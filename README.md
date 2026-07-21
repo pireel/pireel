@@ -24,6 +24,15 @@ develop against the hosted product at [pireel.com](https://pireel.com).
 
 ## Quick start
 
+The fastest way to drive Pireel is from your AI coding agent (Codex / Claude
+Code) — install the plugin and it connects the editor over MCP:
+
+```bash
+npx skills add pireel/pireel-agent
+```
+
+Or run the editor shell locally:
+
 ```bash
 pnpm install
 pnpm dev
