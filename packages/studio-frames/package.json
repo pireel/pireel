@@ -1,0 +1,16 @@
+{
+  "name": "@pireel/studio-frames",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Theme content packs (frames) for Pireel Studio: 22 design-system playbooks (frame.md), layout dialects for live previews, and locale packs. Pure registry core + a Vite loader entry.",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    "./locales": "./src/locales/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@pireel/studio-engine": "workspace:*"
+  }
+}

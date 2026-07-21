@@ -1,0 +1,26 @@
+/** en 词典分片:captions-panel.tsx(key=源码中文原文)。 */
+const dict: Record<string, string> = {
+  '逐词强调': 'Word emphasis',
+  '整句常显，读到哪个词强调哪个词': 'Full line stays on; each word lights up as spoken',
+  '整句字幕': 'Line by line',
+  '整句浮现，干净不抢戏': 'Lines appear one at a time — clean and unobtrusive',
+  '字幕生成中…': 'Generating captions…',
+  '样式对整条视频生效；在画布选中字幕可拖动位置、调整大小': 'Styles apply to the whole video; select a caption on the canvas to move or resize it',
+  '还没有字幕——点任意样式，按口播稿自动生成': 'No captions yet — pick any style to generate them from the transcript',
+  '当前样式': 'Current style',
+  '移除': 'Remove',
+  '移除全部字幕(可撤销)': 'Remove all captions (undoable)',
+  '不加字幕': 'No captions',
+  '无字幕': 'No captions',
+  '使用中': 'In use',
+  '使用': 'Use',
+  '双语翻译': 'Bilingual subtitles',
+  '翻译中…': 'Translating…',
+  '先提取口播稿': 'Transcribe first',
+  '已有 {done}/{total} 句': '{done}/{total} lines done',
+  '未添加': 'Not added',
+  '把口播稿翻成{lang},作为第二行字幕': 'Translate the transcript into {lang} as a second caption line',
+  '清除全部译文(可撤销)': 'Clear all translations (undoable)',
+  '清除': 'Clear',
+};
+export default dict;

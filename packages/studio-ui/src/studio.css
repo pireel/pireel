@@ -1,0 +1,82 @@
+/* Studio workbench styles that live outside Tailwind utilities.
+ * Import from the shell's Tailwind entry, after '@pireel/ui/theme.css'. */
+
+/* 时间轴缩放滑块:2px 细线轨道 + 小圆 thumb（无边框/无胶囊容器,见 studio 走带） */
+.zoom-range {
+  -webkit-appearance: none;
+  appearance: none;
+  /* border-box 下 height 必须含 padding-block(7px×2):写 2px 会把内容盒压成 0,
+   * 配合 background-clip: content-box 轨道线直接消失 */
+  height: 16px;
+  background: var(--color-line-2);
+  border-radius: 2px;
+  cursor: ew-resize;
+}
+.zoom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: var(--color-ink-3);
+  border: none;
+  cursor: ew-resize;
+}
+.zoom-range:hover::-webkit-slider-thumb { background: var(--color-ink); }
+.zoom-range::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: var(--color-ink-3);
+  border: none;
+  cursor: ew-resize;
+}
+.zoom-range::-moz-range-track { height: 2px; background: var(--color-line-2); border-radius: 2px; }
+/* 滑块本体太细(2px 轨道)不好点:纵向撑出 16px 命中区,视觉仍是细线 */
+.zoom-range { padding-block: 7px; background-clip: content-box; }
+
+/* studio 工作台:键盘焦点环(此前全线 hover-only,tab 导航完全不可见)。
+ * 作用域限定 .studio-scope,不影响 shadcn 组件自带的 focus-visible ring。
+ * 只给按钮/链接类:文本输入框不加 outline —— 浏览器把文本域的任何聚焦(含鼠标点入)
+ * 都算 :focus-visible,点进输入框就套蓝框很吵;输入框的聚焦提示归各自的
+ * focus-within:border-* 细边框 + 光标本身(用户定的:去掉输入框蓝框)。 */
+.studio-scope :is(button, a, [role='button'], [tabindex]):not(input):not(textarea):not([contenteditable='true']):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* 进场 boot 层(studio-boot.tsx):主题卡墙交叉滚动 + π 描边 loading。
+ * 列栈 = 同一组卡渲 4 份,位移 -50%(两份)首尾同相 → 无缝循环;
+ * down/up 交替即"第一列从上到下、第二列从下到上"。 */
+@keyframes sb-col-down {
+  from { transform: translateY(-50%); }
+  to { transform: translateY(0); }
+}
+@keyframes sb-col-up {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+.sb-col {
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+/* π 三笔按书写顺序循环描边(pathLength 已归一到 100) */
+.sb-pi path {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: sb-pi-draw 2.2s ease-in-out infinite;
+}
+.sb-pi path:nth-child(2) { animation-delay: 0.18s; }
+.sb-pi path:nth-child(3) { animation-delay: 0.36s; }
+@keyframes sb-pi-draw {
+  0% { stroke-dashoffset: 100; }
+  45% { stroke-dashoffset: 0; }
+  60% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: -100; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sb-col { animation: none; }
+  .sb-pi path { animation: none; stroke-dashoffset: 0; }
+}

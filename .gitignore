@@ -1,0 +1,10 @@
+node_modules
+.pnpm-store
+.DS_Store
+dist
+.vite
+*.log
+.env
+.env.local
+tsconfig.tsbuildinfo
+apps/*/.local-assets

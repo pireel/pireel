@@ -1,0 +1,134 @@
+/**
+ * Provider contracts — the capability seams between the pure engine/editor and
+ * whatever supplies LLM, ASR, storage, and persistence.
+ *
+ * The engine NEVER calls a provider itself (BYO-brain: briefs are assembled here,
+ * generation happens in the caller's model). These interfaces exist so an editor
+ * shell can be wired to different backends:
+ *  - the hosted app injects its own API-backed implementations;
+ *  - an OSS/self-hosted shell injects local or bring-your-own-key implementations,
+ *    or `unavailableProviders()` to run the editor pure-local (BYO agent only).
+ */
+
+import type { BlockEdit, ComposeContext } from './compose';
+import type { DraftPlan, PlanInsert, PlanSentence, PlanVisual } from './plan';
+import type { AsrSegment } from './build-blocks';
+import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
+
+/** One block-generation request (the same shape the BYO brief is assembled from). */
+export interface ComposeRequest {
+  block: BlockEdit;
+  instruction: string;
+  theme?: string;
+  palette?: Record<string, string>;
+  frameId?: string;
+  /** UI language for the human-facing note line. */
+  lang?: string;
+  context?: ComposeContext;
+}
+
+/** Generates block HTML/animation from a request. Hosted: server LLM. OSS: own key or unavailable (use the BYO agent flow instead). */
+export interface BlockComposer {
+  /** Resolves with the raw model output (note + ```html + ```js fences); onDelta streams partials. */
+  composeStream(req: ComposeRequest, onDelta?: (raw: string) => void): Promise<string>;
+}
+
+export interface PlanRequest {
+  sentences: PlanSentence[];
+  videoDurationSec: number;
+  theme?: string;
+  visuals?: PlanVisual[];
+  inserts?: PlanInsert[];
+}
+
+/** Plans scenes/framings/graphic briefs from the narration. */
+export interface NarrationPlanner {
+  plan(req: PlanRequest): Promise<DraftPlan>;
+}
+
+/** Speech → timed sentences (source-clock seconds). */
+export interface Transcriber {
+  transcribe(file: File): Promise<AsrSegment[]>;
+}
+
+/** Source-video byte vault (content-addressed by signature). Null results = degrade to local-only. */
+export interface MediaVault {
+  backup(file: File, sig: string): Promise<{ key: string } | null>;
+  fetch(sig: string): Promise<File | null>;
+}
+
+/** Project persistence beyond the current device. */
+export interface ProjectStore {
+  load(id: string): Promise<StudioProjectDto | null>;
+  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'>;
+  remove(id: string): Promise<void>;
+}
+
+/** Generic asset upload (panel images, stock uploads …) — returns a public URL + storage key. */
+export interface AssetUploader {
+  upload(blob: Blob, opts: { contentType: string; filename?: string }): Promise<{ url: string; key: string }>;
+}
+
+/** One reusable overlay component in the user-level library (few-KB HTML + timeline script). */
+export interface StoredElement {
+  id: string;
+  prompt: string;
+  label: string;
+  createdAt: number;
+  element: { seedId: string; innerHtml: string; timelineBody: string; label: string };
+}
+
+/** User-level component library beyond the current device (localStorage stays as cache). */
+export interface ElementStore {
+  list(): Promise<StoredElement[] | null>;
+  save(e: StoredElement): Promise<void>;
+  remove(id: string): Promise<void>;
+}
+
+export interface StudioProviders {
+  composer: BlockComposer;
+  planner: NarrationPlanner;
+  transcriber: Transcriber;
+  vault: MediaVault;
+  projects: ProjectStore;
+  uploads: AssetUploader;
+  /** Component library sync (absent = pure-local localStorage library, e.g. the OSS shell). */
+  elements?: ElementStore;
+  /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
+  chatEndpoint?: string;
+  /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
+  translate?: (rows: { index: number; text: string }[], targetLanguage: string) => Promise<{ index: number; text: string }[]>;
+  /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;
+   *  absent = the toolbar hides its sync button — BYO agents edit blocks themselves). */
+  syncFill?: (
+    items: { index: number; text: string }[],
+    script: string,
+    block?: { html: string; timeline: string; id: string },
+  ) => Promise<{ items: { index: number; text: string; at?: number }[]; span?: { from: number; to: number }; timeline?: string; html?: string }>;
+}
+
+/** All capabilities absent, failing with actionable guidance — the pure-local baseline:
+ *  editing/preview/export still work; generation goes through the BYO agent flow. */
+export function unavailableProviders(hint = 'no provider configured — connect an agent via MCP (BYO) or inject providers'): StudioProviders {
+  const fail = (cap: string) => Promise.reject(new Error(`${cap} unavailable: ${hint}`));
+  return {
+    composer: { composeStream: () => fail('block composer') },
+    planner: { plan: () => fail('narration planner') },
+    transcriber: { transcribe: () => fail('transcriber') },
+    vault: { backup: async () => null, fetch: async () => null },
+    projects: { load: async () => null, save: async () => 'skip', remove: async () => {} },
+    uploads: { upload: () => fail('asset uploader') },
+  };
+}
+
+/* ---------- 运行时注册器(编辑器包经此取能力;壳在启动时注入实现) ---------- */
+
+let current: StudioProviders = unavailableProviders();
+
+/** 当前生效的 providers(编辑器代码一律经此取,不 import 实现)。 */
+export const studioProviders = (): StudioProviders => current;
+
+/** 壳注入实现(托管壳=API 后端;OSS 壳=本地/BYO;测试=stub)。 */
+export function setStudioProviders(p: StudioProviders): void {
+  current = p;
+}

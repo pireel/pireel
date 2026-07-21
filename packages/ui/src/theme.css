@@ -1,0 +1,375 @@
+/* Pireel design tokens + base styles — shared by every shell (hosted app, OSS shell).
+ * Consume from a Tailwind v4 entry css, AFTER tailwindcss itself:
+ *   @import 'tailwindcss';
+ *   @import '@pireel/ui/theme.css';
+ * Contains: @theme tokens, dark variant, base layer, toast styles, π brand keyframes. */
+@import 'tw-animate-css';
+
+@theme {
+  /* meigen.ai 风格：bg / canvas 与 panel 拉一点对比让卡片自然"浮"出来——
+   * 因为不再走 border-line 划分边界，得靠底色差和阴影。 */
+  --color-bg: #f3f3ef;
+  --color-canvas: #ededE8;
+  --color-panel: #ffffff;
+  --color-panel-2: #fafaf8;
+  --color-ink: #17181b;
+  --color-ink-2: #3a3c42;
+  --color-ink-3: #6a6d76;
+  --color-ink-4: #9a9da6;
+  /* 边框基本不可见——保留 token 是为了 separator / focus ring 这种少量场景。
+   * 卡片背景靠 bg-panel + bg 对比 + shadow 拉层级,不再依赖 border-line 划格。 */
+  --color-line: rgba(20, 22, 30, 0.06);
+  --color-line-2: rgba(20, 22, 30, 0.1);
+  --color-accent: #3f4be8;
+  --color-accent-2: #e85a2a;
+  --color-lime: #c4f24c;
+  --color-lime-soft: #f0fbc7;
+  --color-lime-ink: #58760f;
+  --color-teal: #1fb6a1;
+  --color-rose: #ff4f7b;
+  --color-violet: #8b5cf6;
+  --color-amber: #f5a524;
+
+  --font-sans: var(--font-ui), var(--font-cjk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  --header-h: 3.25rem; /* 52px — sidebar header & topbar */
+
+  /* π 品牌动效：orbit = 绕 π 画圆（圆的常数）的轨道弧；breathe = 思考时字形轻呼吸。
+   * keyframes 在文件底部顶层定义。 */
+  --animate-pi-orbit: pi-orbit 1.4s linear infinite;
+  --animate-pi-breathe: pi-breathe 2.2s ease-in-out infinite;
+
+  --shadow-sm: 0 1px 0 rgba(20, 22, 30, 0.04), 0 1px 2px rgba(20, 22, 30, 0.04);
+  --shadow-md: 0 4px 14px rgba(20, 22, 30, 0.06), 0 1px 3px rgba(20, 22, 30, 0.04);
+  --shadow-lg: 0 20px 60px -20px rgba(20, 22, 30, 0.25);
+
+  /* 圆角规范 —— 全站四档 4/8/12/16,默认 8(详见 docs/design-radius.md):
+   *   sm 4   微元素:徽标/tag/kbd/滑轨/拖拽柄等 ≤24px 小件
+   *   md 8   默认:按钮/输入框/chip/菜单项/composer/小缩略图
+   *   lg 12  卡片:内容卡/缩略图卡/视频卡/popover/toast
+   *   xl 16  顶级容器:侧面板/dialog/灯箱/舞台/hero 区块
+   * 嵌套取同心:内层 ≈ 外层 − 内边距,最小取 4。正圆/胶囊用 rounded-full。
+   * 禁用:任意值 rounded-[Npx];xs/2xl/3xl 是 alias 兜底(存量代码),勿新增。
+   * bare `rounded` 走下方 --radius(=8,即默认档),新代码请显式写 rounded-md。 */
+  --radius-xs: 0.25rem;      /* alias → sm */
+  --radius-sm: 0.25rem;      /* 4px */
+  --radius-md: 0.5rem;       /* 8px —— 默认 */
+  --radius-lg: 0.75rem;      /* 12px */
+  --radius-xl: 1rem;         /* 16px */
+  --radius-2xl: 1rem;        /* alias → xl */
+  --radius-3xl: 1rem;        /* alias → xl */
+
+  /* shadcn / ai-elements 兼容 token —— 映射到品牌色，避免组件失样式。
+   * --color-accent 不在这里：品牌已占用同名 token（#3f4be8）。shadcn 默认 --accent 是
+   * 中性灰 hover，含义不同；项目里的弹出列表 hover 走 bg-panel-2，不用 accent。 */
+  --color-foreground: #17181b;
+  --color-background: #f3f3ef;
+  --color-card: #ffffff;
+  --color-card-foreground: #17181b;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #17181b;
+  --color-primary: #17181b;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #fafaf8;
+  --color-secondary-foreground: #17181b;
+  --color-muted: #fafaf8;
+  --color-muted-foreground: #6a6d76;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #ff4f7b;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #ececE8;
+  --color-input: #ececE8;
+  --color-ring: #9a9da6;
+  --radius: 0.5rem;
+}
+
+/* dark: 变体挂在 html.dark 上(theme-mode.ts 切换;__root 内联脚本首帧恢复,防闪白) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 暗黑主题:utilities 全部引用 var(--color-*),.dark 覆写变量即可全站换挡。
+ * 品牌色(accent/accent-2/lime/teal…)不动;层级仍靠 bg/panel 对比 + 阴影,暗底阴影加深。
+ * 此块必须在未分层样式里(Tailwind 的 @theme 落在 @layer theme,未分层规则天然胜出)。 */
+.dark {
+  color-scheme: dark;
+  --color-bg: #101114;
+  --color-canvas: #0b0c0e;
+  --color-panel: #1a1c20;
+  --color-panel-2: #23252b;
+  --color-ink: #f0f1f4;
+  --color-ink-2: #c8cbd2;
+  --color-ink-3: #8f939d;
+  --color-ink-4: #63676f;
+  --color-line: rgba(235, 238, 245, 0.08);
+  --color-line-2: rgba(235, 238, 245, 0.14);
+  --color-lime-soft: #2b3610;
+  --color-lime-ink: #c4f24c;
+  --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 60px -20px rgba(0, 0, 0, 0.75);
+  /* shadcn / ai-elements 兼容 token */
+  --color-foreground: #f0f1f4;
+  --color-background: #101114;
+  --color-card: #1a1c20;
+  --color-card-foreground: #f0f1f4;
+  --color-popover: #1a1c20;
+  --color-popover-foreground: #f0f1f4;
+  --color-primary: #f0f1f4;
+  --color-primary-foreground: #17181b;
+  --color-secondary: #23252b;
+  --color-secondary-foreground: #f0f1f4;
+  --color-muted: #23252b;
+  --color-muted-foreground: #8f939d;
+  --color-border: #2b2e35;
+  --color-input: #2b2e35;
+  --color-ring: #63676f;
+}
+
+/* shiki 双主题:亮色走默认 color,暗色读 codeToHtml 写进内联样式的 --shiki-dark */
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark, inherit) !important;
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-size: 14px;
+  }
+  a { color: inherit; text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d8d8d3; border-radius: 99px; border: 2px solid var(--color-bg); }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer utilities {
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+}
+
+/* ============ Toast (替代 alert;组件见 ./toast) ============ */
+.toast-stack {
+  position: fixed;
+  z-index: 300;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  position: relative;
+  min-width: 240px;
+  max-width: 360px;
+  padding: 10px 32px 10px 14px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #ececE8;
+  box-shadow: 0 12px 32px rgba(20, 22, 30, 0.12), 0 1px 3px rgba(20, 22, 30, 0.05);
+  font-size: 13px;
+  color: #17181b;
+  pointer-events: auto;
+  animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.toast-info { border-left: 3px solid #3f4be8; }
+.toast-success { border-left: 3px solid #1fb6a1; }
+.toast-warn { border-left: 3px solid #f5a524; }
+.toast-error { border-left: 3px solid #ff4f7b; }
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+.toast-msg {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #3a3c42;
+}
+.toast-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  color: #9a9da6;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.toast-close:hover { color: #17181b; background: #f3f3f0; }
+
+/* ============ π 品牌动效 keyframes（token 见 @theme --animate-pi-*） ============ */
+@keyframes pi-orbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes pi-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.88); opacity: 0.65; }
+}
+/* ============ π logo 入场 + 三层独立编舞（AnimatedBrandMark → .pi-motion*） ============
+ * 时间轴：0.1s 起主笔(ink)三笔描边（横杠→左腿→右腿）→ 1.05s lime/橙淡入 →
+ * 1.6s 起三层各自的 7s 舞步循环「合并→逃离→摇摆→拽回→再合并」；
+ * 外层 frame 跑 6.5s 一轮的偶发 glitch（93%-97% 一小段快速错位）。 */
+
+/* 设计：动的是 π 的笔画本身，不是三个色块刚体。三层结构：
+ *   pi-pointer（指针视差） > pi-body（整体浮动呼吸）> pi-layer×3（颜色）
+ *   每个 pi-layer 内 3 笔（横杠 / 左腿 / 右腿+勾）各自摆动（pi-stroke-*）。
+ *   永久色差 = lime 左上 / 橙 右下的静态基位；动态色差 = 三层笔画摆幅不同（--amp），
+ *   一动起来边缘就散开像拽开 RGB 通道，静下来又收回基位合并。
+ *
+ * 丝滑要点：所有循环动效的关键帧值按正弦曲线取点（缓动编码进数值），整体走
+ *   linear 计时——避免每段 ease-in-out 在每个关键帧减速造成的"泵动"顿挫；
+ *   且首尾值与斜率都连续（腿用整周期 sin、体用 1-cos 落零斜率），循环无接缝跳变。
+ *   各元素周期互质（体 4.6s / 横杠 3.9s / 腿 3.4s），相位长期不锁死，呼吸更自然。 */
+
+/* 指针视差：整簇按 --mx/--my 轻移（custom prop 继承到内层），叠在浮动与笔画摆动之上 */
+.pi-pointer {
+  transform: translate(calc(var(--mx, 0) * 4px), calc(var(--my, 0) * 4px));
+  transition: transform 0.3s ease;
+}
+/* 整体浮动呼吸：以双脚（底边中点）为原点，柔和上浮 + 极轻呼吸缩放，无硬落地拍 */
+.pi-body {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: pi-float 4.6s linear 1.6s infinite both;
+}
+@keyframes pi-float {
+  0%    { transform: translateY(0) scale(1, 1); }
+  12.5% { transform: translateY(-0.7px) scale(0.997, 1.004); }
+  25%   { transform: translateY(-2.5px) scale(0.99, 1.013); }
+  37.5% { transform: translateY(-4.3px) scale(0.984, 1.026); }
+  50%   { transform: translateY(-5px) scale(0.98, 1.03); }
+  62.5% { transform: translateY(-4.3px) scale(0.984, 1.026); }
+  75%   { transform: translateY(-2.5px) scale(0.99, 1.013); }
+  87.5% { transform: translateY(-0.7px) scale(0.997, 1.004); }
+  100%  { transform: translateY(0) scale(1, 1); }
+}
+
+/* 颜色层：只承载颜色 + 永久色差基位 + 动态摆幅 --amp（ink 1，lime 偏大、橙偏小 → 运动时散开） */
+.pi-layer { transform-box: fill-box; }
+.pi-layer-ink { --amp: 1; }
+.pi-layer-lime { --amp: 1.25; transform: translate(-1.6px, -1.6px); opacity: 0; }
+.pi-layer-orange { --amp: 0.78; transform: translate(1.6px, 1.6px); opacity: 0; }
+.pi-layer-lime, .pi-layer-orange {
+  animation: pi-ghost-in 0.45s ease-out 1.05s both;
+}
+@keyframes pi-ghost-in {
+  to { opacity: 1; }
+}
+
+/* 逐笔：横杠绕中心 seesaw，左腿绕顶端（与横杠的附着点）摆，右腿绕左上附着点甩——
+ * 勾在最远端，绕同一原点旋转时画出最大弧（脚尖划动的感觉）。
+ * 每笔同时跑：① ink 描边入场（pi-draw，仅 ink 层有 dasharray）② 待机摆动（pi-stroke-*，linear）。
+ * 摆动从 1.6s 起（描边收尾后），用 --amp 缩放角度做动态色差。 */
+.pi-layer path { transform-box: fill-box; }
+.pi-layer path:nth-child(1) {
+  transform-origin: center;
+  animation: pi-draw 0.55s cubic-bezier(0.65, 0, 0.35, 1) 0.1s both,
+             pi-stroke-bar 3.9s linear 1.6s infinite both;
+}
+.pi-layer path:nth-child(2) {
+  transform-origin: top;
+  animation: pi-draw 0.55s cubic-bezier(0.65, 0, 0.35, 1) 0.32s both,
+             pi-stroke-leg-l 3.4s linear 1.6s infinite both;
+}
+.pi-layer path:nth-child(3) {
+  transform-origin: left top;
+  animation: pi-draw 0.55s cubic-bezier(0.65, 0, 0.35, 1) 0.52s both,
+             pi-stroke-leg-r 3.4s linear 1.6s infinite both;
+}
+/* dasharray 只给 ink 层（lime/橙不描边，直接淡入），否则色层入场会闪描边 */
+.pi-layer-ink path { stroke-dasharray: 100; stroke-dashoffset: 100; }
+@keyframes pi-draw { to { stroke-dashoffset: 0; } }
+
+/* 横杠：±2.5° seesaw（整周期 sin）+ 极轻横向呼吸（1-cos，落零斜率） */
+@keyframes pi-stroke-bar {
+  0%    { transform: rotate(0deg) scaleX(1); }
+  12.5% { transform: rotate(calc(var(--amp, 1) * -1.8deg)) scaleX(1.003); }
+  25%   { transform: rotate(calc(var(--amp, 1) * -2.5deg)) scaleX(1.01); }
+  37.5% { transform: rotate(calc(var(--amp, 1) * -1.8deg)) scaleX(1.017); }
+  50%   { transform: rotate(0deg) scaleX(1.02); }
+  62.5% { transform: rotate(calc(var(--amp, 1) * 1.8deg)) scaleX(1.017); }
+  75%   { transform: rotate(calc(var(--amp, 1) * 2.5deg)) scaleX(1.01); }
+  87.5% { transform: rotate(calc(var(--amp, 1) * 1.8deg)) scaleX(1.003); }
+  100%  { transform: rotate(0deg) scaleX(1); }
+}
+/* 左腿：±8° 单摆（整周期 sin，中点过零处速度最大、端点平滑掉头） */
+@keyframes pi-stroke-leg-l {
+  0%    { transform: rotate(0deg); }
+  12.5% { transform: rotate(calc(var(--amp, 1) * -5.7deg)); }
+  25%   { transform: rotate(calc(var(--amp, 1) * -8deg)); }
+  37.5% { transform: rotate(calc(var(--amp, 1) * -5.7deg)); }
+  50%   { transform: rotate(0deg); }
+  62.5% { transform: rotate(calc(var(--amp, 1) * 5.7deg)); }
+  75%   { transform: rotate(calc(var(--amp, 1) * 8deg)); }
+  87.5% { transform: rotate(calc(var(--amp, 1) * 5.7deg)); }
+  100%  { transform: rotate(0deg); }
+}
+/* 右腿+勾：与左腿反相的 ±9° 单摆——勾在远端划出更大的弧（同步同周期、方向相反） */
+@keyframes pi-stroke-leg-r {
+  0%    { transform: rotate(0deg); }
+  12.5% { transform: rotate(calc(var(--amp, 1) * 6.4deg)); }
+  25%   { transform: rotate(calc(var(--amp, 1) * 9deg)); }
+  37.5% { transform: rotate(calc(var(--amp, 1) * 6.4deg)); }
+  50%   { transform: rotate(0deg); }
+  62.5% { transform: rotate(calc(var(--amp, 1) * -6.4deg)); }
+  75%   { transform: rotate(calc(var(--amp, 1) * -9deg)); }
+  87.5% { transform: rotate(calc(var(--amp, 1) * -6.4deg)); }
+  100%  { transform: rotate(0deg); }
+}
+/* hover：字形轻微放大偏转 + 轨道环绕 π 画圆（与 chat thinking 弧同母题） */
+.pi-motion { transition: transform 0.35s ease; }
+.pi-motion-frame:hover .pi-motion { transform: scale(1.05) rotate(-2deg); }
+.pi-motion-ring {
+  opacity: 0;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition:
+    stroke-dashoffset 0.55s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.2s ease;
+}
+.pi-motion-frame:hover .pi-motion-ring {
+  opacity: 1;
+  stroke-dashoffset: 0;
+}
+/* 偶发信号抖动——刻意保留的短视频视觉梗，但调稀调轻不破坏整体丝滑（11s 一轮、幅度减半） */
+.pi-motion-frame { animation: pi-glitch 11s linear 3s infinite; }
+@keyframes pi-glitch {
+  0%, 95%, 98%, 100% { transform: none; }
+  96% { transform: translate(0.8px, -0.5px) skewX(-2.5deg); }
+  97% { transform: translate(-0.9px, 0.4px) skewX(2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pi-motion path,
+  .pi-layer path,
+  .pi-layer,
+  .pi-body,
+  .pi-motion-frame { animation: none; }
+  .pi-motion path { stroke-dashoffset: 0; transform: none; }
+  /* 定格成静态色差终态：lime 左上、橙右下错位，ink 居中压顶 */
+  .pi-layer-lime,
+  .pi-layer-orange { opacity: 1; }
+  .pi-layer-lime { transform: translate(-1.6px, -1.6px); }
+  .pi-layer-orange { transform: translate(1.6px, 1.6px); }
+}

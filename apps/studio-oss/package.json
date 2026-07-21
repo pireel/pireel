@@ -1,0 +1,34 @@
+{
+  "name": "@pireel/studio-oss-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal open-source shell for Pireel Studio: a plain Vite app that mounts the editor with no SaaS backend. Editing, preview, timeline, and client export run fully in the browser; generation capabilities stay unavailable until you inject your own StudioProviders (or drive the editor with an external agent).",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@pireel/studio-engine": "workspace:*",
+    "@pireel/studio-frames": "workspace:*",
+    "@pireel/studio-ui": "workspace:*",
+    "@pireel/ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "use-intl": "^4.13.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.2",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.5.4",
+    "vite": "^8.0.16",
+    "vite-tsconfig-paths": "6.1.1"
+  }
+}

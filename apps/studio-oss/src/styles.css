@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+/* Shared design tokens / base / toast / brand keyframes (same file the hosted app uses). */
+@import '@pireel/ui/theme.css';
+@import '@pireel/studio-ui/studio.css';
+/* Self-hosted latin/mono variable fonts; CJK falls back to system fonts (see --font-cjk). */
+@import '@fontsource-variable/geist/index.css';
+@import '@fontsource-variable/jetbrains-mono/index.css';
+
+/* Tailwind class scanning: the editor packages live outside this app's root. */
+@source '../../../packages/ui/src';
+@source '../../../packages/studio-ui/src';
+/* Streamdown (ai-elements MessageResponse) ships its own class names. */
+@source '../../../node_modules/streamdown/dist/*.js';
+
+:root {
+  --font-ui: 'Geist Variable';
+  --font-cjk: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei';
+  --font-jetbrains: 'JetBrains Mono Variable';
+}
