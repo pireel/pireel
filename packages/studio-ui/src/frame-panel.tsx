@@ -1,14 +1,16 @@
 'use client';
 
 /**
- * 右侧 rail 的 frame 面板 = studio 的主题模板库(Hyperframes 官方命名:frame.md)。
- * 一个 frame = 一个大主题内容包(知识口播/美食博主/…,开放主题),是"内容感知的模板"——
- * 挂进对话后 agent 把你的口播内容套进这套打法。与 /create 线的 skill 体系无关。
- * - 列表 = 一行一张主题**封面**大卡(主题名当主角,只透风格不列详情,PPT 主题封面的定位);
- * - 点开 = 主题详情:简介 + 该主题产出的多类型**真实预览**卡(showcase 词 → 真实块,
- *   BlockPreviewFrame 同源 Hyperframes 渲染,跟项目主题色走,见 showcase-blocks);
- * - 「使用」= 把 frame 挂进右侧 chat(不是复制提示词文字!),请求带 frameId、
- *   服务端注入 playbook;对话输入框的主题按钮也能唤起同一目录。
+ * The frame panel on the right rail = studio's theme template library (Hyperframes official name: frame.md).
+ * One frame = one large theme content pack (knowledge voiceover / food blogger / …, open-ended themes),
+ * a "content-aware template" — once attached to the chat, the agent fits your voiceover content into its playbook.
+ * Unrelated to the /create line's skill system.
+ * - List = one big **cover** card per row (theme name as the hero, hints at style without listing details,
+ *   positioned like a PPT theme cover);
+ * - Open = theme detail: summary + multi-type **real preview** cards this theme produces (showcase word →
+ *   real block, rendered by BlockPreviewFrame via the same Hyperframes stack, following the project theme color; see showcase-blocks);
+ * - "Use" = attach the frame to the right chat (not copy the prompt text!); the request carries frameId and
+ *   the server injects the playbook. The chat input's theme button opens the same catalog.
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -23,11 +25,13 @@ import { InlineBlockPreview, type PreviewPerson } from './block-preview-card';
 import { coverBlock, showcaseBlock } from '@pireel/studio-frames/showcase-blocks';
 import { type FrameCatalogItem, useFrameCatalog } from './use-frame-catalog';
 
-const CARD_W = 300; // 16:9 单列大卡(面板内容宽约 302)
+const CARD_W = 300; // 16:9 single-column big card (panel content width ~302)
 
-/** 预览占位人像:只给声明了 personFx 的主题画(人像是它设计系统的一部分,方言按
- *  「给人留位」写);其他主题不画——方言根都是整幅不透明底,垫底人像不可见,
- *  而前置会糊到既有设计上。剪影带该主题的人像描边(贴纸白边),必须前置才可见。 */
+/** Preview placeholder person: only drawn for themes that declare personFx (the person is part of their
+ *  design system; the dialect is written to "leave room for the person"). Other themes don't draw it —
+ *  dialect roots are all fully opaque backgrounds, so a person behind is invisible while a person in front
+ *  smears over the existing design. The silhouette carries this theme's person stroke (sticker white edge),
+ *  which is only visible when placed in front. */
 const personOf = (f: FrameCatalogItem): PreviewPerson | null =>
   f.personFx
     ? {
@@ -37,11 +41,12 @@ const personOf = (f: FrameCatalogItem): PreviewPerson | null =>
     : null;
 
 export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: FrameCatalogItem) => void }) {
-  const locale = useLocale() as Locale; // frame 内容有单独的 locale 适配包(标题/简介/预览文案)
+  const locale = useLocale() as Locale; // frame content has its own locale adaptation pack (title/summary/preview copy)
   const frames = useFrameCatalog();
   const [openId, setOpenId] = useState<string | null>(null);
   const open = openId ? frames.find((f) => f.id === openId) : null;
-  // 返回列表时恢复滚动位置:点开前存 scrollTop,列表容器重挂时(useCallback 稳定 ref,只在挂载时跑)写回
+  // Restore scroll position when returning to the list: save scrollTop before opening, write it back when
+  // the list container remounts (useCallback keeps a stable ref, runs only on mount)
   const listRef = useRef<HTMLDivElement | null>(null);
   const savedListScroll = useRef(0);
   const attachList = useCallback((el: HTMLDivElement | null) => {
@@ -68,7 +73,7 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
           <SkillIcon iconKey={open.iconKey} emoji={open.icon} size={22} rounded="rounded-md" />
           <span className="text-ink truncate text-[12px] font-medium">{framePack(locale, open.id)?.title ?? open.title}</span>
         </div>
-        {/* key 按 frame 切:换主题强制重挂滚动容器,滚动位置归零 */}
+        {/* key switches by frame: changing theme force-remounts the scroll container, resetting scroll to zero */}
         <div key={open.id} className="min-h-0 flex-1 overflow-auto p-2.5">
           <div className="text-ink-2 text-[11.5px] leading-relaxed">{open.summary}</div>
           {open.showcase.length > 0 ? (
@@ -99,7 +104,7 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      {/* 标题单层:「主题」归素材栏 tabs 头,这里只留说明行(与字幕面板同一惯例) */}
+      {/* Single-level title: "Theme" lives in the material bar tabs header; only the description row stays here (same convention as the captions panel) */}
       <div className="border-line border-b px-3 py-2">
         <div className="text-ink-4 text-[10.5px]">{t('点开看产出，「使用」后生成的内容都走这套设计；对话里的主题按钮也能换')}</div>
       </div>
@@ -118,8 +123,8 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
   );
 }
 
-/** 列表封面卡:主题名当主角的风格封面(真实渲染,只透风格不列详情);
- *  没有封面的 frame(用户上传等)落回图标行式。 */
+/** List cover card: a style cover with the theme name as hero (real render, hints at style without listing
+ *  details); frames without a cover (user uploads, etc.) fall back to an icon-row style. */
 function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: FrameCatalogItem; locale: Locale; onOpen: () => void }) {
   const block = useMemo(() => coverBlock(frame.id, locale), [frame.id, locale]);
   const previewComp = useMemo<Composition>(
@@ -160,12 +165,12 @@ function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: 
   );
 }
 
-/** showcase 词的真实预览卡:构一个真的块,BlockPreviewFrame 渲(同预览/导出栈,定格稳定帧)。
- *  frame 带 palette(设计 token)时预览 comp 换上它 —— 卡片就是该主题的真实色调;
- *  不认识的词回落词面卡。 */
+/** Real preview card for a showcase word: builds a real block, rendered by BlockPreviewFrame (same
+ *  preview/export stack, frozen on a stable frame). When the frame has a palette (design tokens), the
+ *  preview comp adopts it — the card shows the theme's real color tone; unknown words fall back to a text card. */
 function ShowcaseCard({ comp, frame, kind, locale }: { comp: Composition; frame: FrameCatalogItem; kind: string; locale: Locale }) {
   const block = useMemo(() => showcaseBlock(frame.id, kind, locale), [frame.id, kind, locale]);
-  // 预览一律 16:9 画布 + frame 自己的设计 token(palette 连字体/圆角/阴影一起换)
+  // Preview is always a 16:9 canvas + the frame's own design tokens (palette swaps font/radius/shadow too)
   const previewComp = useMemo<Composition>(
     () => ({ ...comp, width: 1920, height: 1080, ...(frame.palette ? { palette: frame.palette } : {}) }),
     [comp, frame.palette],
@@ -179,7 +184,7 @@ function ShowcaseCard({ comp, frame, kind, locale }: { comp: Composition; frame:
   }
   return (
     <div className="border-line overflow-hidden rounded-lg border">
-      {/* 产出卡人像 = 角落小像:前置才可见(方言底不透明),缩小塞角降遮挡 */}
+      {/* Output card person = small corner figure: only visible in front (dialect background is opaque), shrunk into the corner to reduce occlusion */}
       <InlineBlockPreview
         comp={previewComp}
         block={block}
@@ -196,7 +201,7 @@ function ShowcaseCard({ comp, frame, kind, locale }: { comp: Composition; frame:
   );
 }
 
-/** 主题设计 token 的小色条(accent / panel / paper 三粒),列表行里一眼认主题。 */
+/** Small color strip of the theme's design tokens (accent / panel / paper, three dots), so the theme is recognizable at a glance in a list row. */
 function PaletteDots({ palette }: { palette?: Record<string, string> | null }) {
   if (!palette) return null;
   const dots = ['accent', 'panel', 'paper'].map((k) => palette[k]).filter(Boolean) as string[];

@@ -1,18 +1,21 @@
 /**
- * 客户端导出(本地合成,默认路径;服务端渲染只作兜底):
+ * Client-side export (local compositing, the default path; server render is only a fallback).
  *
- *  视频层(轨0,多源)—— 每个源(主视频 File / 插入段 File|URL)各一条 MediaBunny 顺序
- *    取样流,按成片时间逐帧取帧画进 canvas;取景变换不重算 —— 隐藏 iframe 里 GSAP/inline
- *    的 computed transform 逐帧照抄(与预览严格同源)。
- *  叠加层(轨≥1)—— 同一 iframe seekTimelines(t) 后把 #root 序列化进 SVG foreignObject
- *    → <img> → drawImage,光栅化引擎就是 Blink 本身。字体与块内图片必须内联成 data:
- *    (foreignObject 光栅化禁止一切外部加载);主轨 <video> 用 !important CSS 压隐
- *    (TRIM_SHIM 的 applyMode 每次定位都会改 inline opacity,inline 压不住它)。
- *  音轨 —— 按成片段序拼接:主段取主视频音轨,插入段取它自己的音轨(与预览口径一致),
- *    重打时间戳到成片时间轴。
+ *  Video layer (track 0, multi-source) — each source (main video File / insert-clip File|URL)
+ *    gets one sequential MediaBunny sample stream; frames are drawn to canvas per edited time.
+ *    Framing transforms are not recomputed — the GSAP/inline computed transform inside the
+ *    hidden iframe is copied verbatim per frame (strictly same-source as the preview).
+ *  Overlay layer (track ≥1) — after seekTimelines(t) on the same iframe, #root is serialized
+ *    into an SVG foreignObject → <img> → drawImage; the rasterizer is Blink itself. Fonts and
+ *    in-block images must be inlined as data: (foreignObject rasterization forbids any external
+ *    load); the main-track <video> is hidden with !important CSS (TRIM_SHIM's applyMode rewrites
+ *    inline opacity on every seek, so inline can't hold it down).
+ *  Audio track — concatenated in edited-segment order: main segments take the main video's audio,
+ *    insert clips take their own (matching the preview), timestamps re-stamped onto the edited timeline.
  *
- *  已知不导出:画中画视频块的画面(video 元素进不了 foreignObject)、人像抠像层(canvas
- *    不参与序列化,预览外自然降级)。移植自 experiments/client-export-spike(坑与注均出自实测)。
+ *  Known not exported: picture-in-picture video block frames (video elements can't enter
+ *    foreignObject), the person-matte layer (canvas isn't serialized, degrades gracefully outside
+ *    preview). Ported from experiments/client-export-spike (gotchas and notes all from real testing).
  */
 
 import {
@@ -39,7 +42,7 @@ import { injectPreviewRuntime } from './sample-composition';
 import { buildInlineFontCss } from './export-fonts';
 import { t } from './i18n';
 
-/** 导出参数(弹窗选的):res=短边像素(竖屏即宽),fps 帧率,format 容器/编码。 */
+/** Export options (chosen in the dialog): res=short-side pixels (width for portrait), fps, format=container/codec. */
 export interface ExportRenderOpts {
   res: number;
   fps: number;
@@ -47,14 +50,14 @@ export interface ExportRenderOpts {
 }
 export const DEFAULT_RENDER_OPTS: ExportRenderOpts = { res: 1080, fps: 30, format: 'mp4' };
 
-/* ============================ 源与段 ============================ */
+/* ============================ Sources and segments ============================ */
 
 interface ExpSeg {
   srcStart: number;
   srcEnd: number;
-  /** 源键:'main' 或插入段源键(clip_<shotId>,只作 rigs/files 的 Map 键用)。 */
+  /** Source key: 'main' or an insert-clip key (clip_<shotId>), used only as the rigs/files Map key. */
   key: string;
-  /** 该镜的调色(CSS filter 串;'none'/缺省=不调)——与预览 #vidEl 的 filter 同一 shotFilterCss 口径。 */
+  /** Per-shot color grade (CSS filter string; 'none'/absent = no grade) — same shotFilterCss as the preview's #vidEl filter. */
   filter?: string;
 }
 
@@ -62,7 +65,7 @@ export interface SourceRig {
   input: Input;
   video: Awaited<ReturnType<Input['getPrimaryVideoTrack']>>;
   audio: Awaited<ReturnType<Input['getPrimaryAudioTrack']>>;
-  /** 顺序取样(该源的取帧时刻单调递增):当前帧 + 单帧 lookahead。 */
+  /** Sequential sampling (this source's frame times increase monotonically): current frame + single-frame lookahead. */
   it: AsyncIterator<VideoSample> | null;
   cur: VideoSample | null;
   pending: VideoSample | null;
@@ -89,7 +92,7 @@ export async function openSource(file: File, from: number, to: number, W: number
   };
 }
 
-/** 顺序流取"时间戳 ≤ srcT 的最后一帧"(spike 同款:webm 无 cues 随机访问会大面积 null)。 */
+/** From the sequential stream, take "the last frame with timestamp ≤ srcT" (same as the spike: webm without cues returns null on random access across large ranges). */
 export async function sampleAt(rig: SourceRig, srcT: number): Promise<VideoSample | null> {
   for (;;) {
     if (rig.pending) {
@@ -115,7 +118,7 @@ export async function sampleAt(rig: SourceRig, srcT: number): Promise<VideoSampl
   return rig.cur;
 }
 
-/* ============================ 叠加层 ============================ */
+/* ============================ Overlay layer ============================ */
 
 interface HfWin extends Window {
   __hfPreview?: { seekTimelines(t: number): void };
@@ -140,7 +143,7 @@ function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
         try {
           const win = iframe.contentWindow as HfWin;
           const doc = iframe.contentDocument!;
-          // 主轨视频交给 canvas 层画,DOM 里不参与光栅化(#vidEl 是画布,插入段没有独立元素)
+          // Main-track video is drawn by the canvas layer, kept out of DOM rasterization (#vidEl is the canvas; insert clips have no separate element)
           const hide = doc.createElement('style');
           hide.textContent = '#vidEl { opacity: 0 !important; }';
           doc.head.appendChild(hide);
@@ -158,7 +161,7 @@ function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
   });
 }
 
-/** 块内 <img> 全部内联成 data URI(foreignObject 光栅化禁止外部加载;跨域走 /api/media/fetch 代理)。 */
+/** Inline every in-block <img> as a data URI (foreignObject rasterization forbids external loads; cross-origin goes through the /api/media/fetch proxy). */
 async function inlineImages(root: HTMLElement): Promise<void> {
   const imgs = [...root.querySelectorAll('img')];
   await Promise.all(
@@ -177,7 +180,7 @@ async function inlineImages(root: HTMLElement): Promise<void> {
         });
         img.setAttribute('src', dataUri);
       } catch {
-        /* 单图失败不挡导出:该图缺席 */
+        /* One image failing doesn't block export: it's just absent */
       }
     }),
   );
@@ -186,9 +189,10 @@ async function inlineImages(root: HTMLElement): Promise<void> {
 const XS = new XMLSerializer();
 
 function svgOpen(lw: number, lh: number, dw: number, dh: number, css: string): string {
-  // SVG 必须 data: URI(blob: 会把 canvas 判 tainted,spike 实测)。
-  // 设备尺寸 dw×dh(可 > 布局尺寸)+ viewBox=布局坐标系:浏览器在目标分辨率**重新栅格化**
-  // 矢量内容(4K 文字/图形清晰,而非把 1080 位图拉大)。dw==lw 时 viewBox 恒等,渲染与旧版一致。
+  // SVG must be a data: URI (blob: taints the canvas, verified in the spike).
+  // Device size dw×dh (can be > layout size) + viewBox = layout coordinate system: the browser
+  // re-rasterizes vector content at the target resolution (crisp 4K text/graphics, rather than
+  // upscaling a 1080 bitmap). When dw==lw the viewBox is identity, rendering matches the old version.
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${dw}" height="${dh}" viewBox="0 0 ${lw} ${lh}">` +
     `<foreignObject width="100%" height="100%">` +
@@ -212,14 +216,14 @@ function readTransform(win: Window, el: Element | null): { m: DOMMatrix; radius:
   return { m, radius: parseFloat(cs.borderTopLeftRadius) || 0 };
 }
 
-/* ============================ 导出主流程 ============================ */
+/* ============================ Main export flow ============================ */
 
 export interface ClientExportOpts {
   comp: Composition;
   videoFile: File;
-  /** 本地插入段 File(键=blob URL,与 workbench clipFilesRef 同源)。 */
+  /** Local insert-clip Files (key = blob URL, same source as workbench clipFilesRef). */
   clipFiles: Map<string, File>;
-  /** 分辨率/帧率/格式(缺省 1080p·30·MP4)。 */
+  /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   onProgress?: (done: number, total: number) => void;
   shouldCancel?: () => boolean;
@@ -231,15 +235,16 @@ export class ExportCanceled extends Error {
   }
 }
 
-/** 单帧捕获(外部 agent 的 capture_frame 验证工具用):与导出同一条渲染管线的一帧——
- *  主题背景 + 源视频帧(带取景变换/圆角/投影)+ 叠加层 foreignObject 光栅化。
- *  返回降采样 JPEG dataURL(体积对 LLM 上下文友好);无视频时只画背景+叠加层。 */
+/** Single-frame capture (used by the external agent's capture_frame verification tool): one frame
+ *  from the same render pipeline as export — theme background + source video frame (with framing
+ *  transform/rounded corners/shadow) + overlay foreignObject rasterization.
+ *  Returns a downsampled JPEG dataURL (small enough for LLM context); with no video, draws only background + overlay. */
 export async function captureCompositionFrame(opts: {
   comp: Composition;
   videoFile: File | null;
   clipFiles: Map<string, File>;
   atSec: number;
-  /** 输出长边像素(默认 960)。 */
+  /** Output long-side pixels (default 960). */
   maxDim?: number;
 }): Promise<{ dataUrl: string; width: number; height: number }> {
   const { comp } = opts;
@@ -251,7 +256,7 @@ export async function captureCompositionFrame(opts: {
   const outH = even(H * k);
   const t = Math.max(0, Math.min(totalDuration(comp), opts.atSec));
 
-  // 定位 t 落在哪个成片段(与导出的 segAt 同口径),只开那一个源
+  // Find which edited segment t falls in (same logic as export's segAt), open only that one source
   let rig: SourceRig | null = null;
   let srcT = 0;
   if (opts.videoFile) {
@@ -269,7 +274,7 @@ export async function captureCompositionFrame(opts: {
       try {
         rig = await openSource(file, Math.max(0, srcT - 0.1), srcT, W, H);
       } catch {
-        rig = null; // 源打不开:退化为无视频帧(叠加层仍然可见)
+        rig = null; // Source won't open: degrade to no video frame (overlay still visible)
       }
     }
   }
@@ -329,11 +334,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const FPS = render.fps;
   const W = comp.width;
   const H = comp.height;
-  // 输出尺寸:res=短边,只缩不放;布局/取景全部仍在 comp 坐标系算,画布端一个 setTransform 缩放。
-  // 宽高各自取偶(编码器要求)→ Sx/Sy 各算各的,亚像素差不留黑边
+  // Output size: res=short side, downscale only, never upscale; layout/framing all still computed
+  // in comp coordinates, one setTransform scales at the canvas end.
+  // Width and height each rounded to even (encoder requires it) → Sx/Sy computed independently, no black bars from sub-pixel diff
   const even = (x: number) => Math.max(2, Math.round(x / 2) * 2);
-  // res=输出短边像素。放大到 4K 靠矢量层在目标分辨率重栅格化(svgOpen 的 viewBox)+ 源视频
-  // drawImage 从原生帧直缩到输出(不经 1080 中转)。上限 4× 兜底,防画布/内存爆(下拉最高 2160=2×)。
+  // res=output short-side pixels. Upscaling to 4K relies on the vector layer re-rasterizing at target
+  // resolution (svgOpen's viewBox) + the source video drawImage scaling straight from native frames to
+  // output (no 1080 intermediate). Cap at 4× as a safety net against canvas/memory blowup (dropdown max 2160=2×).
   const k = Math.min(4, render.res / Math.min(W, H));
   const outW = even(W * k);
   const outH = even(H * k);
@@ -342,7 +349,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const shots = comp.shots?.length ? comp.shots : [{ id: 'all', srcStart: 0, srcEnd: comp.video?.durationSec ?? 0, treatment: 'full' as const }];
   const durationSec = Math.max(0.5, totalDuration(comp));
 
-  // 段表(成片序)+ 每个源的 File
+  // Segment table (edited order) + each source's File
   const segs: ExpSeg[] = [];
   const files = new Map<string, File>([['main', videoFile]]);
   for (const sp of clipSpans(shots)) {
@@ -366,7 +373,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     }
   }
 
-  // 每源顺序取样流:起点=该源最早用到的时刻,终点=最晚
+  // Per-source sequential sample stream: start = earliest time this source is used, end = latest
   const rigs = new Map<string, SourceRig>();
   for (const [key, file] of files) {
     const mine = segs.filter((s) => s.key === key);
@@ -376,16 +383,17 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     rigs.set(key, await openSource(file, from, to, W, H));
   }
 
-  // 叠加层文档 + 资产内联
+  // Overlay document + asset inlining
   const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
-    // 布局坐标系恒为 comp 的 W×H(字号标定不变);设备尺寸 = 输出 outW×outH → 矢量在 4K 直接清晰栅格化
+    // Layout coordinate system is always comp's W×H (font-size calibration unchanged); device size =
+    // output outW×outH → vectors rasterize crisply at 4K
     const preEnc = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css));
     const postEnc = encodeURIComponent(SVG_CLOSE);
-    // 主题背景位图(一次):空 root 走同一条光栅化管线(同样按输出分辨率栅格化)
+    // Theme background bitmap (once): empty root goes through the same rasterization pipeline (also at output resolution)
     const bg = await rasterize(
       'data:image/svg+xml;charset=utf-8,' +
         encodeURIComponent(svgOpen(W, H, outW, outH, overlay.headCss) + `<div xmlns="http://www.w3.org/1999/xhtml" id="root"></div>` + SVG_CLOSE),
@@ -401,12 +409,12 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const anyAudio = [...rigs.values()].some((r) => r.audio);
-    // webm 容器装不下 aac,音轨随格式换 opus
+    // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
     await output.start();
 
-    // 成片时间 → 段 + 源内时刻(段外/片尾:冻在最后一段末帧)
+    // Edited time → segment + time within source (outside any segment / past the end: freeze on the last segment's final frame)
     const segStarts: number[] = [];
     {
       let acc = 0;
@@ -427,10 +435,12 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       return { seg: segs[0]!, srcT: segs[0]!.srcStart };
     };
 
-    // 切点转场(真双流,与预览 videoFrameShim 同一套数学):当前帧画进 liveC,"另一侧"
-    // (切点前=B 的前摇 handle,切点后=A 的尾巴 handle)由影子取样流画进 ghostC,再按
-    // from/to 合成进 vidC,p 铺满整个窗口。影子取样越界/缺席=硬切降级。
-    // 每个转场每侧单独开 Input:sampleAt 每流单调,窗口两侧时间域不衔接必须分流。
+    // Cut transitions (true dual-stream, same math as the preview's videoFrameShim): the current frame
+    // draws into liveC, the "other side" (before the cut = B's pre-roll handle, after = A's tail handle)
+    // draws from a shadow sample stream into ghostC, then composites into vidC by from/to, with p spanning
+    // the whole window. Shadow sample out-of-range/absent = hard-cut fallback.
+    // Open a separate Input per transition per side: sampleAt is monotonic per stream, and the two sides'
+    // time domains don't connect, so they must be separate streams.
     const vidC = new OffscreenCanvas(outW, outH);
     const vctx = vidC.getContext('2d')!;
     const liveC = new OffscreenCanvas(outW, outH);
@@ -458,12 +468,14 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + tr.half + 0.2, W, H));
       trsX.push({ cut: tr.cut, half: tr.half, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
     }
-    // gl-transitions 合成器(输出分辨率;无转场不建)
+    // gl-transitions mixer (output resolution; not built if there are no transitions)
     const mixer = trsX.length ? createGlMixer(outW, outH) : null;
 
-    // 每源视频流的最后使用时刻(成片时间):过点就收视频解码器 —— 长项目里转场影子流
-    // ×2/插入段各占一个解码器,攒到几十个会挤爆硬解配额掉软解(取帧随时长变慢的来源)。
-    // input 不能收(音轨阶段还要用),只收视频取样流;影子源整个是导出私有的,连 input 一起收。
+    // Last-use time per source video stream (edited time): retire the video decoder once past it — in
+    // long projects each transition shadow stream (×2) and each insert clip holds a decoder; letting
+    // dozens pile up exhausts the hardware-decode quota and falls back to software (where sampling
+    // slows with duration). Can't dispose the input (still needed in the audio stage), only the video
+    // sample stream; shadow sources are entirely export-private, so dispose their input too.
     const lastUse = new Map<string, number>();
     for (let si = 0; si < segs.length; si++) {
       const end = segStarts[si]! + Math.max(0, segs[si]!.srcEnd - segs[si]!.srcStart);
@@ -482,9 +494,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       rig.it = null;
     };
 
-    // 叠加层序列化只收「当刻可见」的块:seekTimelines 已把窗外块打成 visibility:hidden,
-    // 跳过它们后热帧 SVG 文档只含少数几个块 —— 解析/排版成本不再随项目总块数涨
-    // (整 root 序列化时,11 分钟项目每个热帧都在重排全部几百个块)。
+    // Overlay serialization only takes blocks "visible at this moment": seekTimelines already marks
+    // off-window blocks visibility:hidden, and skipping them leaves the hot-frame SVG doc with just a
+    // few blocks — parse/layout cost no longer scales with the project's total block count (serializing
+    // the whole root, an 11-minute project re-lays-out all several-hundred blocks on every hot frame).
     const rootShell = XS.serializeToString(overlay.root.cloneNode(false));
     const rootOpen = rootShell.endsWith('/>') ? `${rootShell.slice(0, -2)}>` : rootShell.slice(0, rootShell.lastIndexOf('</'));
     const serializeVisible = (): string => {
@@ -497,14 +510,16 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     };
 
     const total = Math.max(1, Math.round(durationSec * FPS));
-    // 叠加层帧缓存:tween 间隙/字幕静止期序列化串逐帧相同 → 复用上一帧位图,
-    // 跳过整条 data URI(含内联字体,MB 级)的解析与光栅化(导出耗时大头)。
+    // Overlay frame cache: during tween gaps / static caption periods the serialized string is identical
+    // frame to frame → reuse the previous frame's bitmap, skipping parse and rasterization of the whole
+    // data URI (with inlined fonts, MB-scale — the bulk of export time).
     let lastSerial = '';
     let lastOverlayImg: HTMLImageElement | null = null;
-    // 编码与下一帧准备重叠:CanvasSource.add 调用时同步抓帧,返回的 Promise 只是编码器
-    // 背压 —— 抓完就能改画布,背压压到下一帧 add 之前才等。
+    // Overlap encoding with next-frame prep: CanvasSource.add grabs the frame synchronously on call, and
+    // the returned Promise is only encoder backpressure — the canvas is free to change once grabbed, and
+    // we only await the backpressure right before the next frame's add.
     let pendingAdd: Promise<void> | null = null;
-    // 分段计时(并行段各记各的墙钟,和可大于总墙钟):瓶颈在哪一段用数据说话
+    // Per-phase timing (parallel phases each track their own wall clock, so the sum can exceed total wall time): data shows where the bottleneck is
     const tm = { prep: 0, raster: 0, video: 0, draw: 0, enc: 0, rasterN: 0 };
     const expT0 = performance.now();
     for (let i = 0; i < total; i++) {
@@ -514,9 +529,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       overlay.win.__hfPreview!.seekTimelines(t);
       const { seg, srcT } = segAt(t);
       const rig = rigs.get(seg.key);
-      // 取景变换统一读 #vidEl:canvas 模式下所有段(含插入段)的取景关键帧都打在这块
-      // 画布上(videoFrameTimelineBody 只 tl.to('#vidEl'));按 clip_<id> 找元素是
-      // 旧「插入段=独立 <video>」时代的残留,元素不存在→单位矩阵→导出丢插入段取景
+      // Read the framing transform uniformly from #vidEl: in canvas mode every segment's (including
+      // insert clips') framing keyframes land on this one canvas (videoFrameTimelineBody only does
+      // tl.to('#vidEl')); looking up an element by clip_<id> is a leftover from the old "insert clip =
+      // separate <video>" era — the element doesn't exist → identity matrix → export loses insert-clip framing
       const el = overlay.doc.getElementById('vidEl');
       const vs = readTransform(overlay.win, el);
       const serial = serializeVisible();
@@ -531,7 +547,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         : Promise.resolve(lastOverlayImg!);
 
       const tr = trsX.find((x) => t >= x.cut - x.half && t <= x.cut + x.half) ?? null;
-      // 影子取样参数先算好,三路解码(叠加层/当前帧/影子帧)互不依赖 → 并行
+      // Compute shadow sampling params first; the three decodes (overlay/current frame/shadow frame) are independent → parallel
       const pre = tr ? t < tr.cut : false;
       const gseg = tr ? (pre ? tr.segB : tr.segA) : null;
       const gRig = tr ? rigs.get(pre ? tr.preKey : tr.postKey) : undefined;
@@ -544,22 +560,23 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       ]);
       lastSerial = serial;
       lastOverlayImg = overlayImg;
-      // bg / overlay 已按输出分辨率(outW×outH)栅格化 → 恒等变换 1:1 画(4K 时文字/图形清晰)。
-      // 源视频仍在 comp 坐标系画,setTransform(Sx) 把目标矩形放到输出尺寸,drawImage 从原生帧直缩过去。
-      // 单侧视频层绘制管线(live 与 ghost 共用):取景变换 + 圆角裁剪 + 投影 + 镜级调色
+      // bg / overlay are already rasterized at output resolution (outW×outH) → draw 1:1 with identity
+      // transform (crisp text/graphics at 4K). The source video is still drawn in comp coordinates;
+      // setTransform(Sx) maps the target rect to output size, drawImage scales straight from native frames.
+      // Single-side video layer paint pipeline (shared by live and ghost): framing transform + rounded-corner clip + shadow + per-shot grade
       const paintLayer = (tc: OffscreenCanvasRenderingContext2D, smp: { draw: (c2: OffscreenCanvasRenderingContext2D, x: number, y: number, w2: number, h2: number) => void }, rg: SourceRig, filterCss?: string) => {
         tc.setTransform(1, 0, 0, 1, 0, 0);
         tc.clearRect(0, 0, outW, outH);
         tc.setTransform(Sx, 0, 0, Sy, 0, 0);
         tc.save();
-        // transform-origin: center —— computed matrix 不含 origin,手动夹 T(c)·M·T(-c)
+        // transform-origin: center — the computed matrix excludes origin, so sandwich it manually as T(c)·M·T(-c)
         tc.translate(W / 2, H / 2);
         tc.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
         tc.translate(-W / 2, -H / 2);
         const path = new Path2D();
         path.roundRect(0, 0, W, H, vs.radius);
         if (vs.m.a < 0.999) {
-          // 缩小取景才看得到投影:先带 shadow 填底,再裁剪画帧
+          // Shadow only shows when framing is scaled down: fill a shadowed base first, then clip and draw the frame
           tc.shadowColor = 'rgba(0,0,0,0.45)';
           tc.shadowBlur = 90;
           tc.shadowOffsetY = 30;
@@ -570,7 +587,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
           tc.shadowOffsetY = 0;
         }
         tc.clip(path);
-        // 镜级调色:与预览 #vidEl 的 CSS filter 同源(canvas filter 同一语法);restore 复位
+        // Per-shot grade: same source as the preview's #vidEl CSS filter (canvas filter, same syntax); restore resets it
         if (filterCss) tc.filter = filterCss;
         smp.draw(tc, (W - rg.dw) / 2, (H - rg.dh) / 2, rg.dw, rg.dh);
         tc.restore();
@@ -579,7 +596,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       lctx.setTransform(1, 0, 0, 1, 0, 0);
       lctx.clearRect(0, 0, outW, outH);
       if (sample && rig) paintLayer(lctx, sample, rig, seg.filter);
-      // 影子层:窗口内"另一侧"的画面(真双流;取样越界/缺席 = 硬切降级)
+      // Shadow layer: the "other side" frame within the window (true dual-stream; sample out-of-range/absent = hard-cut fallback)
       let ghostReady = false;
       if (tr) {
         gctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -589,13 +606,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
           ghostReady = true;
         }
       }
-      // 合成进 vidC:gl-transitions 合成器(与预览 shim / 面板同一份 GL_MIXER_SRC);
-      // 影子缺席/GL 不可用 → 硬切降级
+      // Composite into vidC: gl-transitions mixer (same GL_MIXER_SRC as the preview shim / panel);
+      // shadow absent / GL unavailable → hard-cut fallback
       vctx.setTransform(1, 0, 0, 1, 0, 0);
       vctx.clearRect(0, 0, outW, outH);
       let mixed = false;
       if (tr && ghostReady && mixer) {
-        const p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=窗口起点 1=终点
+        const p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
         const F = pre ? liveC : ghostC;
         const T = pre ? ghostC : liveC;
         const [dx, dy] = glDirection(tr.dir as TransitionDirection);
@@ -613,10 +630,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       ctx.drawImage(overlayImg, 0, 0);
       tm.draw += performance.now() - d0;
       const e0 = performance.now();
-      if (pendingAdd) await pendingAdd; // 上一帧的编码背压:压到这里才等,编码期间下一帧已在准备
+      if (pendingAdd) await pendingAdd; // Previous frame's encode backpressure: only awaited here, so the next frame is already being prepared during encoding
       pendingAdd = videoSource.add(t, 1 / FPS);
       tm.enc += performance.now() - e0;
-      // 用完即收(秒检一次):最后使用时刻已过的源收掉视频解码流;影子源连 input 一起收
+      // Retire once done (checked once per second): sources past their last-use time drop the video decode stream; shadow sources dispose their input too
       if (i % FPS === 0) {
         for (const [key, r2] of rigs) {
           const lu = lastUse.get(key);
@@ -641,7 +658,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // 音轨:按成片段序拼接(主段=口播音轨,插入段=它自己的音轨),重打时间戳
+    // Audio track: concatenate in edited-segment order (main segment = narration audio, insert clip = its own), re-stamp timestamps
     if (audioSource) {
       let edited = 0;
       for (const s of segs) {

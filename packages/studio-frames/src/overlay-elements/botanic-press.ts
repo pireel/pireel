@@ -1,7 +1,9 @@
 /**
- * 植物 Botanical 的口播叠加件:标本标签语言——白 --panel 标签卡被斜切牛皮胶带
- * (--panel-2 rotate -42°)钉住、拉丁编目 mono 行(0.3em 字距)、发丝 --line 分隔线、
- * 一枚陶土蜡封点(--accent-2,每卡限一枚)、细线叶片 SVG 逐笔画入。慢而安静,无弹跳。
+ * Botanical talking-head overlays: herbarium-label language. White --panel
+ * label cards pinned by angled kraft tape (--panel-2, rotate -42deg), a Latin
+ * catalog mono line (0.3em tracking), hairline --line dividers, one terracotta
+ * wax seal (--accent-2, max one per card), and thin-line leaf SVGs drawn
+ * stroke-by-stroke. Slow and quiet, no bounce.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

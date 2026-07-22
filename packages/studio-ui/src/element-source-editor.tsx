@@ -1,14 +1,19 @@
 'use client';
 
 /**
- * 组件源码编辑器 —— 三层编辑(舞台直改 / AI 改 / 源码改)的第三层,与前两层同面闭环:
- *  - 舞台就是实时预览:改动 debounce 后直接投主 composition(双缓冲无闪),不另建隔离预览;
- *    「应用」才算提交,关闭(或切走)未应用则由父层还原到打开时/上次应用的状态。
- *  - lint 与 LLM 同契约:人改的源码同样过 lintBlock + JS 语法编译,硬错误不投舞台、不让应用
- *    (此前人从这里贴未作用域 CSS 能污染全片,LLM 反而进不来)。
- *  - AI 在场:底部一条指令输入,以**当前草稿**为底稿走 compose(等价 edit_block),
- *    结果回填草稿(仍走同一 live-preview→应用流),不用切回对话重新定位。
- * 两个 pane 对齐数据模型(innerHtml / timelineBody),不再合成单文档往返(旧 combine/split 有损边角)。
+ * Component source editor — the third layer of editing (direct stage edit / AI edit / source edit),
+ * closing the loop on the same surface as the other two:
+ *  - The stage is the live preview: edits (after debounce) go straight to the main composition
+ *    (double-buffered, no flicker), no separate isolated preview. Only "Apply" commits; closing
+ *    (or switching away) without applying lets the parent restore the state from open time / last apply.
+ *  - lint shares the LLM contract: hand-edited source also goes through lintBlock + JS syntax compile;
+ *    hard errors don't hit the stage and block Apply (previously a human could paste unscoped CSS here
+ *    that polluted the whole video, while the LLM couldn't).
+ *  - AI present: one instruction input at the bottom runs compose on the **current draft** (equivalent
+ *    to edit_block), result fills back into the draft (still via the same live-preview→apply flow),
+ *    no need to switch back to chat to re-locate.
+ * The two panes align to the data model (innerHtml / timelineBody), no more single-document round-trips
+ * (the old combine/split lost edge cases).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -25,16 +30,16 @@ export interface SourceDraft {
 
 interface ElementSourceEditorProps {
   block: Block;
-  /** 生成锁:该组件正被 AI 生成/重写,编辑器只读 */
+  /** Generation lock: this component is being AI-generated/rewritten, editor is read-only */
   locked: boolean;
-  /** 草稿实时投舞台(debounce 后、无硬 lint 错误才会调) */
+  /** Push draft to stage live (only called after debounce, with no hard lint errors) */
   onDraft: (draft: SourceDraft) => void;
-  /** 提交:草稿成为组件的新状态(关闭不再还原) */
+  /** Commit: draft becomes the component's new state (closing no longer restores) */
   onApply: (draft: SourceDraft) => void;
-  /** 循环播放本组件时间窗(调动画用) */
+  /** Loop-play this component's time window (for tuning animation) */
   loop: boolean;
   onLoop: (on: boolean) => void;
-  /** 以当前草稿为底稿让 AI 改;onNote 流式回传模型正在说的话 */
+  /** Let AI edit using the current draft as the base; onNote streams back what the model is saying */
   runAi: (instruction: string, draft: SourceDraft, onNote: (note: string) => void) => Promise<SourceDraft | null>;
 }
 
@@ -43,14 +48,14 @@ interface Issue {
   message: string;
 }
 
-/** 草稿静态检查:lintBlock(与 LLM 产物同契约)+ JS 语法编译(lint 不做语法解析)。 */
+/** Static check on the draft: lintBlock (same contract as LLM output) + JS syntax compile (lint doesn't parse syntax). */
 function checkDraft(blockId: string, draft: SourceDraft): Issue[] {
   const issues: Issue[] = lintBlock({ blockId, innerHtml: draft.innerHtml, timelineBody: draft.timelineBody }).map((i) => ({
     hard: HARD_LINT_CODES.has(i.code),
     message: i.message,
   }));
   try {
-    // 与 assembleHtml 的 timelineScript 同款编译,提前在编辑器里暴露语法错误
+    // Same compile as assembleHtml's timelineScript, surfacing syntax errors early in the editor
     new Function('tl', draft.timelineBody);
   } catch (e) {
     issues.unshift({ hard: true, message: t('动画脚本语法错误:{msg}', { msg: e instanceof Error ? e.message : String(e) }) });
@@ -59,14 +64,14 @@ function checkDraft(blockId: string, draft: SourceDraft): Issue[] {
 }
 
 export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onLoop, runAi }: ElementSourceEditorProps) {
-  // 草稿只在挂载时取一次(父层 key=block.id 换块自动重置)——之后 block prop 的变化
-  // 就是我们自己的 live-apply 回流,不能反灌草稿
+  // Draft is read once on mount (parent's key=block.id resets it on block change) — afterward,
+  // changes to the block prop are our own live-apply reflow and must not flow back into the draft
   const [draft, setDraft] = useState<SourceDraft>(() => {
     const s = block.slots as { innerHtml?: unknown; timelineBody?: unknown };
     if (block.templateId === 'custom' && typeof s.innerHtml === 'string') {
       return { innerHtml: s.innerHtml, timelineBody: typeof s.timelineBody === 'string' ? s.timelineBody : '' };
     }
-    return renderBlock(block); // 模板块:当前渲染产物作初值(应用后转 custom)
+    return renderBlock(block); // Template block: current render output as initial value (becomes custom after apply)
   });
   const [dirty, setDirty] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -75,14 +80,15 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
   const [aiNote, setAiNote] = useState('');
   const hardCount = issues.filter((i) => i.hard).length;
 
-  // 检查 + 实时投舞台:停手 500ms 后跑;有硬错误只报不投(坏 CSS/坏脚本不进 composition)。
-  // onDraft 走 ref:父层内联传入每渲染换引用,进依赖会反复重置 debounce
+  // Check + live push to stage: runs 500ms after typing stops; hard errors only report, don't push
+  // (bad CSS/script never enters the composition).
+  // onDraft via ref: parent passes it inline so the reference changes each render; putting it in deps would keep resetting the debounce
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   const onDraftRef = useRef(onDraft);
   onDraftRef.current = onDraft;
   useEffect(() => {
-    if (!dirtyRef.current) return; // 初值不检查不投(打开即报错/重建很扰人)
+    if (!dirtyRef.current) return; // Don't check/push the initial value (erroring/rebuilding on open is annoying)
     const h = setTimeout(() => {
       const found = checkDraft(block.id, draft);
       setIssues(found);
@@ -117,7 +123,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      {/* 标题(源码 · 块名)/关闭归浮窗头部,这行只剩功能钮 */}
+      {/* Title (source · block name) / close live in the popover header; this row only holds function buttons */}
       <div className="border-line flex items-center gap-2 border-b px-3 py-1.5">
         {locked && (
           <span className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600">
@@ -153,7 +159,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
         className="flex-[3]"
       />
 
-      {/* 动画 */}
+      {/* Animation */}
       <div className="text-ink-4 border-line flex items-center border-y px-3 py-1 text-[10px]">
         {t('动画 · GSAP(局部时间,0 = 组件起点;写 tl.xxx)')}
       </div>
@@ -165,7 +171,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
         className="flex-[2]"
       />
 
-      {/* 检查结果:硬错误挡投放/应用,软问题只提示 */}
+      {/* Check results: hard errors block push/apply, soft issues only warn */}
       {issues.length > 0 && (
         <div className="border-line max-h-20 overflow-auto border-t px-3 py-1.5">
           {issues.map((i, idx) => (
@@ -176,7 +182,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
         </div>
       )}
 
-      {/* AI 改:以当前草稿为底稿,结果回填草稿 */}
+      {/* AI edit: use current draft as base, result fills back into the draft */}
       <div className="border-line border-t px-3 py-2">
         {aiBusy && (
           <div className="text-ink-3 mb-1.5 flex items-center gap-1.5 text-[11px]">
@@ -209,7 +215,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
         </div>
       </div>
 
-      {/* 应用 / 状态 */}
+      {/* Apply / status */}
       <div className="border-line flex items-center gap-2 border-t px-3 py-1.5">
         <span className="text-ink-4 text-[10px]">{t('改动实时投到舞台;应用才保留,关闭即还原')}</span>
         <button

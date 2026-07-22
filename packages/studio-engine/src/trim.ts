@@ -1,34 +1,34 @@
 /**
- * 成片裁主流剪辑器射核心(纯函数,无 DOM)。
+ * Edited-timeline trim mapping core (pure functions, no DOM).
  *
- * 模型:视频被切成有序「片段(clip)」,每段是源视频上的一个保留区间 [srcStart, srcEnd)。
- * 成片(edited)时间轴 = 各片段源区间**首尾相接**(被剪掉的源区间在成片里不存在)。
- *   - 片段 i 的成片起点 = 前面所有片段的源长度之和。
- *   - 成片总时长 = Σ 各片段源长度。
- * 字幕/演法等叠加块用**成片时间**;剪掉一段源footage后,该段对应的成片区间被移除,
- * 后面的块整体左移(removeEditedInterval)。
+ * Model: the video is cut into an ordered list of "clips", each a kept range [srcStart, srcEnd) on the source video.
+ * The edited timeline = each clip's source range placed END TO END (cut-out source ranges don't exist in the edit).
+ *   - clip i's edited start = sum of all preceding clips' source lengths.
+ *   - total edited duration = Σ each clip's source length.
+ * Overlay blocks (captions/effects) use EDITED time; cutting a source-footage segment removes its corresponding
+ * edited range, and blocks after it shift left as a whole (removeEditedInterval).
  *
- * 增删改查:
- *   · 改/查 = editedToSrc / spans / editedDuration(成片↔源 映射)
- *   · 增 = splitAtEdited(在播放头把片段一分为二)
- *   · 删/裁 = trimLeftAtEdited / trimRightAtEdited / deleteAtEdited(剪掉源footage,返回被移除的成片区间)
- * 裁剪类操作返回 { clips, removed },removed=[a,b] 是成片时间里被抹掉的区间,交给
- * removeEditedInterval 压缩叠加块。
+ * CRUD:
+ *   · read = editedToSrc / spans / editedDuration (edited↔src mapping)
+ *   · add = splitAtEdited (split a clip in two at the playhead)
+ *   · delete/trim = trimLeftAtEdited / trimRightAtEdited / deleteAtEdited (cut source footage, return the removed edited range)
+ * Trim ops return { clips, removed }; removed=[a,b] is the erased range in edited time, passed to
+ * removeEditedInterval to compress overlay blocks.
  */
 
-const EPS = 0.05; // 贴边保护:播放头离片段两端太近不允许切/裁
+const EPS = 0.05; // edge guard: playhead too close to a clip's ends → split/trim disallowed
 
 export interface Clip {
   srcStart: number;
   srcEnd: number;
 }
 
-/** 片段源长度(成片时长贡献)。 */
+/** Clip source length (its contribution to edited duration). */
 export function clipLen(c: Clip): number {
   return Math.max(0, c.srcEnd - c.srcStart);
 }
 
-/** 成片总时长 = Σ 片段源长度。 */
+/** Total edited duration = Σ clip source lengths. */
 export function editedDuration(clips: Clip[]): number {
   return clips.reduce((a, c) => a + clipLen(c), 0);
 }
@@ -36,12 +36,12 @@ export function editedDuration(clips: Clip[]): number {
 export interface ClipSpan<T extends Clip> {
   clip: T;
   index: number;
-  /** 该片段在成片时间轴的起点 / 终点。 */
+  /** This clip's start / end on the edited timeline. */
   editedStart: number;
   editedEnd: number;
 }
 
-/** 每个片段在成片时间轴上的区间(首尾相接)。 */
+/** Each clip's range on the edited timeline (placed end to end). */
 export function spans<T extends Clip>(clips: T[]): ClipSpan<T>[] {
   let acc = 0;
   return clips.map((clip, index) => {
@@ -52,8 +52,8 @@ export function spans<T extends Clip>(clips: T[]): ClipSpan<T>[] {
 }
 
 /**
- * 成片时间 → 落在哪个片段 + 对应源时间。edited 夹到 [0, 总时长];空片段返回 null。
- * 约定:edited 落在片段边界时归到前一个片段(末端取 srcEnd)。
+ * Edited time → which clip it lands in + the corresponding source time. edited is clamped to [0, total]; empty clips return null.
+ * Convention: edited on a clip boundary belongs to the preceding clip (the end takes srcEnd).
  */
 export function editedToSrc(clips: Clip[], edited: number): { index: number; src: number } | null {
   if (!clips.length) return null;
@@ -71,14 +71,16 @@ export function editedToSrc(clips: Clip[], edited: number): { index: number; src
 }
 
 /**
- * 源域匹配谓词:多源主轨下各片段可来自不同源文件,srcStart/srcEnd 是**各自文件**的时间轴。
- * 源时间域运算(词映射/删句/恢复)只许和**同一个源**(通常=被转写的口播源)的片段求交,
- * 其它源的片段跳过匹配、只贡献成片长度 —— 否则两个文件的秒数会数值撞车(实录:删口播
- * 某句会把插入片段误剪一块)。缺省 = 全部参与(单源场景不变)。
+ * Source-domain match predicate: on the multi-source main track, clips can come from different source files,
+ * where srcStart/srcEnd are on EACH FILE's own timeline. Source-time operations (word mapping/sentence deletion/
+ * restore) may only intersect clips from the SAME source (usually the transcribed narration source); clips of
+ * other sources skip matching and only contribute edited length — otherwise the two files' seconds collide
+ * numerically (observed: deleting a narration sentence would wrongly cut a chunk of an insert clip). Default =
+ * all participate (single-source case unchanged).
  */
 export type InSource<T extends Clip = Clip> = (c: T) => boolean;
 
-/** 源时间 → 成片时间(仅当 src 落在某保留片段内)。落在被剪区间/越界返回 null。 */
+/** Source time → edited time (only when src falls inside a kept clip). Returns null if in a cut range / out of bounds. */
 export function srcToEdited<T extends Clip>(clips: T[], src: number, inSource: InSource<T> = () => true): number | null {
   let acc = 0;
   for (const c of clips) {
@@ -89,17 +91,17 @@ export function srcToEdited<T extends Clip>(clips: T[], src: number, inSource: I
   return null;
 }
 
-/* ============================ 增删改查 ============================ */
+/* ============================ CRUD ============================ */
 
 export interface ClipEdit<T extends Clip> {
   clips: T[];
-  /** 被抹掉的成片区间(裁剪/删除产生);split 无移除 → null。交给 removeEditedInterval 压缩块。 */
+  /** Erased edited range (from trim/delete); split removes nothing → null. Passed to removeEditedInterval to compress blocks. */
   removed: [number, number] | null;
 }
 
 /**
- * 剪开:在成片播放头把所在片段一分为二(源区间从切点拆开)。内容不变 → removed=null。
- * makeRight 负责造右半片段(通常 = 复制属性 + 新 id)。
+ * Split: at the edited playhead, split the containing clip in two (its source range splits at the cut). Content unchanged → removed=null.
+ * makeRight builds the right half (usually = copy properties + new id).
  */
 export function splitAtEdited<T extends Clip>(
   clips: T[],
@@ -116,7 +118,7 @@ export function splitAtEdited<T extends Clip>(
   return { clips: [...clips.slice(0, index), left, right, ...clips.slice(index + 1)], removed: null };
 }
 
-/** 左剪:剪掉所在片段里播放头**左侧**的源footage(srcStart→切点)。 */
+/** Trim left: cut the source footage LEFT of the playhead within the clip (srcStart→cut). */
 export function trimLeftAtEdited<T extends Clip>(clips: T[], edited: number): ClipEdit<T> {
   const hit = editedToSrc(clips, edited);
   if (!hit) return { clips, removed: null };
@@ -128,7 +130,7 @@ export function trimLeftAtEdited<T extends Clip>(clips: T[], edited: number): Cl
   return { clips: out, removed: [sp.editedStart, edited] };
 }
 
-/** 右剪:剪掉所在片段里播放头**右侧**的源footage(切点→srcEnd)。 */
+/** Trim right: cut the source footage RIGHT of the playhead within the clip (cut→srcEnd). */
 export function trimRightAtEdited<T extends Clip>(clips: T[], edited: number): ClipEdit<T> {
   const hit = editedToSrc(clips, edited);
   if (!hit) return { clips, removed: null };
@@ -140,7 +142,7 @@ export function trimRightAtEdited<T extends Clip>(clips: T[], edited: number): C
   return { clips: out, removed: [edited, sp.editedEnd] };
 }
 
-/** 删段:移除播放头所在片段(至少保留 1 段)。 */
+/** Delete clip: remove the clip at the playhead (keep at least 1). */
 export function deleteAtEdited<T extends Clip>(clips: T[], edited: number): ClipEdit<T> {
   if (clips.length <= 1) return { clips, removed: null };
   const hit = editedToSrc(clips, edited);
@@ -150,9 +152,10 @@ export function deleteAtEdited<T extends Clip>(clips: T[], edited: number): Clip
 }
 
 /**
- * 删区间:抹掉成片时间 [a,b)——每个片段保留区间外的部分(跨区间的片段拆成左右两半,
- * 右半经 makeRight 造新片段)。区间可跨多个片段。全删保护:结果为空则不动。
- * removed = 夹取后的 [a,b],交给 removeEditedInterval 压缩叠加块。
+ * Remove range: erase edited time [a,b) — each clip keeps the part outside the range (clips spanning the range
+ * split into left/right halves, the right built via makeRight). The range may span multiple clips. Empty-result
+ * guard: if the result is empty, do nothing. removed = the clamped [a,b], passed to removeEditedInterval to
+ * compress overlay blocks.
  */
 export function removeEditedRange<T extends Clip>(
   clips: T[],
@@ -168,24 +171,25 @@ export function removeEditedRange<T extends Clip>(
   for (const sp of spans(clips)) {
     const { clip, editedStart, editedEnd } = sp;
     if (editedEnd <= lo + 1e-9 || editedStart >= hi - 1e-9) {
-      out.push(clip); // 完全在区间外
+      out.push(clip); // entirely outside the range
       continue;
     }
-    // 左侧保留(片段起点在区间前)
+    // keep left side (clip starts before the range)
     if (editedStart < lo - 1e-9) out.push({ ...clip, srcEnd: clip.srcStart + (lo - editedStart) });
-    // 右侧保留(片段终点在区间后)——新片段(新 id 由 makeRight 定)
+    // keep right side (clip ends after the range) — new clip (new id from makeRight)
     if (editedEnd > hi + 1e-9) out.push(makeRight(clip, clip.srcStart + (hi - editedStart), clip.srcEnd));
   }
-  if (!out.length) return { clips, removed: null }; // 全删保护:至少留一段
+  if (!out.length) return { clips, removed: null }; // empty-result guard: keep at least one clip
   return { clips: out, removed: [lo, hi] };
 }
 
 /**
- * 删一批**源时间**区间(口播稿驱动剪辑:删句/删空白/删语气词)。
- * 每个源区间按当前剪辑映射成成片区间(可能跨多个 clip → 多段),段内**降序**逐段删——
- * 源坐标不受剪切影响所以多区间任意顺序;成片坐标每剪一刀都变,必须段内降序。
- * removed = 实际删掉的成片区间,**按删除发生顺序**排列:叠加块要按同一顺序依次
- * removeEditedInterval(每刀的坐标都是"删这刀之前"的成片口径)。
+ * Delete a batch of SOURCE-time ranges (transcript-driven editing: delete sentence/silence/filler word).
+ * Each source range maps to edited range(s) under the current edit (may span multiple clips → multiple segments),
+ * deleted DESCENDING within a range — source coords are unaffected by cuts so ranges may be any order, but edited
+ * coords shift on every cut, so within a range it must be descending. removed = the actually-deleted edited ranges,
+ * in ORDER OF DELETION: overlay blocks must run removeEditedInterval in the same order (each cut's coords are the
+ * "before this cut" edited frame).
  */
 export function removeSrcRanges<T extends Clip>(
   clips: T[],
@@ -198,7 +202,7 @@ export function removeSrcRanges<T extends Clip>(
   for (const [s, e] of srcRanges) {
     const segs: [number, number][] = [];
     for (const sp of spans(cur)) {
-      if (!inSource(sp.clip)) continue; // 其它源的片段:源时间轴不同域,不参与匹配
+      if (!inSource(sp.clip)) continue; // other-source clips: different source-time domain, skip matching
       const a = Math.max(sp.clip.srcStart, s);
       const b = Math.min(sp.clip.srcEnd, e);
       if (b - a > 0.04) segs.push([sp.editedStart + (a - sp.clip.srcStart), sp.editedStart + (b - sp.clip.srcStart)]);
@@ -214,12 +218,12 @@ export function removeSrcRanges<T extends Clip>(
   return { clips: cur, removed };
 }
 
-/** src 时刻 → 成片时刻(宽松口径:落在被剪区间取其后第一个存留点;越界取末端)。 */
+/** src time → edited time (loose: if in a cut range, take the first surviving point after it; out of bounds → the end). */
 export function srcToEditedLoose<T extends Clip>(clips: T[], src: number, inSource: InSource<T> = () => true): number {
   const sp = spans(clips);
   let lastEnd = 0;
   for (const x of sp) {
-    if (!inSource(x.clip)) continue; // 其它源:只占成片长度(spans 已计),不参与源时间匹配
+    if (!inSource(x.clip)) continue; // other sources: only occupy edited length (already in spans), skip source-time matching
     if (src < x.clip.srcStart) return x.editedStart;
     if (src < x.clip.srcEnd) return x.editedStart + (src - x.clip.srcStart);
     lastEnd = x.editedEnd;
@@ -228,9 +232,10 @@ export function srcToEditedLoose<T extends Clip>(clips: T[], src: number, inSour
 }
 
 /**
- * 恢复一段**源时间**区间(口播稿:点已删的词恢复)。找出 [s,e) 里当前未被覆盖的缺口,
- * 优先并进源上相邻的片段(srcEnd/srcStart 贴合,canMerge 放行才并——带 partner 的镜别乱扩),
- * 否则按 srcStart 排序插新片段。已全部在片子里 = 原样返回。
+ * Restore a SOURCE-time range (transcript: click a deleted word to bring it back). Find the gaps in [s,e) not
+ * currently covered, prefer merging into a source-adjacent clip (srcEnd/srcStart touch, only if canMerge allows
+ * — don't over-extend a shot that has a partner), otherwise insert a new clip sorted by srcStart. Already fully
+ * present = returned unchanged.
  */
 export function restoreSrcRange<T extends Clip>(
   clips: T[],
@@ -240,9 +245,10 @@ export function restoreSrcRange<T extends Clip>(
   canMerge: (c: T) => boolean = () => true,
   inSource: InSource<T> = () => true,
 ): T[] {
-  // 多源:恢复只在"本源"片段间进行(排序/合并/插位都是本源的 srcStart 语义);
-  // 其它源的片段先摘下、记住各自的前驱(按 srcStart 值锚定——前驱的 srcStart 在恢复中
-  // 永不改变:合并只延长它的 srcEnd 或压低后继的 srcStart),恢复完挂回原前驱之后。
+  // Multi-source: restore runs only among THIS source's clips (sort/merge/insert all use this source's srcStart
+  // semantics); other-source clips are lifted out first, each remembering its predecessor (anchored by srcStart
+  // value — a predecessor's srcStart never changes during restore: merging only extends its srcEnd or lowers a
+  // successor's srcStart), then reattached after their original predecessor when done.
   const foreign = clips.filter((c) => !inSource(c));
   if (foreign.length) {
     const anchors: { clip: T; afterSrcStart: number | null }[] = [];
@@ -261,7 +267,7 @@ export function restoreSrcRange<T extends Clip>(
       out.push(c);
       for (const a of anchors) if (a.afterSrcStart != null && Math.abs(a.afterSrcStart - c.srcStart) < 1e-6) out.push(a.clip);
     }
-    // 前驱意外消失(理论不可能,恢复不删片段):兜底挂到末尾,不丢内容
+    // predecessor unexpectedly gone (theoretically impossible, restore deletes no clips): fall back to appending at the end, lose nothing
     for (const a of anchors) if (!out.includes(a.clip)) out.push(a.clip);
     return out;
   }
@@ -297,7 +303,7 @@ export function restoreSrcRange<T extends Clip>(
   return out;
 }
 
-/** 删段(按 id)。 */
+/** Delete clip (by id). */
 export function deleteClipById<T extends Clip & { id: string }>(clips: T[], id: string): ClipEdit<T> {
   if (clips.length <= 1) return { clips, removed: null };
   const i = clips.findIndex((c) => c.id === id);
@@ -306,7 +312,7 @@ export function deleteClipById<T extends Clip & { id: string }>(clips: T[], id: 
   return { clips: clips.filter((_, j) => j !== i), removed: [sp.editedStart, sp.editedEnd] };
 }
 
-/* ============================ 块压缩(成片时间) ============================ */
+/* ============================ Block compression (edited time) ============================ */
 
 interface Timed {
   startSec: number;
@@ -314,8 +320,8 @@ interface Timed {
 }
 
 /**
- * 从成片时间轴抹掉区间 [a,b) 并压缩:之前的块不动,之后的块左移 (b-a),
- * 跨区间的块切掉重叠部分,整块落在被删区间内则丢弃。
+ * Erase range [a,b) from the edited timeline and compress: blocks before it stay, blocks after shift left by (b-a),
+ * blocks spanning the range have the overlapping part cut off, blocks entirely inside the deleted range are dropped.
  */
 export function removeEditedInterval<B extends Timed>(blocks: B[], a: number, b: number, minDur = 0.1): B[] {
   if (b - a <= 0) return blocks;
@@ -325,15 +331,15 @@ export function removeEditedInterval<B extends Timed>(blocks: B[], a: number, b:
     const s = blk.startSec;
     const e = blk.startSec + blk.durationSec;
     if (e <= a) {
-      out.push(blk); // 完全在前
+      out.push(blk); // entirely before
     } else if (s >= b) {
-      out.push({ ...blk, startSec: s - gap }); // 完全在后 → 左移
+      out.push({ ...blk, startSec: s - gap }); // entirely after → shift left
     } else {
-      // 跨/落在被删区间:保留区间外的部分,压缩
+      // spans/inside the deleted range: keep the part outside, compress
       const keptBefore = Math.max(0, a - s);
       const keptAfter = Math.max(0, e - b);
       const newDur = keptBefore + keptAfter;
-      if (newDur < minDur) continue; // 基本全在被删区间 → 丢
+      if (newDur < minDur) continue; // basically all inside the deleted range → drop
       out.push({ ...blk, startSec: Math.min(s, a), durationSec: newDur });
     }
   }

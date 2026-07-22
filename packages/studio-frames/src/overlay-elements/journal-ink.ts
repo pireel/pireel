@@ -1,17 +1,20 @@
 /**
- * 报刊 Journal 的口播叠加件:剪报碎片语言——每件是一小片新闻纸(--panel)剪下来
- * 贴在画面上:报头 6px 双线、2px 发丝线、双线三明治(4px+2px)、灰条假文、衬线
- * 900 铅字、mono 页码,红色只做编辑批注(旋转红章/红圈/红编号)。动效纸面化:
- * 快淡入+沿栏轴滑动,禁缩放弹跳(红章盖章除外)。
+ * Journal talking-head overlays: newspaper-clipping language. Each element is a
+ * small scrap of newsprint (--panel) cut out and stuck on the shot: 6px double
+ * masthead rule, 2px hairlines, a double-rule sandwich (4px+2px), gray-bar
+ * greeked text, heavy serif 900 type, mono page numbers; red used only for
+ * editorial marks (rotated red stamp / red circle / red number). Motion is
+ * paper-like: quick fade + slide along the column axis, no scale bounce (except
+ * the red stamp thumping down).
  */
 
 import { mk, txt, type Block } from '../dialects/shared';
 
-/** 新闻纸碎片底:亮纸面 + 近直角 + 极淡纸影 */
+/** Newsprint scrap base: bright paper + near-square corners + faint paper shadow */
 const SCRAP = 'background:var(--panel);border-radius:var(--radius);box-shadow:var(--shadow);';
-/** 双线三明治(收口用) */
+/** Double-rule sandwich (for closing off a block) */
 const SANDWICH = 'border-top:4px solid var(--fg);border-bottom:2px solid var(--fg);';
-/** 灰条假文 */
+/** Gray-bar greeked text */
 const fake = (n: number): string =>
   Array.from({ length: n }, (_, i) => `<i style="width:${i === n - 1 ? 62 : 100}%"></i>`).join('');
 

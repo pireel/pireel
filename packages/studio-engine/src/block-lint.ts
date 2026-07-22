@@ -1,8 +1,11 @@
 /**
- * 块产物静态检查(纯函数)—— LLM 生成的 innerHtml/timelineBody 在进 composition 前过一遍:
- * 未作用域的 CSS 会污染整个文档、vw/vh 破坏固定画布字号、script 标签是注入面、
- * 非确定性 API 破坏逐帧渲染、缺 data-edit 句柄断掉「双击就地改」。
- * 不过关 → 调用方带着 issue 列表让模型修一轮;修不好宁可保留占位也不进坏产物。
+ * Static lint of block output (pure function) — LLM-generated innerHtml/timelineBody
+ * gets one pass before entering composition: unscoped CSS pollutes the whole
+ * document, vw/vh breaks the fixed-canvas font sizing, script tags are an injection
+ * surface, non-deterministic APIs break per-frame rendering, and a missing data-edit
+ * handle disables double-click-to-edit.
+ * Fails → the caller sends the issue list back to the model for one fix round;
+ * if unfixable, keep a placeholder rather than commit bad output.
  */
 
 export interface BlockLintIssue {
@@ -10,7 +13,7 @@ export interface BlockLintIssue {
   message: string;
 }
 
-/** 修一轮也压不下去就拒收的硬错误(坏 CSS/script 会伤及整个文档)。 */
+/** Hard errors rejected even after a fix round (bad CSS/script harms the whole document). */
 export const HARD_LINT_CODES: ReadonlySet<string> = new Set(['unscoped-selector', 'script-tag', 'nondeterministic']);
 
 export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string }): BlockLintIssue[] {
@@ -21,7 +24,7 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — animation belongs in the timeline body' });
   }
 
-  // <style> 作用域:每条规则的选择器都必须含 #blockId(剥掉 @keyframes 块;@container/@media 条件行跳过)
+  // <style> scoping: every rule's selector must contain #blockId (strip @keyframes blocks; skip @container/@media condition lines)
   for (const styleMatch of innerHtml.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
     const css = styleMatch[1]!;
     const noKf = css.replace(/@keyframes[^{]+\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/gi, '');
@@ -30,7 +33,7 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     const flagged = new Set<string>();
     while ((m = ruleRe.exec(noKf)) !== null) {
       const sel = m[2]!.trim();
-      if (!sel || sel.startsWith('@')) continue; // at-rule 条件行(其内部规则会被单独匹配到)
+      if (!sel || sel.startsWith('@')) continue; // at-rule condition line (its inner rules are matched separately)
       if (!sel.includes(`#${blockId}`) && !flagged.has(sel)) {
         flagged.add(sel);
         issues.push({ code: 'unscoped-selector', message: `CSS selector "${sel.slice(0, 60)}" is not scoped under #${blockId}` });
@@ -45,7 +48,7 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     issues.push({ code: 'nondeterministic', message: 'timeline body must be deterministic — no timers / Date.now / Math.random / rAF' });
   }
 
-  // 可见文本却没有任何 data-edit 句柄 → 双击就地改字失效
+  // visible text with no data-edit handle → double-click in-place editing breaks
   const textish = innerHtml
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<[^>]+>/g, '')

@@ -1,6 +1,6 @@
-/** en 词典分片(key=源码中文原文),归属见 index.ts。 */
+/** en dictionary shard (key = the original source Chinese); see index.ts for ownership. */
 const dict: Record<string, string> = {
-  // ---- 共用短词(kind-meta 标签 / 面板选项表 / 徽标) ----
+  // ---- Shared short words (kind-meta labels / panel option tables / badges) ----
   '字幕': 'Captions',
   '标题': 'Title',
   '数字': 'Number',
@@ -36,7 +36,7 @@ const dict: Record<string, string> = {
   '出场': 'Exit',
   '加载中…': 'Loading…',
 
-  // ---- 引擎数据表的名字(SHOT_TREATMENTS / CUT_TRANSITION_EFFECTS,渲染点包 t) ----
+  // ---- Names from engine data tables (SHOT_TREATMENTS / CUT_TRANSITION_EFFECTS, wrapped in t at render) ----
   '放大': 'Zoom in',
   '缩右下': 'Bottom right',
   '缩左上': 'Top left',

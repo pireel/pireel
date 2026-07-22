@@ -8,13 +8,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // 品牌
+        // brand
         default: 'border border-line-2 bg-panel hover:bg-panel-2 text-ink',
         primary: 'bg-ink text-white border border-ink hover:bg-black',
         accent: 'bg-accent text-white border border-accent hover:brightness-110',
         lime: 'bg-lime text-[#1F2A00] border border-lime hover:brightness-95',
         ghost: 'bg-transparent hover:bg-panel-2 text-ink',
-        // shadcn 兼容
+        // shadcn compat
         destructive: 'bg-rose text-white border border-rose hover:brightness-110',
         outline: 'border border-line-2 bg-transparent hover:bg-panel-2 text-ink',
         secondary: 'bg-panel-2 text-ink border border-line hover:bg-panel',

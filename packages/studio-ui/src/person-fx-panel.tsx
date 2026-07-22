@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * 人像面板(工具栏「人像」入口):智能抠像开关(分镜级,只对选中段生效)+ 全局效果样式——
- * 人物置顶、羽化、描边、换背景。数值 0–100 无单位(主流剪辑器口径),assemble 按画布分辨率换算 px。
- * 所有改动走 setComp,与其它配置同路:防抖重建文档 + 双缓冲切换。
- * 效果配置常驻展开:一段抠像都没开时禁用置灰,hover 提示先开开关(用户定的交互)。
+ * Person panel (toolbar "Person" entry): smart-matte toggle (per-shot, only the selected
+ * shot) + global effect styles — person on top, feather, stroke, background swap. Values
+ * are unitless 0–100 (a mainstream editor convention), assemble converts to px by canvas resolution.
+ * All edits go through setComp, same path as other config: debounced doc rebuild + double-buffer swap.
+ * Effect config stays expanded: disabled/dimmed when no shot has matte on, hover hints to enable the toggle first.
  */
 
 import { useRef, useState } from 'react';
@@ -18,14 +19,14 @@ import { t } from './i18n';
 
 type StrokeStyle = 'none' | 'solid' | 'dashed';
 
-/** mask 轨预算进度(父层 runMatteBatch 喂)。 */
+/** Mask-track budget progress (fed by the parent's runMatteBatch). */
 export interface MatteState {
   status: 'idle' | 'running' | 'ready' | 'error';
   done: number;
   total: number;
 }
 
-/** 描边样式卡的人像剪影预览(1:1 画框铺满卡面,与真实效果同构:剪影填充 + 沿轮廓描边)。 */
+/** Person silhouette preview for a stroke-style card (1:1 frame filling the card, isomorphic to the real effect: filled silhouette + stroke along the outline). */
 function BustPreview({ style }: { style: StrokeStyle }) {
   const outline = 'M48 25 a13 13 0 1 1 -0.01 0 Z M20 86 C20 62 33 56 48 56 C63 56 76 62 76 86 Z';
   return (
@@ -69,7 +70,7 @@ export function PersonFxPanel({
   comp: Composition;
   onChange: (fx: PersonFx | undefined) => void;
   matte: MatteState;
-  /** 选中分镜的抠像开关状态;null = 没选中分镜(开关禁用)。 */
+  /** Matte toggle state of the selected shot; null = no shot selected (toggle disabled). */
   selectedShotMatte: boolean | null;
   onToggleShotMatte: (on: boolean) => void;
   onRetry: () => void;
@@ -78,7 +79,7 @@ export function PersonFxPanel({
   const anyMatte = (comp.shots ?? []).some((s) => s.personMatte);
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  // 全默认时把字段清掉(草稿不落空对象)
+  // Drop the field when everything is default (don't persist an empty object in the draft)
   const commit = (next: PersonFx) => {
     const empty = !next.personFront && !(next.feather && next.feather > 0) && !(next.stroke && next.stroke.width > 0) && !next.bg;
     onChange(empty ? undefined : next);
@@ -115,12 +116,12 @@ export function PersonFxPanel({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full min-h-0 w-full flex-col">
-        {/* 标题/关闭归浮窗头部,这里只剩一行说明 */}
+        {/* Title/close live in the floating-window header; only a one-line hint here */}
         <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('开启智能抠像后,人物可以盖在组件上,还能羽化、描边、换背景')}</div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
           {!comp.video && <div className="text-ink-4">{t('先上传口播视频,人像效果才有处生效。')}</div>}
 
-          {/* 分镜级开关 + 预算进度:开关只对当前选中的分镜生效,没选中不给开 */}
+          {/* Per-shot toggle + budget progress: only affects the currently selected shot; can't enable with nothing selected */}
           <section className="flex flex-col gap-1.5">
             <label className="flex cursor-pointer items-center justify-between">
               <span className="text-ink font-medium">{t('智能抠像')}</span>
@@ -168,12 +169,12 @@ export function PersonFxPanel({
             )}
           </section>
 
-          {/* 效果配置:常驻展开;未开抠像时禁用置灰,hover 提示先开开关 */}
+          {/* Effect config: always expanded; disabled/dimmed when matte is off, hover hints to enable the toggle first */}
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex flex-col gap-4">
                 <div className={`flex flex-col gap-4 ${anyMatte ? '' : 'pointer-events-none select-none opacity-45'}`}>
-                  {/* 人物置顶 */}
+                  {/* Person on top */}
                   <section className="flex flex-col gap-1.5">
                     <label className="flex cursor-pointer items-center justify-between">
                       <span className="text-ink font-medium">{t('人物置顶')}</span>
@@ -193,7 +194,7 @@ export function PersonFxPanel({
                     </label>
                     <div className="text-ink-4 text-[10.5px]">{t('人像盖在所有组件上——文字、贴纸从人身后穿过')}</div>
                   </section>
-                  {/* 羽化 */}
+                  {/* Feather */}
                   <section className="flex flex-col gap-1.5">
                     <div className="text-ink flex items-center justify-between font-medium">
                       <span>{t('边缘羽化')}</span>
@@ -211,7 +212,7 @@ export function PersonFxPanel({
                     />
                   </section>
 
-                  {/* 描边:样式卡 + 配置 */}
+                  {/* Stroke: style cards + config */}
                   <section className="flex flex-col gap-2">
                     <div className="text-ink font-medium">{t('人像描边')}</div>
                     <div className="grid grid-cols-3 gap-2">
@@ -323,7 +324,7 @@ export function PersonFxPanel({
                     )}
                   </section>
 
-                  {/* 替换背景 */}
+                  {/* Replace background */}
                   <section className="flex flex-col gap-1.5">
                     <div className="text-ink font-medium">{t('替换背景')}</div>
                     <div className="flex items-center gap-1.5">

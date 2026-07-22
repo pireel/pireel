@@ -1,21 +1,23 @@
-// mediabunny 按需动态加载(约定见 extract-audio.ts)
+// mediabunny is dynamically imported on demand (convention in extract-audio.ts)
 import type { SceneCut, SceneSegment } from './types';
 
 /**
- * HSV 三通道差异场景检测。对标 PySceneDetect ContentDetector,默认阈值 27。
+ * Scene detection by HSV three-channel difference. Mirrors PySceneDetect
+ * ContentDetector, default threshold 27.
  *
- * 路径:抽样帧 → 64×64 canvas → HSV 三通道 mean abs diff → > 阈值标切点。
+ * Path: sampled frames → 64×64 canvas → HSV three-channel mean abs diff →
+ * mark a cut where it exceeds the threshold.
  *
- * 性能参考:30s 视频 @ 5fps 抽样 = 150 帧 → ~500ms-1s。
+ * Performance: a 30s video @ 5fps sampling = 150 frames → ~500ms-1s.
  */
 export async function detectScenes(
   file: File,
   opts: {
-    /** 每秒抽样帧数(默认 5,够检测大部分场景切) */
+    /** Frames sampled per second (default 5, enough to catch most scene cuts) */
     sampleFps?: number;
-    /** 差异阈值(默认 27,PySceneDetect 经验值) */
+    /** Difference threshold (default 27, PySceneDetect's empirical value) */
     threshold?: number;
-    /** 抽样图缩到多大做对比(默认 64) */
+    /** Size the sampled image is scaled to for comparison (default 64) */
     thumbSize?: number;
     onProgress?: (p: number) => void;
   } = {},
@@ -30,7 +32,7 @@ export async function detectScenes(
     const videoTrack = await input.getPrimaryVideoTrack();
     if (!videoTrack) return [];
 
-    // 时间基归零:切点要和 <video> 播放/ASR 可比(首包非零的 mp4 详见 thumbnails.ts)
+    // Zero the time base: cuts must be comparable with <video> playback / ASR (mp4s with a non-zero first packet — see thumbnails.ts)
     const t0 = Math.max(0, await input.getFirstTimestamp());
     const duration = (await input.computeDuration()) - t0;
     const sink = new VideoSampleSink(videoTrack);
@@ -65,7 +67,7 @@ export async function detectScenes(
   }
 }
 
-/** 用切点把 [0, duration] 切成 N+1 段 */
+/** Split [0, duration] into N+1 segments at the cut points */
 export function cutsToSegments(cuts: SceneCut[], duration: number): SceneSegment[] {
   const segments: SceneSegment[] = [];
   let prev = 0;
@@ -77,7 +79,7 @@ export function cutsToSegments(cuts: SceneCut[], duration: number): SceneSegment
   return segments;
 }
 
-// ---- HSV 工具 ----
+// ---- HSV helpers ----
 
 type HsvFrame = { h: Uint8Array; s: Uint8Array; v: Uint8Array };
 

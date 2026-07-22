@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * 成片流水线三步(提取口播稿 / 分析口播稿→规划 / 分析画面),被 agent 工具复用。
+ * Three pipeline steps (extract transcript / analyze transcript→plan / analyze visuals), reused by agent tools.
  *
- * 读/写走 ref(工具内连跑多步要取最新,setState 是异步的);agent 可以同一步**并行**
- * 调多个工具(分析口播稿 ‖ 分析画面,各自一张卡各自进度)—— step 函数做在飞去重:
- * 同一阶段只跑一份,后来者共享同一个 promise。
- * report = 把友好文案/进度推给正在跑的工具卡片(setToolProgress 由调用方按工具 id 包好)。
+ * Reads/writes go through refs (a tool running several steps in a row needs the latest, and setState is async);
+ * the agent can call multiple tools in parallel within one step (analyze transcript ‖ analyze visuals, each its
+ * own card with its own progress) — the step functions dedupe in flight: a given stage runs once, latecomers
+ * share the same promise.
+ * report = push friendly copy/progress to the running tool card (setToolProgress wrapped by the caller per tool id).
  */
 
 import { useRef, type MutableRefObject } from 'react';
@@ -27,10 +28,10 @@ export interface DraftPipelineDeps {
   setPlan: (v: DraftPlan) => void;
   setVisual: (v: VisualTimeline | null) => void;
   setComp: (updater: (c: Composition) => Composition) => void;
-  /** 当前视频(blob 预览 URL + 画布尺寸),无视频返回 null。 */
+  /** Current video (blob preview URL + canvas size), null when there's no video. */
   currentVideo: () => { url: string; durationSec: number; width: number; height: number } | null;
-  /** 插入片段的规划上下文(多源主轨):按需转写后给出锚点/时长/内容。
-   *  没有插入段返回 [];缺省 = 不带(规划当它们不存在,配图会乱——踩过)。 */
+  /** Planning context for inserted clips (multi-source main track): transcribe on demand to give anchor/duration/content.
+   *  Returns [] when there are no inserts; omitted = don't pass them (planning treats them as nonexistent and b-roll gets messy — been bitten). */
   getInsertedClips?: () => Promise<PlanInsert[]>;
 }
 
@@ -48,8 +49,8 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     return p;
   }
 
-  /** 提取口播稿:只 ASR(lib 缓存)+ 存句子。**不铺字幕、不切镜**(字幕默认关、设计图形为主;
-   *  分镜结构由 lay_out 按场景建)。返回句子。 */
+  /** Extract transcript: ASR only (lib-cached) + store sentences. Does not lay captions or cut shots (captions off
+   *  by default, graphics-first; shot structure is built by lay_out per scene). Returns sentences. */
   function stepAsr(report?: (text: string) => void): Promise<AsrSegment[]> {
     if (asrRef.current?.length) return Promise.resolve(asrRef.current);
     return dedup('asr', async () => {
@@ -63,8 +64,8 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     });
   }
 
-  /** 分析口播稿:规划整片演法。需要句子(没有则先提取)。
-   *  画面提示「有则用之」:画面分析已完成就按句带上(录屏别配图/framing 方向),没有不等待。 */
+  /** Analyze transcript: plan the whole cut. Needs sentences (extract first if absent).
+   *  Visual hints are use-if-present: if visual analysis is done, attach it per sentence (no b-roll on screen recordings / framing direction); if not, don't wait. */
   function stepPlan(report?: (text: string) => void): Promise<DraftPlan> {
     if (planRef.current) return Promise.resolve(planRef.current);
     return dedup('plan', () => stepPlanInner(report));
@@ -80,7 +81,7 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
           return { index: i, content: seg.label.content, safe: seg.label.safe };
         })
       : null;
-    // 插入片段上下文:先按需转写再拿(失败不挡规划——宁可少上下文也别断链路)
+    // Inserted-clip context: transcribe on demand then fetch (failure doesn't block planning — better less context than a broken chain)
     const inserts = await (deps.getInsertedClips?.().catch(() => [] as PlanInsert[]) ?? Promise.resolve([] as PlanInsert[]));
     report?.(t('分析口播稿…'));
     const planResp = await studioProviders().planner.plan({
@@ -90,14 +91,14 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
       ...(visuals ? { visuals } : {}),
       ...(inserts.length ? { inserts } : {}),
     });
-    // 空规划(模型输出没解析出场景)绝不缓存 —— 缓存了会让分镜永远切不出占位,配图一直报「先分镜」
+    // Never cache an empty plan (model output parsed no scenes) — caching it would leave shots stuck without placeholders and b-roll forever complaining "cut shots first"
     if (!planResp.scenes?.length) throw new Error(t('规划没有产出场景,请再说一次「分析口播稿」重试'));
     planRef.current = planResp;
     setPlan(planResp);
     return planResp;
   }
 
-  /** 分析画面:本地逐帧(MediaPipe 安全区 + VLM)。按实测速率外推 ETA 推进度。失败返回 null。 */
+  /** Analyze visuals: local frame-by-frame (MediaPipe safe area + VLM). Extrapolate ETA from measured rate for progress. Returns null on failure. */
   function stepVisual(report?: (text: string, frac?: number) => void): Promise<VisualTimeline | null> {
     if (visualRef.current) return Promise.resolve(visualRef.current);
     return dedup('visual', () => stepVisualInner(report));
@@ -106,12 +107,13 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     const vf = videoFileRef.current;
     const v = currentVideo();
     if (!vf || !v) return null;
-    // 总帧数 = min(180, 时长×2fps);先按标定 ~0.13s/帧给初始预估,再用实测速率刷新
+    // Total frames = min(180, duration×2fps); seed the initial estimate at a calibrated ~0.13s/frame, then refresh with measured rate
     const total = Math.min(180, Math.max(1, Math.floor(v.durationSec * 2)));
     const start = performance.now();
     report?.(t('分析画面… 预计约 {sec}s', { sec: Math.max(2, Math.ceil(total * 0.13)) }), 0);
-    // 进度分数只来自 MediaPipe 几何遍;VLM 语义/调色并行且无逐帧进度 → 几何按 85% 折算,
-    // 几何跑完切「语义分析」文案定在 90%,别报 100% 却还在跑(收尾由卡片显示「收尾中」)。
+    // The progress fraction comes only from the MediaPipe geometry pass; VLM semantics/palette run in parallel
+    // with no per-frame progress → scale geometry to 85%, and when geometry finishes switch to "semantic analysis"
+    // copy pinned at 90%, so we never report 100% while still running (the card shows "finishing up" for the tail).
     const vis = await analyzeVisual(vf, v.durationSec, (done, tot) => {
       const g = tot > 0 ? done / tot : 0;
       if (g >= 1) {
@@ -120,14 +122,14 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
       }
       const frac = g * 0.85;
       const elapsed = (performance.now() - start) / 1000;
-      const eta = (g > 0.06 ? elapsed / g - elapsed : total * 0.13 - elapsed) + 2; // +2s 语义遍余量
+      const eta = (g > 0.06 ? elapsed / g - elapsed : total * 0.13 - elapsed) + 2; // +2s headroom for the semantic pass
       report?.(t('分析画面 {pct}% · 约剩 {sec}s', { pct: Math.round(frac * 100), sec: Math.max(1, Math.ceil(eta)) }), frac);
     }).catch(() => null);
     if (vis) {
       visualRef.current = vis;
       setVisual(vis);
-      // 底色派生的调色板挂到 composition → assembleHtml 注 #root、compose 透传给 LLM(轻度融入)。
-      // 挂了 frame(frameId)时不覆盖:frame 是用户显式选的设计系统,画面派生只是缺省来源
+      // Attach the palette derived from the background to the composition → assembleHtml injects #root, compose passes it to the LLM (light blend).
+      // Don't override when a frame (frameId) is mounted: a frame is the user's explicitly chosen design system; the visual-derived palette is only a default source
       if (vis.palette) setComp((c) => (c.frameId ? c : { ...c, palette: vis.palette }));
     }
     return vis;

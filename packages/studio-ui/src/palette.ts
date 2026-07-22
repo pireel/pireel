@@ -1,9 +1,11 @@
 'use client';
 
 /**
- * 底色派生 —— 从缩略帧采样,派生「轻度融入」调色板:一个从画面取的 accent + 给面板/发丝线/网格
- * 微染画面色温。结构/正文颜色不动(保持中性高可读)。输出 = 覆盖 #root 颜色 vars(键不含 --)。
- * 纯客户端 canvas 采样,确定性(同帧同结果);washed/灰画面退回从平均色温取 accent。
+ * Palette derivation — sample thumbnail frames to derive a "lightly blended" palette: one accent taken
+ * from the footage + a subtle tint of the footage's color temperature on panels/hairlines/grid. Structural
+ * and body colors stay untouched (neutral and highly readable). Output = overrides for #root color vars
+ * (keys without --). Pure client-side canvas sampling, deterministic (same frame → same result);
+ * washed-out/gray footage falls back to taking the accent from the average color temperature.
  */
 
 import type { Thumbnail } from '@pireel/studio-engine/video-edit/types';
@@ -29,7 +31,7 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   return [h, s, l];
 }
 
-/** 从缩略帧采样 → 派生 palette(覆盖 accent/panel/panel-2/line/grid)。失败/无帧返回 null(用主题默认)。 */
+/** Sample thumbnail frames → derive palette (overrides accent/panel/panel-2/line/grid). Returns null on failure/no frames (use theme defaults). */
 export async function extractPalette(thumbs: Thumbnail[]): Promise<DerivedPalette | null> {
   if (!thumbs.length || typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') return null;
   try {
@@ -43,7 +45,7 @@ export async function extractPalette(thumbs: Thumbnail[]): Promise<DerivedPalett
     let gs = 0;
     let bs = 0;
     let n = 0;
-    const hueWeight = new Array(12).fill(0); // 饱和度加权的色相直方图(只计鲜艳像素)
+    const hueWeight = new Array(12).fill(0); // Saturation-weighted hue histogram (only vivid pixels count)
 
     for (const th of thumbs) {
       let bm: ImageBitmap;
@@ -69,10 +71,10 @@ export async function extractPalette(thumbs: Thumbnail[]): Promise<DerivedPalett
     }
     if (!n) return null;
 
-    const [tintH] = rgbToHsl(rs / n, gs / n, bs / n); // 平均色 → 色温
+    const [tintH] = rgbToHsl(rs / n, gs / n, bs / n); // average color → color temperature
     const th = Math.round(tintH);
 
-    // accent:最强鲜艳色相 bin 的中心;画面太灰(无鲜艳)→ 退回从色温取
+    // accent: center of the strongest vivid hue bin; if the footage is too gray (nothing vivid) → fall back to the color temperature
     let best = -1;
     let bestV = 0;
     for (let i = 0; i < 12; i++) {

@@ -1,6 +1,7 @@
 /**
- * 双年展 Biennale 的口播叠加件:海报碎片语言——白/墨方块、零圆角、10px 无模糊硬偏移
- * 墨影、mono 刊号章、反白墨板强调。每件是从海报上"撕下"的一块,贴在画面上。
+ * Biennale overlay elements: poster-fragment language — white/ink blocks, no radius, a 10px
+ * hard (no-blur) offset ink shadow, a mono issue-number stamp, reversed-out ink-plate emphasis.
+ * Each element is a piece "torn" from a poster and pasted on the frame.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

@@ -1,15 +1,19 @@
 'use client';
 
 /**
- * 生成面板(生图 / 生视频 / 生组件共用组件,按 type 特化 —— 用户定的形态:
- * **入口分开、面板单类型、交互一致**):历史是「任务卡」流不是对话流——每条生成相互
- * **独立、无上下文**(用户定的:别做成 chat 信息流);要带上下文只有一条路:在图片卡上点
- * 「参考」把具体图片选进 composer 的参考位(reference_images),不选就是纯文生图。
- * 输入 = 圆角 composer,参数收在滑杆 popover(比例/时长/数量),回车即生成。
- * 素材动作:插入画面(到播放头)/ 参考(图→reference_images、视频→reference_videos,喂下一条生成)。
+ * Generation panel (shared by image / video / element gen, specialized by type —
+ * separate entries, single-type panels, consistent interaction). History is a
+ * "task card" stream, not a chat: each generation is independent and context-free
+ * (deliberately not a chat feed). The only way to carry context: click "reference"
+ * on an image card to feed it into the composer's reference slot (reference_images);
+ * otherwise it's pure text-to-image.
+ * Input = rounded composer, params tucked into a slider popover (ratio/duration/count),
+ * Enter to generate. Asset actions: insert (at playhead) / reference (image→reference_images,
+ * video→reference_videos, feeds the next generation).
  *
- * 数据面:图/视频走 /api/create 生成栈(服务端持久历史,pending 挂载续轮询);组件走
- * composeBlockChecked(客户端生成,不自动进片子,历史存 localStorage,插入时重作用域 id)。
+ * Data: image/video go through the /api/create gen stack (server-persisted history,
+ * pending polled on mount); elements go through composeBlockChecked (client-side,
+ * not auto-added to the film, history in localStorage, re-scoped id on insert).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -39,7 +43,7 @@ interface Entry {
   prompt: string;
   status: 'pending' | 'succeeded' | 'failed';
   createdAt: number;
-  /** 发起时的比例(pending 占位条按它撑形状) */
+  /** Ratio at submit time (pending placeholder uses it to size its shape). */
   ratio?: string;
   assets?: GenAsset[];
   element?: GenElementResult;
@@ -47,25 +51,25 @@ interface Entry {
 }
 
 export interface GenChatPanelProps {
-  /** 本面板生成/展示的类型(每个 rail 入口一种,不混)。 */
+  /** Type this panel generates/shows (one per rail entry, never mixed). */
   type: AssetType;
-  comp: Composition; // 组件卡活预览要主题/画布
-  /** dims:已知自然宽高(生图按请求比例反推)→ 插入端免量尺寸,占位即时。 */
+  comp: Composition; // element card live preview needs theme/canvas
+  /** dims: known natural w/h (derived from requested ratio for images) → insert side skips measuring, placeholder is instant. */
   onInsertMedia: (m: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
-  /** 产物拖出面板(拖到画面/时间轴插入):开始拖报素材,结束报 null(与上传面板同契约)。 */
+  /** Drag an asset out of the panel (onto canvas/timeline to insert): report asset on drag start, null on end (same contract as upload panel). */
   onDragAsset?: (asset: (MediaRef & { label?: string; dims?: { w: number; h: number } }) | null) => void;
-  /** 设为主视频。目前视频卡只留「插入画面 / 参考」(与图片卡一致),此入口暂不外显,plumbing 保留备用。 */
+  /** Set as main video. Video cards currently only show "insert / reference" (like image cards), so this entry is hidden for now; plumbing kept for later. */
   onSetMainVideo: (url: string) => Promise<void>;
   onInsertElement: (el: GenElementResult, prompt: string) => void;
-  /** @引用:把素材塞进右侧 agent 的输入框。目前视频卡不外显此入口,plumbing 保留备用。 */
+  /** @mention: drop the asset into the right-side agent's input. Currently hidden on video cards; plumbing kept for later. */
   onMention: (text: string) => void;
-  /** 生成一个组件(composeBlockChecked,不进片子)。 */
+  /** Generate one element (composeBlockChecked, not added to the film). */
   generateElement: (prompt: string, base?: GenElementResult) => Promise<GenElementResult>;
-  /** 仅组件面板:插一个基础块(块类型注册表,原模板面板的入口收编到这)。 */
+  /** Element panel only: insert a base block (block-type registry; the old template panel's entry was folded in here). */
   onInsertTemplate?: (templateId: string) => void;
 }
 
-/* ---------------- 组件历史(localStorage,单一来源在 element-history.ts;图/视频历史在服务端) ---------------- */
+/* ---------------- Element history (localStorage; single source in element-history.ts; image/video history lives server-side) ---------------- */
 
 function loadElementEntries(): Entry[] {
   return loadStoredElements().map((e: ElementEntry): Entry => ({ ...e, type: 'element', status: 'succeeded' }));
@@ -78,7 +82,7 @@ function saveElementEntries(entries: Entry[]) {
   );
 }
 
-/* ---------------- 小件(popover/胶囊/行,同项目线 composer-gen-controls 的观感) ---------------- */
+/* ---------------- Small parts (popover/pill/row, matching composer-gen-controls look) ---------------- */
 
 function PopButton({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -145,17 +149,17 @@ function ratioToCss(size: string | undefined): string {
   return m ? `${m[1]} / ${m[2]}` : '9 / 16';
 }
 
-/** 请求比例 'W:H' → 宽高(比例即可,插入端只用 h/w 定盒)。拿不到 = undefined,让插入端量。 */
+/** Requested ratio 'W:H' → w/h (ratio is enough, insert side only uses h/w to size the box). Unparseable = undefined, let insert side measure. */
 function ratioDims(size: string | undefined): { w: number; h: number } | undefined {
   const m = (size ?? '').match(/^(\d+):(\d+)$/);
   return m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
 }
 
 /**
- * 提交给 image-gen 的 size。gpt-image 要具体 WxH(其它模型吃 aspect):
- *  - 计费 tier_param='image_tier'=`${quality}_${sizeTier}`,sizeTier 由 WxH 反推(见 pickGptImageSizeTier);
- *    发 aspect 会退回 base、质量白选;发 WxH 才让不同 quality 算出不同积分。
- *  - provider 也需要合法尺寸(gpt 不吃 '9:16')。16:9/9:16 默认 2K、1:1 只有 1K。
+ * The size sent to image-gen. gpt-image needs a concrete WxH (other models take aspect):
+ *  - billing tier_param='image_tier'=`${quality}_${sizeTier}`, sizeTier derived from WxH (see pickGptImageSizeTier);
+ *    sending aspect falls back to base and quality is ignored; only WxH lets different quality compute different credits.
+ *  - the provider also needs a valid size (gpt doesn't accept '9:16'). 16:9/9:16 default 2K, 1:1 only 1K.
  */
 function imageSizeParam(modelId: string, ratio: string): string {
   if (modelId === 'gpt-image' || modelId === 'gpt-image-2') {
@@ -170,7 +174,7 @@ const SHIMMER: React.CSSProperties = {
   animation: 'hfgen-shimmer 1.4s infinite linear',
 };
 
-/* ---------------- 面板 ---------------- */
+/* ---------------- Panel ---------------- */
 
 const TYPE_META: Record<AssetType, { title: string; ph: string; empty: string }> = {
   image: { title: '图片', ph: '描述要生成的画面…', empty: '' },
@@ -182,24 +186,24 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
   const [entries, setEntries] = useState<Entry[]>([]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
-  const [loaded, setLoaded] = useState(false); // 历史拉回前不拿 entries 空判视图(免「模板→我的」闪切)
+  const [loaded, setLoaded] = useState(false); // don't decide the view from empty entries before history loads (avoids "templates→mine" flash)
   const [input, setInput] = useState('');
   const [ratio, setRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
-  const [count, setCount] = useState(1); // 仅图
+  const [count, setCount] = useState(1); // image only
   const shell = useStudioShell();
-  const [vidDur, setVidDur] = useState('5'); // 仅视频:时长档(随模型,见 videoDurationOptions)
-  const [quality, setQuality] = useState(''); // 仅图:质量/分辨率档(随模型,见 qualityConfigFor)
-  const [vidRes, setVidRes] = useState('720p'); // 仅视频:分辨率(随模型,见 videoResolutionOptions)
-  const [busy, setBusy] = useState(false); // 提交瞬间锁(生成本身并发跑)
+  const [vidDur, setVidDur] = useState('5'); // video only: duration tier (per model, see videoDurationOptions)
+  const [quality, setQuality] = useState(''); // image only: quality/resolution tier (per model, see qualityConfigFor)
+  const [vidRes, setVidRes] = useState('720p'); // video only: resolution (per model, see videoResolutionOptions)
+  const [busy, setBusy] = useState(false); // momentary submit lock (the generation itself runs concurrently)
   const [credits, setCredits] = useState<{ need: number; balance: number } | null>(null);
-  // 参考图(仅图面板):显式选中的图片才进下一条生成的 reference_images —— 这是唯一的上下文通道
+  // reference images (image panel only): only explicitly selected images go into the next generation's reference_images — the only context channel
   const [refs, setRefs] = useState<GenAsset[]>([]);
-  // 组件底稿:选中某个已生成组件,下一条指令在它基础上改(单个,可替换/移除)
+  // element base draft: pick a generated element, next instruction edits on top of it (single, replaceable/removable)
   const [baseEl, setBaseEl] = useState<{ el: GenElementResult; prompt: string } | null>(null);
-  const [preview, setPreview] = useState<GenAsset | null>(null); // 灯箱:hover 预览镜点开的大图
+  const [preview, setPreview] = useState<GenAsset | null>(null); // lightbox: the enlarged image opened from the hover preview lens
   const listRef = useRef<HTMLDivElement | null>(null);
-  // 模型清单(用户可选;list[0] = 默认,与 create 路由挑的兜底同源)。选中的 modelId 既进
-  // 提交参数(model_id),也喂 useQuote 拿"按钮旁的预估积分"。组件走客户端 compose,无模型。
+  // model list (user-selectable; list[0] = default, same source as the create route's fallback). The chosen modelId feeds both
+  // the submit params (model_id) and useQuote for the "estimated credits next to the button". Elements use client compose, no model.
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
   const [modelId, setModelId] = useState('');
   useEffect(() => {
@@ -211,14 +215,14 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         if (cancelled || !Array.isArray(j?.models)) return;
         const list = j.models.filter((m): m is { id: string; name?: string } => typeof m?.id === 'string').map((m) => ({ id: m.id, name: m.name ?? m.id }));
         setModels(list);
-        if (list[0]) setModelId((cur) => cur || list[0]!.id); // 默认第一款,用户没选过才落
+        if (list[0]) setModelId((cur) => cur || list[0]!.id); // default to first, only if user hasn't chosen
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [type]);
-  // 切模型 → 质量档 reset 到新模型默认;视频分辨率钳到新模型支持的档(各家档位不同)
+  // switch model → reset quality tier to the new model's default; clamp video resolution to a tier the new model supports (each differs)
   useEffect(() => {
     if (type === 'image') setQuality(shell.modelParams?.qualityConfigFor(modelId)?.default ?? '');
     else if (type === 'video') {
@@ -240,14 +244,14 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     }
     return {};
   }, [type, ratio, count, vidDur, quality, vidRes, modelId]);
-  // 组件:modelId 传空 → useQuote 直接给 null,不发请求
+  // elements: modelId empty → useQuote returns null, no request
   const quoteCredits = useQuote({ toolId: type === 'video' ? 'video-gen' : 'image-gen', modelId: type === 'element' ? '' : modelId, params: quoteParams });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // 模板 / 我的 分栏:图、视频面板才有模板库(组件走「基础块」不在此)
+  // templates / mine tabs: only image and video panels have a template library (elements use "base blocks", not here)
   const templates = type === 'element' ? [] : (TEMPLATES_BY_TYPE[type] ?? []);
   const [tab, setTab] = useState<'mine' | 'templates'>('mine');
-  // 跨会话记住这个面板有没有过自己的产物 → 首帧就能定对(有产物直接开「我的」,没有才铺模板),
-  // 免掉「历史异步回来前先按 entries 空铺模板、回来后又切回我的」的闪切。
+  // remember across sessions whether this panel ever had its own output → get the first frame right (had output → open "mine",
+  // otherwise show templates), avoiding the flash of "show templates on empty entries, then switch back to mine once history arrives".
   const hadMineHint = useMemo(() => {
     try {
       return window.localStorage.getItem(`studio:gen-hasmine:${type}`) === '1';
@@ -255,17 +259,17 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
       return false;
     }
   }, [type]);
-  // 历史拉回后 entries 才权威;之前信持久提示。据此决定该铺模板还是「我的」。
+  // entries are authoritative only after history loads; before that, trust the persisted hint. Decide templates vs "mine" from this.
   const knownHasMine = loaded ? entries.length > 0 : hadMineHint;
   const showTemplates = templates.length > 0 && (tab === 'templates' || !knownHasMine);
   const showTabs = templates.length > 0 && knownHasMine;
   const viewKey: 'mine' | 'templates' = showTemplates ? 'templates' : 'mine';
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
-  // 两个视图共用一个滚动容器:各记各的滚动位置,切 tab 时还原(缺省:模板到顶、我的到底)
+  // both views share one scroll container: each remembers its own scroll position, restored on tab switch (default: templates to top, mine to bottom)
   const scrollMemRef = useRef<{ mine?: number; templates?: number }>({});
 
-  /** 模板卡点击:提示词填进输入框(可再编辑),聚焦并切回「我的」旁的编辑态。 */
+  /** Template card click: fill the prompt into the input (still editable), focus, and return to the edit state next to "mine". */
   const useTemplate = useCallback((prompt: string) => {
     setInput(prompt);
     requestAnimationFrame(() => {
@@ -277,7 +281,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     });
   }, []);
 
-  // 挂载:只拉本面板类型的历史(组件在 localStorage,图/视频在服务端含 pending)
+  // on mount: load only this panel type's history (elements from localStorage, image/video from server incl. pending)
   useEffect(() => {
     if (type === 'element') {
       setEntries((cur) => {
@@ -306,7 +310,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     };
   }, [type]);
 
-  // pending(服务端)轮询
+  // poll pending jobs (server-side)
   const pendingKey = entries
     .filter((e) => e.status === 'pending' && e.type !== 'element')
     .map((e) => e.id)
@@ -336,7 +340,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     };
   }, [pendingKey]);
 
-  // 落持久提示:历史权威后,有产物记 '1'、没有清掉 —— 下次开面板首帧直接定对视图(见 hadMineHint)
+  // persist the hint: once history is authoritative, set '1' if there's output, clear otherwise — so next open gets the first frame right (see hadMineHint)
   useEffect(() => {
     if (!loaded) return;
     try {
@@ -344,11 +348,11 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
       if (entries.length > 0) window.localStorage.setItem(k, '1');
       else window.localStorage.removeItem(k);
     } catch {
-      /* 配额/隐私模式忽略 */
+      /* ignore quota/private-mode errors */
     }
   }, [loaded, entries.length, type]);
 
-  // 切 tab(视图切换)→ 还原该视图上次的滚动位置;首次进:模板到顶、我的到最新(底)
+  // switch tab (view switch) → restore that view's last scroll position; first entry: templates to top, mine to latest (bottom)
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -356,7 +360,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     el.scrollTop = saved != null ? saved : viewKey === 'templates' ? 0 : el.scrollHeight;
   }, [viewKey]);
 
-  // 我的:冒出新条目 → 滚到最新(底);模板视图下别抢滚动
+  // mine: new entry appears → scroll to latest (bottom); don't hijack scroll in template view
   const lastId = entries[entries.length - 1]?.id;
   useEffect(() => {
     if (viewKey !== 'mine') return;
@@ -372,17 +376,17 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     if (!text || busy) return;
     setBusy(true);
     setCredits(null);
-    setTab('mine'); // 发起后回到「我的」,好看到刚冒出的产物
+    setTab('mine'); // after submit, return to "mine" so the new output is visible
     try {
       if (type === 'element') {
         const id = `el_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         const createdAt = Date.now();
         setEntries((cur) => [...cur, { id, type: 'element', prompt: text, status: 'pending', createdAt }]);
         setInput('');
-        setBusy(false); // 组件生成较久,先解锁输入(生成在后台继续)
+        setBusy(false); // element gen is slow, unlock input first (generation continues in background)
         try {
           const el = await generateElement(text, baseEl?.el);
-          pushElementToCloud({ id, prompt: text, createdAt, element: el }); // 组件库云端为准,新品即上云
+          pushElementToCloud({ id, prompt: text, createdAt, element: el }); // element library is cloud-authoritative, new items sync immediately
           setEntries((cur) => {
             const next = cur.map((e) => (e.id === id ? { ...e, status: 'succeeded' as const, element: el } : e));
             saveElementEntries(next);
@@ -417,7 +421,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      {/* shimmer 占位动画(同项目线 fc-shimmer;studio 不引 free-create.css,本地定义) */}
+      {/* shimmer placeholder animation (same as fc-shimmer; studio doesn't import free-create.css, defined locally) */}
       <style>{'@keyframes hfgen-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}@media (prefers-reduced-motion: reduce){[style*="hfgen-shimmer"]{animation:none !important}}'}</style>
       <div className="border-line text-ink flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
         {showTabs ? (
@@ -441,7 +445,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
       </div>
 
 
-      {/* 流:模板库 / 我的产物(新的在底) */}
+      {/* stream: template library / my output (newest at bottom) */}
       <div
         ref={listRef}
         onScroll={(e) => {
@@ -467,8 +471,8 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                   onInsertElement={onInsertElement}
                   onUseAsBase={type === 'element' ? (el2, p2) => setBaseEl({ el: el2, prompt: p2 }) : undefined}
                   onAddRef={
-                    // 图/视频面板才有素材参考:图进 reference_images(≤4),视频进 reference_videos(≤3);
-                    // 组件面板的「参考」=底稿(onUseAsBase),不收图
+                    // only image/video panels take asset references: images → reference_images (≤4), videos → reference_videos (≤3);
+                    // the element panel's "reference" = base draft (onUseAsBase), no images
                     type === 'element'
                       ? undefined
                       : (a) => {
@@ -484,17 +488,17 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         )}
       </div>
 
-      {/* 灯箱:点图(hover 预览镜)看大图;点任意处/Esc 关 */}
+      {/* lightbox: click an image (hover preview lens) to enlarge; click anywhere/Esc to close */}
       {preview && <Lightbox asset={preview} onClose={() => setPreview(null)} />}
 
-      {/* composer:参数收在滑杆 popover,主体就是打字 + 发送 */}
+      {/* composer: params tucked into a slider popover, the body is just type + send */}
       <div className="px-3 pb-3 pt-1">
         {credits && shell.CreditsCard && (
           <div className="mb-2">
             <shell.CreditsCard need={credits.need} balance={credits.balance} />
           </div>
         )}
-        {/* composer 观感与对话面板严格同规格:bg-panel-2 / rounded-md / min-h 64 / text-13(用户定的:三个面板输入框统一) */}
+        {/* composer look strictly matches the chat panel spec: bg-panel-2 / rounded-md / min-h 64 / text-13 (all three panel inputs unified) */}
         <div className="border-line bg-panel-2 focus-within:border-ink-4 rounded-md border transition-colors">
           {baseEl && (
             <div className="flex items-center gap-1.5 px-3 pt-2.5">
@@ -511,12 +515,12 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
               {refs.map((r) => (
                 <span key={r.key} className="border-line group relative inline-flex overflow-hidden rounded-md border">
                   {type === 'video' ? (
-                    // 视频参考:首帧当缩略(preload=metadata),裸 key 走 original 直读原片
+                    // video reference: first frame as thumbnail (preload=metadata), bare key uses 'original' to read the source directly
                     <video src={imageThumb(r.key, 'original')} muted playsInline preload="metadata" className="h-8 w-8 bg-black object-cover" />
                   ) : (
                     <img src={imageThumb(r.key, 'inline')} alt="" className="h-8 w-8 object-cover" />
                   )}
-                  {/* 删除:hover 出现在右上角(不再占「参考图」标签位) */}
+                  {/* delete: appears top-right on hover (no longer occupies the "reference image" label slot) */}
                   <button
                     type="button"
                     aria-label={type === 'video' ? t('移除参考片') : t('移除参考图')}
@@ -563,7 +567,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                   </select>
                 )}
                 <PopButton icon={<Sliders size={15} strokeWidth={2.2} />} title={t('生成参数')}>
-                  {/* 质量/分辨率:随模型变(有些模型多档,单档不显)——参考 /image 工作室 */}
+                  {/* quality/resolution: varies by model (some have multiple tiers, single tier hidden) — see the /image studio */}
                   {type === 'image' && qualityCfg && qualityCfg.options.length > 1 && (
                     <Row label={t('质量')}>
                       {qualityCfg.options.map((o) => (
@@ -636,9 +640,9 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
   );
 }
 
-/* ---------------- 流内条目:用户气泡 + 产物 ---------------- */
+/* ---------------- In-stream entry: prompt line + output ---------------- */
 
-/** 任务卡说明:最多两行,溢出时尾部给展开/收起箭头(用户定的)。 */
+/** Task card description: max two lines, expand/collapse arrow at the end on overflow. */
 function PromptLine({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
   const [overflow, setOverflow] = useState(false);
@@ -679,7 +683,7 @@ function ActionChip({ icon: Icon, label, onClick }: { icon: typeof Plus; label: 
   );
 }
 
-/** 大图灯箱:preview 预设(1024 宽)兜清晰度;点任意处/Esc 关。 */
+/** Large-image lightbox: 'preview' preset (1024 wide) for sharpness; click anywhere/Esc to close. */
 function Lightbox({ asset, onClose }: { asset: GenAsset; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -701,7 +705,7 @@ function Lightbox({ asset, onClose }: { asset: GenAsset; onClose: () => void }) 
   );
 }
 
-/* ---------------- 模板库:点卡片把提示词填进输入框 ---------------- */
+/* ---------------- Template library: click a card to fill its prompt into the input ---------------- */
 
 function TemplateGallery({ templates, onUse }: { templates: GenTemplate[]; onUse: (prompt: string) => void }) {
   return (
@@ -722,7 +726,7 @@ function TemplateCard({ t: tpl, onUse }: { t: GenTemplate; onUse: (prompt: strin
       className="border-line group relative block overflow-hidden rounded-lg border text-left"
     >
       {tpl.video ? (
-        // 视频模板有成品:循环小视频卡(静音、hover 才播,省流量);裸 key 走 original 直读原片
+        // video template with a finished clip: looping mini video card (muted, plays on hover to save bandwidth); bare key uses 'original' to read the source directly
         <video
           src={imageThumb(tpl.video, 'original')}
           muted
@@ -739,7 +743,7 @@ function TemplateCard({ t: tpl, onUse }: { t: GenTemplate; onUse: (prompt: strin
       ) : tpl.image ? (
         <img src={imageThumb(tpl.image, 'list')} alt="" loading="lazy" className="aspect-[4/5] w-full bg-[#f3f3f0] object-cover" />
       ) : (
-        // 视频模板无成品预览:深色渐变卡 + 标题 + 提示词摘要
+        // video template with no preview clip: dark gradient card + title + prompt summary
         <div className="flex aspect-[4/5] flex-col justify-between bg-gradient-to-br from-neutral-700 to-neutral-900 p-2.5">
           <Film size={14} className="text-white/60" />
           <div>
@@ -770,22 +774,22 @@ function EntryRow({
 }: {
   entry: Entry;
   comp: Composition;
-  /** 图/视频面板:把这张产物选为下一条生成的参考(图→reference_images,视频→reference_videos) */
+  /** image/video panel: pick this output as the next generation's reference (image→reference_images, video→reference_videos) */
   onAddRef?: (a: GenAsset) => void;
-  /** 组件面板:把这个组件设为底稿——下一条指令在它基础上改。 */
+  /** element panel: set this element as the base draft — the next instruction edits on top of it. */
   onUseAsBase?: (el: GenElementResult, prompt: string) => void;
-  /** 点图/hover 预览镜 → 面板级灯箱看大图 */
+  /** click image / hover preview lens → panel-level lightbox to enlarge */
   onPreview: (a: GenAsset) => void;
 } & Pick<GenChatPanelProps, 'onInsertMedia' | 'onDragAsset' | 'onInsertElement'>) {
   return (
     <div className="flex flex-col gap-1.5">
-      {/* 任务卡口径:提示词是这条生成的说明小字,不是对话发言(每条生成相互独立,无上下文) */}
+      {/* task-card framing: the prompt is caption text for this generation, not a chat message (each generation is independent, no context) */}
       <PromptLine text={e.prompt} />
 
-      {/* 产物(左侧) */}
+      {/* output (left side) */}
       {e.status === 'pending' && (
         <div
-          // self-start:不被 flex-col 拉满宽度,否则 aspectRatio 让位给拉伸宽 → 变全宽
+          // self-start: don't let flex-col stretch to full width, otherwise aspectRatio yields to the stretched width → goes full-width
           className="border-line self-start rounded-lg border"
           style={
             e.type === 'element'
@@ -804,7 +808,7 @@ function EntryRow({
         <div className="flex flex-col items-start gap-1.5">
           <div className="flex flex-wrap gap-1.5">
             {e.assets!.map((a, i) => (
-              // 缩略保持原始比例(strip 预设只限宽不裁);hover 出预览镜,点开灯箱
+              // thumbnail keeps original ratio (strip preset only caps width, no crop); hover shows the preview lens, click opens the lightbox
               <button
                 key={i}
                 type="button"
@@ -818,7 +822,7 @@ function EntryRow({
                 }}
                 onDragEnd={() => onDragAsset?.(null)}
                 className="border-line group relative block shrink-0 overflow-hidden rounded-lg border"
-                // 请求时已知比例:成图占同一个比例盒(=占位图 height 112 + aspectRatio),字节加载前也不塌 → 零跳动
+                // ratio known at request time: the finished image fills the same ratio box (= placeholder height 112 + aspectRatio), no collapse before bytes load → zero jump
                 style={{ background: '#f3f3f0', height: 112, aspectRatio: ratioToCss(e.ratio) }}
               >
                 <img src={imageThumb(a.key, 'strip')} alt="" className="h-full w-full object-cover" loading="lazy" />

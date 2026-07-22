@@ -1,18 +1,20 @@
 'use client';
 
 /**
- * 素材库 —— 图片/视频/组件/上传的聚合面(用户定的:按资产分类、来源变徽标)。
- * 位置在预览区右侧、时间轴上方(不在右 rail;右侧释放给对话)。
+ * Assets library — aggregates images/videos/elements/uploads (categorized by asset,
+ * origin shown as a badge). Sits right of the preview, above the timeline (not in the
+ * right rail; the right side is reserved for chat).
  *
- * 数据面:上传素材(/api/me/materials)+ 生成图/视频(/api/create studio 空间历史)
- * + 组件(生成的叠加 HTML 块,localStorage 见 element-history)合并成一张时间倒序
- * 网格,来源徽标区分;pending 生成在网格顶部占位,4s 轮询到位后原地变素材。
+ * Data: uploads (/api/me/materials) + generated images/videos (/api/create studio space
+ * history) + elements (generated overlay HTML blocks, see element-history in localStorage),
+ * merged into one reverse-chronological grid distinguished by origin badge. Pending gens
+ * hold a placeholder at the top and turn into assets in place after 4s polling.
  *
- * 生成不是独立面板 —— 库头部一个「生成」入口(弹层归 workbench,onOpenGen 上抛),
- * 弹层关闭后 genRefreshTick 自增触发重拉。
+ * Generation isn't a separate panel — the header has one "Generate" entry (the popover
+ * lives in workbench, raised via onOpenGen); closing it bumps genRefreshTick to refetch.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -41,34 +43,34 @@ interface MaterialItem {
   created_at?: number;
 }
 
-/** 库内条目的统一口径(上传/生成图视频/组件三路都归一到这)。 */
+/** Unified shape for library entries (uploads / generated media / elements all normalize here). */
 const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
 
 interface LibraryItem {
   id: string;
   kind: 'image' | 'video' | 'element';
   origin: 'upload' | 'gen' | 'preset';
-  /** 仅组件:预置分类(数据/结构/…);用户组件无此字段=「我的」。 */
+  /** Elements only: preset category (data/structure/…); user elements lack this = "Mine". */
   category?: string;
-  /** 插入/预览用的完整原图直链(组件无)。 */
+  /** Full-res direct URL for insert/preview (elements have none). */
   insertUrl?: string;
-  /** 缩略图源(裸 key 或 URL,过 imageThumb);null → 视频用 <video> 首帧或占位。 */
+  /** Thumbnail source (bare key or URL, through imageThumb); null → video uses <video> first frame or placeholder. */
   thumbSrc?: string | null;
   label: string;
   createdAt: number;
   width?: number | null;
   height?: number | null;
-  /** 上传素材/组件可删;生成图视频历史归生成空间,不在库里删。 */
+  /** Uploads/elements are deletable; generated media history belongs to the gen space, not deleted here. */
   deletable: boolean;
   uploadId?: string;
-  /** 仅组件:插入用的产物(seedId 重作用域在插入端做)。 */
+  /** Elements only: payload for insertion (seedId re-scoping happens on the insert side). */
   element?: GenElementResult;
   prompt?: string;
 }
 
 type KindFilter = 'all' | 'image' | 'video' | 'element';
 
-/** 面板拖出的素材载荷:图/视频=MediaRef+尺寸;组件=本体(seedId 重作用域在插入端)。 */
+/** Drag payload from the panel: image/video = MediaRef + dims; element = the element itself (seedId re-scoped on insert). */
 export type PanelDragAsset =
   | (MediaRef & { label?: string; dims?: { w: number; h: number } })
   | { type: 'element'; element: GenElementResult; prompt: string; label?: string };
@@ -82,7 +84,7 @@ const arOf = (it: LibraryItem): number | undefined =>
 const dimsOf = (it: LibraryItem): { w: number; h: number } | undefined =>
   it.width && it.height && it.width > 0 && it.height > 0 ? { w: it.width, h: it.height } : undefined;
 
-/** 上传前量本地文件自然宽高(instant,无网络)→ 落库存起来,之后瀑布流/插入直接用。 */
+/** Measure a local file's natural dims before upload (instant, no network) → persist so masonry/insert can reuse. */
 const fileDims = (f: File, kind: 'image' | 'video'): Promise<{ w: number; h: number } | null> =>
   new Promise((res) => {
     const url = URL.createObjectURL(f);
@@ -128,8 +130,8 @@ function genToItems(job: GenJob, kind: 'image' | 'video'): LibraryItem[] {
     id: `gen:${job.id}:${i}`,
     kind,
     origin: 'gen' as const,
-    insertUrl: a.url, // gen-api 已是完整原图直链
-    thumbSrc: kind === 'image' ? a.key : null, // 生成视频无抽帧,缩略走 <video> 首帧
+    insertUrl: a.url, // gen-api already returns a full-res direct URL
+    thumbSrc: kind === 'image' ? a.key : null, // generated video has no extracted frame; thumbnail uses <video> first frame
     label: job.prompt.slice(0, 60) || (kind === 'video' ? t('生成视频') : t('生成图片')),
     createdAt: job.createdAt,
     deletable: false,
@@ -157,27 +159,27 @@ export function AssetsPanel({
   onOpenGen,
   genRefreshTick = 0,
 }: {
-  /** 组件卡活预览要主题/画布(BlockPreviewFrame)。 */
+  /** Element live preview needs theme/canvas (BlockPreviewFrame). */
   comp: Composition;
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
-  /** 插入一个组件(seedId 重作用域、目标空件回填都在插入端)。 */
+  /** Insert an element (seedId re-scoping and empty-slot backfill happen on the insert side). */
   onInsertElement: (el: GenElementResult, prompt: string) => void;
-  /** 拖出素材(dragstart 传素材,dragend 传 null)——workbench 据此在舞台/时间轴盖拖放接驳层。 */
+  /** Drag out an asset (asset on dragstart, null on dragend) — workbench uses this to overlay a drop layer on stage/timeline. */
   onDragAsset?: (asset: PanelDragAsset | null) => void;
-  /** 打开生成浮窗(浮窗归 workbench;anchor=触发按钮矩形,popover 式就近弹出)。 */
+  /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
   onOpenGen: (type: GenType, anchor?: DOMRect) => void;
-  /** 生成弹层关闭时自增 → 重拉生成历史/组件。 */
+  /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
-  // 组件分类浏览(用户定的:「我的」第一类,每类一行两卡,分类头右箭头进详情)
+  // Element category browsing ("Mine" first; each category shows one row of two cards, header right-arrow opens detail)
   const [elCat, setElCat] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() =>
     typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid',
   );
   const [q, setQ] = useState('');
   const [uploads, setUploads] = useState<LibraryItem[]>([]);
-  const [gens, setGens] = useState<GenJob[]>([]); // image+video 混存,item 化时按 kind 标
+  const [gens, setGens] = useState<GenJob[]>([]); // image+video stored together, tagged by kind when itemized
   const [elements, setElements] = useState<ElementEntry[]>([]);
   const genKindRef = useRef<Map<string, 'image' | 'video'>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -185,27 +187,47 @@ export function AssetsPanel({
   const [preview, setPreview] = useState<LibraryItem | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
-  // 上传素材:图/视频并行拉齐后合并(接口 kind 单值必填)
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  // Uploads: fetch images/videos in parallel and merge (the API requires a single kind value).
+  // reqSeq guards against races: a slower in-flight load can't overwrite a newer one.
+  const reqSeq = useRef(0);
+  const loadUploads = useCallback((silent = false) => {
+    const seq = ++reqSeq.current;
+    if (!silent) setLoading(true);
     const get = (k: 'image' | 'video') =>
       fetch(`/api/me/materials?tab=global&kind=${k}&limit=200`)
         .then((r) => (r.ok ? r.json() : null))
         .then((j: { items?: MaterialItem[] } | null) => j?.items ?? [])
         .catch(() => [] as MaterialItem[]);
-    void Promise.all([get('image'), get('video')]).then(([imgs, vids]) => {
-      if (cancelled) return;
+    return Promise.all([get('image'), get('video')]).then(([imgs, vids]) => {
+      if (seq !== reqSeq.current) return; // superseded by a newer load
       setUploads([...imgs, ...vids].map(materialToItem).filter((x): x is LibraryItem => !!x));
-      setLoading(false);
+      if (!silent) setLoading(false);
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadTick]);
+  }, []);
 
-  // 生成历史 + 组件:挂载/弹层关闭时重拉。组件=先同步读缓存秒开,再拉云端合并
-  // (云端为准;本地独有的回填上云,见 element-history)
+  useEffect(() => {
+    void loadUploads();
+  }, [reloadTick, loadUploads]);
+
+  // Agent uploads (import_media helper → /api/studio/media) land server-side with NO signal to this
+  // tab, so the library would stay stale until a full reload. Silently refetch when the tab regains
+  // focus/visibility, plus a light poll while visible, so agent-added media shows up on its own.
+  useEffect(() => {
+    const refresh = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') void loadUploads(true);
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    const timer = setInterval(refresh, 20_000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+      clearInterval(timer);
+    };
+  }, [loadUploads]);
+
+  // Gen history + elements: refetch on mount / popover close. Elements: read cache synchronously
+  // for instant open, then fetch and merge cloud (cloud wins; local-only entries backfill to cloud, see element-history)
   useEffect(() => {
     let gone = false;
     setElements(loadElementEntries());
@@ -252,11 +274,11 @@ export function AssetsPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const switchView = (v: ViewMode) => {
     setView(v);
-    scrollRef.current?.scrollTo(0, 0); // 两种视图行高不同,旧 scrollTop 会落在随机位置
+    scrollRef.current?.scrollTo(0, 0); // the two views have different row heights, so old scrollTop lands randomly
     try {
       window.localStorage.setItem(VIEW_KEY, v);
     } catch {
-      /* 隐私模式写不进就算了 */
+      /* private mode can't write; ignore */
     }
   };
 
@@ -268,10 +290,11 @@ export function AssetsPanel({
     return [...uploads, ...genItems, ...elements.map(elementToItem)].sort((a, b) => b.createdAt - a.createdAt);
   }, [uploads, gens, elements]);
 
-  // 组件库=「我的」+ 按主题分组:内容物是**口播叠加件**(卡片尺度、居中自持,不是整页
-  // PPT——用户定的;整页设计留在主题墙给 AI 场景参照)。同一套叠加件结构 × 各主题皮肤:
-  // 主题 token 以块作用域**烘焙进 innerHtml**(data-hf-baked)——预览、插入、换主题三态
-  // 同一份样子,插入后不吃项目主题/其他组件影响(独立性,用户定的)
+  // Element library = "Mine" + grouped by theme. Contents are voiceover overlay pieces (card-scale,
+  // centered, self-contained — not full-page PPT; full-page designs live on the theme wall as AI scene
+  // reference). Same overlay structure × each theme's skin: theme tokens are baked into innerHtml at block
+  // scope (data-hf-baked) — preview, insert, and theme-swap all look identical, and once inserted the piece
+  // is unaffected by the project theme or other elements (independence).
   const frames = useFrameCatalog();
   const themeGroups = useMemo(() => {
     const loc = studioLocale();
@@ -281,7 +304,7 @@ export function AssetsPanel({
       title: framePack(loc, fr.id)?.title ?? fr.title,
       items: (() => {
         const vars = themeVarsCss(getTheme('general'), fr.palette ?? undefined);
-        // 专属叠加件集(方言手作,特色长在件上)优先;没做的主题回落通用结构×皮肤
+        // Prefer a dedicated overlay set (hand-crafted per dialect, character lives in the piece); themes without one fall back to generic structure × skin
         const own = overlayElements(fr.id);
         if (own) {
           return own.map(({ kind: kd, make }): LibraryItem => {
@@ -319,13 +342,13 @@ export function AssetsPanel({
   }, [frames]);
   const themeItemsAll = useMemo(() => themeGroups.flatMap((g) => g.items), [themeGroups]);
   const mineItems = useMemo(() => elements.map(elementToItem).sort((a, b) => b.createdAt - a.createdAt), [elements]);
-  // 叠加件预览:**静态**16:9 画布常量——token 已烘焙,预览与项目 comp 零依赖,
-  // chat 挂/换主题(comp.palette 变)不再连带重渲整墙组件卡(用户报的"跟着刷")
+  // Overlay preview uses a static 16:9 canvas constant — tokens are baked, so preview has zero dependency
+  // on the project comp; chat theme mount/swap (comp.palette changes) no longer re-renders the whole element wall
   const presetPreviewComp = STATIC_ELEMENT_PREVIEW_COMP;
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    // 组件筛选下主题组件一并进搜索池(createdAt=0 天然排最后)
+    // Under the element filter, theme elements join the search pool (createdAt=0 naturally sorts last)
     const pool = kind === 'element' ? [...items, ...themeItemsAll] : items;
     return pool.filter((it) => (kind === 'all' || it.kind === kind) && (!needle || it.label.toLowerCase().includes(needle)));
   }, [items, themeItemsAll, kind, q]);
@@ -340,7 +363,7 @@ export function AssetsPanel({
     [gens, kind],
   );
 
-  /** 网格卡(瀑布流/分类概览/分类详情共用):点击预览、可拖、hover 插入/删除。 */
+  /** Grid card (shared by masonry / category overview / category detail): click to preview, draggable, hover to insert/delete. */
   const gridCard = (it: LibraryItem) => (
     <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 inline-block w-full break-inside-avoid overflow-hidden rounded-md border align-top transition">
       <button
@@ -350,7 +373,7 @@ export function AssetsPanel({
         {...dragProps(it)}
         className="block w-full cursor-zoom-in text-left"
       >
-        {/* 预置卡缩略统一 16:9(竖画布下真实比例大片留白);灯箱/插入仍用真实画布 */}
+        {/* Preset card thumbnails are uniformly 16:9 (true ratio would leave big gaps on a vertical canvas); lightbox/insert still use the real canvas */}
         {it.kind === 'element' ? <ElementTile item={it} comp={it.origin === 'preset' ? presetPreviewComp : comp} /> : <TileThumb item={it} />}
         <div className="text-ink-3 truncate px-1.5 py-1 text-[10px]">{it.label}</div>
       </button>
@@ -391,7 +414,7 @@ export function AssetsPanel({
       const k = f.type.startsWith('video/') ? 'video' : 'image';
       setUploading(true);
       try {
-        const dims = await fileDims(f, k); // 本地量,连同上传一起落库
+        const dims = await fileDims(f, k); // measured locally, persisted along with the upload
         const { url } = await studioProviders().uploads.upload(f, { contentType: f.type || 'application/octet-stream', filename: f.name });
         await fetch('/api/me/uploads', {
           method: 'POST',
@@ -410,7 +433,7 @@ export function AssetsPanel({
     input.click();
   };
 
-  /** 删除:上传素材=软删接口(乐观移除失败回滚);组件=移出本地历史。 */
+  /** Delete: uploads use a soft-delete API (optimistic remove, roll back on failure); elements are removed from local history. */
   const doDelete = async (it: LibraryItem) => {
     if (it.kind === 'element') {
       const ok = await confirm({
@@ -420,7 +443,7 @@ export function AssetsPanel({
         confirmLabel: t('删除'),
       });
       if (!ok) return;
-      removeElementEntry(it.id.slice(3)); // 'el:' 前缀
+      removeElementEntry(it.id.slice(3)); // strip 'el:' prefix
       setElements(loadElementEntries());
       toast.success(t('已删除'));
       return;
@@ -441,7 +464,7 @@ export function AssetsPanel({
       if (!r.ok) throw new Error(String(r.status));
       toast.success(t('已删除'));
     } catch {
-      setUploads(prev); // 失败回滚,别让素材凭空消失
+      setUploads(prev); // roll back on failure so the asset doesn't vanish
       toast.error(t('删除失败,稍后再试'));
     }
   };
@@ -454,7 +477,7 @@ export function AssetsPanel({
     if (it.insertUrl) onInsert({ type: it.kind, url: it.insertUrl }, it.label, dimsOf(it));
   };
   const dragProps = (it: LibraryItem) => {
-    // 组件与图片同权可拖(用户定的统一):载荷带组件本体,落点语义在 workbench
+    // Elements are draggable on par with images (unified): payload carries the element itself, drop semantics live in workbench
     if (it.kind === 'element') {
       if (!it.element) return {};
       return {
@@ -528,7 +551,7 @@ export function AssetsPanel({
                 type="button"
                 onClick={() => {
                   setKind(k.v);
-                  setElCat(null); // 换筛选回到分类概览
+                  setElCat(null); // switching filter returns to the category overview
                 }}
                 className={`rounded-md px-2 py-0.5 text-[11px] transition ${
                   kind === k.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
@@ -560,9 +583,9 @@ export function AssetsPanel({
         </div>
       </div>
 
-      {/* 卡片式内容留白;列表式全宽贴边,留白在行内 padding */}
+      {/* Grid view has content padding; list view is full-bleed with padding inside each row */}
       <div ref={scrollRef} className={`min-h-0 flex-1 overflow-auto ${view === 'grid' ? 'p-2' : ''}`}>
-        {/* pending 生成:占位卡置顶,到位后原地变素材 */}
+        {/* Pending gens: placeholder card pinned to top, turns into an asset in place when ready */}
         {pendingJobs.length > 0 && (
           <div className={view === 'grid' ? 'mb-1.5 space-y-1.5' : 'space-y-0'}>
             {pendingJobs.map((g) => (
@@ -593,7 +616,7 @@ export function AssetsPanel({
             )}
           </div>
         ) : kind === 'element' && !q.trim() ? (
-          // 组件分类浏览(用户定的):「我的」第一类;概览每类一行两卡,分类头右箭头进详情
+          // Element category browsing: "Mine" first; overview shows one row of two cards per category, header right-arrow opens detail
           elCat ? (
             <div>
               <button
@@ -645,7 +668,7 @@ export function AssetsPanel({
             </div>
           )
         ) : view === 'grid' ? (
-          // 瀑布流:CSS 多列,卡片按真实宽高比排,两列高低错落
+          // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns
           <div className="columns-2 gap-1.5">{shown.map(gridCard)}</div>
         ) : (
           <div className="divide-line divide-y">
@@ -693,7 +716,7 @@ export function AssetsPanel({
         )}
       </div>
 
-      {/* 预览灯箱:点素材看大图/视频;插入仍走卡片上的「插入」按钮(这里也给一个顺手插) */}
+      {/* Preview lightbox: click an asset to see it large; insert still goes through the card's "Insert" button (this one is a handy shortcut) */}
       {preview && (
         <AssetLightbox
           item={preview}
@@ -709,12 +732,12 @@ export function AssetsPanel({
   );
 }
 
-/** 素材大图/视频预览:点背板 / Esc 关;底部给一个「插入到画面」顺手插。
- *  原图/原片直链不小,就绪前给「加载中」占位(用户点名补的)。 */
+/** Large asset preview: click backdrop / Esc to close; bottom has an "Insert into canvas" shortcut.
+ *  Full-res URLs aren't small, so show a "Loading" placeholder until ready. */
 function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; comp: Composition; onClose: () => void; onInsert: () => void }) {
-  // 组件=本地 iframe 活预览,即挂即有(无网络加载),不走 ready 占位
+  // Elements get a local iframe live preview, available immediately (no network load), so skip the ready placeholder
   const [ready, setReady] = useState(item.kind === 'element');
-  // 就绪前的占位框按素材真实宽高比撑好(组件=画布比;库里没尺寸的先 16:9)
+  // Size the placeholder box to the asset's true aspect ratio (element = canvas ratio; unknown dims default to 16:9)
   const ar = item.kind === 'element' ? (item.element?.designW && item.element.designH ? item.element.designW / item.element.designH : comp.width / comp.height) : (arOf(item) ?? 16 / 9);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -735,7 +758,7 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
         role="presentation"
         onClick={(e) => e.stopPropagation()}
         className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
-        // 宽 = min(视口余量, 78vh×比例) → 高度恰好 ≤78vh,占位与成品同尺寸
+        // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
         style={{ aspectRatio: ar, width: `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
       >
         {!ready && (
@@ -745,7 +768,7 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
           </div>
         )}
         {item.kind === 'element' && item.element ? (
-          // 组件活预览:自动循环播(与卡片 hover 播同一渲染,只是常播 + 大尺寸)
+          // Element live preview: auto-loops (same render as card hover, just always playing + larger)
           <LightboxElement item={item} comp={comp} />
         ) : item.kind === 'video' ? (
           <video
@@ -780,13 +803,14 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
   );
 }
 
-/** 组件卡活预览:与生成面板同一渲染(定格入场后的稳定帧,hover 才循环播)。
- *  列宽随瀑布流(约 145px),用容器实测宽喂 BlockPreviewFrame 免横向溢出。 */
+/** Element card live preview: same render as the gen panel (freeze on the stable frame after entrance, loops only on hover).
+ *  Column width follows masonry (~145px); feed the measured container width to BlockPreviewFrame to avoid horizontal overflow. */
 function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
   const el = item.element!;
-  // 列表=静态 HTML 直出(用户定):不跑 GSAP(from 动画不生效=定格终态)、零 iframe、
-  // 零光栅;选择器 #seedId 作用域直落主文档不串样式(与 InlineBlockPreview 同手法)。
-  // 挂载后量一次内容真实 rect(含 rotate),把件缩放居中到卡里。
+  // Static HTML output: no GSAP (from-animations don't apply = frozen end state), zero iframe,
+  // zero rasterization; the #seedId selector scope lands directly in the main document without leaking styles
+  // (same technique as InlineBlockPreview). After mount, measure the content's true rect once (including rotate)
+  // to scale and center the piece in the card.
   const holderRef = useRef<HTMLDivElement | null>(null);
   const [fit, setFit] = useState<{ scale: number; dx: number; dy: number } | null>(null);
   const TILE_W = 144;
@@ -796,7 +820,7 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
     if (!holder) return;
     const base = holder.getBoundingClientRect();
     if (base.width < 2) return;
-    // holder 已被 scale 预置为 0?否——量在 scale(1) 隐藏态做:见下 visibility 策略
+    // Is holder pre-scaled to 0? No — measurement happens at scale(1) in a hidden state: see the visibility strategy below
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
@@ -805,7 +829,7 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
       if (n.tagName === 'STYLE') continue;
       const r = n.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) continue;
-      // 近满幅的容器(#seed inset:0 / 根 .w 铺满层)不算内容,否则并集恒等于整画布
+      // Near-full-bleed containers (#seed inset:0 / root .w fill layer) don't count as content, else the union always equals the whole canvas
       if (r.width > base.width * 0.95 && r.height > base.height * 0.95) continue;
       if (r.left < x0) x0 = r.left;
       if (r.top < y0) y0 = r.top;
@@ -859,10 +883,10 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
   );
 }
 
-/** 灯箱里的组件活预览:与 ElementTile 同一渲染,大尺寸 + 常播循环(本地 iframe 即挂即有)。 */
+/** Lightbox element live preview: same render as ElementTile, larger + always looping (local iframe, available immediately). */
 function LightboxElement({ item, comp }: { item: LibraryItem; comp: Composition }) {
   const el = item.element!;
-  // 主题组件按设计尺寸(1920×1080)渲染:用项目竖屏画布会字大框小(px 相对画布宽)
+  // Render theme elements at their design size (1920×1080): a vertical project canvas would make text large and box small (px is relative to canvas width)
   const pc = el.designW && el.designH ? { ...comp, width: el.designW, height: el.designH } : comp;
   const width = Math.max(240, Math.min(window.innerWidth - 96, Math.round(window.innerHeight * 0.78 * (pc.width / pc.height))));
   const previewBlock = {
@@ -877,7 +901,7 @@ function LightboxElement({ item, comp }: { item: LibraryItem; comp: Composition 
   return <BlockPreviewFrame comp={pc} block={previewBlock} width={width} animate />;
 }
 
-/** 瀑布流缩略图:按真实宽高比铺(不裁);生成视频没抽帧 → <video> 元数据首帧顶上。 */
+/** Masonry thumbnail: laid out at true aspect ratio (no crop); generated video has no extracted frame → <video> metadata first frame fills in. */
 function TileThumb({ item: it }: { item: LibraryItem }) {
   const ar = arOf(it);
   if (it.thumbSrc) {
@@ -901,9 +925,10 @@ function TileThumb({ item: it }: { item: LibraryItem }) {
   );
 }
 
-/** 视频瀑布卡:与图片同口径按真实比例铺(不裁)。落库没宽高的(生成视频/旧上传)
- *  → 元数据一到用 videoWidth/Height 钉比例(竖版视频不再被硬裁成 16:9),钉住前
- *  16:9 占位、到位小跳一次(preload=metadata 很快,可接受)。 */
+/** Video masonry card: laid out at true ratio like images (no crop). For entries stored without dims
+ *  (generated video / old uploads) → pin the ratio from videoWidth/Height once metadata arrives (vertical
+ *  videos no longer hard-cropped to 16:9); before that, 16:9 placeholder with one small jump on arrival
+ *  (preload=metadata is fast, acceptable). */
 function VideoTile({ item: it, ar }: { item: LibraryItem; ar: number | undefined }) {
   const [metaAr, setMetaAr] = useState<number | null>(null);
   return (
@@ -922,7 +947,7 @@ function VideoTile({ item: it, ar }: { item: LibraryItem; ar: number | undefined
   );
 }
 
-/** 列表行缩略图(方块小图);组件用图标占位(iframe 缩到 36px 没意义)。 */
+/** List row thumbnail (small square); elements use an icon placeholder (an iframe shrunk to 36px is pointless). */
 function RowThumb({ item: it }: { item: LibraryItem }) {
   if (it.kind === 'element') {
     return (

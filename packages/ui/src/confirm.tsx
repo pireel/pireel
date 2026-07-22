@@ -1,14 +1,14 @@
 'use client';
 
 /**
- * 全局自定义 confirm —— 替代浏览器 `window.confirm()`。
+ * Global custom confirm — replaces the browser's `window.confirm()`.
  *
- * 用法：
+ * Usage:
  *   import { confirm } from './confirm';
- *   if (!(await confirm({ title: '确认删除？', tone: 'danger' }))) return;
+ *   if (!(await confirm({ title: 'Delete this?', tone: 'danger' }))) return;
  *
- * 设计：singleton 队列 + Promise；mount `<ConfirmHost />` 一次（root layout）。
- * 同一时刻只显示一个；并发调用排队执行。Escape = 取消，Enter = 确认。
+ * Design: singleton queue + Promise; mount `<ConfirmHost />` once (root layout).
+ * Only one shows at a time; concurrent calls queue up. Escape = cancel, Enter = confirm.
  */
 
 import { useEffect, useSyncExternalStore } from 'react';
@@ -19,7 +19,7 @@ export interface ConfirmOptions {
   description?: React.ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** 'danger' 把确认按钮染红，用于删除 / 撤销等破坏性操作 */
+  /** 'danger' turns the confirm button red, for destructive actions like delete / revoke */
   tone?: 'default' | 'danger';
 }
 
@@ -67,14 +67,14 @@ function getServerSnapshot() {
 }
 
 /**
- * Root host —— 同时显示队首一条，确认 / 取消后 resolve 对应 Promise 再取下一条。
- * mount 一次即可（root layout）。多挂会重复显示。
+ * Root host — shows the head of the queue; on confirm/cancel it resolves that Promise and moves to the next.
+ * Mount once (root layout). Mounting more than once shows duplicates.
  */
 export function ConfirmHost() {
   const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const current = items[0];
 
-  // 卸载时把残留的 pending 都 resolve(false)，避免组件烧掉留 dangling promise
+  // On unmount, resolve(false) any leftover pending items so nothing is left as a dangling promise
   useEffect(() => {
     return () => {
       for (const p of queue) p.resolve(false);

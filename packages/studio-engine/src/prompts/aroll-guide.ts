@@ -1,8 +1,10 @@
 /**
- * 口播语音剪辑(A-roll)判断手册 —— 单独的技能内容包,按需经 read_editing_guide 读入信息流,
- * 不进 system(缓存前缀不被打穿,同 frame.md 口径)。内容是口播 A-roll 剪辑的判断准则(纯判断、
- * 工具无关),映射到 studio 自己的工具面(read_script / cut_narration / cut_range / set_captions)。
- * 正文英文(注进 LLM 的一律英文)。改判断改这里一处。
+ * A-roll speech-editing judgment playbook — a standalone skill content pack, read
+ * into the feed on demand via read_editing_guide, not placed in system (keeps the
+ * cache prefix intact, same policy as frame.md). Content is the judgment criteria
+ * for A-roll narration editing (pure judgment, tool-agnostic), mapped onto studio's
+ * own tool surface (read_script / cut_narration / cut_range / set_captions).
+ * Body is English (everything injected into the LLM is English). Change judgment here, one place.
  */
 
 export const AROLL_GUIDE = `A-ROLL SPEECH-CLEANUP PLAYBOOK

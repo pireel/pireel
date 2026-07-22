@@ -1,8 +1,9 @@
 /**
- * 霓虹 Neon 的口播叠加件:HUD 贴片语言——面板自带夜绿底+荧光细边+扫描线纹理,
- * 角标括弧(4px accent L 形)、mono 状态微条(● 用 accent-2)、`>` 命令行前缀、
- * 闪烁光标块(steps(1) 有限次收在可见帧)、数据荧光绿带 glow、警报走洋红描边框。
- * 每件是仪表盘上撕下的一块 HUD,中心永远留给说话的人。
+ * Neon overlay elements: HUD-patch language — panels with a dark-green ground + glowing thin
+ * border + scanline texture, corner brackets (4px accent L-shapes), a mono status strip (● uses
+ * accent-2), a `>` command-line prefix, a blinking cursor block (steps(1), finite repeats so it
+ * ends on a visible frame), data in glowing neon green, alerts framed in a magenta outline. Each
+ * element is a HUD torn from a dashboard; the center is always left for the speaker.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

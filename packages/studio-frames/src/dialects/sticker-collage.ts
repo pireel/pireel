@@ -1,9 +1,12 @@
 /**
- * 贴纸 Sticker 方言 —— 校园贴纸拼贴(苹果教育商店参照):**浅灰纸面为主底**,画面上的
- * 一切都是"贴上去的"——白底裁切贴纸(软影+微倾)当主容器,彩色贴纸(青/粉底+白 rim)
- * 与黑色小标签胶囊做点缀,荧光笔块扫关键词,粉色半调星爆最后 pop;黑色只在小剂量
- * (胶囊/索引点/一块黑板贴纸),绝不统治画面。动效一族=贴纸 back.out 拍上来。
- * (配套 frame 级 personFx:主体人抠像加同款白描边;封面/标题卡右侧给人留位。)
+ * Sticker dialect — campus sticker collage (Apple Education Store reference): mostly a light-gray
+ * paper base where everything looks "stuck on" — white die-cut stickers (soft shadow + slight tilt)
+ * as the main container, colored stickers (cyan/pink + white rim) and small black label pills as
+ * accents, highlighter blocks over keywords, a pink halftone starburst popping last. Black stays in
+ * small doses (pills/index dots/one chalkboard sticker) and never dominates. Motion family = stickers
+ * slapping on with back.out.
+ * (Paired frame-level personFx: matte the subject and add the same white outline; cover/title-card
+ * leave room on the right for a person.)
  */
 
 import { type Block, mk } from './shared';

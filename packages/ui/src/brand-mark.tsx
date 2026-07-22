@@ -11,11 +11,12 @@ interface Props {
 }
 
 /**
- * π 字形本体（描边版）——横杠 + 微斜左腿 + 卷脚右腿，100×100 画布。
- * 单独导出给 chat 头像 / loading 等场景复用；颜色由 stroke 控制。
+ * π glyph (stroked) — bar + slightly slanted left leg + curled right foot, on a 100×100 canvas.
+ * Exported standalone for reuse (chat avatar, loading, etc.); color comes from stroke.
  *
- * 品牌叙事：pireel 的 pi 就是 π——无限、不循环（生成式创作的隐喻），
- * 又是圆的常数（思考动画做"绕 π 画圆"的轨道弧，见 chat AssistantAvatar）。
+ * Brand story: pireel's "pi" is π — infinite, non-repeating (a metaphor for generative
+ * creation), and the circle constant (the thinking animation traces an orbit arc "around π",
+ * see chat AssistantAvatar).
  */
 export function PiGlyph({
   stroke,
@@ -32,30 +33,34 @@ export function PiGlyph({
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {/* pathLength 归一到 100：静态渲染无影响，给 .pi-motion 的描边动画用 */}
-      {/* 横杠 */}
+      {/* pathLength normalized to 100: no effect on static render, used by .pi-motion stroke animation */}
+      {/* bar */}
       <path d="M12 28H88" pathLength={100} />
-      {/* 左腿：底部微外撇 */}
+      {/* left leg: flares out slightly at the bottom */}
       <path d="M34 28 30 80" pathLength={100} />
-      {/* 右腿：直落后向右卷脚 */}
+      {/* right leg: drops straight then curls right into a foot */}
       <path d="M66 28v38q0 14 16 11" pathLength={100} />
     </g>
   );
 }
 
 /**
- * 入场即演的 π logo 动效（落地页 hero 用）：
- *   1. 主笔（ink）按书写顺序三笔描边画出（横杠 → 左腿 → 右腿）；lime/橙两层淡入
- *   2. 动的是 π 自己的笔画：横杠 seesaw 倾摆、两条腿绕顶端附着点甩、右腿的「勾」
- *      在最远端画大弧（脚尖点地感）；外层再叠整体 squash/stretch 弹跳（pi-body）
- *   3. 色差是运动驱动的——三层笔画摆幅不同（--amp），一动边缘就散开像拽开 RGB 通道，
- *      静下来收回 lime 左上 / 橙 右下的基位合并；偶发一帧"信号抖动" glitch
- * hover 交互：
- *   - 轨道环绕 π 画圆（与 chat 头像 thinking 弧同一母题：π = 圆的常数）
- *   - 指针移动时整簇按指针方向轻微视差跟随（--mx/--my，CSS 变量直写，不进 React
- *     状态；视差挂在外层 pi-pointer group 上，跟弹跳与逐笔摆动叠加）
- * 纯 CSS 驱动（globals.css 的 .pi-motion* / .pi-body / .pi-layer* / .pi-stroke-* 规则），
- * SSR 安全；prefers-reduced-motion 下直接定格成静态色差终态。
+ * Self-playing π logo animation (landing hero):
+ *   1. Main stroke (ink) draws in writing order, three strokes (bar → left leg → right leg);
+ *      lime/orange layers fade in.
+ *   2. What moves is π's own strokes: the bar seesaws, both legs swing around their top anchor,
+ *      the right leg's "hook" sweeps a large arc at its far end (toe-touching-ground feel);
+ *      an outer layer adds an overall squash/stretch bounce (pi-body).
+ *   3. The chromatic offset is motion-driven — the three layers have different swing amplitudes
+ *      (--amp), so movement splays the edges like pulling RGB channels apart, and at rest they
+ *      settle back to lime up-left / orange down-right; an occasional single-frame "signal jitter" glitch.
+ * hover:
+ *   - an orbit traces a circle around π (same motif as the chat avatar thinking arc: π = circle constant)
+ *   - as the pointer moves, the whole cluster follows with a slight parallax in the pointer direction
+ *     (--mx/--my written directly as CSS vars, not React state; parallax lives on the outer pi-pointer
+ *     group, layered over the bounce and per-stroke swing)
+ * Pure CSS (globals.css rules .pi-motion* / .pi-body / .pi-layer* / .pi-stroke-*), SSR-safe;
+ * under prefers-reduced-motion it freezes to the static chromatic-offset end state.
  */
 export function AnimatedBrandMark({
   size = 88,
@@ -89,8 +94,8 @@ export function AnimatedBrandMark({
       aria-label="Pireel"
     >
       <svg width={size} height={size} viewBox="0 0 100 100" className="pi-motion block">
-        {/* 嵌套：pi-pointer(指针视差) > pi-body(整体弹跳) > 三色层(各自逐笔摆动)。
-            顺序 lime → orange → ink，ink 压顶 */}
+        {/* Nesting: pi-pointer (pointer parallax) > pi-body (overall bounce) > three color layers
+            (each with per-stroke swing). Order lime → orange → ink, ink on top. */}
         <g className="pi-pointer">
           <g className="pi-body">
             <g className="pi-layer pi-layer-lime">
@@ -124,7 +129,8 @@ export function AnimatedBrandMark({
  * Pireel brand mark — π glyph with Douyin-style chromatic offset.
  * Main glyph flanked by lime (up-left) and accent-2 orange (down-right)
  * ghost copies so the symbol appears to have a color-channel shift at its
- * edges. P 字旧标已退役，字形换成 π；色差手法保留（视频文化的视觉语言）。
+ * edges. The old "P" mark is retired, the glyph is now π; the chromatic-offset technique is kept
+ * (the visual language of video culture).
  */
 export function BrandMark({
   size = 28,

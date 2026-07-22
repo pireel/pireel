@@ -1,16 +1,19 @@
 /**
- * 孟菲斯 Memphis 的口播叠加件:几何纸屑语言——白 panel 必带 4px 深蓝描边 +
- * 12px 无模糊硬黄偏移影(签名组合,缺一不可);粗描边空心圆/实心粉三角/薄荷
- * 半圆/波点补丁当纸屑压在件的另一侧;粉色每件只填一个形状或胶囊;黄锯齿线
- * SVG 最后 draw 收尾。构图不对称,动效 power3 滑入 + back.out 弹形状,1s 落定。
+ * Memphis talking-head overlays: geometric-confetti language. White panels always
+ * carry a 4px navy outline + a 12px blur-free hard-yellow offset shadow (the
+ * signature combo, non-negotiable). Thick-outline hollow circles / solid pink
+ * triangles / mint half-circles / polka-dot patches sit as confetti on the
+ * element's off side; pink fills only one shape or pill per element; a yellow
+ * zigzag SVG draws in last to finish. Asymmetric composition; motion is power3
+ * slide-in + back.out shape pop, settling in ~1s.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';
 
-/** 硬影白板:4px 描边 + 硬黄偏移影 */
+/** Hard-shadow white panel: 4px outline + hard-yellow offset shadow */
 const PANEL =
   'background:var(--panel);border:4px solid var(--fg);border-radius:var(--radius);box-shadow:var(--shadow);';
-/** 纸屑:空心圆 / 实心粉三角 / 薄荷半圆 / 波点补丁 */
+/** Confetti: hollow circle / solid pink triangle / mint half-circle / polka-dot patch */
 const CONFETTI = (id: string) => `
 #${id} .circle{position:absolute;border:6px solid var(--fg);border-radius:999px;}
 #${id} .tri{position:absolute;background:var(--accent);clip-path:polygon(50% 0,100% 100%,0 100%);}

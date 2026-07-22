@@ -1,17 +1,19 @@
 /**
- * 爆炸 Mega Sale 的口播叠加件:爆炸贴纸语言——每件是拍在画面上的促销贴:24 角
- * 爆炸贴(clip-path 星形,金底深酒红字,带旋转甩入)、斜彩带条(金底酒红宽距字)、
- * 深红倒计时瓷砖 + 金冒号、巨价签(白字 900 + 深酒红描边,旧价划线)、金 CTA 条
- * (glow + 一次脉冲)。动效硬砸:power4.in 落版 / back.out(2) 带 spin,禁柔和淡入。
+ * Mega Sale overlay elements: burst-sticker language — each element is a promo sticker slapped
+ * on the frame: a 24-point burst (star clip-path, gold ground with deep-wine text, spins in),
+ * a slanted ribbon strip (gold ground, wide-tracked wine text), deep-red countdown tiles + gold
+ * colon, a giant price tag (white 900 + deep-wine stroke, old price struck through), and a gold
+ * CTA bar (glow + one pulse). Motion hits hard: power4.in slam-in / back.out(2) with spin;
+ * no soft fades.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';
 
 const BURST_CLIP =
   'polygon(50% 0%,59% 15%,75% 7%,76% 25%,93% 25%,85% 41%,100% 50%,85% 59%,93% 75%,76% 76%,75% 93%,59% 85%,50% 100%,41% 85%,25% 93%,24% 76%,7% 75%,15% 59%,0% 50%,15% 41%,7% 25%,24% 24%,25% 7%,41% 15%)';
-/** 金底爆炸贴:深酒红字 */
+/** Gold burst sticker: deep-wine text */
 const BURST = `clip-path:${BURST_CLIP};background:var(--panel);color:var(--accent-2);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:900;line-height:1.1;`;
-/** 大促红贴片底 */
+/** Sale red sticker backing */
 const RED = 'background:var(--paper);box-shadow:var(--shadow);border-radius:var(--radius);';
 
 export const overlays: Record<string, () => Block> = {

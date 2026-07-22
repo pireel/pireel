@@ -1,14 +1,16 @@
 'use client';
 
 /**
- * 导出成片:弹窗选项(分辨率/帧率/格式)→ **客户端合成** → 自动下载。发布另走 publishVideo。
+ * Export the finished video: dialog options (resolution/fps/format) → **client-side compositing** →
+ * auto download. Publishing goes through publishVideo instead.
  *
- * - **只客户端合成**(本地零上传、与预览逐帧同源、插入段/取景全覆盖)。不支持 WebCodecs
- *   或本地视频丢失 → 诚实报错(不再静默交给服务端渲染——canvas 化后它产出视频轨全黑的
- *   空片、且从未验证过,已弃用)。
- * - 结果缓存:comp + 原片指纹 + 导出选项都没变 → 不重新合成,直接再下载上次的成片。
- * - 发布(publishVideo):把**成片**上传 R2 换公开直链喂发布中心(源视频永不上传;成片可传)。
- *   按需触发(点「去发布」才传),同内容不重复传。200MB 上限(presign)超了诚实报错。
+ * - **Client-side compositing only** (zero local upload, frame-exact with the preview, full insert-clip/
+ *   framing coverage). No WebCodecs or missing local video → honest error (no longer silently handed to
+ *   server render — after canvas-ization it produced an all-black video track, was never validated, deprecated).
+ * - Result cache: comp + source fingerprint + export options all unchanged → don't re-composite, just re-download the last result.
+ * - Publish (publishVideo): upload the **finished video** to R2 for a public direct link fed to the publish
+ *   center (source video never uploaded; the finished video can be). Triggered on demand (only when "Publish"
+ *   is clicked), same content not re-uploaded. 200MB cap (presign) — honest error if exceeded.
  */
 
 import { useRef, useState, type MutableRefObject } from 'react';
@@ -19,10 +21,10 @@ import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
 import { t } from './i18n';
 
-/** presign 的硬上限(超了 413),提前拦一下给人话。 */
+/** presign's hard cap (413 past it); intercept early to give a human message. */
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
 
-/** 触发浏览器下载(blob 常驻缓存 ref,URL 用完即收)。 */
+/** Trigger a browser download (blob stays in the cache ref; the URL is revoked once done). */
 function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -40,32 +42,32 @@ const filenameFor = (o: ExportRenderOpts) => t('成片-{res}p-{stamp}.{format}',
 export function useStudioExport(deps: {
   compRef: MutableRefObject<Composition>;
   videoFileRef: MutableRefObject<File | null>;
-  /** 本地插入段 File 表(键=blob URL);客户端合成取插入段用。 */
+  /** Local insert-clip File table (key = blob URL); used by client compositing to fetch insert clips. */
   clipFilesRef?: MutableRefObject<Map<string, File>>;
 }) {
   const { compRef, videoFileRef, clipFilesRef } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
-  // 成片上传后的公开直链(R2):「去发布」入口的数据源。客户端合成的本地 blob 无公开链,
-  // 只有 publishVideo 上传后才有值
+  // Public direct link after the finished video is uploaded (R2): the data source for the "Publish"
+  // entry. The client-composited local blob has no public link; this only has a value after publishVideo uploads
   const [publishUrl, setPublishUrl] = useState<string | null>(null);
-  const exportCancelRef = useRef(false); // 用户点了「取消导出」:停止合成解锁 UI
-  const uploadedExportRef = useRef<{ key: string; url: string } | null>(null); // 成片上传结果(同内容不重复传)
-  /** 最近成片缓存:key=comp+原片指纹+选项。没变就直接再下载/发布,不重新合成。 */
+  const exportCancelRef = useRef(false); // User clicked "Cancel export": stop compositing and unlock the UI
+  const uploadedExportRef = useRef<{ key: string; url: string } | null>(null); // Upload result (same content not re-uploaded)
+  /** Last-result cache: key = comp + source fingerprint + options. Unchanged → re-download/publish directly, don't re-composite. */
   const lastExportRef = useRef<{ key: string; blob?: Blob; opts: ExportRenderOpts } | null>(null);
 
-  /** comp 全量 JSON + 原片指纹 + 选项:任何影响成片的东西变了,key 必变。
-   *  (插入段以 blob URL 出现在 comp.shots 里,会话内稳定,天然入 key。) */
+  /** Full comp JSON + source fingerprint + options: if anything affecting the result changes, the key changes.
+   *  (Insert clips appear as blob URLs in comp.shots, stable within a session, so they're naturally in the key.) */
   const exportKey = (c: Composition, opts: ExportRenderOpts): string =>
     `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(c)}`;
 
-  /** 本地能不能客户端合成(WebCodecs + 有原片 File)。不能 = 诚实报错,不再交给弃用的服务端渲染。 */
+  /** Whether client compositing is possible locally (WebCodecs + a source File). If not = honest error, no longer handed to the deprecated server render. */
   const canClientExport = () => typeof window !== 'undefined' && 'VideoEncoder' in window && !!videoFileRef.current;
   const noExportReason = () =>
     !videoFileRef.current ? t('本地视频丢失，重新上传原片后再导出') : t('这个浏览器不支持本地导出，换 Chrome/Edge 打开再试');
 
-  /** 拿到当前内容的成片 blob:缓存命中直接用,否则客户端合成一遍(过程回报进度、可取消)。 */
+  /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
   const renderBlob = async (c: Composition, key: string, opts: ExportRenderOpts): Promise<Blob> => {
     const cached = lastExportRef.current;
     if (cached && cached.key === key && cached.blob) return cached.blob;
@@ -81,8 +83,8 @@ export function useStudioExport(deps: {
     return blob;
   };
 
-  /** 导出 = 客户端合成 + 自动下载。不支持则诚实报错(不再静默走服务端出黑片)。
-   *  返回结果给 agent 导出工具(export_video/track_export)用:成功带落盘文件名。 */
+  /** Export = client compositing + auto download. Unsupported → honest error (no longer silently routed to server render that produces a black clip).
+   *  Returns a result for the agent export tools (export_video/track_export): on success includes the saved filename. */
   async function exportVideo(opts: ExportRenderOpts): Promise<{ ok: boolean; filename?: string; error?: string }> {
     const c = compRef.current;
     if (!c.video?.url) {
@@ -122,8 +124,8 @@ export function useStudioExport(deps: {
     }
   }
 
-  /** 发布 = 客户端合成成片 → 上传 R2 换公开直链 → 点亮 publishUrl(源视频永不上传,成片可传)。
-   *  按需触发(点「去发布」才跑);同内容已传过则复用上次的直链。返回公开 URL(失败/取消返回 null)。 */
+  /** Publish = composite the finished video client-side → upload to R2 for a public direct link → light up publishUrl (source video never uploaded, finished video can be).
+   *  Triggered on demand (only runs when "Publish" is clicked); if the same content was uploaded before, reuse the last link. Returns the public URL (null on failure/cancel). */
   async function publishVideo(opts: ExportRenderOpts): Promise<string | null> {
     const c = compRef.current;
     if (!c.video?.url) {
@@ -137,7 +139,7 @@ export function useStudioExport(deps: {
     }
     const key = exportKey(c, opts);
     if (uploadedExportRef.current?.key === key) {
-      // 同内容已上传过:直接复用直链
+      // Same content already uploaded: reuse the direct link
       setPublishUrl(uploadedExportRef.current.url);
       return uploadedExportRef.current.url;
     }
@@ -177,7 +179,7 @@ export function useStudioExport(deps: {
     cancelExport: () => {
       exportCancelRef.current = true;
     },
-    /** 换片时清掉成片缓存与发布直链(key 含原片指纹本就不会误命中,清是为了释放 blob 内存)。 */
+    /** On source swap, clear the result cache and publish link (the key already includes the source fingerprint so it won't mis-hit; clearing is to free blob memory). */
     resetExport: () => {
       lastExportRef.current = null;
       uploadedExportRef.current = null;

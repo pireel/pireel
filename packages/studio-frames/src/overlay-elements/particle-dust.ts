@@ -1,8 +1,11 @@
 /**
- * 星尘 Particle 的口播叠加件:虚空 pocket 语言——无边框无卡片,文字直接悬浮在一小片
- * 软边虚空上(blur 的近黑 wash + blur(80px) 的 accent 光晕),主角带 text-shadow 光晕;
- * 2-8px 星点(蓝/暖金/星白,透明度错落)逐粒写死 x/y 偏移从四方汇聚落位;
- * 星座连线用内联 SVG stroke-dasharray 自绘,节点小圆后弹出;暖金只给稀有强调。
+ * Particle talking-head overlays: void-pocket language. No border, no card; text
+ * floats directly on a small patch of soft-edged void (a blurred near-black wash
+ * + a blur(80px) accent halo), the hero with a text-shadow glow. 2-8px star dots
+ * (blue / warm gold / star-white, staggered opacity) each with hardcoded x/y
+ * offsets converging into place from all sides; constellation lines self-draw via
+ * inline SVG stroke-dasharray, node circles pop in after; warm gold only for rare
+ * accents.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

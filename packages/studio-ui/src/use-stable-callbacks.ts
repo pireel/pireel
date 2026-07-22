@@ -1,16 +1,18 @@
 'use client';
 
 /**
- * 把一组每次渲染都重建的回调,包成**身份恒定**的 wrapper(内部经 ref 永远调到最新实现)。
+ * Wrap a set of callbacks that are rebuilt every render into **identity-stable** wrappers (internally
+ * routed through a ref so they always call the latest implementation).
  *
- * 用途:给 React.memo 的重子组件(时间轴/chat)喂回调 props——实现可以随便用最新
- * state/闭包重建,wrapper 身份不变,memo 的浅比较才拦得住无关重渲。
- * 键集合必须固定(首次渲染就定型);新增回调 = 新增键,别条件性增删。
+ * Purpose: feed callback props to heavy React.memo children (timeline/chat) — the implementations can
+ * freely rebuild with the latest state/closures while the wrapper identity stays fixed, so memo's shallow
+ * compare can actually block unrelated re-renders.
+ * The key set must be fixed (locked in on first render); a new callback = a new key, never add/remove conditionally.
  */
 
 import { useRef, useState } from 'react';
 
-/** 泛型回调表要容纳任意签名,any 是这里的正确工具。 */
+/** A generic callback map must accept any signature — any is the right tool here. */
 type AnyFnMap = Record<string, (...args: any[]) => any>;
 
 export function useStableCallbacks<T extends AnyFnMap>(impl: T): T {

@@ -1,10 +1,12 @@
 'use client';
 
 /**
- * 字幕样式面板(停靠素材栏的工具面板,入口=走带栏「字幕」按钮;对照 Google Vids Captions):两类字幕 —— 逐词强调(Word emphasis)/
- * 整句字幕(Line by line),每类一墙视觉预设;点一款 = **全局应用**,全片句级花字统一换,
- * 位置/缩放在画布上选中任意花字拖拽调,同样全局生效。
- * 卡片是 Vids 式静态样式卡(深色底 + 一句示范文字),形态直接从预设表生成,不跑 iframe。
+ * Captions style panel (a tool panel docked in the material bar, entered via the "Captions" button;
+ * modeled on Google Vids Captions): two caption kinds — Word emphasis / Line by line, each a wall of
+ * visual presets. Picking one = **global apply**, swapping every sentence-level caption at once; position/scale
+ * is adjusted by selecting any caption on the canvas and dragging, also globally.
+ * Cards are Vids-style static style cards (dark background + one sample line), generated straight from the
+ * preset table, no iframe.
  */
 
 import type { CSSProperties } from 'react';
@@ -23,13 +25,13 @@ const SECTIONS: { mode: CaptionPreset['mode']; title: string; desc: string }[] =
   { mode: 'line', title: '整句字幕', desc: '整句浮现，干净不抢戏' },
 ];
 
-/** 双语翻译区的注入面(托管壳才有翻译能力;OSS 壳不传=整区隐藏,BYO agent 自己翻)。 */
+/** Injection surface for the bilingual translation area (only the hosted shell has translation; the OSS shell passes nothing = whole area hidden, BYO agent translates itself). */
 export interface CaptionTranslationControl {
-  /** 已有译文句数 / 转写总句数(全源合计)。 */
+  /** Sentences already translated / total transcribed sentences (across all sources). */
   done: number;
   total: number;
   busy: boolean;
-  /** 当前选过的目标语言(chip 选中态;新插入片段自动补翻也用它)。 */
+  /** Currently selected target language (chip active state; also used to auto-translate newly inserted segments). */
   lang?: string;
   onTranslate: (targetLanguage: string) => void;
   onClear: () => void;
@@ -45,13 +47,13 @@ export function CaptionsPanel({
   generating,
 }: {
   comp: Composition;
-  /** 点样式卡:全局换所有句级花字的预设(还没有花字时会按口播稿现铺一层)。 */
+  /** Click a style card: globally swap the preset for all sentence-level captions (if none exist yet, lays a layer from the voiceover script). */
   onPickPreset: (presetId: string) => void;
-  /** 移除整层句级花字 + 清全局样式。 */
+  /** Remove the whole sentence-level caption layer + clear global style. */
   onRemove: () => void;
-  /** 双语翻译控制面(缺省隐藏该区)。 */
+  /** Bilingual translation control (hidden when omitted). */
   translation?: CaptionTranslationControl;
-  /** 字幕生成中(ASR/重铺):整面板遮罩,防重复点样式卡。 */
+  /** Captions generating (ASR/re-lay): mask the whole panel to prevent double-clicking style cards. */
   generating?: boolean;
 }) {
   const current = resolveCaptionStyle(comp).preset;
@@ -64,13 +66,13 @@ export function CaptionsPanel({
           <span className="text-ink-2 text-[12px]">{t('字幕生成中…')}</span>
         </div>
       )}
-      {/* 标题单层:「字幕」归停靠面板头部(工具面板体系惯例),这里只留说明行 */}
+      {/* Single-level title: "Captions" lives in the docked panel header (tool panel convention); only the description row stays here */}
       <div className="border-line border-b px-3 py-2">
         <div className="text-ink-4 text-[10.5px]">
           {hasCaptions ? t('样式对整条视频生效；在画布选中字幕可拖动位置、调整大小') : t('还没有字幕——点任意样式，按口播稿自动生成')}
         </div>
       </div>
-      {/* 当前应用样式 + 移除:有花字层才显示 */}
+      {/* Currently applied style + remove: only shown when a caption layer exists */}
       {hasCaptions && (
         <div className="border-line bg-panel-2/60 flex items-center gap-2 border-b px-3 py-2">
           <Type size={12} className="text-accent shrink-0" />
@@ -82,7 +84,7 @@ export function CaptionsPanel({
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto p-2.5">
-        {/* 「无」:不加字幕/移除整层(与样式卡同款形态,选中态=当前没有字幕) */}
+        {/* "None": no captions / remove the whole layer (same shape as a style card; active state = currently no captions) */}
         <div className="mb-3">
           <button
             type="button"
@@ -112,16 +114,17 @@ export function CaptionsPanel({
             <div className="text-ink-4 mb-1.5 text-[10px]">{t(sec.desc)}</div>
             <div className="flex flex-col gap-2">
               {CAPTION_PRESETS.filter((p) => p.mode === sec.mode).map((p) => (
-                // 选中态以「有字幕」为前提:resolveCaptionStyle 无字幕时也回缺省 preset,
-                // 不加前提会和顶部「无字幕」同时亮「使用中」
+                // Active state requires "has captions": resolveCaptionStyle returns a default preset even
+                // with no captions, so without this guard it would light up "in use" alongside the top "None"
                 <PresetCard key={p.id} preset={p} active={hasCaptions && p.id === current} onPick={onPickPreset} />
               ))}
             </div>
           </div>
         ))}
       </div>
-      {/* 双语翻译:sticky 底部常驻——与字幕开关互不依赖(译文写在转写句上,独立配置;
-          位置/大小在画布上选中字幕后拖「译文」框调,同样全局生效) */}
+      {/* Bilingual translation: sticky at the bottom, independent of the captions toggle (translations are
+          written onto transcribed sentences, configured separately; position/size adjusted by selecting a
+          caption on the canvas and dragging its "translation" box, also global) */}
       {translation && (
         <div className="border-line bg-panel-2/40 border-t px-3 py-2">
           <div className="flex items-center gap-1.5">
@@ -189,9 +192,9 @@ function PresetCard({ preset, active, onPick }: { preset: CaptionPreset; active:
   );
 }
 
-/** 示范文字按预设的定格形态摆出来(纯 CSS):强调款亮中间词(变色/划线/色块),整句款平铺。 */
+/** Lay out the sample text in the preset's frozen form (pure CSS): emphasis presets highlight the middle word (recolor/underline/highlight box), line presets lay it flat. */
 function PresetSample({ p }: { p: CaptionPreset }) {
-  // 示范词不进词典:「字幕」这类超短词做 key 会和别处译法撞车,按 locale 直接给
+  // Sample words don't go through the dictionary: ultra-short words like "captions" as keys would collide with other translations elsewhere, so give them by locale directly
   const sample = studioLocale() === 'en' ? ['Cool ', 'captions', ' here'] : ['这是', '字幕', '示范'];
   const fontFamily = p.font === 'serif' ? "'Noto Serif SC','Songti SC',serif" : p.font === 'mono' ? "'IBM Plex Mono',ui-monospace,monospace" : undefined;
   const base: CSSProperties = {
@@ -207,7 +210,7 @@ function PresetSample({ p }: { p: CaptionPreset }) {
   const pill: CSSProperties | undefined = p.bg
     ? { background: p.bg, padding: '4px 10px', borderRadius: 8, display: 'inline-flex', alignItems: 'baseline' }
     : { display: 'inline-flex', alignItems: 'baseline' };
-  // 强调词(中间的「花字」)的定格形态
+  // Frozen form of the emphasized word (the middle caption)
   const emph: CSSProperties = { position: 'relative', margin: '0 0.18em' };
   if (p.emphasis) emph.color = p.emphasis;
   if (p.deco === 'underline') emph.boxShadow = `inset 0 -3px 0 ${p.decoColor}`;

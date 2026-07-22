@@ -1,15 +1,16 @@
 'use client';
 
 /**
- * Studio 对话面板 —— agent + 工具版,与「项目文档」chat 同款观感。
+ * Studio chat panel — agent + tools version, same look as the "project doc" chat.
  *
- *  · 消息流/自动滚动/空态/回底 = ai-elements Conversation 家族
- *  · 气泡 + markdown = Message / MessageResponse(Streamdown)
- *  · 输入框 = contenteditable composer(边框/聚焦/π 头像/占位/@ pill),@ 唤起组件选择器
- *  · LLM 工具调用 = useChat 流式;工具不在服务端 execute,onToolCall 在客户端直接改
- *    Composition(runTool 由工作台注入),addToolOutput 回喂续写。块生成走 /api/studio/compose。
- *  · 工具调用在信息流里渲染成 徽章(即时操作)/ 卡片(生成类)
- *  · 多会话:线程存 localStorage,切换 key remount;startProgress 仍给「一键成片」推进度。
+ *  · Message stream / auto-scroll / empty state / scroll-to-bottom = ai-elements Conversation family
+ *  · Bubbles + markdown = Message / MessageResponse (Streamdown)
+ *  · Input = contenteditable composer (border/focus/π avatar/placeholder/@ pill); @ opens the element picker
+ *  · LLM tool calls = useChat streaming; tools do NOT execute server-side — onToolCall mutates the
+ *    Composition client-side (runTool injected by the workbench), addToolOutput feeds back to continue.
+ *    Block generation goes through /api/studio/compose.
+ *  · Tool calls render in the stream as a badge (instant ops) or a card (generative)
+ *  · Multi-session: threads live in localStorage, switching remounts by key; startProgress still drives "one-tap film".
  */
 
 import {
@@ -47,9 +48,9 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { useToolProgress } from './tool-progress';
 import { studioLocale, t } from './i18n';
 
-/* ============================ 对外类型 ============================ */
+/* ============================ Public types ============================ */
 
-/** 可 @ 的组件(块 / 分镜)。 */
+/** An @-mentionable element (block / shot). */
 export interface StudioElementRef {
   id: string;
   label: string;
@@ -58,14 +59,14 @@ export interface StudioElementRef {
   isShot: boolean;
 }
 
-/** 一条流式「进度」消息的更新器(给「一键成片」后台流程汇报)。 */
+/** Updater for a streaming "progress" message (used by the "one-tap film" background flow to report). */
 export interface ProgressHandle {
   step(text: string): void;
   finish(text: string): void;
   fail(text: string): void;
 }
 
-/** 会话挂载的 frame(studio 主题模板包;主题按钮高亮 + 请求带 frameId,服务端注入 playbook)。 */
+/** Frame attached to the session (studio theme-template pack; theme button highlights + frameId rides the request, server injects the playbook). */
 export interface AttachedFrame {
   id: string;
   title: string;
@@ -75,37 +76,37 @@ export interface AttachedFrame {
 
 export interface StudioChatHandle {
   startProgress(): ProgressHandle;
-  /** 选中态变化时由工作台调用:传组件 → 输入框出一个「当前选中」pill;传 null → 撤掉。 */
+  /** Called by the workbench on selection change: pass an element → input shows a "currently selected" pill; pass null → remove it. */
   insertElementPill(el: StudioElementRef | null): void;
-  /** 工作台直接投喂一条用户消息。流式中静默丢弃。 */
+  /** Workbench pushes a user message directly. Silently dropped while streaming. */
   send(text: string): void;
-  /** 只往输入框填一段文本不发送(生成面板「@引用」素材用)。 */
+  /** Only fill a piece of text into the input without sending (used by the generate panel's "@reference" for assets). */
   insertText(text: string): void;
-  /** 只聚焦输入框(组件浮动条「AI 改」切过来接着打字)。 */
+  /** Only focus the input (component floating bar's "AI edit" switches over to keep typing). */
   focusInput(): void;
-  /** 把 frame 挂到当前会话(frame 面板「使用」/ 输入框主题按钮共用):按钮高亮,随请求注入。 */
+  /** Attach a frame to the current session (shared by frame panel "use" and the input's theme button): button highlights, injected with the request. */
   attachFrame(frame: AttachedFrame): void;
 }
 
 export interface StudioChatProps {
-  /** 客户端执行工具:改 Composition 状态 / 调 compose 生成块,返回小结。 */
+  /** Client-side tool executor: mutates Composition state / calls compose to generate blocks, returns a summary. */
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<StudioToolResult>;
-  /** frame 挂上时回调(面板「使用」和主题按钮都走):工作台借此把主题 palette 落到 comp。 */
+  /** Callback when a frame is attached (both panel "use" and the theme button): the workbench uses it to apply the theme palette to comp. */
   onFrameApplied?: (frame: AttachedFrame) => void;
-  /** 发消息瞬间读的局势(composition 快照/选中/播放头/流水线):经 buildSituation
-   *  拼成文本挂在 user 消息 metadata.situation 上(不进请求 body,也不进 system)。 */
+  /** The situation read at send time (composition snapshot/selection/playhead/pipeline): buildSituation
+   *  turns it into text on the user message's metadata.situation (not in request body, not in system). */
   getBody: () => Record<string, unknown>;
-  /** 当前可 @ 的组件。 */
+  /** Currently @-mentionable elements. */
   elements: StudioElementRef[];
-  /** 会话持久化 key(按项目分:studio:chat:v1:<projectId>,会话属于项目)。 */
+  /** Session persistence key (per project: studio:chat:v1:<projectId>, sessions belong to a project). */
   storageKey: string;
-  /** 会话线程落 localStorage 后通知(工作台借此把会话一并同步上云)。 */
+  /** Fired after threads are written to localStorage (the workbench uses it to sync sessions to the cloud too). */
   onThreadsChange?: () => void;
-  /** 关闭对话区(头部 X;工作台收起右侧区腾画面)。缺省不渲染关闭钮。 */
+  /** Close the chat area (header X; workbench collapses the right region to free up screen). Omit to not render the close button. */
   onClose?: () => void;
 }
 
-/* ============================ 小工具 ============================ */
+/* ============================ Helpers ============================ */
 
 let _mid = 0;
 const mid = (p = 'm') => `${p}${++_mid}_${Math.random().toString(36).slice(2, 7)}`;
@@ -140,7 +141,7 @@ function PiAvatar({ thinking = false, size = 22 }: { thinking?: boolean; size?: 
 const PILL_CLASS =
   'sc-pill inline-flex items-center gap-1 align-middle rounded px-1.5 py-px mx-0.5 text-[12px] font-medium border border-accent/30 bg-accent/10 text-accent select-none cursor-default';
 
-/** 命令式造一个组件 pill(contenteditable=false)。 */
+/** Imperatively build an element pill (contenteditable=false). */
 function makeElementPill(el: StudioElementRef, opts: { auto?: boolean } = {}): HTMLSpanElement {
   const span = document.createElement('span');
   span.contentEditable = 'false';
@@ -156,7 +157,7 @@ function makeElementPill(el: StudioElementRef, opts: { auto?: boolean } = {}): H
   return span;
 }
 
-/** 信息流里把 @id 还原成 pill(与输入框同观感)。 */
+/** Render @id back into a pill within the stream (same look as the input). */
 const REF_TOKEN_RE = /@([a-zA-Z0-9._-]+)/g;
 function renderTextWithElementPills(text: string, elements: StudioElementRef[]): React.ReactNode {
   if (!text) return null;
@@ -183,9 +184,9 @@ function renderTextWithElementPills(text: string, elements: StudioElementRef[]):
   return <>{out}</>;
 }
 
-/* ============================ 工具耗时记忆(ETA 用) ============================ */
+/* ============================ Tool-duration memory (for ETA) ============================ */
 
-// 每类工具的历史耗时 EMA(localStorage 自校准):没有进度分数的工具靠它给「约剩 Ns」。
+// Historical duration EMA per tool type (self-calibrating in localStorage): tools without a progress fraction use it for "~Ns left".
 const DUR_KEY = 'studio:tooldur:v1';
 function typicalToolDuration(toolId: string): number | null {
   try {
@@ -197,18 +198,18 @@ function typicalToolDuration(toolId: string): number | null {
   }
 }
 function recordToolDuration(toolId: string, ms: number) {
-  if (ms < 300) return; // 秒回的不记
+  if (ms < 300) return; // don't record near-instant returns
   try {
     const m = JSON.parse(window.localStorage.getItem(DUR_KEY) ?? '{}') as Record<string, number>;
     const old = typeof m[toolId] === 'number' ? m[toolId] : null;
     m[toolId] = old ? Math.round(old * 0.6 + ms * 0.4) : Math.round(ms);
     window.localStorage.setItem(DUR_KEY, JSON.stringify(m));
   } catch {
-    /* 配额/隐私模式:忽略 */
+    /* quota exceeded / private mode: ignore */
   }
 }
 
-/** 思考中跳点:覆盖所有「没东西在动」的空窗(等首响、工具跑完等续写)。 */
+/** Thinking dots: cover every dead gap where "nothing is moving" (awaiting first response, tool finished awaiting continuation). */
 function ThinkingDots({ label = t('思考中') }: { label?: string }) {
   return (
     <span className="text-ink-3 inline-flex items-center gap-1.5 pt-0.5 text-[13px]">
@@ -222,7 +223,7 @@ function ThinkingDots({ label = t('思考中') }: { label?: string }) {
   );
 }
 
-/* ============================ 工具调用渲染 ============================ */
+/* ============================ Tool-call rendering ============================ */
 
 interface ToolPartLike {
   type: string;
@@ -238,7 +239,7 @@ function toolIdOf(part: ToolPartLike): string {
   return part.type.startsWith('tool-') ? part.type.slice(5) : part.type;
 }
 
-/** 工具调用状态归一。 */
+/** Normalize tool-call status. */
 function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'error'; text: string } {
   const out = part.output as StudioToolResult | undefined;
   if (part.state === 'output-error') return { kind: 'error', text: part.errorText?.slice(0, 40) || t('失败') };
@@ -262,7 +263,7 @@ function ToolBadge({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
       <Check size={11} strokeWidth={2.2} />
     );
   const text = live ?? st.text;
-  // 与 ToolCard 同一套卡片语言:头行(图标章+名称+状态图标),结果文案独立全宽正文行(可换行)
+  // Same card language as ToolCard: header row (icon chip + name + status icon), result text on its own full-width body row (wraps)
   return (
     <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
       <div className="flex items-center gap-2 px-2.5 py-1.5">
@@ -280,9 +281,9 @@ function ToolBadge({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
 }
 
 /**
- * 生成类工具卡:任何时刻都有东西在动 ——
- * 运行中 = spinner + 已用时/预计剩余 + 阶段文案(流式 note > 进度文案 > busyText)+ 进度条
- * (有 frac 走确定态并按速率外推 ETA;没有走 indeterminate 滑条 + 历史耗时 EMA 给 ETA)。
+ * Generative tool card: something is always moving —
+ * running = spinner + elapsed/remaining + stage text (stream note > progress text > busyText) + progress bar
+ * (with frac: determinate, ETA extrapolated by rate; without: indeterminate slider + historical EMA for ETA).
  */
 function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
   const st = toolStatus(part);
@@ -291,7 +292,7 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
   const live = running ? prog : null;
   const instruction = typeof part.input?.instruction === 'string' ? (part.input.instruction as string) : '';
 
-  // 已用时(观察到 running 才起表,每 0.5s 走);完成时记进历史 EMA
+  // Elapsed (clock starts once running is observed, ticks every 0.5s); on completion, record into the historical EMA
   const startRef = useRef<number | null>(null);
   if (running && startRef.current == null) startRef.current = Date.now();
   const [, setTick] = useState(0);
@@ -309,11 +310,11 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
   }, [st.kind, def.id]);
 
   const elapsedS = running && startRef.current != null ? (Date.now() - startRef.current) / 1000 : 0;
-  // ETA:frac 按实测速率外推;否则用历史 EMA;都没有就只报已用时
+  // ETA: with frac, extrapolate by measured rate; else use historical EMA; with neither, only report elapsed
   let timeText = '';
   if (running && elapsedS >= 1) {
     if (live?.frac != null && live.frac >= 0.99) {
-      timeText = t('收尾中 · 已 {s}s', { s: Math.floor(elapsedS) }); // 进度打满但还没返回:别再报「约剩 1s」骗人
+      timeText = t('收尾中 · 已 {s}s', { s: Math.floor(elapsedS) }); // bar full but not returned yet: stop lying with "~1s left"
     } else {
       let remain: number | null = null;
       if (live?.frac != null && live.frac > 0.05) remain = (elapsedS / live.frac) * (1 - live.frac);
@@ -336,19 +337,19 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
           {running && <span className="tabular-nums">{timeText || t('启动中…')}</span>}
         </span>
       </div>
-      {/* 完成/失败:结果文案独立全宽正文行(与 badge 同规格),换行不再吊在右列 */}
+      {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column */}
       {!running && st.text && (
         <div className={`border-line/70 break-words border-t px-2.5 py-1.5 text-[12px] leading-relaxed ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {st.text}
         </div>
       )}
-      {/* 运行中:阶段文案正文行(流式 note > 进度文案 > 默认忙碌文案),多行可读 */}
+      {/* Running: stage-text body row (stream note > progress text > default busy text), multi-line readable */}
       {running && (
         <div className="border-line/70 text-ink-3 line-clamp-3 border-t px-2.5 py-1.5 text-[12px] leading-relaxed">
           {live?.text || (def.busyText ? t(def.busyText) : t('执行中…'))}
         </div>
       )}
-      {/* 进度条:有 frac 确定态;没有 indeterminate 滑条(永远有东西在动) */}
+      {/* Progress bar: determinate with frac; indeterminate slider without (always something moving) */}
       {running &&
         (live?.frac != null ? (
           <div className="bg-line/40 h-1 w-full">
@@ -370,15 +371,15 @@ function renderToolPart(part: ToolPartLike, key: string): React.ReactNode {
   return <div key={key}>{def.kind === 'card' ? <ToolCard def={def} part={part} /> : <ToolBadge def={def} part={part} />}</div>;
 }
 
-/* ============================ 输入框(composer) ============================ */
+/* ============================ Input (composer) ============================ */
 
 interface ComposerHandle {
   insertElementPill(el: StudioElementRef | null): void;
-  /** 末尾追加一段文本并聚焦(生成面板「@引用」用):只填不发。 */
+  /** Append text at the end and focus (used by the generate panel's "@reference"): fill only, don't send. */
   insertText(text: string): void;
-  /** 整框替换成一段文本并聚焦(快捷话术用):连点不同话术互替不拼接。 */
+  /** Replace the whole box with text and focus (used by quick prompts): tapping different prompts swaps, doesn't concatenate. */
   setText(text: string): void;
-  /** 只聚焦(光标到末尾),不动内容(组件浮动条「AI 改」用)。 */
+  /** Focus only (cursor to end), don't touch content (used by the component floating bar's "AI edit"). */
   focusInput(): void;
 }
 
@@ -397,9 +398,9 @@ function Composer({
   placeholder: string;
   status: ChatStatus;
   elements: StudioElementRef[];
-  /** 当前会话挂载的 frame(主题按钮高亮;选择器里再点同一项即移除)。 */
+  /** Frame attached to the current session (theme button highlights; tapping the same item in the picker removes it). */
   frame: AttachedFrame | null;
-  /** 主题选择器的 frame 目录。 */
+  /** Frame catalog for the theme picker. */
   frames: FrameCatalogItem[];
   onPickFrame: (frame: AttachedFrame) => void;
   onRemoveFrame: () => void;
@@ -407,7 +408,7 @@ function Composer({
   onStop: () => void;
   methodsRef: React.MutableRefObject<ComposerHandle | null>;
 }) {
-  const locale = useLocale() as Locale; // 主题封面预览是 locale 化内容包
+  const locale = useLocale() as Locale; // theme cover preview is a locale-specific content pack
   const editorRef = useRef<HTMLDivElement>(null);
   const refPopoverRef = useRef<TriggerPopoverHandle>(null);
   const framePopoverRef = useRef<TriggerPopoverHandle>(null);
@@ -422,7 +423,7 @@ function Composer({
     setEmpty(isEmpty);
   }
 
-  /** 序列化 contenteditable → 纯文本(pill 还原成 @id token)。 */
+  /** Serialize contenteditable → plain text (pills become @id tokens). */
   function serialize(): string {
     const el = editorRef.current;
     if (!el) return '';
@@ -465,7 +466,7 @@ function Composer({
     clear();
   }
 
-  /** 吞掉光标前最近一个 trigger 字符。 */
+  /** Swallow the nearest trigger character before the cursor. */
   function consumeTriggerChar(trigger: string) {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return;
@@ -520,7 +521,7 @@ function Composer({
     }
   }
 
-  /** 主题选择器选中 → 挂 frame(按钮高亮,不进正文);再点当前已挂的那项 = 移除。 */
+  /** Theme picker selection → attach frame (button highlights, not in body text); tapping the currently attached item = remove. */
   function pickFrame(item: FrameCatalogItem) {
     if (frame?.id === item.id) {
       onRemoveFrame();
@@ -529,7 +530,7 @@ function Composer({
     onPickFrame({ id: item.id, title: item.title, icon: item.icon, iconKey: item.iconKey ?? null });
   }
 
-  /** @ 选择器选中 → 插 pill。 */
+  /** @ picker selection → insert pill. */
   function pickElement(el: StudioElementRef) {
     const root = editorRef.current;
     if (root && root.querySelector(`[data-ref-id="${CSS.escape(el.id)}"]:not([data-auto])`)) {
@@ -548,14 +549,14 @@ function Composer({
       insertElementPill: (el: StudioElementRef | null) => {
         const root = editorRef.current;
         if (!root) return;
-        // 撤掉上一枚「当前选中」pill(连同它后面的那个空格)
+        // Remove the previous "currently selected" pill (and the space after it)
         root.querySelectorAll('[data-auto]').forEach((n) => {
           const next = n.nextSibling;
           if (next && next.nodeType === Node.TEXT_NODE && next.textContent === ' ') next.remove();
           n.remove();
         });
         if (el) {
-          // 已显式 @ 过同一个 → 不重复加
+          // Already explicitly @-mentioned the same one → don't add again
           if (!root.querySelector(`[data-ref-id="${CSS.escape(el.id)}"]`)) {
             root.appendChild(makeElementPill(el, { auto: true }));
             root.appendChild(document.createTextNode(' '));
@@ -584,7 +585,7 @@ function Composer({
         if (!root) return;
         root.appendChild(document.createTextNode(`${text} `));
         recomputeEmpty();
-        // 聚焦并把光标放到末尾,用户接着打字就是补充说明
+        // Focus and put the cursor at the end so the user's next typing becomes an addendum
         root.focus();
         const sel = window.getSelection();
         if (sel) {
@@ -654,7 +655,7 @@ function Composer({
             >
               <AtSign className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
-            {/* 主题按钮:挂载态 = 按钮本身高亮(不再往输入框塞 tag);选择器里再点同一项移除 */}
+            {/* Theme button: attached state = button itself highlights (no longer stuffs a tag into the input); tap the same item in the picker to remove */}
             <button
               type="button"
               className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
@@ -716,7 +717,7 @@ function Composer({
         )}
       />
 
-      {/* 主题选择器:纯按钮唤起(无 trigger 字符,`/` 预留给以后的 skill);大行卡 = 左封面右介绍 */}
+      {/* Theme picker: button-only trigger (no trigger char, `/` reserved for future skills); tall row card = cover on left, description on right */}
       <TriggerPopover<FrameCatalogItem>
         ref={framePopoverRef}
         editorRef={editorRef}
@@ -735,8 +736,8 @@ function Composer({
   );
 }
 
-/** 主题选择器的大行卡:左 = 方言封面真实渲染(16:9,悬停预演;无封面回落图标),
- *  右 = 标题 + 简介;当前挂载项打勾,再点一次移除。 */
+/** Tall row card for the theme picker: left = real dialect-cover render (16:9, hover preview; falls back to icon if no cover),
+ *  right = title + summary; the currently attached item is checked, tap again to remove. */
 function FrameOptionRow({
   item,
   locale,
@@ -753,7 +754,7 @@ function FrameOptionRow({
   setActive: () => void;
 }) {
   const block = useMemo(() => coverBlock(item.id, locale), [item.id, locale]);
-  // 封面统一 16:9 画布 + frame 自己的 palette;chat 里拿不到项目 comp,主题走默认
+  // Cover uses a uniform 16:9 canvas + the frame's own palette; chat can't reach the project comp, so theme is default
   const previewComp = useMemo<Composition>(
     () => ({ width: 1920, height: 1080, theme: 'general', video: null, blocks: [], ...(item.palette ? { palette: item.palette } : {}) }),
     [item.palette],
@@ -788,7 +789,7 @@ function FrameOptionRow({
   );
 }
 
-/* ============================ 单线程 chat(useChat) ============================ */
+/* ============================ Single-thread chat (useChat) ============================ */
 
 function ChatThread({
   threadId,
@@ -819,20 +820,20 @@ function ChatThread({
   getBodyRef.current = getBody;
   const composerRef = useRef<ComposerHandle | null>(null);
 
-  // 会话挂载的 frame:输入框主题按钮高亮,每次请求把 frameId 一起带走(服务端注入 playbook)
+  // Frame attached to the session: input theme button highlights, every request carries frameId along (server injects the playbook)
   const [frame, setFrame] = useState<AttachedFrame | null>(initialFrame);
   const frameRef = useRef(frame);
   frameRef.current = frame;
   const onFrameAppliedRef = useRef(onFrameApplied);
   onFrameAppliedRef.current = onFrameApplied;
-  /** 挂 frame(面板/主题按钮共用):除了会话态,还通知工作台把主题 palette 应用到 comp。 */
+  /** Attach a frame (shared by panel/theme button): besides session state, also notifies the workbench to apply the theme palette to comp. */
   const applyFrame = useCallback((f: AttachedFrame) => {
     setFrame(f);
     onFrameAppliedRef.current?.(f);
   }, []);
 
-  // body 只带 frameId;局势快照在发消息时挂 metadata.situation(随会话持久,
-  // 路由物化成 <composition_state> part)——历史字节稳定,prompt cache 才命中
+  // body carries only frameId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
+  // the route materializes it into a <composition_state> part) — stable history bytes are what let the prompt cache hit
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
@@ -864,10 +865,10 @@ function ChatThread({
     },
   });
 
-  // 落盘:流跑完(ready / error)写 localStorage;流式中每 2s 节流快照一份——
-  // 生成中切走会话/刷新页面,已流出的部分和已完成的工具输出不再整条蒸发。
-  // 首次挂载 status 就是 'ready'(恢复/切换旧会话时也是)——那次要跳过,
-  // 否则光是打开旧会话就把它的 updatedAt 刷新,历史排序被翻乱。
+  // Persist: on stream end (ready / error) write localStorage; throttle a snapshot every 2s while streaming —
+  // so switching sessions / refreshing mid-generation doesn't evaporate the streamed-out parts and completed tool outputs.
+  // On first mount status is already 'ready' (also when restoring/switching to an old session) — skip that one,
+  // otherwise merely opening an old session refreshes its updatedAt and scrambles the history ordering.
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const mountedRef = useRef(false);
@@ -886,9 +887,9 @@ function ChatThread({
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy]);
-  // 生成中卸载(切会话/新对话触发 key remount):停流 + 快照到最后一刻——
-  // 不停的话 fetch 还在跑、onToolCall 在后台改作品但 UI 已经没了。
-  // 非生成态卸载不快照(打开旧会话看一眼再切走,不该刷它的 updatedAt)。
+  // Unmount mid-generation (switching session/new chat triggers key remount): stop the stream + snapshot the last moment —
+  // otherwise fetch keeps running and onToolCall mutates the work in the background while the UI is already gone.
+  // Non-generating unmount doesn't snapshot (glance at an old session then switch away shouldn't refresh its updatedAt).
   const busyRef = useRef(busy);
   busyRef.current = busy;
   const stopRef = useRef(stop);
@@ -899,14 +900,14 @@ function ChatThread({
       try {
         void stopRef.current();
       } catch {
-        /* 已结束 */
+        /* already ended */
       }
       onSnapshot(messagesRef.current, frameRef.current);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
-  // 生成中刷新/关页:浏览器原生确认弹窗(流断了就续不上——客户端执行架构,没有服务端可恢复的 run)
+  // Refresh/close mid-generation: native browser confirm dialog (a broken stream can't resume — client-execution architecture, no server-side run to recover)
   useEffect(() => {
     if (!busy) return;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -914,7 +915,7 @@ function ChatThread({
     return () => window.removeEventListener('beforeunload', warn);
   }, [busy]);
 
-  // frame 挂/摘也落盘(有消息才存;否则空会话不该进历史)
+  // Attaching/detaching a frame also persists (only if there are messages; an empty session shouldn't enter history)
   useEffect(() => {
     if (messagesRef.current.length > 0) onSnapshot(messagesRef.current, frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -924,18 +925,18 @@ function ChatThread({
     (text: string) => {
       const t = text.trim();
       if (!t || status === 'streaming' || status === 'submitted') return;
-      // 发送瞬间快照当前局势:只有最新一份代表现实(旧消息里的是历史,identity 有交代)
+      // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       void sendMessage({ text: t, metadata: { situation: buildSituation(getBodyRef.current() as ChatSituation) } });
     },
     [sendMessage, status],
   );
 
-  // 快捷话术:填充进 composer 而非直发(用户可改措辞/追加 @ 引用再发)
+  // Quick prompts: fill into the composer instead of sending directly (user can reword / add @ references before sending)
   const fillComposer = useCallback((text: string) => {
     composerRef.current?.setText(text);
   }, []);
 
-  // 「一键成片」进度 + 选中 pill 暴露给工作台。
+  // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(
     handleRef,
     () => ({
@@ -987,7 +988,7 @@ function ChatThread({
 
   return (
     <>
-      {/* indeterminate 进度条的滑动动画(工具卡用) */}
+      {/* Slide animation for the indeterminate progress bar (used by tool cards) */}
       <style>{'@keyframes hf-indet{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}@media (prefers-reduced-motion: reduce){[style*="hf-indet"]{animation:none !important}}'}</style>
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="gap-5 p-3">
@@ -998,9 +999,9 @@ function ChatThread({
                 title={t('我来帮你做这条视频')}
                 description={t('上传视频后点「一键成片」,自动分镜、配设计图形;也可以直接说要加什么、怎么改,@ 指定某个组件或分镜。')}
               />
-              {/* 引导:成片流水线全由 agent 驱动,点一下 = 发一句话 */}
-              {/* 不用 Suggestions(横向滚动条):快捷话术直接换行铺开。
-                  点击=填进输入框(可改可删,发送权在用户),不直接发 */}
+              {/* Onboarding: the film pipeline is entirely agent-driven, one tap = one sentence sent */}
+              {/* Not using Suggestions (horizontal scrollbar): quick prompts wrap across lines instead.
+                  Click = fill into the input (editable/deletable, send authority stays with the user), doesn't send directly */}
               <div className="flex max-w-full flex-wrap items-center justify-center gap-2 px-3">
                 <Suggestion suggestion={t('一键成片,分镜、配图、字幕一步到位')} onClick={fillComposer} />
                 <Suggestion suggestion={t('先分镜看看结构,我再决定怎么改')} onClick={fillComposer} />
@@ -1010,8 +1011,8 @@ function ChatThread({
           ) : (
             messages.map((m, mi) => {
               const parts = (m.parts ?? []) as ToolPartLike[];
-              // 死区检测:流还在跑,但最后一个可见 part 既不是「正在跑的工具」(卡片自己会动)
-              // 也不是「正在长的文本」(token 本身是反馈)→ 出思考跳点,别让画面静止
+              // Dead-zone detection: stream still running, but the last visible part is neither a "running tool" (its card animates itself)
+              // nor "growing text" (the tokens are their own feedback) → show thinking dots, don't let the view freeze
               const busy = status === 'submitted' || status === 'streaming';
               const isLast = mi === messages.length - 1;
               const vis = parts.filter((p) => p.type !== 'step-start');
@@ -1051,7 +1052,7 @@ function ChatThread({
               );
             })
           )}
-          {/* 发出去还没等到首响(最后一条是用户消息):独立思考行 */}
+          {/* Sent but no first response yet (last message is the user's): standalone thinking row */}
           {(status === 'submitted' || status === 'streaming') && messages[messages.length - 1]?.role === 'user' && (
             <Message from="assistant">
               <div className="flex items-start gap-2">
@@ -1062,7 +1063,7 @@ function ChatThread({
               </div>
             </Message>
           )}
-          {/* 请求/流失败:给个看得见的错误条(否则只是悄悄停住),重试 = regenerate 重跑最后一轮 */}
+          {/* Request/stream failed: show a visible error bar (otherwise it just silently stops); retry = regenerate reruns the last round */}
           {error && (
             <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
               <X size={12} className="shrink-0 text-destructive" />
@@ -1100,14 +1101,14 @@ function ChatThread({
   );
 }
 
-/* ============================ 多会话外壳 ============================ */
+/* ============================ Multi-session shell ============================ */
 
 interface StoredThread {
   id: string;
   title: string;
   messages: UIMessage[];
   updatedAt: number;
-  /** 会话挂载的 frame(恢复会话时主题按钮高亮一起回来)。 */
+  /** Frame attached to the session (theme button highlight comes back when restoring the session). */
   frame?: AttachedFrame | null;
 }
 
@@ -1127,13 +1128,13 @@ function saveThreads(storageKey: string, threads: StoredThread[]) {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(threads.slice(0, 30)));
   } catch {
-    /* 配额满 / 隐私模式 —— 忽略 */
+    /* quota full / private mode — ignore */
   }
 }
 
-/** 恢复中断会话的清洗:流式中落盘的快照里,工具 part 可能停在「入参已到/还在流」态——
- *  恢复后没有 onToolCall 会继续执行它,不清洗就是永远转圈的卡。标成中断错误态,
- *  文本 part 的半截内容原样保留(已经流出来的就是历史)。 */
+/** Sanitize an interrupted session on restore: in a snapshot persisted mid-stream, a tool part may be stuck in "input arrived/still streaming"
+ *  state — after restore there's no onToolCall to continue it, so without sanitizing the card spins forever. Mark it as an interrupted error;
+ *  keep half-finished text parts as-is (whatever already streamed out is history). */
 function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
   return messages.map((m) => {
     if (m.role !== 'assistant') return m;
@@ -1159,9 +1160,10 @@ function firstUserText(messages: UIMessage[]): string {
     .trim();
 }
 
-/** memo:chat 常挂(切面板只 hidden),工作台高频重渲(box 拖拽逐帧 setComp)时
- *  不能连带整棵消息树重渲。前提 = 三个 props 身份稳定(工作台侧已保证:
- *  runTool 走 useStableCallbacks、getBody useCallback([])、elements 按内容 key memo)。 */
+/** memo: chat stays mounted (switching panels only hides it), so the workbench's high-frequency re-renders
+ *  (box drag setComp every frame) must not re-render the whole message tree along with it. Precondition = the three
+ *  props have stable identity (guaranteed on the workbench side: runTool via useStableCallbacks, getBody useCallback([]),
+ *  elements memoized by content key). */
 export const StudioChat = memo(
   forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat({ runTool, getBody, elements, onFrameApplied, storageKey, onThreadsChange, onClose }, ref) {
   const [threads, setThreads] = useState<StoredThread[]>([]);
@@ -1170,10 +1172,10 @@ export const StudioChat = memo(
   const [activeId, setActiveId] = useState<string>(() => mid('thread'));
   const [histOpen, setHistOpen] = useState(false);
   const innerRef = useRef<StudioChatHandle | null>(null);
-  const frames = useFrameCatalog(); // `/` 选择器的 frame 目录(进程内缓存)
+  const frames = useFrameCatalog(); // frame catalog for the `/` picker (in-process cache)
 
-  // 挂载后从 localStorage 恢复(SSR 安全:首帧空,客户端再水合)。key 按项目分,
-  // 会话属于项目;工作台按项目 remount,所以 storageKey 不会中途变
+  // Restore from localStorage after mount (SSR-safe: first frame empty, hydrate on the client). Key is per project,
+  // sessions belong to a project; the workbench remounts per project, so storageKey won't change mid-life
   useEffect(() => {
     const loaded = loadThreads(storageKey);
     if (loaded.length) {
@@ -1184,13 +1186,13 @@ export const StudioChat = memo(
   }, []);
 
   const active = threads.find((t) => t.id === activeId);
-  // 恢复时清洗中断残留(memo 按消息身份:快照落盘才换引用,不逐帧跑)
+  // Sanitize interruption leftovers on restore (memo by message identity: reference changes only when a snapshot persists, not every frame)
   const activeMessages = active?.messages;
   const restoredMessages = useMemo(() => (activeMessages ? sanitizeRestored(activeMessages) : []), [activeMessages]);
 
-  // 最新 threads 镜像:onSnapshot 在 updater 外算 merged 用(updater 必须纯——React 会在
-  // 渲染期重放排队中的 updater,内含 saveThreads/通知工作台的副作用会变成"渲染中 setState"
-  // 告警,踩过)。快照来自流式收尾回调(事件时机),ref 读到的就是当前值。
+  // Latest threads mirror: onSnapshot computes merged outside the updater (the updater must be pure — React replays
+  // queued updaters during render, and side effects like saveThreads/notifying the workbench inside would become
+  // "setState during render" warnings; been bitten). Snapshots come from the stream-end callback (event time), so the ref reads the current value.
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
   const onSnapshot = useCallback(
@@ -1201,7 +1203,7 @@ export const StudioChat = memo(
       const merged = [next, ...threadsRef.current.filter((t) => t.id !== activeId)];
       setThreads(merged);
       saveThreads(storageKey, merged);
-      onThreadsChangeRef.current?.(); // 落 localStorage 了 → 通知工作台同步上云
+      onThreadsChangeRef.current?.(); // persisted to localStorage → notify the workbench to sync to the cloud
     },
     [activeId, storageKey],
   );
@@ -1227,7 +1229,7 @@ export const StudioChat = memo(
 
   return (
     <div className="bg-panel flex h-full min-h-0 w-full min-w-0 flex-col">
-      {/* 头:标题 + 历史 + 新对话 */}
+      {/* Header: title + history + new chat */}
       <div className="border-line text-ink-3 relative flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
         <Sparkles size={13} className="text-accent" />
         <span className="truncate">{active?.title ?? t('对话')}</span>

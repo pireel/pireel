@@ -1,6 +1,7 @@
 /**
- * 泡泡 Kawaii 方言 —— 糖果贴纸:白泡泡一律 5px 深梅粗描边 + 粉软影,歪 2-6 度;
- * 对话气泡带小尾巴;✦✧ 星星 + 腮红圆点当彩纸;入场全走 back.out 弹跳。
+ * Kawaii dialect — candy stickers: white bubbles always with a 5px deep-plum outline + pink soft
+ * shadow, tilted 2-6°; speech bubbles have little tails; ✦✧ stars + blush dots as confetti;
+ * everything enters with a back.out bounce.
  */
 
 import { type Block, mk } from './shared';

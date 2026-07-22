@@ -1,6 +1,6 @@
 /**
- * 像素 Arcade 方言 —— 8-bit 街机屏:零圆角、同色十字外扩阴影做像素阶梯角、
- * 8px 硬偏移压印影;HUD 金币/血条/LEVEL 关卡牌;steps(1) 有限次闪烁。
+ * Arcade dialect — 8-bit arcade screen: zero radius, same-color cross-expanded shadows for stepped
+ * pixel corners, 8px hard-offset stamped shadow; HUD coins/health bar/LEVEL cards; steps(1) finite blinks.
  */
 
 import { type Block, mk } from './shared';

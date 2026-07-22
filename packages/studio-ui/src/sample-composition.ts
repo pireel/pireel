@@ -1,27 +1,28 @@
 /**
- * Hyperframes composition 样板 + 浏览器预览运行时。
+ * Hyperframes composition sample + browser preview runtime.
  *
- * 核心思路(见架构讨论):composition 就是自包含网页,直接塞 <iframe srcdoc> 即在用户
- * 浏览器里实时渲染。编辑态零服务端;同一份 HTML 之后发服务端 headless Chrome 逐帧截图导出
- * → 预览与导出同源同引擎,天然 WYSIWYG。
+ * Core idea (see architecture discussion): a composition is a self-contained web page,
+ * dropped straight into <iframe srcdoc> to render live in the user's browser. Zero server in
+ * edit mode; the same HTML is later sent to server-side headless Chrome for frame-by-frame
+ * export → preview and export share one engine and origin, so WYSIWYG is inherent.
  *
- * 预览运行时(注入进 iframe)按 Hyperframes 的**数据属性约定**驱动:
- *  - 每个 [data-composition-id] 有 data-start/data-duration,且其 GSAP 时间轴注册在
- *    window.__timelines[id]。
- *  - __hfPreview.seek(t):对每个 composition 计算 localT=t-start,可见则显示并把它的
- *    时间轴 seek 到 localT,否则隐藏;<video>/<audio> 同理 seek currentTime。
- * 这套约定与真 Hyperframes 渲染读的是同一批属性 → 同一份 HTML 两边通用。
+ * The preview runtime (injected into the iframe) is driven by Hyperframes' data-attribute convention:
+ *  - Each [data-composition-id] has data-start/data-duration, and its GSAP timeline is registered
+ *    at window.__timelines[id].
+ *  - __hfPreview.seek(t): for each composition compute localT=t-start; if visible, show it and
+ *    seek its timeline to localT, else hide; <video>/<audio> seek currentTime the same way.
+ * This convention reads the same attributes as real Hyperframes rendering → one HTML works on both sides.
  */
 
-/** 起手样板:竖屏口播风,标题卡 + 逐词高亮花字。纯 HTML+GSAP,无需 build。 */
+/** Starter sample: portrait talking-head style, title card + per-word highlight captions. Pure HTML+GSAP, no build. */
 export const STARTER_HTML = `<!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <style>
   * { margin: 0; box-sizing: border-box; }
   html, body { width: 1080px; height: 1920px; overflow: hidden; background: #0a0a0a;
-    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #root { position: relative; width: 1080px; height: 1920px;
     background: linear-gradient(160deg, #1a1147 0%, #3a1d5c 55%, #0a0a0a 100%); }
   .comp { position: absolute; inset: 0; }
@@ -38,18 +39,18 @@ export const STARTER_HTML = `<!doctype html>
 <body>
 <div id="root" data-composition-id="root" data-start="0" data-width="1080" data-height="1920">
 
-  <!-- 标题卡:0~3s -->
+  <!-- title card: 0–3s -->
   <div class="comp" id="title" data-composition-id="title" data-start="0" data-duration="3">
-    <h1>三个让口播涨粉的技巧</h1>
-    <div class="sub">@你的账号</div>
+    <h1>3 tricks to grow your channel</h1>
+    <div class="sub">@yourhandle</div>
   </div>
 
-  <!-- 逐词高亮花字:3~6s -->
+  <!-- per-word highlight captions: 3–6s -->
   <div class="comp" id="cap" data-composition-id="cap" data-start="3" data-duration="3">
     <div class="line">
-      <span class="w" id="w0"><span class="hl"></span>钩子</span>
-      <span class="w" id="w1"><span class="hl"></span>前三秒</span>
-      <span class="w" id="w2"><span class="hl"></span>定生死</span>
+      <span class="w" id="w0"><span class="hl"></span>Hook</span>
+      <span class="w" id="w1"><span class="hl"></span>First 3s</span>
+      <span class="w" id="w2"><span class="hl"></span>Make or break</span>
     </div>
   </div>
 
@@ -76,27 +77,28 @@ window.__timelines = window.__timelines || {};
 </body>
 </html>`;
 
-/** 注入进 iframe 的预览运行时(在 composition 自身脚本之后执行,故能读到 __timelines)。
- *  播放时:视频用原生 play()(顺滑,不逐帧 seek),GSAP 花字时间轴逐帧对齐到视频时钟。
- *  拖拽/暂停时:才 seek 视频 currentTime。 */
+/** Preview runtime injected into the iframe (runs after the composition's own scripts, so it can read __timelines).
+ *  On play: video uses native play() (smooth, no per-frame seek); GSAP caption timelines align frame-by-frame to the video clock.
+ *  On scrub/pause: only then seek the video's currentTime. */
 const PREVIEW_RUNTIME = `
 <script>
 (function () {
-  try { document.body.classList.add('hf-editor'); } catch (e) {} // 编辑态:显示素材位占位(导出不注入此运行时 → 占位不渲染)
+  try { document.body.classList.add('hf-editor'); } catch (e) {} // edit mode: show media-slot placeholders (export doesn't inject this runtime → placeholders not rendered)
   function comps() { return Array.prototype.slice.call(document.querySelectorAll('[data-composition-id]')); }
   function media() { return Array.prototype.slice.call(document.querySelectorAll('video,audio')); }
   function num(el, a, d) { var v = parseFloat(el.getAttribute(a)); return isNaN(v) ? d : v; }
   function tlOf(id) { return (window.__timelines && window.__timelines[id]) || null; }
-  // 主时钟视频:主轨(track 0)里**正在播**的那个 —— 多源主轨下外部插入段播放时主视频停摆,
-  // 时钟必须跟 clip 走(clip 的 data-start+currentTime 恰好就是成片时间),否则 raf 积分漂移
-  // 会提前撞 ended。都没在播回退 #vidEl。
+  // master-clock video: whichever track-0 video is *currently playing* — under a multi-source main track,
+  // the main video stalls while an external inserted clip plays, so the clock must follow the clip
+  // (the clip's data-start+currentTime is exactly the final-cut time), else raf integration drift
+  // hits ended too early. If none is playing, fall back to #vidEl.
   function primaryVideo() {
     var vids = document.querySelectorAll('video[data-track-index="0"]');
     for (var i = 0; i < vids.length; i++) { if (!vids[i].paused && !vids[i].ended) return vids[i]; }
     return document.getElementById('vidEl') || document.querySelector('video');
   }
-  // 成片裁剪的 成片↔源 映射 + 播放跳剪,由文档里注入的 VIDEO_TRIM_SHIM 在 #vidEl 的 currentTime 上处理。
-  // 这里运行时把视频当**成片时间**口径用即可(currentTime 读写都是成片时间)。
+  // final-cut↔source mapping + play-time trim jumps are handled by the VIDEO_TRIM_SHIM injected into the doc, over #vidEl's currentTime.
+  // this runtime just treats the video as *final-cut time* (currentTime reads/writes are all final-cut time).
 
   function duration() {
     var max = 0;
@@ -114,10 +116,10 @@ const PREVIEW_RUNTIME = `
     return max || 5;
   }
 
-  // 只对齐花字/层(GSAP 时间轴 + 可见性),不碰视频 currentTime —— 播放时每帧调,顺滑。
+  // align captions/layers only (GSAP timeline + visibility), don't touch video currentTime — called per frame during playback, smooth.
   function seekTimelines(t) {
-    lastSeekT = t; // 「最近渲染时刻」必须含播放逐帧:capEdit/animPreview 的恢复都回放它,
-    // 只在完整 seek 记的话,暂停瞬间的恢复会跳回播放前的旧时刻(实录:一暂停动画全归零)
+    lastSeekT = t; // "latest render time" must include per-frame playback: capEdit/animPreview restore replays it;
+    // if recorded only on a full seek, a restore at the pause instant jumps back to the pre-play time (observed: all animation resets to zero on pause)
     comps().forEach(function (el) {
       var id = el.getAttribute('data-composition-id');
       var s = num(el, 'data-start', 0);
@@ -135,8 +137,8 @@ const PREVIEW_RUNTIME = `
     });
   }
 
-  // 完整 seek(含视频 currentTime,成片时间口径)—— 拖拽/暂停定位用。
-  var lastSeekT = 0; // 最近一次定位(视频晚就绪时 loadedmetadata 补 seek 用)
+  // full seek (including video currentTime, final-cut time) — for scrub/pause positioning.
+  var lastSeekT = 0; // last position (used by loadedmetadata to re-seek when the video is ready late)
   function seek(t) {
     lastSeekT = t;
     media().forEach(function (m) {
@@ -146,12 +148,13 @@ const PREVIEW_RUNTIME = `
     seekTimelines(t);
   }
 
-  // —— 「选中=强显」机制已整体退役(2026-07-13):在运行时逆向重构"块落定后的样子"
-  //    对生成代码的初态写法(tl.from 内联 / CSS 规则基态+tl.to / 多条 tween)是打不完的
-  //    地鼠。现在**选中不可见块=父层把播放头挪到该块落定时刻**,画面=播放渲染的真实
-  //    结果,零形态特判。本文档只保留 clearProps 口径给 animPreview 收尾用。
-  // ⚠️ clearProps 只许点名动画会碰的属性:'all' 会连**作者写的内联样式**一起清
-  //   (renderMedia 的 .hf-media、LLM 块里的 style="…" 全遭殃,实测图片塌成自然尺寸)。
+  // —— the "selected = force-show" mechanism is fully retired (2026-07-13): reverse-reconstructing
+  //    "how a block looks once settled" at runtime is whack-a-mole against generated-code initial-state
+  //    styles (inline tl.from / CSS base rule + tl.to / multiple tweens). Now *selecting an invisible
+  //    block = the parent moves the playhead to that block's settle time*, so the picture is the real
+  //    playback-rendered result, zero form special-casing. This doc keeps only the clearProps list for animPreview cleanup.
+  // ⚠️ clearProps may only name properties the animation touches: 'all' would also wipe *author-written inline styles*
+  //   (renderMedia's .hf-media and style="…" inside LLM blocks all suffer; observed: images collapse to natural size).
   var FOCUS_CLEAR = 'opacity,visibility,transform,clipPath,filter';
 
   function play(t) {
@@ -159,45 +162,45 @@ const PREVIEW_RUNTIME = `
       var s = num(m, 'data-start', 0);
       try { m.currentTime = Math.max(0, t - s); } catch (e) {}
       var p = m.play && m.play();
-      // 起播被拒(典型:autoplay 权限没落到 opaque origin 文档)必须上报 —— 静默吞掉的话
-      // 表现就是"播放头在走、视频画面冻着",谁也查不到
+      // a rejected play() (typically: autoplay permission not granted to the opaque-origin doc) must be reported —
+      // if silently swallowed, it looks like "the playhead moves but the video is frozen", untraceable
       if (p && p.catch) p.catch(function (err) {
         try { console.warn('[hf] play() rejected', err && err.name, err && err.message); } catch (e2) {}
         fpost({ type: 'playBlocked', name: err && err.name, msg: String((err && err.message) || '').slice(0, 140) });
       });
     });
-    // canvas 渲染模式(__parentClock):时钟/视频帧归父层引擎,本文档不自驱不报 clock/ended;
-    // 上面 media() 只剩画中画素材,照常起播即可。父层每帧发 hf:seekTimelines 对齐叠加层。
+    // canvas render mode (__parentClock): clock/video frames belong to the parent engine; this doc doesn't self-drive or report clock/ended;
+    // media() above holds only picture-in-picture assets, just start them normally. The parent sends hf:seekTimelines each frame to align overlays.
     if (window.__parentClock) { drive.on = false; return; }
     startDrive(t);
   }
   function pause() {
     drive.on = false;
     media().forEach(function (m) { try { m.pause(); } catch (e) {} });
-    // 暂停=冻结在当前播放状态(用户定的),踩过"一暂停动画跳回基态"。
+    // pause = freeze at the current playback state (user's intent); we've been bitten by "animation jumps back to base state on pause".
   }
 
-  // —— 播放驱动循环(iframe 自驱,单一时钟源):有视频跟视频成片钟,没有/没播起来就自己积分;
-  //    每帧对齐花字时间轴 + 单向上报位置(src 标注钟源,父层只观察);播完上报 ended。
-  //    父层不再每帧发号施令 —— play/pause/seek 是仅有的三个一次性命令。
-  // 解码僵尸自愈:paused=false、ready=4、currentTime 却不走(实录:重建文档首次装载的
-  // 解码器可能生而僵死,疑与旧文档解码器未释放的竞争有关;微量 seek 踢不醒,只有重建
-  // 媒体装载能救)。驱动循环 600ms 检出 → 就地 load() 循环重建,恢复 <1s。
+  // —— playback drive loop (iframe self-driven, single clock source): follow the video's final-cut clock if there's a video, else self-integrate;
+  //    align the caption timeline each frame + report position one-way (src marks the clock source, parent only observes); report ended when done.
+  //    the parent no longer commands each frame — play/pause/seek are the only three one-shot commands.
+  // decode-zombie self-heal: paused=false, ready=4, yet currentTime doesn't advance (observed: the decoder on a rebuilt doc's first load
+  //    can be born dead, likely a race with the old doc's decoder not being released; a tiny seek won't wake it, only rebuilding the
+  //    media load helps). The drive loop detects it at 600ms → rebuilds the load in place via load(), recovers in <1s.
   var zombie = { ct: -1, ts: 0, heals: 0 };
-  // 僵尸检测/自愈必须用**原始** currentTime:裁剪后 raw 落在首段之前时,成片口径(s2e)会
-  // 合法地停在 0,旧口径把正常追帧误判成僵尸 → 反复重建装载,播放彻底起不来(实录)。
+  // zombie detection/heal must use *raw* currentTime: after trimming, when raw sits before the first segment, the final-cut mapping (s2e)
+  // legitimately stops at 0, and the old measure misjudges normal tracking as a zombie → repeatedly rebuilds the load, playback never starts (observed).
   var rawDrv = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime');
   function rawTime(m) { try { return rawDrv.get.call(m); } catch (e) { return m.currentTime; } }
   function healZombie(v) {
     if (zombie.heals >= 3) return;
-    if (!v.currentSrc) return; // 没有源的元素(blob 失效未复活)不是僵尸,重建装载救不了它
+    if (!v.currentSrc) return; // an element with no source (dead blob not yet revived) isn't a zombie; rebuilding the load can't save it
     zombie.heals++;
     try {
-      console.warn('[hf] 解码僵尸自愈:重建媒体装载', { ct: v.currentTime, heal: zombie.heals });
+      console.warn('[hf] decode-zombie self-heal: rebuilding media load', { ct: v.currentTime, heal: zombie.heals });
       var edited = v.currentTime;
       var url = v.src;
       v.removeAttribute('src');
-      v.load(); // 释放僵死的解码器会话
+      v.load(); // release the dead decoder session
       v.src = url;
       v.addEventListener('loadedmetadata', function () {
         try {
@@ -215,7 +218,7 @@ const PREVIEW_RUNTIME = `
     drive.last = performance.now();
     zombie.ct = -1;
     zombie.ts = performance.now();
-    if (drive.on) return; // 已在驱动:只重定位
+    if (drive.on) return; // already driving: just reposition
     drive.on = true;
     (function loop() {
       if (!drive.on) return;
@@ -244,18 +247,18 @@ const PREVIEW_RUNTIME = `
     })();
   }
 
-  // 播放主时钟 = 口播视频的**成片**进度(currentTime 经 shim 已是成片时间);无视频返回 null。
+  // playback master clock = the talking-head video's *final-cut* progress (currentTime is already final-cut time via the shim); null if no video.
   function clock() {
     var v = primaryVideo();
     return v ? v.currentTime + num(v, 'data-start', 0) : null;
   }
 
-  // —— autofit 实测:每个块内容溢出它的 box 多少 → 缩放系数 k。scrollW/H 是**布局**值,不受 GSAP transform
-  //    或已套的 scale 影响,所以可重复测且幂等。**测完就地套用**(不等父层回推——双缓冲下父层
-  //    回推的目标可能是另一个缓冲,时序丢缩放 → 字体溢出裸奔);父层只记进 Block.fitScale 给导出。
+  // —— autofit measurement: how far each block's content overflows its box → scale factor k. scrollW/H are *layout* values, unaffected by GSAP transform
+  //    or an already-applied scale, so it's repeatable and idempotent. *Apply in place once measured* (don't wait for the parent to push back — under double
+  //    buffering the parent's push-back target may be the other buffer, dropping the scale on a timing miss → fonts overflow unclamped); the parent only records it into Block.fitScale for export.
   function fpost(m) { m.source = 'hf'; try { parent.postMessage(m, '*'); } catch (e) {} }
-  // box 块是双层(容器=裁切窗口 + [data-hf-content] 内容层):autofit 的测量/套用都对内容层 ——
-  // 容器 overflow:hidden 且入场动效可能占用容器 transform,内容层才是内容的真布局框
+  // a box block is two-layer (container = crop window + [data-hf-content] content layer): autofit measures/applies on the content layer —
+  // the container is overflow:hidden and its transform may be used by the enter animation, so the content layer is the true layout frame
   function fitTarget(el) { return el.querySelector('[data-hf-content]') || el; }
   function applyFit(id, k) {
     var el = document.querySelector('[data-composition-id="' + id + '"]');
@@ -273,11 +276,11 @@ const PREVIEW_RUNTIME = `
       var t = fitTarget(el);
       var cw = t.clientWidth, ch = t.clientHeight;
       if (!cw || !ch) return;
-      // 容差 2px:忽略亚像素/取整造成的伪溢出,只在真超出时算缩放
+      // 2px tolerance: ignore subpixel/rounding pseudo-overflow, only compute scale on real overflow
       var kw = t.scrollWidth > cw + 2 ? cw / t.scrollWidth : 1;
       var kh = t.scrollHeight > ch + 2 ? ch / t.scrollHeight : 1;
-      fits[id] = Math.floor(Math.min(kw, kh) * 100) / 100; // 量化 0.01 防抖
-      applyFit(id, fits[id]); // 就地生效
+      fits[id] = Math.floor(Math.min(kw, kh) * 100) / 100; // quantize to 0.01 to de-jitter
+      applyFit(id, fits[id]); // apply in place
     });
     fpost({ type: 'fit', fits: fits });
   }
@@ -285,8 +288,8 @@ const PREVIEW_RUNTIME = `
 
   window.__hfPreview = { seek: seek, seekTimelines: seekTimelines, play: play, pause: pause, clock: clock, duration: duration, measureFit: measureFit };
 
-  // 父层控制协议:iframe 带 sandbox(opaque origin)后父层拿不到 contentWindow.__hfPreview,
-  // 控制全走消息。__hfPreview 仍保留(blockPreviewDoc 的单块预览在文档内自调)。
+  // parent control protocol: once the iframe is sandboxed (opaque origin) the parent can't reach contentWindow.__hfPreview,
+  // so all control goes through messages. __hfPreview is kept (blockPreviewDoc's single-block preview calls it in-doc).
   window.addEventListener('message', function (e) {
     var d = e.data || {};
     if (d.type === 'hf:seek') { try { seek(Number(d.t) || 0); } catch (err) {} }
@@ -294,15 +297,15 @@ const PREVIEW_RUNTIME = `
     else if (d.type === 'hf:play') { try { play(Number(d.t) || 0); } catch (err) {} }
     else if (d.type === 'hf:pause') { try { pause(); } catch (err) {} }
     else if (d.type === 'hf:shotVars' && d.vars) {
-      // 取景大小拖动中:直接 gsap.set 视频取景变换(零 setState 契约,同 hf:capStyle);
-      // 松手后父层提交 comp,重建的时间轴关键帧/inline 变换与这里的终值一致,切换无跳变。
-      // target:外部插入段的取景打在它自己的 clip <video> 上(缺省主视频)
+      // during framing-size drag: gsap.set the video framing transform directly (zero-setState contract, same as hf:capStyle);
+      // on release the parent commits the comp, and the rebuilt timeline keyframes / inline transform match the final values here, so the switch has no jump.
+      // target: an external inserted clip's framing is applied to its own clip <video> (defaults to the main video)
       try { window.gsap && window.gsap.set(d.target || '#vidEl', d.vars); } catch (err) {}
     }
     else if (d.type === 'hf:vidTimeline') {
-      // 取景就地换轨:杀旧 vid 时间轴、装新体、按当前时刻重演。取景类改动不再整文档重建
-      // ——重建会让视频画布空一帧(闪),快速连点取景卡尤其明显。体经 new Function 编译,
-      // 与 assemble 的 timelineScript 同款隔离(坏体=空时间轴,不放倒运行时)。
+      // in-place framing swap: kill the old vid timeline, install the new body, re-run at the current time. Framing changes no longer rebuild the whole doc
+      // — a rebuild blanks the video canvas for one frame (flash), especially visible on rapid framing-card clicks. The body is compiled via new Function,
+      // isolated the same way as assemble's timelineScript (a bad body = empty timeline, doesn't take down the runtime).
       try {
         var oldVt = window.__timelines && window.__timelines['vid'];
         if (oldVt && oldVt.kill) { try { oldVt.kill(); } catch (errK) {} }
@@ -313,8 +316,8 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:animPreview' && d.id) {
-      // 动效卡点击:当场把该入/出场演一遍,演完回聚焦全显示态。
-      // 变换值与 templates.ts 的 MEDIA_ENTER/MEDIA_EXIT 同源,改那边记得同步这里
+      // animation-card click: play that enter/exit once on the spot, then return to the focused fully-shown state.
+      // the transform values share a source with templates.ts's MEDIA_ENTER/MEDIA_EXIT; remember to sync here when changing those
       try {
         var apHost = document.querySelector('[data-composition-id="' + d.id + '"]');
         var apT = apHost && (apHost.querySelector('.hf-media') || apHost);
@@ -324,8 +327,8 @@ const PREVIEW_RUNTIME = `
           var apV = (d.phase === 'out' ? AP_OUT : AP_IN)[d.effect];
           var apD = Math.max(0.15, Math.min(Number(d.dur) || 0.5, 2));
           window.gsap.killTweensOf(apT);
-          // 演完清临时内联,再把该块的时间轴强制渲回当前时刻的真实状态(选中已把播放头
-          // 挪到落定时刻,真实状态就是可见的;render 带 force,同值不被 GSAP 短路)
+          // after playing, clear the temp inline styles, then force the block's timeline to render back to the real state at the current time (selecting already moved
+          // the playhead to the settle time, so the real state is visible; render with force so equal values aren't short-circuited by GSAP)
           var apEnd = function () {
             try {
               window.gsap.set(apT, { clearProps: FOCUS_CLEAR });
@@ -340,12 +343,12 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:capStyle') {
-      // 花字全局样式即时预览(拖动中零 setState,同组件的 hf:nudge/hf:boxSize 契约):
-      // 位置直改 .cap-line 的 left/bottom;字号直改每个 .w 的 font-size(缩放=字体大小,
-      // 不动 transform → 与 GSAP 入场零冲突)。底板 padding 等重建时按新字号重烤。
+      // caption global-style live preview (zero setState during drag, same contract as the component's hf:nudge/hf:boxSize):
+      // position edits .cap-line's left/bottom directly; font size edits each .w's font-size (scaling = font size,
+      // no transform → zero conflict with the GSAP enter). Backplate padding etc. is re-baked at the new font size on rebuild.
       try {
         document.querySelectorAll('.cap-line').forEach(function (cl) {
-          // 同值跳过:重复写 style 也会脏样式触发重排,拖动每帧一次就是持续卡顿
+          // skip equal values: rewriting style dirties it and triggers reflow; once per drag frame means continuous stutter
           if (typeof d.xPct === 'number') {
             var lv = d.xPct + '%';
             if (cl.style.left !== lv) cl.style.left = lv;
@@ -356,7 +359,7 @@ const PREVIEW_RUNTIME = `
           }
           if (typeof d.hPct === 'number') {
             var mh = d.hPct > 0 ? d.hPct + '%' : '';
-            if (cl.style.minHeight !== mh) cl.style.minHeight = mh; // 框高:底板(min-height)跟手
+            if (cl.style.minHeight !== mh) cl.style.minHeight = mh; // frame height: the backplate (min-height) tracks the drag
           }
           if (typeof d.fontPx === 'number') {
             cl.querySelectorAll('.w').forEach(function (wEl) {
@@ -368,8 +371,8 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:capSubStyle') {
-      // 译文行即时预览:与主行 hf:capStyle **同一契约**——位置直改 left/bottom、框高改
-      // min-height;字号不走 live(与主行同因:改字号要重分段,等松手重建一步到位)
+      // translation-line live preview: *same contract* as the main line's hf:capStyle — position edits left/bottom directly, frame height edits
+      // min-height; font size isn't live (same reason as the main line: changing size needs re-segmentation, done in one shot on release rebuild)
       try {
         document.querySelectorAll('.cap-sub').forEach(function (el) {
           if (typeof d.xPct === 'number') {
@@ -388,9 +391,9 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:capEdit') {
-      // 编辑态强显:字幕带 fade 入场,播放头常停在透明度很低的时刻——选中字幕时把
-      // 当前段强制到不透明度 1(段序号由父层按同一拆段口径算好传来);取消选中/播放时
-      // 重跑 seekTimelines 恢复时间轴真实状态(GSAP 会把 inline opacity 写回正确值)。
+      // edit-mode force-show: captions fade in, so the playhead often sits at a very-low-opacity moment — on selecting a caption, force
+      // the current segment to opacity 1 (the segment index comes from the parent, computed with the same segmentation); on deselect/play
+      // re-run seekTimelines to restore the timeline's real state (GSAP writes the inline opacity back to the correct value).
       try {
         document.querySelectorAll('.cap-line[data-hf-edit]').forEach(function (pe) {
           pe.removeAttribute('data-hf-edit');
@@ -404,14 +407,14 @@ const PREVIEW_RUNTIME = `
             ceSeg.style.visibility = 'visible';
           }
         } else {
-          seekTimelines(lastSeekT); // 恢复:时间轴按当前时刻重写各段状态
+          seekTimelines(lastSeekT); // restore: the timeline rewrites each segment's state at the current time
         }
       } catch (err) {}
     }
-    else if (d.type === 'hf:measureFit') { triggerFit(); } // 父层几何-only 提交后重测 autofit(box 变小内容溢出要缩)
+    else if (d.type === 'hf:measureFit') { triggerFit(); } // re-measure autofit after a geometry-only parent commit (a smaller box overflows and needs scaling)
     else if (d.type === 'hf:measure' && d.id) {
-      // 量某块可见内容的真实矩形(花字选中框用:字幕行是 iframe 内 CSS 排版,父层只能实测)。
-      // 花字框是**全局样式**的手柄(用户定的),量第一段作代表落位,不跟当前词跳
+      // measure a block's visible content rect (for the caption selection box: caption lines are laid out by CSS inside the iframe, the parent can only measure).
+      // the caption box is the *global-style* handle (user's intent), so measure the first segment as a representative position, don't jump with the current word
       try {
         var msEl = document.getElementById(String(d.id));
         var msT = msEl && (d.sub ? msEl.querySelector('.cap-sub') : (msEl.querySelector('.cap-line') || msEl));
@@ -424,7 +427,7 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:remove' && d.id) {
-      // 即时删块(不等 300ms 防抖重建+双缓冲切换):删除要跟手;重建照走,换进来的文档本来就没这块
+      // instant block delete (don't wait for the 300ms debounced rebuild + double-buffer swap): delete must feel immediate; the rebuild still runs, and the swapped-in doc simply doesn't have this block
       try {
         var rmEl = document.getElementById(String(d.id));
         if (rmEl && rmEl.classList.contains('comp')) rmEl.remove();
@@ -435,8 +438,8 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:teardown') {
-      // 即将被替换的旧缓冲:立即释放媒体装载(解码器会话不等 GC —— 新文档的解码器
-      // 若与未释放的旧会话竞争,可能生而僵死)
+      // the old buffer about to be replaced: release the media load immediately (decoder sessions don't wait for GC — the new doc's decoder
+      // may be born dead if it races an unreleased old session)
       try {
         pause();
         var tv = primaryVideo();
@@ -444,20 +447,20 @@ const PREVIEW_RUNTIME = `
       } catch (err) {}
     }
     else if (d.type === 'hf:fit' && d.fits) {
-      // 父层推送的已知缩放(装载初期、fonts.ready 实测前先按上次记录顶上,防溢出一闪)
+      // known scale pushed by the parent (early in load, before fonts.ready measurement, apply the last recorded value to prevent an overflow flash)
       Object.keys(d.fits).forEach(function (id) { applyFit(id, d.fits[id]); });
     }
     else if (d.type === 'hf:ping') {
-      // 活体应答:父层切换缓冲前靠它确认本文档的脚本/监听真的就绪
-      // (load 事件会被空载竞态/字体阻塞骗过,曾把画面切给聋文档)
+      // liveness reply: the parent uses it to confirm this doc's scripts/listeners are really ready before switching buffers
+      // (the load event can be fooled by an empty-load race / font blocking, which once switched the picture to a deaf doc)
       fpost({ type: 'pong', nonce: d.nonce });
     }
     else if (d.type === 'hf:video' && d.file) {
-      // 本地 blob 视频:sandbox iframe 与父层不同源,父层的 blob: URL 这里读不到 →
-      // 父层把 File 结构化克隆传进来,本文档自己造 object URL(文档销毁自动回收)。
-      // 幂等:已注入过就跳过(父层的播放看门狗会重发,重设 src 会打断正在播的视频)。
+      // local blob video: the sandboxed iframe is cross-origin from the parent, so the parent's blob: URL can't be read here →
+      // the parent structured-clones the File in, and this doc makes its own object URL (auto-reclaimed when the doc is destroyed).
+      // idempotent: skip if already injected (the parent's play watchdog re-sends, and resetting src would interrupt a playing video).
       var v = document.getElementById('vidEl');
-      // force = 看门狗判定解码僵尸,强制重建 src(新 object URL + 重新装载)踹醒它
+      // force = the watchdog judged a decode zombie, force-rebuild src (new object URL + reload) to kick it awake
       if (v && (!v.__hfInjected || d.force)) {
         try {
           if (d.force && v.src) { try { URL.revokeObjectURL(v.src); } catch (err2) {} }
@@ -468,8 +471,8 @@ const PREVIEW_RUNTIME = `
       }
     }
     else if (d.type === 'hf:clipFile' && d.file && d.id) {
-      // 本地外部插入段(多源主轨):与 hf:video 同款——文件留在本地不上传,File 结构化克隆
-      // 传进来自己造 object URL。幂等:装载过就跳过。
+      // local external inserted clip (multi-source main track): same as hf:video — the file stays local, unuploaded; the File is structured-cloned
+      // in and this doc makes its own object URL. Idempotent: skip if already loaded.
       var ce = document.getElementById(String(d.id));
       if (ce && !ce.__hfInjected) {
         try {
@@ -481,7 +484,7 @@ const PREVIEW_RUNTIME = `
     }
   });
   try { seek(0); } catch (e) {}
-  // 字体就绪 + 两帧后测(等版式/CJK 字形稳定,否则量出来偏)
+  // measure after fonts ready + two frames (wait for layout/CJK glyphs to settle, else the measurement is off)
   try {
     if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(triggerFit);
     else triggerFit();
@@ -489,18 +492,18 @@ const PREVIEW_RUNTIME = `
 })();
 </script>
 <script>
-/* 编辑桥(v0 式直接在预览里改):单击选块,点中 [data-edit] 文字直接就地改(光标落点击处)→ 父层回写 slot;
-   按住块身拖 >4px → boxDragStart/boxDrag(dx,dy 为 comp px)/boxDragEnd → 父层换算写回 Block.box。
-   子→父:{source:'hf',type:'select'|'edit'|'boxDragStart'|'boxDrag'|'boxDragEnd',...}
-   父→子:{type:'hf:selectBlock'|'hf:clearSel'} */
+/* edit bridge (v0-style, edit directly in the preview): single-click to select a block, click [data-edit] text to edit in place (caret at the click point) → parent writes the slot back;
+   hold on the block body and drag >4px → boxDragStart/boxDrag (dx,dy in comp px)/boxDragEnd → parent converts and writes back to Block.box.
+   child→parent: {source:'hf',type:'select'|'edit'|'boxDragStart'|'boxDrag'|'boxDragEnd',...}
+   parent→child: {type:'hf:selectBlock'|'hf:clearSel'} */
 (function () {
   var st = document.createElement('style');
-  // 选中描边:满画布块(字幕等)靠它显选中,常显;有 box 的块(卡片)idle 时父层已画选中框
-  // (BoxEditOverlay,更清晰),这条描边只在体拖中(父层框让位)才亮 —— 否则和父层框叠成双框。
+  // selection outline: full-canvas blocks (captions etc.) rely on it to show selection, always on; for box blocks (cards) the parent already draws a selection frame when idle
+  // (BoxEditOverlay, clearer), so this outline only lights up during body-drag (when the parent frame steps aside) — else it doubles up with the parent frame.
   st.textContent = '[data-hf-sel]:not([data-hf-box]),[data-hf-sel][data-hf-dragging]{outline:3px solid var(--accent,#37e1ff);outline-offset:3px;border-radius:4px}'
     + '[data-hf-sel]{cursor:move}'
     + '[data-edit]{cursor:text} [data-composition-id]:not(#root):not([data-composition-id="vid"]){cursor:pointer}'
-    // 拖动块时别选中文本:全局禁选,唯就地改字的 contenteditable 恢复可选(不然改字选不了字)
+    // don't select text while dragging a block: disable selection globally, only the in-place-edit contenteditable restores selectability (else you can't select text to edit)
     + 'body{-webkit-user-select:none;user-select:none}'
     + '[contenteditable="true"]{-webkit-user-select:text;user-select:text}'
     + '[contenteditable="true"]{outline:2px dashed var(--accent,#37e1ff);cursor:text}';
@@ -512,7 +515,7 @@ const PREVIEW_RUNTIME = `
     sel = el || null;
     if (sel) sel.setAttribute('data-hf-sel', '');
   }
-  // 最近的可选块(排除 root 与视频轨)
+  // nearest selectable block (excluding root and the video track)
   function closestComp(el) {
     while (el && el !== document.body) {
       if (el.getAttribute) {
@@ -525,21 +528,21 @@ const PREVIEW_RUNTIME = `
   }
   function post(m) { m.source = 'hf'; try { parent.postMessage(m, '*'); } catch (e) {} }
 
-  var dragEndAt = 0; // 体拖松手后浏览器会补发一个 click,不当单击(否则拖完就误入改字)
+  var dragEndAt = 0; // after a body-drag release the browser fires a stray click, don't treat it as a single click (else dragging accidentally enters text edit)
   document.addEventListener('click', function (e) {
     if (performance.now() - dragEndAt < 350) return;
-    if (e.target && e.target.getAttribute && e.target.getAttribute('contenteditable') === 'true') return; // 编辑中不抢选
+    if (e.target && e.target.getAttribute && e.target.getAttribute('contenteditable') === 'true') return; // don't grab selection while editing
     var comp = closestComp(e.target);
     if (comp) {
       highlight(comp);
-      // 字幕块分靶:点译文行(.cap-sub)= 选第二字幕,父层只出译文手柄;点主行/其它 = 主
+      // caption block sub-targeting: clicking the translation line (.cap-sub) = select the second caption, parent shows only the translation handle; clicking the main line/other = main
       var selPart = e.target && e.target.closest && e.target.closest('.cap-sub') ? 'sub' : 'main';
       post({ type: 'select', blockId: comp.getAttribute('data-composition-id'), part: selPart });
-      // 单击文字即改(Notion 式,不需要双击);拖动语义不受影响 —— 体拖有 4px 阈值,拖过就不算 click
+      // single click to edit text (Notion-style, no double click needed); drag semantics unaffected — body-drag has a 4px threshold, past which it's not a click
       var ed = e.target && e.target.closest ? e.target.closest('[data-edit]') : null;
       if (ed && comp.contains(ed)) enterEdit(ed, comp, e);
-      // 图片 slot:点中块内 <img>(素材位整图 .hf-media 除外,那是块本体)→ 上报序号 + 归一矩形,
-      // 父层据此贴着图片位置出图片专属工具条(换图/删除),零 LLM
+      // image slot: clicking an <img> inside the block (except the full media-slot image .hf-media, which is the block body) → report index + normalized rect,
+      // and the parent shows an image-specific toolbar (replace/delete) glued to the image position, zero LLM
       var im = e.target && e.target.closest ? e.target.closest('img') : null;
       if (im && comp.contains(im) && !(im.classList && im.classList.contains('hf-media'))) {
         var W0 = rootDim('data-width', 1080), H0 = rootDim('data-height', 1920);
@@ -549,26 +552,26 @@ const PREVIEW_RUNTIME = `
         post({ type: 'imgSel', blockId: comp.getAttribute('data-composition-id'), index: idx, rect: { x: ir.left / W0, y: ir.top / H0, w: ir.width / W0, h: ir.height / H0 } });
       }
     }
-    else { highlight(null); post({ type: 'select', blockId: null }); } // 点空白/视频 = 取消选中(否则选中框没有消失的途径)
+    else { highlight(null); post({ type: 'select', blockId: null }); } // click blank/video = deselect (else the selection frame has no way to disappear)
   }, true);
 
-  // —— 块移动引擎(体拖 + 父层手柄拖共用)——
-  // 拖动期间只在本文档里移动(零 React 重渲,顺滑),吸附画布中线并上报参考线;
-  // 结束把最终位移交父层一次性写回 Block.box。位移保留到父层重建文档后原子切换,
-  // 两边位置一致,无跳变。只有 [data-hf-box](有 box 的块)可拖;dx/dy 是 comp px。
-  // ⚠️ 位移用 CSS translate **属性**(不是 transform):autofit 的 applyFit 会整串覆写
-  // el.style.transform,若共用 transform,后台缓冲装载测量回推 fit 时会把拖动位移抹掉
-  // (表现为松手后先跳回原位、文档切换后又跳到新位)。两属性各管各的,互不冲掉。
+  // —— block move engine (shared by body-drag + parent handle-drag) ——
+  // during the drag, move only within this doc (zero React re-render, smooth), snap to the canvas center line and report guide lines;
+  // on end, hand the final displacement to the parent to write back to Block.box in one shot. The displacement is kept until the parent rebuilds the doc and swaps atomically,
+  // so both sides agree, no jump. Only [data-hf-box] (box blocks) is draggable; dx/dy are comp px.
+  // ⚠️ displacement uses the CSS translate *property* (not transform): autofit's applyFit overwrites the whole
+  // el.style.transform, and if they shared transform, the background buffer's load-measurement fit push-back would erase the drag displacement
+  // (looks like jumping back to origin on release, then jumping to the new position after the doc swap). Each property minds its own, no clobbering.
   var nudge = null;
   function rootDim(a, f) { var r = document.getElementById('root'); var v = r && parseFloat(r.getAttribute(a)); return v || f; }
   function baseTranslate(el) {
-    // 注意:本段活在模板字符串里,正则的反斜杠必须双写,否则 \\d 会被外层字符串转义吃掉
+    // note: this block lives in a template string, so the regex backslashes must be doubled, else \\d gets eaten by the outer string escaping
     var m = /(-?[\\d.]+)px(?:\\s+(-?[\\d.]+)px)?/.exec(el.style.translate || '');
     return { x: m ? parseFloat(m[1]) : 0, y: m && m[2] ? parseFloat(m[2]) : 0 };
   }
   function beginNudge(el) {
     if (!el || !el.hasAttribute('data-hf-box')) return false;
-    var b = baseTranslate(el); // 上一次拖动尚未随文档重建落地时,新拖动叠在其上
+    var b = baseTranslate(el); // when the previous drag hasn't yet landed via doc rebuild, the new drag stacks on top of it
     nudge = {
       el: el, id: el.getAttribute('data-composition-id'),
       rect0: el.getBoundingClientRect(), bx: b.x, by: b.y,
@@ -580,15 +583,15 @@ const PREVIEW_RUNTIME = `
   function applyNudge(dx, dy) {
     if (!nudge) return;
     var r = nudge.rect0, W = nudge.W, H = nudge.H;
-    // 不做边界钳制:组件允许拖出画布,出界部分被画布 overflow 截断(toolbar 由父层钳住,永远够得着)
-    // 中心吸附:块中心贴近画布中线 1.5% 内吸上(体拖专属;父层细边条拖动仍是不吸的精调通道)
+    // no boundary clamping: components may be dragged off-canvas, the off-canvas part is clipped by the canvas overflow (the toolbar is clamped by the parent, always reachable)
+    // center snap: when the block center is within 1.5% of the canvas center line it snaps on (body-drag only; the parent's thin edge-bar drag stays a non-snapping fine-tune channel)
     var cx = r.left + r.width / 2 + dx, cy = r.top + r.height / 2 + dy;
     var snapX = Math.abs(cx - W / 2) < W * 0.015, snapY = Math.abs(cy - H / 2) < H * 0.015;
     if (snapX) dx = W / 2 - (r.left + r.width / 2);
     if (snapY) dy = H / 2 - (r.top + r.height / 2);
     nudge.dx = dx; nudge.dy = dy;
-    // ghost 语义(同字幕手柄,用户定的):内容不实时动,只上报位移 —— 父层画虚线 ghost 跟手,
-    // 松手 boxDragEnd 一次提交(免重建通道把终值一次打回本文档)
+    // ghost semantics (same as the caption handle, user's intent): content doesn't move live, only the displacement is reported — the parent draws a dashed ghost that tracks the drag,
+    // and on release boxDragEnd commits once (the rebuild-free channel pushes the final value back to this doc in one shot)
     post({ type: 'boxDrag', blockId: nudge.id, dx: dx, dy: dy, snapX: snapX, snapY: snapY });
   }
   function endNudge() {
@@ -597,18 +600,18 @@ const PREVIEW_RUNTIME = `
     nudge = null;
   }
 
-  // 体拖:按住块身拖 >4px = 移动这个块。拖没拖过阈值不发,单击选块/双击改字语义原样保留。
-  // 丢 pointerup 三防:①拖起即 setPointerCapture(指针划出 iframe 也持续收 move/up);
-  // ②move 里 buttons===0 即刻收尾(万一 up 还是错过,松开后不会再跟着鼠标走);③pointercancel 同 up。
-  document.addEventListener('dragstart', function (e) { e.preventDefault(); }, true); // 预览里禁原生拖拽(图片拖影会劫持体拖)
+  // body-drag: hold on the block body and drag >4px = move this block. Nothing is sent below the threshold, and single-click-to-select / double-click-to-edit semantics are preserved.
+  // three guards against a lost pointerup: 1) setPointerCapture on drag start (keep receiving move/up even if the pointer leaves the iframe);
+  // 2) in move, finish immediately when buttons===0 (if up is still missed, it won't keep following the mouse after release); 3) pointercancel same as up.
+  document.addEventListener('dragstart', function (e) { e.preventDefault(); }, true); // disable native drag in the preview (image drag-ghost would hijack the body-drag)
   document.addEventListener('pointerdown', function (e) {
     if (e.button !== 0) return;
-    if (e.target && e.target.closest && e.target.closest('[contenteditable="true"]')) return; // 编辑中不拖
+    if (e.target && e.target.closest && e.target.closest('[contenteditable="true"]')) return; // don't drag while editing
     var comp = closestComp(e.target);
     if (!comp || !comp.hasAttribute('data-hf-box')) return;
     var sx = e.clientX, sy = e.clientY, started = false, raf = 0, lx = 0, ly = 0;
     function mv(ev) {
-      if (ev.buttons === 0) { up(); return; } // 按钮已松(错过 up):立即结束,别跟着裸移动走
+      if (ev.buttons === 0) { up(); return; } // button already released (missed up): finish immediately, don't follow bare movement
       var dx = ev.clientX - sx, dy = ev.clientY - sy;
       if (!started) {
         if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
@@ -634,7 +637,7 @@ const PREVIEW_RUNTIME = `
     document.addEventListener('pointercancel', up);
   }, true);
 
-  // 就地改字:单击 [data-edit] 即进入,光标落在点击处(落不到再退到末尾),blur 提交回父层
+  // in-place text edit: single click on [data-edit] enters it, caret at the click point (falls back to the end if it can't land), blur commits back to the parent
   function enterEdit(ed, comp, ev) {
     if (ed.getAttribute('contenteditable') === 'true') return;
     ed.setAttribute('contenteditable', 'true');
@@ -661,8 +664,8 @@ const PREVIEW_RUNTIME = `
     });
   }
 
-  // 快捷键转发:点过预览后焦点在本 iframe(独立焦点上下文),父层 keydown 收不到 ——
-  // 把编辑快捷键原样转发回父层统一处理;就地改字(contenteditable)中不转发。
+  // shortcut forwarding: after clicking the preview, focus is in this iframe (separate focus context) and the parent's keydown doesn't fire —
+  // forward editing shortcuts back to the parent to handle uniformly; don't forward while editing in place (contenteditable).
   var FWD_KEYS = { ' ': 1, ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, Delete: 1, Backspace: 1, Escape: 1 };
   document.addEventListener('keydown', function (e) {
     if (e.target && e.target.closest && e.target.closest('[contenteditable="true"]')) return;
@@ -676,14 +679,14 @@ const PREVIEW_RUNTIME = `
     if (d.type === 'hf:selectBlock') highlight(d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null);
     else if (d.type === 'hf:clearSel') highlight(null);
     else if (d.type === 'hf:nudge') {
-      // 父层手柄拖动:走同一套移动引擎(dx/dy 已是 comp px)
+      // parent handle-drag: uses the same move engine (dx/dy are already comp px)
       if (d.phase === 'start') beginNudge(d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null);
       else if (d.phase === 'move') applyNudge(Number(d.dx) || 0, Number(d.dy) || 0);
       else if (d.phase === 'end') endNudge();
     }
     else if (d.type === 'hf:blockTiming') {
-      // 时间窗就地补丁(时间轴拖块/裁剪的提交):运行时每帧动态读 data-start/data-duration,
-      // 改属性 + 按当前时刻重演即可,不用整文档重建。容器与其内层媒体([data-start] 后代)同步。
+      // time-window in-place patch (commit of timeline block-drag/trim): the runtime reads data-start/data-duration dynamically each frame,
+      // so just change the attributes + re-run at the current time, no full doc rebuild. The container and its inner media ([data-start] descendants) stay in sync.
       var bt2 = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
       if (bt2) {
         bt2.setAttribute('data-start', String(Number(d.start) || 0));
@@ -696,15 +699,15 @@ const PREVIEW_RUNTIME = `
       }
     }
     else if (d.type === 'hf:blockStyle') {
-      // 表观就地补丁(浮动条 bg/边框/圆角/透明度的提交):容器 frame 属性 + 内容层 bg token 族。
-      // 值由父层按 assemble 同一 helper 算好(blockBgCss),与重组输出恒等 —— 空值=清干净。
+      // appearance in-place patch (commit of the floating bar's bg/border/radius/opacity): container frame properties + content-layer bg token family.
+      // values are computed by the parent with the same helper as assemble (blockBgCss), identical to the rebuild output — an empty value = clear it.
       var bs = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
       if (bs) {
         bs.style.border = d.border || '';
         bs.style.borderRadius = d.radius || '';
         bs.style.opacity = d.opacity == null ? '' : String(d.opacity);
         var bc = bs.querySelector('[data-hf-content]') || bs;
-        // 先清后涂:上一次 bg 打上的 token/背景全部撤掉,再按新串逐对 setProperty
+        // clear then paint: remove all tokens/background applied by the previous bg, then setProperty pair by pair from the new string
         ['--panel', '--paper', '--fg', '--muted', '--line', '--panel-2', '--grid'].forEach(function (k2) { bc.style.removeProperty(k2); });
         bc.style.removeProperty('background');
         String(d.bgCss || '').split(';').forEach(function (pair) {
@@ -717,9 +720,9 @@ const PREVIEW_RUNTIME = `
       }
     }
     else if (d.type === 'hf:boxSize') {
-      // 父层边/角柄裁切:过程只在本文档直改几何(零 React 重渲),父层松手才一次性提交 Block.box。
-      // 容器(裁切窗口)动,内容层 [data-hf-content] 同步反向补偿(cx/cy/cw/ch,相对窗口的%)——
-      // 内容锚定画布不动,拖哪条边裁哪条边
+      // parent edge/corner-handle crop: during the gesture only edit geometry in this doc (zero React re-render), the parent commits Block.box in one shot on release.
+      // the container (crop window) moves, and the content layer [data-hf-content] compensates inversely in sync (cx/cy/cw/ch, % relative to the window) —
+      // the content stays anchored to the canvas, and whichever edge you drag is the edge you crop
       var sel2 = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
       if (sel2) {
         sel2.style.width = (Number(d.w) * 100) + '%';
@@ -732,19 +735,19 @@ const PREVIEW_RUNTIME = `
           wc.style.top = (Number(d.cy) * 100) + '%';
           wc.style.width = (Number(d.cw) * 100) + '%';
           wc.style.height = (Number(d.ch) * 100) + '%';
-          // 角柄等比缩放:视觉 scale 同步 ×k(scale 属性,不碰 transform/translate)
+          // corner-handle proportional scale: the visual scale syncs ×k (scale property, doesn't touch transform/translate)
           if (d.s != null) wc.style.scale = String(Number(d.s) || 1);
         }
       }
     }
     else if (d.type === 'hf:rotate') {
-      // 底部旋转手柄拖动:直改容器 transform:rotate(实时,零 React 重渲);松手父层提交 Block.rotation。
-      // rotate 走 transform,与 nudge 的 translate / boxSize 的 w-h-left-top / 内容层 scale 各属性正交,互不覆写。
+      // bottom rotate-handle drag: edit the container transform:rotate directly (live, zero React re-render); the parent commits Block.rotation on release.
+      // rotate uses transform, orthogonal to nudge's translate / boxSize's w-h-left-top / the content layer's scale — no mutual overwrite.
       var selRot = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
       if (selRot) { selRot.style.transformOrigin = 'center center'; selRot.style.transform = (Number(d.deg) || 0) ? 'rotate(' + (Number(d.deg) || 0) + 'deg)' : ''; }
     }
     else if (d.type === 'hf:radius') {
-      // 圆角滑杆:直改容器 border-radius(实时)
+      // radius slider: edit the container border-radius directly (live)
       var selRad = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
       if (selRad) selRad.style.borderRadius = (Number(d.px) || 0) > 0 ? (Number(d.px) || 0) + 'px' : '';
     }
@@ -752,22 +755,22 @@ const PREVIEW_RUNTIME = `
 })();
 </script>`;
 
-/** 把预览运行时注入 composition HTML(插在 </body> 前)。 */
+/** Inject the preview runtime into the composition HTML (before </body>). */
 export function injectPreviewRuntime(html: string): string {
   if (html.includes('</body>')) return html.replace('</body>', `${PREVIEW_RUNTIME}\n</body>`);
   return html + PREVIEW_RUNTIME;
 }
 
-/** iframe 暴露的预览句柄类型。 */
+/** Preview handle type exposed by the iframe. */
 export interface HfPreviewHandle {
-  /** 完整定位(含视频 currentTime)—— 拖拽/暂停用。 */
+  /** Full seek (including video currentTime) — for scrub/pause. */
   seek(t: number): void;
-  /** 只对齐花字时间轴(不碰视频)—— 播放每帧用,顺滑。 */
+  /** Align only the caption timeline (leave video alone) — used per frame during playback, smooth. */
   seekTimelines(t: number): void;
-  /** 媒体原生播放(t = 起播全局秒)。 */
+  /** Native media playback (t = global start second). */
   play(t: number): void;
   pause(): void;
-  /** 播放主时钟 = 视频进度;无视频返回 null。 */
+  /** Playback master clock = video progress; null if no video. */
   clock(): number | null;
   duration(): number;
 }

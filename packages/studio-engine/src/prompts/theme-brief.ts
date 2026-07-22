@@ -1,4 +1,4 @@
-/** general 主题给 LLM 的结构设计简报(颜色由画面派生,结构固定)。 */
+/** The general theme's structural design brief for the LLM (colors derived from the footage, structure fixed). */
 
 export const THEME_GENERAL_BRIEF = `# General — STRUCTURAL design system (colors come from the footage, structure is fixed)
 

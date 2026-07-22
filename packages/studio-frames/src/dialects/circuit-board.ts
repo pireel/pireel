@@ -1,7 +1,8 @@
 /**
- * 电路 Circuit 方言 —— 通电电路板:铜金走线(横平竖直 + 45° 折角)+ 过孔 + 芯片引脚 +
- * 丝印位号;签名动效=电流脉冲(同路径 accent-2 副本,pathLength=100,dasharray 14 200,
- * offset 14 → -114 跑一趟)沿线奔跑后 LED 常亮。三态:没电=灰,有电=金,激活=青。
+ * Circuit dialect — a powered circuit board: copper-gold traces (orthogonal + 45° bends) + vias +
+ * chip pins + silkscreen refs; signature motion = a current pulse (an accent-2 copy on the same path,
+ * pathLength=100, dasharray 14 200, offset 14 → -114 for one run) racing along the trace, then LEDs
+ * stay lit. Three states: no power = gray, powered = gold, active = cyan.
  */
 
 import { type Block, mk } from './shared';

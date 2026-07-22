@@ -1,11 +1,12 @@
 /**
- * 孟菲斯 Memphis —— 几何波普方言:粗描边纸屑、硬黄偏移影、不对称构图。
- * 结构逻辑:信息压一侧、几何纸屑压另一侧;白面板必带 4px 描边 + 12px 无模糊硬影。
+ * Memphis — geometric pop dialect: thick-outlined confetti, hard-yellow offset shadows, asymmetric
+ * composition. Structure logic: content weighted to one side, geometric confetti to the other;
+ * white panels always have a 4px outline + 12px no-blur hard shadow.
  */
 
 import { type Block, mk } from './shared';
 
-/** 通用纸屑:空心圆 / 实心三角 / 半圆 / 波点补丁。 */
+/** Shared confetti: hollow circle / solid triangle / semicircle / polka-dot patch. */
 const confetti = (id: string) => `
 #${id} .circle{position:absolute;border:6px solid var(--fg);border-radius:999px;}
 #${id} .tri{position:absolute;background:var(--accent);clip-path:polygon(50% 0,100% 100%,0 100%);}

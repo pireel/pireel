@@ -1,6 +1,6 @@
 /**
- * frame locale 包索引:目前只有 en(zh 是 canonical,不设包)。
- * 每个 frame 一个包文件(./en/<frameId>.ts),这里聚合;加语言 = 新目录 + 新映射。
+ * Frame locale pack index: currently only en (zh is canonical, no pack).
+ * One pack file per frame (./en/<frameId>.ts), aggregated here; add a language = new dir + new map.
  */
 
 
@@ -63,13 +63,13 @@ const EN: Record<string, FrameLocalePack> = {
   'sticker-collage': stickerCollage,
 };
 
-/** 取某语言下某 frame 的适配包;zh/未收录 → undefined(用 canonical 中文)。 */
+/** Get the adapted pack for a frame in a language; zh/not-found → undefined (use canonical Chinese). */
 export function framePack(locale: SupportedLocale | undefined, frameId: string): FrameLocalePack | undefined {
   if (locale !== 'en') return undefined;
   return EN[frameId];
 }
 
-/** showcase 词标签(canonical 中文键)按语言取显示名。 */
+/** showcase kind label (canonical Chinese key) → display name per language. */
 export function kindLabel(locale: SupportedLocale | undefined, kind: string): string {
   if (locale !== 'en') return kind;
   return KIND_LABELS_EN[kind] ?? kind;

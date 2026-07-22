@@ -1,18 +1,23 @@
 /**
- * Studio composer —— "agent 写 HTML 片段" 的服务端大脑。
+ * Studio composer — the server-side brain for "agent writes HTML fragments".
  *
- * 只有**单块(fragment)**一条路径:给 LLM 灌片段契约(#BLOCK_ID 作用域 + 局部时间 GSAP)+
- * 设计约束 + 组件词汇/图表 recipe,按指令生成/修改一个块的 innerHtml + timelineBody。
- * 整篇 composition 由 assembleHtml(数据驱动 + 模板注册表)拼,**不再让 LLM 重写整篇**——
- * 那会破坏「块是数据」的模型(旧 HYPERFRAMES_SYSTEM 整篇路径已删,勿加回)。
+ * There is only one path — single block (fragment): feed the LLM the fragment
+ * contract (#BLOCK_ID scope + local-time GSAP) + design constraints + component
+ * vocabulary/chart recipes, and per instruction generate/modify one block's
+ * innerHtml + timelineBody. The whole composition is stitched by assembleHtml
+ * (data-driven + template registry) — the LLM never rewrites the whole thing,
+ * which would break the "blocks are data" model (the old whole-composition
+ * HYPERFRAMES_SYSTEM path is deleted; don't add it back).
  *
- * 语言策略:system prompt 一律英文(注进模型的);**画面内可见文本跟口播稿语言**(LANGUAGE 规则);
- * 面向用户的 note 跟 UI locale(调用方传 lang,缺省跟指令语言)。
+ * Language policy: system prompt is always English (what's injected into the
+ * model); on-screen text follows the spoken script's language (LANGUAGE rule);
+ * the user-facing note follows the UI locale (caller passes lang, defaults to
+ * the instruction's language).
  */
 
 import { BLOCK_SYSTEM, withActiveTheme } from './prompts';
 
-/** 最小 chat 形状(对齐 @/lib/models 的 ModelRouter.chat)。 */
+/** Minimal chat shape (matches @/lib/models ModelRouter.chat). */
 interface ChatHint {
   quality?: 'high' | 'standard' | 'cheap';
   provider?: string;
@@ -22,23 +27,23 @@ interface ChatCapable {
   chat: (i: { system?: string; prompt: string; hint?: ChatHint }) => Promise<{ text: string }>;
 }
 
-/** 回退 hint(OpenRouter 无默认 chat model;路由会传 catalog 解析出的真 provider_model_id)。 */
+/** Fallback hint (OpenRouter has no default chat model; the router passes the real provider_model_id resolved from the catalog). */
 const HINT: ChatHint = { quality: 'high' };
 export type { ChatHint };
 
-/** 把当前主题简报接到 system 末尾(装配在 prompts/index.ts,正文在 active-theme-compose.md)。 */
+/** Append the current theme brief to the end of system (assembled in prompts/index.ts, body in active-theme-compose.md). */
 export const withTheme = withActiveTheme;
 
 export interface ComposeContext {
-  /** 口播文案全文(内容背景语境)。 */
+  /** Full spoken script (content background context). */
   script?: string;
-  /** 片段窗内的口播句 + **本地时间**(秒,0=片段起点):序列/叠加内容按「这句何时被说到」精确卡点。 */
+  /** Spoken beats within the fragment window + local time (seconds, 0 = fragment start): sequence/overlay content is cued precisely by when each line is spoken. */
   beats?: Array<{ text: string; start: number; end: number }>;
-  /** 同一条视频里其它片段的一句话清单(按时间序,含本块位置标记)——反单调:让模型看见邻块,主动换原型/对齐/动效。 */
+  /** One-line list of the other fragments in this same video (time order, marks this block's position) — anti-monotony: let the model see neighbors and vary archetype/alignment/motion. */
   neighbors?: string[];
 }
 
-/* ============================ 单块编辑(分镜块) ============================ */
+/* ============================ Single-block edit (shot block) ============================ */
 
 export interface BlockEdit {
   id: string;
@@ -46,9 +51,9 @@ export interface BlockEdit {
   innerHtml: string;
   timelineBody: string;
   label?: string;
-  /** 这个片段 box 的真实像素尺寸(在 1080×1920 画布内),让模型按真实画面定字号/组件大小。 */
+  /** This fragment box's real pixel size (inside the 1080×1920 canvas), so the model sizes type/components against the actual frame. */
   boxPx?: { w: number; h: number };
-  /** 片段在屏时长(秒):序列类内容据此把逐条揭示摊到整段(PPT 式),不要一股脑全出。 */
+  /** On-screen duration (seconds): sequential content spreads its reveals across the whole span (PPT-style) instead of dumping all at once. */
   durationSec?: number;
 }
 
@@ -58,8 +63,8 @@ export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; 
   const parts: string[] = [`BLOCK_ID = ${args.block.id} (scope all selectors under #${args.block.id})`, `Block kind: ${args.block.kind}`];
   if (args.block.boxPx)
     parts.push(
-      // 「不许超出」是硬约束:绝对定位内容溢出 box 时 autofit(scroll 尺寸)测不到,
-      // 溢出的字会盖到人脸/出画——宁小勿溢,标题字号给了硬上限
+      // "must not overflow" is a hard constraint: autofit (scroll size) can't detect overflow of absolutely-positioned content,
+      // and overflowing text lands on the face / off-canvas — prefer too small over overflow; headline gets a hard cap
       `This fragment's box is about ${args.block.boxPx.w}×${args.block.boxPx.h}px inside the FIXED 1080px-wide canvas reference (px is consistent — the whole canvas scales uniformly for preview/export). HARD CONSTRAINT: everything must fit INSIDE ${args.block.boxPx.w}×${args.block.boxPx.h}px — nothing may stick out (overflowing content lands on the speaker's face or off-canvas; there is no auto-shrink for absolutely-positioned overflow). When unsure, size type one step SMALLER, never larger. Keep the largest headline ≤ ${Math.max(40, Math.round(args.block.boxPx.h / 4))}px and total content height (with margins) within the box. Adapt the layout to this box's aspect ratio.`,
     );
   if (args.block.durationSec)
@@ -97,7 +102,7 @@ export function parseBlockResponse(
 ): { innerHtml: string; timelineBody: string; note: string } {
   const html = /```html\s*([\s\S]*?)```/i.exec(text);
   const js = /```(?:js|javascript)\s*([\s\S]*?)```/i.exec(text);
-  // note = 去掉两个围栏后剩下的文字
+  // note = the text left after removing both fenced blocks
   let note = text;
   for (const m of [html, js]) if (m) note = note.replace(m[0], '');
   note = note.trim() || '已更新该块';

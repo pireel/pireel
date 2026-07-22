@@ -1,9 +1,10 @@
 'use client';
 
 /**
- * 单块活预览卡的共享件(组件库卡 / 模板面板卡共用,此前各自手抄一份已开始漂移):
- * - BlockPreviewFrame:blockPreviewDoc 自包含 iframe(定格稳定帧)+ 等比缩放;overlay 走 children。
- * - BlockKindFooter:KIND_META 图标 + 标签脚标。
+ * Shared pieces for a single-block live preview card (used by both the component-library card and the template-panel
+ * card, which previously each hand-copied a version that had started to drift):
+ * - BlockPreviewFrame: blockPreviewDoc self-contained iframe (frozen stable frame) + proportional scaling; overlay via children.
+ * - BlockKindFooter: KIND_META icon + label footer.
  */
 
 import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
@@ -13,7 +14,7 @@ import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
 import { t } from './i18n';
 
-/** 透明区棋盘格(屏幕像素级画在容器上;画进缩放文档会被缩糊,踩过)。 */
+/** Transparency checkerboard (drawn at screen-pixel scale on the container; drawing it into the scaled document blurs it — learned the hard way). */
 const CHECKER_STYLE: CSSProperties = {
   backgroundColor: '#ffffff',
   backgroundImage:
@@ -34,28 +35,28 @@ export function BlockPreviewFrame({
   comp: Composition;
   block: Block;
   width: number;
-  /** 预览底:'checker'=诚实底(透明棋盘格,库/卡片默认);'stage'=舞台纸底(主题墙)。 */
+  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
   ground?: 'stage' | 'checker';
-  /** 取景框(设计画布 px):给了=只看这一块(件居中放大,组件列表卡用);缺省=整画布缩微。 */
+  /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
   focus?: { x: number; y: number; w: number; h: number };
-  /** 动态预览:true = 自动循环播;'hover' = 悬停才播、移开回稳定帧。缺省定格稳定帧。 */
+  /** Animated preview: true = auto-loop; 'hover' = play on hover, return to stable frame on leave. Default freezes the stable frame. */
   animate?: boolean | 'hover';
-  /** 叠加层(时间戳章/悬浮按钮/生成中盖层),挂在同一 relative 容器里 */
+  /** Overlay layer (timestamp stamp / hover buttons / generating cover), mounted in the same relative container */
   children?: ReactNode;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  // 仅当本块(或主题/画布尺寸/调色板)变才重渲文档——故意不依赖整个 comp,
-  // 否则任何编辑都会让整墙 iframe 重载。
+  // Re-render the doc only when this block (or theme/canvas size/palette) changes — deliberately not depending on the whole comp,
+  // otherwise any edit would reload the entire wall of iframes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const doc = useMemo(() => injectPreviewRuntime(blockPreviewDoc(comp, block, { loop: animate, ground })), [block, comp.theme, comp.width, comp.height, comp.palette, animate, ground]);
-  // checker 态组件不占满格:缩进一圈居中,四周露出棋盘格(占满会把"透明可见"盖没)
+  // In checker mode the component doesn't fill the cell: inset and centered so the checkerboard shows around it (filling would hide the "transparency is visible" cue)
   const inset = ground === 'checker' ? 0.86 : 1;
   const h = Math.round(comp.height * (width / comp.width));
-  // focus 取景:按件的包围盒选缩放,件中心对齐卡中心——列表卡看"件本体"不看整画布
+  // focus framing: pick scale from the piece's bounding box, align piece center to card center — list cards show the "piece itself", not the whole canvas
   const scale = focus ? Math.min((width * inset) / focus.w, (h * inset) / focus.h) : (width / comp.width) * inset;
   const padX = focus ? Math.round(width / 2 - (focus.x + focus.w / 2) * scale) : Math.round((width * (1 - inset)) / 2);
   const padY = focus ? Math.round(h / 2 - (focus.y + focus.h / 2) * scale) : Math.round((h * (1 - inset)) / 2);
-  // 沙箱 iframe(opaque origin)拿不到 __hfPreview,悬停播放控制走 postMessage
+  // The sandboxed iframe (opaque origin) can't reach __hfPreview, so hover play control goes through postMessage
   const setLoop = (on: boolean) => iframeRef.current?.contentWindow?.postMessage({ type: 'hf-loop', on }, '*');
   return (
     <div
@@ -90,9 +91,9 @@ export function BlockKindFooter({ block }: { block: Block }) {
   );
 }
 
-/* ============================ 内联预览(可信块专用) ============================ */
+/* ============================ Inline preview (trusted blocks only) ============================ */
 
-/** 主页面按需加载自托管 GSAP(与预览 iframe 用同一份 /vendor/gsap.min.js),进程内单次。 */
+/** Main page lazy-loads self-hosted GSAP on demand (same /vendor/gsap.min.js as the preview iframe), once per process. */
 type GsapLike = { timeline: (o?: Record<string, unknown>) => GsapTimeline };
 interface GsapTimeline {
   play(t?: number): void;
@@ -115,18 +116,18 @@ function loadGsap(): Promise<GsapLike | null> {
 }
 
 /**
- * 内联块预览 —— **只给我们自己手写的可信块用**(frame 方言封面/showcase):
- * 不走 iframe(切面板不再白屏、不用每卡起一个文档拉脚本),直接渲 innerHtml +
- * 主页面 GSAP 跑时间轴。信任边界不变:LLM 生成的块仍然只能走 BlockPreviewFrame 沙箱。
- * 字体差异:主应用是系统字体栈(不载 Noto 切片),衬线/等宽走栈内回落,可接受。
+ * Inline block preview — ONLY for trusted blocks we hand-write ourselves (frame-dialect covers/showcase):
+ * no iframe (switching panels no longer flashes white, no per-card document pulling scripts), renders innerHtml directly +
+ * runs the timeline with the main page's GSAP. Trust boundary unchanged: LLM-generated blocks still go only through the BlockPreviewFrame sandbox.
+ * Font difference: the main app uses the system font stack (no Noto subsets loaded); serif/mono fall back within the stack, acceptable.
  */
-/** 预览里的占位人像(半身剪影):把「图形浮在口播的人上面」演出来。
- *  front=false 垫在图形后(常规叠加);front=true 压在图形前(文字穿人/人物置顶);
- *  strokeColor 有值 = 主题的人像描边推荐(贴纸白边)直接画在剪影上。 */
+/** Placeholder person in the preview (half-body silhouette): demonstrates "graphics floating over the talking-head person".
+ *  front=false sits behind the graphics (normal overlay); front=true sits in front (text-behind-person / person on top);
+ *  a non-empty strokeColor = the theme's recommended person outline (sticker white edge) drawn directly on the silhouette. */
 export interface PreviewPerson {
   front?: boolean;
   strokeColor?: string | null;
-  /** hero = 封面主角尺寸;corner = 产出卡角落小像(默认 hero)。 */
+  /** hero = cover protagonist size; corner = small figure in the output card's corner (default hero). */
   size?: 'hero' | 'corner';
 }
 
@@ -167,11 +168,11 @@ export function InlineBlockPreview({
   comp: Composition;
   block: Block;
   width: number;
-  /** true = 自动循环;'hover' = 悬停播、移开回稳定帧;false = 定格稳定帧。 */
+  /** true = auto-loop; 'hover' = play on hover, return to stable frame on leave; false = freeze the stable frame. */
   animate?: boolean | 'hover';
-  /** 占位人像;null = 不画(非主题场景)。 */
+  /** Placeholder person; null = don't draw (non-theme scenes). */
   person?: PreviewPerson | null;
-  /** 预览底:'checker'=诚实底(透明棋盘格,库/卡片默认);'stage'=舞台纸底(主题墙)。 */
+  /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
   ground?: 'stage' | 'checker';
 }) {
   const { innerHtml, timelineBody } = useMemo(() => renderBlock(block), [block]);
@@ -189,14 +190,14 @@ export function InlineBlockPreview({
     let dead = false;
     void loadGsap().then((g) => {
       if (dead || !g) return;
-      // animate=true(详情卡):循环播,播完稳定一拍再来。
-      // 其余(封面/静态):不循环 —— 默认定格在**最终态**(progress 1),
-      // hover 从头播一遍,播到尾自然停在最终态。
+      // animate=true (detail card): loop, settle one beat after each pass then repeat.
+      // Otherwise (cover/static): no loop — default freezes at the final state (progress 1);
+      // hover plays once from the start, ending naturally at the final state.
       const tl = g.timeline(animate === true ? { paused: true, repeat: -1, repeatDelay: 1.2 } : { paused: true });
       try {
         new Function('tl', timelineBody)(tl);
       } catch {
-        /* 坏时间轴 → 静态展示 */
+        /* bad timeline -> static display */
       }
       tlRef.current = tl;
       if (animate === true) tl.play(0);
@@ -223,11 +224,11 @@ export function InlineBlockPreview({
             el.style.cssText = `position:absolute;left:${padX}px;top:${padY}px;width:${comp.width}px;height:${comp.height}px;transform:scale(${scale});transform-origin:top left;overflow:hidden;${ground === 'checker' ? 'background:transparent;' : `background:${stageBg};`}${vars}font-family:var(--font-body);color:var(--fg);`;
         }}
       >
-        {/* 占位人像垫底(常规叠加:图形在人前) */}
+        {/* Placeholder person underneath (normal overlay: graphics in front of the person) */}
         {person && !person.front && <PersonBust person={person} canvasH={comp.height} />}
-        {/* 方言块的选择器全部 #id 作用域,直接落主文档不串样式 */}
+        {/* Dialect blocks' selectors are all #id-scoped, so they drop into the main document without style bleed */}
         <div id={block.id} style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: innerHtml }} />
-        {/* 人物置顶(personFront:文字穿人/贴纸人)→ 剪影压在图形前 */}
+        {/* Person on top (personFront: text-behind-person / sticker person) -> silhouette sits in front of the graphics */}
         {person?.front && <PersonBust person={person} canvasH={comp.height} />}
       </div>
     </div>

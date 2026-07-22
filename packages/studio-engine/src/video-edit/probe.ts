@@ -2,9 +2,10 @@ import { ALL_FORMATS, BlobSource, Input } from 'mediabunny';
 import type { ClipMeta } from './types';
 
 /**
- * 读视频元数据。流式读 metadata,**不**加载整段视频。
+ * Read video metadata. Streams the metadata; does NOT load the whole video.
  *
- * 对 1GB 文件秒返回——MediaBunny 只读 mp4 atom 头/wmv index,几 KB 字节。
+ * Returns in a second even for 1GB files — MediaBunny reads only the mp4 atom
+ * headers / wmv index, a few KB.
  */
 export async function probeVideo(file: File): Promise<ClipMeta> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });

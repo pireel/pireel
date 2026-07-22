@@ -1,6 +1,7 @@
 /**
- * 竞技 Varsity 方言 —— 体育播报包装:一切 skewX(-8deg) 前倾;镂空球衣巨号贴边裁切;
- * 对角危险条纹带;比分对阵板(胜者橙 + 一次脉冲);0.2s power3 对向硬撞入。
+ * Varsity dialect — sports-broadcast packaging: everything leans forward with skewX(-8deg);
+ * outlined giant jersey numbers cropped at the edge; diagonal hazard stripes; scoreboard matchup
+ * (winner in orange + one pulse); 0.2s power3 slamming in from opposite sides.
  */
 
 import { type Block, mk } from './shared';

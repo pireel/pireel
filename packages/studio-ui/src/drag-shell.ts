@@ -1,25 +1,26 @@
 /**
- * 舞台拖动壳 —— 所有"按住拖"交互的公共骨架(块框移动/改边/缩放/旋转、字幕主行/译文行
- * 手柄……新类型一律用它,别再手写)。统一承担四件事:
+ * Stage drag shell — the shared skeleton for all "press and drag" interactions (block box move/edge/scale/
+ * rotate, caption main-line/translation-line handles… always use it for new types, don't hand-roll again).
+ * It uniformly handles four things:
  *
- *  1. 指针捕获:setPointerCapture(出窗口/滑过 iframe 也持续收 move/up;老内核没有
- *     就靠 buttons 兜底),move/up/cancel 全挂 window。
- *  2. rAF 合帧:每帧最多一次 onFrame(拖动逐事件回调是持续卡顿的来源,踩过)。
- *  3. buttons==0 兜底:错过 pointerup(弹窗/失焦)立即收尾,不跟裸移动。
- *  4. 收尾时序:onEnd 必调、且必在最后一次 onFrame 之后(最后一帧不丢)。
+ *  1. Pointer capture: setPointerCapture (keeps receiving move/up even outside the window / over an iframe;
+ *     old engines without it fall back to buttons), with move/up/cancel all bound on window.
+ *  2. rAF frame coalescing: at most one onFrame per frame (per-event drag callbacks are a proven source of jank).
+ *  3. buttons==0 fallback: if pointerup is missed (popup/blur), wrap up immediately instead of tracking bare moves.
+ *  4. Teardown order: onEnd is always called, and always after the last onFrame (the final frame isn't dropped).
  *
- * 语义归调用方:onFrame 里算增量落 live 通道/本地 ghost,onEnd 里提交状态。
- * 护盾(shield)/ghost 这类**视觉**是组件级 state,由调用方在 onStart/onEnd 里开关
- * ——壳只管指针生命周期,不管画什么。
+ * Semantics belong to the caller: compute deltas in onFrame and apply to the live channel / local ghost,
+ * commit state in onEnd. **Visuals** like the shield/ghost are component-level state, toggled by the caller
+ * in onStart/onEnd — the shell only manages the pointer lifecycle, not what gets drawn.
  */
 
 export interface DragShellOpts {
-  /** 起手副作用(开护盾/ghost、发 phase:start……)。 */
+  /** Start-of-gesture side effects (open shield/ghost, emit phase:start…). */
   onStart?: () => void;
-  /** 每帧一次(rAF 合帧):dx/dy = 相对起点的**屏幕 px** 增量;ev = 最新指针事件
-   *  (要 shiftKey/绝对坐标的从这拿)。归一化/换算归调用方(各家基底不同)。 */
+  /** Once per frame (rAF-coalesced): dx/dy = **screen px** delta from the start point; ev = the latest
+   *  pointer event (get shiftKey/absolute coords from here). Normalization/conversion is the caller's job (bases differ). */
   onFrame: (dx: number, dy: number, ev: PointerEvent) => void;
-  /** 松手/取消收尾(提交状态、关护盾、发 phase:end……)。 */
+  /** Release/cancel teardown (commit state, close shield, emit phase:end…). */
   onEnd: () => void;
 }
 
@@ -29,7 +30,7 @@ export function startPointerDrag(e: React.PointerEvent, opts: DragShellOpts): vo
   try {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   } catch {
-    /* 老内核没有 capture:靠 buttons 兜底 */
+    /* Old engines lack capture: fall back to buttons */
   }
   opts.onStart?.();
   const sx = e.clientX;

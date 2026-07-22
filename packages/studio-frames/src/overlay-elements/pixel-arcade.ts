@@ -1,8 +1,10 @@
 /**
- * 像素 Arcade 的口播叠加件:HUD sprite 语言——硬边靛蓝板用同色十字外扩阴影做像素
- * 阶梯角(零圆角),标题压 var(--shadow) 无模糊硬偏移 text-shadow(盖章感),HUD/数据
- * 全 mono 大写宽字距,金币金给分数/PRESS START,薄荷绿给血条格子/箭头/激活态(两色
- * 不同框),血条逐格点亮,动效机械:0.2s 硬滑 + steps(1) 有限次闪烁收在可见帧。
+ * Arcade overlay elements: HUD-sprite language — hard-edged indigo plates that fake pixel-stair
+ * corners via a same-color cross of expanded shadows (no radius); titles get a var(--shadow)
+ * no-blur hard-offset text-shadow (a stamped look); HUD/data are all mono uppercase wide-tracked;
+ * coin-gold for scores / PRESS START; mint-green for health-bar cells / arrows / active state
+ * (the two colors use different frames); the health bar lights up cell by cell. Motion is
+ * mechanical: 0.2s hard slide + steps(1) finite blink that ends on a visible frame.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

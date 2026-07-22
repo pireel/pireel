@@ -1,8 +1,10 @@
 /**
- * 留白 Zen 的口播叠加件:quiet slip 语言——一小条暖纸(--paper 底、零圆角零投影零光晕)
- * 落在画面一角,衬线小字+宽字距、一根 1px 发丝线、一枚 12px 朱砂印点(一件只一枚,
- * 全件最响的东西)、竖排批注 writing-mode:vertical-rl、黄金分割锚点不双轴居中。
- * 动效只许 0.6-0.9s 慢淡入 + 10px 位移,朱点永远最后落。
+ * Zen overlay elements: quiet-slip language — a small strip of warm paper (--paper ground,
+ * no radius, no shadow, no glow) sits in a corner of the frame; small serif type + wide tracking,
+ * a single 1px hairline, one 12px cinnabar seal dot (only one per element, the loudest thing on it),
+ * vertical annotations (writing-mode: vertical-rl), anchored on the golden ratio rather than
+ * centered on both axes. Motion is limited to a 0.6-0.9s slow fade + 10px drift; the seal dot
+ * always lands last.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

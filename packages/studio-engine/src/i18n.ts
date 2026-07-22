@@ -1,21 +1,26 @@
 /**
- * studio 轻量 i18n 核心(引擎/编辑器包共用,零依赖):
+ * Lightweight studio i18n core (shared by the engine/editor packages, zero deps):
  *
- * - **中文串即 key**:源码里保留中文原文(单一事实源),en 词典做 zh→en 映射;
- *   查不到回落中文,永不炸 UI。词典按包注册(registerEnMessages),分文件维护。
- * - locale 由壳注入(托管壳=路由 $locale;OSS 壳自定,默认 en)——**渲染前设一次**,
- *   不做运行时响应式(切语言=换路由整页重来,与应用路由行为一致)。
- * - 插值:`t('已铺 {n} 条', { n })`,{name} 占位。
- * - **只用于客户端 UI 字符**:服务端(Worker)是跨请求共享模块作用域,这个全局
- *   locale 在那不安全——server-tools/MCP 回执不走这里。
- * - 模块作用域禁止调 t()(壳还没注入 locale):常量存中文,渲染/使用点再包。
+ * - Chinese string IS the key: source keeps the Chinese original (single source
+ *   of truth); the en dictionary maps zh→en, falling back to Chinese on a miss so
+ *   the UI never breaks. Dictionaries register per package (registerEnMessages),
+ *   maintained in separate files.
+ * - locale is injected by the shell (hosted shell = route $locale; OSS shell sets
+ *   its own, default en) — set ONCE before render; no runtime reactivity
+ *   (switching language = route change + full-page reload, matching app-router behavior).
+ * - Interpolation: `t('已铺 {n} 条', { n })`, {name} placeholders.
+ * - Client-side UI strings ONLY: the server (Worker) has cross-request shared
+ *   module scope where this global locale is unsafe — server-tools/MCP receipts
+ *   don't go through here.
+ * - Never call t() at module scope (the shell hasn't injected locale yet): store
+ *   Chinese in constants and wrap at the render/use site.
  */
 
 export type StudioLocale = 'zh' | 'en';
 
 let locale: StudioLocale = 'zh';
 const EN: Record<string, string> = {};
-/** en 缺词收集(探针/自检读,不刷控制台)。 */
+/** Collects missing en keys (read by probe/self-check, doesn't spam the console). */
 export const missingEn = new Set<string>();
 
 export function setStudioLocale(l: StudioLocale): void {
@@ -25,7 +30,7 @@ export function studioLocale(): StudioLocale {
   return locale;
 }
 
-/** 各包把自己的 en 词典并进来(在包的 i18n 入口模块体调,消费 t 即触发注册)。 */
+/** Each package merges in its own en dictionary (called in the package's i18n entry module body; consuming t triggers registration). */
 export function registerEnMessages(dict: Record<string, string>): void {
   Object.assign(EN, dict);
 }

@@ -1,15 +1,17 @@
 /**
- * frame 详情页「主题会产出」的**真实预览**块工厂 —— 按 (frameId, kind) 取:
- * 每个 frame 是一套自己的**版式方言**,不是同一套骨架换配色。
- *   蓝图  = 工程制图:线框、标注线、网格、图签,只描边不填充
- *   奶油  = 贴纸软糖:歪斜圆角贴纸、药丸、圆点缀饰、叠层
- *   双年展 = 构成主义海报:巨字出血、竖排、反白板、整帧即海报
- *   黑金  = 时装编辑部:居中、极限留白、发丝金框、衬线细字、宽字距小字
- *   报刊  = 报纸头版:报头双线、多栏假文、首字下沉、红笔批注
- *   霓虹  = HUD 终端:扫描网格、角标括号、状态栏、mono 读数、光标
- * 设计原则(claude-design):承诺极端方向、主导色+锐利强调、禁"圆角卡+左边框"套路、
- * 字不小于画布 1080p 下的 24px 等效。1920×1080 画布,经 blockPreviewDoc 真实渲染定格。
- * 词表开放:该 frame 没实现的词返回 null,面板落回词面卡。
+ * Factory for the real-preview blocks shown on a frame's detail page ("what this
+ * theme produces"), keyed by (frameId, kind). Each frame is its own layout dialect,
+ * not one skeleton reskinned:
+ *   Blueprint = engineering drawing: wireframes, dimension lines, grid, title block, stroke-only
+ *   Cream     = sticker candy: tilted rounded stickers, pills, dot accents, layering
+ *   Biennale  = constructivist poster: giant bleeding type, vertical text, reversed panels
+ *   Noir      = fashion editorial: centered, extreme whitespace, hairline gold frame, thin serif
+ *   Journal   = newspaper front page: double-rule masthead, faux columns, drop caps, red-pen notes
+ *   Neon      = HUD terminal: scan grid, corner brackets, status bar, mono readouts, cursor
+ * Design rules: commit to an extreme direction, dominant color + sharp accent, no
+ * "rounded card + left border" cliche, text no smaller than 24px-equivalent at 1080p.
+ * 1920x1080 canvas, rendered for real via blockPreviewDoc.
+ * Open vocabulary: a kind a frame doesn't implement returns null, panel falls back to a label card.
  */
 
 
@@ -36,7 +38,7 @@ import * as circuitBoard from './dialects/circuit-board';
 import * as stickerCollage from './dialects/sticker-collage';
 
 /* ================================================================
-   蓝图 Blueprint —— 工程制图方言:网格底、线框、尺寸标注、图签
+   Blueprint — engineering-drawing dialect: grid ground, wireframes, dimension marks, title block
    ================================================================ */
 
 const bpRoot = (id: string) => `
@@ -416,7 +418,7 @@ const blueprint: Record<string, () => Block> = {
 };
 
 /* ================================================================
-   奶油 Cream —— 贴纸软糖方言:歪斜贴纸、药丸、圆点缀饰
+   Cream — sticker-candy dialect: tilted stickers, pills, dot accents
    ================================================================ */
 
 const cream: Record<string, () => Block> = {
@@ -684,7 +686,7 @@ const cream: Record<string, () => Block> = {
 };
 
 /* ================================================================
-   双年展 Biennale —— 构成主义海报方言:巨字出血、竖排、反白板
+   Biennale — constructivist-poster dialect: giant bleeding type, vertical text, reversed panels
    ================================================================ */
 
 const biennale: Record<string, () => Block> = {
@@ -893,7 +895,7 @@ const biennale: Record<string, () => Block> = {
 };
 
 /* ================================================================
-   黑金 Noir —— 时装编辑部方言:居中、发丝金框、衬线、宽字距
+   Noir — fashion-editorial dialect: centered, hairline gold frame, serif, wide tracking
    ================================================================ */
 
 const noirFrame = (id: string) => `
@@ -1129,7 +1131,7 @@ const noir: Record<string, () => Block> = {
 };
 
 /* ================================================================
-   报刊 Journal —— 报纸头版方言:报头双线、多栏假文、红笔批注
+   Journal — newspaper-front-page dialect: double-rule masthead, faux columns, red-pen annotations
    ================================================================ */
 
 const jnFake = (n: number, w = 100): string =>
@@ -1422,7 +1424,7 @@ const journal: Record<string, () => Block> = {
 };
 
 /* ================================================================
-   霓虹 Neon —— HUD 终端方言:状态栏、角标括号、mono 读数、光标
+   Neon — HUD-terminal dialect: status bar, corner brackets, mono readouts, cursor
    ================================================================ */
 
 const neonChrome = (id: string) => `
@@ -1732,15 +1734,16 @@ const DIALECTS: Record<string, Record<string, () => Block>> = {
   'sticker-collage': stickerCollage.blocks,
 };
 
-/** (frameId, showcase 词) → 该主题方言下的真实示例块;没实现的回 null(面板落回词面卡)。
- *  locale 给非中文语言套适配文案包(方言源码保持中文单一来源,见 lib/frames/locales)。 */
+/** (frameId, showcase kind) → the real sample block in that theme's dialect; null if not
+ *  implemented (panel falls back to a label card). locale applies the adapted copy pack for
+ *  non-Chinese languages (dialect source stays single-source Chinese, see lib/frames/locales). */
 export function showcaseBlock(frameId: string, kind: string, locale?: SupportedLocale): Block | null {
   const b = DIALECTS[frameId]?.[kind]?.() ?? null;
   return b ? localizeBlock(b, framePack(locale, frameId)) : null;
 }
 
 /* ================================================================
-   封面 —— 列表缩略图:主题名当主角,只透风格不列详情(PPT 主题封面的定位)
+   Covers — list thumbnails: theme name is the hero, hint the style without listing details (like a slide-deck theme cover)
    ================================================================ */
 
 const COVERS: Record<string, () => Block> = {
@@ -1888,7 +1891,7 @@ const COVERS: Record<string, () => Block> = {
     ),
 };
 
-/** frameId → 封面块(列表缩略图;没有的回 null,面板落回行式)。 */
+/** frameId → cover block (list thumbnail; null if none, panel falls back to a row). */
 export function coverBlock(frameId: string, locale?: SupportedLocale): Block | null {
   const b = COVERS[frameId]?.() ?? null;
   return b ? localizeBlock(b, framePack(locale, frameId)) : null;

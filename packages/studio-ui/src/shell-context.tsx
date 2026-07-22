@@ -1,7 +1,9 @@
 /**
- * StudioShell —— 编辑器包与宿主壳(SaaS/OSS)之间的 UI 注入面。
- * 托管壳注入计费卡、生成参数表等 SaaS 知识;OSS 壳可全部缺省,面板优雅降级。
- * 能力类注入走 engine 的 StudioProviders(数据/服务);这里只管**呈现层**插槽。
+ * StudioShell — the UI injection surface between the editor package and the host shell (SaaS/OSS).
+ * The hosted shell injects SaaS knowledge like the credits card and generation-params table; the OSS
+ * shell can omit everything and the panels degrade gracefully.
+ * Capability injection goes through the engine's StudioProviders (data/services); this handles only
+ * **presentation-layer** slots.
  */
 
 import { createContext, useContext, type ComponentType } from 'react';
@@ -17,9 +19,9 @@ export interface ShellQualityConfig {
 }
 
 export interface StudioShell {
-  /** 积分不足卡(SaaS 计费件;缺省=不渲染)。 */
+  /** Insufficient-credits card (SaaS billing piece; omitted = not rendered). */
   CreditsCard?: ComponentType<{ need: number; balance: number }>;
-  /** 生成模型参数表(质量档/时长/分辨率;缺省=面板隐藏对应选择器)。 */
+  /** Generation model params table (quality/duration/resolution; omitted = panel hides the matching selectors). */
   modelParams?: {
     qualityConfigFor(modelId: string): ShellQualityConfig | null;
     videoDurationOptions(modelId: string): string[];

@@ -1,7 +1,9 @@
 /**
- * 单块片段契约(设计约束/组件词汇/图表 recipe/SELF-CHECK)—— studio 最热改的提示词。
- * 改完先跑 compose.test 质量契约,再让用户跑 STUDIO_EVAL=1 评测(烧额度,用户自己跑)。
- * 注意:正文里的 ``` 围栏在模板字面量里要写成 \`\`\`。
+ * Single-block fragment contract (design constraints / component vocabulary /
+ * chart recipes / SELF-CHECK) — studio's most frequently edited prompt.
+ * After editing, run the compose.test quality contract first, then have the user
+ * run the STUDIO_EVAL=1 benchmark (burns credits, the user runs it themselves).
+ * Note: ``` fences in the body must be written as \`\`\` inside the template literal.
  */
 
 export const BLOCK_SYSTEM = `You author/edit ONE overlay FRAGMENT that sits in a box over a vertical (1080×1920) talking-head video. It is ONE designed element from a great data/editorial deck — a metric card, a comparison, a flow/structure diagram, a small hand-built chart, a labelled callout. NOT a subtitle, NOT a full slide, NOT a paragraph of styled text. You only see/change this fragment; its position, size and timing are decided for you.

@@ -1,10 +1,12 @@
 /**
- * 一键成片初稿 —— 规划阶段(口播稿 + 画面 → **场景化分镜 storyboard**)。
+ * One-shot draft — planning stage (narration script + picture → scene-based storyboard).
  *
- * 2026-06 重写:从「逐句演法」改成「**LLM 统筹分场景**」。agent 读全稿(+画面提示)把句子
- * **归并成 N 个场景**,每个场景 = 句子区间(= 语义驱动的分镜切点)+ 取景 + 一个**设计图形 brief**
- * (从完整组件词汇里选:数字/对比/流程/结构/KPI/图表/时间轴/循环/callout/列表/标题 + 从稿里抠的真实数据)。
- * **设计图形为主**(绝大多数场景都有),字幕/花字默认关、纯可选。build-draft 据场景切镜 + 落待配图占位。
+ * 2026-06 rewrite: from "per-sentence acting" to "LLM segments into scenes". The agent reads
+ * the full script (+ picture hints) and merges sentences into N scenes; each scene = a sentence
+ * range (= semantics-driven cut point) + framing + one design-graphic brief (chosen from the full
+ * component vocabulary: metric/comparison/pipeline/structure/kpi/chart/timeline/loop/callout/list/
+ * title + real data pulled from the script). Design graphics are primary (most scenes have one);
+ * captions/effects default off, purely optional. build-draft cuts shots per scene + drops picture placeholders.
  */
 
 import { PLAN_SYSTEM, PLAN_SYSTEM_TOOLS, planWithActiveTheme } from './prompts';
@@ -17,11 +19,11 @@ interface ChatCapable {
   }) => Promise<{ text: string }>;
 }
 
-/** 取景:镜头怎么取(给设计图形腾位)。build-draft 结合画面把它落成具体 ShotTreatment。 */
+/** Framing: how the shot is composed (making room for the design graphic). build-draft resolves it into a concrete ShotTreatment using the picture. */
 export type Framing = 'full' | 'punch-in' | 'corner' | 'split';
 export const FRAMINGS: Framing[] = ['full', 'punch-in', 'corner', 'split'];
 
-/** 设计图形组件类型(对齐 compose.ts BLOCK_SYSTEM 的组件词汇)。 */
+/** Design-graphic component types (aligned with compose.ts BLOCK_SYSTEM's component vocabulary). */
 export type GraphicComponent =
   | 'metric'
   | 'comparison'
@@ -48,31 +50,31 @@ export const GRAPHIC_COMPONENTS: GraphicComponent[] = [
   'title',
 ];
 
-/** 图形体量档(LLM 按叙事权重选):badge=过场小签 · card=常规(默认)· banner=通栏横带 · poster=主角时刻。
- *  build-draft 按档在几何安全区内裁实际落框——治「所有图形一个尺寸」。 */
+/** Graphic size tiers (LLM picks by narrative weight): badge=small transition tag · card=normal (default) · banner=full-width strip · poster=hero moment.
+ *  build-draft sizes the actual box within the geometry safe zone per tier — cures "every graphic the same size". */
 export type GraphicSize = 'badge' | 'card' | 'banner' | 'poster';
 export const GRAPHIC_SIZES: GraphicSize[] = ['badge', 'card', 'banner', 'poster'];
 
-/** 一个场景要出的设计图形:选组件 + 设计简报 + 从口播里抠的真实数据。 */
+/** The design graphic a scene produces: chosen component + design brief + real data pulled from the narration. */
 export interface SceneGraphic {
   component: GraphicComponent;
-  /** 中文:这个片段展示什么、怎么排版(焦点组件 + 结构)。 */
+  /** What this segment shows and how it's laid out (focal component + structure). */
   brief: string;
-  /** 真实数字 / 要点 / 关键词(从这几句里逐字抠,逗号或换行分隔)。 */
+  /** Real numbers / points / keywords (pulled verbatim from these sentences, comma- or newline-separated). */
   data?: string;
-  /** 体量档(缺省 card)。 */
+  /** Size tier (default card). */
   size?: GraphicSize;
 }
 
-/** 场景 = 一组连续句子归并成的一个分镜单元。 */
+/** Scene = one storyboard unit merged from a run of consecutive sentences. */
 export interface Scene {
-  /** 覆盖的句子 index 区间(含两端)。 */
+  /** Covered sentence index range (inclusive both ends). */
   from: number;
   to: number;
   framing: Framing;
-  /** 该场景的设计图形(设计图形为主,绝大多数场景都有;纯过渡句/录屏可空)。 */
+  /** The scene's design graphic (primary; most scenes have one; pure transition/screen-recording can be empty). */
   graphic?: SceneGraphic;
-  /** 可选:该场景叠的口播关键词(仅主题开字幕时 build-draft 会铺)。 */
+  /** Optional: narration keywords overlaid on this scene (build-draft lays them only when the theme has captions on). */
   emphasis?: string[];
 }
 
@@ -80,7 +82,7 @@ export interface DraftPlan {
   title?: { text: string; sub?: string; durationSec: number };
   scenes: Scene[];
   outro?: { text: string; sub?: string; durationSec: number };
-  /** 插入段自己的场景(平权分镜:布局按它切镜/取景/落占位)。缺省 = 插入段整段一拍。 */
+  /** Insert clips' own scenes (equal-footing storyboard: layout cuts/frames/places placeholders by it). Default = whole insert as one beat. */
   inserts?: InsertPlan[];
 }
 
@@ -91,50 +93,53 @@ export interface PlanSentence {
   end: number;
 }
 
-/** 每句的画面提示(来自画面分析):内容类型 + 哪侧安全。 */
+/** Per-sentence picture hint (from visual analysis): content type + which side is safe. */
 export interface PlanVisual {
   index: number;
   content: string; // talkinghead | screen | broll | slide | other
   safe: string; // left | right | top | bottom | full | none
 }
 
-/** 多源主轨的插入片段(规划上下文):atSec=主源时间锚点(插在哪个主源切点),
- *  text=该段口播内容(没有则空)。带 sentences(**该片段自己的源时钟**)时,句子经
- *  unifiedPlanRows 交织进统一叙事流平权参与规划;没有句子(无口播/没转写)则维持
- *  整段一拍(prompt 标记行,场景绕开)。 */
+/** An insert clip on the multi-source main track (planning context): atSec=anchor on the main-source
+ *  timeline (which main cut point it splices at), text=that clip's narration (empty if none). With
+ *  sentences (the clip's OWN source clock), the sentences interleave into the unified narrative flow
+ *  via unifiedPlanRows and plan on equal footing; without sentences (no narration/transcript) it stays
+ *  a single beat (marker line in the prompt, scenes skip it). */
 export interface PlanInsert {
   atSec: number;
   durationSec: number;
   text: string;
-  /** 该插入段自己的分句(index 从 0 起,start/end 是**这个片段源文件**的秒)。 */
+  /** This insert's own sentences (index from 0, start/end are seconds on THIS clip's source file). */
   sentences?: { index: number; start: number; end: number; text: string }[];
 }
 
-/** 插入段自己的场景规划(clip = 插入段枚举的 1 起序号,与 insertPlanContexts 顺序一致)。
- *  注意:这是**装配层的分解产物**——LLM 面对的是统一叙事流(unifiedPlanRows),
- *  不感知这个结构;分解在 assemblePlan 里按行来源自动做。 */
+/** An insert's own scene plan (clip = 1-based index in the insert enumeration, matching insertPlanContexts order).
+ *  Note: this is the ASSEMBLY layer's decomposition product — the LLM faces the unified narrative flow
+ *  (unifiedPlanRows) and never sees this structure; the split happens in assemblePlan by row source. */
 export interface InsertPlan {
   clip: number;
   scenes: Scene[];
 }
 
-/** 统一叙事流的一行:主叙述句或插入段句,按成片叙事顺序排列。规划的索引空间
- *  就是这份行号(0 起连续)——LLM 整体读、整体切场景;local 记回各来源自己的
- *  句子索引,装配层据此把全局场景分解回 主/各插入段。 */
+/** One row of the unified narrative flow: a main sentence or an insert sentence, in final narrative order.
+ *  The planning index space IS this row number (0-based, contiguous) — the LLM reads and segments the whole;
+ *  local records each source's own sentence index, which the assembly layer uses to decompose global scenes
+ *  back into main/each insert. */
 export interface PlanRow {
-  /** 'main' | 插入段序号(1 起)。 */
+  /** 'main' | insert index (1-based). */
   src: 'main' | number;
-  /** 该来源自己的句子索引。 */
+  /** This source's own sentence index. */
   local: number;
-  /** 该来源**自己时钟**的秒(跨来源不连续,pacing 只在同源行内比)。 */
+  /** Seconds on this source's OWN clock (discontinuous across sources; compare pacing only within one source). */
   start: number;
   end: number;
   text: string;
 }
 
-/** 主叙述句 + 插入段句 → 统一叙事流(按锚点交织)。插入的语义就是"叙事中间的
- *  一拍",导演必须整体读——这里是唯一的交织点,所有生产/装配方共用防漂移。
- *  无句子的插入段不占行(在 prompt 里以标记行呈现,场景绕开它)。 */
+/** Main sentences + insert sentences → unified narrative flow (interleaved by anchor). An insert's meaning
+ *  is "a beat in the middle of the narrative", which the director must read as a whole — this is the single
+ *  interleave point, shared by all producers/assemblers to prevent drift. Sentence-less inserts take no row
+ *  (shown as a marker line in the prompt, scenes skip it). */
 export function unifiedPlanRows(sentences: PlanSentence[], inserts?: PlanInsert[]): PlanRow[] {
   const rows: PlanRow[] = [];
   const main = [...sentences].sort((a, b) => a.start - b.start);
@@ -146,14 +151,14 @@ export function unifiedPlanRows(sentences: PlanSentence[], inserts?: PlanInsert[
     }
   };
   for (const m of main) {
-    flushBefore(m.start); // 锚点=前最近主源段末:主句起点越过锚点前先落插入段行
+    flushBefore(m.start); // anchor = end of nearest preceding main segment: flush insert rows before the main sentence's start crosses the anchor
     rows.push({ src: 'main', local: m.index, start: m.start, end: m.end, text: m.text });
   }
   flushBefore(Infinity);
   return rows;
 }
 
-/** 规划提示词(核心约束 + 输出契约)装配在 prompts/index.ts,正文在 prompts/plan-*.md。 */
+/** Planning prompt (core constraints + output contract) is assembled in prompts/index.ts; body in prompts/plan-*.md. */
 export { PLAN_SYSTEM, PLAN_SYSTEM_TOOLS };
 
 export function buildPlanPrompt(args: {
@@ -164,11 +169,12 @@ export function buildPlanPrompt(args: {
   inserts?: PlanInsert[];
 }): string {
   const vmap = new Map((args.visuals ?? []).map((v) => [v.index, v]));
-  // 统一叙事流:主句与插入段句按锚点交织成**一份稿子**——插入的语义就是叙事中间的
-  // 一拍,LLM 必须整体读、整体切场景(分开各排各的索引会让它失去叙事上下文,踩过)。
+  // Unified narrative flow: main + insert sentences interleave by anchor into ONE script — an insert's
+  // meaning is a beat mid-narrative, so the LLM must read and segment the whole (splitting into separate
+  // index spaces loses narrative context; been there).
   const rows = unifiedPlanRows(args.sentences, args.inserts);
   const hasClips = rows.some((r) => r.src !== 'main');
-  // 无句子的插入段:不占行号,以标记行插在锚点处(场景绕开它;它是自己的无声一拍)
+  // Sentence-less inserts: take no row number, shown as a marker line at the anchor (scenes skip it; it's its own silent beat)
   const silent = (args.inserts ?? []).map((c, k) => ({ c, k })).filter((x) => !x.c.sentences?.length);
   const lineFor = (r: PlanRow, g: number) => {
     const v = r.src === 'main' ? vmap.get(r.local) : undefined;
@@ -215,7 +221,7 @@ function coerceGraphic(g: unknown): SceneGraphic | undefined {
     ? (o.component as GraphicComponent)
     : 'callout';
   const brief = typeof o.brief === 'string' ? o.brief.trim() : '';
-  if (!brief) return undefined; // 没简报的图形没意义
+  if (!brief) return undefined; // a graphic with no brief is meaningless
   const data = typeof o.data === 'string' && o.data.trim() ? o.data.trim() : undefined;
   const size = GRAPHIC_SIZES.includes(o.size as GraphicSize) ? (o.size as GraphicSize) : undefined;
   return { component, brief, ...(data ? { data } : {}), ...(size ? { size } : {}) };
@@ -236,9 +242,9 @@ function coerceScene(s: unknown, sentenceCount: number): Scene | null {
   return { from, to, framing, ...(graphic ? { graphic } : {}), ...(emphasis.length ? { emphasis } : {}) };
 }
 
-/* ============================ 容错 JSON(截断/尾逗号抢救) ============================ */
+/* ============================ Fault-tolerant JSON (truncation / trailing-comma rescue) ============================ */
 
-/** 扫描配平:返回补齐用的闭合序列;结构坏(错配/截在字符串里)返回 null。 */
+/** Scan and balance brackets: return the closing sequence to append; return null if structure is broken (mismatch / cut inside a string). */
 function bracketBalance(s: string): string | null {
   const stack: string[] = [];
   let inStr = false;
@@ -271,8 +277,8 @@ function bracketBalance(s: string): string | null {
     .join('');
 }
 
-/** 截断修复:从尾部逐个回退到最近的 }/],配平剩余括号再试 parse——
- *  长稿输出被 max_tokens 截断时,丢掉不完整的尾部、保住前面完整的场景。 */
+/** Truncation repair: step back from the tail to the nearest }/], balance the remaining brackets, retry parse —
+ *  when a long output is cut by max_tokens, drop the incomplete tail and keep the complete leading scenes. */
 function repairTruncatedJson(raw: string): string | null {
   for (let end = raw.length; end > 0; ) {
     const cut = Math.max(raw.lastIndexOf('}', end - 1), raw.lastIndexOf(']', end - 1));
@@ -285,7 +291,7 @@ function repairTruncatedJson(raw: string): string | null {
         JSON.parse(candidate);
         return candidate;
       } catch {
-        /* 回退到更早的闭合点 */
+        /* fall back to an earlier closing point */
       }
     }
     end = cut;
@@ -293,7 +299,7 @@ function repairTruncatedJson(raw: string): string | null {
   return null;
 }
 
-/** 容错抽 plan JSON:围栏(允许没闭合)→ 直接 parse → 去尾逗号 → 截断修复。失败返回 {}。 */
+/** Fault-tolerant plan JSON extraction: fence (unclosed allowed) → direct parse → strip trailing comma → truncation repair. Returns {} on failure. */
 export function extractPlanJson(text: string): Record<string, unknown> {
   const fenced = /```json\s*([\s\S]*?)(?:```|$)/i.exec(text);
   let raw = (fenced?.[1] ?? text).trim();
@@ -303,28 +309,28 @@ export function extractPlanJson(text: string): Record<string, unknown> {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    /* 继续 */
+    /* continue */
   }
-  // 常见小毛病:尾逗号
+  // common minor issue: trailing comma
   const noTrailing = raw.replace(/,\s*([}\]])/g, '$1');
   try {
     return JSON.parse(noTrailing) as Record<string, unknown>;
   } catch {
-    /* 继续 */
+    /* continue */
   }
   const repaired = repairTruncatedJson(noTrailing);
   if (repaired) {
     try {
       return JSON.parse(repaired) as Record<string, unknown>;
     } catch {
-      /* 落空 */
+      /* give up */
     }
   }
   return {};
 }
 
-/** rowsOrCount:统一叙事流行(生产路径,分解回主/插入段)或纯句数(遗留/回灌:
- *  存储态 plan 已是分解后形状,scenes 即主叙述本地索引,inserts 原样收编)。 */
+/** rowsOrCount: unified-flow rows (production path, decomposes back into main/inserts) or plain sentence count
+ *  (legacy/reload: a stored plan is already in decomposed shape, scenes ARE main local indices, inserts taken as-is). */
 export function parsePlan(text: string, rowsOrCount: PlanRow[] | number): DraftPlan {
   const o = extractPlanJson(text);
   return assemblePlan(
@@ -338,7 +344,7 @@ export function parsePlan(text: string, rowsOrCount: PlanRow[] | number): DraftP
   );
 }
 
-/** 存储态 plan 的 inserts 原样收编(云端回灌重解析:装配层早已分解过,shape 校验即可)。 */
+/** Take a stored plan's inserts as-is (cloud reload re-parse: the assembly layer already decomposed them, only shape validation needed). */
 function coerceInsertPlans(raw: unknown[]): InsertPlan[] {
   const out: InsertPlan[] = [];
   for (const item of raw) {
@@ -355,8 +361,8 @@ function coerceInsertPlans(raw: unknown[]): InsertPlan[] {
   return out;
 }
 
-/** 由零散 pieces(JSON 解析产物 / 工具环逐个发射的场景)组装 DraftPlan:逐个 coerce +
- *  排序 + 覆盖归一(被吞场景丢弃、gap 归前、尾部延伸)+ title/outro 兜底默认。 */
+/** Assemble a DraftPlan from loose pieces (JSON parse product / scenes emitted one by one by the tool loop):
+ *  coerce each + sort + coverage normalize (drop swallowed scenes, merge gaps forward, extend tail) + title/outro defaults. */
 export function assemblePlan(
   pieces: { scenes: unknown[]; title?: unknown; outro?: unknown; inserts?: unknown[] },
   rowsOrCount: PlanRow[] | number,
@@ -368,16 +374,16 @@ export function assemblePlan(
     .filter((s): s is Scene => !!s)
     .sort((a, b) => a.from - b.from);
 
-  // 归一:顺序覆盖,每个 index 恰好属一个场景(cover every sentence exactly once)。
-  //  · 被前面场景完全吞掉(s.to < cursor)→ 整场丢弃:graphic.data 是从原句区间抠的,平移会挂到错误句子上
-  //  · 部分重叠 → 只 clamp 起点
-  //  · 中段 gap → 并入前一个场景(延长 prev.to);开头 gap → 并入第一个场景(from=0)
-  //  · 尾部没覆盖 → 最后一场延伸到末尾
+  // Normalize: sequential coverage, each index belongs to exactly one scene (cover every sentence exactly once).
+  //  · fully swallowed by a preceding scene (s.to < cursor) → drop the whole scene: graphic.data is pulled from the original sentence range, so shifting would attach it to the wrong sentences
+  //  · partial overlap → only clamp the start
+  //  · mid gap → merge into the previous scene (extend prev.to); leading gap → merge into the first scene (from=0)
+  //  · uncovered tail → extend the last scene to the end
   const scenes: Scene[] = [];
   let cursor = 0;
   for (const s of parsed) {
     if (cursor > sentenceCount - 1) break;
-    if (s.to < cursor) continue; // 完全被吞 → 丢弃
+    if (s.to < cursor) continue; // fully swallowed → drop
     let from = Math.max(cursor, s.from);
     const to = Math.max(from, Math.min(sentenceCount - 1, s.to));
     if (from > cursor) {
@@ -389,10 +395,11 @@ export function assemblePlan(
   }
   if (scenes.length && cursor <= sentenceCount - 1) scenes[scenes.length - 1]!.to = sentenceCount - 1;
 
-  // 分解:统一叙事流(全局行号)→ 主叙述场景(main 本地索引)+ 各插入段场景(段内索引)。
-  // 覆盖归一在全局做完了;这里只按**源界拆分**(LLM 违规跨源/归一补 gap 造成的跨界,
-  // 首片保留 graphic/framing,后续片回 full 无图——图形 brief 属于原场景的主体内容)+
-  // 索引重映射。无 rows(遗留/回灌)= scenes 即主叙述,inserts 原样收编。
+  // Decompose: unified flow (global row numbers) → main scenes (main local indices) + each insert's scenes (in-clip indices).
+  // Coverage normalization was done globally; here we only split at SOURCE boundaries (crossings from LLM
+  // rule-breaking or gap-merging: the first piece keeps graphic/framing, later pieces revert to full with no
+  // graphic — the graphic brief is the original scene's main content) + index remapping. No rows (legacy/reload)
+  // = scenes ARE the main narration, inserts taken as-is.
   let mainScenes: Scene[] = scenes;
   let insertPlans: InsertPlan[] = coerceInsertPlans(pieces.inserts ?? []);
   if (rows) {
@@ -443,7 +450,7 @@ export async function planDraft(
     videoDurationSec: number;
     topic?: string;
     visuals?: PlanVisual[];
-    /** 当前主题简报(themeForLlm 产物)→ 让规划的调性/取色落在预设内。 */
+    /** Current theme brief (themeForLlm output) → keeps the plan's tone/palette within the preset. */
     theme?: string;
     hint?: { quality?: 'high' | 'standard' | 'cheap'; provider?: string; provider_model_id?: string };
   },

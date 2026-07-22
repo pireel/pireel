@@ -9,7 +9,7 @@
     "./video-edit": "./src/video-edit/index.ts",
     "./*": "./src/*.ts"
   },
-  "sideEffects": false,
+  "sideEffects": ["**/templates.ts", "**/templates.js"],
   "license": "AGPL-3.0-only",
   "dependencies": {
     "fast-json-patch": "^3.1.1",

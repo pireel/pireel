@@ -1,4 +1,4 @@
-/** en 词典分片:hyperframes-workbench.tsx(key=源码中文原文),归属见 index.ts。 */
+/** en dictionary shard: hyperframes-workbench.tsx (key = the original source Chinese); see index.ts for ownership. */
 const dict: Record<string, string> = {
   '圆角': 'Corner radius',
   '组件正在生成，改动会被生成结果覆盖——等生成完成再改': 'This element is generating — your edit would be overwritten. Wait for it to finish',
@@ -311,5 +311,8 @@ const dict: Record<string, string> = {
   '这个组件在人像上层,点击垫到人像后面': 'This element sits above the portrait — click to send it behind',
   '画面更新中…': 'Updating the canvas…',
   '插入中…': 'Inserting…',
+  '已复制组件引用,粘到 agent 对话里说怎么改': 'Copied — paste into your agent chat and say what to change',
+  '复制组件引用,发给你的 agent': 'Copy a block reference for your agent',
+  '复制失败': 'Copy failed',
 };
 export default dict;

@@ -1,15 +1,17 @@
 /**
- * 泡泡 Kawaii 的口播叠加件:撕下来的贴纸语言——白泡泡板一律 5px 深梅粗描边 +
- * 粉软影,歪 2-6 度;对话气泡带小尾巴;accent 药丸(纸色字+glow)每件至多一个;
- * ✦✧ 星星与腮红圆点作彩纸;入场全走 back.out 弹跳,禁直线滑入。根透明,
- * 贴在说话画面上。
+ * Kawaii talking-head overlays: peel-off sticker language. White bubble panels
+ * all with a 5px deep-plum outline + soft pink shadow, tilted 2-6deg; speech
+ * bubbles have a little tail; at most one accent pill per element (paper-color
+ * text + glow); ✦✧ stars and blush dots as confetti; every entrance uses a
+ * back.out bounce, no straight slide-in. Transparent root, stuck onto the
+ * talking-head shot.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';
 
-/** 白泡泡板:粗描边 + 粉软影 */
+/** White bubble panel: thick outline + soft pink shadow */
 const BUB = 'background:var(--panel);border:5px solid var(--fg);box-shadow:var(--shadow);';
-/** accent 药丸:纸色字 + glow */
+/** Accent pill: paper-color text + glow */
 const PILL =
   'background:var(--accent);color:var(--paper);font-weight:800;border-radius:999px;box-shadow:var(--glow);';
 

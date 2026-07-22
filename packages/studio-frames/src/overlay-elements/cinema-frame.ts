@@ -1,7 +1,9 @@
 /**
- * 影院 Cinema 的口播叠加件:遮幅字幕语言——底部 --panel-2 黑边遮幅条滑入、
- * 场记 slate(mono + accent-2 红点 ●)、时间码、220×2 金色细线(金色配给制:每件只给
- * 一个金强调)、双语字幕(中文主行 + 0.3em 字距英文小注)。动效只有滑入与慢淡。
+ * Cinema talking-head overlays: letterbox-subtitle language. A bottom --panel-2
+ * letterbox bar slides in, a mono slate (with accent-2 red dot ●), timecode, a
+ * 200x2 thin gold rule (gold is rationed: one gold accent per element), and
+ * bilingual subtitles (primary line + 0.3em-tracked small English caption).
+ * Motion is only slide-in and slow fade.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

@@ -7,24 +7,24 @@
 
 export interface Frame {
   id: string;
-  /** 面板上的中文名。 */
+  /** Display name shown on the panel. */
   title: string;
-  /** 一句话简介(中文,UI 文案)。 */
+  /** One-line summary (UI copy). */
   summary: string;
-  /** emoji 图标(缩略图无封面时的回落 + tag 渲染)。 */
+  /** Emoji icon (fallback when a thumbnail has no cover + tag rendering). */
   icon: string;
-  /** 封面图 R2 裸 key(可选;有则缩略图墙用它)。 */
+  /** Cover image R2 bare key (optional; used by the thumbnail wall if present). */
   iconKey?: string;
-  /** 主题产出的类型预览词(开放词表,frame 面板详情页渲染真实预览卡)。 */
+  /** Preview kinds the theme produces (open vocabulary; frame detail page renders real preview cards). */
   showcase: string[];
-  /** 主题设计 token(键与 theme vars 同名;含 alpha 用 8 位 hex 别带逗号)。 */
+  /** Theme design tokens (keys match theme vars; use 8-digit hex for alpha, no commas). */
   palette?: Record<string, string>;
-  /** 人像贴纸描边推荐(可选):挂载主题时落到 comp.personFx——主体人也成为这套设计的一部分。
-   *  键:stroke-style(solid|dashed)/stroke-width(0-100)/stroke-color/stroke-opacity(0-1)/
-   *  person-front(true)/feather(0-100)。 */
+  /** Person-matte stroke recommendation (optional): written to comp.personFx on mount, so the
+   *  subject also becomes part of the design. Keys: stroke-style(solid|dashed)/stroke-width(0-100)/
+   *  stroke-color/stroke-opacity(0-1)/person-front(true)/feather(0-100). */
   personFx?: Record<string, string>;
   version: string;
-  /** playbook 正文(英文,注入 studio chat system)。 */
+  /** Playbook body (English, injected into the studio chat system prompt). */
   body: string;
 }
 
@@ -54,7 +54,7 @@ export function parseFrame(raw: string, ctx: string): Frame {
       .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
       .filter(Boolean);
   };
-  // 顶层逗号切分:括号/引号里的逗号不算(shadow 的 rgb(… / …) 、字体栈都会带逗号)
+  // Split on top-level commas only: commas inside parens/quotes don't count (shadow's rgb(...) and font stacks carry commas)
   const splitTop = (inner: string): string[] => {
     const parts: string[] = [];
     let buf = '';
@@ -106,7 +106,7 @@ export function parseFrame(raw: string, ctx: string): Frame {
   };
 }
 
-/** 注入 path→raw 的内容表建注册表;路径须形如 …/<id>/frame.md(id 与 frontmatter 校验一致)。 */
+/** Build a registry from an injected path→raw content map; paths must look like .../<id>/frame.md (id checked against frontmatter). */
 export function createFrameRegistry(files: Record<string, string>): FrameRegistry {
   let cache: Frame[] | null = null;
   const loadAll = (): Frame[] => {

@@ -1,11 +1,12 @@
 /**
- * 千禧 Y2K —— 复古千禧方言:轨道椭圆环绕主角、✦ 星芒、双描边胶囊、气泡高光点。
- * 结构逻辑:每卡一个"发光焦点物"(标题/气泡/按钮)+ 环 + 星芒,拉宽斜体是签名字形。
+ * Y2K — retro-millennium dialect: orbital ellipses around the hero, ✦ sparkles, double-outlined pills,
+ * bubble highlight dots. Structure logic: one "glowing focal object" per card (title/bubble/button)
+ * + ring + sparkle; wide italic is the signature type.
  */
 
 import { type Block, mk } from './shared';
 
-/** 星芒 + 气泡(带高光点)通用样式。 */
+/** Shared styles for sparkles + bubbles (with highlight dots). */
 const orbits = (id: string) => `
 #${id} .sp{position:absolute;font-style:normal;color:var(--accent-2);line-height:1;}
 #${id} .bb{position:absolute;border-radius:999px;background:var(--panel-2);}

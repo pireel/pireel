@@ -1,6 +1,6 @@
 /**
- * 留白 Zen —— 极简禅白方言:黄金分割锚点、一根发丝线、一枚朱砂印点。
- * 零圆角零投影;动效只有 0.6-0.9s 慢淡 + 10px 位移;禁双轴居中。
+ * Zen — minimal zen-white dialect: golden-ratio anchors, a single hairline, one cinnabar seal dot.
+ * Zero radius, zero shadow; motion is only a 0.6-0.9s slow fade + 10px shift; no dual-axis centering.
  */
 
 import { type Block, mk } from './shared';

@@ -1,8 +1,10 @@
 /**
- * 贴纸 Sticker 的口播叠加件:撕下来的裁切贴纸语言——白底贴纸只靠软影分离、彩色/黑底
- * 贴纸带 10px 白 rim、黑色小标签胶囊、青色荧光笔块扫关键词、粉色半调星爆最后 pop、
- * 索引圆点贴,一律微倾(相邻反号)。每件像从贴纸簿上撕下来拍在画面上。
- * (主体人自带白描边贴纸化,件避开人、不拿白贴纸贴脸。)
+ * Sticker overlay elements: peeled die-cut sticker language — white stickers separated by soft
+ * shadow only; color/black stickers get a 10px white rim; small black label capsules; a cyan
+ * highlighter block swipes across keywords; a pink halftone star-burst pops last; index dots.
+ * Everything tilts slightly (adjacent ones tilt opposite ways). Each element looks torn from a
+ * sticker book and slapped on the frame. (The subject is already stickerized with a white outline,
+ * so elements avoid the person — don't stick a white sticker on their face.)
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

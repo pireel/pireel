@@ -1,19 +1,19 @@
 /**
- * Studio composition 模型 —— 核心层:类型 + 分镜/时长几何 + 模板注册表 + 共享文本工具。
+ * Studio composition model — core layer: types + shot/duration geometry + template registry + shared text utils.
  *
- * 结构 = 连续视频(轨0)+ 多轨叠加块。**块只存数据**:`{ templateId, slots, 时间, 轨 }`;
- * 具体 HTML/动画由【模板注册表】+【主题(CSS 变量)】在 assemble 时动态渲染。好处:
- *  - 加模板 = 往注册表加一条;换主题 = 改 var,不动块。
- *  - plan/agent 可枚举模板 + 槽位 schema,声明式选模板填槽(预设 only,保美感)。
- *  - 块是数据 → 可重渲、可校验、可序列化(存项目/版本)。
- *  - agent 自由写 HTML 走 'custom' 模板(slots = {innerHtml,timelineBody}),保留灵活性。
+ * Structure = continuous video (track 0) + multi-track overlay blocks. **Blocks store data only**: `{ templateId, slots, time, track }`;
+ * the actual HTML/animation is rendered dynamically at assemble time by the [template registry] + [theme (CSS vars)]. Benefits:
+ *  - Adding a template = one registry entry; switching theme = change vars, blocks untouched.
+ *  - plan/agent can enumerate templates + slot schema and declaratively pick a template and fill slots (presets only, keeps it pretty).
+ *  - Blocks are data → re-renderable, validatable, serializable (save project/version).
+ *  - Agent-authored freeform HTML goes through the 'custom' template (slots = {innerHtml,timelineBody}), keeping flexibility.
  *
- * 分层(对外入口一律 './composition' barrel,别直接 import 本文件):
- *   composition-core(本文件,无兄弟依赖) ← templates(渲染实现+注册,import 副作用)
- *   ← assemble(拼完整文档) / block-factory(块构造器)
+ * Layering (external entry is always the './composition' barrel, don't import this file directly):
+ *   composition-core (this file, no sibling deps) ← templates (render impl + registration, import side effect)
+ *   ← assemble (assemble the full document) / block-factory (block constructors)
  *
- * 约定:data-start/duration = 全局秒;块内 GSAP 时间轴用局部时间(0=块起点),assemble 注册到
- * window.__timelines[block.id];模板选择器一律 #blockId 作用域。
+ * Convention: data-start/duration = global seconds; a block's GSAP timeline uses local time (0 = block start), assemble registers to
+ * window.__timelines[block.id]; template selectors are always #blockId scoped.
  */
 
 import type { ThemeId } from './theme';
@@ -22,10 +22,10 @@ import { DEFAULT_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 
 export type BlockKind = 'caption' | 'title' | 'stat' | 'list' | 'transition' | 'custom' | 'media';
 
-/** 块槽位数据(各模板自定义键)。文本存原文(未转义),render 内部 escape。 */
+/** Block slot data (each template defines its own keys). Text stored raw (unescaped); render escapes internally. */
 export type Slots = Record<string, unknown>;
 
-/** 归一子区域([0..1],原点左上)。Block.box / 取景空区 / 安全区落点共用,别再各处内联重声明。 */
+/** Normalized sub-region ([0..1], origin top-left). Shared by Block.box / framing vacancy / safe-area placement; don't redeclare inline elsewhere. */
 export interface NormBox {
   x: number;
   y: number;
@@ -33,7 +33,7 @@ export interface NormBox {
   h: number;
 }
 
-/** 素材位内容(slots.media / 面板插入 / 素材选择共用的最小形状)。 */
+/** Media reference (minimal shape shared by slots.media / panel insert / asset picker). */
 export interface MediaRef {
   type: 'image' | 'video';
   url: string;
@@ -41,43 +41,43 @@ export interface MediaRef {
 
 export interface Block {
   id: string;
-  /** 模板 id(注册表键)。'custom' = agent 自由写的 HTML。 */
+  /** Template id (registry key). 'custom' = agent-authored freeform HTML. */
   templateId: string;
   slots: Slots;
-  /** 全局起点 / 时长(秒)。 */
+  /** Global start / duration (seconds). */
   startSec: number;
   durationSec: number;
-  /** 轨道:0 留给视频;叠加块 >=1,越大越上层。 */
+  /** Track: 0 reserved for video; overlay blocks >=1, larger = higher layer. */
   trackIndex: number;
-  /** 放置子区域(归一 [0..1],原点左上)。缺省 = 满画布(inset:0)。给安全区落点用。
-   *  有 contentBox 时 box 退化为**裁切窗口**(overflow:hidden 的取景框)。 */
+  /** Placement sub-region (normalized [0..1], origin top-left). Default = full canvas (inset:0). Used for safe-area placement.
+   *  With a contentBox, box degrades to a **clipping window** (overflow:hidden framing frame). */
   box?: NormBox;
-  /** 内容布局矩形(归一,画布坐标):拖边/角裁切时内容锚定画布不动的载体 ——
-   *  box 缩了内容不重排,只是窗口变小把内容裁掉。缺省 = 与 box 重合(未裁切)。
-   *  整块平移时两者一起挪(见 workbench shiftBox)。 */
+  /** Content layout rect (normalized, canvas coords): the carrier that keeps content anchored to the canvas during edge/corner cropping —
+   *  shrinking box does not reflow content, it just narrows the window and clips content. Default = coincides with box (uncropped).
+   *  When translating the whole block, both move together (see workbench shiftBox). */
   contentBox?: NormBox;
-  /** autofit 缩放系数(<1):内容溢出 box 时由预览实测算出,assembleHtml 给 #blockId 套 transform:scale,
-   *  预览与导出同源。缺省/≈1 = 不缩。来自 sample-composition 的 measureFit → workbench applyFits。 */
+  /** autofit scale factor (<1): measured by the preview when content overflows box; assembleHtml applies transform:scale to #blockId,
+   *  preview and export same-source. Default/≈1 = no scale. From sample-composition's measureFit → workbench applyFits. */
   fitScale?: number;
-  /** 组件底板背景(CSS color):容器垫实底 + 覆写本块 --panel/--paper。缺省 = 透明叠在画面上。 */
+  /** Component backdrop background (CSS color): fills a solid base + overrides this block's --panel/--paper. Default = transparent over the frame. */
   bg?: string;
-  /** 组件边框颜色(CSS color):容器描 3px 实线(box 块带圆角)。缺省 = 无边框。 */
+  /** Component border color (CSS color): container draws a 3px solid line (box blocks get rounded corners). Default = no border. */
   border?: string;
-  /** 组件整体透明度(0–1):容器 opacity。缺省/1 = 不透明。 */
+  /** Component overall opacity (0–1): container opacity. Default/1 = opaque. */
   opacity?: number;
-  /** 圆角(comp px):最外层容器 border-radius(box 块 overflow:hidden 一并裁圆内容)。缺省/0 = 直角。 */
+  /** Corner radius (comp px): outermost container border-radius (box blocks overflow:hidden also round-clips content). Default/0 = square. */
   radius?: number;
-  /** 整体旋转(度,-180–180):最外层容器 transform:rotate,绕中心。缺省/0 = 不转。 */
+  /** Overall rotation (deg, -180–180): outermost container transform:rotate around center. Default/0 = no rotation. */
   rotation?: number;
-  /** 内容视觉缩放系数(字号一起变),由角柄等比缩放写入:窗口(box)×k、内容层
-   *  (contentBox)布局尺寸不变只挪中心、scale ×k 三者同步,零重排。渲染为内容层的
-   *  CSS scale **属性**,不影响布局也不进 transform 串 —— 与 autofit 的 transform、
-   *  拖动的 translate 三条通道互不覆写。缺省 = 1。 */
+  /** Content visual scale factor (font size scales too), written by corner-handle proportional scaling: window (box) ×k, content layer
+   *  (contentBox) layout size unchanged (only center moves), and scale ×k stay in sync — zero reflow. Rendered as the content layer's
+   *  CSS scale **property**, not affecting layout and not entering the transform chain — mutually non-overwriting with autofit's transform
+   *  and drag's translate (three separate channels). Default = 1. */
   scale?: number;
-  /** 相对人像抠片层的块级覆盖:'front'=压在人像上,'behind'=垫在人像后。
-   *  缺省 = 跟全局 personFx.personFront(人物置顶时全部块在人后)。抠像管线没开时无效。 */
+  /** Block-level override relative to the person-matte layer: 'front' = above the person, 'behind' = under the person.
+   *  Default = follow global personFx.personFront (with person-on-top, all blocks go behind the person). No-op when matte pipeline is off. */
   personLayer?: 'front' | 'behind';
-  /** 给用户看的标签。 */
+  /** User-facing label. */
   label?: string;
 }
 
@@ -86,51 +86,51 @@ export interface StudioVideo {
   durationSec: number;
 }
 
-/** 镜头处理 —— 口播视频在某段内怎么取景(缩到角落腾位给图文 / 放大强调 / 半切 / 全屏)。
- *  split-l/-r = 半切:视频占左/右半,另一半留给 hyperframes 的块(partnerBlockId)。 */
+/** Shot treatment — how the talking-head video is framed within a segment (shrink to corner to make room for graphics / punch-in emphasis / half-split / fullscreen).
+ *  split-l/-r = half-split: video takes the left/right half, the other half goes to a hyperframes block (partnerBlockId). */
 export type ShotTreatment = 'full' | 'punch-in' | 'corner-br' | 'corner-tl' | 'split-l' | 'split-r';
 
 /**
- * 视频轨上的一个分镜=一个**片段(clip)**:保留源视频 [srcStart, srcEnd) 这段。
- * 成片(edited)时间轴 = 各片段源区间首尾相接(被剪掉的源区间在成片里不存在)。
- * 见 trim.ts 的映射/增删改查。
- * 分镜边界没有转场语义:同一条口播素材的切片之间就是跳切(jump cut),
- * 视觉变化由取景(treatment)承担;真要转场效果用组件轨的 transition 块。
+ * One shot on the video track = one **clip**: keeps the source-video segment [srcStart, srcEnd).
+ * The edited timeline = each clip's source interval joined end-to-end (trimmed-out source intervals don't exist in the edit).
+ * See trim.ts for the mapping/CRUD.
+ * Shot boundaries carry no transition semantics: slices of the same talking-head source are just jump cuts,
+ * visual change is carried by framing (treatment); for an actual transition effect use a transition block on the component track.
  */
 export interface VideoShot extends Clip {
   id: string;
   srcStart: number;
   srcEnd: number;
-  /** 多源主轨:有值 = 外部插入片段(srcStart/srcEnd 是**这个文件自己**的时间,不指主视频)。
-   *  缺省 = 主视频切片。**平权**(主视频只是先加载的源):取景/抠像/音频/字幕/分割裁剪删除
-   *  对插入段一律成立(取景统一打 #vidEl 画布、抠像按段的源喂 MODNet、字幕各源各自转写映射;
-   *  trim.ts 的成片数学只看长度,外源段天然成立)。别按早期"v1 恒全屏静音"的旧约束加守卫。 */
+  /** Multi-source main track: set = externally inserted clip (srcStart/srcEnd are **this file's own** time, not the main video).
+   *  Default = main-video slice. **Equal footing** (the main video is just the first-loaded source): framing/matte/audio/captions/split-trim-delete
+   *  all apply to inserted segments (framing uniformly targets the #vidEl canvas, matte feeds MODNet with the segment's own source, captions transcribe/map per source;
+   *  trim.ts's edit math only looks at length, so external segments work naturally). Don't add guards based on the early "v1 always-fullscreen-muted" constraint. */
   src?: string;
-  /** 本地插入段的 fileSig(src 是会话级 blob URL,刷新即死):草稿恢复按它从 OPFS
-   *  本地视频库取回 File 重建 src。远端 URL 的插入段没有这个字段。 */
+  /** Local inserted segment's fileSig (src is a session-scoped blob URL, dies on refresh): draft restore uses it to fetch the File
+   *  back from the OPFS local video library and rebuild src. Remote-URL inserted segments don't have this field. */
   srcSig?: string;
-  /** 取景恒作用整镜(一镜=一取景):要"只放大前几秒"就把镜剪开——split 是唯一的时间切分原语,
-   *  不在 shot 之内再造私有时间轴(treatmentLenSec 松回模型已删,关键帧序列与剪开等价)。 */
+  /** Framing always applies to the whole shot (one shot = one framing): to "punch in only the first few seconds", cut the shot — split is the only time-division primitive,
+   *  don't build a private timeline within a shot (the treatmentLenSec loose-return model was removed; a keyframe sequence is equivalent to cutting). */
   treatment: ShotTreatment;
-  /** 半切/缩角时,另一半/背后放哪个 block(hyperframes 层)。仅作链接,块自身独立渲染。 */
+  /** For half-split/corner-shrink, which block goes in the other half / behind (hyperframes layer). Link only; the block renders independently. */
   partnerBlockId?: string;
-  /** 本镜开启智能抠像(逐段生效,用户定的:开关只对选中段生效,不做全局/自动补跑)。
-   *  开启时父层对本段预算 mask;人像效果(personFx)只在开了抠像的段起作用。 */
+  /** Enable smart matte for this shot (per-segment, user-set: the toggle only affects the selected segment, no global/auto backfill).
+   *  When on, the parent budgets a mask for this segment; person effects (personFx) only take effect on matte-enabled segments. */
   personMatte?: boolean;
-  /** 取景大小 0–100(无单位,主流剪辑器口径):放大=变焦幅度,缩角=小窗大小,半切=视频占宽。
-   *  缺省 = 各类型的 TREAT_SIZE_DEFAULT(与旧常量等效)。'full' 无此概念。 */
+  /** Framing size 0–100 (unitless, a mainstream editor convention): punch-in = zoom amount, corner = small-window size, half-split = video width.
+   *  Default = each type's TREAT_SIZE_DEFAULT (equivalent to the old constants). 'full' has no such concept. */
   treatSize?: number;
-  /** 镜级画面调色(1=中性,只存偏离中性的字段;整镜生效,切点即换不做过渡)。
-   *  预览=#vidEl 的 CSS filter,导出=ctx.filter,同一 shotFilterCss 口径双端同源。 */
+  /** Shot-level color grade (1 = neutral, only stores fields deviating from neutral; applies to the whole shot, swaps at the cut with no transition).
+   *  Preview = #vidEl's CSS filter, export = ctx.filter, same shotFilterCss convention on both ends. */
   filter?: ShotFilter;
-  /** 本镜**入点**的转场(与上一镜的内容切换,不是遮罩):区域以切点为中心左右对称。
-   *  prevId 锚死前一镜——任一邻镜被删/换(id 不再相邻),转场自动失效(cutTransitions
-   *  过滤,不需要在每条剪辑路径上清理)。时长上限 MAX_TRANSITION_SEC,再被两侧镜长夹。 */
+  /** Transition at this shot's **in-point** (content switch with the previous shot, not a mask): region is symmetric around the cut.
+   *  prevId anchors to the previous shot — if either neighbor is deleted/replaced (id no longer adjacent), the transition auto-invalidates (cutTransitions
+   *  filters it, no need to clean up in every edit path). Duration capped by MAX_TRANSITION_SEC, then clamped by both neighboring shot lengths. */
   transIn?: CutTransition;
 }
 
-/** 切点转场:两镜内容的交接效果。效果集 = gl-transitions gallery 十选(id 对齐上游着色器名,
- *  GLSL 本体在 transition-gl.ts,预览/导出/面板同一 WebGL 合成器)。 */
+/** Cut transition: the handoff effect between two shots' content. Effect set = 10 picks from the gl-transitions gallery (id matches upstream shader name,
+ *  GLSL itself in transition-gl.ts; preview/export/panel share one WebGL compositor). */
 export type CutTransitionEffect =
   | 'fade'
   | 'fadeblack'
@@ -142,14 +142,14 @@ export type CutTransitionEffect =
   | 'rotatescale'
   | 'glitch'
   | 'dreamy';
-/** push/slide 的运动方向(B 的行进方向;up=向上进,即从底边入画)。 */
+/** Motion direction for push/slide (B's travel direction; up = entering upward, i.e. from the bottom edge). */
 export type TransitionDirection = 'up' | 'down' | 'left' | 'right';
 export interface CutTransition {
   prevId: string;
   effect: CutTransitionEffect;
-  /** 总时长(秒,左右各一半);≤ MAX_TRANSITION_SEC,且每侧不超过邻镜长度。 */
+  /** Total duration (seconds, half on each side); ≤ MAX_TRANSITION_SEC, and each side no longer than the neighboring shot. */
   durationSec: number;
-  /** 仅 push/slide 有意义;缺省 'left'。 */
+  /** Only meaningful for push/slide; default 'left'. */
   direction?: TransitionDirection;
 }
 export const MAX_TRANSITION_SEC = 4;
@@ -165,11 +165,11 @@ export const CUT_TRANSITION_EFFECTS: { id: CutTransitionEffect; name: string }[]
   { id: 'glitch', name: '故障' },
   { id: 'dreamy', name: '波浪' },
 ];
-/** 带方向的效果(面板据此显示方向按钮)。 */
+/** Direction-bearing effects (panel shows direction buttons for these). */
 export const DIRECTIONAL_TRANSITIONS: ReadonlySet<CutTransitionEffect> = new Set(['directional', 'directionalwipe']);
 
-/** 有效切点转场表(成片时间):prevId 必须仍是紧邻前镜(删/剪走任一侧即失效),
- *  half 被两侧镜长夹(转场不越镜)。预览 shim / 导出 / 时间轴同一口径。 */
+/** Table of valid cut transitions (edited time): prevId must still be the immediately-preceding shot (deleting/trimming either side invalidates it),
+ *  half is clamped by both neighboring shot lengths (transitions don't cross shots). Same convention for preview shim / export / timeline. */
 export function cutTransitions(
   shots: VideoShot[],
 ): { cut: number; shotId: string; effect: CutTransitionEffect; half: number; dir: TransitionDirection }[] {
@@ -188,20 +188,20 @@ export function cutTransitions(
   return out;
 }
 
-/** 分割点是否落在某个转场覆盖区内(区内禁分割——先移除转场)。 */
+/** Whether a split point falls inside some transition's coverage region (splitting inside is forbidden — remove the transition first). */
 export function splitBlockedByTransition(shots: VideoShot[], atSec: number): boolean {
   return cutTransitions(shots).some((tr) => Math.abs(atSec - tr.cut) < tr.half - 1e-3);
 }
 
-/** 画面调色三参(数值系数,1=不动;undefined 视同 1)。 */
+/** Three color-grade params (numeric factors, 1 = no change; undefined treated as 1). */
 export interface ShotFilter {
   brightness?: number;
   contrast?: number;
   saturate?: number;
 }
 
-/** ShotFilter → CSS/canvas filter 串('none'=中性)。亮度/对比夹在 [0.2, 3](黑屏/爆白没有
- *  正当用途);饱和允许到 0(黑白片是正当需求)。 */
+/** ShotFilter → CSS/canvas filter string ('none' = neutral). Brightness/contrast clamped to [0.2, 3] (blackout/blowout have no
+ *  legitimate use); saturation allowed down to 0 (black-and-white is a legitimate need). */
 export function shotFilterCss(f?: ShotFilter): string {
   if (!f) return 'none';
   const clamp = (x: number, lo: number) => Math.min(3, Math.max(lo, Math.round(x * 100) / 100));
@@ -221,64 +221,64 @@ export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
   { id: 'split-r', name: '右半' },
 ];
 
-/** 全局花字样式(Vids Captions 式):预设/位置/缩放一处调、全片句级花字统一生效。
- *  只作用于**无 box** 的 caption 块(句级字幕层);带 box 的花字(关键词重击等)是独立定位的
- *  强调组件,不受全局样式管。缺省(undefined)= 各块按自身 slots 渲染(草稿构建时的主题取舍)。 */
+/** Global caption style (Vids Captions style): preset/position/scale tuned in one place, applied uniformly to all sentence-level captions.
+ *  Only affects caption blocks **without a box** (the sentence-level subtitle layer); captions with a box (keyword punches, etc.) are independently
+ *  positioned emphasis components not governed by the global style. Default (undefined) = each block renders per its own slots (draft-build theming tradeoff). */
 export interface CaptionStyle {
-  /** 视觉预设 id(caption-presets 注册表;mode 逐词强调/整句字幕也由预设定)。 */
+  /** Visual preset id (caption-presets registry; the per-word-emphasis / full-sentence mode is also set by the preset). */
   preset: string;
-  /** 垂直位置:花字底边距画布顶部的 %(高度口径)。 */
+  /** Vertical position: caption's bottom edge distance from canvas top, in % (height-based). */
   yPct: number;
-  /** 水平位置:花字行中心距画布左缘的 %(宽度口径)。缺省 50 = 居中。 */
+  /** Horizontal position: caption line center distance from canvas left, in % (width-based). Default 50 = centered. */
   xPct?: number;
-  /** 框宽:字幕行允许的最大宽度(画布宽 %)。**拆段口径由它和字号实时推**(框窄了每段字少)。
-   *  缺省 56 ≈ 40px 字号下一行 13 个 CJK 字。 */
+  /** Box width: max width allowed for a subtitle line (canvas width %). **Line-wrapping is derived live from this and the font size** (narrower box = fewer chars per line).
+   *  Default 56 ≈ 13 CJK chars per line at 40px font. */
   wPct?: number;
-  /** 整体缩放系数(1 = 预设原始字号)。 */
+  /** Overall scale factor (1 = preset's original font size). */
   scale: number;
-  /** 字幕框高(画布高 %):框底=yPct 锚。**字号不动,底板跟着框走**——渲染时落到
-   *  .cap-line 的 min-height,文字在框内垂直居中(无底板的预设只是占位变高)。
-   *  缺省/0 = 贴字幕行实高。 */
+  /** Subtitle box height (canvas height %): box bottom = yPct anchor. **Font size stays put, the backdrop follows the box** — rendered as
+   *  .cap-line's min-height, text vertically centered inside (presets without a backdrop just grow taller as a placeholder).
+   *  Default/0 = hugs the actual line height. */
   hPct?: number;
-  /** 译文行(双语第二行)的独立位置/字号:与主行互不依赖,画布上单独拖拽/缩放。
-   *  缺省 = 贴主行正下方、0.6× 主行字号(跟随主行移动)。yPct=行顶距画布顶 %,
-   *  xPct=行中心距左缘 %,scale=字号系数(与主行 scale 同口径,1=预设原始字号)。
-   *  lang=UI 面选过的目标语言(面板 chip 选中态 + 新插入片段自动补翻用)。 */
+  /** Independent position/font for the translation line (bilingual second line): independent of the main line, dragged/scaled separately on canvas.
+   *  Default = directly below the main line, 0.6× the main font size (moves with the main line). yPct = line-top distance from canvas top %,
+   *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
+   *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
   sub?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
   width: number;
   height: number;
-  /** 预设主题 id —— 定全片配色/字体/发光,模板用 var(--x) 取。 */
+  /** Preset theme id — sets the whole video's colors/fonts/glow; templates read via var(--x). */
   theme: ThemeId;
   video: StudioVideo | null;
   blocks: Block[];
-  /** 视频轨分镜切片(每片一种取景)。空/缺省 = 整条全屏。 */
+  /** Video-track shot slices (one framing per slice). Empty/absent = one continuous fullscreen clip. */
   shots?: VideoShot[];
-  /** 从画面底色派生的调色板(覆盖 #root 颜色 vars,叠在主题默认之后)。来自画面分析。 */
+  /** Palette derived from the frame's base colors (overrides #root color vars, layered after theme defaults). From frame analysis. */
   palette?: Record<string, string>;
-  /** 全局花字样式,见 CaptionStyle。assemble 时覆盖句级花字的 effect/yPct/scale。 */
+  /** Global caption style, see CaptionStyle. At assemble time, overrides sentence-level captions' effect/yPct/scale. */
   captionStyle?: CaptionStyle;
-  /** 挂载的 frame 主题包 id(挂载时与 palette 一起落文档):compose 请求带上它,
-   *  服务端把该 frame 的设计语言注进 ACTIVE THEME(覆盖通用审美,工程契约不动)。 */
+  /** Mounted frame theme-pack id (written to the document alongside palette on mount): the compose request carries it,
+   *  the server injects that frame's design language into ACTIVE THEME (overrides generic aesthetics, engineering contract untouched). */
   frameId?: string;
-  /** 人像效果全局样式(工具栏「人像」面板):人物置顶/羽化/描边/换背景。
-   *  只在开了抠像(VideoShot.personMatte)的分镜段起作用;缺省 = 全默认。 */
+  /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
+   *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
 }
 
-/** 人像效果配置(全局样式;抠没抠像逐段定,见 VideoShot.personMatte)。
- *  预览端实时合成;导出链路暂不支持(换背景层导出时隐藏,退回原画面)。
- *  数值一律 0–100 无单位(主流剪辑器口径),assemble 按画布分辨率换算成 px。 */
+/** Person-effect config (global style; matte on/off is per-segment, see VideoShot.personMatte).
+ *  Composited live on the preview side; the export path is not yet supported (the background-swap layer is hidden on export, falling back to the original frame).
+ *  All values are 0–100 unitless (a mainstream editor convention); assemble converts to px per canvas resolution. */
 export interface PersonFx {
-  /** 人物置顶:人像盖在所有组件上(文字穿人)。缺省 = 组件在人物前(常规叠加)。 */
+  /** Person-on-top: person overlays all components (text passes behind the person). Default = components in front of the person (normal overlay). */
   personFront?: boolean;
-  /** mask 边缘羽化强度 0–100(0 = 硬边)。缺省 0。 */
+  /** Mask edge feather strength 0–100 (0 = hard edge). Default 0. */
   feather?: number;
-  /** 人像描边:样式卡(实线/虚线)+ 粗细 0–100 + 透明度 0–1。缺省 = 无。 */
+  /** Person stroke: style card (solid/dashed) + width 0–100 + opacity 0–1. Default = none. */
   stroke?: { style: 'solid' | 'dashed'; width: number; color: string; opacity?: number };
-  /** 背景替换:纯色或图片(素材库 URL);缺省 = 不换。 */
+  /** Background replacement: solid color or image (asset-library URL); default = no swap. */
   bg?: { type: 'color'; color: string } | { type: 'image'; url: string };
 }
 
@@ -292,21 +292,21 @@ export function shotId(): string {
   return `shot${_shotUid}_${Math.floor(performance.now())}`;
 }
 
-/** 按分镜(句)自动切片:每句起点切一刀 → 覆盖 [0,视频末] 的连续片段,默认全屏取景。 */
+/** Auto-slice by shot (sentence): cut at each sentence start → continuous clips covering [0, video end], default fullscreen framing. */
 export function shotsFromSentences(sentences: { start: number }[], videoDurationSec: number): VideoShot[] {
   const cuts = [...new Set(sentences.map((s) => Math.max(0, Math.round(s.start * 10) / 10)))].sort((a, b) => a - b);
-  if (!cuts.length || cuts[0]! > 0) cuts.unshift(0); // 首段从 0 起
+  if (!cuts.length || cuts[0]! > 0) cuts.unshift(0); // first segment starts at 0
   const shots: VideoShot[] = [];
   for (let i = 0; i < cuts.length; i++) {
     const srcStart = cuts[i]!;
     const srcEnd = i + 1 < cuts.length ? cuts[i + 1]! : videoDurationSec;
-    if (srcEnd - srcStart < 0.05) continue; // 跳过过短片段
+    if (srcEnd - srcStart < 0.05) continue; // skip too-short clips
     shots.push({ id: shotId(), srcStart, srcEnd, treatment: 'full' });
   }
   return shots;
 }
 
-/** 取景大小(0–100)的各类型默认值 —— 旧硬编码常量的反解,缺省行为不变。 */
+/** Per-type defaults for framing size (0–100) — reverse-derived from the old hardcoded constants; default behavior unchanged. */
 export const TREAT_SIZE_DEFAULT: Record<ShotTreatment, number> = {
   full: 0,
   'punch-in': 18,
@@ -316,7 +316,7 @@ export const TREAT_SIZE_DEFAULT: Record<ShotTreatment, number> = {
   'split-r': 50,
 };
 
-/** 取景大小 0–100 → 视频 scale:放大 1.05–2.0,缩角 0.2–0.6,半切 0.3–0.7。 */
+/** Framing size 0–100 → video scale: punch-in 1.05–2.0, corner 0.2–0.6, half-split 0.3–0.7. */
 function treatScale(tr: ShotTreatment, size?: number): number {
   const v = Math.max(0, Math.min(100, size ?? TREAT_SIZE_DEFAULT[tr])) / 100;
   if (tr === 'punch-in') return 1.05 + v * 0.95;
@@ -325,9 +325,9 @@ function treatScale(tr: ShotTreatment, size?: number): number {
   return 1;
 }
 
-/** 镜头取景 → GSAP transform 变量对象(transform-only,合成层、scrub 安全、与导出同源)。
- *  缩角贴角留 2% 边距,半切贴边;位移随 scale 联动(xPercent = (1-s)/2 口径)。
- *  导出:大小滑杆拖动中,父层用它直发 hf:shotVars 给预览实时 set(零 setState,松手才提交)。 */
+/** Shot framing → GSAP transform variable object (transform-only, compositor layer, scrub-safe, same-source as export).
+ *  Corner-shrink leaves a 2% margin from the corner, half-split hugs the edge; offset tracks scale (xPercent = (1-s)/2 convention).
+ *  Export: while dragging the size slider, the parent uses this to emit hf:shotVars directly to the preview for a live set (zero setState, commits only on release). */
 export function shotTransformVars(tr: ShotTreatment, size?: number): { scale: number; xPercent: number; yPercent: number; borderRadius: number } {
   const s = treatScale(tr, size);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -355,19 +355,19 @@ function shotVars(tr: ShotTreatment, size?: number): string {
 }
 
 /**
- * 取景腾出的「空区」归一盒子(给半切/缩角的另一半 = partner block 落点)。
- * full/punch-in 占满或放大 → 无空区返回 null。坐标留了边距,不贴边。
+ * Normalized "vacancy" box freed up by framing (placement for the other half of a half-split/corner = partner block).
+ * full/punch-in fill or zoom → no vacancy, returns null. Coords leave a margin, not edge-to-edge.
  */
 export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox | null {
   const s = treatScale(tr, size);
   switch (tr) {
-    case 'corner-br': // 视频缩右下 → 空出上半大块(高度随小窗大小联动)
+    case 'corner-br': // video shrinks to bottom-right → frees a large top block (height tracks small-window size)
       return { x: 0.06, y: 0.1, w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
-    case 'corner-tl': // 视频缩左上 → 空出下半大块
+    case 'corner-tl': // video shrinks to top-left → frees a large bottom block
       return { x: 0.06, y: Math.min(0.7, s + 0.06), w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
-    case 'split-l': // 视频占左半 → 空出右半(宽度随占宽联动)
+    case 'split-l': // video takes the left half → frees the right half (width tracks occupied width)
       return { x: Math.min(0.72, s + 0.02), y: 0.12, w: Math.max(0.2, 1 - s - 0.08), h: 0.76 };
-    case 'split-r': // 视频占右半 → 空出左半
+    case 'split-r': // video takes the right half → frees the left half
       return { x: 0.06, y: 0.12, w: Math.max(0.2, 1 - s - 0.08), h: 0.76 };
     default:
       return null;
@@ -375,18 +375,18 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
 }
 
 /**
- * 视频取景时间轴体(关键帧模型,按**成片时间**):
- *  1) 每镜起点一个取景关键帧(取景恒作用整镜,一镜=一取景)。
- *  2) 连续相同取景(类型+大小都同)去重——分割出的同取景相邻碎段是一个状态,不补冗余 tween。
- * 设了就执行,**没有最短停留合并**(用户定的):"取景别停不足 1s"是给 LLM 分镜时的
- * 克制要求(见 prompts/plan.ts FRAMING),用户手动剪出来的碎镜取景照常执行。
- * 注册到 __timelines['vid']。
+ * Video framing timeline body (keyframe model, in **edited time**):
+ *  1) One framing keyframe at each shot's start (framing always applies to the whole shot, one shot = one framing).
+ *  2) Consecutive identical framings (same type + size) are deduped — adjacent split-off segments with the same framing are one state, no redundant tween.
+ * Whatever is set gets executed, with **no minimum-hold merging** (user-set): "don't hold a framing under 1s" is a restraint asked of the LLM at shot-planning time
+ * (see prompts/plan.ts FRAMING); framings on shot fragments the user hand-cut are executed as-is.
+ * Registered to __timelines['vid'].
  */
 export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotTreatment; size?: number }[] {
   const sp = spans(shots);
   if (sp.length === 0) return [];
 
-  // canvas 渲染模式:视频轨是**一块画布**,所有段(含其它源的插入段)的取景统一打在它身上
+  // canvas render mode: the video track is **one canvas**; all segments' framings (including other-source inserts) are applied to it uniformly
   const keys: { at: number; tr: ShotTreatment; size?: number }[] = [];
   for (const { clip, editedStart } of sp) {
     keys.push({ at: editedStart, tr: clip.treatment, size: (clip as VideoShot).treatSize });
@@ -412,8 +412,8 @@ export function videoFrameTimelineBody(shots: VideoShot[]): string {
     const dur = Math.max(0.2, Math.min(0.5, gap - 0.05));
     lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotVars(final[i]!.tr, final[i]!.size)}), ${n(final[i]!.at)});`);
   }
-  // 调色关键帧(与取景独立去重):跳切语义——切点即换(set),不做过渡 tween。
-  // 全片无调色 = 一行不出;有则含中性段的 'none' 复位,否则前镜的滤镜会漏到后镜。
+  // Color-grade keyframes (deduped independently of framing): jump-cut semantics — swap at the cut (set), no transition tween.
+  // No grading anywhere = no lines emitted; if any, neutral segments emit a 'none' reset, otherwise the prior shot's filter leaks into the next.
   if (sp.some(({ clip }) => shotFilterCss((clip as VideoShot).filter) !== 'none')) {
     let prevCss: string | null = null;
     for (const { clip, editedStart } of sp) {
@@ -426,7 +426,7 @@ export function videoFrameTimelineBody(shots: VideoShot[]): string {
   return lines.join('\n');
 }
 
-/** 成片(edited)时长:有分镜片段则 = Σ 片段源长度,否则原视频时长;再取与块末端的最大。 */
+/** Edited duration: with shot clips = Σ clip source lengths, else original video duration; then max'd against block end times. */
 export function editedVideoDuration(comp: Composition): number {
   return comp.shots && comp.shots.length ? editedDuration(comp.shots) : (comp.video?.durationSec ?? 0);
 }
@@ -437,16 +437,16 @@ export function totalDuration(comp: Composition): number {
   return Math.max(0.1, max);
 }
 
-/** 轨道数(含视频轨 0)。 */
+/** Track count (including video track 0). */
 export function trackCount(comp: Composition): number {
   let max = comp.video ? 0 : -1;
   for (const b of comp.blocks) if (b.trackIndex > max) max = b.trackIndex;
   return max + 1;
 }
 
-/** 找一条在 [startSec, startSec+durationSec) 窗内空闲的组件轨(≥1):从 preferred 起向上,
- *  返回第一条与已有块无时间重叠的轨号。插入新组件时用它——轨是图层不是分类,同轨同窗的
- *  chip 在时间轴上会互相叠住点不到;轨号越大越靠上,行数由 trackCount 动态长。 */
+/** Find a component track (≥1) free within the [startSec, startSec+durationSec) window: starting from preferred and going up,
+ *  return the first track index with no time overlap against existing blocks. Used when inserting a new component — tracks are layers, not categories;
+ *  chips on the same track and window overlap on the timeline and become unclickable; larger index = higher, and row count grows dynamically via trackCount. */
 export function freeTrack(blocks: Block[], startSec: number, durationSec: number, preferred = 2): number {
   const end = startSec + durationSec;
   for (let t = Math.max(1, preferred); ; t++) {
@@ -455,11 +455,11 @@ export function freeTrack(blocks: Block[], startSec: number, durationSec: number
   }
 }
 
-/** 数字/百分比序列化(templates/assemble 共用,保持产出字符串稳定)。 */
+/** Number/percent serialization (shared by templates/assemble, keeps output strings stable). */
 export const n = (x: number) => (Math.round(x * 1000) / 1000).toString();
 export const pct = (v: number) => `${n(v * 100)}%`;
 
-/* ============================ 模板注册表 ============================ */
+/* ============================ Template registry ============================ */
 
 export interface SlotSpec {
   type: 'text' | 'text[]' | 'words' | 'image' | 'enum';
@@ -478,9 +478,9 @@ export interface Template {
   name: string;
   kind: BlockKind;
   defaultTrackIndex: number;
-  /** 槽位 schema —— 给 plan/agent/UI 知道这个模板能填什么。 */
+  /** Slot schema — tells plan/agent/UI what this template can be filled with. */
   slots: Record<string, SlotSpec>;
-  /** slots(含数据) + blockId(+块成片起点,内嵌 media 的 data-start 用;+块时长,出场动效定位用) → 渲染产物。选择器须 #blockId 作用域。 */
+  /** slots (with data) + blockId (+ block's edited start, for embedded media's data-start; + block duration, for entrance-animation timing) → render output. Selectors must be #blockId scoped. */
   render(slots: Slots, blockId: string, startSec?: number, durationSec?: number): Rendered;
 }
 
@@ -495,24 +495,24 @@ export function listTemplates(): Template[] {
   return [...REGISTRY.values()];
 }
 
-/** 把一个块渲染成 innerHtml + timelineBody(经注册表 + 模板)。 */
+/** Render a block into innerHtml + timelineBody (via the registry + template). */
 export function renderBlock(block: Block): Rendered {
   return getTemplate(block.templateId).render(block.slots, block.id, block.startSec, block.durationSec);
 }
 
-/** 块的语义类型(来自其模板)。 */
+/** The block's semantic kind (from its template). */
 export function blockKind(block: Block): BlockKind {
   return getTemplate(block.templateId).kind;
 }
 
-/** 句级花字 = 无 box 的 caption 块(全局样式的作用对象);带 box 的是独立定位的强调花字。 */
+/** Sentence-level caption = a caption block without a box (target of the global style); boxed ones are independently positioned emphasis captions. */
 export function isSentenceCaption(block: Block): boolean {
   return blockKind(block) === 'caption' && !block.box;
 }
 
-/** 当前生效的全局花字样式:显式设置优先,否则从第一个句级花字的 slots 推(给面板选中态
- *  和画布手柄一个稳定初值),片里还没有花字则取默认。 */
-/** 字幕框宽缺省(画布宽 %):≈ 40px 字号下一行 13 个 CJK 字。 */
+/** The currently-effective global caption style: explicit setting wins, else derived from the first sentence-level caption's slots (a stable initial value
+ *  for the panel selected-state and canvas handles); if there's no caption yet, take the default. */
+/** Default subtitle box width (canvas width %): ≈ 13 CJK chars per line at 40px font. */
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
 export function resolveCaptionStyle(comp: Composition): CaptionStyle {
@@ -523,10 +523,10 @@ export function resolveCaptionStyle(comp: Composition): CaptionStyle {
   return { preset, yPct, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, scale: 1 };
 }
 
-/** 译文行(双语第二行)的完整样式——**CaptionStyle 同形**,主行的手柄/渲染/量测口径
- *  原样复用(选中框、移动 live、改宽 ghost、分词拆行全一套逻辑)。sub 未设的量从主行
- *  派生:行底锚 = 主行底 + 0.2 主字号间隙 + 译文行实高(即"贴主行正下方"的解析式),
- *  字号 0.6× 主行,x/框宽跟主行。 */
+/** Full style for the translation line (bilingual second line) — **same shape as CaptionStyle**, reusing the main line's handle/render/measure conventions
+ *  as-is (selection box, live move, width-change ghost, tokenize-and-wrap all one set of logic). Values sub doesn't set are derived from the main line:
+ *  line-bottom anchor = main bottom + 0.2 main-font gap + translation line's actual height (the closed form of "directly below the main line"),
+ *  font 0.6× main, x/box-width follow the main line. */
 export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const m = resolveCaptionStyle(comp);
   const p = getCaptionPreset(m.preset);
@@ -546,7 +546,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   };
 }
 
-/* ============================ 基础 ============================ */
+/* ============================ Basics ============================ */
 
 export interface FxWord {
   text: string;
@@ -573,7 +573,7 @@ export const str = (v: unknown, d = '') => (typeof v === 'string' ? v : d);
 export const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 export const wordsOf = (v: unknown): FxWord[] => (Array.isArray(v) ? (v as FxWord[]) : []);
 
-/* ============================ 安全 ============================ */
+/* ============================ Safety ============================ */
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');

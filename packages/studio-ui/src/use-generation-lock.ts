@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * 生成锁:被配图 worker(排队+在跑)/ edit_block 重写 / 编辑器 AI 改 持有的块,
- * 期间禁一切编辑 —— worker 在任务开始就快照了占位的 box/时间窗,中途改动要么喂给
- * 模型旧数据、要么被生成结果整块覆盖。
+ * Generation lock: blocks held by the graphics worker (queued + running) / edit_block rewrite / editor AI
+ * edit are locked against all editing — the worker snapshots the placeholder's box/time window when the
+ * task starts, so a mid-task edit would either feed the model stale data or be wholly overwritten by the result.
  *
- * 用法:改动入口统一过 `genIdsRef.current.has(id)`(异步/事件回调里读最新)或
- * `genLockToast(id)`(拦下并提示);UI 渲染态读 `genIds`。单块出结果即时解锁。
+ * Usage: route edit entry points through `genIdsRef.current.has(id)` (read the latest inside async/event
+ * callbacks) or `genLockToast(id)` (block and prompt); UI render state reads `genIds`. A block unlocks the
+ * instant its result lands.
  */
 
 import { useCallback, useRef, useState } from 'react';
@@ -26,7 +27,7 @@ export function useGenerationLock() {
     genIdsRef.current = next;
     setGenIds(next);
   }, []);
-  /** 时间轴拖动等手势入口:锁中 → toast 拦下,返回 true 表示「别动」。 */
+  /** Gesture entry points like timeline drag: if locked → toast blocks it, returns true meaning "don't move". */
   const genLockToast = useCallback((id: string): boolean => {
     if (!genIdsRef.current.has(id)) return false;
     toast.info(t('这个组件正在生成中，先不能动它'));

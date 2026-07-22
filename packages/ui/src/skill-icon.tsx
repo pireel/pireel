@@ -1,10 +1,11 @@
 import { imageThumb, type ImagePreset } from './image-url';
 
 /**
- * Skill 图标——统一渲染点。iconKey（生成图标集的裸 R2 key）优先，经 imageThumb
- * 转图当 app-icon 式色块；缺省回落 emoji（坐在 accent 浅底里）。
+ * Skill icon — single render point. Prefers iconKey (raw R2 key of the generated icon set),
+ * transformed via imageThumb into an app-icon-style tile; falls back to an emoji (on a light accent bg).
  *
- * 卡片/菜单/抽屉等有空间处用它；chat 输入框的内联 pill 与喂 LLM 的文本仍走 emoji。
+ * Use it where there's room (cards/menus/drawers); the chat input's inline pill and the text fed to
+ * the LLM still use the emoji.
  */
 export function SkillIcon({
   iconKey,

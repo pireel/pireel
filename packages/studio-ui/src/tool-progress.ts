@@ -1,22 +1,23 @@
 'use client';
 
 /**
- * 工具实时进度(外部 store)——长工具在 chat 卡片里显示实时文案 + 进度条。
- * 工具执行在 workbench(runStudioTool),展示在 StudioChat 的 ToolCard,两者无 props 直连;
- * 用一个轻量 store 解耦:执行侧 setToolProgress / clearToolProgress,展示侧 useToolProgress(id)。
+ * Live tool progress (external store) — long-running tools show live text + a progress bar in the chat card.
+ * Tools execute in the workbench (runStudioTool) but display in StudioChat's ToolCard, with no direct prop link;
+ * a lightweight store decouples them: the execution side calls setToolProgress / clearToolProgress, the display
+ * side calls useToolProgress(id).
  *
- * **多槽**:按工具 id 各存一份 —— agent 可以在同一步并行调多个工具(如 分析口播稿 ‖ 分析画面),
- * 各自的卡片读各自的进度,互不clobber。
+ * **Multi-slot**: stored per tool id — the agent may run several tools in parallel in one step (e.g.
+ * analyze transcript ‖ analyze visuals), so each card reads its own progress without clobbering the others.
  */
 
 import { useSyncExternalStore } from 'react';
 
 export interface ToolProgress {
-  /** 正在跑的工具 id(与 ToolCard 的 def.id 匹配才显示) */
+  /** The running tool's id (shown only when it matches ToolCard's def.id) */
   id: string;
-  /** 友好文案,如「分析画面 42% · 约剩 12s」 */
+  /** Friendly text, e.g. "Analyzing visuals 42% · ~12s left" */
   text: string;
-  /** 0..1 进度,有则画条 */
+  /** 0..1 progress; draws a bar when present */
   frac?: number;
 }
 
@@ -28,7 +29,7 @@ const emit = () => {
 
 export function setToolProgress(p: ToolProgress | null): void {
   if (p === null) {
-    // 兼容旧调用:清空全部(新代码请用 clearToolProgress(id))
+    // Legacy call compat: clear everything (new code should use clearToolProgress(id))
     map = {};
   } else {
     map = { ...map, [p.id]: p };
@@ -55,7 +56,7 @@ const snapshot = (): Record<string, ToolProgress> => map;
 const empty: Record<string, ToolProgress> = {};
 const server = (): Record<string, ToolProgress> => empty;
 
-/** 订阅某个工具的进度(没在跑返回 null)。 */
+/** Subscribe to a tool's progress (returns null when not running). */
 export function useToolProgress(id: string): ToolProgress | null {
   const m = useSyncExternalStore(subscribe, snapshot, server);
   return m[id] ?? null;

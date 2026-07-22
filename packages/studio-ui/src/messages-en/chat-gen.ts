@@ -1,5 +1,5 @@
-/** en 词典分片(key=源码中文原文),归属见 index.ts。覆盖:studio-chat.tsx /
- *  gen-chat-panel.tsx / gen-templates.ts(模板卡 label)/ gen-api.ts / element-source-editor.tsx。 */
+/** en dictionary shard (key = the original source Chinese); see index.ts for ownership. Covers: studio-chat.tsx /
+ *  gen-chat-panel.tsx / gen-templates.ts (template card labels) / gen-api.ts / element-source-editor.tsx. */
 const dict: Record<string, string> = {
   /* ---------------- studio-chat.tsx ---------------- */
   '思考中': 'Thinking',
@@ -83,7 +83,7 @@ const dict: Record<string, string> = {
   '参考': 'Reference',
   '也可拖到画面 / 时间轴插入': 'You can also drag it onto the canvas / timeline',
 
-  /* ---------------- gen-templates.ts:类目(经 zhCategory 展示) ---------------- */
+  /* ---------------- gen-templates.ts: categories (shown via zhCategory) ---------------- */
   '海报': 'Poster',
   '图形信息': 'UI & graphic',
   '插画 / 3D': 'Illustration / 3D',
@@ -96,7 +96,7 @@ const dict: Record<string, string> = {
   '氛围': 'Ambience',
   '人物': 'People',
 
-  /* ---------------- gen-templates.ts:视频模板标题 ---------------- */
+  /* ---------------- gen-templates.ts: video template titles ---------------- */
   '缓慢推近特写': 'Slow push-in close-up',
   '环绕运镜产品': 'Product orbit shot',
   '无人机拉升揭示': 'Drone rise reveal',

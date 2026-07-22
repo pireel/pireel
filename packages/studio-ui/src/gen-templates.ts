@@ -1,30 +1,33 @@
 /**
- * 生成面板的「模板」库:精选可直接复用的提示词,点一下就填进输入框去生成。
+ * The gen panel's "Template" library: curated ready-to-reuse prompts; one click drops them into the input to generate.
  *
- * - 图片模板:扒自开源榜单 nanobanana-trending-prompts(jau123/nanobanana-trending-prompts),
- *   按创作者常用场景(海报/图形/插画3D/产品品牌/摄影/美食)各取高分若干。预览图已转存我们的
- *   R2(键 studio/gen-templates/<id>.jpg,裸 key),展示统一走 imageThumb,不再依赖外链。
- * - 视频模板:自研一批口播 B-roll / 运镜 / 空镜 / 氛围提示词(视频源没有现成榜单)。有成品预览片
- *   就填 video(R2 裸键,卡片渲染循环小视频);没有则退化成标题占位卡。
+ * - Image templates: pulled from the open-source leaderboard nanobanana-trending-prompts
+ *   (jau123/nanobanana-trending-prompts), taking several high-scorers per common creator
+ *   scenario (poster/graphic/illustration-3D/product-brand/photography/food). Preview images
+ *   are re-hosted on our R2 (key studio/gen-templates/<id>.jpg, bare key), all shown via imageThumb, no external links.
+ * - Video templates: a self-authored batch of talking-head B-roll / camera-move / cutaway /
+ *   mood prompts (no ready leaderboard for video sources). If there's a finished preview clip,
+ *   fill video (bare R2 key, card loops a small video); otherwise fall back to a title placeholder card.
  *
- * 面板逻辑:没有自己生成过 → 直接铺模板;一旦有了自己的产物 → 顶部出「我的 / 模板」两个 tab。
+ * Panel logic: nothing generated yet → show templates directly; once the user has their own
+ * output → show two tabs ("Mine / Templates") at the top.
  */
 
 export interface GenTemplate {
   id: string;
-  /** 归类(英文原类目 / 视频自定义中文类目),UI 用 TEMPLATE_CATEGORY_ZH 映射展示。 */
+  /** Category (original English category / custom Chinese category for video), displayed via the TEMPLATE_CATEGORY_ZH map. */
   category: string;
-  /** 视频模板无预览片时,用标题撑卡片;图片模板靠 image,不强制标题。 */
+  /** When a video template has no preview clip, the title fills the card; image templates rely on image, title not required. */
   title?: string;
-  /** 预览图裸 key(R2;图片模板有),展示走 imageThumb。 */
+  /** Preview image bare key (R2; image templates have it), shown via imageThumb. */
   image?: string;
-  /** 成品预览片裸 key(R2;视频模板有成品才填),卡片循环播;展示走 imageThumb(_,'original')。 */
+  /** Finished preview clip bare key (R2; only set when a video template has a finished clip), card loops it; shown via imageThumb(_,'original'). */
   video?: string;
-  /** 完整提示词,点卡片即填进输入框。 */
+  /** Full prompt, dropped into the input on card click. */
   prompt: string;
 }
 
-/** 类目中文名(展示用;缺省回退原串)。 */
+/** Chinese category display names (fall back to the original string if missing). */
 export const TEMPLATE_CATEGORY_ZH: Record<string, string> = {
   'Poster Design': '海报',
   'UI & Graphic': '图形信息',
@@ -41,7 +44,7 @@ export const TEMPLATE_CATEGORY_ZH: Record<string, string> = {
 
 export const zhCategory = (c: string): string => TEMPLATE_CATEGORY_ZH[c] ?? c;
 
-/** 图片模板(开源榜单精选,预览图已转存 R2)。 */
+/** Image templates (curated from the open-source leaderboard, preview images re-hosted on R2). */
 export const IMAGE_TEMPLATES: GenTemplate[] = [
   {
     id: '2008976966255337666',
@@ -2438,7 +2441,7 @@ Output:
   },
 ];
 
-/** 视频模板(自研口播 B-roll / 运镜 / 空镜 / 氛围)。 */
+/** Video templates (self-authored talking-head B-roll / camera-move / cutaway / mood). */
 export const VIDEO_TEMPLATES: GenTemplate[] = [
   {
     id: 'v01',

@@ -1,14 +1,18 @@
 /**
- * BYO-brain 简报组装 —— 「brief → 外部模型生成 → apply 校验落块」契约的服务端半边。
+ * BYO-brain brief assembly — the server half of the "brief → external model
+ * generates → apply validates and commits the block" contract.
  *
- * 定位:**客户端无关**。今天的消费方是 /api/studio/mcp(Codex/Claude Code/任何
- * MCP 客户端),但这里只做纯函数组装,不知道 MCP 的存在——将来内部 chat、自家
- * agent、别的传输面要走 BYO 同样从这里拿简报。LLM 归调用方,质量契约不降级:
- * 生成物仍过 parseBlockResponse + lintBlock(apply 侧)/ parsePlan(submit 侧)。
+ * Client-agnostic. Today's consumer is /api/studio/mcp (Codex / Claude Code /
+ * any MCP client), but this does pure-function assembly only and knows nothing
+ * about MCP — future internal chat, our own agent, or any other transport going
+ * BYO gets briefs from here too. The LLM belongs to the caller; the quality
+ * contract does not degrade: output still passes parseBlockResponse + lintBlock
+ * (apply side) / parsePlan (submit side).
  *
- * 与自家 LLM 路径共用同一批提示词纯函数(BLOCK_SYSTEM/withTheme/buildBlockPrompt、
- * PLAN_SYSTEM/planWithActiveTheme/buildPlanPrompt),**没有第二份 prompt**——
- * compose 路由的 ACTIVE THEME 组装也收敛到这里(assembleComposeTheme),防两处漂移。
+ * Shares the same prompt pure-functions as our own LLM path (BLOCK_SYSTEM/
+ * withTheme/buildBlockPrompt, PLAN_SYSTEM/planWithActiveTheme/buildPlanPrompt);
+ * there is NO second prompt — the compose route's ACTIVE THEME assembly also
+ * converges here (assembleComposeTheme) to prevent drift between two places.
  */
 
 import { type BlockEdit, type ComposeContext, BLOCK_SYSTEM, buildBlockPrompt, withTheme } from './compose';
@@ -22,8 +26,8 @@ export interface FrameContent {
   body: string;
 }
 
-/** compose 的 ACTIVE THEME 文本(compose 路由与 BYO brief 同源单点):
- *  主题 token(+palette 覆盖)+ 可选 frame 设计语言嫁接(审美层 frame 赢,工程契约不动)。 */
+/** compose's ACTIVE THEME text (single source shared by the compose route and BYO brief):
+ *  theme tokens (+ palette override) + optional frame design-language graft (frame wins on aesthetics, engineering contract unchanged). */
 export function assembleComposeTheme(themeId?: string, palette?: Record<string, string>, frame?: FrameContent | null): string {
   let theme = themeForLlm(getTheme(themeId as ThemeId | undefined), palette);
   if (frame) {
@@ -42,8 +46,8 @@ export interface ComposeBriefInput {
   lang?: string;
 }
 
-/** 块生成简报:调用方拿 system+prompt 用**自己的模型**生成,原文回传 apply_block。
- *  输出格式契约(note → \`\`\`html → \`\`\`js)已在 prompt 末尾,不另立文档。 */
+/** Block-generation brief: the caller takes system+prompt, generates with its OWN model, and passes the raw output back to apply_block.
+ *  The output-format contract (note → \`\`\`html → \`\`\`js) is at the end of the prompt, not a separate doc. */
 export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string } {
   return {
     system: withTheme(BLOCK_SYSTEM, assembleComposeTheme(input.theme, input.palette, input.frame)),
@@ -64,8 +68,8 @@ export interface PlanBriefInput {
   inserts?: PlanInsert[];
 }
 
-/** 规划简报:走单发 JSON 契约(PLAN_SYSTEM,非自家 LLM 的工具环变体)——
- *  调用方生成 DraftPlan JSON 原文回传 submit_plan(parsePlan 容错收编)。 */
+/** Plan brief: uses the single-shot JSON contract (PLAN_SYSTEM, not our LLM's tool-loop variant);
+ *  the caller generates the DraftPlan JSON and passes it raw back to submit_plan (parsePlan tolerantly reconciles it). */
 export function assemblePlanBrief(input: PlanBriefInput): { system: string; prompt: string } {
   const theme = themeForLlm(getTheme(input.theme as ThemeId | undefined));
   return {

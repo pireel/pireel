@@ -145,7 +145,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // 越界给行数;空 text 删单句;clear 清全部
     const r4 = runServerTool('set_caption_translations', { items: [{ index: 9, text: 'x' }] }, proj());
     expect(r4.result.ok).toBe(false);
-    expect(r4.result.error).toContain('3 句');
+    expect(r4.result.error).toContain('3 lines');
     const r5 = runServerTool('set_caption_translations', { clear: true }, p2);
     expect(r5.context!.asr![0]!.sub).toBeUndefined();
   });

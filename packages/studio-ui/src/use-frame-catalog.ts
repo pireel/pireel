@@ -2,26 +2,26 @@
 
 import { useEffect, useState } from 'react';
 
-/** Frame 目录条目(GET /api/studio/frames 回的 manifest,无 body)。 */
+/** Frame catalog entry (the manifest returned by GET /api/studio/frames, no body). */
 export interface FrameCatalogItem {
   id: string;
   title: string;
   summary: string;
   icon: string;
-  /** 封面 R2 裸 key;null → 回落 emoji。 */
+  /** Cover R2 raw key; null → fall back to emoji. */
   iconKey?: string | null;
-  /** 主题产出类型预览词(frame 面板详情页的预览卡)。 */
+  /** Theme output-type preview words (preview card on the frame panel detail page). */
   showcase: string[];
-  /** 主题设计 token(键同 theme vars);预览卡按它渲出该主题的真实色调。null → 用当前项目主题。 */
+  /** Theme design tokens (keys match theme vars); the preview card renders the theme's real tones from it. null → use the current project theme. */
   palette?: Record<string, string> | null;
-  /** 人像贴纸描边推荐(见 Frame.personFx);挂载时落 comp.personFx。null → 主题不管人像。 */
+  /** Recommended portrait sticker outline (see Frame.personFx); applied to comp.personFx on mount. null → theme ignores the portrait. */
   personFx?: Record<string, string> | null;
 }
 
-// 进程内缓存——目录基本不变,整个 app 生命周期拉一次够了。
+// In-process cache — the catalog is essentially static, so fetching once per app lifetime is enough.
 let cache: FrameCatalogItem[] | null = null;
 
-// localStorage 镜像:刷新/新开页首帧就有目录(boot 层主题卡墙不空窗),后台 fetch 到再覆盖。
+// localStorage mirror: the catalog is present on the first frame after refresh/new tab (boot theme wall isn't empty), then overwritten once the background fetch lands.
 const LS_KEY = 'studio:frame-catalog:v1';
 function readStoredCatalog(): FrameCatalogItem[] | null {
   if (typeof window === 'undefined') return null;
@@ -38,12 +38,13 @@ function storeCatalog(frames: FrameCatalogItem[]): void {
   try {
     window.localStorage.setItem(LS_KEY, JSON.stringify(frames));
   } catch {
-    /* 存不下就算了,下次还走 fetch */
+    /* If it won't fit, ignore — next time we fetch again */
   }
 }
 
-// 目录来源可注入(与 setStudioProviders 同一手法):托管壳默认走 API(客户端拿不到
-// server-only 注册表);OSS 壳直接喂 @pireel/studio-frames/vite 的客户端注册表,零后端。
+// The catalog source is injectable (same approach as setStudioProviders): the hosted shell
+// defaults to the API (clients can't reach the server-only registry); the OSS shell feeds in
+// @pireel/studio-frames/vite's client registry directly, no backend.
 let source: () => Promise<FrameCatalogItem[]> = () =>
   fetch('/api/studio/frames')
     .then((r) => (r.ok ? r.json() : { frames: [] }))
@@ -54,8 +55,8 @@ export function setFrameCatalogSource(fn: () => Promise<FrameCatalogItem[]>): vo
   cache = null;
 }
 
-/** frame 面板 + 对话 `/` 菜单 + boot 卡墙共用的主题目录。
- *  首帧:内存缓存 → localStorage 镜像;后台仍拉一次真源刷新(镜像可能过期)。 */
+/** Theme catalog shared by the frame panel + chat `/` menu + boot card wall.
+ *  First frame: in-memory cache → localStorage mirror; a real-source fetch still runs in the background to refresh (the mirror may be stale). */
 export function useFrameCatalog(): FrameCatalogItem[] {
   const [items, setItems] = useState<FrameCatalogItem[]>(() => cache ?? readStoredCatalog() ?? []);
   useEffect(() => {
@@ -63,7 +64,7 @@ export function useFrameCatalog(): FrameCatalogItem[] {
     let alive = true;
     source()
       .then((frames) => {
-        if (!frames.length) return; // 拉挂了别把镜像顶成空
+        if (!frames.length) return; // fetch failed — don't clobber the mirror with empty
         cache = frames;
         storeCatalog(frames);
         if (alive) setItems(frames);

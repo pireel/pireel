@@ -1,7 +1,10 @@
 /**
- * 竞技 Varsity 的口播叠加件:体育播报 lower-third 语言——一切 skewX(-8deg) 前倾、
- * 炭黑记分板 slab、橙色 mono 大写 chip、对角危险条纹带、镂空球衣描边数字、
- * 胜者橙板一次 1.04 脉冲、0.2s power3 对向硬撞入。每件像切进画面的播报图形。
+ * Varsity talking-head overlays: sports-broadcast lower-third language.
+ * Everything leans forward with skewX(-8deg): charcoal scoreboard slabs, orange
+ * mono uppercase chips, diagonal hazard-stripe bands, hollow jersey-outline
+ * numbers, a single 1.04 pulse on the winner's orange panel, and a 0.2s power3
+ * hard slam-in from opposite sides. Each element reads like a broadcast graphic
+ * cut into the shot.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

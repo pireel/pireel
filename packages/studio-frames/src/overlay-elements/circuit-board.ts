@@ -1,8 +1,9 @@
 /**
- * 电路 Circuit 的口播叠加件:breakout 小基板语言——每件是一小块焊在画面上的
- * --paper 基板(自带 fab 网格),铜金走线(45° 折角 + 过孔)、芯片件(引脚齿 + 丝印位号)、
- * 电流脉冲(accent-2 副本 dasharray 14 200 → offset -114 跑一趟)点亮 LED。
- * 三态不混:没电 line 灰 / 有电 accent 金 / 激活 accent-2 青。
+ * Circuit overlay elements: breakout-board language — each element is a small --paper PCB soldered
+ * onto the frame (with its own fab grid), copper-gold traces (45deg bends + vias), chip parts
+ * (pin teeth + silkscreen designators), a current pulse (accent-2 copy, dasharray 14 200 -> offset
+ * -114, runs once) that lights up an LED. Three states, never mixed: no power = gray line /
+ * powered = accent gold / active = accent-2 cyan.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

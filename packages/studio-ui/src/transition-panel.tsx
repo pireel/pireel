@@ -1,12 +1,14 @@
 'use client';
 
 /**
- * 转场面板(时间轴切点热区/区域点开,统一浮窗承载):效果集 = gl-transitions gallery
- * 十选,着色器本体与预览/导出同一份(transition-gl.ts 的 GL_MIXER_SRC)。每张卡是
- * 一块 canvas,用两张**真实照片**跑真着色器——静态定格半程,hover 从头到尾循环播
- * (对齐 gl-transitions.com/gallery 的交互)。全部卡共享一个 WebGL 合成器(canvas
- * 上下文有数量上限,一卡一个会被浏览器回收),渲染完 blit 到各卡的 2d canvas。
- * 推移/划开带方向。时长在时间轴区域两侧柄上对称拖(≤4s),面板不管时长。
+ * Transition panel (opened from a timeline cut hotspot/zone, hosted in the shared popover): the effect
+ * set = ten picks from the gl-transitions gallery, sharing the exact shader source with preview/export
+ * (GL_MIXER_SRC in transition-gl.ts). Each card is a canvas running the real shader over two **real
+ * photos** — static freeze at the midpoint, looping start-to-end on hover (matching the
+ * gl-transitions.com/gallery interaction). All cards share one WebGL mixer (canvas contexts are capped;
+ * one per card would get reclaimed by the browser), then blit into each card's 2d canvas.
+ * Push/wipe carry a direction. Duration is dragged symmetrically on the handles at both sides of the
+ * timeline zone (≤4s); the panel doesn't manage duration.
  */
 
 import { useEffect, useRef } from 'react';
@@ -38,7 +40,7 @@ const HINTS: Record<CutTransitionEffect, string> = {
 const CW = 168;
 const CH = 104;
 
-/** 预览资源单例:两张真实照片 cover 进 CW×CH 的板 + 共享 GL 合成器。 */
+/** Preview resource singleton: two real photos cover-fit into CW×CH plates + a shared GL mixer. */
 let RES: Promise<{ mixer: GlMixer | null; plateA: HTMLCanvasElement; plateB: HTMLCanvasElement }> | null = null;
 function res() {
   RES ??= (async () => {
@@ -69,7 +71,7 @@ function res() {
   return RES;
 }
 
-/** 单张效果卡:真着色器渲染,静态定格半程;hover 循环播 p 0→1(1.2s + 短驻留)。 */
+/** A single effect card: real shader render, static freeze at the midpoint; on hover, loops p 0→1 (1.2s + a short hold). */
 function EffectCard({ effect, dir }: { effect: CutTransitionEffect | null; dir: TransitionDirection }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef(0);
@@ -79,7 +81,7 @@ function EffectCard({ effect, dir }: { effect: CutTransitionEffect | null; dir: 
     if (!g) return;
     const { mixer, plateA, plateB } = await res();
     if (effect == null) {
-      g.drawImage(p < 0.5 ? plateA : plateB, 0, 0); // 无 = 跳切
+      g.drawImage(p < 0.5 ? plateA : plateB, 0, 0); // none = hard cut
       return;
     }
     const [dx, dy] = glDirection(dir);
@@ -96,7 +98,7 @@ function EffectCard({ effect, dir }: { effect: CutTransitionEffect | null; dir: 
     const t0 = performance.now();
     const loop = (now: number) => {
       if (!hoverRef.current) return;
-      void paint(Math.min(1, ((now - t0) % 1600) / 1200)); // 1.2s 播完 + 0.4s 驻留
+      void paint(Math.min(1, ((now - t0) % 1600) / 1200)); // 1.2s to play + 0.4s hold
       rafRef.current = requestAnimationFrame(loop);
     };
     cancelAnimationFrame(rafRef.current);
@@ -122,11 +124,11 @@ export function TransitionPanel({
   direction,
   onPick,
 }: {
-  /** 该切点当前的转场效果(null=没设)。 */
+  /** Current transition effect at this cut (null = unset). */
   effect: CutTransitionEffect | null;
-  /** 当前方向(仅推移/划开;缺省 left)。 */
+  /** Current direction (push/wipe only; defaults to left). */
   direction: TransitionDirection;
-  /** 点卡/点方向即应用;effect null=移除。 */
+  /** Clicking a card/direction applies immediately; effect null = remove. */
   onPick: (effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
 }) {
   const cards: { id: CutTransitionEffect | null; name: string; hint: string }[] = [

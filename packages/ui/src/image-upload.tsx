@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { IconClose, IconPlus } from './icons';
 
 /* ======================================================================
- * 单图上传：空态为一个虚线卡片，点击上传；已上传后以实心卡片展示，支持看大图和移除。
+ * Single-image upload: empty state is a dashed card, click to upload; once uploaded it shows as a
+ * solid card with view-large and remove.
  * ====================================================================== */
 export function ImageUpload({
   value,
@@ -16,10 +17,11 @@ export function ImageUpload({
   value: string;
   onChange: (url: string) => void;
   accept?: string;
-  /** 空态 / 替换按钮里的文案，默认"上传图片" */
+  /** Text in the empty-state / replace button. */
   label?: string;
-  /** 上传完成后异步钩子，给 caller 用 file 做附加动作（如视频抽首帧上传 poster）。
-   *  fire-and-forget——出错不影响主上传流程 */
+  /** Async hook after upload completes, so the caller can do extra work with the file
+   *  (e.g. extract a video's first frame and upload a poster).
+   *  Fire-and-forget — errors don't affect the main upload flow. */
   afterUpload?: (file: File, url: string) => void | Promise<void>;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -92,7 +94,7 @@ export function ImageUpload({
     );
   }
 
-  // 空态：虚线卡片，点击触发上传
+  // Empty state: dashed card, click to trigger upload
   return (
     <div className="flex flex-col gap-1.5">
       <button
@@ -124,8 +126,8 @@ export function ImageUpload({
 }
 
 /* ======================================================================
- * 多图上传：展示一串缩略图 + 末尾"+"按钮，超过 maxItems 时隐藏"+"。
- * 点击"+"支持多选，按选中顺序串行上传（同时显示进度占位）。
+ * Multi-image upload: shows a row of thumbnails + a trailing "+" button, hidden once over maxItems.
+ * The "+" supports multi-select, uploading serially in selection order (with progress placeholders).
  * ====================================================================== */
 export function ImageUploadList({
   values,
@@ -138,15 +140,15 @@ export function ImageUploadList({
   onChange: (urls: string[]) => void;
   accept?: string;
   maxItems?: number;
-  /** "+"卡片上的文案 */
+  /** Text on the "+" card */
   label?: string;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  /** 正在上传的占位：每个文件一条，按完成顺序从列表里消失。 */
+  /** In-flight upload placeholders: one per file, removed from the list as each completes. */
   const [pending, setPending] = useState<{ id: string; name: string; progress: number; err?: string }[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
-  // onChange 每次改变都把最新 values 写进 ref，供串行上传回调读取最新数组
+  // Mirror latest values into a ref on every change, so serial upload callbacks read the current array
   const valuesRef = useRef(values);
   useEffect(() => {
     valuesRef.current = values;
@@ -157,12 +159,12 @@ export function ImageUploadList({
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
     if (picked.length === 0) return;
-    // 尊重 maxItems —— 多选超出时截断
+    // Respect maxItems — truncate when a multi-select exceeds it
     const room = typeof maxItems === 'number' ? Math.max(0, maxItems - values.length - pending.length) : picked.length;
     const files = picked.slice(0, room);
     if (fileRef.current) fileRef.current.value = '';
 
-    // 先把占位塞进 pending，再串行上传
+    // Add placeholders to pending first, then upload serially
     const slots = files.map((f) => ({ id: randomId(), name: f.name, progress: 0 }));
     setPending((prev) => [...prev, ...slots]);
 
@@ -173,7 +175,7 @@ export function ImageUploadList({
         const url = await uploadFile(file, (pct) => {
           setPending((prev) => prev.map((p) => (p.id === slot.id ? { ...p, progress: pct } : p)));
         });
-        // 成功：从 pending 删除，把 URL 追加到 values
+        // Success: remove from pending, append the URL to values
         setPending((prev) => prev.filter((p) => p.id !== slot.id));
         onChange([...valuesRef.current, url]);
       } catch (e) {
@@ -233,7 +235,7 @@ export function ImageUploadList({
   );
 }
 
-/* ---------------- 基础原子：缩略图、带移除的缩略图、上传占位 ---------------- */
+/* ---------------- Building blocks: thumbnail, removable thumbnail, upload placeholder ---------------- */
 
 function Thumb({ src, onOpen }: { src: string; onOpen: () => void }) {
   const isVideo = /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(src);
@@ -343,7 +345,7 @@ function ProgressBar({ pct }: { pct: number }) {
   );
 }
 
-/* ---------------- Lightbox & SVG 小件 ---------------- */
+/* ---------------- Lightbox & small SVG bits ---------------- */
 
 function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
   const isVideo = /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(src);
@@ -403,7 +405,7 @@ function ZoomIcon() {
   );
 }
 
-/* ---------------- 上传：presign → XHR PUT ---------------- */
+/* ---------------- Upload: presign → XHR PUT ---------------- */
 
 export async function uploadFile(file: File, onProgress: (pct: number) => void): Promise<string> {
   const res = await fetch('/api/upload/media/presign', {
@@ -447,7 +449,7 @@ function putWithProgress(
     xhr.addEventListener('abort', () => reject(new Error('上传被中断')));
     xhr.open('PUT', url);
     xhr.setRequestHeader('Content-Type', file.type || 'image/png');
-    // presign 把 Cache-Control 签进了 SigV4 签名，PUT 必须带同值，否则 R2 拒签 SignatureDoesNotMatch
+    // presign signed Cache-Control into the SigV4 signature; the PUT must send the same value or R2 rejects with SignatureDoesNotMatch
     if (cacheControl) xhr.setRequestHeader('Cache-Control', cacheControl);
     xhr.send(file);
   });

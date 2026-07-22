@@ -1,12 +1,12 @@
 /**
- * 自动分镜 —— **分镜(lay_out)阶段**。plan(场景化 storyboard) + 口播分句 + 画面分析 → Composition 的**结构**:
- * 视频轨分镜切片(只切**视觉状态变化点**:取景变化 ∪ 源画面硬切,场景边界不自动成刀)
- * + 取景(corner/split/punch 腾位)+ **待配图占位块**。
+ * Auto-storyboard — **lay_out stage**. plan (scene storyboard) + speech sentences + visual analysis → the **structure** of a Composition:
+ * video-track shot slices (cut only at **visual state-change points**: framing changes ∪ source hard cuts; scene boundaries don't auto-become cuts)
+ * + framing (corner/split/punch make room) + **graphic-placeholder blocks**.
  *
- * 关键(2026-06 场景重写):plan 已把句子归并成场景,每个场景带一个**设计图形 brief**。这里:
- *  - 分镜 = 场景起点(语义切点) ∪ 源画面真实切点(cuts);无场景则退回按句切。
- *  - 每个场景(非录屏)落一个**待配图占位**(slots.spec = 组件+brief+真实数据),配图步逐个 compose 成设计图形。
- *  - **设计图形为主**;字幕/花字(逐句动效字)是主题取舍(theme.captions,general 默认关),仅 emphasis 关键词可选叠。
+ * Key (2026-06 scene rewrite): plan already merged sentences into scenes, each carrying a **graphic design brief**. Here:
+ *  - shots = scene starts (semantic cuts) ∪ real source cuts; with no scenes, fall back to per-sentence.
+ *  - each scene (non-screencast) gets a **graphic placeholder** (slots.spec = component + brief + real data); the compose step turns each into a designed graphic.
+ *  - **graphics first**; captions/kinetic-text are a theme choice (theme.captions, off by default in general); only emphasis keywords are optionally overlaid.
  */
 
 import { wordsFromText } from './caption-fx';
@@ -32,26 +32,26 @@ import type { VisualTimeline } from './visual-types';
 export type Box = { x: number; y: number; w: number; h: number };
 type VisSeg = VisualTimeline['segments'][number];
 /**
- * full/punch 时图形落点的**兜底**固定框:下半安全区,底边到 y=0.84 为止,不侵入字幕禁区
- * (visual.ts CAPTION_RESERVE 固定预留底部 16%)。有几何数据时优先 graphicBoxFromGeometry。
+ * **Fallback** fixed box for graphic placement under full/punch: lower safe zone, bottom edge at y=0.84,
+ * staying out of the caption no-go zone (visual.ts CAPTION_RESERVE reserves the bottom 16%). Prefer graphicBoxFromGeometry when geometry is available.
  */
 const FULL_GRAPHIC_BOX: Box = { x: 0.07, y: 0.46, w: 0.86, h: 0.38 };
-/** 图形占位最短时长(秒):被标题挤到比这还短就不值得出图,直接跳过。 */
+/** Min graphic-placeholder duration (sec): if a title squeezes it shorter than this, it's not worth showing — skip. */
 const MIN_GRAPHIC_SEC = 0.8;
-/** 取景最短停留(秒):比这短的场景不取景(推近/缩角一闪而过读作闪烁)。提示词里的
- *  "HOLD ≥1s" 只约束 LLM 规划,这里是布局层的硬兜底;用户手动剪的不受此限(渲染层照常执行)。 */
+/** Min framing hold (sec): scenes shorter than this get no framing (a punch-in/corner that flashes by reads as flicker).
+ *  The "HOLD ≥1s" in the prompt only constrains LLM planning; this is the layout layer's hard fallback. Manual user cuts are exempt (the render layer runs them as-is). */
 const MIN_FRAMING_HOLD_SEC = 1;
-/** 邻近切点合并阈值(秒),兼**自动分镜最短片段长度**:画面切点贴着已留切点时丢弃
- *  (语义优先)——切点间距 ≥ 此值,自动分镜不再产出 <1s 的碎镜。 */
+/** Nearby-cut merge threshold (sec), also the **min auto-shot segment length**: a visual cut hugging an already-kept cut is dropped
+ *  (semantics win) — cuts spaced ≥ this value, so auto-storyboard stops producing <1s fragment shots. */
 export const MIN_CUT_GAP_SEC = 1;
 
 const intersects = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 /**
- * full/punch 场景的图形落点:**几何安全区驱动**——取窗内主导段(与场景重叠最久的段)的
- * 最大空矩形(rects 已按段扣除人脸/字幕带,从大到小),再做:边距内缩 → 底部钳到字幕禁区
- * (y+h ≤ 0.84)→ 尺寸下限(摆不下像样图形的跳过)→ **跨段人脸硬避让**(场景横跨多段时,
- * 主导段的空区可能压到别段的脸)。全部不合格 → 退固定框。
+ * Graphic placement for full/punch scenes: **geometry safe-zone driven** — take the largest empty rect of the dominant
+ * segment in the window (the one overlapping the scene longest; rects already have faces/caption bands subtracted, largest-first), then:
+ * margin inset → clamp bottom to the caption no-go zone (y+h ≤ 0.84) → size floor (skip if no decent graphic fits) →
+ * **cross-segment face avoidance** (when a scene spans multiple segments, the dominant segment's empty area may cover another segment's face). All fail → fall back to the fixed box.
  */
 export function graphicBoxFromGeometry(visual: VisualTimeline | undefined, from: number, to: number): Box {
   const segs = (visual?.segments ?? []).filter((s) => s.end > from + 0.05 && s.start < to - 0.05);
@@ -63,16 +63,16 @@ export function graphicBoxFromGeometry(visual: VisualTimeline | undefined, from:
   return pickGraphicBox(dominant.geom!.rects, faces);
 }
 
-/** rects→选框核心(主源与插入段共用):边距内缩 → 底部字幕禁区钳制(y+h ≤ 0.84)→
- *  尺寸下限(w≥0.42/h≥0.2,摆不下像样图形的跳过)→ 人脸硬避让 → 全不合格退兜底框。 */
+/** rects→box selection core (shared by main source and inserted clips): margin inset → clamp bottom to caption no-go zone (y+h ≤ 0.84) →
+ *  size floor (w≥0.42/h≥0.2, skip if no decent graphic fits) → face avoidance → all fail, return fallback box. */
 export function pickGraphicBox(rects: Box[], faces: Box[], fallback: Box = FULL_GRAPHIC_BOX): Box {
-  const M = 0.03; // 边距内缩:空矩形常贴画框,图形不贴边
+  const M = 0.03; // margin inset: empty rects often hug the frame edge; keep graphics off the edge
   for (const r of rects) {
     const x = r.x + M;
     const y = r.y + M;
     const w = r.w - M * 2;
-    const h = Math.min(r.h - M * 2, 0.84 - y); // 字幕禁区钳制
-    if (w < 0.42 || h < 0.2) continue; // 摆不下像样的图形
+    const h = Math.min(r.h - M * 2, 0.84 - y); // clamp to caption no-go zone
+    if (w < 0.42 || h < 0.2) continue; // no decent graphic fits
     const box = { x, y, w, h };
     if (faces.some((f) => intersects(box, f))) continue;
     return box;
@@ -80,9 +80,9 @@ export function pickGraphicBox(rects: Box[], faces: Box[], fallback: Box = FULL_
   return fallback;
 }
 
-/** 体量档 → 在安全基底 rect 内裁实际落框(plan 定档、几何定基底,互不越权):
- *  poster=整块基底 · card=宽度用满、高度钳到 0.42 垂直居中(split 的整列留给 poster)·
- *  banner=通栏横带垂直居中 · badge=左上角小签。治「所有图形都是同一个兜底框」。 */
+/** Size tier → carve the actual box within the safe base rect (plan sets the tier, geometry sets the base, neither oversteps):
+ *  poster = whole base · card = full width, height clamped to 0.42 and vertically centered (split's full column reserved for poster) ·
+ *  banner = full-width strip vertically centered · badge = small tag in the top-left. Fixes "every graphic is the same fallback box". */
 export function graphicBoxForSize(base: Box, size: GraphicSize | undefined): Box {
   switch (size) {
     case 'poster':
@@ -103,9 +103,9 @@ export function graphicBoxForSize(base: Box, size: GraphicSize | undefined): Box
   }
 }
 
-/** 配图的底况提示(给 compose 决定「要不要卡面」用,不再一刀切):
- *  corner/split 空区 = 纯色页面底(视频缩到一边),卡面可选、鼓励开放版式;
- *  full/punch = 实拍活动底,必须有分离手段(卡/scrim/强字面处理)。 */
+/** Backdrop hint for the graphic (lets compose decide "card surface or not", instead of a blanket rule):
+ *  corner/split empty area = solid page color (video shrunk aside), card optional, open layouts encouraged;
+ *  full/punch = live moving footage, needs a separation device (card/scrim/strong type treatment). */
 function backdropNote(treatment: ShotTreatment, vis: VisSeg | null): string {
   if (treatment !== 'full' && treatment !== 'punch-in') {
     return 'BACKDROP: flat theme page — the video is shrunk aside; your box sits on the solid page color, NOT on footage. A filled card is OPTIONAL here; open editorial composition directly on the page is welcome.';
@@ -115,7 +115,7 @@ function backdropNote(treatment: ShotTreatment, vis: VisSeg | null): string {
   return `BACKDROP: live moving footage behind your box.${d}${t} Default to direct composition on the footage — high-contrast ink, strong type, NO filled background; use a card/scrim only for dense structured content (multi-row data / chart / table).`;
 }
 
-/** 切点合并:语义切点(取景变化点)全保留;画面切点距任一已留切点 < MIN_CUT_GAP_SEC 则丢弃。 */
+/** Cut merge: keep all semantic cuts (framing-change points); drop any visual cut within MIN_CUT_GAP_SEC of a kept cut. */
 export function mergeCuts(semantic: number[], visualCuts: number[]): { start: number }[] {
   const kept = [...semantic].sort((a, b) => a - b);
   for (const c of [...visualCuts].sort((a, b) => a - b)) {
@@ -125,7 +125,7 @@ export function mergeCuts(semantic: number[], visualCuts: number[]): { start: nu
   return kept.sort((a, b) => a - b).map((start) => ({ start }));
 }
 
-/** 分镜:摆结构 + 待配图占位(不出设计图形)。配图步把占位逐个 compose 成设计图形。 */
+/** Storyboard: place structure + graphic placeholders (no designed graphics yet). The compose step turns each placeholder into a designed graphic. */
 export function layoutFromPlan(
   plan: DraftPlan,
   opts: {
@@ -142,18 +142,18 @@ export function layoutFromPlan(
     c.width = opts.video.width;
     c.height = opts.video.height;
   }
-  const captions = getTheme(c.theme).captions; // 主题定要不要逐句花字/字幕(general=false)
+  const captions = getTheme(c.theme).captions; // theme decides whether to show per-sentence captions/kinetic-text (general=false)
   const end = opts.video.durationSec;
   const sents = opts.sentences;
   const blocks: Block[] = [];
-  // 轨=图层:落块时对已铺的块找空轨(同轨同窗的 chip 会互相叠住)。模板默认轨作起始偏好。
+  // track = layer: when placing a block, find a free track among already-placed blocks (chips on the same track and window would overlap). Template default track is the starting preference.
   const put = (b: Block) => blocks.push({ ...b, trackIndex: freeTrack(blocks, b.startSec, b.durationSec, b.trackIndex) });
   const treatments: { from: number; to: number; treatment: ShotTreatment }[] = [];
 
   const sStart = (i: number) => sents[Math.max(0, Math.min(sents.length - 1, i))]?.start ?? 0;
   const sEnd = (i: number) => sents[Math.max(0, Math.min(sents.length - 1, i))]?.end ?? end;
 
-  // 开场标题 → 占位(配图设计成开场卡)
+  // opening title → placeholder (compose designs it into an opening card)
   if (plan.title) {
     put(
       placeholder(titleInstruction(plan.title.text, plan.title.sub, 'opening title card (开场标题卡)'), { x: 0.08, y: 0.3, w: 0.84, h: 0.4 }, 0, plan.title.durationSec, plan.title.text),
@@ -168,24 +168,24 @@ export function layoutFromPlan(
     const vis = opts.visual ? visualAt(opts.visual, mid) : null;
     const screen = !!vis && (vis.label.content === 'screen' || vis.label.content === 'slide');
 
-    // 取景:录屏不缩;否则按 framing(角/半的方向由人物所在侧定)。
-    // 按**场景区间**记(不是单点)——场景内若有源切点会切成多个 shot,要让整段都保持取景,
-    // 否则中途弹回全屏、而图形还挂着就会盖脸。
-    // 硬约束(克制要求在布局层兜底,提示词只管 LLM 那头):场景 < 1s 不取景。
+    // Framing: screencasts don't shrink; otherwise follow framing (corner/half direction set by which side the person is on).
+    // Recorded per **scene interval** (not a single point) — a scene with source cuts splits into multiple shots, and the whole
+    // span must hold the framing; otherwise it snaps back to full mid-way while the graphic still hangs on and covers the face.
+    // Hard constraint (restraint enforced in the layout layer; the prompt only handles the LLM side): scene < 1s gets no framing.
     const raw = screen ? 'full' : framingToTreatment(scene.framing, vis);
     const treatment = stop - start >= MIN_FRAMING_HOLD_SEC ? raw : 'full';
 
-    // 设计图形占位(录屏场景不盖图形;主题图形为主)。分镜边界不做转场(跳切),
-    // corner/split 的取景本身就是 0.5s 平滑过渡,无需再叠转场块。
-    // 起点避开开场标题卡(同轨同区域,叠显会糊):推迟到 max(场景起点, 标题结束),剩得太短就跳过。
+    // Graphic placeholder (screencast scenes get no overlaid graphic; theme graphics come first). Shot boundaries use no transition (jump cut);
+    // corner/split framing is itself a 0.5s smooth transition, so no extra transition block is needed.
+    // Start avoids the opening title card (same track and area, overlapping would blur): defer to max(scene start, title end); skip if too little remains.
     let placedGraphic = false;
     if (scene.graphic && !screen) {
       const titleEnd = plan.title?.durationSec ?? 0;
       const gStart = Math.max(start, titleEnd);
       const gDur = stop - gStart;
       if (gDur >= MIN_GRAPHIC_SEC) {
-        // corner/split 用取景腾出的空区;full/punch 用几何安全区驱动的落点(无几何数据退固定框)。
-        // 安全基底之内再按 plan 的体量档裁实际落框——大小由叙事权重定,不再千篇一律。
+        // corner/split use the empty area freed by framing; full/punch use the geometry-safe-zone-driven placement (fall back to fixed box with no geometry).
+        // Within the safe base, carve the actual box by plan's size tier — size set by narrative weight, no longer uniform.
         const vac = treatmentVacancyBox(treatment);
         const base = vac ?? graphicBoxFromGeometry(opts.visual, start, stop);
         const box = graphicBoxForSize(base, scene.graphic.size);
@@ -193,24 +193,24 @@ export function layoutFromPlan(
         placedGraphic = true;
       }
     }
-    // corner/split 是给图形腾位的:图形真落下了才保留,否则回 full——不再出现
-    // 「人缩到一边、空区却什么都没有」(规划没给图 / 占位被时长下限跳过 都走这条)。
-    // punch-in 是强调不是腾位,无图也成立。
+    // corner/split exist to make room for a graphic: keep them only if a graphic actually landed, else revert to full — no more
+    // "person shrunk aside, empty area holding nothing" (covers both no planned graphic and a placeholder skipped by the duration floor).
+    // punch-in is emphasis, not room-making, so it holds even with no graphic.
     const needsGraphic = treatment !== 'full' && treatment !== 'punch-in';
     if (treatment !== 'full' && (!needsGraphic || placedGraphic)) treatments.push({ from: start, to: stop, treatment });
 
-    // 可选叠字:仅主题开字幕 + 场景给了关键词
+    // Optional overlaid text: only when the theme has captions on + the scene provided keywords
     if (captions && scene.emphasis?.length) {
       put(keywordBlock(scene.emphasis.join(' '), start, Math.min(stop, start + 1.4)));
     }
   }
 
-  // 主题开字幕时,按口播稿铺字幕(独立于场景;长句拆段见 captionBlocksFromAsr)。
-  // preset 只是初始形态,全局花字样式一设即覆盖。句级字幕是专属一层(全局花字样式按
-  // isSentenceCaption 管),相邻句偶有毫秒重叠,不走 put() 找空轨——被 bump 到别的行反而乱。
+  // When the theme has captions on, lay out captions from the speech script (independent of scenes; long-sentence splitting in captionBlocksFromAsr).
+  // preset is only the initial form; global kinetic-text styles override once set. Sentence captions are a dedicated layer (global styles keyed by
+  // isSentenceCaption); adjacent sentences occasionally overlap by milliseconds — don't use put() to find a free track, being bumped to another row is messier.
   if (captions) blocks.push(...captionBlocksFromAsr(sents, { preset: 'ln-clean', yPct: 93 }));
 
-  // 结尾 CTA → 占位
+  // closing CTA → placeholder
   if (plan.outro) {
     put(
       placeholder(titleInstruction(plan.outro.text, plan.outro.sub, 'closing CTA card (结尾 CTA 卡)'), { x: 0.08, y: 0.32, w: 0.84, h: 0.36 }, Math.max(0, end - plan.outro.durationSec), plan.outro.durationSec, plan.outro.text),
@@ -218,14 +218,14 @@ export function layoutFromPlan(
   }
 
   c.blocks = blocks;
-  // 分镜 = **视觉状态变化点**:取景变化点(相邻同取景先合并) ∪ 源画面真实切点。
-  // 场景(语义节奏)只是配图单元,不再自动在视频轨上切一刀——口播画面本身不变时,
-  // 章节感由叠加图形承载,把视频剁开只会碎(用户观察定的);想细分有 split_shot。
-  // 邻近切点合并(取景优先),防碎镜挤满时间轴。
-  // 句间呼吸缝桥接:取景区间按场景句子区间记,相邻句之间有停顿——不桥接的话缝里会
-  // 切出零点几秒的 full 碎镜,播放时「缩角→闪一下全屏→半切」(用户报的闪烁)。
-  // 缝归前一个取景,切换发生在下一状态自己的起点;缝 ≥ 阈值视为真有全屏内容
-  // (整场 full 场景至少一句长),不桥接。
+  // shots = **visual state-change points**: framing-change points (adjacent same-framing merged first) ∪ real source cuts.
+  // Scenes (semantic rhythm) are only graphic units and no longer auto-cut the video track — when the speaker footage itself doesn't change,
+  // chapter feel is carried by overlaid graphics; chopping the video only fragments it (decided from user observation); use split_shot to subdivide.
+  // Merge nearby cuts (framing wins) to keep fragment shots from crowding the timeline.
+  // Bridge inter-sentence breathing gaps: framing intervals are recorded by scene sentence ranges, and adjacent sentences have pauses — without
+  // bridging, the gap produces a sub-second full fragment shot, playing back as "corner → flash full → half-split" (the flicker users reported).
+  // The gap goes to the preceding framing; the switch happens at the next state's own start. A gap ≥ threshold counts as real full-screen content
+  // (a full scene is at least one sentence long) and isn't bridged.
   const BRIDGE_GAP_SEC = 1.5;
   const sorted = [...treatments].sort((a, b) => a.from - b.from).map((t) => ({ ...t }));
   for (let i = 0; i + 1 < sorted.length; i++) {
@@ -239,17 +239,17 @@ export function layoutFromPlan(
     else coalesced.push(t);
   }
   const semantic = coalesced.flatMap((t) => [t.from, t.to]);
-  // 画面切点:只保留**内容真变**的(口播→录屏/b-roll 等),同内容的 jump cut 不进分镜
-  // ——取景方向按场景中点定,碎刀只会把时间轴剁散;首尾 1s 内的切点丢弃(防碎头碎尾)。
+  // Visual cuts: keep only those where **content truly changes** (speaker → screencast/b-roll, etc.); same-content jump cuts don't enter the storyboard
+  // — framing direction is set by scene midpoint, and fragment cuts only shatter the timeline; cuts within 1s of the head/tail are dropped (avoid fragmented start/end).
   const visualCuts = contentCuts(opts.visual, opts.cuts ?? []).filter((t) => t > MIN_CUT_GAP_SEC && t < end - MIN_CUT_GAP_SEC);
   const baseShots = shotsFromSentences(mergeCuts(semantic, visualCuts), end);
   c.shots = applyTreatments(baseShots, coalesced);
   return c;
 }
 
-/** 画面切点内容过滤:切点两侧段的 content 标签不同(口播↔录屏/b-roll/幻灯)才保留。
- *  同内容的 jump cut(创作者口播常态,每句剪一刀)不进分镜——对取景/渲染毫无影响,
- *  只会把分镜条剁碎(用户观察定的)。无画面语义数据 / 对不上段边界时保守保留。 */
+/** Visual-cut content filter: keep a cut only if the content labels of the segments on either side differ (speaker ↔ screencast/b-roll/slide).
+ *  Same-content jump cuts (creator speaker norm, one cut per sentence) don't enter the storyboard — no effect on framing/render,
+ *  they only shatter the storyboard strip (decided from user observation). With no visual semantic data / no matching segment boundary, keep conservatively. */
 export function contentCuts(visual: VisualTimeline | undefined, cuts: number[]): number[] {
   const segs = visual?.segments ?? [];
   if (!segs.length) return cuts;
@@ -261,9 +261,9 @@ export function contentCuts(visual: VisualTimeline | undefined, cuts: number[]):
   });
 }
 
-/* ============================ 取景 / 落点 ============================ */
+/* ============================ Framing / placement ============================ */
 
-/** Framing → 具体 ShotTreatment(角/半的方向跟人物所在侧,把人留在原侧、图形腾另一侧)。 */
+/** Framing → concrete ShotTreatment (corner/half direction follows the person's side, keeping the person in place and freeing the other side for the graphic). */
 function framingToTreatment(framing: Framing, vis: VisSeg | null): ShotTreatment {
   switch (framing) {
     case 'punch-in':
@@ -277,27 +277,27 @@ function framingToTreatment(framing: Framing, vis: VisSeg | null): ShotTreatment
   }
 }
 
-/* ============================ 待配图占位 ============================ */
+/* ============================ Graphic placeholders ============================ */
 
-/** 占位 = media 块(编辑态显占位)+ slots.spec(给配图步的中文指令)。配图把它 compose 成设计图形后替换。 */
+/** Placeholder = media block (shows a placeholder in edit mode) + slots.spec (the instruction for the compose step). Compose turns it into a designed graphic and replaces it. */
 function placeholder(spec: string, box: Box, startSec: number, durationSec: number, gist: string): Block {
   const b = mediaBlock({ startSec, durationSec: Math.max(0.8, durationSec), box, trackIndex: 2, label: gist.slice(0, 16) || t('待配图') });
   b.slots = { spec };
   return b;
 }
 
-/** 是不是待配图占位块。 */
+/** Whether this is a graphic-placeholder block. */
 export function isPlaceholder(b: Block): boolean {
   return b.templateId === 'media' && typeof (b.slots as { spec?: unknown }).spec === 'string';
 }
-/** 取占位块的配图指令。 */
+/** Get a placeholder block's graphic instruction. */
 export function placeholderSpec(b: Block): string {
   return String((b.slots as { spec?: unknown }).spec ?? '');
 }
 
-/** 插入片段窗口内剔掉**主源场景**的配图占位:那些占位的 brief 来自主源口播,顺移后
- *  滑进插入窗就是张冠李戴。插入段自己的配图走 insertedClipPlaceholder(平权:按它
- *  自己的内容配),不是不配。windows=成片时间窗;只剔占位,其它块(字幕/标题)不动。 */
+/** Within inserted-clip windows, drop **main-source scene** graphic placeholders: their briefs come from the main-source speech, and once
+ *  shifted into the insert window they'd be mismatched. The inserted clip's own graphics go through insertedClipPlaceholder (equal footing: matched to
+ *  its own content), not skipped. windows = final-cut time windows; only placeholders are dropped, other blocks (captions/titles) untouched. */
 export function dropPlaceholdersInWindows(blocks: Block[], windows: { start: number; end: number }[]): Block[] {
   if (!windows.length) return blocks;
   return blocks.filter((b) => {
@@ -308,12 +308,12 @@ export function dropPlaceholdersInWindows(blocks: Block[], windows: { start: num
   });
 }
 
-/** 插入片段的配图占位(**平权,用户定的**:插入段与主源一样,按自己的口播内容配图)。
- *  layout = 插入段自己的几何分析结果(MediaPipe 免费遍,见 visual.insertedClipSafeZone →
- *  pickGraphicBox);缺省(拿不到 File/分析失败)仍退 FULL_GRAPHIC_BOX 兜底。
- *  spec 让 compose 按内容自选组件(add_block 同款自由度),并带 BACKDROP 行——插入段
- *  永远是实拍活动底(措辞对齐 backdropNote 的 full/punch 分支)。无声/过短不出占位——
- *  没有数据支撑的图形是装饰,宁缺。 */
+/** Graphic placeholder for an inserted clip (**equal footing, per the user's decision**: like the main source, the clip gets a graphic from its own speech content).
+ *  layout = the clip's own geometry analysis (free MediaPipe pass, see visual.insertedClipSafeZone →
+ *  pickGraphicBox); missing (no File / analysis failed) still falls back to FULL_GRAPHIC_BOX.
+ *  spec lets compose pick the component by content (same freedom as add_block), and carries a BACKDROP line — an inserted clip
+ *  is always live moving footage (wording aligned with backdropNote's full/punch branch). No speech / too short → no placeholder —
+ *  a graphic with no data behind it is decoration, better omitted. */
 export function insertedClipPlaceholder(
   win: { start: number; end: number },
   speech: string,
@@ -326,7 +326,7 @@ export function insertedClipPlaceholder(
     ? ' A face was detected in this clip — the given box already avoids it; keep everything inside the box.'
     : '';
   const backdrop = `BACKDROP: live moving footage behind your box (inserted real-life clip). Default to direct composition on the footage — high-contrast ink, strong type, NO filled background; use a card/scrim only for dense structured content (multi-row data / chart / table).${face}`;
-  // 首尾各留 0.2s:配图不顶着插入段切点进出
+  // Leave 0.2s at each end: the graphic doesn't butt against the clip's in/out cuts
   return placeholder(
     `按这段插入片段的口播内容配一个设计图形(组件按内容自选:大数字/对比/流程/要点等;数据从原话里逐字抠,别编):「${text.slice(0, 200)}」\n${backdrop}`,
     layout?.box ?? FULL_GRAPHIC_BOX,
@@ -336,17 +336,17 @@ export function insertedClipPlaceholder(
   );
 }
 
-/** 插入段平权分镜:按 plan 给这个插入段的 scenes(**该片段自己的句子索引**)把整段
- *  切成多镜 + 取景 + 逐场景配图占位。与主源 layoutFromPlan 同一套克制约束
- *  (<1s 不取景、corner/split 无图回 full、图形短于下限跳过)。返回 null = 场景/句子
- *  对不上(调用方退回整段一拍 + 整窗占位的旧路径)。
- *  人物侧没有逐段画面分析,用几何安全区反推:图形安全区在左 → 人在右(corner-br/split-r)。 */
+/** Inserted-clip storyboard on equal footing: using the scenes plan gave this clip (**the clip's own sentence indices**), split the whole
+ *  clip into multiple shots + framing + per-scene graphic placeholders. Same restraint constraints as the main-source layoutFromPlan
+ *  (<1s no framing, corner/split with no graphic reverts to full, graphics shorter than the floor are skipped). Returns null = scenes/sentences
+ *  don't match (caller falls back to the old path of one shot + one whole-window placeholder).
+ *  With no per-segment visual analysis for the person's side, infer from the geometry safe zone: graphic safe zone on the left → person on the right (corner-br/split-r). */
 export function layoutInsertWindow(args: {
-  /** 该插入段的成片时间窗。 */
+  /** This clip's final-cut time window. */
   win: { start: number; end: number };
-  /** 原整段插入 shot(src/srcStart/srcEnd 为该片段自己的源时钟)。 */
+  /** The original whole inserted shot (src/srcStart/srcEnd are the clip's own source clock). */
   clip: VideoShot;
-  /** 该片段窗内分句(自己的源时钟,index 与 plan 的 clip 场景索引同域)。 */
+  /** Sentences within the clip window (its own source clock; index shares the domain of plan's clip scene indices). */
   sentences: { index: number; start: number; end: number; text: string }[];
   scenes: Scene[];
   layout?: { box: Box; hasFace?: boolean };
@@ -355,7 +355,7 @@ export function layoutInsertWindow(args: {
   if (!scenes.length || !sentences.length) return null;
   const clamp = (t: number) => Math.max(clip.srcStart, Math.min(clip.srcEnd, t));
   const sAt = (i: number) => sentences[Math.max(0, Math.min(sentences.length - 1, i))]!;
-  // 人物侧:几何安全区(图形落点)在左半 → 人在右;缺几何按人居右兜底(corner-br 惯例)
+  // Person side: geometry safe zone (graphic placement) in the left half → person on the right; missing geometry defaults to person-right (corner-br convention)
   const personLeft = layout ? layout.box.x + layout.box.w / 2 >= 0.5 : false;
   const toTreatment = (f: Framing): ShotTreatment => {
     switch (f) {
@@ -373,7 +373,7 @@ export function layoutInsertWindow(args: {
   const backdrop = `BACKDROP: live moving footage behind your box (inserted real-life clip). Default to direct composition on the footage — high-contrast ink, strong type, NO filled background; use a card/scrim only for dense structured content (multi-row data / chart / table).${face}`;
 
   const blocks: Block[] = [];
-  const treatments: { from: number; to: number; treatment: ShotTreatment }[] = []; // clip 源时钟
+  const treatments: { from: number; to: number; treatment: ShotTreatment }[] = []; // clip source clock
   for (const scene of scenes) {
     const a = clamp(sAt(scene.from).start);
     const b = clamp(sAt(scene.to).end);
@@ -382,7 +382,7 @@ export function layoutInsertWindow(args: {
     const treatment = b - a >= MIN_FRAMING_HOLD_SEC ? raw : 'full';
     let placedGraphic = false;
     if (scene.graphic) {
-      const es = win.start + (a - clip.srcStart) + 0.2; // 首留 0.2s:不顶着切点进出
+      const es = win.start + (a - clip.srcStart) + 0.2; // 0.2s lead-in: don't butt against the cut
       const ee = Math.min(win.end, win.start + (b - clip.srcStart)) - 0.2;
       if (ee - es >= MIN_GRAPHIC_SEC) {
         const vac = treatmentVacancyBox(treatment);
@@ -395,7 +395,7 @@ export function layoutInsertWindow(args: {
     if (treatment !== 'full' && (!needsGraphic || placedGraphic)) treatments.push({ from: a, to: b, treatment });
   }
 
-  // 相邻同取景合并 → 切点 = 取景状态变化点(与主源同思路:场景语义不自动成刀,取景才成刀)
+  // Merge adjacent same-framing → cuts = framing state-change points (same idea as the main source: scene semantics don't auto-cut, only framing does)
   const sorted = [...treatments].sort((x, y) => x.from - y.from);
   const coalesced: typeof treatments = [];
   for (const t of sorted) {
@@ -440,9 +440,9 @@ const SIZE_INTENT: Record<GraphicSize, string> = {
   poster: 'HERO moment — use the whole given box at editorial scale (oversized focal element, generous negative space)',
 };
 
-/** SceneGraphic → 配图指令。机器生成的指令用英文(与 system 同语言,模型跟随更稳);
- *  brief/data 原样内嵌(跟口播稿语言),画面内可见文本语言由 BLOCK_SYSTEM 的 LANGUAGE 规则钉住。
- *  backdrop = 底况提示(空区纯色底/实拍活动底),交给 compose 决定要不要卡面。 */
+/** SceneGraphic → graphic instruction. Machine-generated instructions use English (same language as system, models follow more reliably);
+ *  brief/data embedded verbatim (in the speech script's language); the language of visible on-screen text is pinned by BLOCK_SYSTEM's LANGUAGE rule.
+ *  backdrop = backdrop hint (empty-area solid color / live moving footage), leaving compose to decide whether to use a card surface. */
 function graphicInstruction(g: SceneGraphic, backdrop?: string): string {
   const data = g.data ? `\nREAL DATA (use these values verbatim from the script; do NOT invent numbers): ${g.data}` : '';
   const size = `\nSIZE INTENT: ${SIZE_INTENT[g.size ?? 'card']}.`;
@@ -450,7 +450,7 @@ function graphicInstruction(g: SceneGraphic, backdrop?: string): string {
   return `Create ONE designed graphic fragment — component: ${g.component} (${COMPONENT_LABEL[g.component]}). Not a subtitle, not plain styled text; it needs real structure. Design brief: ${g.brief}${data}${size}${bd}`;
 }
 
-/** 占位块标签用的简短文案。 */
+/** Short label text for the placeholder block. */
 function graphicGist(g: SceneGraphic): string {
   return (g.data || g.brief).slice(0, 16);
 }
@@ -459,9 +459,9 @@ function titleInstruction(text: string, sub: string | undefined, role: string): 
   return `Create a ${role}: “${text}”${sub ? ` with a sub-line “${sub}”` : ''}. Centered or editorial layout, on-theme. Keep the given text verbatim (it is already in the script's language).`;
 }
 
-/* ============================ 花字(主题开时) ============================ */
+/* ============================ Kinetic text (when the theme has it on) ============================ */
 
-/** 关键词 pop:口播里的关键词,大字砸入,放上方。仅 theme.captions 时用。 */
+/** Keyword pop: keywords from the speech, slammed in large near the top. Used only when theme.captions. */
 function keywordBlock(kw: string, start: number, end: number): Block {
   const words = wordsFromText(kw, start, Math.min(end, start + 1.2));
   const b = captionBlock({ effect: 'kinetic-slam', words, label: kw, trackIndex: 2 });
@@ -469,7 +469,7 @@ function keywordBlock(kw: string, start: number, end: number): Block {
   return b;
 }
 
-/** 把场景取景区间套到落在其中的每个 shot(按 shot 中点判归属)——场景内多 shot 全程保持取景。 */
+/** Apply each scene's framing interval to every shot falling within it (membership by shot midpoint) — multiple shots in a scene all hold the framing. */
 function applyTreatments(shots: VideoShot[], treatments: { from: number; to: number; treatment: ShotTreatment }[]): VideoShot[] {
   return shots.map((s) => {
     const mid = (s.srcStart + s.srcEnd) / 2;
@@ -478,7 +478,7 @@ function applyTreatments(shots: VideoShot[], treatments: { from: number; to: num
   });
 }
 
-/** 找覆盖时刻 t 的视觉段(没有就用最后一段)。 */
+/** Find the visual segment covering moment t (fall back to the last segment). */
 function visualAt(v: VisualTimeline, t: number): VisSeg | null {
   return v.segments.find((s) => t >= s.start - 0.01 && t < s.end + 0.01) ?? v.segments.at(-1) ?? null;
 }

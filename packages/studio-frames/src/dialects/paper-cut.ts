@@ -1,6 +1,7 @@
 /**
- * 剪纸 Paper-cut —— 国潮红金方言:层叠切角红纸板、金角标、金章、竖排对句、云弧。
- * 版式逻辑:居中对称的仪式感;金色是贵重物,每卡至多一章 + 一处鎏金。
+ * Paper-cut — guochao red-and-gold dialect: layered notched red cardboard, gold corner marks,
+ * gold seals, vertical couplets, cloud arcs. Layout logic: centered-symmetric ceremony;
+ * gold is precious — at most one seal + one gilt touch per card.
  */
 
 import { type Block, mk } from './shared';

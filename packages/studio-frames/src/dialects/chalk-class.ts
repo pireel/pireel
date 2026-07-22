@@ -1,6 +1,7 @@
 /**
- * 黑板 Chalkboard —— 课堂板书方言:木框黑板、虚线粉笔框、手绘下划线、
- * ①②③ 板书编号、虚线圈词、粉笔灰。版式逻辑:微倾斜的手写散排,拒绝横平竖直。
+ * Chalkboard — classroom-blackboard dialect: wood-framed board, dashed chalk boxes, hand-drawn
+ * underlines, ①②③ numbering, dashed word circles, chalk dust. Layout logic: slightly tilted
+ * handwritten scatter, no straight orthogonal alignment.
  */
 
 import { type Block, mk } from './shared';

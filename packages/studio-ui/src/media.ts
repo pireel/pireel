@@ -1,11 +1,12 @@
 'use client';
 
 /**
- * Studio 本地媒体链路 —— 视频不上传云端,只在浏览器里读。
+ * Studio local media pipeline — video is never uploaded to the cloud, only read in the browser.
  *
- * 打开 → 选本地文件(URL.createObjectURL 预览本地播放)→ MediaBunny 探测元数据 →
- * **只抽音频**(几十 MB)上传做 ASR → 分镜。整段原片只在【导出】时才上传。
- * 复用全站现成件:extractAudio(MediaBunny 抽音轨)/ studioProviders().uploads.upload(干净中间产物路径,不污染素材库)。
+ * Open → pick a local file (URL.createObjectURL for local preview playback) → MediaBunny probes metadata →
+ * **audio only** (tens of MB) is uploaded for ASR → shots. The full source clip is uploaded only on Export.
+ * Reuses existing shared pieces: extractAudio (MediaBunny audio-track extraction) / studioProviders().uploads.upload
+ * (clean intermediate-artifact path, doesn't pollute the material library).
  */
 
 import { extractAudio } from '@pireel/studio-engine/video-edit/extract-audio';
@@ -22,20 +23,20 @@ export interface ProbedFile {
   hasAudio: boolean;
 }
 
-/** 文件指纹:同一文件(名/大小/改时间)→ 同 key,ASR/上传可命中缓存。 */
+/** File fingerprint: same file (name/size/mtime) → same key, so ASR/uploads can hit the cache. */
 export function fileSig(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
-/** 本地探测视频元数据(MediaBunny 动态加载,不上传)。 */
+/** Probe video metadata locally (MediaBunny dynamically loaded, no upload). */
 export async function probeVideoFile(file: File): Promise<ProbedFile> {
   const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
     const v = await input.getPrimaryVideoTrack();
     const a = await input.getPrimaryAudioTrack().catch(() => null);
-    // computeDuration 是"最大结束时间戳"口径:首包非零的 mp4 会把时长虚长一个偏移量。
-    // 减掉 getFirstTimestamp 换算成 <video> 播放口径(currentTime 0 = 最早样本)。
+    // computeDuration measures the "max end timestamp": an mp4 with a non-zero first packet inflates the
+    // duration by that offset. Subtract getFirstTimestamp to convert to <video> playback frame (currentTime 0 = earliest sample).
     const duration = (await input.computeDuration()) - Math.max(0, await input.getFirstTimestamp());
     return {
       durationSec: Number.isFinite(duration) && duration > 0 ? duration : 0,
@@ -48,7 +49,7 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
   }
 }
 
-/** 抽音频(只传音频)→ ASR → 句级分镜。按 fileSig 缓存(同片只转一次)。 */
+/** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
 export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   const sig = fileSig(file);
   const cached = getCachedAsr(sig);
@@ -61,11 +62,12 @@ export async function transcribeFile(file: File): Promise<AsrSegment[]> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ audio_url: url }),
   });
-  // 服务端故障要抛明确错误,别静默吞成空数组——上层得把「ASR 挂了」和「视频真没人声」区分开
+  // Server failures must throw a clear error, not silently become an empty array — callers need to tell "ASR failed" apart from "the video truly has no speech"
   if (!r.ok) throw new Error(t('ASR 请求失败(HTTP {status})', { status: r.status }));
   const j = (await r.json()) as { segments?: Array<{ start: number; end: number; text: string }> };
-  // ASR 时间是"音轨自身归零"口径(Conversion 抽音频时减的是音轨首包),播放是"全部轨最早
-  // 样本归零"。两轨首包不同步的文件要补上差值,否则字幕/剪点整体平移。
+  // ASR times are in the "audio track's own zero" frame (audio extraction subtracts the audio track's first
+  // packet), while playback is in "earliest sample across all tracks". Files whose two tracks' first packets
+  // are out of sync need this delta added back, or captions/cut points shift wholesale.
   const off = await audioPlaybackOffset(file);
   const segs: AsrSegment[] = (Array.isArray(j.segments) ? j.segments : [])
     .filter((s) => s.text?.trim())
@@ -74,7 +76,7 @@ export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   return segs;
 }
 
-/** 音轨首包相对播放零点(全部轨最早样本)的偏移,秒。两轨同步的正常文件 ≈0。 */
+/** Audio track's first-packet offset relative to the playback zero (earliest sample across all tracks), in seconds. ≈0 for normal in-sync files. */
 async function audioPlaybackOffset(file: File): Promise<number> {
   const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
@@ -90,15 +92,15 @@ async function audioPlaybackOffset(file: File): Promise<number> {
   }
 }
 
-/** 缩率图一格:全局时刻 + blob URL(供时间轴视频轨铺底)。 */
+/** One filmstrip frame: global timestamp + blob URL (backing the timeline video track). */
 export interface FilmstripFrame {
   t: number;
   url: string;
 }
 
 /**
- * 等距抽缩率图给时间轴视频轨铺底(本地解码,不上传)。
- * count 控制密度;onFrame 增量回调,让缩率图边解码边浮现。
+ * Sample evenly-spaced filmstrip frames to back the timeline video track (local decode, no upload).
+ * count controls density; onFrame is an incremental callback so the filmstrip appears as it decodes.
  */
 export async function extractFilmstrip(
   file: File,
@@ -109,7 +111,7 @@ export async function extractFilmstrip(
   const dur = durationSec > 0 ? durationSec : 0;
   if (dur <= 0) return [];
   const n = Math.max(2, Math.min(count, 600));
-  // 每格取该区间中点,避开 0 与结尾黑帧
+  // Each cell takes its interval's midpoint, avoiding 0 and the trailing black frame
   const stamps = Array.from({ length: n }, (_, i) => Math.min(dur - 0.05, ((i + 0.5) / n) * dur));
   const frames: FilmstripFrame[] = [];
   await extractThumbnails(file, stamps, {
@@ -124,13 +126,13 @@ export async function extractFilmstrip(
   return frames.sort((a, b) => a.t - b.t);
 }
 
-/** 导出时才上传整段原片,返回可被渲染服务拉取的 https URL。 */
+/** Upload the full source clip only at export time, returning an https URL the render service can fetch. */
 export async function uploadVideoFile(file: File): Promise<string> {
   const { url } = await studioProviders().uploads.upload(file, { contentType: file.type || 'video/mp4', filename: file.name || 'studio-video.mp4' });
   return url;
 }
 
-/** 上传素材位的图片,返回 https URL(渲染服务可拉取并本地化)。 */
+/** Upload a material-slot image, returning an https URL (the render service can fetch and localize it). */
 export async function uploadImageFile(file: File): Promise<string> {
   const { url } = await studioProviders().uploads.upload(file, { contentType: file.type || 'image/png', filename: file.name || 'studio-image.png' });
   return url;

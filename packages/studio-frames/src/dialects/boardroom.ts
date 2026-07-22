@@ -1,6 +1,7 @@
 /**
- * 简报 Boardroom —— 商务咨询方言:顶部通栏蓝条、章节页眉、结论先行标题、
- * KPI 卡组、平涂柱图、SOURCE 脚注。版式逻辑:左对齐网格精密排布,零旋转零装饰。
+ * Boardroom — business-consulting dialect: full-width top blue bar, section headers,
+ * conclusion-first titles, KPI card sets, flat bar charts, SOURCE footnotes.
+ * Layout logic: precise left-aligned grid, zero rotation, zero decoration.
  */
 
 import { type Block, mk } from './shared';

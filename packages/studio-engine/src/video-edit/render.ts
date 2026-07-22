@@ -17,34 +17,34 @@ import {
 } from 'mediabunny';
 import { type CaptionEffect, type CaptionFxInput, type FxWord, drawCaptionFx, hasCaptionFx } from '../caption-fx';
 
-/** 段边缘音频淡入淡出时长(秒),消除硬切的咔哒/突兀 */
+/** Audio fade in/out duration (seconds) at segment edges, kills the click/abruptness of hard cuts */
 const AUDIO_FADE = 0.05;
 
 /**
- * Timeline → mp4 渲染(纯浏览器,WebCodecs)。
+ * Timeline → mp4 render (pure browser, WebCodecs).
  *
- * 支持"声画分离":每段的画面和声音可来自不同素材。
- * 画面统一 cover-fit 到竖屏 9:16,可选烧录字幕。
+ * Supports "audio/video separation": each segment's picture and sound can come from different clips.
+ * Picture is uniformly cover-fit to portrait 9:16, with optional burned-in captions.
  *
- * A/V 同步要点(踩过的坑):
- *   - 每段画面/音频各自以"段内首帧时间戳"为原点归零,再加全局 timeOffset
- *   - timeOffset 按段的视觉时长(video.end - video.start)累加,音频裁到同长,避免漂移
+ * A/V sync notes (gotchas learned the hard way):
+ *   - Each segment's video/audio is zeroed to its "first-sample timestamp within the segment", then offset by the global timeOffset
+ *   - timeOffset accumulates by the segment's visual length (video.end - video.start); audio is trimmed to the same length to avoid drift
  *
- * 限制(后续迭代):BufferTarget 整片入内存(<60s 没问题);暂无 BGM / 片头尾 / 转场。
+ * Limits (future work): BufferTarget holds the whole clip in memory (fine for <60s); no BGM / intro-outro / transitions yet.
  */
 
 /**
- * 默认字体:字制区喜脉体(免费商用,媲美文悦新青年体的粗黑标题体)+ 系统中文兜底。
- * 文悦新青年体是商用授权字体,政务交付不能用未授权版,故选公益免费的喜脉体替代。
+ * Default font: Ximaiti (free for commercial use, a bold-black title face comparable to Wenyue Xinqingnian) + system Chinese fallback.
+ * Wenyue Xinqingnian requires a commercial license; government deliverables can't use unlicensed copies, so we substitute the free Ximaiti.
  */
 const FONT_FAMILY = '喜脉体';
 export const DEFAULT_FONT = `"${FONT_FAMILY}", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
 
-/** 字体文件放这(public/fonts/,根路径)。加载成功才能烧出喜脉体,否则回退系统字体 */
+/** Font file lives here (public/fonts/, root path). Only a successful load can burn Ximaiti, otherwise fall back to system fonts */
 const FONT_PATH = '/fonts/ximaiti.woff2';
 let fontLoaded: boolean | null = null;
 
-/** 渲染前确保字体就绪。失败不抛错(回退系统字体),只标记一次 */
+/** Ensure the font is ready before rendering. Failures don't throw (fall back to system fonts), only mark once */
 async function ensureFont(): Promise<void> {
   if (fontLoaded !== null) return;
   if (typeof FontFace === 'undefined') {
@@ -52,7 +52,7 @@ async function ensureFont(): Promise<void> {
     return;
   }
   try {
-    // 用绝对 origin URL,绕开 next-intl 的 /zh 前缀(否则会请求成 /zh/fonts/... 而 404)
+    // Use an absolute origin URL to bypass next-intl's /zh prefix (otherwise the request becomes /zh/fonts/... and 404s)
     const origin = typeof location !== 'undefined' ? location.origin : '';
     const face = new FontFace(FONT_FAMILY, `url("${origin}${FONT_PATH}")`);
     await face.load();
@@ -64,42 +64,42 @@ async function ensureFont(): Promise<void> {
 }
 
 export interface RenderSegment {
-  /** 段时长(秒),= video 区间长度 */
+  /** Segment length (seconds), = video range length */
   dur: number;
   audio: { clipId: string; start: number; end: number };
   video: { clipId: string; start: number; end: number };
 }
 
-/** 覆盖层(字幕/大字报),时间在【段时间轴】上(t=0=首段,不含片头) */
+/** Overlay layer (subtitle/caption), timed on the [segment timeline] (t=0 = first segment, excludes intro) */
 export interface RenderOverlay {
-  /** 缺省 subtitle。caption=大字报(auto-edit 用,字幕编辑器已不产出) */
+  /** Defaults to subtitle. caption = big-text overlay (used by auto-edit; the caption editor no longer produces it) */
   kind?: 'subtitle' | 'caption';
   text: string;
   start: number;
   end: number;
-  /** 归一化中心位置(0..1)。给了优先用,否则回退 position。 */
+  /** Normalized center position (0..1). Preferred when given, otherwise falls back to position. */
   x?: number;
   y?: number;
   position?: 'top' | 'center' | 'bottom';
   emphasis?: 'normal' | 'strong';
-  /** 文本框宽度(归一化 0..1 帧宽)。缺省 0.9。 */
+  /** Text box width (normalized 0..1 of frame width). Defaults to 0.9. */
   width?: number;
-  /** 字号缩放,1=默认。预览与烧录同步。 */
+  /** Font-size scale, 1 = default. Kept in sync between preview and burn-in. */
   fontScale?: number;
-  /** 字体颜色,默认 #fff。 */
+  /** Font color, defaults to #fff. */
   color?: string;
-  /** 描边色,缺省 #000;'none' 关闭描边。 */
+  /** Stroke color, defaults to #000; 'none' disables the stroke. */
   strokeColor?: string;
-  /** 背景底块色,缺省无。 */
+  /** Background block color, defaults to none. */
   bgColor?: string;
-  /** 动效花字:设了 effect + words 即走逐词动画分支(canvas 原生),不再画静态字幕。 */
+  /** Animated captions: setting effect + words takes the per-word animation branch (native canvas), no longer drawing static captions. */
   effect?: CaptionEffect;
   words?: FxWord[];
-  /** 高亮/卡拉OK 强调色。 */
+  /** Highlight/karaoke accent color. */
   accentColor?: string;
 }
 
-/** 接缝转场（「标记」模型：不改总时长，在接缝两侧各 duration/2 的窗口内合成）。 */
+/** Seam transition ("marker" model: total duration unchanged, composited within a duration/2 window on each side of the seam). */
 export type RenderTransitionType =
   | 'dissolve'
   | 'fade'
@@ -110,10 +110,10 @@ export type RenderTransitionType =
   | 'flicker';
 export type RenderTransitionDir = 'left' | 'right' | 'up' | 'down';
 export interface RenderTransition {
-  /** 接缝左段下标（在 segments[afterIndex] 与 segments[afterIndex+1] 之间） */
+  /** Index of the segment left of the seam (between segments[afterIndex] and segments[afterIndex+1]) */
   afterIndex: number;
   type: RenderTransitionType;
-  /** 总时长（秒），两侧各半 */
+  /** Total duration (seconds), split half per side */
   duration: number;
   dir?: RenderTransitionDir;
 }
@@ -121,26 +121,26 @@ export interface RenderTransition {
 export interface RenderOptions {
   width?: number;
   height?: number;
-  /** 字幕/大字报层(段时间轴绝对秒) */
+  /** Subtitle/caption layer (absolute seconds on the segment timeline) */
   overlays?: RenderOverlay[];
-  /** 接缝转场（按 afterIndex） */
+  /** Seam transitions (keyed by afterIndex) */
   transitions?: RenderTransition[];
-  /** 文字字体族,默认新青年体 + 系统兜底 */
+  /** Text font family, defaults to Xinqingnian + system fallback */
   fontFamily?: string;
-  /** 片头标题(空则不加片头) */
+  /** Intro title (empty = no intro) */
   title?: string;
-  /** 片尾落款(空则不加片尾) */
+  /** Outro credit (empty = no outro) */
   outro?: string;
-  /** 投稿单位,显示在片头副标题 */
+  /** Submitting org, shown as the intro subtitle */
   orgName?: string;
-  /** 片头时长秒,默认 2.5 */
+  /** Intro duration in seconds, defaults to 2.5 */
   introDuration?: number;
-  /** 片尾时长秒,默认 2.5 */
+  /** Outro duration in seconds, defaults to 2.5 */
   outroDuration?: number;
   onProgress?: (p: number) => void;
 }
 
-/** 每个素材的 Input + sink 缓存,避免一个素材被多段引用时反复打开 */
+/** Per-clip Input + sink cache, avoids reopening a clip referenced by multiple segments */
 type ClipHandle = {
   input: Input;
   videoTrack: InputVideoTrack | null;
@@ -177,7 +177,7 @@ export async function renderTimeline(
   };
 
   try {
-    // 先确定有没有任何音频源,决定要不要加音轨(全程无声就别加,免得 finalize 卡)
+    // First determine whether there's any audio source, to decide whether to add an audio track (don't add one if fully silent, or finalize hangs)
     const audioClipIds = new Set(segments.map((s) => s.audio.clipId));
     let anyAudio = false;
     for (const id of audioClipIds) {
@@ -208,9 +208,9 @@ export async function renderTimeline(
     const outroDur = opts.outroDuration ?? 2.5;
     const lastIndex = segments.length - 1;
 
-    // ---- 接缝转场：预抽两侧定格帧 + 每接缝半窗时长 h（标记模型：不改总时长）----
-    // 出片时在 [接缝-h, 接缝+h] 内合成：左半用「下一段首帧」定格混入，右半用「上一段末帧」定格混入，
-    // 不外扩素材、不移动片段。单个转场预备失败即跳过（该接缝回退硬切），不拖垮整片导出。
+    // ---- Seam transitions: pre-grab still frames on both sides + half-window length h per seam (marker model: total duration unchanged) ----
+    // At export, composite within [seam-h, seam+h]: the left half mixes in the "next segment's first frame" still, the right half the "previous segment's last frame" still,
+    // without extending clips or moving segments. If preparing a single transition fails, skip it (that seam falls back to a hard cut) rather than sinking the whole export.
     const targetLens = segments.map((s) => Math.max(0.1, s.dur || Math.max(0.1, s.video.end - s.video.start)));
     const txBySeam = new Map<number, SeamTx>();
     const tmp = new OffscreenCanvas(W, H);
@@ -219,7 +219,7 @@ export async function renderTimeline(
       try {
         const i = t.afterIndex;
         if (i < 0 || i >= segments.length - 1) continue;
-        // 半窗 ≤ 任一相邻段的 45%（头尾窗不会在中间短段上重叠），且 ≤ 1s
+        // Half-window ≤ 45% of either neighboring segment (so head/tail windows don't overlap on a short middle segment), and ≤ 1s
         const h = Math.min(t.duration / 2, 0.45 * targetLens[i], 0.45 * targetLens[i + 1], 1);
         if (h < 0.03) continue;
         const oh = await open(segments[i].video.clipId);
@@ -236,7 +236,7 @@ export async function renderTimeline(
         if (!outStill || !inStill) continue;
         txBySeam.set(i, { type: t.type, dir: t.dir ?? 'left', h, outStill, inStill });
       } catch {
-        // 跳过该转场
+        // Skip this transition
       }
     }
 
@@ -245,30 +245,30 @@ export async function renderTimeline(
       const seg = segments[si];
       const videoRange = Math.max(0.1, seg.video.end - seg.video.start);
 
-      // ---- 画面 ----
+      // ---- Picture ----
       const vh = await open(seg.video.clipId);
-      // 素材找不到(clipId 对不上)→ 整段跳过,不推进 timeOffset,避免留黑屏空白 gap
+      // Clip not found (clipId mismatch) → skip the whole segment without advancing timeOffset, to avoid a black gap
       if (!vh?.videoTrack) {
         opts.onProgress?.((si + 1) / segments.length);
         continue;
       }
-      // 目标段长 = 编排给的 dur(有对白段已按整句对齐)。声音完整播,画面不够则定格补帧。
+      // Target segment length = the dur the arrangement gave (dialogue segments are already aligned to whole sentences). Audio plays fully; if the picture is short, freeze-frame to fill.
       const targetLen = Math.max(0.1, seg.dur || videoRange);
 
       vh.videoSink ??= new VideoSampleSink(vh.videoTrack);
-      let segEnd = 0; // 实际解码到的画面长
+      let segEnd = 0; // Actual decoded picture length
       for await (const sample of vh.videoSink.samples(seg.video.start, seg.video.end)) {
-        // try/finally 保证任何路径(含 videoSource.add 抛错)都 close,避免 VideoSample 泄漏
+        // try/finally ensures close() on every path (including videoSource.add throwing), avoiding VideoSample leaks
         try {
-          // 以"请求起点"为共同零点(不是各轨首采样)——露脸段画面/声音同源同起点,嘴型精确对齐
+          // Use the "request start" as the common zero point (not each track's first sample) — for face segments, picture and audio share source and start, so lip sync is exact
           const rel = Math.max(0, sample.timestamp - seg.video.start);
-          // 上界用 targetLen 不是 videoRange:B-roll 区间可能比整句长,
-          // 超出就切,否则视频帧会越界到下一段时间区间 → 时间戳倒退报错
+          // Upper bound uses targetLen, not videoRange: a B-roll range may be longer than the whole sentence;
+          // cut when exceeded, otherwise video frames would spill into the next segment's time range → timestamp-goes-backward error
           if (rel >= targetLen) break;
           drawCoverFit(ctx, sample, W, H);
-          // 接缝转场合成（先于字幕：字幕压在转场之上）。命中头/尾窗才动，否则原样直通。
+          // Seam transition compositing (before captions: captions sit on top of the transition). Only acts when hitting a head/tail window, otherwise passes through unchanged.
           if (txBySeam.size) applyTransition(ctx, tmp, tmpCtx, txBySeam, si, rel, targetLen, W, H);
-          // 片头/片尾标题卡显示期间,抑制大字报 caption(两者都是大字点题,叠一起=两层重复)
+          // While an intro/outro title card is showing, suppress the big-text caption (both are big titling text; stacking them = duplicate layers)
           const inTitle = si === 0 && !!opts.title && rel < introDur;
           const inOutro = si === lastIndex && !!opts.outro && rel > targetLen - outroDur;
           drawOverlays(ctx, overlays, timeOffset + rel, W, H, font, inTitle || inOutro);
@@ -281,7 +281,7 @@ export async function renderTimeline(
         }
       }
 
-      // 画面比目标短(声音是完整整句而画面 B-roll 不够长)→ 定格当前帧补满,声音不被切
+      // Picture shorter than target (audio is the full sentence but the B-roll picture isn't long enough) → freeze the current frame to fill, so audio isn't cut
       if (segEnd > 0 && segEnd < targetLen - 0.05) {
         const step = 0.4;
         for (let t = segEnd; t < targetLen - 1e-6; t += step) {
@@ -289,17 +289,17 @@ export async function renderTimeline(
         }
       }
 
-      // ---- 声音(裁到目标段长)----
+      // ---- Audio (trimmed to target segment length) ----
       if (audioSource) {
         const ah = await open(seg.audio.clipId);
         if (ah?.audioTrack) {
           ah.audioSink ??= new AudioSampleSink(ah.audioTrack);
           for await (const a of ah.audioSink.samples(seg.audio.start, seg.audio.end)) {
             try {
-              // 同样以请求起点为零点,与视频共用 timeOffset 原点 → 声画对齐
+              // Also zeroed to the request start, sharing the video's timeOffset origin → A/V aligned
               const relA = Math.max(0, a.timestamp - seg.audio.start);
               if (relA >= targetLen) break;
-              // 段头尾各 50ms 淡入淡出,消除硬切咔哒;中段原样直通
+              // 50ms fade in/out at each segment edge, kills hard-cut clicks; middle passes through unchanged
               const faded = fadeEdges(a, relA, targetLen, timeOffset + relA);
               if (faded) {
                 try {
@@ -329,15 +329,15 @@ export async function renderTimeline(
       try {
         h.input.dispose();
       } catch {
-        // 忽略 dispose 异常
+        // Ignore dispose errors
       }
     }
   }
 }
 
 /**
- * 段边缘音频淡入淡出。只处理落在头 50ms / 尾 50ms 的 chunk(中段返回 null 直通,省开销)。
- * 读 f32 交错 PCM,逐帧乘增益斜坡,产新 AudioSample。任何异常返回 null(回退原样,不破坏渲染)。
+ * Fade audio in/out at segment edges. Only processes chunks in the head 50ms / tail 50ms (middle returns null to pass through, saving cost).
+ * Reads f32 interleaved PCM, multiplies a gain ramp per frame, produces a new AudioSample. Any exception returns null (falls back to original, doesn't break rendering).
  */
 function fadeEdges(
   sample: AudioSample,
@@ -355,7 +355,7 @@ function fadeEdges(
     const sr = sample.sampleRate;
     const size = sample.allocationSize({ planeIndex: 0, format: 'f32' });
     const buf = new Float32Array(size / 4);
-    sample.copyTo(buf, { planeIndex: 0, format: 'f32' }); // 交错
+    sample.copyTo(buf, { planeIndex: 0, format: 'f32' }); // interleaved
     for (let f = 0; f < frames; f++) {
       const t = relA + f / sr;
       let g = 1;
@@ -371,11 +371,11 @@ function fadeEdges(
       timestamp: newTimestamp,
     });
   } catch {
-    return null; // 回退:用原 sample
+    return null; // Fallback: use the original sample
   }
 }
 
-/** 把源帧按 cover 缩放铺满竖屏,居中裁切。sample.draw 会处理旋转元数据 */
+/** Cover-scale the source frame to fill the portrait frame, center-cropped. sample.draw handles rotation metadata */
 function drawCoverFit(
   ctx: OffscreenCanvasRenderingContext2D,
   sample: { displayWidth: number; displayHeight: number; draw: (c: OffscreenCanvasRenderingContext2D, dx: number, dy: number, dw?: number, dh?: number) => void },
@@ -392,23 +392,23 @@ function drawCoverFit(
   sample.draw(ctx, (W - dw) / 2, (H - dh) / 2, dw, dh);
 }
 
-// ===== 接缝转场合成 =====
+// ===== Seam transition compositing =====
 
-/** 一个接缝的转场数据：半窗 h + 两侧定格帧（cover-fit 到 W×H 的离屏画布）。 */
+/** One seam's transition data: half-window h + still frames on both sides (cover-fit to a W×H offscreen canvas). */
 interface SeamTx {
   type: RenderTransitionType;
   dir: RenderTransitionDir;
   h: number;
-  /** 上一段(出场)末帧——右半窗用 */
+  /** Previous segment's (outgoing) last frame — used by the right half-window */
   outStill: OffscreenCanvas;
-  /** 下一段(入场)首帧——左半窗用 */
+  /** Next segment's (incoming) first frame — used by the left half-window */
   inStill: OffscreenCanvas;
 }
 
 const clampNum = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
-/** 抓单帧 → cover-fit 到 W×H 离屏画布。失败返回 null（调用方回退硬切）。 */
+/** Grab a single frame → cover-fit to a W×H offscreen canvas. Returns null on failure (caller falls back to a hard cut). */
 async function grabStill(
   track: InputVideoTrack,
   at: number,
@@ -426,7 +426,7 @@ async function grabStill(
       } finally {
         s.close();
       }
-      return c; // 只要首帧
+      return c; // First frame is enough
     }
     return null;
   } catch {
@@ -435,9 +435,9 @@ async function grabStill(
 }
 
 /**
- * 命中接缝头/尾窗则就地合成转场。ctx 已画好当前(live)帧。
- * 尾窗(出场段右缘 [targetLen-h, targetLen])：half='out'，p 0→0.5；
- * 头窗(入场段左缘 [0, h])：half='in'，p 0.5→1。两窗在中间短段上不重叠（h≤45%段长）。
+ * If a seam head/tail window is hit, composite the transition in place. ctx already holds the current (live) frame.
+ * Tail window (outgoing segment's right edge [targetLen-h, targetLen]): half='out', p 0→0.5;
+ * head window (incoming segment's left edge [0, h]): half='in', p 0.5→1. The two windows don't overlap on a short middle segment (h ≤ 45% of segment length).
  */
 function applyTransition(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -456,7 +456,7 @@ function applyTransition(
     try {
       compositeTransition(ctx, tmp, tmpCtx, tail.inStill, tail.type, tail.dir, 0.5 * q, 'out', W, H);
     } catch {
-      // 合成失败 → 保留 live 帧（硬切）
+      // Composite failed → keep the live frame (hard cut)
     }
     return;
   }
@@ -466,15 +466,15 @@ function applyTransition(
     try {
       compositeTransition(ctx, tmp, tmpCtx, head.outStill, head.type, head.dir, 0.5 + 0.5 * q, 'in', W, H);
     } catch {
-      // 同上
+      // Same as above
     }
   }
 }
 
 /**
- * 按效果把 from→to 合成到 ctx。p 为整段转场进度(0→1)。
- * half='out'：from=live(出场段)、to=对侧定格(入场首帧)；half='in'：from=对侧定格(出场末帧)、to=live(入场段)。
- * live 已在 ctx 上 → 先快照进 tmp，再清屏重组，这样 push/slide 能整体平移 live 层。
+ * Composite from→to onto ctx per effect. p is overall transition progress (0→1).
+ * half='out': from=live (outgoing segment), to=opposite still (incoming first frame); half='in': from=opposite still (outgoing last frame), to=live (incoming segment).
+ * live is already on ctx → snapshot it into tmp first, then clear and recompose, so push/slide can translate the live layer as a whole.
  */
 function compositeTransition(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -507,7 +507,7 @@ function compositeTransition(
       break;
     }
     case 'fade': {
-      // 先淡到黑(p→0.5)再淡出(0.5→1)，不交叉
+      // Fade to black first (p→0.5) then fade out (0.5→1), no crossfade
       if (p < 0.5) {
         ctx.drawImage(from, 0, 0, W, H);
         ctx.globalAlpha = clamp01(2 * p);
@@ -557,7 +557,7 @@ function compositeTransition(
     }
     case 'flicker': {
       ctx.drawImage(from, 0, 0, W, H);
-      // 方波抖动叠在交叉透明度上 → 两层来回闪
+      // Square-wave jitter layered on the crossfade alpha → the two layers flicker back and forth
       const jitter = Math.floor(p * 12) % 2 === 0 ? 0.4 : -0.15;
       ctx.globalAlpha = clamp01(p + jitter);
       ctx.drawImage(to, 0, 0, W, H);
@@ -574,7 +574,7 @@ function compositeTransition(
   ctx.globalAlpha = 1;
 }
 
-/** push：from/to 一起平移（新片把旧片推出去）。dir = 新片进入方向。 */
+/** push: from/to translate together (the new clip pushes the old one out). dir = the new clip's entry direction. */
 function pushOffsets(dir: RenderTransitionDir, p: number, W: number, H: number) {
   switch (dir) {
     case 'right':
@@ -589,7 +589,7 @@ function pushOffsets(dir: RenderTransitionDir, p: number, W: number, H: number) 
   }
 }
 
-/** slide：from 不动，to 从一侧滑入盖住。 */
+/** slide: from stays put, to slides in from one side to cover it. */
 function slideOffset(dir: RenderTransitionDir, p: number, W: number, H: number) {
   switch (dir) {
     case 'right':
@@ -604,7 +604,7 @@ function slideOffset(dir: RenderTransitionDir, p: number, W: number, H: number) 
   }
 }
 
-/** 画出当前时间命中的所有覆盖层。先字幕后大字报(大字报压在上层) */
+/** Draw all overlays active at the current time. Subtitles first, then captions (captions on top) */
 function drawOverlays(
   ctx: OffscreenCanvasRenderingContext2D,
   overlays: RenderOverlay[],
@@ -615,20 +615,20 @@ function drawOverlays(
   suppressCaption = false,
 ) {
   const active = overlays.filter((o) => t >= o.start && t < o.end);
-  // 动效花字优先:命中 effect+words 的走逐词动画分支(canvas 原生),不再画静态层
+  // Animated captions take priority: those with effect+words go to the per-word animation branch (native canvas), no static layer drawn
   for (const o of active) {
     if (hasCaptionFx(o)) drawCaptionFx(ctx, o as CaptionFxInput, t, W, H, font);
   }
   for (const o of active.filter((o) => !hasCaptionFx(o) && (o.kind ?? 'subtitle') === 'subtitle')) {
     drawSubtitleLayer(ctx, o, W, H, font);
   }
-  if (suppressCaption) return; // 片头/片尾标题卡期间不画大字报,避免两层大字重叠
+  if (suppressCaption) return; // Don't draw captions during intro/outro title cards, to avoid two big-text layers overlapping
   for (const o of active.filter((o) => !hasCaptionFx(o) && o.kind === 'caption')) {
     drawCaptionLayer(ctx, o, W, H, font);
   }
 }
 
-/** 底部对白字幕:小字、白字黑描边、自动换行。支持 position(上/中/下) + 字号缩放 + 颜色。 */
+/** Bottom dialogue subtitle: small text, white with black stroke, auto-wrapped. Supports position (top/center/bottom) + font-size scale + color. */
 function drawSubtitleLayer(
   ctx: OffscreenCanvasRenderingContext2D,
   o: RenderOverlay,
@@ -644,7 +644,7 @@ function drawSubtitleLayer(
   const lineH = fontSize * 1.3;
   const blockH = lines.length * lineH;
   const cx = (o.x ?? 0.5) * W;
-  // 有 x/y 用归一化中心；否则回退 position（兼容 auto-edit）
+  // Use normalized center if x/y given; otherwise fall back to position (auto-edit compatibility)
   const cy =
     o.x != null || o.y != null
       ? (o.y ?? 0.88) * H
@@ -654,7 +654,7 @@ function drawSubtitleLayer(
           ? H / 2
           : H - H * 0.08 - blockH / 2;
 
-  // 背景底块
+  // Background block
   if (o.bgColor && o.bgColor !== 'none') {
     let maxW = 0;
     for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
@@ -664,7 +664,7 @@ function drawSubtitleLayer(
     ctx.fill();
   }
 
-  // 描边（缺省黑；'none' 关闭）
+  // Stroke (defaults to black; 'none' disables)
   const stroke = o.strokeColor ?? '#000';
   const hasStroke = !!stroke && stroke !== 'none';
   if (hasStroke) {
@@ -679,7 +679,7 @@ function drawSubtitleLayer(
   });
 }
 
-/** 大字报/花字:大字,顶部或居中,strong 带半透明色块底 */
+/** Caption / animated text: large text, top or center, strong gets a semi-transparent color block behind it */
 function drawCaptionLayer(
   ctx: OffscreenCanvasRenderingContext2D,
   o: RenderOverlay,
@@ -698,7 +698,7 @@ function drawCaptionLayer(
   const centerY = o.position === 'center' ? H / 2 : H * 0.16 + blockH / 2;
 
   if (strong) {
-    // 半透明色块底,增强可读性 + 视觉冲击
+    // Semi-transparent color block, boosts readability + visual impact
     const pad = fontSize * 0.4;
     let maxW = 0;
     for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
@@ -735,9 +735,9 @@ function roundRect(
 }
 
 /**
- * 片头标题 / 片尾落款,盖在现场画面上(B 方案,不用纯色卡)。
- * 画面已由 drawCoverFit 铺好,这里加一层半透明压暗 + 居中大字 + 副标题(单位名),
- * 保证文字在任意画面上都清晰。
+ * Intro title / outro credit, laid over the live picture (option B, not a solid-color card).
+ * The picture is already laid down by drawCoverFit; here we add a semi-transparent dim layer + centered large text + subtitle (org name),
+ * so the text stays legible over any picture.
  */
 function drawCardText(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -747,7 +747,7 @@ function drawCardText(
   H: number,
   font: string,
 ) {
-  // 半透明压暗整屏,文字更可读
+  // Semi-transparent full-screen dim, makes text more readable
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(0, 0, W, H);
 
@@ -787,5 +787,5 @@ function wrapText(ctx: OffscreenCanvasRenderingContext2D, text: string, maxWidth
     }
   }
   if (cur) lines.push(cur);
-  return lines.slice(0, 3); // 最多 3 行,过长截断
+  return lines.slice(0, 3); // Max 3 lines, truncate if longer
 }

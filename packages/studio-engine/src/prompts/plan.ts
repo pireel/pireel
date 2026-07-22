@@ -1,8 +1,8 @@
 /**
- * 规划(分镜导演)提示词:核心约束 + 两种输出契约,拼接就在本文件(TS 模板字面量原生合并)。
+ * Planning (storyboard director) prompt: core constraints + two output contracts, spliced in this file (native TS template-literal merge).
  */
 
-/** 核心约束(两种输出契约共用)。 */
+/** Core constraints (shared by both output contracts). */
 export const PLAN_CORE = `You are the DIRECTOR of a vertical (9:16) talking-head short. Turn the plain single-take into a DESIGNED video by segmenting the script into SCENES and giving each scene a designed on-screen GRAPHIC (a card / chart / diagram — built later as HTML + inline SVG). Designed graphics are the MAIN EVENT, not occasional decoration. Subtitles are OFF by default — never rely on them to carry meaning.
 
 SEGMENT INTO SCENES (this IS the storyboard — do NOT go one-scene-per-sentence)
@@ -34,7 +34,7 @@ RULES
 - LANGUAGE: write ALL on-screen text — title, outro, "data" — in the SAME language as the spoken script. NEVER translate (English script → English title/data; Chinese → Chinese). Write "brief" in the script's language too — it flows into the design step and keeps the whole chain in one language.
 - Respect the picture hint: content=screen/slide → framing "full" and omit the graphic (don't cover a screen recording).`;
 
-/** 单发 JSON 契约(遗留路径:一次吐整个 storyboard JSON)。 */
+/** Single-shot JSON contract (legacy path: emits the whole storyboard JSON at once). */
 export const PLAN_SYSTEM = `${PLAN_CORE}
 
 Return ONE \`\`\`json block with EXACTLY this shape:
@@ -58,8 +58,8 @@ Return ONE \`\`\`json block with EXACTLY this shape:
 Scene from/to are ROW indices of the numbered script exactly as given (rows tagged [clip #k] included — plan them as beats of the same narrative; never mix tagged and untagged rows in one scene).
 Output ONLY the JSON block, no prose.`;
 
-/** 工具环契约(生产路径):场景逐个 add_scene 发射 —— 每个调用独立 schema 校验,
- *  输出跨多步分摊(不赌 max_tokens),全稿一次读入保全局一致性。 */
+/** Tool-loop contract (production path): scenes emitted one add_scene at a time — each call schema-validated independently,
+ *  output amortized across steps (no betting on max_tokens), the whole script read in once for global consistency. */
 export const PLAN_SYSTEM_TOOLS = `${PLAN_CORE}
 
 OUTPUT — emit the storyboard via TOOL CALLS, never as a JSON block:

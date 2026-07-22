@@ -1,10 +1,12 @@
 /**
- * 字幕重铺 / 口播卡点 —— 参数化纯函数(从 workbench 组件里抽出:原版闭包在
- * clipAsrRef/compRef 上,双端要用就得把数据当参数)。
+ * Caption re-lay / narration beats — parameterized pure functions (extracted from
+ * the workbench component: the original closed over clipAsrRef/compRef, so using
+ * them on both ends means passing the data as params).
  *
- * 消费方:workbench(薄包一层喂 ref)+ server-executor(离线 MCP:标签页关着时
- * cut_narration/set_captions 在服务端跑,数据来自 studio_projects.context)。
- * 纯模块纪律:零 react/浏览器依赖(与 build-draft/build-blocks 同一档)。
+ * Consumers: workbench (thin wrapper feeding refs) + server-executor (offline MCP:
+ * when the tab is closed, cut_narration/set_captions run server-side, data from
+ * studio_projects.context). Pure-module discipline: zero react/browser deps (same
+ * tier as build-draft/build-blocks).
  */
 
 import { wordsFromText } from './caption-fx';
@@ -13,11 +15,13 @@ import { spans as clipSpans, srcToEditedLoose } from './trim';
 import { type AsrSegment, captionBlocksFromAsr } from './build-blocks';
 import { joinWords } from './caption-fx';
 
-/** 源域匹配谓词:口播稿/转写的时间轴属于**口播源**(无 src 字段的段)。 */
+/** Source-domain predicate: the narration/transcript timeline belongs to the narration source (segments without a src field). */
 export const inNarrationSource = (c: VideoShot): boolean => !c.src;
 
-/** 把某源的转写词时间(该源坐标)映射到指定剪辑(成片坐标)并丢掉已被剪光的词——
- *  铺/重铺字幕时用:字幕块活在成片时间轴上,剪过之后不能拿源时间直接铺。 */
+/** Map a source's transcript word times (that source's coords) onto the edited
+ *  timeline (final coords) and drop words fully cut away — used when laying/re-
+ *  laying captions: caption blocks live on the edited timeline, so after cutting
+ *  you can't lay them by source time directly. */
 export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource): AsrSegment[] {
   const out: AsrSegment[] = [];
   for (const s of segs) {
@@ -25,27 +29,32 @@ export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (
       .map((w) => {
         const start = srcToEditedLoose(shots, w.start, inSrc);
         const end = srcToEditedLoose(shots, w.end, inSrc);
-        // 词宽只收不涨:词的中间被切进了插入段/剪切点时,松映射会把整段插入时长吞进词内
-        // (词间反而无缝,拆条判不到)——按源域词宽封顶,让跳变落到词与词之间
+        // Word width only shrinks, never grows: when a cut / insert lands mid-word,
+        // the loose mapping would swallow the whole inserted duration into the word
+        // (making word gaps seamless, so splitting can't detect it) — cap at the
+        // source-domain word width so the jump falls between words instead
         return { ...w, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
       })
       .filter((w) => w.end - w.start > 0.03);
     if (!words.length) continue;
-    // 句子被剪辑打断(词与词之间被插进了其它源的片段):成片时间出现大跳变——按跳变拆成
-    // 多条字幕,各自窗口贴自己的词。不拆的话一条字幕横跨整个插入段,和插入段自己的字幕
-    // 叠在同一锚点上(实录:两行字幕摞在一起)。删词剪辑不产生跳变(时间被压缩),不受影响
+    // Sentence broken up by editing (a segment from another source inserted
+    // between words): a big jump appears in edited time — split into multiple
+    // captions by the jump, each window hugging its own words. Without splitting,
+    // one caption spans the whole insert and stacks on the insert's own caption at
+    // the same anchor (observed: two lines of subtitles piled up). Word-delete
+    // edits produce no jump (time is compressed), so they're unaffected
     const groups: (typeof words)[] = [[words[0]!]];
     for (let i = 1; i < words.length; i++) {
       if (words[i]!.start - words[i - 1]!.end > 0.8) groups.push([words[i]!]);
       else groups[groups.length - 1]!.push(words[i]!);
     }
-    // 译文(sub)只跟第一段:句子被插入段拆成多条时,整句译文重复铺会上下摞两份
+    // Translation (sub) follows only the first group: when a sentence is split into several, re-laying the whole-sentence translation would stack two copies
     groups.forEach((g, gi) => out.push({ start: g[0]!.start, end: g[g.length - 1]!.end, text: joinWords(g.map((w) => w.text)), words: g, ...(gi === 0 && s.sub ? { sub: s.sub } : {}) }));
   }
   return out;
 }
 
-/** 全源转写 → 成片时间轴的字幕数据:口播源 + 各插入源各按自己的谓词映射,按成片时间排序。 */
+/** All-source transcript → edited-timeline caption data: narration source + each inserted source mapped by its own predicate, sorted by edited time. */
 export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null, clipAsr: Record<string, AsrSegment[]>): AsrSegment[] {
   return [
     ...(narr?.length ? mapSegsToEdited(narr, shots) : []),
@@ -53,8 +62,10 @@ export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null,
   ].sort((a, b) => a.start - b.start);
 }
 
-/** 字幕=转写的纯计算产物:转写变了(删句/删词/恢复/改词/插入段转写到位)就整层重算。
- *  没铺过字幕 → 原样返回(不主动加层);全源都没转写 → 保留现有层不清空。 */
+/** Captions = a pure computation from the transcript: whenever the transcript
+ *  changes (delete sentence/word, restore, edit word, inserted-clip transcript
+ *  arrives), recompute the whole layer. No captions laid → return as-is (don't add
+ *  a layer); no transcript from any source → keep the existing layer, don't clear. */
 export function relayCaptionLayer(blocks: Block[], shots: VideoShot[], narr: AsrSegment[] | null, clipAsr: Record<string, AsrSegment[]>): Block[] {
   if (!blocks.some(isSentenceCaption)) return blocks;
   const mapped = mappedCaptionSegs(shots, narr, clipAsr);
@@ -62,9 +73,12 @@ export function relayCaptionLayer(blocks: Block[], shots: VideoShot[], narr: Asr
   return [...blocks.filter((b) => !isSentenceCaption(b)), ...captionBlocksFromAsr(mapped)];
 }
 
-/** 时间窗内的口播句 → 本地时间 beats(0=窗起点),给 compose 精确卡点。
- *  按镜逐段映射:窗是**成片**时间,句子是各源的**源**时间——窗盖住哪段镜,就取那段镜
- *  的源在对应源域窗口内的句子再换回成片。直接拿源秒对成片窗过滤会漂。 */
+/** Narration sentences within a time window → local-time beats (0 = window start),
+ *  giving compose precise timing. Mapped per-shot: the window is EDITED time,
+ *  sentences are each source's SOURCE time — for whatever shots the window covers,
+ *  take that shot's source sentences within the corresponding source-domain window
+ *  and convert back to edited. Filtering source seconds against the edited window
+ *  directly would drift. */
 export function beatsForWindow(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
@@ -94,7 +108,7 @@ export function beatsForWindow(
     }
     beats.sort((a, b) => a.start - b.start);
   } else {
-    // 无分镜(理论上占位必伴随 shots,防御):退回旧口径,成片=源
+    // No shots (defensive; in theory a placeholder always comes with shots): fall back to the old convention, edited = source
     for (const s of narr ?? []) {
       if (!s.text?.trim() || s.end <= startSec + 0.05 || s.start >= winEnd - 0.05) continue;
       beats.push({ text: s.text.trim(), start: Math.max(0, s.start - startSec), end: Math.max(0, Math.min(s.end, winEnd) - startSec) });
@@ -103,10 +117,13 @@ export function beatsForWindow(
   return beats;
 }
 
-/** 插入片段 → 规划上下文(纯函数,双端同源:workbench 组规划输入 / server-executor
- *  离线 submit_plan 校验句数)。锚点 = 前最近主源段的 srcEnd(主源时间域,plan 口径);
- *  sentences = 该插入窗内的转写句(**该片段自己的源时钟**,index 按窗内重排从 0 起)
- *  ——平权分镜的输入面,顺序即 plan 契约里的 clip 序号(1 起)。 */
+/** Inserted clips → planning context (pure, shared by both ends: workbench builds
+ *  the planning input / server-executor validates sentence count in offline
+ *  submit_plan). Anchor = the srcEnd of the nearest preceding main-source segment
+ *  (main-source time domain, the plan's convention); sentences = the transcript
+ *  sentences within that insert window (the clip's OWN source clock, index
+ *  re-numbered from 0 within the window) — the input surface for equal-footing
+ *  storyboarding, order = the clip index in the plan contract (1-based). */
 export function insertPlanContexts(
   shots: VideoShot[],
   clipAsr: Record<string, AsrSegment[]>,

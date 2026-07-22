@@ -1,15 +1,16 @@
 /**
- * 导入短令牌 —— agent 本地导入 helper 的临时凭证(对标 a reference transcript editor 的 30 分钟
- * import token:MCP 连接可能是 OAuth,token 不能也不该交给 shell;helper 只拿
- * 一张范围收窄、限时的票)。
+ * Import token — a short-lived, scope-narrowed credential for the agent's local
+ * import helper. The MCP connection may be OAuth, so the real token must never
+ * reach the shell; the helper gets a time-limited, narrowed ticket instead.
  *
- * 形态:`imp1.{b64url(userId)}.{expEpochSec}.{b64url(hmacSha256(secret, userId.exp))}`
- * 无状态(HMAC 自校验,不落库),secret=BETTER_AUTH_SECRET。只被 /api/studio/media
- * 一个端点接受(put/put-audio/asr/register 四个动作,正好覆盖 helper 的全部所需)。
+ * Shape: `imp1.{b64url(userId)}.{expEpochSec}.{b64url(hmacSha256(secret, userId.exp))}`
+ * Stateless (HMAC self-verifies, nothing persisted), secret=BETTER_AUTH_SECRET.
+ * Accepted by a single endpoint, /api/studio/media (four actions:
+ * put/put-audio/asr/register — exactly what the helper needs).
  */
 
 const VERSION = 'imp1';
-export const IMPORT_TOKEN_TTL_SEC = 1800; // 30 分钟
+export const IMPORT_TOKEN_TTL_SEC = 1800; // 30 minutes
 
 const b64url = (buf: ArrayBuffer | Uint8Array): string => {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -32,7 +33,7 @@ export async function createImportToken(userId: string, ttlSec = IMPORT_TOKEN_TT
   return { token: `${VERSION}.${b64url(new TextEncoder().encode(userId))}.${exp}.${sig}`, expiresAt: exp };
 }
 
-/** 校验令牌;有效返回 userId,无效/过期返回 null。 */
+/** Verify the token; returns userId if valid, null if invalid/expired. */
 export async function verifyImportToken(token: string): Promise<string | null> {
   const parts = token.split('.');
   if (parts.length !== 4 || parts[0] !== VERSION) return null;

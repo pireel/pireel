@@ -1,8 +1,10 @@
 /**
- * 黑金 Noir 的口播叠加件:鎏金 placard 语言——小块暖近黑底(--panel)配双层发丝框
- * (外 1px 暗金 + 内 1px 象牙 ::before),衬线细字、拉丁小字 caps 极限字距、
- * — ◆ — 菱形饰线、金色只做发丝线/单个鎏金数字或词、无填充金边 pill。
- * 动效只有 0.4-0.6s 淡入与缓移,arrive never pop。每件是请柬上裁下的一枚。
+ * Noir-gold talking-head overlays: gilded-placard language. Small warm near-black
+ * cards (--panel) with a double hairline frame (outer 1px dark gold + inner 1px
+ * ivory ::before), thin serif type, Latin small-caps at extreme tracking,
+ * — ◆ — diamond ornaments, gold used only for hairlines / a single gilded
+ * number or word / an unfilled gold-edge pill. Motion is only 0.4-0.6s fades and
+ * easing; arrive, never pop. Each element is a piece cut from an invitation.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

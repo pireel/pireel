@@ -1,27 +1,30 @@
 /**
- * 在线素材(stock)—— 服务端数据层(参考 Google Vids 的 Stock & web 面板:
- * 创作者缺 b-roll 时面板里现搜现插,一切服务当前视频)。
+ * Online stock media — server-side data layer (modeled on Google Vids' Stock &
+ * web panel: when a creator lacks b-roll, they search and insert from the panel,
+ * all in service of the current video).
  *
- * Provider:Pexels 优先、Pixabay 兜底(都是免费 key、可商用、无需署名——
- * 许可最省心的两家;key 在 .env:PEXELS_API_KEY / PIXABAY_API_KEY)。
- * 本文件只做纯归一(可单测)+ fetch 封装;路由在 routes/api/studio/stock.ts。
- * 插入走直链(两家 CDN 都允许热链);导出容器侧按公网 URL 拉取。
+ * Providers: Pexels first, Pixabay fallback (both free key, commercial-use, no
+ * attribution required — the two most license-friendly; keys in .env:
+ * PEXELS_API_KEY / PIXABAY_API_KEY). This file only does pure normalization
+ * (unit-testable) + fetch wrapping; routing lives in routes/api/studio/stock.ts.
+ * Insertion uses direct links (both CDNs allow hotlinking); the export container
+ * pulls by public URL.
  */
 
-/** sticker = 透明底贴图(Pixabay image_type=vector 的 PNG 渲染),插入时当图片用 */
+/** sticker = transparent-background graphic (PNG render of Pixabay image_type=vector), inserted as an image */
 export type StockKind = 'image' | 'video' | 'sticker';
 
 export interface StockItem {
   id: string;
   type: StockKind;
-  /** 网格缩略图(小图,面板展示用) */
+  /** Grid thumbnail (small, for panel display) */
   thumb: string;
-  /** 插入 composition 用的正片直链(图 ≈2x 大图 / 视频挑 ≥720p 的 mp4) */
+  /** Direct link to the full asset for inserting into the composition (image ≈2x large / video picks an mp4 ≥720p) */
   url: string;
   width: number;
   height: number;
   durationSec?: number;
-  /** 作者名(许可不强制署名,但展示是礼貌) */
+  /** Author name (license doesn't require attribution, but showing it is polite) */
   author: string;
   provider: 'pexels' | 'pixabay';
 }
@@ -67,7 +70,7 @@ export function normalizePexelsPhoto(p: PexelsPhoto): StockItem | null {
   return { id: `px_${p.id}`, type: 'image', thumb, url, width: p.width, height: p.height, author: p.photographer ?? '', provider: 'pexels' };
 }
 
-/** 视频挑档:优先「高度 ≥720 里最小的」mp4(够 1080 竖屏画中画,别拉 4K 浪费带宽),没有就取最大档。 */
+/** Video variant pick: prefer the smallest mp4 with height ≥720 (enough for a 1080 vertical PiP, don't waste bandwidth on 4K); fall back to the largest. */
 export function normalizePexelsVideo(v: PexelsVideo): StockItem | null {
   const mp4s = (v.video_files ?? []).filter((f) => f.link && (f.file_type ?? '').includes('mp4') && f.height);
   if (!mp4s.length || !v.image) return null;
@@ -138,7 +141,7 @@ export function normalizePixabayPhoto(p: PixabayPhoto, type: 'image' | 'sticker'
 }
 
 export function normalizePixabayVideo(v: PixabayVideo): StockItem | null {
-  // medium(≈720-1080)够用;没有再升 large、降 small
+  // medium (≈720-1080) is enough; else step up to large, then down to small
   const pick = v.videos?.medium ?? v.videos?.large ?? v.videos?.small;
   const thumb = pick?.thumbnail ?? v.videos?.tiny?.thumbnail;
   if (!pick?.url || !thumb) return null;
@@ -158,7 +161,7 @@ export function normalizePixabayVideo(v: PixabayVideo): StockItem | null {
 async function pixabaySearch(key: string, q: string, type: StockKind, page: number, per: number): Promise<StockPage> {
   const lang = hasCjk(q) ? '&lang=zh' : '';
   const base = type === 'video' ? 'https://pixabay.com/api/videos/' : 'https://pixabay.com/api/';
-  // 贴纸 = vector 图(webformat 渲染成透明底 PNG,插进画面不带白底)
+  // sticker = vector image (webformat renders to a transparent-background PNG, no white box in the frame)
   const extra = type === 'sticker' ? '&image_type=vector' : '';
   const r = await fetch(`${base}?key=${encodeURIComponent(key)}&q=${encodeURIComponent(q)}&page=${page}&per_page=${per}&safesearch=true${lang}${extra}`);
   if (!r.ok) throw new Error(`pixabay ${r.status}`);
@@ -171,17 +174,17 @@ async function pixabaySearch(key: string, q: string, type: StockKind, page: numb
   return { items: items.filter((x): x is StockItem => !!x), page, hasMore: page * per < (j.totalHits ?? 0), provider: 'pixabay' };
 }
 
-/* ============================ 入口 ============================ */
+/* ============================ Entry ============================ */
 
-/** 有没有配任何 stock 源(给路由/前端判空态)。 */
+/** Whether any stock provider is configured (for routes/frontend empty state). */
 export function stockConfigured(): boolean {
   return !!(process.env.PEXELS_API_KEY || process.env.PIXABAY_API_KEY);
 }
 
 /**
- * 搜在线素材:图/视频 Pexels 优先(质量更稳)、Pixabay 兜底;
- * 贴纸只有 Pixabay 有(Pexels 无 vector 类目),没配 Pixabay key 返回空页(面板隐藏该区)。
- * 都没 key 抛 no_stock_provider。
+ * Search stock media: images/videos prefer Pexels (steadier quality), Pixabay fallback;
+ * stickers are Pixabay-only (Pexels has no vector category) — with no Pixabay key, returns an empty page (panel hides that section).
+ * With no key at all, throws no_stock_provider.
  */
 export async function searchStock(q: string, type: StockKind, page = 1, per = 24): Promise<StockPage> {
   const pexels = process.env.PEXELS_API_KEY;

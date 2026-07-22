@@ -121,14 +121,14 @@ export function unavailableProviders(hint = 'no provider configured — connect 
   };
 }
 
-/* ---------- 运行时注册器(编辑器包经此取能力;壳在启动时注入实现) ---------- */
+/* ---------- Runtime registry (editor packages get capabilities via this; the shell injects impls at startup) ---------- */
 
 let current: StudioProviders = unavailableProviders();
 
-/** 当前生效的 providers(编辑器代码一律经此取,不 import 实现)。 */
+/** The currently active providers (editor code always gets them via this, never imports impls). */
 export const studioProviders = (): StudioProviders => current;
 
-/** 壳注入实现(托管壳=API 后端;OSS 壳=本地/BYO;测试=stub)。 */
+/** The shell injects impls (hosted shell = API backend; OSS shell = local/BYO; tests = stub). */
 export function setStudioProviders(p: StudioProviders): void {
   current = p;
 }

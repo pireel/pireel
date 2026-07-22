@@ -1,4 +1,4 @@
-/** en 词典分片:captions-panel.tsx(key=源码中文原文)。 */
+/** en dictionary shard: captions-panel.tsx (key = the original source Chinese). */
 const dict: Record<string, string> = {
   '逐词强调': 'Word emphasis',
   '整句常显，读到哪个词强调哪个词': 'Full line stays on; each word lights up as spoken',

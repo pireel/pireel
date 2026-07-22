@@ -1,7 +1,7 @@
 /**
- * frame 预览的 locale 文案替换:构好的块(innerHtml/label 中文)按包里的 copy 表
- * 做字面量替换。最长键优先,避免"金句"吃掉"金句花字"这类前缀重叠。
- * timelineBody 不动(GSAP 选择器/数值,无文案)。
+ * Locale copy substitution for frame previews: literal-replace the Chinese in a built
+ * block's innerHtml/label using the pack's copy table. Longest key first, so a prefix
+ * like "金句" doesn't eat "金句花字". timelineBody is untouched (GSAP selectors/numbers, no copy).
  */
 
 import type { Block } from '@pireel/studio-engine/composition';

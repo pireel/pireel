@@ -1,28 +1,28 @@
 /**
- * Google Fonts → 内联 @font-face(base64 data:)。
+ * Google Fonts → inline @font-face (base64 data:).
  *
- * foreignObject SVG 当 <img> 光栅化时不允许加载任何外部资源,字体必须以 data: URI 内嵌。
- * Noto Sans SC 全量 4 字重 ≈ 15-20MB(base64 后更大),每帧拼进 SVG 字符串不可接受 →
- * 按「实际用到的码点 ∩ 各子集的 unicode-range」只内嵌命中的子集(CJK 常见就几个,~几百 KB)。
- * 结果字符串整次导出缓存复用。
+ * A foreignObject SVG rasterized as <img> can't load any external resource, so fonts must be embedded
+ * as data: URIs. All 4 weights of Noto Sans SC ≈ 15-20MB (larger after base64), unacceptable to splice
+ * into the SVG string every frame → embed only the subsets hit by "used code points ∩ each subset's
+ * unicode-range" (for common CJK that's just a few, ~a few hundred KB). The result string is cached and reused for the whole export.
  */
 
 export interface FontFace {
   family: string;
   style: string;
   weight: string;
-  /** unicode-range 解析成 [start, end] 列表;无声明 = null(全量保留)。 */
+  /** unicode-range parsed into a [start, end] list; no declaration = null (keep all). */
   ranges: [number, number][] | null;
   url: string;
 }
 
-/** assembleHtml head 里那条 Google Fonts link 的等价 css2 请求(与 assemble 的 STUDIO_FONTS_HREF 同步维护)。 */
+/** The css2 request equivalent to the Google Fonts link in assembleHtml's head (kept in sync with assemble's STUDIO_FONTS_HREF). */
 export const FONT_CSS_URL =
   'https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+SC:wght@700;900&family=IBM+Plex+Mono:wght@500;600&display=swap';
 
 function parseRange(spec: string): [number, number] | null {
   const s = spec.trim().toUpperCase();
-  // U+4E00-9FFF / U+2000 / U+4??(通配)
+  // U+4E00-9FFF / U+2000 / U+4?? (wildcard)
   const m = /^U\+([0-9A-F?]+)(?:-([0-9A-F]+))?$/.exec(s);
   if (!m) return null;
   if (m[1].includes('?')) {
@@ -62,27 +62,56 @@ function toBase64(buf: ArrayBuffer): string {
 }
 
 /**
- * 构建内联字体 CSS:抓 css2 → 过滤命中 usedText 码点的子集 → 逐个抓 woff2 转 base64。
- * 返回可直接塞进 SVG <style> 的 @font-face 串。
+ * Fetch a Google Fonts resource, same-origin proxy FIRST: Google's `/l/font` (text= subset)
+ * endpoint doesn't reliably send Access-Control-Allow-Origin, so a direct browser fetch CORS-fails
+ * even in normal Chrome — the `/api/media/fetch` proxy fetches it server-side (no CORS, works in
+ * restricted in-app browsers too, and read-through-caches font binaries into R2). Direct fetch is
+ * the fallback for shells with no backend (OSS). Returns null if both fail (degrade to system fonts).
+ */
+async function fetchFont(url: string): Promise<Response | null> {
+  try {
+    const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`);
+    if (r.ok) return r;
+  } catch {
+    /* proxy unreachable (e.g. OSS shell, no backend) → try direct */
+  }
+  try {
+    const r = await fetch(url);
+    if (r.ok) return r;
+  } catch {
+    /* external host blocked / CORS / offline → give up */
+  }
+  return null;
+}
+
+/**
+ * Build inline font CSS: fetch css2 → keep subsets hit by usedText's code points → fetch each woff2 and base64 it.
+ * Returns an @font-face string ready to drop into an SVG <style>.
  */
 export async function buildInlineFontCss(
   usedText: string,
   log: (m: string) => void = () => {},
 ): Promise<string> {
   const t0 = performance.now();
-  // 精确子集:text= 让 Google 服务端按字符裁字形(CJK 每子集几百 KB → 全部合计几十 KB)。
-  // 内联串是每个变动帧 SVG data URI 的一部分,体积直接乘在逐帧解析成本上。
-  // 大小写都收(CSS text-transform 会要走 textContent 里没有的另一半字形);
-  // 字符集过大(URL 上限)或请求失败 → 回落 unicode-range 命中法(旧行为)。
+  // Exact subset: text= makes Google's server cut glyphs per character (a few hundred KB per CJK subset →
+  // tens of KB total). The inline string is part of every changed frame's SVG data URI, so its size
+  // multiplies directly into per-frame parse cost.
+  // Include both cases (CSS text-transform can demand the other-case glyphs absent from textContent);
+  // charset too large (URL limit) or request fails → fall back to the unicode-range hit method (old behavior).
   const uniq = [...new Set([...(usedText + usedText.toUpperCase() + usedText.toLowerCase())])].join('');
   let res: Response | null = null;
   if (uniq.length > 0 && uniq.length <= 600) {
-    res = await fetch(`${FONT_CSS_URL}&text=${encodeURIComponent(uniq)}`).catch(() => null);
-    if (res?.ok) log(`字体精确子集:${uniq.length} 字符`);
-    else res = null;
+    res = await fetchFont(`${FONT_CSS_URL}&text=${encodeURIComponent(uniq)}`);
+    if (res) log(`字体精确子集:${uniq.length} 字符`);
   }
-  if (!res) res = await fetch(FONT_CSS_URL);
-  if (!res.ok) throw new Error(`fonts css ${res.status}`);
+  if (!res) res = await fetchFont(FONT_CSS_URL);
+  if (!res) {
+    // Google Fonts unreachable even via the proxy (offline / OSS shell). Degrade to NO inlined fonts
+    // instead of throwing: the frame/export still renders with system fallback fonts. A hard
+    // "Failed to fetch" here used to kill capture_frame outright.
+    log('字体 CSS 拉取失败,退化为系统字体(不内联)');
+    return '';
+  }
   const faces = parseFontFaces(await res.text());
 
   const used = new Set<number>();
@@ -95,12 +124,14 @@ export async function buildInlineFontCss(
 
   const parts = await Promise.all(
     kept.map(async (f) => {
-      const buf = await (await fetch(f.url)).arrayBuffer();
+      const r = await fetchFont(f.url);
+      if (!r) return ''; // one woff2 failing (blocked/flaky) shouldn't kill the whole capture/export
+      const buf = await r.arrayBuffer();
       const range = f.ranges ? `unicode-range:${f.ranges.map(([a, b]) => (a === b ? `U+${a.toString(16)}` : `U+${a.toString(16)}-${b.toString(16)}`)).join(',')};` : '';
       return `@font-face{font-family:'${f.family}';font-style:${f.style};font-weight:${f.weight};src:url(data:font/woff2;base64,${toBase64(buf)}) format('woff2');${range}}`;
     }),
   );
-  const css = parts.join('\n');
+  const css = parts.filter(Boolean).join('\n');
   log(`字体内联完成:${(css.length / 1024 / 1024).toFixed(2)}MB css · ${((performance.now() - t0) / 1000).toFixed(2)}s`);
   return css;
 }

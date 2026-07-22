@@ -1,6 +1,6 @@
 /**
- * 组装层:把 Composition 拼成完整 Hyperframes 文档(预览 iframe 与导出同源)。
- * 依赖模板注册表已就绪 —— 对外一律走 './composition' barrel(它先 import './templates')。
+ * Assembly layer: stitch a Composition into a complete Hyperframes document (preview iframe and export share the same source).
+ * Depends on the template registry being ready — always go through the './composition' barrel externally (it imports './templates' first).
  */
 
 import { getTheme, themeVarsCss } from './theme';
@@ -18,25 +18,25 @@ import {
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 
-/* ============================ 组装 ============================ */
+/* ============================ Assembly ============================ */
 
 /**
- * 注入到文档里的 <video> 裁主流剪辑器射 shim:把 #vidEl 的 currentTime 改成**成片时间**口径
- * (get:源→成片;set:成片→源),并用 rAF 在播放时跳过被剪区间。读 window.__segments。
- * 这样无论是预览运行时、还是导出 headless 渲染器逐帧 set currentTime,都按成片时间工作。
+ * <video> trim-mapping shim injected into the document: reframe #vidEl's currentTime to the **final-cut time** basis
+ * (get: source→final; set: final→source), and use rAF to skip trimmed regions during playback. Reads window.__segments.
+ * This way both the preview runtime and the export headless renderer (setting currentTime frame by frame) work in final-cut time.
  */
-/** 预览文档的设计字体(单一来源)。父文档(workbench)也要加载同一份——字幕拆段的
- *  canvas measureText 在父文档量,父文档没这字体会退到系统字体,西文宽度对不上就换行。 */
+/** Design fonts for the preview document (single source). The parent document (workbench) must load the same set — caption
+ *  splitting's canvas measureText runs in the parent, and without this font it falls back to a system font whose Latin widths mismatch and wrap. */
 export const STUDIO_FONTS_HREF =
   'https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Noto+Serif+SC:wght@700;900&family=IBM+Plex+Mono:wght@500;600&display=swap';
 
-/** 帧 shim(canvas 模式):画父层引擎推来的帧;切点转场用 **gl-transitions 的 WebGL
- *  合成器**(GL_MIXER_SRC,与导出/面板同一份源码)——引擎在窗口内随主帧带来"另一侧"
- *  的影子帧(frame2),from/to 两条活流按上游着色器合成,p 铺满整个窗口。
- *  兜底链:影子帧断供→切点后用冻结的 A 末帧当 from(至少后半程有效果);GL 不可用/
- *  着色器编译失败→硬切。上传前先 cover 进 W×H 中转画布(纹理直传会被拉伸变形)。 */
+/** Frame shim (canvas mode): draw frames pushed by the parent-layer engine; cut transitions use the **gl-transitions WebGL
+ *  mixer** (GL_MIXER_SRC, same source as export/panel) — within a window the engine brings the "other side" ghost frame
+ *  (frame2) alongside the main frame, and the two live streams (from/to) are composited by the upstream shader, p spanning the whole window.
+ *  Fallback chain: ghost frames cut off → after the cut, use the frozen last frame of A as from (at least the second half has an effect); GL unavailable /
+ *  shader compile fails → hard cut. Before upload, cover into a W×H staging canvas first (direct texture upload gets stretched/distorted). */
 export function videoFrameShim(transitions: { cut: number; effect: string; half: number; dx: number; dy: number }[]): string {
-  return `window.__parentClock = true; // 时钟/解码/音频在父层引擎,本文档不自驱
+  return `window.__parentClock = true; // clock/decode/audio run in the parent-layer engine; this doc doesn't self-drive
 (function(){
   var c = document.getElementById('vidEl');
   if (!c || !c.getContext) return;
@@ -58,7 +58,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     g.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
     return stage;
   };
-  // 按源 staging + 版本号:帧没换只重画不重 cover/不重传纹理(时钟驱动的逐 tick 重合成才能 60fps)
+  // per-source staging + version: if the frame is unchanged, redraw only — skip re-cover/re-upload (clock-driven per-tick recompositing is what hits 60fps)
   var SL = function () { if (stagedLiveVer !== liveVer) { cover(stageLive, liveBmp); stagedLiveVer = liveVer; } return stageLive; };
   var SG = function () { if (stagedGhostVer !== ghostVer) { cover(stageGhost, ghostBmp); stagedGhostVer = ghostVer; } return stageGhost; };
   var drawPlain = function (bmp) {
@@ -71,25 +71,25 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     if (!liveBmp || !(t >= 0)) return;
     var tr = null;
     for (var i = 0; i < TRS.length; i++) { if (t >= TRS[i].cut - TRS[i].half && t <= TRS[i].cut + TRS[i].half) { tr = TRS[i]; break; } }
-    if (t < lastT - 0.05 || t > lastT + 0.5) frozenCut = null; // 倒退/大跳:冻帧作废
+    if (t < lastT - 0.05 || t > lastT + 0.5) frozenCut = null; // rewind/big jump: discard frozen frame
     if (tr && lastT >= 0 && lastT < tr.cut && t >= tr.cut) {
-      // 过切点:当前画布 = A 的最后一帧,冻结作影子断供的兜底 from
+      // crossing the cut: current canvas = A's last frame; freeze it as the fallback "from" when ghost frames cut off
       frozen = frozen || mkStage();
       frozen.getContext('2d').clearRect(0, 0, W, H);
       frozen.getContext('2d').drawImage(c, 0, 0);
       frozenCut = tr.cut;
-      // 换边:切点前到达的影子帧是 B 前摇,切点后 from 应是 A 尾巴——旧边帧作废,
-      // 新边影子到帧前由冻结的 A 末帧顶住(内容连续,不闪跳)。到达时间在切点后的
-      // 影子帧已是新边(引擎 ghostFresh 门验过),别误杀
+      // side switch: ghosts arriving before the cut are B's pre-roll; after the cut "from" should be A's tail — old-side frames are discarded,
+      // and until the new-side ghost arrives the frozen last frame of A holds (content stays continuous, no flicker). Ghost frames whose
+      // arrival time is past the cut are already new-side (the engine's ghostFresh gate verified this) — don't kill them by mistake
       if (ghostBmp && ghostAtT < tr.cut) { try { ghostBmp.close(); } catch (eX) {} ghostBmp = null; }
     }
     lastT = t;
     if (!tr) { bakedWinCut = -1; drawPlain(liveBmp); return; }
-    // 本窗口已由成品帧接管:旧双流合成整段让路(帧间小间隙也不许插画,插了就是叠层 strobe)
+    // this window is now owned by baked frames: the old dual-stream compositing steps aside entirely (don't draw into inter-frame gaps either — that layers up into strobe)
     if (bakedWinCut === tr.cut) return;
-    var p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=窗口起点 1=终点
+    var p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
     var pre = t < tr.cut;
-    // from/to:切点前 from=主帧(A)/to=影子(B 前摇);切点后 from=影子(A 尾巴)/to=主帧(B)
+    // from/to: before the cut from=main frame (A) / to=ghost (B pre-roll); after the cut from=ghost (A tail) / to=main frame (B)
     var F = pre ? SL() : (ghostBmp ? SG() : (frozenCut === tr.cut ? frozen : null));
     var FK = pre ? 'L' + liveVer : (ghostBmp ? 'G' + ghostVer : 'Z' + frozenCut);
     var T = pre ? (ghostBmp ? SG() : null) : SL();
@@ -100,14 +100,14 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
       ctx.drawImage(MIX.canvas, 0, 0, W, H);
       return;
     }
-    drawPlain(liveBmp); // GL 不可用/影子未热且无冻帧:硬切
+    drawPlain(liveBmp); // GL unavailable / ghost not warm and no frozen frame: hard cut
   };
-  // 当前帧的源信息(personCut 要 mask 用):elKey='main'|clip_<shotId>,srcT=该源文件时间
+  // current frame's source info (personCut needs it for the mask): elKey='main'|clip_<shotId>, srcT=time within that source file
   window.__vidSrc = null;
   window.addEventListener('message', function (e) {
     var d = e.data || {};
     if (d.type === 'hf:seekTimelines') {
-      // 播放/scrub 时钟:仅转场窗口附近按时钟重合成(影子帧短暂断供运动也继续走)
+      // play/scrub clock: recomposite by clock only near transition windows (motion keeps going even if ghost frames briefly cut off)
       try {
         var st = Number(d.t);
         if (st >= 0 && liveBmp) {
@@ -120,7 +120,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     }
     if (d.type !== 'hf:frame' || !d.frame) return;
     if (d.baked) {
-      // 预烧录成品帧(0.5× 同长宽比):直接铺满,合成/冻帧/簿记全部让路
+      // pre-baked frame (0.5× same aspect ratio): just fill; compositing / freeze / bookkeeping all step aside
       try {
         ctx.clearRect(0, 0, W, H);
         ctx.drawImage(d.frame, 0, 0, W, H);
@@ -140,7 +140,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         ghostBmp = d.frame2; ghostVer++;
         ghostAtT = typeof d.t === 'number' ? d.t : lastT;
       } else if (ghostBmp) {
-        // 出窗后影子帧作废(窗内缺席则沿用上一张,微卡好过闪切)
+        // discard ghost frame once out of the window (if missing inside the window, reuse the last one — a tiny stutter beats a flicker cut)
         var t0 = typeof d.t === 'number' ? d.t : lastT;
         var inWin = false;
         for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].cut - TRS[wi].half && t0 <= TRS[wi].cut + TRS[wi].half) { inWin = true; break; } }
@@ -154,12 +154,12 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
 }
 
 /**
- * 人像抠片(「文字穿人」):#personCut 画布夹在人后块与人前块之间,每帧把视频按
- * object-fit:cover 同映射画上、再用人像 mask destination-in 只留人的像素。
- * mask 由父层算(MediaPipe 在父文档,sandbox iframe 进不去):本文档 rVFC 抓视频帧
- * 缩到长边 ≤384 发 personFrame,父层分割完回 hf:personMask;单飞节流(上一张没回不发新帧)。
- * 取景变换跟随:GSAP 把取景写在 video 的 inline transform 上,逐帧原样拷到画布。
- * 导出/无父层环境:mask 永远不来,画布保持透明,自然降级成常规前景叠加。
+ * Person matte ("text behind person"): the #personCut canvas sits between behind-person and front-person blocks; each frame draws the video
+ * with the same object-fit:cover mapping, then destination-in with the person mask to keep only the person's pixels.
+ * The mask is computed by the parent layer (MediaPipe lives in the parent document; a sandbox iframe can't reach it): this document's rVFC grabs a video frame,
+ * scales it to long edge ≤384 and sends personFrame; the parent returns hf:personMask when segmentation is done; single-flight throttled (no new frame until the last returns).
+ * Framing-transform follow: GSAP writes framing onto the video's inline transform, copied to the canvas as-is each frame.
+ * Export / no-parent environment: the mask never arrives, the canvas stays transparent, and it degrades naturally to a normal foreground overlay.
  */
 const PERSON_CUT_SHIM = `(function(){
   var v = document.getElementById('vidEl');
@@ -169,21 +169,21 @@ const PERSON_CUT_SHIM = `(function(){
   if (!ctx) return;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  // 效果参数由 assemble 烤进 data 属性(改配置 → setComp → 文档重建,与其它配置同路)
+  // effect params are baked into data-attributes by assemble (config change → setComp → doc rebuild, same path as other config)
   var feather = parseFloat(c.getAttribute('data-feather')) || 0;
   var strokeW = parseFloat(c.getAttribute('data-stroke-w')) || 0;
   var strokeC = c.getAttribute('data-stroke-color') || '#ffffff';
   var bgEl = document.getElementById('personBg');
   var W = c.width, H = c.height;
-  // 人像(视频∘mask)与描边剪影各自离屏,主画布按 描边→人像 顺序合成
+  // person (video ∘ mask) and stroke silhouette each render offscreen; the main canvas composites in stroke→person order
   var P = document.createElement('canvas'); P.width = W; P.height = H;
   var pctx = P.getContext('2d');
   pctx.imageSmoothingEnabled = true; pctx.imageSmoothingQuality = 'high';
   var strokeStyle = c.getAttribute('data-stroke-style') || 'solid';
   var strokeAlpha = parseFloat(c.getAttribute('data-stroke-alpha'));
   if (!(strokeAlpha >= 0 && strokeAlpha <= 1)) strokeAlpha = 1;
-  // 描边 = mask 轮廓追踪(marching squares)出 Path2D 再 stroke:实线/虚线都沿轮廓走,
-  // 线宽取 2×目标宽 —— 内半边被上层人像盖住,视觉上只剩外圈(主流剪辑器同款"外描边")。
+  // stroke = trace the mask outline (marching squares) into a Path2D, then stroke it: solid/dashed both follow the contour,
+  // line width = 2× target — the inner half is covered by the person layer above, so only the outer ring shows (mainstream-editor-style "outer stroke").
   var tc = null, tctx = null, strokePath = null, strokeGrid = null;
   if (strokeW > 0) { tc = document.createElement('canvas'); tctx = tc.getContext('2d', { willReadFrequently: true }); }
   function retrace(){
@@ -194,7 +194,7 @@ const PERSON_CUT_SHIM = `(function(){
     tctx.drawImage(mask, 0, 0, gw, gh);
     var px = tctx.getImageData(0, 0, gw, gh).data;
     function at(x, y){ return x >= 0 && y >= 0 && x < gw && y < gh && px[(y * gw + x) * 4 + 3] > 127 ? 1 : 0; }
-    // 逐 blob:从未消费的边界起点走 marching squares 一圈;短环(噪点)丢弃,bbox 内起点跳过
+    // per blob: walk marching squares once from an unconsumed boundary start; drop short loops (noise), skip starts already inside a bbox
     var boxes = [], paths = [], attempts = 0;
     for (var sy = 0; sy < gh && attempts < 6; sy++) {
       for (var sx = 0; sx < gw && attempts < 6; sx++) {
@@ -234,7 +234,7 @@ const PERSON_CUT_SHIM = `(function(){
       }
     }
     if (!paths.length) { strokePath = null; return; }
-    // 中点二次曲线平滑(步进 3 抽稀),网格坐标建 Path2D,draw 时 translate/scale 到画布
+    // midpoint quadratic-curve smoothing (decimate by step 3); build Path2D in grid coords, translate/scale to canvas at draw time
     var p2 = new Path2D();
     for (var ci = 0; ci < paths.length; ci++) {
       var q = paths[ci], step = 3, n2 = Math.floor(q.length / 2 / step);
@@ -253,8 +253,8 @@ const PERSON_CUT_SHIM = `(function(){
   window.addEventListener('message', function(e){
     var d = e.data || {};
     if (d.type === 'hf:personFx') {
-      // 实时参数更新(人像浮窗滑杆/样式卡即时生效,不等文档重建;值与重建烤进 data 属性的一致)。
-      // 结构性开关(personFront 层序/首次装管线)仍走重建——那是 DOM 结构不是参数。
+      // live param update (person popover sliders / style cards take effect immediately, no doc rebuild; values match what a rebuild bakes into data-attributes).
+      // structural switches (personFront layer order / first pipeline install) still go through a rebuild — that's DOM structure, not params.
       if (d.feather != null) feather = parseFloat(d.feather) || 0;
       if (d.strokeW != null) {
         strokeW = parseFloat(d.strokeW) || 0;
@@ -273,7 +273,7 @@ const PERSON_CUT_SHIM = `(function(){
               bgEl = document.createElement('div');
               bgEl.id = 'personBg';
               bgEl.style.cssText = 'position:absolute;inset:0;display:none;';
-              if (v.parentNode) v.insertAdjacentElement('afterend', bgEl); // 层序同 assemble:视频之上、块之下
+              if (v.parentNode) v.insertAdjacentElement('afterend', bgEl); // layer order same as assemble: above the video, below the blocks
             }
           }
           bgEl.style.background = d.bg;
@@ -284,8 +284,8 @@ const PERSON_CUT_SHIM = `(function(){
     if (d.type === 'hf:personMask') {
       inflight = false;
       if (mask) { try { mask.close(); } catch (err) {} }
-      // 没 mask(此段没开抠像/轨没就绪)= 清掉旧 mask:滑进未抠像段时人像层立即消失,
-      // 不残留上一段的画面;退避重问,别每帧刷父层
+      // no mask (this segment has matting off / track not ready) = clear the old mask: scrubbing into an unmatted segment hides the person layer immediately,
+      // no leftover from the previous segment; back off before re-asking, don't hammer the parent every frame
       mask = d.mask || null;
       if (mask) {
         try { retrace(); } catch (err2) { strokePath = null; }
@@ -295,15 +295,15 @@ const PERSON_CUT_SHIM = `(function(){
       }
     }
   });
-  // mask 全量预算在父层(用户开抠像时跑一次),这里只按**该源文件的时间**要现成的:
-  // canvas 渲染模式下帧信息由帧 shim 记在 window.__vidSrc(elKey + 该源文件时间)
+  // full mask compute lives in the parent (runs once when the user enables matting); here we only request a ready one keyed by **time within that source file**:
+  // in canvas render mode the frame shim records frame info on window.__vidSrc (elKey + time within that source file)
   var lastReq = -1, lastEl = '', nextAskAt = 0;
   function feed(){
     var fi = window.__vidSrc;
     if (inflight || !fi) return;
     if (performance.now() < nextAskAt) return;
     var t = fi.srcT, ek = fi.elKey || 'main';
-    if (mask && ek === lastEl && Math.abs(t - lastReq) < 1 / 30) return; // 同一帧不重复要
+    if (mask && ek === lastEl && Math.abs(t - lastReq) < 1 / 30) return; // don't re-request the same frame
     inflight = true;
     lastReq = t;
     lastEl = ek;
@@ -311,24 +311,24 @@ const PERSON_CUT_SHIM = `(function(){
   }
   function draw(){
     var fi = window.__vidSrc;
-    // 还没有帧(装载间隙)→ 整层熄灭
+    // no frame yet (load gap) → blank the whole layer
     if (!fi) { ctx.clearRect(0, 0, W, H); if (bgEl) bgEl.style.display = 'none'; return; }
     ctx.clearRect(0, 0, W, H);
-    // 换背景层跟着 mask 走:有 mask 的段才亮(导出/无父层/未开抠像的段一律隐藏,退回原画面)
+    // background-replace layer follows the mask: only lit on segments that have a mask (export / no parent / matting-off segments all hidden, fall back to original frame)
     if (bgEl) bgEl.style.display = mask ? 'block' : 'none';
     if (!mask) return;
-    // mask 的宽高比 = 源帧;画布上的帧已按 cover 摆好,mask 用同一套 cover 映射对位
+    // mask aspect ratio = source frame; the on-canvas frame is already cover-fit, so align the mask with the same cover mapping
     var vw = fi.w || W, vh = fi.h || H;
     var k = Math.max(W / vw, H / vh), dw = vw * k, dh = vh * k, dx = (W - dw) / 2, dy = (H - dh) / 2;
     pctx.clearRect(0, 0, W, H);
-    pctx.drawImage(v, 0, 0); // 视频帧直接取自 #vidEl 画布(已 cover 合成)
+    pctx.drawImage(v, 0, 0); // video frame taken straight from the #vidEl canvas (already cover-composited)
     pctx.globalCompositeOperation = 'destination-in';
     if (feather > 0) pctx.filter = 'blur(' + feather + 'px)';
     pctx.drawImage(mask, dx, dy, dw, dh);
     pctx.filter = 'none';
     pctx.globalCompositeOperation = 'source-over';
     if (strokePath && strokeGrid) {
-      // 轮廓描边垫在人像下:线宽 2×(内半被人像盖住 = 外描边);虚线段长随线宽走
+      // contour stroke sits under the person: line width 2× (inner half covered by the person = outer stroke); dash length scales with line width
       var s = dw / strokeGrid.gw;
       ctx.save();
       ctx.translate(dx, dy);
@@ -350,9 +350,9 @@ const PERSON_CUT_SHIM = `(function(){
   (function loop(){ try { feed(); draw(); } catch (e) {} requestAnimationFrame(loop); })();
 })();`;
 
-/** 单条时间轴的注册脚本。体经 new Function 编译再执行:语法错误/运行时抛错都圈在本块
- *  (空时间轴照常注册),不放倒同一 <script> 里其它块 —— 人改源码和 LLM 输出都可能带坏脚本,
- *  lint 不做 JS 语法解析,这里是最后一道隔离。 */
+/** Registration script for a single timeline. The body is compiled and run via new Function: syntax errors / runtime throws are contained to this block
+ *  (an empty timeline still registers) and don't take down other blocks in the same <script> — both human source edits and LLM output can carry bad scripts,
+ *  lint doesn't do JS syntax parsing, so this is the last line of isolation. */
 function timelineScript(id: string, body: string): string {
   return (
     `(function(){ var tl = gsap.timeline({ paused: true }); ` +
@@ -362,21 +362,21 @@ function timelineScript(id: string, body: string): string {
 }
 
 /**
- * 拼成完整 Hyperframes 文档。gsapSrc 可换(导出走渲染容器本地 './vendor/gsap.min.js')。
- * 预览默认自托管 /vendor/gsap.min.js(srcdoc iframe 继承父文档 base → 同源):
- * 组件库/模板墙一屏 N 个 iframe 各拉一次脚本,同源强缓存 + 国内可达,不再吊在 jsdelivr 上。
+ * Stitch a complete Hyperframes document. gsapSrc is swappable (export uses the render container's local './vendor/gsap.min.js').
+ * Preview self-hosts /vendor/gsap.min.js by default (a srcdoc iframe inherits the parent document's base → same-origin):
+ * with N iframes per screen in the component library / template wall each fetching the script, same-origin strong caching + reachable in China, no longer hanging off jsdelivr.
  */
-/** custom 块是否自带卡面(显式 data-hf-surface 标记,或 background:var(--panel) 的卡)。
- *  有卡面时用户设背景色只做 token 覆盖 —— 卡面自己换色,容器不叠涂
- *  (整框+卡面双色重叠、卡外留白也被涂色,就是"设色后配色重叠错乱"的来源)。 */
+/** Whether a custom block carries its own card surface (explicit data-hf-surface marker, or a background:var(--panel) card).
+ *  When it has a surface, a user-set background color is only a token override — the surface recolors itself, the container doesn't paint over it
+ *  (a two-color overlap of frame + surface, with the space outside the card also painted, is the source of "colors overlap and break after setting a color"). */
 export function customHasSurface(templateId: string, innerHtml: string): boolean {
   return templateId === 'custom' && (innerHtml.includes('data-hf-surface') || /background\s*:[^;{}]*var\(--panel\)/.test(innerHtml));
 }
 
-/** 块背景色 → 内容层 CSS(token 覆写 + 可选容器垫底)。surfaceOnly=有卡面,只换 token。
- *  同时按 bg 亮度翻转墨色族(--fg/--muted/--line/--panel-2/--grid):浅底配深墨、深底配浅墨,
- *  深主题下选浅色"浅字浅底不可读"的对比崩坏在这兜住(--accent 保持主题色)。
- *  就地补丁通道(hf:blockStyle)与整文档重组共用本函数 —— 两条路输出恒等。 */
+/** Block background color → content-layer CSS (token override + optional container backing). surfaceOnly = has a surface, only swap tokens.
+ *  Also flips the ink family (--fg/--muted/--line/--panel-2/--grid) by bg luminance: light bg → dark ink, dark bg → light ink,
+ *  catching the "light text on light bg, unreadable" contrast breakdown when picking a light color under a dark theme (--accent keeps the theme color).
+ *  The in-place patch channel (hf:blockStyle) and full-document reassembly share this function — both paths output identically. */
 export function blockBgCss(bg: string, surfaceOnly: boolean): string {
   let ink = '';
   const hex = /^#([0-9a-fA-F]{6})/.exec(bg);
@@ -394,22 +394,22 @@ export function blockBgCss(bg: string, surfaceOnly: boolean): string {
 export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js'): string {
   const { width: W, height: H } = comp;
   const theme = getTheme(comp.theme);
-  // 底色:派生/主题包 palette 给了 paper 就用它(frame 深色主题的预览要能真的变深),否则主题默认
+  // Background: use paper if the derived/theme-pack palette provided it (a frame's dark-theme preview must actually go dark), otherwise the theme default
   const bg = comp.palette?.paper ?? theme.background;
   const body: string[] = [];
   const scripts: string[] = [];
 
   if (comp.video) {
-    // 视频轨 = 一块 <canvas>(canvas 渲染模式,用户定的):解码/时钟/音频全在父层引擎
-    // (video-track-engine),帧经 hf:frame 推进来画。文档重建不再重造解码器 → "解码僵尸"
-    // 整类问题的病根移除。id 仍叫 vidEl:取景关键帧/shotVars/personCut 的选择器零改动。
+    // Video track = a single <canvas> (canvas render mode, per the user's decision): decode/clock/audio all in the parent-layer engine
+    // (video-track-engine), frames drawn as they're pushed via hf:frame. Document rebuild no longer recreates the decoder → the root cause of the whole
+    // "decode zombie" class of problems is removed. The id stays vidEl: framing keyframe / shotVars / personCut selectors need zero changes.
     const hasShots = !!(comp.shots && comp.shots.length);
     const editedDur = hasShots ? editedDuration(comp.shots!) : comp.video.durationSec;
     body.push(
       `<canvas id="vidEl" data-composition-id="vid" width="${n(comp.width)}" height="${n(comp.height)}" data-start="0" data-duration="${n(editedDur)}" data-track-index="0" ` +
         `style="position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;box-shadow:0 30px 90px rgba(0,0,0,0.45);"></canvas>`,
     );
-    // 帧接收 shim + 父层时钟标记(运行时据此不自驱时钟,见 PREVIEW_RUNTIME);切点转场表烤进 shim
+    // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
     scripts.push(
       videoFrameShim(
         hasShots
@@ -420,38 +420,38 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
           : [],
       ),
     );
-    // 镜头取景时间轴(按成片时间)注册到 vid → 变换打在画布元素上,单画布统一吃所有段的取景
+    // Framing timeline (in final-cut time) registered to vid → transforms applied to the canvas element, one canvas absorbing every segment's framing
     const frameBody = hasShots ? videoFrameTimelineBody(comp.shots!) : '';
     if (frameBody) {
       scripts.push(timelineScript('vid', frameBody));
     }
   }
 
-  // 按 trackIndex 稳定排序后渲染:块不带 z-index,DOM 顺序即叠层 → 排序保证
-  // 「data-track-index 越大越上层」的宣称成立,与 comp.blocks 插入顺序无关;同轨保持原顺序。
-  // 转场叠层(track 60)自带 z-index:60,不受此排序影响。
-  // 排序键:句级花字恒在最上层(字幕是可读性刚需,不许被组件盖住;用户定的),
-  // 其余块按 trackIndex(DOM 顺序即叠层)
+  // Render after a stable sort by trackIndex: blocks carry no z-index, so DOM order = stacking → sorting makes the claim
+  // "higher data-track-index is on top" hold, regardless of comp.blocks insertion order; same track keeps original order.
+  // The transition layer (track 60) carries its own z-index:60 and is unaffected by this sort.
+  // Sort key: sentence captions are always topmost (captions are a readability must-have, not to be covered by components; per the user's decision),
+  // other blocks by trackIndex (DOM order = stacking)
   const zKey = (b: Block) => (isSentenceCaption(b) ? Number.MAX_SAFE_INTEGER : b.trackIndex);
   const ordered = [...comp.blocks].sort((a, b) => zKey(a) - zKey(b));
-  // 人像三明治:视频 → 换背景层 → [人物置顶时:全部块] → #personCut 抠片画布 → [常规:全部块]。
-  // 抠像逐段生效(VideoShot.personMatte):有任一段开了才装管线;段外没有 mask,画布
-  // 透明、背景层隐藏,自动退回常规画面。层级(personFront)/描边/背景是全局样式。
+  // Person sandwich: video → background-swap layer → [when person on top: all blocks] → #personCut matte canvas → [normal: all blocks].
+  // Matting takes effect per segment (VideoShot.personMatte): the pipeline is installed only if any segment turned it on; outside those segments there's no mask, the canvas is
+  // transparent and the background layer hidden, auto-reverting to the normal picture. Layer order (personFront) / stroke / background are global styles.
   const fx = comp.personFx;
   const fxOn = !!comp.video && (comp.shots ?? []).some((s) => s.personMatte);
   const personFront = fxOn && !!fx?.personFront;
-  // 块级覆盖:b.personLayer 显式指定人前/人后,缺省跟全局 personFront
+  // Block-level override: b.personLayer explicitly sets front/behind person; default follows the global personFront
   const isBehind = (b: Block) => (fxOn ? (b.personLayer ? b.personLayer === 'behind' : personFront) : false);
   const behind = ordered.filter((b) => isBehind(b));
   const front = ordered.filter((b) => !isBehind(b));
-  // 有任一块要垫到人后,抠片画布就得在(否则块级 'behind' 无从垫起)
+  // If any block needs to sit behind the person, the matte canvas must exist (otherwise block-level 'behind' has nothing to sit under)
   const fxPipeline = fxOn && (personFront || (fx?.stroke?.width ?? 0) > 0 || !!fx?.bg || behind.length > 0);
   if (fxPipeline && fx?.bg) {
-    // 换背景层盖在原视频上(display:none,shim 拿到首个 mask 才亮);人像由上层抠片画布补回
+    // Background-swap layer covers the original video (display:none, lit only once the shim gets the first mask); the person is restored by the matte canvas above
     const bgStyle = fx.bg.type === 'color' ? `background:${escapeAttr(fx.bg.color)};` : `background:#000 center/cover no-repeat url('${escapeAttr(fx.bg.url)}');`;
     body.push(`<div id="personBg" style="position:absolute;inset:0;display:none;${bgStyle}"></div>`);
   }
-  // 全局花字样式:渲染时覆盖句级花字的预设/位置/缩放,块自身 slots 不动(样式是全局态,不落进块)
+  // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched (style is global state, not baked into the block)
   const cs = comp.captionStyle;
   const renderOne = (b: Block) => {
     const capBase = isSentenceCaption(b) ? { ...b, slots: { ...b.slots, canvasW: comp.width } } : b;
@@ -460,31 +460,31 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
         ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const { innerHtml, timelineBody } = renderBlock(rb);
-    // autofit:内容溢出时整体缩到刚好进 box(实测得来),预览=导出
+    // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
     const fit = b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
-    // 内容等比缩放:CSS scale 属性(围绕中心),不影响布局(autofit 量 scrollWidth 不被污染),
-    // 也不进 transform 串(不会被 autofit transform 覆写)
+    // Uniform content scaling: CSS scale property (around center), doesn't affect layout (autofit's scrollWidth measure stays uncontaminated),
+    // and doesn't enter the transform chain (won't be overwritten by the autofit transform)
     const scaleCss = typeof b.scale === 'number' && Math.abs(b.scale - 1) > 0.005 ? `scale:${n(b.scale)};` : '';
-    // 组件背景(用户在浮动条上设的):helper 见 blockBgCss/customHasSurface(就地补丁通道复用同一逻辑)
+    // Component background (set by the user on the floating bar): see helpers blockBgCss/customHasSurface (the in-place patch channel reuses the same logic)
     const hasSurface = customHasSurface(b.templateId, innerHtml);
     const bgCss = b.bg ? blockBgCss(b.bg, hasSurface) : '';
-    // 边框/透明度/圆角/旋转贴在最外层容器(= 取景框)上
+    // Border/opacity/radius/rotation are applied to the outermost container (= the framing box)
     const frame: string[] = [];
     if (b.border) frame.push(`border:3px solid ${escapeAttr(b.border)};`);
-    // 圆角:用户显式设了走它;否则有底板/边框时给个默认圆角(与旧行为一致)
+    // Radius: use the user's explicit value if set; otherwise give a default radius when there's a backing/border (matches old behavior)
     if (typeof b.radius === 'number' && b.radius > 0) frame.push(`border-radius:${n(b.radius)}px;`);
     else if ((b.bg || b.border) && b.box) frame.push('border-radius:var(--radius,24px);');
     if (typeof b.opacity === 'number' && b.opacity < 0.995) frame.push(`opacity:${n(Math.max(0.05, b.opacity))};`);
-    // 整体旋转:绕中心转最外层容器(box 块的裁切窗口/满画布层一并转);与内容层的 scale/autofit 互不干扰
+    // Whole-block rotation: rotate the outermost container around center (a box block's crop window / full-canvas layer rotates with it); independent of the content layer's scale/autofit
     if (typeof b.rotation === 'number' && Math.abs(b.rotation) > 0.01) frame.push(`transform:rotate(${n(b.rotation)}deg);transform-origin:center center;`);
     const attrs =
       `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
       `data-width="${W}" data-height="${H}"`;
     if (b.box) {
-      // box 块 = 双层:容器是裁切窗口(overflow:hidden,拖边/角只动窗口),内容层
-      // [data-hf-content] 按 contentBox 锚定画布 —— 裁切时内容不重排,窗口外被裁掉;
-      // bg 卡面/autofit/内容缩放都在内容层(± 缩放只缩内容,超窗被裁 = 取景框内变焦)。
+      // box block = two layers: the container is the crop window (overflow:hidden, dragging edges/corners only moves the window), the content layer
+      // [data-hf-content] is anchored to the canvas by contentBox — cropping doesn't reflow content, anything outside the window is clipped;
+      // bg surface / autofit / content scaling all live in the content layer (± scaling only scales content, over-window is clipped = zoom within the framing box).
       const cb = b.contentBox ?? b.box;
       const pos = `left:${pct(b.box.x)};top:${pct(b.box.y)};width:${pct(b.box.w)};height:${pct(b.box.h)};`;
       const rel = `left:${pct((cb.x - b.box.x) / b.box.w)};top:${pct((cb.y - b.box.y) / b.box.h)};width:${pct(cb.w / b.box.w)};height:${pct(cb.h / b.box.h)};`;
@@ -493,9 +493,9 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
           `<div data-hf-content style="position:absolute;${rel}${bgCss}${scaleCss}${fit}">\n${innerHtml}\n</div>\n</div>`,
       );
     } else {
-      // 满画布块(字幕层等):平铺单层,无裁切/缩放语义。
-      // 句级字幕容器不吃点击(pointer-events:none,.cap-line 自己 auto):容器 inset:0 铺满
-      // 全画布,吃点击的话字幕在屏时点画布任何空白都会命中它——"点空白选分镜"整个失效
+      // Full-canvas block (caption layer, etc.): a single flat layer, no crop/scale semantics.
+      // The sentence-caption container doesn't take clicks (pointer-events:none, .cap-line is auto): the container is inset:0 spanning
+      // the whole canvas, and if it took clicks, clicking any blank area while captions are on-screen would hit it — "click blank to select a shot" would break entirely
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
       body.push(`<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${innerHtml}\n</div>`);
     }
@@ -503,8 +503,8 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   };
   for (const b of behind) renderOne(b);
   if (fxPipeline) {
-    // 抠片画布:pointer-events 穿透(人后块照常点选);transform 由 shim 逐帧从 video 拷来
-    // 0–100 无单位 → px(随画布分辨率换算):羽化满档 ≈ W/45(1080→24px),描边满档 ≈ W/30(1080→36px)
+    // Matte canvas: pointer-events pass through (behind-person blocks stay clickable); transform is copied from the video by the shim each frame
+    // 0–100 unitless → px (scaled by canvas resolution): feather at max ≈ W/45 (1080→24px), stroke at max ≈ W/30 (1080→36px)
     const featherPx = Math.round(((Math.max(0, Math.min(100, fx?.feather ?? 0)) / 100) * W) / 45 * 10) / 10;
     const strokePx = fx?.stroke ? Math.max(1.2, ((Math.max(0, Math.min(100, fx.stroke.width)) / 100) * W) / 30) : 0;
     body.push(
@@ -531,7 +531,7 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   #root { position: relative; width: ${W}px; height: ${H}px; background: ${bg}; overflow: hidden;
     ${themeVarsCss(theme, comp.palette)} font-family: var(--font-body); color: var(--fg); }
   .comp { position: absolute; }
-  /* 素材位占位:默认不渲染(导出干净),仅编辑态(body.hf-editor)显示 */
+  /* media-slot placeholder: not rendered by default (clean export), shown only in editor mode (body.hf-editor) */
   .hf-ph { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px;
     border:3px dashed rgba(255,255,255,0.34); border-radius:24px; color:rgba(255,255,255,0.72); background:rgba(255,255,255,0.05); }
   body.hf-editor .hf-ph { display:flex; }
@@ -553,14 +553,14 @@ ${scripts.join('\n')}
 }
 
 /**
- * 单块预览文档:把一个叠加块单独渲成自包含 HTML(主题背景 + 该块,跑到中段定格),
- * 供时间轴 hover 出"这块长啥样"的实时小预览。块归一到 0 起点;无视频、无其它块。
+ * Single-block preview document: render one overlay block into self-contained HTML on its own (theme background + the block, paused mid-run),
+ * for a live mini-preview on timeline hover showing "what this block looks like". The block is normalized to a 0 start; no video, no other blocks.
  */
-/** 单块预览的「诚实底」:素材库/生成卡/时间轴悬停里,块是要叠进画面的对象——
- *  底必须表达"透明,叠在画面上"(棋盘格),不许垫舞台纸底冒充组件自身的背景
- *  (所见≠所得:列表里看着有底,插进去没有;用户点名的直觉红线)。
- *  主题墙(frame-panel)例外:那是主题整页设计的展示,保留 stage。 */
-// 文档只负责变透明;棋盘格由预览容器按**屏幕像素**画(画在文档里会被缩放糊掉,踩过)
+/** The "honest ground" for single-block previews: in the asset library / generation card / timeline hover, a block is an object to overlay onto the picture —
+ *  the ground must convey "transparent, sitting on the picture" (checkerboard), not fake a stage paper ground as if it were the component's own background
+ *  (WYSIWYG violation: a ground shows in the list but not once inserted; a gut red line the user named).
+ *  The theme wall (frame-panel) is the exception: it showcases a theme's full-page design, so keep the stage. */
+// The document only goes transparent; the checkerboard is drawn by the preview container in **screen pixels** (drawing it inside the document gets scaled and blurred — been there)
 const TRANSPARENT_CSS = 'background:transparent !important;';
 
 export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: boolean | 'hover'; ground?: 'stage' | 'checker' } = {}): string {
@@ -572,18 +572,18 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
     blocks: [{ ...block, startSec: 0 }],
     shots: [],
     ...(comp.palette ? { palette: comp.palette } : {}),
-    // 花字预览也吃全局样式 —— 时间轴小卡/样式卡与正片所见一致
+    // Caption previews also take the global style — timeline mini-cards / style cards match what's seen in the final cut
     ...(comp.captionStyle ? { captionStyle: comp.captionStyle } : {}),
   };
-  // 定格到入场动画结束后的稳定帧(显示完整内容,不卡在揭示半截);入场多在 1s 内完成,
-  // 取 85% 但至少 1s,封顶到末端前 0.06s(避开尾部退场)
+  // Pause on the stable frame after the entrance animation ends (show full content, not stuck mid-reveal); entrances mostly finish within 1s,
+  // take 85% but at least 1s, capped at 0.06s before the end (avoid the tail exit)
   const at = Math.min(block.durationSec - 0.06, Math.max(1.0, block.durationSec * 0.85));
   let html = assembleHtml(mini);
   if (opts.ground === 'checker') html = html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`);
   if (opts.loop) {
-    // 动态预览:rAF 循环播动画 —— 播完在稳定帧上悬停一拍再从头来(frame 面板样式卡用)。
-    // loop:'hover' = 初始定格,父层 postMessage {type:'hf-loop',on} 控制(封面墙悬停才播);
-    // 沙箱 iframe(opaque origin)父层拿不到 __hfPreview,控制只能走消息。
+    // Animated preview: rAF loops the animation — after playing, hold on the stable frame for a beat then restart (used by frame-panel style cards).
+    // loop:'hover' = initially paused, controlled by parent postMessage {type:'hf-loop',on} (plays only on cover-wall hover);
+    // a sandboxed iframe (opaque origin) can't reach __hfPreview from the parent, so control must go through messages.
     const HOLD = 1.2;
     const cycle = Math.max(0.5, at) + HOLD;
     const auto = opts.loop === true;

@@ -1,14 +1,15 @@
 'use client';
 
 /**
- * 人像 matting(MODNet on WebGPU)—— 抠像管线的高质量 mask 来源。
- * MediaPipe selfie 分割内部是 256 网格,放大到画布是台阶锯齿;matting 模型输出真
- * alpha matte(发丝级软边),这正是主流剪辑器级边缘的来源。
+ * Person matting (MODNet on WebGPU) — the high-quality mask source for the matte pipeline.
+ * MediaPipe selfie segmentation is a 256 grid internally, so upscaling to the canvas gives stair-step
+ * aliasing; the matting model outputs a true alpha matte (hair-level soft edges) — the source of
+ * commercial-grade edges.
  *
- * WebGPU 专属:wasm 单线程一帧几百 ms 撑不起实时预览;WebGPU 不可用/加载失败一律返回
- * null,调用方(geometry.segmentPersonMask)退回 MediaPipe。运行时与模型全自托管:
- * public/ort/(scripts/sync-ort.sh)+ public/models/modnet_portrait.onnx
- * (来源 https://huggingface.co/Xenova/modnet)。
+ * WebGPU only: wasm single-threaded takes hundreds of ms per frame, too slow for live preview. When
+ * WebGPU is unavailable / load fails, always return null and the caller (geometry.segmentPersonMask)
+ * falls back to MediaPipe. Runtime and model are fully self-hosted: public/ort/ (scripts/sync-ort.sh)
+ * + public/models/modnet_portrait.onnx (from https://huggingface.co/Xenova/modnet).
  */
 
 import type * as OrtNs from 'onnxruntime-web';
@@ -20,7 +21,7 @@ interface MatteSession {
 }
 
 let _sess: Promise<MatteSession | null> | null = null;
-// GPU 会话串行喂(mask 流本身逐帧;双缓冲并发一律排队)
+// Feed the GPU session serially (the mask stream is frame-by-frame; double-buffered concurrency queues up)
 let _queue: Promise<unknown> = Promise.resolve();
 
 function load(): Promise<MatteSession | null> {
@@ -29,26 +30,27 @@ function load(): Promise<MatteSession | null> {
     if (!('gpu' in navigator)) return null;
     try {
       const ort = await import('onnxruntime-web');
-      // ?v= 缓存戳用 ort 运行时真实版本——immutable 一年缓存靠 URL 变化失效,升级即重拉;
-      // URL 已是绝对地址(matte-assets 统一拼 base:CDN 直出或同源)
+      // ?v= cache-buster uses ort's real runtime version — immutable one-year caching invalidates via
+      // URL change, so an upgrade re-fetches. URLs are already absolute (matte-assets joins the base: CDN or same-origin)
       const u = ortWasmUrls(ort.env.versions?.web);
       ort.env.wasm.wasmPaths = { wasm: u.wasm, mjs: u.mjs };
-      // 模型选型:MODNet(人像 matting,纯标准算子,webgpu EP 全跑通)。RVM 更稳(时序记忆)
-      // 但其 AveragePool(ceil_mode)在 ort-web webgpu 没实现、混合分派也救不回(算子被
-      // webgpu 认领后运行期才炸)——等 EP 补上可切回(模型:PeterL1n/RobustVideoMatting releases)。
+      // Model choice: MODNet (person matting, standard ops only, runs fully on the webgpu EP). RVM is
+      // steadier (temporal memory) but its AveragePool (ceil_mode) isn't implemented in ort-web webgpu,
+      // and hybrid dispatch can't save it either (once webgpu claims the op it blows up at runtime) —
+      // switch back once the EP fills it in (model: PeterL1n/RobustVideoMatting releases).
       const session = await ort.InferenceSession.create(modnetUrl(), {
         executionProviders: ['webgpu', 'wasm'],
         graphOptimizationLevel: 'all',
       });
-      console.info('[studio/person-matte] MODNet 就绪(WebGPU)');
+      console.info('[studio/person-matte] MODNet ready (WebGPU)');
       return { ort, session };
     } catch (e) {
-      console.warn('[studio/person-matte] matting 模型加载失败,退回 MediaPipe 分割', e);
+      console.warn('[studio/person-matte] matting model failed to load, falling back to MediaPipe segmentation', e);
       return null;
     }
   })();
   _sess = p;
-  // 失败不永久缓存:下次调用重试(网络抖动别把整个会话钉死在低质量路径)
+  // Don't cache failures permanently: retry on the next call (a network blip shouldn't pin the whole session to the low-quality path)
   p.then(
     (s) => {
       if (!s && _sess === p) _sess = null;
@@ -61,16 +63,16 @@ function load(): Promise<MatteSession | null> {
 }
 
 /**
- * 一帧位图 → alpha matte 位图(尺寸=推理分辨率,调用方按 cover 映射拉伸)。
- * 不负责 close 传入位图。WebGPU 不可用/失败返回 null。
+ * One frame bitmap → alpha matte bitmap (size = inference resolution; caller stretches via cover mapping).
+ * Does not close the passed-in bitmap. Returns null when WebGPU is unavailable / fails.
  */
 export function matteMask(src: ImageBitmap): Promise<ImageBitmap | null> {
   const run = async (): Promise<ImageBitmap | null> => {
     const s = await load();
     if (!s) return null;
     try {
-      // MODNet:长边 ≤512,宽高取 32 的倍数(模型多级 /32 下采样,非整除会形变/报错);
-      // 归一化 (x-0.5)/0.5;输出 [1,1,h,w] alpha
+      // MODNet: long edge ≤512, width/height rounded to multiples of 32 (the model down-samples by /32
+      // multiple times; non-divisible sizes distort or error). Normalize (x-0.5)/0.5; output [1,1,h,w] alpha
       const k = Math.min(1, 512 / Math.max(src.width, src.height));
       const w = Math.max(32, Math.round((src.width * k) / 32) * 32);
       const h = Math.max(32, Math.round((src.height * k) / 32) * 32);
@@ -97,7 +99,7 @@ export function matteMask(src: ImageBitmap): Promise<ImageBitmap | null> {
       mctx.putImageData(new ImageData(px, w, h), 0, 0);
       return mc.transferToImageBitmap();
     } catch (e) {
-      console.warn('[studio/person-matte] matting 推理失败', e);
+      console.warn('[studio/person-matte] matting inference failed', e);
       return null;
     }
   };
@@ -107,18 +109,19 @@ export function matteMask(src: ImageBitmap): Promise<ImageBitmap | null> {
 }
 
 export interface MatteFrame {
-  /** 源时间(播放口径,已减首包偏移;= 预览里 video 的原生 currentTime)。 */
+  /** Source time (playback frame of reference, first-packet offset already subtracted; = the preview video's native currentTime). */
   t: number;
-  /** alpha mask 的 webp(带透明通道):按需 createImageBitmap 解码,内存里只存压缩体。 */
+  /** webp of the alpha mask (with transparency): decoded via createImageBitmap on demand, only the compressed form kept in memory. */
   blob: Blob;
 }
 
 export const MATTE_FPS = 15;
 
 /**
- * 预算一段 mask 轨:对 [from,to)(源时间,缺省=整条)按 MATTE_FPS 抽帧 → matting → webp mask 序列。
- * 按分镜段调用(选中哪段算哪段,用户定的:不做全量);预览端按时间取最近的 mask,不做实时推理。
- * 返回 null = 无视频轨/被取消。mask 按**源时间**索引,剪辑/裁切不影响缓存有效性。
+ * Precompute a mask track: over [from,to) (source time, default = whole clip), sample at MATTE_FPS →
+ * matting → webp mask sequence. Called per shot (whichever segment the user selects; no full-clip pass);
+ * the preview picks the nearest mask by time and does no live inference.
+ * Returns null = no video track / cancelled. Masks are indexed by **source time**, so trim/cut don't invalidate the cache.
  */
 export async function computeMatteTrack(
   file: File,
@@ -146,7 +149,7 @@ export async function computeMatteTrack(
     const stamps: number[] = [];
     for (let t = from; t < to; t += 1 / MATTE_FPS) stamps.push(t);
     if (!stamps.length) stamps.push(from);
-    // 时间基归零:请求加回首包偏移,回带减掉(mp4 首包非零详见 thumbnails.ts)
+    // Time base zeroing: add the first-packet offset back on request, subtract it on return (mp4 non-zero first packet — see thumbnails.ts)
     const t0 = Math.max(0, await input.getFirstTimestamp());
     const sink = new VideoSampleSink(track);
     const out: MatteFrame[] = [];
@@ -161,9 +164,9 @@ export async function computeMatteTrack(
       sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, cw, ch);
       sample.close();
       const frame = canvas.transferToImageBitmap();
-      canvas.width = cw; // transfer 后画布归零,重设尺寸复活
+      canvas.width = cw; // canvas is zeroed after transfer; resetting the size revives it
       canvas.height = ch;
-      const mask = await segmentPersonMask(frame); // 内部负责 close frame
+      const mask = await segmentPersonMask(frame); // closes frame internally
       if (mask) {
         const mc = new OffscreenCanvas(mask.width, mask.height);
         const mctx = mc.getContext('2d');

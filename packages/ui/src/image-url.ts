@@ -1,21 +1,22 @@
 /**
- * 图片 URL 缩略 / 格式化 helper
+ * Image URL thumbnailing / formatting helper.
  *
- * 单域名：原图与转图都在 cdn.pireel.com（R2 custom domain），转图走 Cloudflare
- * Image Transformations 内置 URL 格式：
- *   原图：cdn.pireel.com/<key>
- *   转图：cdn.pireel.com/cdn-cgi/image/width=W[,height=H,fit=cover],format=auto/<key>
- * 前置：zone 开启 Images → Transformations，且 allowed origins 放行 cdn.pireel.com。
+ * Single domain: both originals and transforms live on cdn.pireel.com (R2 custom domain);
+ * transforms use Cloudflare Image Transformations' built-in URL format:
+ *   original:  cdn.pireel.com/<key>
+ *   transform: cdn.pireel.com/cdn-cgi/image/width=W[,height=H,fit=cover],format=auto/<key>
+ * Prereq: enable Images → Transformations on the zone, and allow cdn.pireel.com in allowed origins.
  *
- * 前端展示走 imageThumb() 套尺寸预设；'original' 直读原图（不烧 transform 量）。
+ * Frontend display goes through imageThumb() with size presets; 'original' reads the original directly
+ * (doesn't burn transform quota).
  *
- * 配置：VITE_IMG_SOURCE_BASE。未配 → 直返原输入（开发环境/未接入）。
+ * Config: VITE_IMG_SOURCE_BASE. Unset → returns the input as-is (dev / not wired up).
  */
 
-// 双端读取：process.env 里**有定义**（含空串）就以它为准（workerd nodejs_compat /
-// vitest / scripts；vi.stubEnv(key,'') 即可模拟"未配置"），undefined 才落
-// import.meta.env（浏览器，Vite 注入）。不能按 process 存在性二选一——TanStack
-// Start dev 往浏览器注入只含 TSS_* 的 process 全局，那样 VITE_* 会被读成空。
+// Read from both sides: if process.env has the key *defined* (even ''), use it (workerd nodejs_compat /
+// vitest / scripts; vi.stubEnv(key,'') simulates "unconfigured"); only fall back to import.meta.env
+// (browser, injected by Vite) when it's undefined. Don't branch on process existence — TanStack Start
+// dev injects a process global into the browser containing only TSS_*, which would read VITE_* as empty.
 function readEnv(viteKey: string): string {
   const fromProcess =
     typeof process !== 'undefined' && process.env ? process.env[viteKey] : undefined;
@@ -24,69 +25,71 @@ function readEnv(viteKey: string): string {
     (import.meta as unknown as { env?: Record<string, string> }).env?.[viteKey] || ''
   );
 }
-/** 展示 CDN（cdn.pireel.com）。服务端散读统一走这里——别再直读 env。 */
+/** Display CDN (cdn.pireel.com). Server-side reads should all go through here — don't read env directly. */
 export function imgSourceBase(): string {
   return readEnv('VITE_IMG_SOURCE_BASE').replace(/\/$/, '');
 }
 const readSourceBase = imgSourceBase;
 
-/** 我们自己的存储 / CDN host 白名单——其余 host 的 URL 不转码（外部参考图、provider
- *  临时 URL 等）。img.pireel.com 已退役，留在这里只为解析历史完整 URL 抠 key。 */
+/** Whitelist of our own storage / CDN hosts — URLs on other hosts aren't transformed (external reference
+ *  images, provider temp URLs, etc.). img.pireel.com is retired, kept here only to parse the key out of
+ *  historical full URLs. */
 const OUR_HOSTS = new Set(['cdn.pireel.com', 'img.pireel.com']);
 
 /**
- * 把输入归一成 s3 key：
- *   - 裸 key（不含 protocol）→ 直接当 key 返
- *   - data: / blob: → null（不能 transform）
- *   - 完整 URL：白名单内抠 path 当 key；外站返 null（不 transform）
+ * Normalize the input into an s3 key:
+ *   - bare key (no protocol) → returned as the key directly
+ *   - data: / blob: → null (can't transform)
+ *   - full URL: whitelisted host → path as key; external host → null (no transform)
  */
 function extractKey(input: string): string | null {
   if (!input) return null;
   if (/^(data|blob):/.test(input)) return null;
-  // 站内相对路径('/local-assets/…' 这类本地资产路由):是 URL 不是裸 key,原样透传——
-  // 剥掉打头斜杠会让浏览器按当前页面路径解析,图直接 404(OSS 壳踩过)
+  // Site-relative paths ('/local-assets/…' and similar local-asset routes): these are URLs, not bare keys,
+  // pass through as-is — stripping the leading slash would make the browser resolve against the current
+  // page path and 404 the image (hit this in the OSS shell).
   if (input.startsWith('/')) return null;
   if (!input.includes('://')) {
-    // 裸 key（DB 新格式：'creations/u_x/cre_y-0.png'）
+    // bare key (new DB format: 'creations/u_x/cre_y-0.png')
     return input.replace(/^\//, '');
   }
   try {
     const u = new URL(input);
     if (!OUR_HOSTS.has(u.hostname)) return null;
-    // 已是转图 URL（/cdn-cgi/image/<opts>/<key>）→ 剥掉前缀取回裸 key，防二次转图
+    // Already a transform URL (/cdn-cgi/image/<opts>/<key>) → strip the prefix back to the bare key, avoiding double transform
     return u.pathname.replace(/^\//, '').replace(/^cdn-cgi\/image\/[^/]+\//, '');
   } catch {
     return null;
   }
 }
 
-/** 尺寸铁律：预设宽高 ≥ 该类场景**最大渲染尺寸的 2 倍**（Retina 下才清晰）。
- *  渲染尺寸都在代码里写死，不需要运行时算——改了某处 DOM 尺寸记得回来对账。 */
+/** Sizing rule: preset width/height ≥ 2× the max render size for that scenario (sharp on Retina).
+ *  Render sizes are hard-coded, no runtime math — if you change a DOM size somewhere, come back and reconcile. */
 export const IMAGE_PRESETS = {
-  /** pill 内嵌小图标，最大渲染 28×28 → 2× = 56 */
+  /** small inline pill icon, max render 28×28 → 2× = 56 */
   inline: { w: 56, h: 56 },
-  /** 列表行/网格缩略，最大渲染 88×88（聊天图组），常见 36~64 → 2× ≈ 192 */
+  /** list-row/grid thumbnail, max render 88×88 (chat image group), typically 36~64 → 2× ≈ 192 */
   thumb: { w: 192, h: 192 },
-  /** 保比例缩略（不裁剪，studio 生成面板产物条带），高 112 渲染 16:9 时 ~200 宽 → 2× = 400 */
+  /** aspect-preserving thumbnail (no crop, studio generation-panel output strip), height 112 → ~200 wide at 16:9 → 2× = 400 */
   strip: { w: 400, h: 0 },
-  /** 卡片封面（项目/模板/素材/落地页），卡片可拉伸到 ~480 CSS px 宽 → 2× = 960 */
+  /** card cover (project/template/asset/landing), card can stretch to ~480 CSS px wide → 2× = 960 */
   list: { w: 960, h: 0 },
-  /** pill hover 大图、lightbox 启动缩略，最大渲染 ~512 宽 → 2× = 1024 */
+  /** pill-hover large image, lightbox startup thumbnail, max render ~512 wide → 2× = 1024 */
   preview: { w: 1024, h: 0 },
-  /** 画布 image strip（高 320 容器宽自适应，16:9 时 ~570 宽）→ 2× ≈ 1280 */
+  /** canvas image strip (height 320, container width fluid, ~570 wide at 16:9) → 2× ≈ 1280 */
   canvas: { w: 1280, h: 0 },
 } as const;
 
 export type ImagePreset = keyof typeof IMAGE_PRESETS | 'original';
 
 /**
- * 拿一个语义尺寸的 transform URL。输入接受：
- *   - 裸 s3 key（DB 新格式，如 'creations/u_x/cre_y-0.png'）→ 拼 cdn host
- *   - 完整 URL 在 OUR_HOSTS 下（历史数据）→ 抠 key 后拼 cdn host
- *   - 外部 URL（参考图 / provider 临时链 / dataURL）→ 原样返不 transform
+ * Get a transform URL at a semantic size. Accepts:
+ *   - bare s3 key (new DB format, e.g. 'creations/u_x/cre_y-0.png') → prefixed with the cdn host
+ *   - full URL on OUR_HOSTS (historical data) → key extracted, then prefixed with the cdn host
+ *   - external URL (reference image / provider temp link / dataURL) → returned as-is, no transform
  *
- * 'original' 直读原图 URL，不走 transform（全尺寸场景没必要烧转图量）。
- * SOURCE_BASE 没配 → 直返裸 key（dev 兜底，浏览器自己处理）。
+ * 'original' reads the original URL directly, no transform (full-size cases needn't burn transform quota).
+ * SOURCE_BASE unset → returns the bare key (dev fallback, browser handles it).
  */
 export function imageThumb(
   url: string | undefined | null,
@@ -94,7 +97,7 @@ export function imageThumb(
 ): string {
   if (!url) return '';
   const key = extractKey(url);
-  // 不是我们的图（外部 URL）—— 跳过转码原样返
+  // Not our image (external URL) — skip transform, return as-is
   if (!key) return url;
 
   const sourceBase = readSourceBase().replace(/\/$/, '');
@@ -107,6 +110,6 @@ export function imageThumb(
     ...(cfg.h > 0 ? [`height=${cfg.h}`, 'fit=cover'] : []),
     'format=auto',
   ].join(',');
-  // Cloudflare Image Transformations 内置 URL 格式（同域名，无独立转图服务）
+  // Cloudflare Image Transformations built-in URL format (same domain, no separate transform service)
   return `${sourceBase}/cdn-cgi/image/${opts}/${key}`;
 }

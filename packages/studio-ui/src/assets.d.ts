@@ -1,4 +1,4 @@
-/** 面板静态资产(Vite 处理成 URL;转场预览的两张真实照片用)。 */
+/** Panel static assets (Vite turns these into URLs; used by the transition preview's two real photos). */
 declare module '*.jpg' {
   const src: string;
   export default src;

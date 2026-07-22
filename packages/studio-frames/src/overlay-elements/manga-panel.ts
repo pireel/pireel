@@ -1,16 +1,18 @@
 /**
- * 漫画 Manga 的口播叠加件:浮动分格/对话泡语言——白纸墨框(6px 墨线+硬偏移影+
- * 微倾斜)、速度线三角裁进格角、网点补丁、白椭圆对话泡+旋转方块尾巴、拟声词
- * SFX(纸色填充+粗墨描边)、反白格当最响的强调、红色每件至多一处(红章)。
- * 动效硬切:格子对撞滑入、SFX power3.in 砸落,禁柔光渐变。根透明贴在画面上。
+ * Manga overlay elements: floating-panel / speech-bubble language — white paper with ink frames
+ * (6px ink line + hard offset shadow + slight tilt), speed-line triangles clipped into panel
+ * corners, halftone patches, white oval speech bubbles + rotated-square tails, onomatopoeia SFX
+ * (paper fill + thick ink stroke), a reversed-out panel as the loudest emphasis, red used at most
+ * once per element (a red stamp). Motion is hard-cut: panels collide/slide in, SFX slams down with
+ * power3.in; no soft gradients. Transparent root, pasted on the frame.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';
 
-/** 墨线格:白纸底 + 6px 墨框 + 硬影 */
+/** Ink panel: white paper + 6px ink frame + hard shadow */
 const PANEL =
   'background:var(--panel);border:6px solid var(--fg);border-radius:var(--radius);box-shadow:var(--shadow);';
-/** 速度线 + 网点补丁 */
+/** Speed lines + halftone patch */
 const TONES = (id: string) => `
 #${id} .spd{position:absolute;background:repeating-linear-gradient(65deg,var(--fg) 0 3px,transparent 3px 26px);clip-path:polygon(0 0,100% 0,0 100%);}
 #${id} .ht{position:absolute;background-image:radial-gradient(var(--fg) 2.4px,transparent 2.4px);background-size:18px 18px;}`;

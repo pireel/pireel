@@ -1,24 +1,26 @@
 'use client';
 
 /**
- * 组件(生成的叠加 HTML 块)库 —— **云端为准 + localStorage 缓存**(2026-07-18 上云,
- * 跨项目/跨设备复用;此前纯 localStorage,清缓存/换设备全丢)。
- * 读=同步读缓存(面板秒开),syncElementEntries 拉云端合并回写;写=缓存+fire-and-forget
- * 上云(providers.elements;OSS 壳缺省=纯本地,行为与上云前一致)。
- * innerHtml 数 KB 一条,缓存 cap 防撑爆配额(云端上限 200 在服务端)。
+ * Element library (generated overlay HTML blocks) — **cloud is source of truth + localStorage
+ * cache** (moved to cloud 2026-07-18 for cross-project/cross-device reuse; previously pure
+ * localStorage, so clearing the cache / switching devices lost everything).
+ * Read = sync read from cache (panel opens instantly), syncElementEntries pulls the cloud and
+ * merges back; write = cache + fire-and-forget push to cloud (providers.elements; OSS shell
+ * defaults to local-only, same behavior as before cloud).
+ * Each innerHtml is a few KB; the cache cap avoids blowing the quota (cloud limit of 200 is server-side).
  */
 
 import { studioProviders, type StoredElement } from '@pireel/studio-engine/providers';
 
 export interface GenElementResult {
-  /** 生成时的种子块 id(选择器作用域);插入时用它重作用域成新 id */
+  /** Seed block id at generation time (selector scope); on insert it's re-scoped to a new id */
   seedId: string;
   innerHtml: string;
   timelineBody: string;
   label: string;
-  /** 预置组件带上来源 id(落进块 slots):「同步内容」据此重建带节拍的时间轴。 */
+  /** Presets carry a source id (stored in block slots): "sync content" uses it to rebuild the beat-timed timeline. */
   presetId?: string;
-  /** 设计标定尺寸(主题组件=1920×1080):插入时按此 cq 化并选画布内适配窗,不满屏铺。 */
+  /** Design reference size (theme elements = 1920×1080): on insert, cq-ify against this and pick an in-canvas fit window rather than filling the screen. */
   designW?: number;
   designH?: number;
 }
@@ -57,23 +59,24 @@ export function loadElementEntries(): ElementEntry[] {
 
 export function saveElementEntries(entries: ElementEntry[]): void {
   try {
-    // 存成生成面板历史同款形态(带 type/status,老读取方直接兼容)
+    // Store in the same shape as gen-panel history (with type/status, so old readers stay compatible)
     const done = entries.slice(-ELS_CAP).map((e) => ({ ...e, type: 'element', status: 'succeeded' }));
     window.localStorage.setItem(ELS_KEY, JSON.stringify(done));
   } catch {
-    /* 配额/隐私模式忽略 */
+    /* Ignore quota / private mode */
   }
 }
 
 const toWire = (e: ElementEntry): StoredElement => ({ id: e.id, prompt: e.prompt, label: e.element.label, createdAt: e.createdAt, element: e.element });
 
-/** 单条上云(fire-and-forget;OSS 壳无 provider = no-op)。 */
+/** Push a single entry to cloud (fire-and-forget; OSS shell has no provider = no-op). */
 export function pushElementToCloud(e: ElementEntry): void {
   void studioProviders().elements?.save(toWire(e)).catch(() => {});
 }
 
-/** 云端同步:云端为准,本地独有的(离线新增/上云前的历史)回填上云;合并结果写回
- *  缓存并返回(时间升序,与缓存序一致)。没配 provider / 拉取失败返回 null(用缓存)。 */
+/** Cloud sync: cloud is source of truth; local-only entries (added offline / history from before
+ *  cloud) are backfilled up; the merged result is written back to cache and returned (ascending by
+ *  time, matching cache order). Returns null if no provider / fetch fails (use the cache). */
 export async function syncElementEntries(): Promise<ElementEntry[] | null> {
   const store = studioProviders().elements;
   if (!store) return null;
@@ -84,13 +87,13 @@ export async function syncElementEntries(): Promise<ElementEntry[] | null> {
     .map((c) => ({ id: c.id, prompt: c.prompt, createdAt: c.createdAt, element: c.element }));
   const cloudIds = new Set(cloudEntries.map((e) => e.id));
   const localOnly = loadElementEntries().filter((e) => !cloudIds.has(e.id));
-  for (const e of localOnly) pushElementToCloud(e); // 一次性回填:上云前的本地历史不丢
+  for (const e of localOnly) pushElementToCloud(e); // one-time backfill: don't lose local history from before cloud
   const merged = [...cloudEntries, ...localOnly].sort((a, b) => a.createdAt - b.createdAt);
   saveElementEntries(merged);
   return merged.slice(-ELS_CAP);
 }
 
-/** 画布上的组件存回素材库(浮动条「存为组件」):追加一条(同 id 覆盖),超 cap 挤掉最老的。 */
+/** Save a canvas element back to the library (floating toolbar "Save as element"): append one (same id overwrites), evict the oldest past cap. */
 export function addElementEntry(entry: ElementEntry): void {
   saveElementEntries([...loadElementEntries().filter((e) => e.id !== entry.id), entry]);
   pushElementToCloud(entry);

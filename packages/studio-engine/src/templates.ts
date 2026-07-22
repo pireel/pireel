@@ -1,7 +1,9 @@
 /**
- * 内置模板的渲染实现 + 注册(import 本文件即注册,副作用由 './composition' barrel 统一触发)。
- * 选择器一律 #blockId 作用域;文本节点打 data-edit 供预览就地改字。加模板 = 在这里
- * 加一个 render + registerTemplate,UI(模板面板/组件库/检查器枚举)自动长出来。
+ * Built-in template render impls + registration (importing this file registers them;
+ * the side effect is triggered via the './composition' barrel). Selectors are always
+ * scoped by #blockId; text nodes get data-edit for in-place editing in the preview.
+ * Add a template = add a render + registerTemplate here, and the UI (template panel /
+ * component library / inspector enums) grows automatically.
  */
 
 import {
@@ -22,7 +24,7 @@ import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx, wordsFromText } from './caption-fx';
 
-/* ============================ 模板渲染实现 ============================ */
+/* ============================ template render impls ============================ */
 
 function renderTitle(slots: Slots, id: string): Rendered {
   const text = str(slots.text);
@@ -95,8 +97,8 @@ function renderCaption(slots: Slots, id: string): Rendered {
   const scale = typeof slots.scale === 'number' && slots.scale > 0 ? (slots.scale as number) : 1;
   const hPct = typeof slots.hPct === 'number' && slots.hPct > 0 ? (slots.hPct as number) : 0;
   if (words.length === 0) return { innerHtml: '<div></div>', timelineBody: '' };
-  // 字幕归字幕、组件归组件:effect='kinetic-slam' 是关键词重击**组件**(带 box 独立定位);
-  // 其余一律句级字幕 → 预设通道(slots.preset 是块初始形态,全局 captionStyle 在 assemble 时覆盖)。
+  // Captions vs blocks: effect='kinetic-slam' is a keyword-slam BLOCK (has its own box, positioned independently);
+  // everything else is a sentence caption → preset channel (slots.preset is the block's initial form; global captionStyle overrides it at assemble time).
   if (str(slots.effect) === 'kinetic-slam') return renderSlam(words, id, scale);
   const subStyle = {
     ...(typeof slots.subYPct === 'number' ? { yPct: slots.subYPct as number } : {}),
@@ -109,15 +111,15 @@ function renderCaption(slots: Slots, id: string): Rendered {
   return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW);
 }
 
-/** 预设字体 → CSS font-family(serif 走 Noto Serif SC,mono 走主题 --font-num,缺省主题正文)。 */
+/** Preset font → CSS font-family (serif → Noto Serif SC, mono → theme --font-num, default → theme body). */
 function presetFontCss(p: CaptionPreset): string {
   if (p.font === 'serif') return `'Noto Serif SC','Songti SC',serif`;
   if (p.font === 'mono') return 'var(--font-num)';
   return 'var(--font-body)';
 }
 
-/** canvas 量宽用的**具体**字体栈(CSS var 进不了 canvas font;与文档实际加载的一致:
- *  --font-body=Noto Sans SC / --font-num=IBM Plex Mono,见 theme.ts)。 */
+/** Concrete font stack for canvas width measurement (CSS vars can't be used in canvas font;
+ *  matches what the document actually loads: --font-body=Noto Sans SC / --font-num=IBM Plex Mono, see theme.ts). */
 function presetFontFamilies(p: CaptionPreset): string {
   if (p.font === 'serif') return "'Noto Serif SC','Songti SC',serif";
   if (p.font === 'mono') return "'IBM Plex Mono',ui-monospace,monospace";
@@ -125,34 +127,39 @@ function presetFontFamilies(p: CaptionPreset): string {
 }
 
 /**
- * 预设花字:emphasis = 读到哪个词强调哪个词(变色 / 划线滑入 / 色块弹出);
- * line = 整句浮现的干净字幕,无逐词动画。视觉(配色/底板/装饰)全部来自预设表。
- * 长句**渲染期实时拆段**(chunkWordsByWidth):每段一个 .cap-line 按词时间轮播——
- * 单行短句不糊屏;拆段不落数据,块保持一句一块(旧块/草稿自动生效)。
+ * Preset captions: emphasis = highlight each word as it's spoken (color change / underline
+ * slide-in / color-block pop); line = whole sentence fades in as a clean caption, no per-word
+ * animation. Visuals (colors / background plate / decoration) all come from the preset table.
+ * Long lines are split into segments at render time (chunkWordsByWidth): each segment is one
+ * .cap-line, cycled by word time — short single lines don't blur the screen; splitting isn't
+ * persisted, blocks stay one-sentence-per-block (old blocks/drafts work automatically).
  */
 /**
- * 字幕行分段(**渲染与编辑态共用的单一口径**,workbench 选中强显要按同样的段定位)。
- * 拆段预算(px 口径,与渲染 CSS 逐项同源,全部按**取整后的真实值**入账;行内 nowrap,
- * 万一低估也只是左右对称微溢出,绝不视觉换行):
- *   框宽 = wPct% × 画布宽(canvasW,竖屏 1080/横屏 1920——硬编码 1080 会把横屏行宽腰斩,踩过)
- *   − 底板左右 padding:与 CSS 完全同式 round(fs×0.42)×2(仅有底板时)
- *   − 0.15em 安全余量(canvas 与排版引擎的亚像素差/字体未就绪回退)
- *   词间 flex gap = round(fs×0.18),n 词 n−1 个:按"每词摊 1 个、预算补回 1 个"精确入账。
- *   词宽 = canvas measureText 实测(pretext 式,italic/weight/字号/字体栈与渲染一致;
- *   量宽文档必须加载同款字体,见 STUDIO_FONTS_HREF);node/测试环境无 canvas → 字形
- *   类别估表退路,并恒取两者较大值(宁可早断,不许溢出换行)。
+ * Caption line segmentation (a SINGLE spec shared by render and edit modes — workbench
+ * selection highlight must locate the same segments). Split budget (in px, item-for-item
+ * from the render CSS, all accounted at the ROUNDED real value; lines are nowrap, so even if
+ * underestimated it's only symmetric micro-overflow, never a visual wrap):
+ *   box width = wPct% × canvas width (canvasW, portrait 1080 / landscape 1920 — hardcoding
+ *     1080 halves the landscape line width, been bitten)
+ *   − plate left/right padding: exactly the CSS formula round(fs×0.42)×2 (only when there's a plate)
+ *   − 0.15em safety margin (subpixel diff between canvas and the layout engine / font-not-ready fallback)
+ *   inter-word flex gap = round(fs×0.18), n−1 for n words: accounted precisely as "one per word, one added back from budget".
+ *   word width = canvas measureText actual (pretext-style, italic/weight/size/font-stack match
+ *     render; the measuring document must load the same fonts, see STUDIO_FONTS_HREF); node/test
+ *     env has no canvas → glyph-class estimate table fallback, always taking the larger of the two
+ *     (rather cut early than overflow into a wrap).
  */
 
 export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: number, scale: number, canvasW = 1080): FxWord[][] {
   const fs = Math.max(10, Math.round(p.size * scale));
   const gapPx = Math.round(fs * 0.18);
-  const spPx = Math.round(fs * 0.12); // 西文词界追加距(与渲染 .sp 同口径)
+  const spPx = Math.round(fs * 0.12); // extra gap at Latin word boundaries (same spec as render .sp)
   const padPx = p.bg ? Math.round(fs * 0.42) * 2 : 0;
   const canvasFont = `${p.italic ? 'italic ' : ''}${p.weight} ${fs}px ${presetFontFamilies(p)}`;
   const wordPx = (t: string) => {
     const est = estWordEm(t) * fs;
     const m = measureTextPx(t, canvasFont);
-    return m == null ? est : Math.max(m, est); // 取较大值:估表作下限,canvas 只会收紧不会放宽
+    return m == null ? est : Math.max(m, est); // take the larger: estimate is the floor, canvas only tightens never loosens
   };
   const extra = new Map<FxWord, number>();
   words.forEach((w, i) => {
@@ -164,8 +171,8 @@ export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: num
 
 function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080): Rendered {
   const { start } = span2(words);
-  // scale = **字号**系数(用户定的:缩放调的是字体大小,不是区域 transform)——
-  // 字号/底板内边距/装饰全按缩放后的字号排版,文本真实重排,不是整块位图式缩放
+  // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
+  // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
   const fs = Math.max(10, Math.round(p.size * scale));
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
   const segs = captionLineSegments(words, p, wPct, scale, canvasW);
@@ -183,11 +190,13 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     })
     .join('');
   const pill = p.bg ? `background:${p.bg}; padding:${Math.round(fs * 0.22)}px ${Math.round(fs * 0.42)}px; border-radius:${Math.round(fs * 0.28)}px;` : '';
-  // 双语副行:整句译文贴在主行正下方(主行 bottom 锚在 yPct,副行 top 锚同一线),
-  // 视觉随预设走(同字体/底板/投影,0.6× 字号),无逐词动画——副行没有词级时间
-  // 译文行 = 主行同一套口径的"第二条字幕行":分词拆行走同一个 captionLineSegments 预算
-  // (框宽×字号实时推),锚定同主行(行底=yPct、行中心=xPct、框宽 wPct、框高 hPct 落
-  // min-height),底板/投影/字体全随预设。缺省(subStyle.yPct 未设)= 贴主行正下方跟随。
+  // Bilingual sub-line: full-sentence translation sits directly under the main line (main line
+  // bottom anchored at yPct, sub-line top anchored at the same line), visuals follow the preset
+  // (same font/plate/shadow, 0.6× size), no per-word animation — the sub-line has no word times.
+  // The translation line is a "second caption line" on the same spec as the main line: word-split
+  // reflow via the same captionLineSegments budget (box width × font size, live), anchored to the
+  // main line (line bottom=yPct, center=xPct, box width wPct, box height hPct → min-height), plate/
+  // shadow/font all follow the preset. Default (subStyle.yPct unset) = follow directly under the main line.
   const subScale = subStyle?.scale ?? scale * 0.6;
   const subFs = Math.max(9, Math.round(p.size * subScale));
   const subW = subStyle?.wPct ?? wPct;
@@ -207,9 +216,10 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
       : p.deco === 'underline'
         ? `#${id} .w .deco { position:absolute; left:2px; right:2px; bottom:${-fs * 0.14}px; height:${Math.max(3, Math.round(fs * 0.08))}px; background:${p.decoColor}; border-radius:3px; transform:scaleX(0); transform-origin:left center; }`
         : '';
-  // .w/.cap-sub-line span 的 top:-0.04em = CJK 光学垂直居中:Noto Sans SC 的 ascent/descent
-  // (1.16/0.29em)远大于 line-height,负半行距把基线压低,而 CJK 墨迹不用 descent 区 →
-  // 底板里文字偏下 ≈0.07em(像素探针 cap-center-probe.mjs 实测,修正后上下留白 15/16px 持平)
+  // top:-0.04em on .w/.cap-sub-line span = CJK optical vertical centering: Noto Sans SC's ascent/descent
+  // (1.16/0.29em) far exceed line-height, the negative half-leading pushes the baseline down, and CJK
+  // ink doesn't use the descent zone → text sits ~0.07em low in the plate (measured with pixel probe
+  // cap-center-probe.mjs; after the fix top/bottom whitespace is level at 15/16px).
   const css = `
 #${id} .cap-root { position:absolute; inset:0; }
 #${id} .cap-line { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; display:flex; flex-wrap:nowrap; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; width:${n(wPct)}%; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }
@@ -217,8 +227,9 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
 ${decoCss}
 #${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.12)}px; }${subCss}`.trim();
 
-  // 段轮播:全部先隐;每段在它首词时间入场,下一段登场时这段熄灭(末段陪块到最后)。
-  // 出入场都是硬切(set):淡入+上浮版本两句之间有 0.22s 半透明空窗,播放中体感闪晕(用户报)
+  // Segment cycling: all hidden first; each segment enters at its first word's time, and goes dark
+  // when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
+  // (set): the fade-in + rise version had a 0.22s semi-transparent gap between sentences that felt like flicker in playback (user-reported).
   const lines: string[] = [`gsap.set('#${id} .cap-line', { autoAlpha: 0 });`];
   if (sub) lines.push(`tl.set('#${id}-sub', { autoAlpha: 1 }, 0);`);
   segs.forEach((g, si) => {
@@ -232,7 +243,7 @@ ${decoCss}
       const ws = w.start - start;
       const we = Math.max(w.start - start + 0.15, w.end - start);
       if (p.emphasis) {
-        // 当前词变色(karaoke 式:读到亮起,读完还原)
+        // Current word color change (karaoke-style: lights up when spoken, reverts after)
         lines.push(`tl.set('#${id}-w${i} .t', { color:'${p.emphasis}' }, ${n(ws)});`);
         lines.push(`tl.set('#${id}-w${i} .t', { color:'${p.text}' }, ${n(we)});`);
       }
@@ -277,32 +288,34 @@ export function renderTransition(slots: Slots, id: string): Rendered {
     };
   }
   if (effect === 'fade') {
-    // 渐隐:黑场吸到底再吐出(dip to black),切换在最黑那一刻
+    // fade: dip to black then back out, the cut happens at the darkest moment
     return {
       innerHtml: `<div class="tr"></div>\n<style>#${id} .tr{position:absolute;inset:0;background:#000;opacity:0;}</style>`,
       timelineBody: `tl.to('#${id} .tr',{opacity:1,duration:0.25,ease:'power1.in'},0);\ntl.to('#${id} .tr',{opacity:0,duration:0.25,ease:'power1.out'},0.25);`,
     };
   }
   if (effect === 'slide') {
-    // 推移:深色面板自下而上推满再继续上推出,切换发生在盖满那一刻
+    // slide: dark panel pushes up to fill then continues out the top, the cut happens at full cover
     return {
       innerHtml: `<div class="tr"></div>\n<style>#${id} .tr{position:absolute;inset:0;background:var(--bg,#0a0a0a);transform:translateY(110%);}</style>`,
       timelineBody: `tl.fromTo('#${id} .tr',{yPercent:110},{yPercent:0,duration:0.24,ease:'power2.in'},0);\ntl.to('#${id} .tr',{yPercent:-110,duration:0.26,ease:'power2.out'},0.24);`,
     };
   }
-  // wipe(默认):accent 面板从左扫过盖满再扫出,切换发生在盖满那一刻
+  // wipe (default): accent panel sweeps in from the left to fill then sweeps out, the cut happens at full cover
   return {
     innerHtml: `<div class="tr"></div>\n<style>#${id} .tr{position:absolute;inset:0;background:var(--accent);box-shadow:var(--glow);transform:translateX(-110%);}</style>`,
     timelineBody: `tl.fromTo('#${id} .tr',{xPercent:-110},{xPercent:0,duration:0.22,ease:'power2.in'},0);\ntl.to('#${id} .tr',{xPercent:110,duration:0.24,ease:'power2.out'},0.22);`,
   };
 }
 
-/** 素材位:空时占位(仅编辑态可见),填了图/视频则铺满块区(box 由取景空区给)。
- *  视频内嵌一条 <video data-start=块起点 muted>,预览运行时驱动所有 <video> 故自动跟时间轴;
- *  data-start 用块的成片起点,使它从自身 0 起播(B-roll 在该区间内播放)。导出端二路视频同步依赖
- *  Hyperframes CLI 行为(未验证),故 muted 防音轨打架。 */
-/** 素材位入/出场预设(对齐 Google Vids Animation 面板的 Object Enter/Exit:Fade/Slide/Rise/Scale)。
- *  入场 from 左/下/小,出场镜像到 右/上/小;'none' 不出 tween。 */
+/** Media slot: placeholder when empty (visible only in edit mode); when filled with image/video it
+ *  fills the block region (box comes from the framing's empty area). Video embeds a
+ *  <video data-start=block-start muted>; the preview runtime drives all <video> so it auto-follows
+ *  the timeline; data-start uses the block's edited start so it plays from its own 0 (B-roll plays
+ *  within that range). Export-side secondary-video sync relies on Hyperframes CLI behavior (unverified),
+ *  so muted to prevent audio tracks clashing. */
+/** Media slot enter/exit presets (aligned with Google Vids Animation panel's Object Enter/Exit:
+ *  Fade/Slide/Rise/Scale). Enter from left/bottom/small, exit mirrored to right/top/small; 'none' emits no tween. */
 export type MediaAnim = { enter?: string; exit?: string; dur?: number };
 const MEDIA_ENTER: Record<string, string> = {
   fade: '{ autoAlpha: 0 }',
@@ -320,7 +333,7 @@ const MEDIA_EXIT: Record<string, string> = {
 function renderMedia(slots: Slots, id: string, startSec = 0, durationSec?: number): Rendered {
   const m = (slots.media ?? null) as { type?: string; url?: string } | null;
   if (m && m.url && (m.type === 'image' || m.type === 'video')) {
-    // 圆角交给最外层容器(overflow:hidden 裁),img 自身不设——否则它的自圆角比外层紧,外层调大也被它压住
+    // Rounding is left to the outermost container (overflow:hidden clips it), img sets none itself — otherwise its own corner radius is tighter than the container's and caps it even when the container widens
     const css = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
     const inner =
       m.type === 'image'
@@ -333,7 +346,7 @@ function renderMedia(slots: Slots, id: string, startSec = 0, durationSec?: numbe
       const enter = anim.enter && MEDIA_ENTER[anim.enter];
       const exit = anim.exit && MEDIA_EXIT[anim.exit];
       if (enter) lines.push(`tl.from('#${id} .hf-media', Object.assign({ duration: ${n(d)}, ease: 'power2.out' }, ${enter}), 0);`);
-      // 出场钉在块末端往前 d 秒;块太短则挤在后半段
+      // Exit pinned d seconds before the block end; if the block is too short it crowds into the second half
       if (exit && durationSec) {
         const at = Math.max(enter ? d : 0, durationSec - d);
         lines.push(`tl.to('#${id} .hf-media', Object.assign({ duration: ${n(d)}, ease: 'power2.in' }, ${exit}), ${n(at)});`);
@@ -343,14 +356,14 @@ function renderMedia(slots: Slots, id: string, startSec = 0, durationSec?: numbe
     }
     return { innerHtml: inner, timelineBody: lines.join('\n') };
   }
-  // 空 → 占位(.hf-ph 默认 display:none,仅 body.hf-editor 显示;样式在 assembleHtml head)
+  // empty → placeholder (.hf-ph is display:none by default, shown only under body.hf-editor; styles in assembleHtml head)
   return {
     innerHtml: `<div class="hf-ph"><div class="hf-ph-plus">+</div><div class="hf-ph-tip">${t('选中后可 AI 生成<br/>或上传图片 / 视频')}</div></div>`,
     timelineBody: '',
   };
 }
 
-/* ============================ 注册内置模板 ============================ */
+/* ============================ register built-in templates ============================ */
 
 registerTemplate({
   id: 'custom',
@@ -388,7 +401,7 @@ registerTemplate({
   id: 'transition',
   name: '转场',
   kind: 'transition',
-  defaultTrackIndex: 3, // 最上层,盖住底下切换
+  defaultTrackIndex: 3, // topmost, covers the cut beneath
   slots: { effect: { type: 'enum', label: '效果', options: ['wipe', 'flash', 'fade', 'slide'] } },
   render: renderTransition,
 });
@@ -412,3 +425,15 @@ registerTemplate({
   slots: { media: { type: 'image', label: '图片/视频' } },
   render: renderMedia,
 });
+
+/**
+ * Force-load anchor: all templates register via this module's TOP-LEVEL registerTemplate side
+ * effects. Under sideEffects:false, if nobody imports a named export of this module the bundler
+ * tree-shakes the whole thing away (REGISTRY empty → getTemplate returns undefined → blockKind
+ * crashes). The MCP worker path (server-tools' blockKind/renderBlock) is exactly this case.
+ * Having the consumer import and call this empty function forces the module into the bundle and
+ * top-level evaluation (completing registration).
+ */
+export function ensureTemplatesRegistered(): void {
+  /* Empty impl: its only purpose is to give the bundler a non-shakeable reference, incidentally triggering this module's top-level side effects. */
+}

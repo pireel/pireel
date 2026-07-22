@@ -1,23 +1,24 @@
 /**
- * 蓝图 Blueprint 的口播叠加件:制图纸 detail callout 语言——每件是一小片带
- * 坐标网格的深蓝图纸,发丝内框、虚线尺寸线(端刺)、引出标注(accent 点→线→
- * mono 注记)、空心描边巨数、45° 斜纹强调、mono 图签(FIG./REV/SCALE)。
- * 动效 rise-and-settle ≤0.4s 不弹跳。根透明,件贴在说话画面上。
+ * Blueprint overlay elements: drafting-paper detail-callout language — each element is a small
+ * patch of navy blueprint with a coordinate grid: hairline inner frame, dashed dimension lines
+ * (with end ticks), leader callouts (accent dot -> line -> mono note), hollow outlined giant
+ * numbers, 45deg hatch emphasis, mono title block (FIG./REV/SCALE). Motion is rise-and-settle
+ * in <=0.4s, no bounce. Transparent root; elements sit on the talking-head frame.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';
 
-/** 小片图纸底:navy 纸 + 48px 网格 + 发丝框 */
+/** Small blueprint patch: navy paper + 48px grid + hairline frame */
 const PATCH =
   'background-color:var(--paper);background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:48px 48px;border:2px solid var(--line);box-shadow:var(--shadow);';
-/** 虚线尺寸线(端刺走伪元素,动效只选父级) */
+/** Dashed dimension line (end ticks via pseudo-elements; animate only the parent) */
 const DIM = (id: string, cls = 'dim') => `
 #${id} .${cls}{display:flex;align-items:center;gap:16px;color:var(--muted);}
 #${id} .${cls} i{flex:1;height:0;border-top:2px dashed var(--line);position:relative;}
 #${id} .${cls} i::before,#${id} .${cls} i::after{content:'';position:absolute;top:-8px;width:2px;height:18px;background:var(--line);}
 #${id} .${cls} i::before{left:0}#${id} .${cls} i::after{right:0}
 #${id} .${cls} b{font-family:var(--font-num);font-size:26px;font-weight:500;letter-spacing:0.2em;}`;
-/** 45° 斜纹强调 */
+/** 45deg hatch emphasis */
 const HATCH = 'repeating-linear-gradient(45deg,var(--accent) 0 10px,transparent 10px 24px)';
 
 export const overlays: Record<string, () => Block> = {

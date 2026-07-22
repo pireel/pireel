@@ -1,8 +1,8 @@
 /**
- * studio-ui 的 i18n 入口:核心(t/setStudioLocale)在 engine 包(见其头注,含
- * 「中文即 key / 模块作用域禁 t() / 仅客户端」三条铁律);这里把 UI 包自己的
- * en 词典注册进去——**注册挂在模块体**,消费者 import { t } 即触发,不吃
- * sideEffects:false 的摇树(纯副作用导入会被摇掉,别改成那样)。
+ * studio-ui's i18n entry: the core (t/setStudioLocale) lives in the engine package (see its header for
+ * the three iron rules — Chinese is the key / no t() at module scope / client-only); here we register the
+ * UI package's own en dictionary — **registration runs in the module body** so a consumer's import { t }
+ * triggers it, surviving sideEffects:false tree-shaking (a pure side-effect import would get shaken out — don't change it to that).
  */
 
 import { registerEnMessages } from '@pireel/studio-engine/i18n';

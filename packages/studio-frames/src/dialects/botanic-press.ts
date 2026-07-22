@@ -1,6 +1,7 @@
 /**
- * 植物 Botanical —— 标本手账方言:细线枝叶 SVG 逐笔画入、标本标签卡 + 斜胶带、
- * 拉丁编目行、陶土蜡封点。版式逻辑:不对称双栏 + 发丝纵线,大留白慢节奏。
+ * Botanical — herbarium-journal dialect: thin-line foliage SVGs drawn in stroke by stroke, specimen
+ * label cards + diagonal tape, Latin catalog lines, terracotta wax-seal dots. Layout logic:
+ * asymmetric two columns + a hairline vertical rule, lots of whitespace, slow pace.
  */
 
 import { type Block, mk } from './shared';
@@ -20,7 +21,7 @@ const LEAF = `<svg class="glyph" viewBox="0 0 90 70">
   <path class="lf" d="M8 62 C30 44 52 28 82 8"/>
 </svg>`;
 
-/* 三段生长期简笔 sprig:发芽 / 展叶 / 开花,同一画布逐笔画入 */
+/* Three-stage growth sprigs: sprout / leaf-out / bloom, drawn in stroke by stroke on the same canvas */
 const SPROUT = `<svg class="stage" viewBox="0 0 200 220">
   <path class="st" d="M100 210 C96 160 104 120 100 70"/>
   <path class="lf" d="M100 110 C70 96 46 100 30 122 C58 138 86 130 100 110"/>
@@ -43,7 +44,7 @@ const BLOOM = `<svg class="stage" viewBox="0 0 200 220">
   <circle class="bd" cx="100" cy="44" r="8"/>
 </svg>`;
 
-/* 横向枝条:生长记录时间线的轴,一根弯茎 + 三片小叶,同 sprig 逐笔画入 */
+/* Horizontal branch: the axis of the growth-log timeline, one curved stem + three small leaves, drawn in like the sprig */
 const BRANCH = `<svg class="branch" viewBox="0 0 1580 120">
   <path class="st" d="M8 66 C300 40 560 92 800 64 C1080 34 1320 66 1572 50"/>
   <path class="lf" d="M330 56 C312 30 318 10 344 2 C360 28 352 48 330 56"/>

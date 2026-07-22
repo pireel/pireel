@@ -1,8 +1,11 @@
 /**
- * 千禧 Y2K 的口播叠加件:skinned widget 语言——白胶囊 chip(3px 电光蓝描边)、
- * 拉宽斜体 scaleX(1.15) 字形、电光蓝轨道椭圆环绕焦点(唯一 glow 之一)、粉色副环反向
- * 垫底、✦ 星芒有限次闪烁、双描边胶囊按钮、气泡必带左上高光点;圆角最小 36px 禁直角
- * 禁渐变。每件像贴在画面上的一块 MP3 皮肤小部件。
+ * Y2K talking-head overlays: skinned-widget language. White capsule chips (3px
+ * electric-blue outline), stretched italic scaleX(1.15) glyphs, an electric-blue
+ * orbit ellipse around the focal point (one of the only glows), a pink secondary
+ * ring counter-rotated behind it, ✦ sparkles that blink a finite number of
+ * times, double-outlined capsule buttons, and bubbles that always carry a
+ * top-left highlight dot; min 36px corner radius, no right angles, no gradients.
+ * Each element reads like an MP3-skin widget stuck onto the shot.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

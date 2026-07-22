@@ -1,17 +1,17 @@
-// mediabunny 按需动态加载(约定见 extract-audio.ts)——类型导入不进 bundle
+// mediabunny is dynamically imported on demand (convention in extract-audio.ts) — the type import doesn't enter the bundle
 import type { Source } from 'mediabunny';
 import type { Thumbnail } from './types';
 
 interface ThumbOpts {
   width?: number;
-  /** 不传按 width × 宽高比算 */
+  /** If omitted, derived from width × aspect ratio */
   height?: number;
   quality?: number;
-  /** 每抽到一帧就回调（增量渲染：让缩略图边解码边出现，不必等整条视频抽完） */
+  /** Called on each extracted frame (incremental rendering: thumbnails appear as they decode, no need to wait for the whole video) */
   onThumb?: (thumb: Thumbnail) => void;
 }
 
-/** 核心：给定 mediabunny Source（Blob 或 Url），在指定时间戳抽帧渲 JPEG。 */
+/** Core: given a mediabunny Source (Blob or Url), extract frames at the given timestamps and render JPEG. */
 async function extractFromSource(
   source: Source,
   timestamps: number[],
@@ -29,9 +29,10 @@ async function extractFromSource(
     const aspect = track.displayWidth / track.displayHeight;
     const targetH = opts.height ?? Math.round(targetW / aspect);
 
-    // 时间基归零:-c copy 剪过的 mp4 首包时间戳可以不是 0,mediabunny 给的是原始轨道
-    // 时间,而 <video> 播放/ASR(Conversion 内部同样减 getFirstTimestamp)都是归零口径。
-    // 不减掉的话缩略图会整体偏移(曾差 2s+)。负首包(B 帧编辑列表)按"不呈现"钳到 0。
+    // Zero the time base: an mp4 cut with -c copy can have a non-zero first-packet timestamp;
+    // mediabunny reports raw track time, while <video> playback / ASR (Conversion also subtracts
+    // getFirstTimestamp internally) are all zero-based. Without subtracting, thumbnails shift as a
+    // whole (once off by 2s+). A negative first packet (B-frame edit list) is clamped to 0 ("not presented").
     const t0 = Math.max(0, await input.getFirstTimestamp());
     const sink = new VideoSampleSink(track);
     const canvas = new OffscreenCanvas(targetW, targetH);
@@ -58,11 +59,11 @@ async function extractFromSource(
 }
 
 /**
- * 在指定时间戳抽视频帧,渲染成 JPEG Blob（本地 File 源）。
+ * Extract video frames at the given timestamps, rendered to JPEG Blobs (local File source).
  *
- * 单调 timestamps 走优化解码路径,比循环 getSample 快。
+ * Monotonic timestamps take an optimized decode path, faster than looping getSample.
  *
- * 性能:1080p 抽 1 帧 ~50-150ms。
+ * Perf: ~50-150ms per frame at 1080p.
  */
 export async function extractThumbnails(
   file: File,
@@ -74,18 +75,19 @@ export async function extractThumbnails(
 }
 
 /**
- * 同 extractThumbnails，但直接从 URL 流式抽帧：mediabunny UrlSource 走 HTTP Range，
- * 只取 moov + 目标帧附近的样本字节，不必先把整片下完。配合 onThumb 增量渲染，
- * 缩略图能像 <video> 预览一样很快开始浮现。
+ * Same as extractThumbnails, but streams frames directly from a URL: mediabunny
+ * UrlSource uses HTTP Range, fetching only moov + the sample bytes near the target
+ * frames, no need to download the whole file first. With onThumb incremental
+ * rendering, thumbnails start appearing quickly, like a <video> preview.
  *
- * url 需支持 Range（同源代理 /api/media/fetch 已透传 Range）。
+ * url must support Range (the same-origin proxy /api/media/fetch passes Range through).
  */
 export async function extractThumbnailsFromUrl(
   url: string,
   timestamps: number[],
   opts: ThumbOpts = {},
 ): Promise<Thumbnail[]> {
-  // same-origin 代理带 cookie 过鉴权
+  // same-origin proxy carries the cookie for auth
   const { UrlSource } = await import('mediabunny');
   return extractFromSource(
     new UrlSource(url, { requestInit: { credentials: 'same-origin' } }),

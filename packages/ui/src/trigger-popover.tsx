@@ -1,19 +1,20 @@
 'use client';
 
 /**
- * TriggerPopover —— "@ / 这类触发字符 + 浮窗 + 即时筛选 + 键盘选择" 的统一交互。
+ * TriggerPopover — unified interaction for "trigger char like @ or / + popover + live filter + keyboard select".
  *
- * 之前 chat-column 里的 @ mention 和 / skill menu 各写一遍，行为不一致：@ 删除会
- * 关闭弹窗、/ 删除不关；/ 缺 query filter 等。这里把触发→定位→query→keyboard nav→
- * click outside→trigger 字符消失自动关 这一整套抽出来，业务方只管：
+ * The @ mention and / skill menu in chat-column used to be written separately and behaved inconsistently:
+ * deleting @ closed the popover but deleting / didn't; / had no query filter; etc. This extracts the whole
+ * trigger → position → query → keyboard nav → click-outside → auto-close-when-trigger-char-gone flow, so the
+ * caller only handles:
  *
- *   1. items 数据 + 怎么从 item 提取可搜索文本（itemSearchText）
- *   2. 渲染单项（renderItem，能拿到 active / pick / setActive / 上一项做分组用）
- *   3. 选中以后做什么（onPick；"吞掉触发字符" 这种 editor 修改也在这里做）
+ *   1. items data + how to extract searchable text from an item (itemSearchText)
+ *   2. rendering an item (renderItem, which gets active / pick / setActive / prev item for grouping)
+ *   3. what to do on select (onPick; editor edits like "swallow the trigger char" go here too)
  *
- * 打开时机：editor 上键入 trigger 字符，组件不 preventDefault，让字符进 editor，
- * 同时记录光标 anchor。后续 input/compositionend 都跑一遍 query 抽取——抽不到
- * （trigger 被删了、出现空格、跳出 text 节点）就自动关。
+ * When it opens: typing the trigger char in the editor; the component doesn't preventDefault, letting the
+ * char into the editor while recording the caret anchor. Every input/compositionend re-runs the query
+ * extraction — if it can't extract one (trigger deleted, a space appeared, moved out of the text node) it auto-closes.
  */
 
 import {
@@ -27,42 +28,43 @@ import {
   useState,
 } from 'react';
 
-/** 命令式 API —— Composer 底部按钮点了之后直接打开（不靠 trigger 字符）。
- *  传入 anchorEl 时弹窗以该元素为锚（一般是触发按钮自己），不传则 fallback 到编辑器位置。 */
+/** Imperative API — opens directly when a Composer bottom-bar button is clicked (not via a trigger char).
+ *  When anchorEl is passed the popover anchors to that element (usually the trigger button itself);
+ *  otherwise it falls back to the editor position. */
 export interface TriggerPopoverHandle {
   open: (anchorEl?: HTMLElement | null) => void;
 }
 
 export interface TriggerPopoverProps<T> {
-  /** 触发字符："@" / "/" / 或其他单字符;不传 = 只走命令式 open()(按钮唤起),编辑器不监听 */
+  /** Trigger char: "@" / "/" / or another single char; omit = imperative open() only (button-invoked), editor not listened to */
   trigger?: string;
-  /** contenteditable 编辑器的 ref */
+  /** ref to the contenteditable editor */
   editorRef: React.RefObject<HTMLElement | null>;
-  /** 关掉监听（streaming / disabled 时用）。默认 true。 */
+  /** Turn off listening (for streaming / disabled). Default true. */
   enabled?: boolean;
 
-  /** 全部 items 源 */
+  /** Source of all items */
   items: T[];
-  /** 提取 item 的可搜索文本，多个字段 join 成字符串。filter 用 lowercase includes。 */
+  /** Extract searchable text from an item, joining multiple fields into a string. Filter uses lowercase includes. */
   itemSearchText: (item: T) => string;
-  /** item 的 React key */
+  /** React key for an item */
   itemKey: (item: T) => string;
 
-  /** 卡头标题（"/ 调用 Skill · 28 个" 这类） */
+  /** Header title (e.g. "/ Run Skill · 28") */
   title: string;
 
-  /** 可选分类 tab：传了就在标题下出一排可点 tab，←/→ 左右切换，列表只显示当前 tab。
-   *  搭配 itemTab 用——把 item 归到某个 tab.key。 */
+  /** Optional category tabs: if passed, a row of clickable tabs shows under the title, ←/→ switches between them,
+   *  and the list only shows the current tab. Use with itemTab — assigns an item to a tab.key. */
   tabs?: { key: string; label: string }[];
-  /** item 属于哪个 tab.key（仅 tabs 模式用） */
+  /** Which tab.key an item belongs to (tabs mode only) */
   itemTab?: (item: T) => string;
 
-  /** items 本来就空时的占位 */
+  /** Placeholder when items is empty to begin with */
   emptyOriginal?: React.ReactNode;
-  /** items 不为空但 query 没匹配到时的占位 */
+  /** Placeholder when items is non-empty but the query matched nothing */
   emptyMatched?: (query: string) => React.ReactNode;
 
-  /** 渲染单项 */
+  /** Render an item */
   renderItem: (
     item: T,
     ctx: {
@@ -74,24 +76,24 @@ export interface TriggerPopoverProps<T> {
     },
   ) => React.ReactNode;
 
-  /** 选中回调；caller 负责把 item 应用到 editor（吞 trigger 字符 + 插 pill 等）。
-   *  组件会在调用 onPick 后立即关闭 popover —— caller 不需要自己 close。 */
+  /** Select callback; the caller applies the item to the editor (swallow trigger char + insert pill, etc.).
+   *  The component closes the popover right after calling onPick — the caller doesn't need to close it. */
   onPick: (item: T) => void;
 
-  /** 弹窗关闭时回调（toggle / Esc / 外点 / 选中后皆触发）。caller 用来把焦点 +
-   *  光标还原回编辑器原位。 */
+  /** Called when the popover closes (fires on toggle / Esc / click-outside / after select). The caller uses
+   *  it to restore focus + caret back to the editor. */
   onClose?: () => void;
 
-  /** 弹窗容器的额外 className（width / shadow 等） */
+  /** Extra className for the popover container (width / shadow / etc.) */
   className?: string;
 }
 
 interface Anchor {
-  /** trigger 元素左边线（绝对像素，viewport 坐标） */
+  /** left edge of the trigger element (absolute px, viewport coords) */
   left: number;
-  /** trigger 顶边 */
+  /** top edge of the trigger */
   top: number;
-  /** trigger 底边——给"上方空间不够时翻到下方"的算法用；caret 触发时 top == bottom */
+  /** bottom edge of the trigger — used by the "flip below when there's not enough room above" logic; on caret trigger, top == bottom */
   bottom: number;
 }
 
@@ -121,59 +123,60 @@ function TriggerPopoverImpl<T>(
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const [activeTab, setActiveTab] = useState<string>(tabs?.[0]?.key ?? '');
-  /** 手动 open() 触发：跳过"光标前必须有 trigger 字符"的检查；不在 input 里跟踪 query
-   *  自动关闭。query 通过弹窗自带搜索框输入。 */
+  /** Manual open() mode: skips the "must have a trigger char before the caret" check; doesn't track query
+   *  in input or auto-close. Query comes from the popover's own search box. */
   const [manualMode, setManualMode] = useState(false);
-  // active 变化来自键盘才自动滚动;鼠标 hover 设 active 不滚——否则鼠标刚扫过
-  // 列表边缘被裁一半的行,就会触发 scrollIntoView 让整个列表跳一下。
+  // Only auto-scroll when active changes came from the keyboard; setting active via mouse hover doesn't scroll —
+  // otherwise brushing the mouse over a row half-clipped at the list edge would trigger scrollIntoView and jump the whole list.
   const kbNavRef = useRef(false);
   const isComposingRef = useRef(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  // 命令式 open() 的触发按钮——外点关闭要放过它（点按钮本身交给 onClick toggle，
-  // 否则 mousedown 先 close、紧接着 onClick 又 open，按钮变成「只会重开、关不掉」）。
+  // Trigger button for the imperative open() — click-outside must skip it (clicking the button itself is
+  // handled by its onClick toggle; otherwise mousedown closes first and onClick reopens, making the button
+  // "only ever reopen, never close").
   const anchorElRef = useRef<HTMLElement | null>(null);
-  // open() 闭包里读不到最新 anchor（deps 固定），用 ref 镜像开合态做 toggle 判断。
+  // The open() closure can't read the latest anchor (deps are fixed), so mirror the open/closed state in a ref for the toggle check.
   const openRef = useRef(false);
   useEffect(() => {
     openRef.current = anchor != null;
   }, [anchor]);
 
-  // 先按 query 过滤；tab 模式下 tab 计数用这一层。
+  // Filter by query first; in tabs mode the tab counts use this layer.
   const queryFiltered = useMemo(() => {
     if (!query) return items;
     const q = query.toLowerCase();
     return items.filter((it) => itemSearchText(it).toLowerCase().includes(q));
   }, [items, query, itemSearchText]);
 
-  // 再按当前 tab 过滤（非 tab 模式直接用 queryFiltered）。列表 / 键盘都用 filtered。
+  // Then filter by the current tab (non-tabs mode just uses queryFiltered). Both list and keyboard use filtered.
   const filtered = useMemo(() => {
     if (!tabs || !itemTab) return queryFiltered;
     return queryFiltered.filter((it) => itemTab(it) === activeTab);
   }, [queryFiltered, tabs, itemTab, activeTab]);
 
-  // filtered 长度变 / 切 tab → 重置 active idx
+  // filtered length changes / tab switches → reset active idx
   useEffect(() => {
     setActiveIdx(0);
   }, [filtered.length, activeTab]);
 
-  // 关闭时清干净。silent=true（外点关闭）跳过 onClose —— 用户点到别处时不该把焦点
-  // 抢回编辑器；toggle / Esc / 选中走默认（onClose 还原编辑器光标）。
+  // Clean up on close. silent=true (click-outside close) skips onClose — clicking elsewhere shouldn't yank
+  // focus back to the editor; toggle / Esc / select use the default (onClose restores the editor caret).
   const close = useCallback(
     (opts?: { silent?: boolean }) => {
       setAnchor(null);
       setQuery('');
       setManualMode(false);
-      setActiveIdx(0); // 关闭即复位高亮——下次打开不残留上次选中位
-      setActiveTab(tabs?.[0]?.key ?? ''); // tab 也回到第一个
+      setActiveIdx(0); // reset highlight on close — next open doesn't retain the last selection
+      setActiveTab(tabs?.[0]?.key ?? ''); // tab also returns to the first
       anchorElRef.current = null;
       if (!opts?.silent) onClose?.();
     },
     [tabs, onClose],
   );
 
-  /** 从光标向前找最近的 trigger 字符，返回它和光标之间的 query。
-   *  返回 null = "应该关闭弹窗"——trigger 不在当前文本节点 / 含空格 / 被其他字符隔断。 */
+  /** Search backward from the caret for the nearest trigger char, returning the query between it and the caret.
+   *  Returns null = "should close the popover" — trigger isn't in the current text node / contains a space / is broken up by other chars. */
   const readQuery = useCallback((): string | null => {
     if (typeof window === 'undefined' || !trigger) return null;
     const el = editorRef.current;
@@ -211,7 +214,7 @@ function TriggerPopoverImpl<T>(
     return { left: rect.left, top: rect.top, bottom: rect.bottom };
   }, [editorRef]);
 
-  // editor-level 监听：trigger 字符 / input / composition(无 trigger = 纯按钮唤起,不挂监听)
+  // editor-level listeners: trigger char / input / composition (no trigger = button-only invocation, no listeners attached)
   useEffect(() => {
     if (!enabled || !trigger) return;
     const el = editorRef.current;
@@ -219,23 +222,23 @@ function TriggerPopoverImpl<T>(
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== trigger) return;
-      // 不 preventDefault：字符正常进入 editor，readQuery 才能在后续 input 里跟踪
+      // Don't preventDefault: the char enters the editor normally, so readQuery can track it in later input events
       setTimeout(() => {
         const a = readCaretAnchor();
         if (a) {
           setAnchor(a);
           setQuery('');
-          setActiveIdx(0); // 每次重新触发都从头开始，不残留上次选中位
+          setActiveIdx(0); // each re-trigger starts from the top, no leftover selection
           setActiveTab(tabs?.[0]?.key ?? '');
         }
       }, 0);
     };
 
     const handleInputCheck = () => {
-      // 弹窗没开就不跟踪 —— 没必要
+      // Don't track when the popover isn't open — no need
       const opened = popoverRef.current !== null;
       if (!opened && !anchor) return;
-      // 手动模式：query 走弹窗自带输入框，不跟踪 editor 里的 trigger 字符
+      // Manual mode: query comes from the popover's own input, don't track the trigger char in the editor
       if (manualMode) return;
       const q = readQuery();
       if (q === null) {
@@ -246,7 +249,7 @@ function TriggerPopoverImpl<T>(
     };
 
     const onInput = () => {
-      if (isComposingRef.current) return; // IME 组合期间不动
+      if (isComposingRef.current) return; // hold still during IME composition
       handleInputCheck();
     };
 
@@ -271,14 +274,14 @@ function TriggerPopoverImpl<T>(
     };
   }, [enabled, editorRef, trigger, readCaretAnchor, readQuery, close, anchor, manualMode, tabs]);
 
-  // 命令式 open：按钮点击直接打开。优先用传入的 anchorEl 做锚，没传就 fallback 到编辑器位置。
-  // 渲染时根据视口剩余空间决定弹窗向上还是向下展开（top edge 太靠近顶部 → 向下）。
+  // Imperative open: button click opens directly. Prefer the passed anchorEl as anchor, falling back to the editor position.
+  // At render time the remaining viewport space decides whether the popover expands up or down (top edge too close to the top → down).
   useImperativeHandle(
     ref,
     () => ({
       open: (anchorEl?: HTMLElement | null) => {
-        // 已开 → 再点同一个按钮当作 toggle 关闭（外点 handler 已放过按钮，所以这里
-        // 一定还是开态，能正确切到关）。
+        // Already open → clicking the same button again toggles it closed (the click-outside handler skips the
+        // button, so it's still in the open state here and correctly switches to closed).
         if (openRef.current) {
           close();
           return;
@@ -291,7 +294,7 @@ function TriggerPopoverImpl<T>(
         setQuery('');
         setManualMode(true);
         setActiveIdx(0);
-        // 下一帧把搜索框 focus 起来，让用户可以直接打字过滤
+        // Focus the search box on the next frame so the user can type to filter right away
         setTimeout(() => searchInputRef.current?.focus(), 0);
       },
     }),
@@ -306,7 +309,7 @@ function TriggerPopoverImpl<T>(
       if (e.key === 'Escape') {
         close();
       } else if (tabs && tabs.length >= 2 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        // 左右切 tab（像全局搜索）
+        // Switch tabs left/right (like global search)
         const i = tabs.findIndex((tb) => tb.key === activeTab);
         const dir = e.key === 'ArrowRight' ? 1 : -1;
         const next = tabs[(i + dir + tabs.length) % tabs.length];
@@ -335,23 +338,23 @@ function TriggerPopoverImpl<T>(
     return () => document.removeEventListener('keydown', handle, true);
   }, [anchor, filtered, activeIdx, onPick, close, tabs, activeTab]);
 
-  // click outside 关
+  // click-outside close
   useEffect(() => {
     if (!anchor) return;
     const handle = (e: MouseEvent) => {
       if (popoverRef.current?.contains(e.target as Node)) return;
-      // 点触发按钮自身不算外部 —— 留给它的 onClick 做 toggle 关闭，否则 mousedown
-      // 先 close、紧接着 onClick 又 open，按钮永远关不掉。
+      // Clicking the trigger button itself doesn't count as outside — leave it to its onClick toggle, otherwise
+      // mousedown closes first and onClick reopens, and the button can never be closed.
       if (anchorElRef.current?.contains(e.target as Node)) return;
-      // 编辑器里点（移光标）也算外部 —— 用户切了上下文，弹窗该关。silent：点别处
-      // 不抢焦点回编辑器（但点回编辑器自身时下面会自然落焦，无需还原）。
+      // Clicking in the editor (moving the caret) also counts as outside — the user switched context, so close.
+      // silent: clicking elsewhere doesn't yank focus back to the editor (but clicking back into the editor itself lands focus naturally, no restore needed).
       close({ silent: true });
     };
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, [anchor, close]);
 
-  // active 项滚到可视区 —— 仅键盘导航;hover 引起的 active 变化不动滚动位
+  // Scroll the active item into view — keyboard nav only; hover-induced active changes don't move the scroll position
   useEffect(() => {
     if (!kbNavRef.current) return;
     kbNavRef.current = false;
@@ -361,8 +364,9 @@ function TriggerPopoverImpl<T>(
     active?.scrollIntoView({ block: 'nearest' });
   }, [activeIdx]);
 
-  // 实测后夹进视口：默认在 trigger 上方展开，上方放不下翻到下方；左右越界回拉。
-  // 用 layout effect（paint 前跑）按实际宽高定位，避免「估算尺寸」导致超出屏幕。
+  // Measure then clamp into the viewport: expands above the trigger by default, flips below if it won't fit;
+  // pulls back in when it overflows left/right. Uses a layout effect (runs before paint) to position by actual
+  // width/height, avoiding off-screen results from "estimated sizes".
   useLayoutEffect(() => {
     if (!anchor) return;
     const el = popoverRef.current;
@@ -377,7 +381,7 @@ function TriggerPopoverImpl<T>(
     let left = anchor.left;
     if (left + w > vw - margin) left = vw - margin - w;
     if (left < margin) left = margin;
-    let top = anchor.top - 8 - h; // 上方展开
+    let top = anchor.top - 8 - h; // expand above
     if (top < margin) {
       const below = anchor.bottom + 8;
       top = below + h <= vh - margin ? below : Math.max(margin, vh - margin - h);
@@ -399,7 +403,7 @@ function TriggerPopoverImpl<T>(
         left: anchor.left,
         top: anchor.top,
         zIndex: 50,
-        // 列表本身 max-h-[60vh]；整体再兜一层不超过视口高度，配合 layout effect 夹位
+        // The list itself is max-h-[60vh]; cap the whole thing to the viewport height as a backstop, working with the layout-effect clamping
         maxHeight: 'calc(100vh - 16px)',
         maxWidth: 'calc(100vw - 16px)',
       }}
@@ -481,7 +485,7 @@ function TriggerPopoverImpl<T>(
   );
 }
 
-// forwardRef 包一层暴露 open() 给 caller。泛型 props 通过 cast 保留，运行时无副作用。
+// Wrap in forwardRef to expose open() to the caller. Generic props are preserved via a cast, no runtime effect.
 export const TriggerPopover = forwardRef(TriggerPopoverImpl) as <T>(
   props: TriggerPopoverProps<T> & { ref?: React.Ref<TriggerPopoverHandle> },
 ) => React.ReactElement | null;

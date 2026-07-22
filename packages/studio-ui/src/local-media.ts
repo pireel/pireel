@@ -1,15 +1,17 @@
 /**
- * OPFS 本地视频库:主视频/插入段「留在本地不上传」模式的持久层——刷新后按 fileSig 取回,
- * 草稿恢复不再要用户重选文件。best-effort:不支持/被驱逐/任何失败都静默降级回
- * 「重新导入」提示,不会比没有它更糟。
+ * OPFS local video library: the persistence layer for the "keep local, don't upload" mode of the
+ * main video / insert clips — recover by fileSig after refresh, so draft restore no longer asks the
+ * user to re-pick the file. best-effort: unsupported / evicted / any failure silently degrades back
+ * to the "re-import" prompt, never worse than not having it.
  *
- * 存取键 = fileSig(name:size:lastModified)。OPFS 里的 File 元数据(名字/mtime/type)
- * 是落盘时的,不是原文件的 —— 取回时按 sidecar meta 重建 File,保证 fileSig(取回) ===
- * 原 sig(草稿接回校验、ASR/画面分析缓存、autosave 的 sig 全都依赖这个恒等)。
+ * Storage key = fileSig (name:size:lastModified). The File metadata in OPFS (name/mtime/type) is what
+ * was written to disk, not the original file's — on retrieval the File is rebuilt from the sidecar meta
+ * so that fileSig(retrieved) === original sig (draft reconnect validation, ASR/visual-analysis cache,
+ * and autosave sig all depend on this identity).
  */
 
 const DIR = 'local-videos';
-const MAX_FILES = 12; // 视频很大,只留最近 N 部(LRU by 落盘时间);超出连 meta 一起清
+const MAX_FILES = 12; // Videos are large — keep only the most recent N (LRU by write time); beyond that, purge with their meta
 
 interface StoredMeta {
   name: string;
@@ -17,7 +19,7 @@ interface StoredMeta {
   lastModified: number;
 }
 
-/** sig 含文件名(可能有中文/空格/冒号),收敛成 OPFS 安全文件名;size:mtime 保证唯一性。 */
+/** The sig contains the filename (which may have CJK/spaces/colons); normalize to an OPFS-safe name; size:mtime guarantees uniqueness. */
 const sigKey = (sig: string) => sig.replace(/[^a-zA-Z0-9._-]/g, '_');
 
 async function dirHandle(): Promise<FileSystemDirectoryHandle | null> {
@@ -34,14 +36,14 @@ export async function saveLocalVideo(file: File, sig: string): Promise<void> {
   const dir = await dirHandle();
   if (!dir) return;
   try {
-    // 常驻申请(best-effort):不给就接受被驱逐的可能
+    // Request persistence (best-effort): if denied, accept the risk of eviction
     void navigator.storage.persist?.().catch(() => {});
     const key = sigKey(sig);
     try {
       await dir.getFileHandle(key);
-      return; // 同 sig 已落盘(内容由 size+mtime 钉死),跳过重写
+      return; // Same sig already on disk (content pinned by size+mtime) — skip rewrite
     } catch {
-      /* 不存在 → 落盘 */
+      /* Not present → write it */
     }
     const meta: StoredMeta = { name: file.name, type: file.type, lastModified: file.lastModified };
     const fh = await dir.getFileHandle(key, { create: true });
@@ -71,7 +73,7 @@ export async function loadLocalVideo(sig: string): Promise<File | null> {
       const mh = await dir.getFileHandle(`${key}.meta.json`);
       meta = JSON.parse(await (await mh.getFile()).text()) as StoredMeta;
     } catch {
-      /* meta 缺失:退化成落盘元数据(sig 对不上,只影响接回校验) */
+      /* meta missing: fall back to on-disk metadata (sig won't match, only affects reconnect validation) */
     }
     return meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored;
   } catch {
@@ -79,7 +81,7 @@ export async function loadLocalVideo(sig: string): Promise<File | null> {
   }
 }
 
-/** LRU 清理:按落盘时间只留最近 MAX_FILES 部(meta sidecar 跟着数据文件走)。 */
+/** LRU cleanup: keep only the most recent MAX_FILES by write time (the meta sidecar follows its data file). */
 async function prune(dir: FileSystemDirectoryHandle): Promise<void> {
   try {
     const files: { name: string; mtime: number }[] = [];
@@ -95,7 +97,7 @@ async function prune(dir: FileSystemDirectoryHandle): Promise<void> {
         await dir.removeEntry(f.name);
         await dir.removeEntry(`${f.name}.meta.json`);
       } catch {
-        /* 清不掉就留着,下次再试 */
+        /* If it can't be removed, leave it — try again next time */
       }
     }
   } catch {

@@ -1,14 +1,16 @@
 /**
- * 转场窗口预烧录:切点/时长/效果都是确定的,离线把整个窗口合成好(MediaBunny 双侧
- * 采样 + 同一个 gl-transitions 合成器),播放时纯放帧——把"临场调度两个解码器"从
- * 关键路径上整个拿掉(用户点名的方向:已经是 canvas 了,提前烧录别现场调度)。
+ * Pre-bake a transition window: cut/duration/effect are all known, so compose the
+ * whole window offline (MediaBunny two-sided sampling + one gl-transitions mixer) and
+ * just play frames back — takes "schedule two decoders live" off the critical path.
  *
- * 产物 = webp 帧序列(0.5× comp 分辨率、30fps;1s 转场 ≈ 30 帧 × ~80KB ≈ 2.4MB 内存),
- * 引擎逼近窗口时 decodeBake 解成 ImageBitmap,窗口过了即弃。烧录失败/没烧完 → 引擎
- * 自动落回影子解码路径,语义不变。
+ * Output = webp frame sequence (0.5× comp resolution, 30fps; a 1s transition ≈ 30
+ * frames × ~80KB ≈ 2.4MB memory). The engine calls decodeBake into ImageBitmaps as it
+ * approaches the window, then drops them once past. Bake fails / didn't finish → engine
+ * falls back to the shadow-decode path, same semantics.
  *
- * 帧内容口径与预览 shim 完全一致:两侧源帧 cover 合成(不含取景/调色——那两样在
- * 预览里是 #vidEl 元素级的 CSS transform/filter,由 GSAP 关键帧照常作用在整块画布上)。
+ * Frame content matches the preview shim exactly: both source frames composed cover
+ * (no framing/grading — those are element-level CSS transform/filter on #vidEl in the
+ * preview, applied by GSAP keyframes over the whole canvas as usual).
  */
 
 import { type GlMixer, createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
@@ -16,17 +18,17 @@ import type { CutTransitionEffect, TransitionDirection } from '@pireel/studio-en
 import { type SourceRig, openSource, sampleAt } from './client-export';
 
 export interface BakeSpec {
-  /** 成片切点(秒)与半宽。 */
+  /** Output cut point (seconds) and half-width. */
   cut: number;
   half: number;
   effect: CutTransitionEffect;
   dir: TransitionDirection;
-  /** 两侧源文件与切点处的源时间(A 在 aEnd 结束,B 从 bStart 开始)。 */
+  /** Both source files and their source times at the cut (A ends at aEnd, B starts at bStart). */
   fileA: File;
   aEnd: number;
   fileB: File;
   bStart: number;
-  /** 画布(comp)尺寸——烧录按 0.5× 出。 */
+  /** Canvas (comp) size — bake renders at 0.5×. */
   compW: number;
   compH: number;
 }
@@ -40,10 +42,10 @@ export interface BakedWindow {
   frames: Blob[];
 }
 
-/** 帧数预算:短窗口烧高帧率(1s 窗口≈48fps),长窗口降帧控内存;夹在 24–60。 */
+/** Frame budget: short windows bake at high fps (1s ≈ 48fps), long windows drop fps to cap memory; clamped 24–60. */
 const FRAME_BUDGET = 96;
 
-/** 烧一个转场窗口。cancelled() 轮询取消(编辑期重烧频繁,旧任务立即让路)。 */
+/** Bake one transition window. cancelled() polls for cancellation (frequent re-bakes while editing; stale tasks yield immediately). */
 export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boolean): Promise<BakedWindow | null> {
   const W = Math.max(2, Math.round(spec.compW / 2));
   const H = Math.max(2, Math.round(spec.compH / 2));
@@ -51,7 +53,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   if (!mixer) return null;
   const fps = Math.max(24, Math.min(60, FRAME_BUDGET / (2 * spec.half)));
   const n = Math.max(2, Math.round(2 * spec.half * fps));
-  // 每侧两条顺序采样流(live 侧 + handle 侧;sampleAt 每流单调,时间域不衔接必须分流)
+  // Two sequential sample streams per side (live + handle; sampleAt is monotonic per stream, and the time domains don't connect so they must be separate)
   const rigs: SourceRig[] = [];
   const open = async (f: File, from: number, to: number) => {
     const r = await openSource(f, Math.max(0, from), Math.max(0, to), W, H);
@@ -69,7 +71,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
     const liveB = await open(spec.fileB, spec.bStart, spec.bStart + spec.half);
     const [dx, dy] = glDirection(spec.dir);
     const frames: Blob[] = [];
-    // 各侧画进自己的 stage;采样越界(handle 不够长)沿用上一帧内容,别断烧
+    // Each side draws into its own stage; if sampling runs out of bounds (handle too short), reuse the last frame rather than aborting the bake
     let haveF = false;
     let haveT = false;
     const drawSide = async (rig: SourceRig, srcT: number, stage: OffscreenCanvas): Promise<boolean> => {
@@ -85,10 +87,10 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
       const t = spec.cut - spec.half + (i / (n - 1)) * 2 * spec.half;
       const p = i / (n - 1);
       const pre = t < spec.cut;
-      // from/to 与 shim 同口径:切点前 A live/B 前摇,切点后 A 尾巴/B live
+      // from/to same convention as shim: before cut A live / B pre-roll, after cut A tail / B live
       haveF = (pre ? await drawSide(liveA, spec.aEnd - (spec.cut - t), stageF) : await drawSide(ghostA, spec.aEnd + (t - spec.cut), stageF)) || haveF;
       haveT = (pre ? await drawSide(ghostB, spec.bStart - (spec.cut - t), stageT) : await drawSide(liveB, spec.bStart + (t - spec.cut), stageT)) || haveT;
-      if (!haveF || !haveT) return null; // 首帧就采不到:这个窗口烧不了(素材边界)
+      if (!haveF || !haveT) return null; // can't even sample the first frame: this window can't be baked (media boundary)
       if (!mixer.render(stageF, stageT, spec.effect, p, dx, dy, `f${i}`, `t${i}`)) return null;
       octx.clearRect(0, 0, W, H);
       octx.drawImage(mixer.canvas, 0, 0);
@@ -106,7 +108,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   }
 }
 
-/** webp 帧序列 → ImageBitmap 序列(引擎逼近窗口时调,窗口过了整组 close)。 */
+/** webp frame sequence → ImageBitmap sequence (called as the engine approaches the window; close the whole set once past). */
 export async function decodeBake(b: BakedWindow): Promise<ImageBitmap[]> {
   return Promise.all(b.frames.map((blob) => createImageBitmap(blob)));
 }

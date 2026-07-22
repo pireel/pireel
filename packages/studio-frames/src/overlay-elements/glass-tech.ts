@@ -1,8 +1,9 @@
 /**
- * 玻璃 Glass 的口播叠加件:悬浮磨砂 pane 语言——每件是一片自带 frost 底的玻璃
- * (--panel 8% 白 + backdrop blur + --line 边而顶边 --muted 更亮读作受光棱 + 28px 圆角),
- * pane 内部藏一颗 blur 光斑(overflow hidden 裁住)当光源、玻璃 chip 药丸带发光小圆点、
- * 数据用 mono accent 冰蓝 + text-shadow 光晕。光先亮,玻璃后浮起。
+ * Glass overlay elements: floating frosted-pane language — each element is a slab of glass
+ * with its own frost backing (--panel 8% white + backdrop blur + --line border, top edge
+ * brighter --muted to read as a lit rim + 28px radius). Inside each pane a blurred light blob
+ * (clipped by overflow hidden) acts as the light source; glass chip pills carry a glowing dot;
+ * figures use mono accent ice-blue + text-shadow halo. Light comes up first, glass floats in after.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

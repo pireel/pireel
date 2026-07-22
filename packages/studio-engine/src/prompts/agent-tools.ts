@@ -1,13 +1,15 @@
 /**
- * Studio 编辑 agent 的工具集 —— 一处定义,server / client 共用。
+ * Studio editing agent toolset — defined once, shared by server and client.
  *
- * 关键设计:这些工具**不在服务端 execute**。服务端只用它们的 JSON schema 把 tool
- * 挂进 streamText(模型据此发 tool-call);真正的执行发生在**客户端**——studio-chat
- * 的 useChat.onToolCall 收到 tool-call 后,调工作台传进来的 runTool 直接改 React 里的
- * Composition 状态(移块/裁剪/换取景…),再 addToolOutput 把结果喂回,模型继续/收尾。
- * 块内容生成(add_block / edit_block)仍复用 /api/studio/compose。
+ * Key design: these tools are NOT executed on the server. The server only uses their
+ * JSON schema to attach tools to streamText (the model emits tool-calls from that);
+ * actual execution happens on the CLIENT — studio-chat's useChat.onToolCall receives
+ * a tool-call and calls the workbench-provided runTool to mutate the React Composition
+ * state directly (move block / trim / reframe…), then addToolOutput feeds the result
+ * back and the model continues/finishes. Block content generation (add_block /
+ * edit_block) still reuses /api/studio/compose.
  *
- * 因此本文件必须 client-safe:零服务端依赖,schema 用裸 JSON(不引 zod)。
+ * So this file must be client-safe: zero server deps, schema is plain JSON (no zod).
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
@@ -16,23 +18,23 @@ export type StudioToolKind = 'badge' | 'card';
 
 export interface StudioToolDef {
   id: string;
-  /** badge = 即时状态变更(小徽章);card = 需生成、较慢(卡片显示 note)。 */
+  /** badge = instant state change (small badge); card = needs generation, slower (card shows note). */
   kind: StudioToolKind;
-  /** 信息流里的小图标(emoji)。 */
+  /** Small icon in the feed (emoji). */
   icon: string;
-  /** 中文 UI 标签(进度/卡片标题用)。 */
+  /** UI label (used for progress / card title). */
   label: string;
-  /** 运行中的默认忙碌文案(还没有流式 note/阶段进度时卡片显示这个,别让用户干等静态字)。 */
+  /** Default busy text while running (shown on the card before any streamed note/stage progress — don't leave the user staring at static text). */
   busyText?: string;
-  /** 英文 agent 指令(进 system prompt + tool description)。 */
+  /** English agent instruction (goes into system prompt + tool description). */
   description: string;
-  /** JSON schema —— 服务端 jsonSchema() 包给 tool();客户端只读 input,不校验。 */
+  /** JSON schema — server wraps it via jsonSchema() into tool(); client only reads input, no validation. */
   inputSchema: Record<string, unknown>;
 }
 
 const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r'] as const;
 
-/** 小工具:拼一个 object schema。 */
+/** Helper: build an object schema. */
 function obj(
   properties: Record<string, unknown>,
   required: string[],
@@ -41,7 +43,7 @@ function obj(
 }
 
 export const STUDIO_TOOLS: StudioToolDef[] = [
-  /* ---------- frame(主题内容包;服务端执行,客户端只渲染卡片,无 runTool 实现) ---------- */
+  /* ---------- frame (theme content pack; server-executed, client only renders the card, no runTool impl) ---------- */
   {
     id: 'read_frame',
     kind: 'card',
@@ -62,7 +64,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       "Attach a frame (theme content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. Call this when the user picks a frame from your recommendation, or names one explicitly. The catalog of ids appears in <frame_catalog> when none is attached. Also usable to SWITCH to a different frame.",
     inputSchema: obj({ frame_id: { type: 'string', description: 'Frame id from the catalog, e.g. "biennale-poster"' } }, ['frame_id']),
   },
-  /* ---------- 口播剪辑判断手册(单独技能内容包;服务端执行,客户端只渲染卡片,无 runTool 实现) ---------- */
+  /* ---------- speech-editing playbook (separate skill content pack; server-executed, client only renders the card, no runTool impl) ---------- */
   {
     id: 'read_editing_guide',
     kind: 'card',
@@ -73,7 +75,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       "Load the A-roll speech-cleanup playbook (complete-semantic-unit editing, retakes, false starts, two-tier fillers, boundary discipline). Call this ONCE — BEFORE any transcript-based speech cut (cleanup / de-filler / tighten / cut_narration / a highlight or short version) — then follow it. Its result persists in the conversation: if a read_editing_guide result is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
   },
-  /* ---------- 成片流水线(从口播视频到初稿,card · 慢) ---------- */
+  /* ---------- production pipeline (from talking-head video to first draft, card · slow) ---------- */
   {
     id: 'extract_asr',
     kind: 'card',
@@ -140,7 +142,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
 
-  /* ---------- 块内容(走 compose 生成,card) ---------- */
+  /* ---------- block content (generated via compose, card) ---------- */
   {
     id: 'add_block',
     kind: 'card',
@@ -174,7 +176,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
 
-  /* ---------- 块时间/位置(即时,badge) ---------- */
+  /* ---------- block timing/position (instant, badge) ---------- */
   {
     id: 'move_block',
     kind: 'badge',
@@ -250,7 +252,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({ id: { type: 'string', description: 'block or shot id' } }, ['id']),
   },
 
-  /* ---------- 字幕(全局预设层:整句字幕/逐词强调,从口播稿铺,一处调全片生效) ---------- */
+  /* ---------- captions (global preset layer: full-line captions / per-word emphasis, laid from the transcript, one setting applies to the whole video) ---------- */
   {
     id: 'set_captions',
     kind: 'card',
@@ -298,7 +300,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
 
-  /* ---------- 视频轨分镜(即时,badge) ---------- */
+  /* ---------- video track shots (instant, badge) ---------- */
   {
     id: 'set_shot_treatment',
     kind: 'badge',
@@ -440,7 +442,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({}, []),
   },
 
-  /* ---------- 导出(本地客户端合成,card · 慢) ---------- */
+  /* ---------- export (local client-side compositing, card · slow) ---------- */
   {
     id: 'export_video',
     kind: 'card',
@@ -473,17 +475,17 @@ export const STUDIO_TOOL_MAP: Record<string, StudioToolDef> = Object.fromEntries
   STUDIO_TOOLS.map((d) => [d.id, d]),
 );
 
-/** 工具结果(client runTool 返回 → addToolOutput → 模型 + 卡片渲染共用)。 */
+/** Tool result (client runTool returns → addToolOutput → shared by model + card render). */
 export interface StudioToolResult {
   ok: boolean;
-  /** 一句中文小结(成功时给卡片/徽章显示,也给模型续写参考)。 */
+  /** One-line summary (shown on card/badge on success, also fed to the model for continuation). */
   summary?: string;
-  /** 失败原因。 */
+  /** Failure reason. */
   error?: string;
-  /** 查询类工具的结构化数据(给模型看的,如 get_block 的块详情;卡片不渲染)。 */
+  /** Structured data for query tools (for the model, e.g. get_block's block detail; not rendered on the card). */
   data?: unknown;
-  /** 截帧类工具的图像(base64,无 data: 前缀)——MCP 面转成 image content 给外部 agent"看"。 */
+  /** Captured-frame image (base64, no data: prefix) — MCP side turns it into image content for the external agent to "see". */
   image?: { data: string; mimeType: string };
-  /** 多图(visual_brief 的采样帧)——MCP 面逐张转 image content。 */
+  /** Multiple images (visual_brief sampled frames) — MCP side converts each into image content. */
   images?: { data: string; mimeType: string }[];
 }

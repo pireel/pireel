@@ -16,9 +16,9 @@ export function SimpleSelect({
   className = '',
 }: {
   /**
-   * 受控值。null 表示未选（显示 placeholder）。
-   * 不要传 undefined —— base-ui 会把 undefined 当 uncontrolled，
-   * 后续给值时会报 "changing from uncontrolled to controlled"。
+   * Controlled value. null means unselected (shows placeholder).
+   * Never pass undefined — base-ui treats undefined as uncontrolled,
+   * and setting a value later throws "changing from uncontrolled to controlled".
    */
   value: string | null;
   onValueChange?: (v: string) => void;

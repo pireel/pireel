@@ -1,8 +1,10 @@
 /**
- * 剪纸 Paper-cut 的口播叠加件:挂饰语言——小块切角红纸板层叠(panel 上层 + panel-2
- * 右下错位 18px 的刀切 clip-path)、金色四角 L 形角标、圆形金章(6px 金边带金晕,
- * 最后盖下 scale 1.6→1 power3.in)、竖排对句条(writing-mode:vertical-rl 像挂轴落下)、
- * 镂空金云弧。奶白衬线为主墨,金是贵重物,每件至多一处鎏金。
+ * Paper-cut overlay elements: hanging-ornament language — stacked notched red paper boards
+ * (panel on top + panel-2 offset 18px to the bottom-right, cut with a clip-path), gold L-shaped
+ * corner marks, a round gold seal (6px gold border with glow, stamped down last with scale
+ * 1.6->1 power3.in), vertical couplet strips (writing-mode: vertical-rl, dropping like a hanging
+ * scroll), hollow gold cloud arcs. Cream serif is the main ink; gold is precious — at most one
+ * gilded touch per element.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

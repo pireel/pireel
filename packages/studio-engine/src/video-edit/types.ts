@@ -1,8 +1,9 @@
 /**
- * 视频剪辑(video-edit)模块共享类型。
+ * Shared types for the video-edit module.
  *
- * 范围:浏览器端视频处理基础设施——画像 / 抽音频 / 场景检测 / 缩略图 / 渲染。
- * 不含业务编排(LLM timeline / 入库等),那些走上层组件。
+ * Scope: browser-side video processing infrastructure — probe / extract-audio /
+ * scene detection / thumbnails / render. No business orchestration (LLM timeline,
+ * persistence, etc.) — that lives in higher-level components.
  */
 
 export type ClipMeta = {
@@ -15,9 +16,9 @@ export type ClipMeta = {
 };
 
 export type SceneCut = {
-  /** 切点处的时间戳(秒) */
+  /** Timestamp of the cut (seconds) */
   timestamp: number;
-  /** HSV 差异分数,用于调阈值 */
+  /** HSV difference score, for tuning the threshold */
   score: number;
 };
 
@@ -27,10 +28,10 @@ export type SceneSegment = {
 };
 
 export type Thumbnail = {
-  /** 抽帧时间戳(秒) */
+  /** Frame timestamp (seconds) */
   timestamp: number;
-  /** Object URL 指向 Blob,记得 revoke */
+  /** Object URL pointing at the Blob — remember to revoke */
   url: string;
-  /** Blob 本体,需要上传时用 */
+  /** The Blob itself, for when you need to upload */
   blob: Blob;
 };

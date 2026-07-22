@@ -1,14 +1,18 @@
 'use client';
 
 /**
- * 专业多轨时间轴(Google Vids 取向)。
+ * Pro multi-track timeline (Google Vids style).
  *
- * 轨0=口播视频:底铺缩率图(filmstrip),上叠分镜切片(各自镜头取景;边界=跳切,无转场语义)。
- *   轨≥1=叠加组件(花字/标题/数字/列表/转场…):每块
- *   带类型图标+标签(选中显时间范围),整块可拖移、两端可裁剪、点选进右侧对话。
- *   左 gutter 每轨配类型图标;顶部缩放条(放大/缩小/适应);标尺主次刻度;播放头可拖。
+ * Track 0 = talking-head video: filmstrip base with shot slices on top (each with its own
+ *   camera treatment; boundary = jump cut, no transition semantics).
+ *   Track >=1 = overlay elements (captions/title/stat/list/transition...): each block has a
+ *   type icon + label (shows time range when selected), is draggable whole, trimmable at both
+ *   ends, and clickable to open in the right-side chat.
+ *   Left gutter shows a type icon per track; top zoom bar (in/out/fit); ruler major/minor ticks;
+ *   draggable playhead.
  *
- * 所有 x 都相对内容层 contentRef 量;吸附到 整秒/分镜切点/其它块边/播放头。
+ * All x are measured relative to the content layer (contentRef); snaps to whole seconds /
+ * shot cut points / other block edges / playhead.
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -33,27 +37,28 @@ import { t } from './i18n';
 import { playhead, usePlayheadT } from './playhead';
 import type { FilmstripFrame } from './media';
 
-const PREVIEW_W = 108; // hover 组件小预览宽
+const PREVIEW_W = 108; // hover element preview width
 
-const ROW_H = 30; // 叠加轨(组件/字幕)行高:紧凑省空间(用户定的)
-const SCENE_H = 78; // 轨0=场景栏,加高放场景卡
-const SCENE_PAD_T = 12; // 场景卡距轨上缘的空隙(同主流剪辑器):从空隙起拖=框选,从卡面起拖=重排;上侧大一点好命中
-const SCENE_PAD_B = 8; // 场景卡距轨下缘的空隙
+const ROW_H = 30; // overlay track (element/caption) row height: compact to save space (user's call)
+const SCENE_H = 78; // track 0 = scene rail, taller to fit scene cards
+const SCENE_PAD_T = 12; // gap above scene card (like a mainstream editor): drag from gap = marquee, from card = reorder; bigger on top for easier hit
+const SCENE_PAD_B = 8; // gap below scene card
 const ROW_GAP = 6;
 const RULER_H = 24;
 const GUTTER = 40;
-const CAP_LANE = -1; // 「字幕轴」哨兵轨号:只读、不可拖排、不进 z 重排、不参与框选;真轨号恒 ≥0
-const EDGE_PAD = 12; // gutter 与内容层之间的呼吸位:首块选中环(ring-2 外扩)+ 首切点「+」半圆(10px)不被 sticky gutter 盖掉
-const SHOT_GAP = 2; // 分镜卡之间的细缝(从卡右缘扣,左缘保持时间精确)
-export const MIN_PPS = 2; // 最小缩放:~2px/秒,可看到分钟级(1 分钟≈120px,刻度走分钟)
+const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
+const EDGE_PAD = 12; // breathing room between gutter and content: keeps first block's selection ring (ring-2 outset) and first cut-point "+" half-circle (10px) from being clipped by the sticky gutter
+const SHOT_GAP = 2; // hairline gap between shot cards (taken off the right edge, left edge stays time-accurate)
+export const MIN_PPS = 2; // min zoom: ~2px/s, shows minute scale (1 min ~= 120px, ticks go by minutes)
 export const MAX_PPS = 260;
 export const DEFAULT_PPS = 78;
 const MIN_DUR = 0.3;
 const SNAP_PX = 7;
 
-/** 源时间锚定的胶片开窗(同主流剪辑器):第 k 格恒覆盖源时间 [k,k+1)×tileDur,取与窗口
- *  [srcStart,srcEnd) 相交的格。首格 left 可为负(由卡的 overflow-hidden 裁掉)——
- *  分割在 2.5 格处:前段是 2.5 格,后段从第 2.5 格中间接续,后段贴片永不重采样。 */
+/** Source-time-anchored filmstrip window (like a mainstream editor): tile k always covers source time
+ *  [k,k+1)*tileDur; take tiles that intersect the window [srcStart,srcEnd). First tile's left
+ *  can be negative (clipped by the card's overflow-hidden) — a split at 2.5 tiles gives 2.5
+ *  tiles before and the rest continuing from the middle of tile 2.5, so trailing tiles never resample. */
 function stripTiles(strip: FilmstripFrame[], srcStart: number, srcEnd: number, tileDur: number, pps: number): { left: number; url: string }[] {
   if (!strip.length || tileDur <= 0 || srcEnd <= srcStart) return [];
   const tiles: { left: number; url: string }[] = [];
@@ -73,7 +78,7 @@ function stripTiles(strip: FilmstripFrame[], srcStart: number, srcEnd: number, t
   return tiles;
 }
 
-/** 时间轴 chip 的品类底色(基础 label/icon/dot 在共享 kind-meta.ts)。 */
+/** Timeline chip category background colors (base label/icon/dot live in shared kind-meta.ts). */
 const KIND_CHIP: Record<BlockKind, { chip: string; chipSel: string }> = {
   caption: { chip: 'bg-rose-500/15 ring-rose-400/30 hover:bg-rose-500/25', chipSel: 'bg-rose-500/30 ring-2 ring-rose-400' },
   title: { chip: 'bg-amber-500/15 ring-amber-400/30 hover:bg-amber-500/25', chipSel: 'bg-amber-500/30 ring-2 ring-amber-400' },
@@ -85,21 +90,23 @@ const KIND_CHIP: Record<BlockKind, { chip: string; chipSel: string }> = {
 };
 const TREATMENT_NAME: Record<string, string> = Object.fromEntries(SHOT_TREATMENTS.map((t) => [t.id, t.name]));
 
-/** 播放头光标:订阅 playhead store —— 播放中 60fps 只重渲这一个小组件,不动整个时间轴。
- *  横移必须走 transform:改 left 每帧触发 layout + layout-shift,和引擎 rAF 抢主线程,
- *  转场窗口内就是肉眼可见的顿挫(用户 Performance 面板对出来的)。 */
+/** Playhead cursor: subscribes to the playhead store — at 60fps during playback only this small
+ *  component re-renders, not the whole timeline.
+ *  Horizontal move must use transform: changing left triggers layout + layout-shift every frame,
+ *  fights the engine's rAF for the main thread, and causes visible stutter inside transition
+ *  windows (confirmed via the user's Performance panel). */
 function PlayheadCursor({ pps }: { pps: number }) {
   const t = usePlayheadT();
   return (
     <div className="pointer-events-none absolute top-0 bottom-0 left-0 z-30 will-change-transform" style={{ transform: `translateX(${t * pps}px)` }}>
       <div className="absolute top-0 bottom-0 -left-px w-0.5 bg-rose" />
-      {/* 头标:下指箭头(border 三角,底边 8px 与线同轴) */}
+      {/* Head marker: down-pointing arrow (border triangle, 8px base aligned with the line) */}
       <div className="absolute top-0 -left-[4px] h-0 w-0 border-x-4 border-t-[6px] border-x-transparent border-t-rose drop-shadow" />
     </div>
   );
 }
 
-/** 播放头所在场景的高亮环(选中态另有 indigo 环,由场景卡自己画)。 */
+/** Highlight ring for the scene under the playhead (selected state has its own indigo ring, drawn by the scene card). */
 function ActiveSceneRing({
   sceneSpans,
   pps,
@@ -111,27 +118,27 @@ function ActiveSceneRing({
 }) {
   const t = usePlayheadT();
   const active = sceneSpans.find((sp) => t >= sp.start - 1e-3 && t < sp.end - 1e-3);
-  // 选中的镜(含多选集所有成员)已有 accent 选中环,播放头白环让位,不叠双环
+  // Selected shots (including all marquee members) already have an accent selection ring; the playhead's white ring yields so they don't stack
   if (!active || selectedShotIds.has(active.shot.id)) return null;
   const lastEnd = sceneSpans.length ? sceneSpans[sceneSpans.length - 1]!.end : 0;
-  const gapR = active.end < lastEnd - 1e-3 ? SHOT_GAP : 0; // 与场景卡同口径:细缝从右缘扣
+  const gapR = active.end < lastEnd - 1e-3 ? SHOT_GAP : 0; // same rule as scene cards: hairline gap off the right edge
   return (
     <div
       className="pointer-events-none absolute top-3 bottom-2 left-0 z-10 rounded ring-2 ring-white/70 will-change-transform"
-      // 横移走 transform:切点上的环跳变若走 left 会记 layout-shift + 整轴重排,恰好砸在转场峰值那一帧
+      // Horizontal move via transform: if the ring's jump at cut points went through left it would log layout-shift + full-track reflow, landing exactly on the transition's peak frame
       style={{ transform: `translateX(${active.start * pps}px)`, width: Math.max(8, (active.end - active.start) * pps - gapR) }}
     />
   );
 }
 
-/** 自适应标尺步长:让每格 ≥ ~64px。 */
+/** Adaptive ruler step: keep each cell >= ~64px. */
 function rulerStep(pps: number): number {
   const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
   for (const s of steps) if (s * pps >= 64) return s;
   return 1200;
 }
 
-/** 刻度标签:≥60s 显示 mm:ss,否则 Xs。 */
+/** Tick label: mm:ss for >=60s, otherwise Xs. */
 function fmtTick(s: number): string {
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -141,72 +148,72 @@ function fmtTick(s: number): string {
 
 interface StudioTimelineProps {
   comp: Composition;
-  /** 播放中:播放头越出视口时自动滚动跟随(用户手动滚则停,直到下次播放)。 */
+  /** During playback: auto-scroll to follow the playhead when it leaves the viewport (stops if the user scrolls manually, until next play). */
   playing: boolean;
-  /** 定位信号:每次自增 = 把时间轴滚动居中到当前播放头(点走带时间读数触发)。 */
+  /** Locate signal: each increment = scroll the timeline to center on the current playhead (triggered by clicking the transport time readout). */
   locateSignal: number;
-  /** 分镜多选集(⌘点选/框选):高亮 + 批量删除 + 播放头环让位。单选=单组件集。 */
+  /** Shot multi-select set (Cmd-click / marquee): highlight + batch delete + playhead ring yields. Single select = a one-element set. */
   selectedShotIds: Set<string>;
-  /** 组件多选集(⌘点选/框选,可跨多条组件轨):高亮 + 批量删除。单选=单组件集。 */
+  /** Block multi-select set (Cmd-click / marquee, can span multiple element tracks): highlight + batch delete. Single select = a one-element set. */
   selectedBlockIds: Set<string>;
   filmstrip?: FilmstripFrame[];
-  /** 缩放(px/秒)受控:值与 setter 都来自走带的滑块。 */
+  /** Zoom (px/sec) is controlled: value and setter both come from the transport slider. */
   pps: number;
   onPps: React.Dispatch<React.SetStateAction<number>>;
   onSeek: (t: number) => void;
-  /** hover 预览:把中央播放器 seek 到该时间(不动播放头);null=还原到播放头。 */
+  /** Hover preview: seek the center player to this time (without moving the playhead); null = restore to the playhead. */
   onScrub: (t: number | null) => void;
   onSelect: (id: string | null) => void;
-  /** 点选分镜。additive=⌘/Ctrl 多选(进/出多选集)。 */
+  /** Select a shot. additive = Cmd/Ctrl multi-select (toggle in/out of the set). */
   onSelectShot: (id: string, additive?: boolean) => void;
-  /** 框选:鼠标在场景轨**上下空隙**起拖出矩形(同主流剪辑器;从卡面起拖=重排),命中的分镜 id 一次性设为多选集。 */
+  /** Marquee: drag a rectangle from the **top/bottom gap** of the scene track (like a mainstream editor; dragging from the card = reorder); matched shot ids all become the multi-select set. */
   onBoxSelectShots: (ids: string[]) => void;
-  /** 场景卡拖动重排(从卡面起拖,同主流剪辑器):把片段序列里第 from 个挪到第 to 位(splice 语义)。 */
+  /** Scene card drag-reorder (drag from the card, like a mainstream editor): move clip `from` to position `to` in the clip sequence (splice semantics). */
   onReorderShot?: (from: number, to: number) => void;
-  /** 块跨轨移动(chip 纵向拖进另一条组件轨行):改 trackIndex=改 z(NLE 惯例)。
-   *  空轨自然消失——轨道行从块派生,搬空即collapse,无需显式清除。 */
+  /** Move a block across tracks (drag chip vertically into another element track row): changing trackIndex = changing z (NLE convention).
+   *  Empty tracks vanish on their own — track rows derive from blocks, so emptying one collapses it; no explicit cleanup. */
   onMoveBlockTrack?: (id: string, trackIndex: number) => void;
-  /** 块拖进行间空隙=掰出新轨(同主流剪辑器):slot=新轨在叠加轨自上而下显示序里的插入位(0..N)。
-   *  workbench 端整表重编 z(与 gutter 拖行重排同口径,z=1 恒归字幕层)。 */
+  /** Drag a block into a row gap = spawn a new track (like a mainstream editor): slot = insert position in the overlay tracks' top-to-bottom display order (0..N).
+   *  Workbench recomputes all z (same rule as gutter drag-reorder; z=1 is always the caption layer). */
   onMoveBlockNewTrack?: (id: string, slot: number) => void;
-  /** 点选组件。additive=⌘/Ctrl 多选(进/出多选集,不动播放头)。 */
+  /** Select a block. additive = Cmd/Ctrl multi-select (toggle in/out of the set, without moving the playhead). */
   onSelectBlock: (id: string, additive?: boolean) => void;
-  /** 框选组件:在组件轨空白拖出矩形(可跨多轨),命中的块 id 一次性设为多选集。 */
+  /** Marquee blocks: drag a rectangle over empty element-track space (can span tracks); matched block ids all become the multi-select set. */
   onBoxSelectBlocks: (ids: string[]) => void;
-  /** 点空白处:取消一切选中(组件 + 分镜)。 */
+  /** Click empty space: clear all selection (blocks + shots). */
   onDeselectAll: () => void;
-  /** 分镜左下角取景 tag:直接打开取景设置面板(点分镜本体只选中不开面板)。 */
+  /** Shot's bottom-left treatment tag: opens the treatment settings panel directly (clicking the shot body only selects, doesn't open the panel). */
   onOpenShotSettings: (id: string) => void;
-  /** 设置某镜取景方式（全屏/放大/缩角/半切）；取景恒作用整镜 */
+  /** Set a shot's camera treatment (full/zoom/corner/split); treatment always applies to the whole shot */
   onMoveBlock: (id: string, newStartSec: number) => void;
   onResizeBlock: (id: string, newStartSec: number, newDurationSec: number) => void;
-  /** 叠加轨重排(gutter 拖行):传新的自上而下轨号序,workbench 重编 z。 */
+  /** Overlay track reorder (gutter drag): pass the new top-to-bottom track-number order; workbench recomputes z. */
   onReorderTracks: (topToBottom: number[]) => void;
-  /** 面板素材正在拖动(上传/生图/生视频的卡片拖出):时间轴变成 drop 区。
-   *  落点分流:主轨(缩率图/场景卡行)= 插入片段(图片=5s 静态帧;2026-07-17 用户
-   *  定的,把"视频拖入主轨已砍"翻案回来);其余区域 = 图片插画中画素材块,视频不响应。 */
+  /** A panel asset is being dragged (a card dragged out of upload/image-gen/video-gen): the timeline becomes a drop zone.
+   *  Drop routing: main track (filmstrip / scene card row) = insert a clip (image = 5s static frame; user's 2026-07-17 call,
+   *  reverting the earlier "video-into-main-track removed"); elsewhere = a picture-in-picture asset block, video ignored. */
   assetDragging?: boolean;
-  /** 拖动素材的类型。落区规则:图片=主轨(5s 静帧片段)+叠加区(画中画);
-   *  视频=只主轨(整段片段);组件=只叠加区(落点时刻插入,与图片同权)。 */
+  /** Dragged asset type. Drop-zone rules: image = main track (5s static-frame clip) + overlay area (picture-in-picture);
+   *  video = main track only (whole clip); element = overlay area only (inserted at the drop time, same as image). */
   assetDragKind?: 'image' | 'video' | 'element' | null;
-  /** 素材(图片)落到时间轴非主轨区:报落点时间(秒),workbench 在该时刻插素材块。 */
+  /** Asset (image) dropped on a non-main-track area: report the drop time (sec); workbench inserts an asset block there. */
   onDropAsset?: (t: number) => void;
-  /** 素材落到主轨:按插入片段处理(视频=整段插入,图片=5s 静态帧),workbench 拉字节走 insertClipCore。 */
+  /** Asset dropped on the main track: handled as a clip insert (video = whole clip, image = 5s static frame); workbench fetches bytes via insertClipCore. */
   onDropAssetClip?: (t: number) => void;
-  /** 外部插入段的缩率图(shotId → 帧,t=片段自己的源时间)。 */
+  /** Filmstrips for externally inserted clips (shotId -> frames, t = the clip's own source time). */
   clipStrips?: Record<string, FilmstripFrame[]>;
-  /** 分镜边界「+」:在该成片时刻插入本地视频(workbench 弹文件选择→上传→插主轨)。 */
+  /** Shot boundary "+": insert a local video at that edited-time (workbench pops a file picker -> upload -> insert into main track). */
   onInsertClipAt?: (t: number) => void;
-  /** 分镜边界转场热区:点击在统一浮窗里选转场效果(cutSec=该边界的成片时刻)。 */
+  /** Shot boundary transition hotspot: click to pick a transition effect in the shared popover (cutSec = that boundary's edited-time). */
   onOpenTransition?: (cutSec: number, anchor: DOMRect) => void;
-  /** 转场区域两侧柄拖动(左右对称):提交新总时长(秒,≤4)。 */
+  /** Transition handles drag on both sides (symmetric): commit the new total duration (sec, <=4). */
   onResizeTransition?: (shotId: string, durationSec: number) => void;
-  /** 外部片段插入进行中(下载/上传/读时长):在该成片时刻画「插入中」徽标,别让用户以为没生效。 */
+  /** External clip insert in progress (download/upload/reading duration): draw an "inserting" badge at that edited-time so the user doesn't think it failed. */
   clipPendingAt?: number | null;
 }
 
-/** memo:回调 props 由工作台经 useStableCallbacks 稳定身份;工作台里与时间轴无关的
- *  状态变化(导出进度/面板切换/生成态)不再整树重渲这棵大组件。comp 变仍然照常渲。 */
+/** memo: callback props have stable identity via the workbench's useStableCallbacks; timeline-irrelevant
+ *  state changes in the workbench (export progress / panel switch / generating state) no longer re-render this big tree. comp changes still render as usual. */
 export const StudioTimeline = memo(StudioTimelineImpl);
 
 function StudioTimelineImpl({
@@ -244,37 +251,37 @@ function StudioTimelineImpl({
   clipStrips,
 }: StudioTimelineProps) {
   const dur = totalDuration(comp);
-  const videoDur = comp.video ? editedVideoDuration(comp) : 0; // 成片视频时长(缩率图/场景轨宽)
+  const videoDur = comp.video ? editedVideoDuration(comp) : 0; // edited video duration (filmstrip / scene track width)
   const shots = useMemo(() => comp.shots ?? [], [comp.shots]);
-  // 场景在**成片**时间轴的区间(片段源区间首尾相接)
+  // Scenes' spans on the **edited** timeline (clip source spans joined end to end)
   const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
-  // 缩率图方格(同主流剪辑器):正方形贴片(格宽=格高,object-cover 裁),网格锚在**源时间**上——
-  // 每张卡只是对连续胶片"开窗"(stripTiles),分割/裁剪后各段接续原胶片,永不重排后段
+  // Filmstrip tiles (like a mainstream editor): square tiles (width=height, object-cover crop), grid anchored on **source time** —
+  // each card just "windows" (stripTiles) the continuous strip; after split/trim each segment continues the original strip, never re-laying-out trailing segments
   const thumbW = SCENE_H - SCENE_PAD_T - SCENE_PAD_B;
-  const tileDur = thumbW / pps; // 一格覆盖的源时长
+  const tileDur = thumbW / pps; // source duration one tile covers
   const filmTiles = useMemo(() => stripTiles(filmstrip ?? [], 0, videoDur, tileDur, pps), [filmstrip, videoDur, tileDur, pps]);
 
-  const [hover, setHover] = useState<{ block: Block; left: number; top: number } | null>(null); // hover 组件小预览
-  const [guide, setGuide] = useState<number | null>(null); // 拖动时的吸附对齐参考线(秒)
-  const [dropHint, setDropHint] = useState<{ t: number; clip: boolean } | null>(null); // 素材拖入时的插入点标线(clip=悬在主轨,落点=插入片段)
-  const [hoverBounds, setHoverBounds] = useState<{ l: number; r: number } | null>(null); // hover 分镜卡:两端出「+」插本地视频
-  const [trDrag, setTrDrag] = useState<{ cut: number; half: number } | null>(null); // 转场柄拖动中的实时半宽(对称)
-  const [marquee, setMarquee] = useState<{ l: number; r: number } | null>(null); // 场景轨框选矩形(内容坐标 px)
-  const laneRef = useRef<HTMLDivElement | null>(null); // 场景轨 DOM(内容坐标基准,随滚动移动)
-  const marqueeDraggedRef = useRef(false); // 本次指针按下是否已成框选拖拽(用于抑制随后的分镜点选)
-  const [blockMarquee, setBlockMarquee] = useState<{ l: number; r: number; t: number; b: number } | null>(null); // 组件轨框选矩形(tracksRef 坐标 px,含 y 好跨轨)
-  const tracksRef = useRef<HTMLDivElement | null>(null); // 轨道背景区 DOM(组件框选的坐标基准)
-  const blockMarqueeDraggedRef = useRef(false); // 组件框选是否已成拖拽(抑制随后的组件点选)
-  const marqueeRafRef = useRef(0); // 框选期间的 rAF(边缘自动滚动 + 每帧重算矩形)
-  const [hoverT, setHoverT] = useState<number | null>(null); // hover 时间(中央预览跳到此帧 + 画 hover 竖线)
+  const [hover, setHover] = useState<{ block: Block; left: number; top: number } | null>(null); // hover element preview
+  const [guide, setGuide] = useState<number | null>(null); // snap alignment guide while dragging (sec)
+  const [dropHint, setDropHint] = useState<{ t: number; clip: boolean } | null>(null); // insert-point marker during asset drag (clip = hovering main track, drop = insert a clip)
+  const [hoverBounds, setHoverBounds] = useState<{ l: number; r: number } | null>(null); // hovered shot card: show "+" at both ends to insert a local video
+  const [trDrag, setTrDrag] = useState<{ cut: number; half: number } | null>(null); // live half-width while dragging a transition handle (symmetric)
+  const [marquee, setMarquee] = useState<{ l: number; r: number } | null>(null); // scene-track marquee rectangle (content px)
+  const laneRef = useRef<HTMLDivElement | null>(null); // scene-track DOM (content-coordinate base, moves with scroll)
+  const marqueeDraggedRef = useRef(false); // whether this pointer-down became a marquee drag (used to suppress the subsequent shot click)
+  const [blockMarquee, setBlockMarquee] = useState<{ l: number; r: number; t: number; b: number } | null>(null); // element-track marquee rectangle (tracksRef px, includes y for cross-track)
+  const tracksRef = useRef<HTMLDivElement | null>(null); // track background area DOM (coordinate base for block marquee)
+  const blockMarqueeDraggedRef = useRef(false); // whether the block marquee became a drag (suppress the subsequent block click)
+  const marqueeRafRef = useRef(0); // rAF during marquee (edge auto-scroll + recompute rectangle each frame)
+  const [hoverT, setHoverT] = useState<number | null>(null); // hover time (center preview jumps to this frame + draw hover vertical line)
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draggingRef = useRef(false); // 拖动中:让 hover-seek 让路(避免双重 seek)
-  const hoverRaf = useRef(0); // hover rAF 合并
-  const hoverXRef = useRef(0); // 最新 hover 屏幕 x
-  // hover-scrub 驻留武装:进时间轴 ≥160ms 且真移动过 ≥6px 才开始跟手 seek 中央预览。
-  // 光标从组件轨划去舞台「路过」时间轴、或选中控制条出现顶得布局位移,都不该让画面跳一下。
+  const draggingRef = useRef(false); // while dragging: let hover-seek yield (avoid double seek)
+  const hoverRaf = useRef(0); // hover rAF coalescing
+  const hoverXRef = useRef(0); // latest hover screen x
+  // hover-scrub arming: only start following-seek of the center preview after >=160ms in the timeline and >=6px of real movement.
+  // A cursor "passing through" the timeline on its way from an element track to the stage, or a layout shift from the selection control bar appearing, shouldn't make the picture jump.
   const scrubEnterRef = useRef<{ x: number; y: number; ts: number } | null>(null);
   const scrubArmedRef = useRef(false);
 
@@ -299,7 +306,7 @@ function StudioTimelineImpl({
   const W = Math.max(320, dur * pps);
   const x = useCallback((s: number) => s * pps, [pps]);
 
-  // 吸附点:整秒 + 分镜切点(起+末) + 其它块两端。播放头每帧变,不进 memo,snap 时实时从 store 取。
+  // Snap points: whole seconds + shot cut points (start + end) + other blocks' two ends. The playhead changes every frame, so it's not in memo; read live from the store at snap time.
   const snapPoints = useMemo(() => {
     const pts: number[] = [];
     for (let s = 0; s <= dur; s += 1) pts.push(s);
@@ -328,18 +335,18 @@ function StudioTimelineImpl({
           hit = p;
         }
       }
-      setGuide(hit); // 命中吸附点 → 亮对齐参考线
+      setGuide(hit); // hit a snap point -> light up the alignment guide
       return Math.round(best * 100) / 100;
     },
     [snapPoints, pps],
   );
 
-  // 内容层左缘(随滚动变),拖动时每帧重算
+  // Content layer's left edge (changes with scroll); recompute each frame while dragging
   const contentLeft = () => contentRef.current?.getBoundingClientRect().left ?? 0;
   const secAt = (clientX: number) => Math.max(0, Math.min(dur, (clientX - contentLeft()) / pps));
-  /** 框选通用引擎(场景轨 / 组件轨共用):锚点取内容坐标(base 随滚动移动,x0/y0 是内容坐标恒定),
-   *  末点每帧按 base 的**实时** rect 重算 → 一路支持边缘自动滚动;指针停在边缘不动也靠 rAF 持续滚。
-   *  baseRef=坐标基准 DOM;draggedRef=本次是否成拖拽;onDrag=画矩形;onCommit=命中判定;onClick=纯点击(未拖)。 */
+  /** Shared marquee engine (scene track / element track): anchor in content coordinates (base moves with scroll, x0/y0 stay fixed in content coords),
+   *  end point recomputed each frame from base's **live** rect -> supports edge auto-scroll throughout; keeps scrolling via rAF even when the pointer sits still at the edge.
+   *  baseRef = coordinate-base DOM; draggedRef = whether it became a drag; onDrag = draw rectangle; onCommit = hit test; onClick = pure click (no drag). */
   const startMarquee = (
     e: React.PointerEvent,
     baseRef: React.MutableRefObject<HTMLDivElement | null>,
@@ -353,14 +360,14 @@ function StudioTimelineImpl({
     const base = baseRef.current;
     if (!base) return;
     const rect0 = base.getBoundingClientRect();
-    const x0 = e.clientX - rect0.left; // 内容坐标:滚动不改它(base 移动但内容点固定)
+    const x0 = e.clientX - rect0.left; // content coords: scroll doesn't change it (base moves but the content point stays fixed)
     const y0 = e.clientY - rect0.top;
     draggedRef.current = false;
     let lastX = e.clientX;
     let lastY = e.clientY;
     let px1 = NaN;
     let py1 = NaN;
-    const EDGE = 44; // 视口边缘触发自动滚的宽度(px)
+    const EDGE = 44; // viewport-edge band width that triggers auto-scroll (px)
     const frame = () => {
       const sc = scrollRef.current;
       if (sc) {
@@ -368,16 +375,16 @@ function StudioTimelineImpl({
         let dx = 0;
         if (lastX < sr.left + EDGE) dx = -Math.ceil(((sr.left + EDGE - lastX) / EDGE) * 20);
         else if (lastX > sr.right - EDGE) dx = Math.ceil(((lastX - (sr.right - EDGE)) / EDGE) * 20);
-        if (dx) sc.scrollLeft += dx; // 命中边缘:持续横滚(base 随之左右移,末点重算即扩到新区)
+        if (dx) sc.scrollLeft += dx; // at the edge: keep horizontal-scrolling (base moves with it, and recomputing the end point extends into the new area)
       }
-      const r = base.getBoundingClientRect(); // 实时 rect(含滚动量)
+      const r = base.getBoundingClientRect(); // live rect (includes scroll offset)
       const x1 = lastX - r.left;
       const y1 = lastY - r.top;
       if (!draggedRef.current && (Math.abs(x1 - x0) > 4 || Math.abs(y1 - y0) > 4)) draggedRef.current = true;
       if (draggedRef.current && (x1 !== px1 || y1 !== py1)) {
         px1 = x1;
         py1 = y1;
-        onDrag(x0, y0, x1, y1); // 只在矩形真变了才 setState(边缘滚动时每帧变,静止不变)
+        onDrag(x0, y0, x1, y1); // only setState when the rectangle actually changed (changes each frame during edge scroll, unchanged when still)
       }
       marqueeRafRef.current = requestAnimationFrame(frame);
     };
@@ -400,8 +407,8 @@ function StudioTimelineImpl({
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   };
-  /** 场景轨框选:从轨**上下空隙**(或末卡右侧空白)起拖出矩形,命中的分镜一次性入多选集。
-   *  卡面按下被卡自己拦下走重排(startShotDrag),两套手势按起点分流,同主流剪辑器。 */
+  /** Scene-track marquee: drag a rectangle from the track's **top/bottom gap** (or the blank right of the last card); matched shots all enter the multi-select set.
+   *  Pressing on a card is intercepted by the card itself for reorder (startShotDrag); the two gestures split by start point, like a mainstream editor. */
   const onLanePointerDown = (e: React.PointerEvent) => {
     startMarquee(
       e,
@@ -416,25 +423,25 @@ function StudioTimelineImpl({
       () => setMarquee(null),
     );
   };
-  // 图片/视频/组件拖动都让时间轴当 drop 区;落区按类型分(见 assetDragKind 注释)
+  // Image/video/element drags all make the timeline a drop zone; drop routing splits by type (see assetDragKind comment)
   const dropActive = !!assetDragging && !!assetDragKind;
-  /** 落点/悬停是否在主轨(缩率图/场景卡行)——决定"插入片段"还是"落点插块"。 */
+  /** Whether the drop/hover is on the main track (filmstrip / scene card row) — decides "insert clip" vs "insert block at drop point". */
   const onMainTrack = (e: { target: EventTarget | null }) => !!(e.target as Element | null)?.closest?.('[data-main-track]');
-  /** 该类型允许落在这个区吗:主轨收图片/视频(片段化),叠加区收图片/组件(块)。 */
+  /** Is this type allowed to drop in this area: main track takes image/video (as clips), overlay area takes image/element (as blocks). */
   const dropAllowed = (clip: boolean) => (clip ? assetDragKind !== 'element' : assetDragKind !== 'video');
-  // 拖动结束(松手在时间轴外/取消)标线要收
+  // On drag end (released outside the timeline / cancelled) clear the marker
   useEffect(() => {
     if (!assetDragging) setDropHint(null);
   }, [assetDragging]);
 
-  // 通用指针拖动(返回是否真的拖了 → 区分点选/拖拽)。pointermove 用 rAF 合并到每帧一次,
-  // 避免每个事件都 seek 视频(解码贵)造成卡顿;draggingRef 让 hover-seek 拖动中让路。
+  // Generic pointer drag (returns whether it actually dragged -> distinguishes click vs drag). pointermove is coalesced to once per frame via rAF,
+  // to avoid seeking the video on every event (decoding is expensive) which causes jank; draggingRef makes hover-seek yield during the drag.
   const drag = (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
     e.preventDefault();
     try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); // 出窗口也持续收 move/up
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); // keep receiving move/up even outside the window
     } catch {
-      /* 靠 buttons 兜底 */
+      /* fall back to buttons */
     }
     const sx = e.clientX;
     const sy = e.clientY;
@@ -448,8 +455,8 @@ function StudioTimelineImpl({
       if (moved) onMove(lastX, lastY);
     };
     const mv = (ev: PointerEvent) => {
-      if (ev.buttons === 0) { up(); return; } // 错过 pointerup:立即收尾,不跟裸移动
-      if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) moved = true; // 纯纵向(跨轨)也算拖
+      if (ev.buttons === 0) { up(); return; } // missed pointerup: finish immediately, don't track bare movement
+      if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) moved = true; // pure vertical (cross-track) also counts as a drag
       lastX = ev.clientX;
       lastY = ev.clientY;
       if (moved && !raf) raf = requestAnimationFrame(flush);
@@ -459,7 +466,7 @@ function StudioTimelineImpl({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       if (raf) cancelAnimationFrame(raf);
-      setGuide(null); // 拖动结束收起参考线
+      setGuide(null); // drag ended, hide the guide
       draggingRef.current = false;
       onUp?.(moved);
     };
@@ -468,7 +475,7 @@ function StudioTimelineImpl({
     window.addEventListener('pointercancel', up);
   };
 
-  // ⌘滚轮缩放(缩放值受控于走带滑块)
+  // Cmd + wheel zoom (zoom value is controlled by the transport slider)
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -481,17 +488,17 @@ function StudioTimelineImpl({
     return () => el.removeEventListener('wheel', onWheel);
   }, [onPps]);
 
-  // 播放时自动滚动跟随播放头:越出视口就 paging 滚过去(播放头落到可见内容左侧 ~10%,留出提前量)。
-  // 用户播放中手动滚动 → 停跟随,直到下次播放重新开启(followRef 在 playing 上升沿复位)。
+  // Auto-scroll to follow the playhead during playback: page-scroll when it leaves the viewport (land the playhead at ~10% from the visible content's left, leaving lead-in).
+  // User manual scroll during playback -> stop following, until next play re-enables it (followRef resets on the playing rising edge).
   const followRef = useRef(true);
-  const progScrollUntilRef = useRef(0); // 程序化滚动的时间窗:窗内的 scroll 事件不算用户操作
-  /** 滚动使播放头落到可见内容宽度的 leadFrac 处(0.1=左侧留提前量跟随;0.5=居中定位)。 */
+  const progScrollUntilRef = useRef(0); // time window for programmatic scrolls: scroll events within it don't count as user action
+  /** Scroll so the playhead lands at leadFrac of the visible content width (0.1 = left lead-in for follow; 0.5 = center it). */
   const scrollToPlayhead = useCallback(
     (leadFrac: number) => {
       const el = scrollRef.current;
       const content = contentRef.current;
       if (!el || !content) return;
-      // 内容层左缘在滚动坐标系的 x(用 rect 算不依赖 offsetParent)
+      // Content layer's left edge in scroll coordinates (computed via rect, no offsetParent dependency)
       const contentX = content.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
       const px = contentX + playhead.get() * pps;
       const target = px - GUTTER - (el.clientWidth - GUTTER) * leadFrac;
@@ -501,15 +508,14 @@ function StudioTimelineImpl({
     [pps],
   );
   useEffect(() => {
-    if (playing) followRef.current = true; // 播放开始:重启跟随
+    if (playing) followRef.current = true; // playback started: restart following
   }, [playing]);
   useEffect(() => {
     if (!playing) return;
     let lastCheck = 0;
     const follow = () => {
       if (!followRef.current) return;
-      // 出视口判定 4Hz 足够:playhead 每帧都发,这里每帧 getBoundingClientRect 就是
-      // 每帧强制同步 layout,和引擎 rAF 抢主线程(转场顿挫的帮凶之一)
+      // 4Hz is enough for the out-of-viewport check: the playhead fires every frame, and calling getBoundingClientRect every frame here would force a synchronous layout each frame, fighting the engine's rAF for the main thread (one contributor to transition stutter)
       const now = performance.now();
       if (now - lastCheck < 250) return;
       lastCheck = now;
@@ -518,15 +524,15 @@ function StudioTimelineImpl({
       if (!el || !content) return;
       const contentX = content.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
       const px = contentX + playhead.get() * pps;
-      const visLeft = el.scrollLeft + GUTTER; // 左侧被 sticky gutter 盖住,可见内容从 +GUTTER 起
+      const visLeft = el.scrollLeft + GUTTER; // left is covered by the sticky gutter; visible content starts at +GUTTER
       const visRight = el.scrollLeft + el.clientWidth;
       if (px < visLeft || px > visRight - 8) scrollToPlayhead(0.1);
     };
     const unsub = playhead.subscribe(follow);
-    follow(); // 起播即校正一次
+    follow(); // correct once at play start
     return unsub;
   }, [playing, pps, scrollToPlayhead]);
-  // 点走带时间读数 → 居中定位到播放头(自增 locateSignal 触发;跳过首次挂载)
+  // Click transport time readout -> center on the playhead (triggered by incrementing locateSignal; skip first mount)
   const scrollToPlayheadRef = useRef(scrollToPlayhead);
   scrollToPlayheadRef.current = scrollToPlayhead;
   const firstLocateRef = useRef(true);
@@ -541,13 +547,13 @@ function StudioTimelineImpl({
   const onScrollFollow = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const moved = el.scrollLeft !== lastScrollLeftRef.current; // 只认横向滚动(竖向切轨不算)
+    const moved = el.scrollLeft !== lastScrollLeftRef.current; // only count horizontal scroll (vertical track-switch doesn't count)
     lastScrollLeftRef.current = el.scrollLeft;
-    if (performance.now() < progScrollUntilRef.current) return; // 程序化滚动,忽略
-    if (playing && moved) followRef.current = false; // 播放中的用户横向手动滚动 → 停跟随
+    if (performance.now() < progScrollUntilRef.current) return; // programmatic scroll, ignore
+    if (playing && moved) followRef.current = false; // user horizontal manual scroll during playback -> stop following
   };
 
-  // 每轨代表性 kind(取该轨第一个块);轨0=视频
+  // Representative kind per track (take that track's first block); track 0 = video
   const trackKind = (track: number): BlockKind | 'video' => {
     if (track === 0) return 'video';
     const b = comp.blocks.find((bk) => bk.trackIndex === track);
@@ -557,18 +563,18 @@ function StudioTimelineImpl({
   const step = rulerStep(pps);
   const ticks = Math.floor(dur / step) + 1;
 
-  // 轨0 = 场景栏(有视频时加高);per-track 高度/偏移。
-  // **显示序 ≠ 轨号序**:叠加轨按 z 降序排(NLE 惯例,上面的行盖住下面的行),
-  // 字幕(轨1,z 最低)自然落在最底;gutter 拖行重排 = 重编 z(onReorderTracks)。
+  // Track 0 = scene rail (taller when there's video); per-track height/offset.
+  // **Display order != track-number order**: overlay tracks sort by descending z (NLE convention, upper rows cover lower ones),
+  // captions (track 1, lowest z) naturally land at the bottom; gutter drag-reorder = recomputing z (onReorderTracks).
   const sceneRail = !!comp.video;
   const H0 = sceneRail ? SCENE_H : ROW_H;
-  // 只给真有非字幕块的轨开行:句级字幕不进时间轴(纯计算产物),空轨也不再渲染空行
+  // Only open a row for tracks that actually have non-caption blocks: sentence captions don't enter the timeline (pure computed output), and empty tracks no longer render empty rows
   const overlayTracks = useMemo(() => {
     const set = new Set<number>();
     for (const b of comp.blocks) if (b.trackIndex > 0 && !isSentenceCaption(b)) set.add(b.trackIndex);
     return [...set].sort((a, b) => b - a);
   }, [comp.blocks]);
-  // 句级字幕单独一条只读「字幕轴」(跟转写走,不可拖/裁,编辑入口在字幕面板),恒排在最底
+  // Sentence captions get their own read-only "caption lane" (follows the transcript, no drag/trim, edited from the caption panel), always at the bottom
   const captionBlocks = useMemo(
     () => comp.blocks.filter(isSentenceCaption).sort((a, b) => a.startSec - b.startSec),
     [comp.blocks],
@@ -587,8 +593,8 @@ function StudioTimelineImpl({
   const slotTop = (slot: number) => (slot === 0 ? 0 : H0 + ROW_GAP + (slot - 1) * (ROW_H + ROW_GAP));
   const tracksH = slotTop(displayTracks.length - 1) + (displayTracks.length > 1 ? ROW_H : H0);
 
-  /** 组件轨框选:在组件轨空白拖出矩形(可跨多条轨),命中的组件块一次性入多选集。
-   *  坐标基准 tracksRef;x 与 x(start)、y 与 rowTop 同域。纯点击=取消选中 + 播放头到点击处。 */
+  /** Element-track marquee: drag a rectangle over empty element-track space (can span tracks); matched blocks all enter the multi-select set.
+   *  Coordinate base tracksRef; x shares the domain of x(start), y that of rowTop. Pure click = clear selection + move playhead to the click point. */
   const onOverlayPointerDown = (e: React.PointerEvent) => {
     startMarquee(
       e,
@@ -607,7 +613,7 @@ function StudioTimelineImpl({
             const br = x(b.startSec + b.durationSec);
             const bt = rowTop(b.trackIndex) + 4;
             const bb = bt + (ROW_H - 8);
-            return bl < hi && br > lo && bt < bot && bb > top; // 时间轴 x 与 轨道 y 双向相交
+            return bl < hi && br > lo && bt < bot && bb > top; // intersect on both timeline x and track y
           })
           .map((b) => b.id);
         onBoxSelectBlocks(hit);
@@ -620,19 +626,19 @@ function StudioTimelineImpl({
     );
   };
 
-  // gutter 拖行重排:被拖行 translateY 跟手,目标槽画插入线,松手提交新显示序
+  // Gutter drag-reorder: the dragged row follows via translateY, the target slot draws an insert line, release commits the new display order
   const [trackDrag, setTrackDrag] = useState<{ track: number; fromSlot: number; toSlot: number; dy: number } | null>(null);
   const trackDragRef = useRef(trackDrag);
   trackDragRef.current = trackDrag;
   const startTrackDrag = (e: React.PointerEvent, track: number) => {
-    if (overlayTracks.length <= 1) return; // 只有一条叠加轨,没得排(字幕轴不算)
+    if (overlayTracks.length <= 1) return; // only one overlay track, nothing to reorder (caption lane doesn't count)
     e.preventDefault();
     const fromSlot = dispIdx.get(track)!;
     const sy = e.clientY;
     const mv = (ev: PointerEvent) => {
       if (ev.buttons === 0) { up(); return; }
       const dy = ev.clientY - sy;
-      // 上界钳到最后一条真叠加轨(=overlayTracks.length),字幕轴那一格不接受落点
+      // Clamp the upper bound to the last real overlay track (= overlayTracks.length); the caption lane's slot rejects drops
       const toSlot = Math.max(1, Math.min(overlayTracks.length, fromSlot + Math.round(dy / (ROW_H + ROW_GAP))));
       setTrackDrag({ track, fromSlot, toSlot, dy });
     };
@@ -643,7 +649,7 @@ function StudioTimelineImpl({
       const td = trackDragRef.current;
       setTrackDrag(null);
       if (td && td.toSlot !== td.fromSlot) {
-        const order = overlayTracks.slice(); // 叠加轨自上而下(不含字幕轴)
+        const order = overlayTracks.slice(); // overlay tracks top-to-bottom (excludes caption lane)
         const [moved] = order.splice(td.fromSlot - 1, 1);
         order.splice(td.toSlot - 1, 0, moved!);
         onReorderTracks(order);
@@ -654,17 +660,17 @@ function StudioTimelineImpl({
     window.addEventListener('pointercancel', up);
   };
 
-  // 场景卡拖动重排(同主流剪辑器):从**卡面**起拖=调顺序,从轨上下空隙起拖=框选(onLanePointerDown)。
-  // 被拖卡 translateX 跟手,目标缝画插入线,松手提交新序;<4px 不算拖,放行点选。
-  // rAF 循环与框选引擎同款:贴视口边缘持续自动横滚,位移按内容坐标算(滚动不跑偏)。
+  // Scene card drag-reorder (like a mainstream editor): drag from the **card** = reorder, drag from the track's top/bottom gap = marquee (onLanePointerDown).
+  // The dragged card follows via translateX, the target seam draws an insert line, release commits the new order; <4px isn't a drag, so the click passes through.
+  // Same rAF loop as the marquee engine: keep auto horizontal-scrolling at the viewport edge, displacement computed in content coords (doesn't drift with scroll).
   const [shotDrag, setShotDrag] = useState<{ from: number; to: number; dx: number } | null>(null);
   const shotDragRef = useRef(shotDrag);
   shotDragRef.current = shotDrag;
-  const shotDragMovedRef = useRef(false); // 本次按下是否已成拖拽(抑制随后的点选)
+  const shotDragMovedRef = useRef(false); // whether this press became a drag (suppress the subsequent click)
   const startShotDrag = (e: React.PointerEvent, from: number) => {
     if (e.button !== 0 || !onReorderShot || sceneSpans.length <= 1) return;
     e.preventDefault();
-    const x0 = e.clientX - contentLeft(); // 内容坐标起点(滚动不改它)
+    const x0 = e.clientX - contentLeft(); // content-coordinate start (scroll doesn't change it)
     const mid0 = (x(sceneSpans[from]!.start) + x(sceneSpans[from]!.end)) / 2;
     const mids = sceneSpans.map((sp) => (x(sp.start) + x(sp.end)) / 2);
     shotDragMovedRef.current = false;
@@ -683,8 +689,8 @@ function StudioTimelineImpl({
       const dx = lastX - contentLeft() - x0;
       if (shotDragMovedRef.current || Math.abs(dx) > 4) {
         shotDragMovedRef.current = true;
-        draggingRef.current = true; // hover-seek 让路
-        // 目标位 = 被拖卡中心压过几张别的卡的中点(即移除自己后的插入下标,恰是 splice 语义)
+        draggingRef.current = true; // hover-seek yields
+        // Target position = how many other cards' midpoints the dragged card's center passes (i.e. the insert index after removing itself, exactly splice semantics)
         let to = 0;
         for (let j = 0; j < mids.length; j++) if (j !== from && mid0 + dx > mids[j]!) to += 1;
         const cur = shotDragRef.current;
@@ -709,7 +715,7 @@ function StudioTimelineImpl({
       const sd = shotDragRef.current;
       setShotDrag(null);
       if (sd && shotDragMovedRef.current && sd.to !== sd.from) onReorderShot(sd.from, sd.to);
-      // click 在 pointerup 后同步派发,旗标先留给它抑制点选;松手在卡外没有 click,下一拍兜底复位
+      // click fires synchronously after pointerup, so keep the flag for it to suppress the click; releasing outside the card has no click, so reset on the next tick as a fallback
       setTimeout(() => {
         shotDragMovedRef.current = false;
       }, 0);
@@ -719,16 +725,15 @@ function StudioTimelineImpl({
     window.addEventListener('pointercancel', up);
   };
 
-  // 块跨轨拖移:拖动中指针落进组件轨行核心带=吸行(to),落进行间空隙=掰新轨(gap=插入位,
-  // 画横向插入线);横向照旧实时挪,松手提交。to/gap 恒只设其一。
+  // Block cross-track drag: while dragging, the pointer landing in an element track row's core band = snap to row (to), landing in a row gap = spawn a new track (gap = insert position, draws a horizontal insert line); horizontal move stays live, release commits. Only one of to/gap is ever set.
   const [blockTrackDrag, setBlockTrackDrag] = useState<{ id: string; to: number | null; gap: number | null } | null>(null);
   const blockTrackDragRef = useRef(blockTrackDrag);
   blockTrackDragRef.current = blockTrackDrag;
 
   return (
     <div className="border-line bg-panel flex max-h-96 min-h-0 flex-col border-t">
-      {/* 滚动区(缩放控制已移到上方走带工具栏)。面板素材拖入时整块变 drop 区:
-          落点横坐标经 secAt(含滚动/缩放)换算成时间,workbench 在该时刻插素材块 */}
+      {/* Scroll area (zoom controls moved to the transport toolbar above). When a panel asset is dragged in, the whole area becomes a drop zone:
+          the drop x is converted to time via secAt (includes scroll/zoom), and workbench inserts an asset block at that time */}
       <div
         ref={scrollRef}
         className={`min-h-0 flex-1 overflow-auto ${dropActive ? 'ring-accent/60 ring-2 ring-inset' : ''}`}
@@ -738,14 +743,14 @@ function StudioTimelineImpl({
             ? (e) => {
                 e.preventDefault();
                 const clip = onMainTrack(e);
-                // 类型不许落这个区:不给标线也不给落点(别画假承诺)
+                // Type not allowed in this area: no marker and no drop (don't draw a false promise)
                 if (!dropAllowed(clip)) {
                   e.dataTransfer.dropEffect = 'none';
                   setDropHint(null);
                   return;
                 }
                 e.dataTransfer.dropEffect = 'copy';
-                // 插入点标线跟光标(0.1s 量化防抖);主轨落点=插入片段(真插会吸附分割点)
+                // Insert marker follows the cursor (0.1s quantized to debounce); dropping on the main track = insert a clip (the real insert snaps to split points)
                 setDropHint({ t: Math.round(secAt(e.clientX) * 10) / 10, clip });
               }
             : undefined
@@ -753,7 +758,7 @@ function StudioTimelineImpl({
         onDragLeave={
           dropActive
             ? (e) => {
-                // dragleave 会从子组件冒泡(拖过场景卡就触发):只有真离开容器才清标线
+                // dragleave bubbles from children (fires when dragging over a scene card): only clear the marker when truly leaving the container
                 if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropHint(null);
               }
             : undefined
@@ -772,8 +777,8 @@ function StudioTimelineImpl({
         }
       >
         <div className="flex" style={{ minWidth: GUTTER + EDGE_PAD * 2 + W }}>
-          {/* 左:轨标签(图标 + 名)。sticky 固定列,z 要压过所有滚动内容(取景徽标 z-30/
-              播放头 z-30/框选·「+」z-40),否则横滚时内容滑到它下面却盖在图标上 */}
+          {/* Left: track labels (icon + name). Sticky fixed column; z must beat all scrolling content (treatment badge z-30 /
+              playhead z-30 / marquee & "+" z-40), otherwise on horizontal scroll content slides under it but covers the icons */}
           <div className="bg-panel sticky left-0 z-50 shrink-0" style={{ width: GUTTER }}>
             <div className="border-line border-b" style={{ height: RULER_H }} />
             <div style={{ paddingTop: 0 }}>
@@ -802,17 +807,17 @@ function StudioTimelineImpl({
             </div>
           </div>
 
-          {/* 呼吸位:首块选中环往左出血 2px,没有它会钻到 sticky gutter 底下被截断(右侧同理,见尾部 spacer) */}
+          {/* Breathing room: the first block's selection ring bleeds 2px left; without it, it slips under the sticky gutter and gets clipped (same on the right, see trailing spacer) */}
           <div className="shrink-0" style={{ width: EDGE_PAD }} />
 
-          {/* 右:标尺 + 轨道 + 播放头 */}
+          {/* Right: ruler + tracks + playhead */}
           <div
             ref={contentRef}
             className="relative select-none"
             style={{ width: W }}
             onClick={() => {
-              // 点空白 = 取消一切选中。交互组件(分镜/chip/刻度/按钮)各自 stopPropagation,
-              // 冒泡到这里的就是背景。框选拖拽收尾不当点选(浏览器一般不发 click,加个保险)。
+              // Click empty space = clear all selection. Interactive parts (shots/chips/ticks/buttons) each stopPropagation,
+              // so what bubbles here is the background. A marquee drag's tail isn't a click (browsers usually don't fire click, but add a safeguard).
               if (marqueeDraggedRef.current || blockMarqueeDraggedRef.current) {
                 marqueeDraggedRef.current = false;
                 blockMarqueeDraggedRef.current = false;
@@ -821,7 +826,7 @@ function StudioTimelineImpl({
               onDeselectAll();
             }}
             onMouseMove={(e) => {
-              if (draggingRef.current) return; // 拖动中由 onSeek 负责,别再 hover-seek
+              if (draggingRef.current) return; // during drag onSeek handles it, don't also hover-seek
               hoverXRef.current = e.clientX;
               if (!scrubArmedRef.current) {
                 const a = scrubEnterRef.current;
@@ -832,8 +837,8 @@ function StudioTimelineImpl({
                 hoverRaf.current = requestAnimationFrame(() => {
                   hoverRaf.current = 0;
                   const tt = secAt(hoverXRef.current);
-                  setHoverT(tt); // hover 竖线即时反馈
-                  if (scrubArmedRef.current) onScrub(tt); // 武装后才跟手:每帧最多一次,中央预览跳帧
+                  setHoverT(tt); // hover line, instant feedback
+                  if (scrubArmedRef.current) onScrub(tt); // only follow after armed: at most once per frame, center preview jumps frames
                 });
             }}
             onMouseLeave={() => {
@@ -845,14 +850,14 @@ function StudioTimelineImpl({
               scrubEnterRef.current = null;
               scrubArmedRef.current = false;
               setHoverT(null);
-              if (armed) onScrub(null); // 还原到播放头(没武装过就没动过预览,不用还原)
+              if (armed) onScrub(null); // restore to the playhead (if never armed, the preview never moved, so no restore needed)
             }}
           >
-            {/* 标尺(点/拖 seek)+ 主次刻度 */}
+            {/* Ruler (click/drag to seek) + major/minor ticks */}
             <div
               className="border-line text-ink-4 relative cursor-ew-resize select-none border-b text-[9px]"
               style={{ height: RULER_H }}
-              onClick={(e) => e.stopPropagation()} // 拖刻度 seek 不取消选中
+              onClick={(e) => e.stopPropagation()} // dragging the ruler to seek doesn't clear selection
               onPointerDown={(e) => {
                 onSeek(secAt(e.clientX));
                 drag(e, (cx) => onSeek(secAt(cx)));
@@ -864,16 +869,16 @@ function StudioTimelineImpl({
                   <div key={i} className="absolute bottom-0 top-0" style={{ left: x(s) }}>
                     <div className="bg-line absolute bottom-0 left-0 w-px" style={{ height: 6 }} />
                     <span className="text-ink-4 absolute left-1 top-0.5 tabular-nums">{fmtTick(s)}</span>
-                    {/* 次刻度(半格) */}
+                    {/* Minor tick (half cell) */}
                     {x(step) >= 40 && <div className="bg-line/60 absolute bottom-0 w-px" style={{ left: x(step) / 2, height: 3 }} />}
                   </div>
                 );
               })}
             </div>
 
-            {/* 轨道背景区(承载所有行) */}
+            {/* Track background area (hosts all rows) */}
             <div ref={tracksRef} className="relative" style={{ height: tracksH }}>
-              {/* 行底纹 */}
+              {/* Row background */}
               {displayTracks.map((track) => (
                 <div
                   key={`bg${track}`}
@@ -882,7 +887,7 @@ function StudioTimelineImpl({
                   style={{ top: rowTop(track), height: rowH(track) }}
                   onPointerDown={(e) => {
                     if (e.target !== e.currentTarget) return;
-                    // 组件轨(track>0)空白:起框选(拖=框选,点=取消选中+定位);轨0=场景栏交给 laneRef
+                    // Element track (track>0) blank: start marquee (drag = marquee, click = deselect + seek); track 0 = scene rail handled by laneRef
                     if (track > 0) onOverlayPointerDown(e);
                     else {
                       onSelect(null);
@@ -891,14 +896,14 @@ function StudioTimelineImpl({
                   }}
                 />
               ))}
-              {/* 组件轨框选矩形(可跨多条轨,含 y 边界) */}
+              {/* Element-track marquee rectangle (can span tracks, includes y bounds) */}
               {blockMarquee && (
                 <div
                   className="pointer-events-none absolute z-40 rounded-sm border border-sky-400 bg-sky-400/15"
                   style={{ left: blockMarquee.l, top: blockMarquee.t, width: Math.max(1, blockMarquee.r - blockMarquee.l), height: Math.max(1, blockMarquee.b - blockMarquee.t) }}
                 />
               )}
-              {/* 轨道重排插入线(gutter 拖行时) */}
+              {/* Track reorder insert line (during gutter drag) */}
               {trackDrag && trackDrag.toSlot !== trackDrag.fromSlot && (
                 <div
                   className="bg-accent/90 pointer-events-none absolute left-0 right-0 z-40 h-0.5 rounded"
@@ -906,22 +911,22 @@ function StudioTimelineImpl({
                 />
               )}
 
-              {/* 轨0=场景栏:缩率图底 + 场景卡(分镜切片)。hover 分镜卡 → 两端出「+」插本地视频 */}
+              {/* Track 0 = scene rail: filmstrip base + scene cards (shot slices). Hover a shot card -> "+" at both ends to insert a local video */}
               {comp.video && (
                 <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }} onMouseLeave={() => setHoverBounds(null)}>
-                  {/* 缩率图底铺(固定每格宽,取最近源帧;同云剪辑)。有分镜卡时不铺——
-                      缩率图进卡内裁切,否则连续底图从卡的透明圆角处漏出来,圆角/细缝都看不见 */}
+                  {/* Filmstrip base fill (fixed tile width, nearest source frame; like cloud editors). Not filled when there are scene cards —
+                      the filmstrip gets clipped inside each card; otherwise the continuous base leaks through the cards' transparent rounded corners, hiding the corners/gaps */}
                   {sceneSpans.length === 0 && (
                     <div className="bg-ink/10 pointer-events-none absolute top-3 bottom-2 left-0 overflow-hidden rounded ring-1 ring-white/10" style={{ width: x(videoDur) }}>
                       {filmTiles.map((tl, i) => (
-                        // max-w-none:preflight 的 img max-width:100% 以容器为基,窄卡会把贴片压瘦露缝(三处贴片同理)
+                        // max-w-none: preflight's img max-width:100% is relative to the container, so a narrow card would squeeze tiles thin and expose gaps (same for all three tile spots)
                         <img key={i} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
                       ))}
                       {(filmstrip ?? []).length === 0 && <div className="h-full w-full bg-gradient-to-r from-accent/20 to-accent/8" />}
                     </div>
                   )}
-                  {/* 场景卡(分镜片段,半透明透出缩率图):序号 + 当前场景高亮 + 取景标 */}
-                  {/* 播放头所在场景的高亮环:单独订阅播放头,播放中不再整表重渲 */}
+                  {/* Scene cards (shot clips, semi-transparent so the filmstrip shows through): index + current-scene highlight + treatment tag */}
+                  {/* Highlight ring for the scene under the playhead: subscribes to the playhead separately, so playback no longer re-renders the whole table */}
                   <ActiveSceneRing sceneSpans={sceneSpans} pps={pps} selectedShotIds={selectedShotIds} />
                   {marquee && (
                     <div
@@ -929,7 +934,7 @@ function StudioTimelineImpl({
                       style={{ left: marquee.l, width: Math.max(1, marquee.r - marquee.l) }}
                     />
                   )}
-                  {/* 重排目标缝的插入线:to<from 画在目标卡左缘,to>from 画在目标卡右缘(splice 语义) */}
+                  {/* Reorder target-seam insert line: to<from draws at the target card's left edge, to>from at its right edge (splice semantics) */}
                   {shotDrag && shotDrag.to !== shotDrag.from && (
                     <div
                       className="bg-accent pointer-events-none absolute top-3 bottom-2 z-50 w-1 -translate-x-1/2 rounded-full shadow"
@@ -939,15 +944,15 @@ function StudioTimelineImpl({
                   {sceneSpans.map(({ shot, start, end }, i) => {
                     const sel = selectedShotIds.has(shot.id);
                     const shotLen = end - start;
-                    const gapR = i < sceneSpans.length - 1 ? SHOT_GAP : 0; // 细缝从卡右缘扣,左缘保持时间精确
+                    const gapR = i < sceneSpans.length - 1 ? SHOT_GAP : 0; // hairline gap off the right edge, left edge stays time-accurate
                     const w = Math.max(8, x(shotLen) - gapR);
                     const hasTreatment = shot.treatment !== 'full';
-                    const dragged = shotDrag?.from === i; // 本卡正被拖动重排
+                    const dragged = shotDrag?.from === i; // this card is being drag-reordered
                     return (
                       <div key={shot.id}>
                         <button
                           type="button"
-                          // 从卡面按下=进重排通道(stopPropagation 拦掉轨面框选;上下空隙才是框选入口,同主流剪辑器)
+                          // Pressing on the card = enter the reorder channel (stopPropagation blocks the track's marquee; only the top/bottom gap is the marquee entry, like a mainstream editor)
                           onPointerDown={(e) => {
                             e.stopPropagation();
                             startShotDrag(e, i);
@@ -955,20 +960,20 @@ function StudioTimelineImpl({
                           onClick={(e) => {
                             e.stopPropagation();
                             if (shotDragMovedRef.current) {
-                              shotDragMovedRef.current = false; // 这是重排拖拽的收尾,不当点选
+                              shotDragMovedRef.current = false; // this is the tail of a reorder drag, not a click
                               return;
                             }
                             if (marqueeDraggedRef.current) {
-                              marqueeDraggedRef.current = false; // 这是框选拖拽的收尾,不当点选
+                              marqueeDraggedRef.current = false; // this is the tail of a marquee drag, not a click
                               return;
                             }
                             const additive = e.metaKey || e.ctrlKey;
-                            if (!additive) onSeek(secAt(e.clientX)); // 单选=选中+播放头到点击位置;多选不跳播放头
+                            if (!additive) onSeek(secAt(e.clientX)); // single select = select + playhead to click position; multi-select doesn't move the playhead
                             onSelectShot(shot.id, additive);
                           }}
                           onDoubleClick={(e) => e.stopPropagation()}
                           onMouseEnter={() => {
-                            if (draggingRef.current) return; // 重排/裁剪拖动扫过别的卡:不弹边界「+」
+                            if (draggingRef.current) return; // a reorder/trim drag sweeping over other cards: don't pop the boundary "+"
                             setHoverBounds({ l: start, r: end });
                           }}
                           title={t('场景 {n} · 镜头:{name}', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
@@ -977,9 +982,9 @@ function StudioTimelineImpl({
                           }`}
                           style={{ left: x(start), width: w, ...(dragged ? { transform: `translateX(${shotDrag!.dx}px)`, zIndex: 45 } : {}) }}
                         >
-                          {/* 缩率图(卡内裁切:圆角/细缝由卡的 overflow-hidden 生效)。
-                              外部插入段:主 filmstrip 是主视频的帧,贴上去就是错的 —— 铺它自己抽的帧
-                              (clipStrips,t=片段源时间;还没抽出来先垫专属底色) */}
+                          {/* Filmstrip (clipped inside the card: rounded corners / hairline gaps from the card's overflow-hidden).
+                              Externally inserted clip: the main filmstrip is the main video's frames, so pasting it would be wrong — lay down its own extracted frames
+                              (clipStrips, t = clip source time; before frames are extracted, show a dedicated placeholder background) */}
                           {shot.src ? (
                             <div className="pointer-events-none absolute inset-0">
                               {(() => {
@@ -998,13 +1003,13 @@ function StudioTimelineImpl({
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
                             </>
                           )}
-                          {/* 序号 */}
+                          {/* Index number */}
                           <span className="absolute left-1 top-1 rounded bg-black/55 px-1 text-[9px] font-semibold leading-[14px] text-white">{i + 1}</span>
                         </button>
 
-                        {/* 取景徽标(每镜):点击选中分镜 → 右侧取景面板(样式卡)打开。坐在场景卡左下角。
-                            取景恒作用整镜(一镜=一取景,要局部就剪开),设了就执行——没有"停留不足合并"
-                            (那是给 LLM 分镜时的克制要求,用户手动剪的不管)。 */}
+                        {/* Treatment badge (per shot): click selects the shot -> opens the right-side treatment panel (style cards). Sits at the scene card's bottom-left.
+                            Treatment always applies to the whole shot (one shot = one treatment; split to localize), and applies as set — no "merge if dwell is too short"
+                            (that restraint is for LLM shot-planning, not for user manual cuts). */}
                         <div className="absolute z-30" style={{ left: x(start) + 3, bottom: SCENE_PAD_B + 1 }}>
                           <button
                             type="button"
@@ -1024,9 +1029,9 @@ function StudioTimelineImpl({
                       </div>
                     );
                   })}
-                  {/* 切点转场(内容级,挂在主轴上):没设=窄带添加入口;设了=以切点为中心的
-                      对称区域(主题色),两侧柄左右对称拖时长(拖一边另一边镜像跟,总长≤4s)。
-                      z-30 在场景卡之上、hover「+」(z-40)之下 */}
+                  {/* Cut-point transition (content-level, mounted on the main track): unset = narrow "add" affordance; set = a
+                      symmetric region centered on the cut (theme color), with handles on both sides dragging the duration symmetrically (drag one, the other mirrors; total <=4s).
+                      z-30 is above scene cards, below the hover "+" (z-40) */}
                   {onOpenTransition &&
                     (() => {
                       const trs = cutTransitions(shots);
@@ -1040,8 +1045,8 @@ function StudioTimelineImpl({
                               title={t('添加转场')}
                               aria-label={t('添加转场')}
                               onMouseEnter={() => {
-                                if (draggingRef.current) return; // 拖动中不抢 hover-scrub
-                                // 悬停转场位=明确意图:立即武装 hover-scrub,中央预览直接跳到切点帧
+                                if (draggingRef.current) return; // don't grab hover-scrub while dragging
+                                // Hovering the transition spot = clear intent: arm hover-scrub immediately, center preview jumps straight to the cut frame
                                 scrubArmedRef.current = true;
                                 setHoverT(end);
                                 onScrub(end);
@@ -1058,7 +1063,7 @@ function StudioTimelineImpl({
                             </button>
                           );
                         }
-                        // 拖动中的实时半宽(本地态);柄夹在 [0.1, min(2, 两侧镜长)]
+                        // Live half-width while dragging (local state); handle clamped to [0.1, min(2, both sides' shot lengths)]
                         const lenPrev = sceneSpans[i]!.end - sceneSpans[i]!.start;
                         const lenSelf = sceneSpans[i + 1]!.end - sceneSpans[i + 1]!.start;
                         const maxHalf = Math.min(MAX_TRANSITION_SEC / 2, lenPrev, lenSelf);
@@ -1090,8 +1095,8 @@ function StudioTimelineImpl({
                             className="absolute top-3 bottom-2 z-30"
                             style={{ left: x(end - half), width: Math.max(10, x(half * 2)) }}
                             onMouseEnter={(e) => {
-                              if (draggingRef.current) return; // 拖动中不抢 hover-scrub
-                              // 悬停转场区=明确意图:立即武装,预览跳到光标时刻(后续 mousemove 冒泡跟手)
+                              if (draggingRef.current) return; // don't grab hover-scrub while dragging
+                              // Hovering the transition region = clear intent: arm immediately, preview jumps to the cursor's time (subsequent mousemove bubbles up to follow)
                               scrubArmedRef.current = true;
                               const tt = secAt(e.clientX);
                               setHoverT(tt);
@@ -1119,7 +1124,7 @@ function StudioTimelineImpl({
                         );
                       });
                     })()}
-                  {/* hover 分镜的前后边界「+」:点击在该分割点插入本地视频(上传→插主轨) */}
+                  {/* "+" at the hovered shot's leading/trailing boundaries: click to insert a local video at that split point (upload -> insert into main track) */}
                   {hoverBounds && onInsertClipAt && !assetDragging && clipPendingAt == null &&
                     [hoverBounds.l, hoverBounds.r].map((b, bi) => (
                       <button
@@ -1141,7 +1146,7 @@ function StudioTimelineImpl({
                 </div>
               )}
 
-              {/* 叠加组件 chip:类型图标 + 标签 + 选中显时间;整块拖移 + 两端裁剪 */}
+              {/* Overlay element chip: type icon + label + time when selected; whole-block drag + trim at both ends */}
               {comp.blocks.map((b) => {
                 const track = b.trackIndex;
                 const sel = selectedBlockIds.has(b.id);
@@ -1150,10 +1155,10 @@ function StudioTimelineImpl({
                 const Icon = meta.icon;
                 const left = x(b.startSec);
                 const width = Math.max(16, x(b.durationSec));
-                // 句级字幕不进时间轴:字幕是口播稿的纯计算产物(编辑入口=口播稿面板/花字面板),
-                // 时间轴上摆一排跟着转写走、不可拖不可裁的 chip 只是噪音
+                // Sentence captions don't enter the timeline: captions are a pure computed output of the script (edited from the script panel / caption panel);
+                // a row of chips that follow the transcript and can't be dragged or trimmed is just noise
                 if (isSentenceCaption(b)) return null;
-                // 跨轨拖移中:chip 吸到目标行渲染;命中行间空隙则骑在插入线上(松手才真改 trackIndex)
+                // During cross-track drag: chip renders snapped to the target row; if it hits a row gap it rides the insert line (trackIndex only really changes on release)
                 const btd = blockTrackDrag?.id === b.id ? blockTrackDrag : null;
                 const crossing = !!btd && (btd.gap != null || btd.to !== track);
                 const top = btd?.gap != null ? slotTop(1 + btd.gap) - ROW_GAP / 2 - (ROW_H - 8) / 2 : rowTop(btd?.to ?? track) + 4;
@@ -1163,26 +1168,26 @@ function StudioTimelineImpl({
                     title={b.label}
                     className={`group absolute overflow-hidden rounded-md ring-1 ${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
                     style={{ left, width, top, height: ROW_H - 8 }}
-                    onClick={(e) => e.stopPropagation()} // chip 经 pointer 选中,阻断冒泡免被背景取消
+                    onClick={(e) => e.stopPropagation()} // chip is selected via pointer; block bubbling so the background doesn't clear it
                     onMouseEnter={(e) => openHover(b, e.currentTarget)}
                     onMouseLeave={closeHover}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
                       closeHover();
-                      onSelect(b.id); // 定位已由单击完成(点哪停哪),双击不再另跳块起点
+                      onSelect(b.id); // positioning was already done by the single click (stop where you clicked); double-click no longer jumps to the block start
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       closeHover();
-                      const additive = e.metaKey || e.ctrlKey; // ⌘/Ctrl 多选
-                      const at = secAt(e.clientX); // 按下处的时间:点选时播放头就停在这
+                      const additive = e.metaKey || e.ctrlKey; // Cmd/Ctrl multi-select
+                      const at = secAt(e.clientX); // time at press point: on click the playhead stops here
                       const grab = at - b.startSec;
                       drag(
                         e,
                         (cx, cy) => {
                           if (additive) return;
                           onMoveBlock(b.id, snap(Math.max(0, secAt(cx) - grab), [b.startSec, b.startSec + b.durationSec]));
-                          // 纵向:行核心带=吸行;行间空隙(含场景轨下沿/字幕轴两侧)=掰新轨插入位
+                          // Vertical: a row's core band = snap to row; a row gap (including the scene track's lower edge / caption lane's sides) = new-track insert position
                           if (!onMoveBlockTrack) return;
                           const base = tracksRef.current?.getBoundingClientRect();
                           if (!base) return;
@@ -1195,11 +1200,11 @@ function StudioTimelineImpl({
                             }
                           }
                           if (to != null || !onMoveBlockNewTrack) {
-                            // 没命中行核心带又不支持掰新轨:保持上次命中的行
+                            // Missed a row's core band and new-track isn't supported: keep the last matched row
                             const prev = blockTrackDragRef.current?.id === b.id ? blockTrackDragRef.current : null;
                             setBlockTrackDrag({ id: b.id, to: to ?? prev?.to ?? track, gap: null });
                           } else {
-                            let g = 0; // 插入位=数过几条行核心带
+                            let g = 0; // insert position = count of row core bands passed
                             for (const tk of overlayTracks) if (y > rowTop(tk) + ROW_H - 4) g += 1;
                             setBlockTrackDrag({ id: b.id, to: null, gap: g });
                           }
@@ -1215,10 +1220,10 @@ function StudioTimelineImpl({
                             return;
                           }
                           if (additive) {
-                            onSelectBlock(b.id, true); // 进/出多选集,不动播放头
+                            onSelectBlock(b.id, true); // toggle in/out of the multi-select set, don't move the playhead
                             return;
                           }
-                          // 点选 = 选中 + 播放头定位到点击的具体位置(舞台直接看到这一刻)
+                          // Click = select + playhead to the exact clicked position (stage shows that moment directly)
                           onSeek(at);
                           onSelectBlock(b.id, false);
                         },
@@ -1234,7 +1239,7 @@ function StudioTimelineImpl({
                         </span>
                       )}
                     </div>
-                    {/* 左裁剪 */}
+                    {/* Left trim */}
                     <span
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -1246,7 +1251,7 @@ function StudioTimelineImpl({
                       }}
                       className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize rounded-l ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
                     />
-                    {/* 右裁剪 */}
+                    {/* Right trim */}
                     <span
                       onPointerDown={(e) => {
                         e.stopPropagation();
@@ -1261,7 +1266,7 @@ function StudioTimelineImpl({
                 );
               })}
 
-              {/* 掰新轨的横向插入线(块拖进行间空隙时):骑在两行之间的缝隙正中 */}
+              {/* New-track horizontal insert line (when a block is dragged into a row gap): rides the center of the gap between two rows */}
               {blockTrackDrag?.gap != null && (
                 <div
                   className="bg-accent pointer-events-none absolute left-0 z-40 h-0.5 rounded-full shadow"
@@ -1269,7 +1274,7 @@ function StudioTimelineImpl({
                 />
               )}
 
-              {/* 字幕轴:句级字幕只读 chip(跟转写走,不可拖/裁;点=播放头跳到点击处,编辑入口在字幕面板) */}
+              {/* Caption lane: sentence-caption read-only chips (follow the transcript, no drag/trim; click = playhead jumps to click point, edited from the caption panel) */}
               {hasCaptions &&
                 captionBlocks.map((b) => (
                   <div
@@ -1278,7 +1283,7 @@ function StudioTimelineImpl({
                     className="absolute overflow-hidden rounded-md bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20"
                     style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
                     onClick={(e) => {
-                      e.stopPropagation(); // 只读:点=跳播放头到点击处,不选中/不取消选中
+                      e.stopPropagation(); // read-only: click = jump playhead to click point, no select/deselect
                       onSeek(secAt(e.clientX));
                     }}
                   >
@@ -1288,7 +1293,7 @@ function StudioTimelineImpl({
                   </div>
                 ))}
 
-              {/* 吸附对齐参考线(拖动命中切点/整秒/邻块边/播放头时) */}
+              {/* Snap alignment guide (when a drag hits a cut point / whole second / adjacent block edge / playhead) */}
               {guide != null && (
                 <div className="pointer-events-none absolute top-0 bottom-0 z-40" style={{ left: x(guide) }}>
                   <div className="absolute top-0 bottom-0 w-px bg-accent/90" style={{ boxShadow: '0 0 6px rgba(63,75,232,0.55)' }} />
@@ -1296,7 +1301,7 @@ function StudioTimelineImpl({
                 </div>
               )}
 
-              {/* 素材拖入的插入点标线:跟光标 —— 所见即所插;悬在主轨=插入片段口径 */}
+              {/* Asset-drag insert-point marker: follows the cursor — what you see is where it inserts; hovering the main track = insert-clip mode */}
               {dropActive && dropHint != null && (
                 <div className="pointer-events-none absolute top-0 bottom-0 z-40" style={{ left: x(dropHint.t) }}>
                   <div className="bg-accent absolute top-0 bottom-0 w-0.5 -translate-x-1/2" style={{ boxShadow: '0 0 8px rgba(63,75,232,0.7)' }} />
@@ -1306,7 +1311,7 @@ function StudioTimelineImpl({
                 </div>
               )}
 
-              {/* 外部片段插入进行中(下载/上传/读时长):落点处亮徽标,别让人以为拖了没反应 */}
+              {/* External clip insert in progress (download/upload/reading duration): show a badge at the drop point so it doesn't look like the drag did nothing */}
               {clipPendingAt != null && (
                 <div className="pointer-events-none absolute z-40 -translate-x-1/2" style={{ left: x(clipPendingAt), top: 8 }}>
                   <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-white">
@@ -1317,21 +1322,21 @@ function StudioTimelineImpl({
 
             </div>
 
-            {/* hover 竖线(贯穿标尺+轨道;中央预览同步跳到该帧) */}
+            {/* Hover vertical line (spans ruler + tracks; center preview jumps to that frame in sync) */}
             {hoverT != null && <div className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-white/35" style={{ left: x(hoverT) }} />}
 
-            {/* 播放头:贯穿标尺+轨道,亮线 + 顶部圆点(订阅播放头 store,每帧只这一个组件动)。
-                空工程不画——空轨道上悬一根红线像坏了 */}
+            {/* Playhead: spans ruler + tracks, bright line + top dot (subscribes to the playhead store, only this component moves each frame).
+                Not drawn on an empty project — a red line hanging on empty tracks looks broken */}
             {(comp.video || comp.blocks.length > 0) && <PlayheadCursor pps={pps} />}
           </div>
 
-          {/* 右侧呼吸位:末块选中环的出血不被滚动容器右缘截断 */}
+          {/* Right breathing room: the last block's selection ring bleed isn't clipped by the scroll container's right edge */}
           <div className="shrink-0" style={{ width: EDGE_PAD }} />
         </div>
       </div>
 
 
-      {/* hover 组件小预览(固定屏幕坐标,浮在 chip 上方) */}
+      {/* Hover element preview (fixed screen coords, floats above the chip) */}
       {hover && (
         <div
           className="border-line bg-panel pointer-events-none fixed z-50 overflow-hidden rounded-lg border shadow-2xl"
@@ -1346,7 +1351,7 @@ function StudioTimelineImpl({
             style={{
               width: PREVIEW_W,
               height: previewH,
-              // 透明区棋盘格(屏幕像素;与 block-preview-card 同款,画进缩放文档会糊)
+              // Transparency checkerboard (screen pixels; same as block-preview-card, drawing it into the scaled doc would blur it)
               backgroundColor: '#ffffff',
               backgroundImage:
                 'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',

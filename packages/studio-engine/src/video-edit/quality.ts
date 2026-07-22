@@ -1,20 +1,22 @@
 import { ALL_FORMATS, BlobSource, Input, VideoSampleSink } from 'mediabunny';
 
 /**
- * 素材质检 + 去重指纹。全部浏览器内、纯算法、零模型、零额外网络。
+ * Clip quality check + dedup fingerprint. All in-browser, pure algorithm, no
+ * model, no extra network.
  *
- * 一次解码 N 帧,同时算出:清晰度 / 黑屏比 / 静帧程度 / 感知哈希(aHash),
- * 顺带产出展示用缩略图(中间帧)。替代单纯的 extractThumbnails,不多花解码。
+ * Decodes N frames once and computes: sharpness / black-frame ratio / static-
+ * frame degree / perceptual hash (aHash), plus a display thumbnail (middle
+ * frame). Replaces a bare extractThumbnails at no extra decode cost.
  */
 
 export interface ClipQuality {
-  /** Laplacian 方差均值,越低越糊 */
+  /** Mean Laplacian variance; lower = blurrier */
   blurScore: number;
-  /** 采样帧里"接近全黑/纯色"的占比 0-1 */
+  /** Fraction of sampled frames that are "near all-black / solid color", 0-1 */
   blackRatio: number;
-  /** 相邻采样帧最大差异,越低越像静帧/卡死 */
+  /** Max diff between adjacent sampled frames; lower = more like a static/frozen frame */
   motionScore: number;
-  /** 8×8 平均哈希,64 位 0/1。跨片段比汉明距离做去重 */
+  /** 8×8 average hash, 64 bits 0/1. Compare Hamming distance across clips to dedup */
   aHash: Uint8Array;
 }
 
@@ -24,20 +26,20 @@ export interface ClipAssessment extends ClipQuality {
 }
 
 export interface QualityVerdict {
-  /** 是否建议进入编排 */
+  /** Whether it's recommended for use */
   usable: boolean;
-  /** 不可用原因(usable=false 时给) */
+  /** Reason it's unusable (given when usable=false) */
   reason?: 'too_short' | 'black' | 'blurry' | 'frozen';
   label?: string;
 }
 
-const BLUR_MIN = 12; // Laplacian 方差低于此判模糊(经验值,320px 灰度)
-const BLACK_LUMA = 24; // 帧平均亮度低于此算黑帧
-const BLACK_VAR = 60; // 且方差低于此(排除"暗但有内容")
-const MOTION_MIN = 1.5; // 相邻帧差异低于此判静帧
+const BLUR_MIN = 12; // Laplacian variance below this = blurry (empirical, 320px grayscale)
+const BLACK_LUMA = 24; // frame mean luma below this = black frame
+const BLACK_VAR = 60; // and variance below this (excludes "dark but has content")
+const MOTION_MIN = 1.5; // adjacent-frame diff below this = static frame
 
 /**
- * 采样 ~6 帧评估质量 + 算 aHash + 出缩略图。
+ * Sample ~6 frames to assess quality + compute aHash + produce a thumbnail.
  */
 export async function assessClip(
   file: File,
@@ -100,7 +102,7 @@ export async function assessClip(
     }
 
     if (!thumbBlob) {
-      // 中间帧没抽到(极短/损坏),退一帧
+      // middle frame didn't decode (very short/corrupt), fall back to whatever's on the canvas
       thumbBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.78 });
     }
 
@@ -120,7 +122,7 @@ export async function assessClip(
   }
 }
 
-/** 按阈值给质检结论。duration 来自 probe。minDuration 短于此判过短(默认 5s)。 */
+/** Verdict from thresholds. duration comes from probe. Shorter than minDuration = too short (default 5s). */
 export function judgeQuality(q: ClipQuality, duration: number, minDuration = 5): QualityVerdict {
   if (duration < minDuration) {
     return { usable: false, reason: 'too_short', label: `过短(<${minDuration}s)` };
@@ -131,7 +133,7 @@ export function judgeQuality(q: ClipQuality, duration: number, minDuration = 5):
   return { usable: true };
 }
 
-/** 两个 aHash 的汉明距离(0-64,越小越像) */
+/** Hamming distance between two aHashes (0-64, smaller = more alike) */
 export function aHashDistance(a: Uint8Array, b: Uint8Array): number {
   let d = 0;
   for (let i = 0; i < 64; i++) if (a[i] !== b[i]) d++;
@@ -139,10 +141,11 @@ export function aHashDistance(a: Uint8Array, b: Uint8Array): number {
 }
 
 /**
- * 去重分组。只把"极高相似"(距离 ≤ threshold)判为重复;
- * 中等相似(多机位同场景)保留——政务多角度 B-roll 是宝贵素材,不能误删。
+ * Dedup grouping. Only "very high similarity" (distance ≤ threshold) counts as a
+ * duplicate; medium similarity (multi-camera, same scene) is kept — multi-angle
+ * B-roll is valuable material, don't delete it by mistake.
  *
- * 返回每个 id → 它重复于哪个 id(保留组内第一个,其余标重复)。
+ * Returns each id → the id it duplicates (first in a group is kept, the rest marked as dupes).
  */
 export function findDuplicates(
   items: Array<{ id: string; aHash: Uint8Array }>,
@@ -158,7 +161,7 @@ export function findDuplicates(
   return dupOf;
 }
 
-// ---- 像素工具 ----
+// ---- Pixel helpers ----
 
 function toGray(rgba: Uint8ClampedArray, w: number, h: number): Float32Array {
   const out = new Float32Array(w * h);
@@ -177,7 +180,7 @@ function lumaStats(gray: Float32Array): { mean: number; variance: number } {
   return { mean, variance: v / gray.length };
 }
 
-/** 3×3 Laplacian 卷积后的方差——经典清晰度/对焦指标 */
+/** Variance after a 3×3 Laplacian convolution — the classic sharpness/focus metric */
 function laplacianVariance(gray: Float32Array, w: number, h: number): number {
   const lap: number[] = [];
   for (let y = 1; y < h - 1; y++) {
@@ -200,7 +203,7 @@ function frameDiff(a: Float32Array, b: Float32Array): number {
   return sum / a.length;
 }
 
-/** 8×8 平均哈希 */
+/** 8×8 average hash */
 function averageHash(rgba: Uint8ClampedArray, w: number, h: number): Uint8Array {
   const N = 8;
   const cells = new Float32Array(N * N);

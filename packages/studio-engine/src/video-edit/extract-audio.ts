@@ -1,15 +1,17 @@
 /**
- * 从视频抽出纯音频(AAC in mp4 容器,即 m4a)。
+ * Extract pure audio from a video (AAC in an mp4 container, i.e. m4a).
  *
- * 用途:"视频不上传,只传音频做 ASR"——1GB 视频抽出来通常只剩几十 MB,
- * 上传时间从十几分钟降到 1-2 分钟。
+ * Purpose: "don't upload the video, upload only the audio for ASR" — a 1GB video
+ * usually reduces to a few dozen MB, cutting upload time from ~15 min to 1-2 min.
  *
- * 走 Conversion API + video.discard,只过音频轨,不解码视频帧,很快(<1s/条)。
+ * Uses the Conversion API + video.discard, passing only the audio track without
+ * decoding video frames — fast (<1s per clip).
  *
- * 无音轨的视频会抛错,调用方应先用 probeVideo 判断 hasAudio。
+ * Throws on a video with no audio track; callers should check hasAudio via probeVideo first.
  *
- * mediabunny 按需动态加载(≈90KB gz):它被 studio/cloud-edit 等首屏静态可达,
- * 但只有用户真选了视频才会用到——别让它压进首包。本目录各文件同此约定。
+ * mediabunny is dynamically imported on demand (≈90KB gz): it's statically
+ * reachable from the studio/cloud-edit first paint, but only used once the user
+ * actually picks a video — keep it out of the initial bundle. Same convention for every file in this directory.
  */
 import type { BufferTarget as BufferTargetType } from 'mediabunny';
 

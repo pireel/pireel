@@ -3,20 +3,21 @@
 import { useEffect, useState } from 'react';
 
 /**
- * useQuote —— 给 /image /video 工作室"生成按钮旁的预估积分"用。
+ * useQuote — powers the "estimated credits" shown next to the generate button in the /image and
+ * /video studios.
  *
- * 监听 params 变化时 debounce 拉 /api/billing/quote 拿当前积分预算。
- * model_id 缺时返回 null（前端按钮就只显示「生成」而不带预估）。
+ * Debounce-fetches /api/billing/quote on param changes to get the current credit estimate.
+ * Returns null when model_id is missing (button then shows just "generate" with no estimate).
  *
- * 入参 deep compare 用 JSON.stringify——只支持可序列化对象，对当前 schema 够用。
+ * Deep-compares args via JSON.stringify — only supports serializable objects, which is enough for the current schema.
  */
 
 export interface UseQuoteArgs {
   toolId: string;
-  /** image-gen / video-gen 必传；其他 tool 可空。 */
+  /** Required for image-gen / video-gen; optional for other tools. */
   modelId?: string;
   params: Record<string, unknown>;
-  /** 防抖延迟（ms）。默认 250。 */
+  /** Debounce delay (ms). Default 250. */
   debounceMs?: number;
 }
 
@@ -44,7 +45,7 @@ export function useQuote(args: UseQuoteArgs): number | null {
         const j = (await res.json()) as { credits?: number };
         if (!cancelled && typeof j.credits === 'number') setCredits(j.credits);
       } catch {
-        // 静默——预估失败不阻挡用户提交
+        // Silent — a failed estimate shouldn't block the user from submitting
       }
     }, debounceMs);
     return () => {

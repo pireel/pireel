@@ -1,11 +1,12 @@
 'use client';
 
 /**
- * 右侧 rail 的口播稿面板(Descript 式转写驱动剪辑):整篇稿子是**词级纯文本流**——
- * 点一个词弹出「删除 / 替换」;划词选中多个词 = 批量删除;句间空白内联成 (…9.4s) 标记,
- * 点它可删。删词/删空白 = 删掉对应视频区间(源时间 → 当前剪辑映射在 workbench cutSrcRanges)。
- * 顶部批量动作:一键删空白、删语气词(嗯/呃…,需真词级时间戳)。
- * 面板只算不剪——剪切/替换走回调(workbench 统一做 undo 快照/块压缩/花字同步)。
+ * Right-rail script panel (Descript-style transcript-driven editing): the whole script is a word-level plain-text stream —
+ * click a word to pop up "delete / replace"; drag-select multiple words = batch delete; inter-sentence silence is inlined
+ * as a (…9.4s) marker you can click to delete. Deleting words/silence = deleting the corresponding video range (source
+ * time -> current-edit mapping lives in workbench cutSrcRanges).
+ * Top batch actions: one-click delete silence, delete filler words (uh/um…, requires true word-level timestamps).
+ * The panel only computes, it doesn't cut — cut/replace go through callbacks (workbench centralizes undo snapshot / block compaction / caption sync).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -16,28 +17,28 @@ import { srcToEditedLoose } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { t } from './i18n';
 
-/** 句间空白判定阈值(秒):短于这个的停顿是正常呼吸,不算"空白"。 */
+/** Inter-sentence silence threshold (sec): pauses shorter than this are normal breathing, not "silence". */
 const MIN_SILENCE_SEC = 0.8;
-/** 删空白时两侧各留的缓冲(秒):贴边剪会吃掉尾音。 */
+/** Buffer left on each side when cutting silence (sec): cutting flush would eat the trailing sound. */
 const CUT_PAD_SEC = 0.12;
-/** 语气词(整词匹配,保守清单——"那个/就是"常有实义,不碰)。 */
+/** Filler words (whole-word match, conservative list — words like "那个/就是" often carry real meaning, leave them). */
 const FILLER_RE = /^(嗯+|呃+|唔+|诶+|额+|um+|uh+|emm+|hmm+)[,。,.!?!?…]?$/i;
 
 export type SrcRange = [number, number];
-/** 带源的剪切/恢复单元:src=null 为口播源,否则为插入源的 src 键——各源时间轴独立。 */
+/** Source-tagged cut/restore unit: src=null is the talking-head source, otherwise the inserted source's src key — each source's timeline is independent. */
 export type ScriptCut = { src: string | null; range: SrcRange };
 type Word = { text: string; start: number; end: number };
 
-/** 稿子是多源的:每句属于一个源(口播源 src=null / 插入源 src=该段的 src 键),
- *  源时间运算(在场判定/删/恢复/seek)只和**同源**片段求交——不同文件的秒数会数值撞车。 */
+/** The script is multi-source: each sentence belongs to one source (talking-head src=null / inserted src = that segment's src key).
+ *  Source-time operations (presence check / delete / restore / seek) intersect only with same-source shots — seconds from different files would collide numerically. */
 const inSrcOf = (src: string | null) => (c: VideoShot) => (c.src ?? null) === src;
 
-/** 某源的 src 区间在当前剪辑下是否还有残留(被剪光的词/句=已删)。 */
+/** Whether a source's src range still has any remnant under the current edit (a fully-cut word/sentence = deleted). */
 function srcRangeAlive(shots: VideoShot[], src: string | null, s: number, e: number): boolean {
   return shots.some((c) => (c.src ?? null) === src && Math.min(c.srcEnd, e) - Math.max(c.srcStart, s) > 0.04);
 }
 
-/** 稿子里的一句:seg 属于哪个源 + 源内句序 + 成片落点(排序键,句子按成片顺序插排)。 */
+/** One sentence in the script: which source seg belongs to + in-source sentence index + final-cut landing point (sort key; sentences interleave in final-cut order). */
 type SentItem = { src: string | null; si: number; seg: AsrSegment; words: Word[]; at: number };
 
 type Popover =
@@ -60,32 +61,33 @@ export function ScriptPanel({
   onReplaceWord,
 }: {
   sentences: AsrSegment[] | null;
-  /** 插入源的转写(键=shot.src):句子时间是**该源文件**自己的时间轴。 */
+  /** Inserted-source transcripts (keyed by shot.src): sentence times are on that source file's own timeline. */
   clipSentences: Record<string, AsrSegment[]>;
   shots: VideoShot[];
   videoDurationSec: number;
-  /** ASR 提取进行中(按钮转圈防连点)。 */
+  /** ASR extraction in progress (button spins to prevent double-clicks). */
   extracting: boolean;
   onExtract: () => void;
-  /** 跳到某处(成片时间)。 */
+  /** Seek somewhere (final-cut time). */
   onSeek: (editedSec: number) => void;
-  /** 剪掉一批(源,源时间区间);msg = 成功 toast 文案。 */
+  /** Cut a batch (source, source time range); msg = success toast text. */
   onCut: (cuts: ScriptCut[], msg: string) => void;
-  /** 恢复一批已删的(源,源时间区间)(点已删的词)。 */
+  /** Restore a batch of deleted ones (source, source time range) (clicking a deleted word). */
   onRestore: (cuts: ScriptCut[], msg: string) => void;
-  /** 替换某源某句里的一个词(按词时间戳定位;同步已铺花字)。 */
+  /** Replace one word in a given source's sentence (located by word timestamp; syncs already-laid captions). */
   onReplaceWord: (src: string | null, si: number, word: Word, text: string) => void;
 }) {
   const sents = useMemo(() => sentences ?? [], [sentences]);
-  // 全源句流:口播句 + 各插入源的句(词流真词级优先,没有按字符占比估算),
-  // 按各自源→成片的落点插排——插入片段的稿子出现在它在片子里的位置
+  // All-source sentence stream: talking-head sentences + each inserted source's sentences (prefer true word-level word streams,
+  // else estimate by character proportion), interleaved by each one's source->final-cut landing point — an inserted clip's
+  // script appears at its position in the film
   const items = useMemo(() => {
     const out: SentItem[] = [];
     sents.forEach((seg, si) =>
       out.push({ src: null, si, seg, words: seg.words?.length ? seg.words : wordsFromText(seg.text, seg.start, seg.end), at: srcToEditedLoose(shots, seg.start, inSrcOf(null)) }),
     );
     for (const [src, list] of Object.entries(clipSentences)) {
-      if (!shots.some((c) => c.src === src)) continue; // 该源已整个不在片子里
+      if (!shots.some((c) => c.src === src)) continue; // this source is entirely out of the film
       list.forEach((seg, si) =>
         out.push({ src, si, seg, words: seg.words?.length ? seg.words : wordsFromText(seg.text, seg.start, seg.end), at: srcToEditedLoose(shots, seg.start, inSrcOf(src)) }),
       );
@@ -94,8 +96,9 @@ export function ScriptPanel({
   }, [sents, clipSentences, shots]);
   const hasTrueWords = items.some((it) => it.seg.words?.length);
 
-  // 空白 = 句间(含片头/片尾)无语音区,留缓冲后仍 ≥ 阈值。已删的**留在流里划横线**(同删词口径),
-  // 不消失。只算口播源(插入源的静音段是画面本体,不当"空白"批量剪)
+  // Silence = a no-speech region between sentences (including head/tail) still ≥ threshold after padding. Deleted ones
+  // stay in the stream struck through (same convention as deleted words), they don't vanish. Only the talking-head source
+  // counts (an inserted source's silent stretches are the footage itself, not "silence" to batch-cut)
   const gaps = useMemo(() => {
     if (!sents.length || videoDurationSec <= 0) return [] as { after: number; range: SrcRange; alive: boolean }[];
     const out: { after: number; range: SrcRange; alive: boolean }[] = [];
@@ -113,7 +116,7 @@ export function ScriptPanel({
   const silenceTotal = silences.reduce((a, { range: [s, e] }) => a + (e - s), 0);
   const gapAfter = useMemo(() => new Map(gaps.map((g) => [g.after, g])), [gaps]);
 
-  // 语气词:必须有真词级时间戳(估算时间不敢自动批量下剪刀;手动点删由用户自己判断)。全源参与
+  // Filler words: require true word-level timestamps (won't auto-batch-cut on estimated times; manual click-delete is the user's own call). All sources participate
   const fillers = useMemo(() => {
     if (!hasTrueWords) return [] as { src: string | null; range: SrcRange; text: string }[];
     const out: { src: string | null; range: SrcRange; text: string }[] = [];
@@ -129,7 +132,7 @@ export function ScriptPanel({
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [pop, setPop] = useState<Popover | null>(null);
-  const [replacing, setReplacing] = useState(''); // 替换输入(pop.kind==='word' 时)
+  const [replacing, setReplacing] = useState(''); // replacement input (when pop.kind==='word')
   const [replaceMode, setReplaceMode] = useState(false);
   useEffect(() => {
     if (!pop) return;
@@ -142,7 +145,7 @@ export function ScriptPanel({
     return () => window.removeEventListener('mousedown', close);
   }, [pop]);
 
-  /** 面板内坐标(popover 绝对定位口径)。 */
+  /** Panel-local coordinates (for the popover's absolute positioning). */
   const localXY = (clientX: number, clientY: number) => {
     const r = rootRef.current?.getBoundingClientRect();
     return { x: clientX - (r?.left ?? 0), y: clientY - (r?.top ?? 0) };
@@ -157,13 +160,13 @@ export function ScriptPanel({
     onSeek(srcToEditedLoose(shots, word.start, inSrcOf(it.src)));
   };
 
-  /** 划词多选:mouseup 收拢选区覆盖到的词——在场的可批量删,已删的可批量恢复(混选两个动作都给)。
-   *  按源分组:各源时间轴独立,删除区间不能跨源合并。 */
+  /** Drag multi-select: on mouseup, gather the words the selection covers — present ones can be batch-deleted, deleted ones
+   *  batch-restored (a mixed selection offers both actions). Grouped by source: each source's timeline is independent, so delete ranges can't merge across sources. */
   const onMouseUp = (e: React.MouseEvent) => {
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !rootRef.current) return;
     const nodes = [...rootRef.current.querySelectorAll<HTMLElement>('[data-w]')].filter((el) => sel.containsNode(el, true));
-    if (nodes.length < 2) return; // 单词走点击弹层
+    if (nodes.length < 2) return; // a single word goes through the click popover
     const aliveBySrc = new Map<string | null, { lo: number; hi: number; n: number }>();
     const deadBySrc = new Map<string | null, SrcRange[]>();
     let deadN = 0;
@@ -179,7 +182,7 @@ export function ScriptPanel({
         g.n++;
         aliveBySrc.set(src, g);
       } else {
-        // 相邻已删词的 pad 互相重叠 → 合并成连续区间(restoreSrcRange 对重复恢复本就免疫)
+        // Adjacent deleted words' pads overlap -> merge into one continuous range (restoreSrcRange is already idempotent to repeated restores)
         const a = Math.max(0, ws - 0.02);
         const b = we + 0.02;
         const rs = deadBySrc.get(src) ?? [];
@@ -222,7 +225,7 @@ export function ScriptPanel({
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col" ref={rootRef}>
       <PanelHeader hint={hasTrueWords ? t('点词删/换 · 划词批量删 · (…s)=空白') : t('点词删/换(词级时间为句内估算)· 划词批量删')} />
-      {/* 批量动作 */}
+      {/* Batch actions */}
       <div className="border-line flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
         <button
           type="button"
@@ -243,8 +246,9 @@ export function ScriptPanel({
           <Scissors size={11} /> {fillers.length ? t('删语气词({n})', { n: fillers.length }) : t('删语气词')}
         </button>
       </div>
-      {/* 词级纯文本流:点词弹删/换,划词多选,空白内联 (…9.4s);已删的词/空白留在流里划横线。
-          横向永不滚:西文词间补空格给断行机会,break-words 兜底超长 token(URL/长数字) */}
+      {/* Word-level plain-text stream: click a word to pop delete/replace, drag to multi-select, silence inlined as (…9.4s);
+          deleted words/silence stay in the stream struck through.
+          Never scrolls horizontally: add spaces between Latin words for line-break opportunities, break-words as a fallback for over-long tokens (URLs/long numbers) */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words px-3 py-2.5 text-[13px] leading-[1.9]" onMouseUp={onMouseUp}>
         {gapAfter.has(-1) && (
           <GapToken
@@ -287,7 +291,7 @@ export function ScriptPanel({
                 </span>
               );
             })
-              // 西文词界补空格:相邻 span 间没有空白 = 英文句连成一个不可断长串(既丑又撑出横向滚动)
+              // Add spaces at Latin word boundaries: no whitespace between adjacent spans = an English sentence becomes one unbreakable long string (ugly, and forces horizontal scroll)
               .flatMap((node, wi, arr) => (wi < arr.length - 1 && needsSpace(it.words[wi]!.text, it.words[wi + 1]!.text) ? [node, ' '] : [node]))}
             {it.src === null && gapAfter.has(it.si) && (
               <GapToken
@@ -302,7 +306,7 @@ export function ScriptPanel({
         ))}
       </div>
 
-      {/* 弹层:词(删/换)· 空白(删)· 多选(批量删) */}
+      {/* Popover: word (delete/replace) · silence (delete) · multi-select (batch delete) */}
       {pop && (
         <div
           data-script-pop
@@ -434,13 +438,13 @@ export function ScriptPanel({
   );
 }
 
-/** 西文词界要不要补空格:前词以 ASCII 词字符/句点类结尾 且 后词以 ASCII 词字符开头。
- *  中文词界不补(字间本就可断行,补了会撑开视觉);ASR 的英文词通常不自带空格。 */
+/** Whether to add a space at a Latin word boundary: prev word ends with an ASCII word char / punctuation and next word starts with an ASCII word char.
+ *  Don't add between Chinese words (chars already break freely; adding would spread them out visually); ASR's English words usually don't carry their own spaces. */
 function needsSpace(cur: string, next: string): boolean {
   return /[A-Za-z0-9.,!?;:'")\]%]$/.test(cur) && /^[A-Za-z0-9('"[$]/.test(next);
 }
 
-/** 空白标记:(…9.4s)。在场=点删;已删=划横线留在流里,点它可恢复(与词的删/恢复同口径)。 */
+/** Silence marker: (…9.4s). Present = click to delete; deleted = struck through in the stream, click to restore (same convention as word delete/restore). */
 function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean }; onClick: (e: React.MouseEvent) => void }) {
   const label = `(…${(gap.range[1] - gap.range[0]).toFixed(1)}s)`;
   return (
@@ -461,7 +465,7 @@ function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean }; 
   );
 }
 
-/** 标题归浮窗头部,这里只剩一行说明。 */
+/** The title belongs to the floating-window header; only a one-line hint remains here. */
 function PanelHeader({ hint }: { hint: string }) {
   return <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{hint}</div>;
 }

@@ -1,18 +1,22 @@
 /**
- * 右侧 agent 的 chat 提示词面:身份/剧本(CHAT_IDENTITY,静态)+ <composition_state>
- * 局势拼装(buildSituation)+ system 总装(buildChatSystem)。工具契约在 ./agent-tools。
+ * Chat prompt surface for the side-panel agent: identity/script (CHAT_IDENTITY,
+ * static) + <composition_state> situation assembly (buildSituation) + system
+ * assembly (buildChatSystem). Tool contracts live in ./agent-tools.
  *
- * 缓存架构(与 propose.ts 的 cache_control 断点配套):system 完全静态——局势快照
- * **不进 system**,由客户端在发消息时经 buildSituation 拼好挂在 user 消息的
- * metadata.situation 上(随会话持久化),路由把它物化成该消息开头的 text part。
- * 历史因此 append-only、字节稳定:system 断点 + 滚动消息断点都能真正命中。
- * 口播稿也不进快照(最大头且不随剪辑变化)——经 extract_asr 回执 / read_script
- * 工具一次性进信息流,之后走缓存。
+ * Cache architecture (paired with propose.ts's cache_control breakpoints): the
+ * system is fully static — the situation snapshot does NOT go into system. The
+ * client builds it via buildSituation when sending a message and attaches it to
+ * the user message's metadata.situation (persisted with the conversation); the
+ * route materializes it into a text part at the start of that message. History is
+ * therefore append-only and byte-stable: both the system breakpoint and rolling
+ * message breakpoints actually hit. The transcript also stays out of the snapshot
+ * (largest chunk, unchanged by editing) — it enters the stream once via an
+ * extract_asr receipt / read_script tool, then hits cache.
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
 
-/* ============================ 局势快照类型(拼进 system 的那部分请求体) ============================ */
+/* ============================ Situation snapshot types ============================ */
 
 export interface BlockSnap {
   id: string;
@@ -20,20 +24,22 @@ export interface BlockSnap {
   kind?: string;
   startSec?: number;
   durationSec?: number;
-  /** 待配图占位(分镜摆的坑,还没生成设计图形)。 */
+  /** Empty slot placed by the storyboard, no designed graphic generated yet. */
   placeholder?: boolean;
 }
 export interface ShotSnap {
   id: string;
   index?: number;
-  /** 成片时间区间(剪辑工具 fromSec/atSec 的寻址时钟)。 */
+  /** Edited-timeline interval (the clock cutting tools' fromSec/atSec address). */
   editedStart?: number;
   editedEnd?: number;
   srcStart?: number;
   srcEnd?: number;
   treatment?: string;
-  /** 插入源短标(A/B/…,同一外部源同一字母):有值 = 该段来自其它源文件,
-   *  src 时间是那个文件自己的,与口播稿时间轴无关。缺省 = 主源(口播)切片。 */
+  /** Inserted-source short tag (A/B/…, same letter for the same external
+   *  source): present = this segment comes from another source file, its src
+   *  times belong to that file and are unrelated to the narration timeline.
+   *  Absent = a slice of the main (narration) source. */
   source?: string;
 }
 export interface CompositionSnap {
@@ -41,7 +47,7 @@ export interface CompositionSnap {
   theme?: string;
   blocks?: BlockSnap[];
   shots?: ShotSnap[];
-  /** 句级字幕层状态:有值 = 字幕开着(全局预设层)。缺省 = 没铺字幕。 */
+  /** Sentence-caption layer state: present = captions on (global preset layer). Absent = no captions laid. */
   captions?: { preset?: string; yPct?: number };
 }
 export interface SelectedSnap {
@@ -55,34 +61,37 @@ export interface PipelineSnap {
   plan?: boolean;
   visual?: boolean;
 }
-/** 局势 = composition 快照 + 选中 + 播放头 + 流水线状态。**不含口播稿**——稿子
- *  锚源时间、不随剪辑变化,没必要每轮重发;它经 extract_asr 回执 / read_script
- *  工具一次性进信息流(缓存友好)。 */
+/** Situation = composition snapshot + selection + playhead + pipeline state.
+ *  Does NOT include the transcript — it is anchored to source time, unchanged by
+ *  editing, no need to resend each turn; it enters the stream once via an
+ *  extract_asr receipt / read_script tool (cache-friendly). */
 export interface ChatSituation {
   composition?: CompositionSnap;
   selected?: SelectedSnap | null;
   playheadSec?: number;
-  /** 流水线状态:哪些阶段已完成,agent 不盲目重跑/答非所问。 */
+  /** Pipeline state: which stages are done, so the agent doesn't blindly re-run / answer off-target. */
   pipeline?: PipelineSnap;
-  /** 主视频字节是否已挂载(false=标签页刚打开,OPFS/云端取回中或缺失——视频类
-   *  工具会失败,但项目数据是全的;agent 别误读成"项目没视频")。 */
+  /** Whether the main video bytes are loaded (false = tab just opened, being
+   *  restored from OPFS/cloud, or missing — video tools will fail, but project
+   *  data is complete; agent must not misread as "project has no video"). */
   videoBytesReady?: boolean;
-  /** 会话挂载的 frame(studio 主题模板包;客户端只传 id,路由解析后注入挂载通告)。 */
+  /** Frame attached to the conversation (studio theme content pack; client sends only the id, route resolves it and injects the attach notice). */
   frameId?: string;
 }
 
-/** 路由侧解析好的 frame 元信息(playbook 正文经 read_frame 工具按需取,不直接进 system)。 */
+/** Frame metadata resolved on the route side (playbook body is fetched on demand via read_frame, not put directly in system). */
 export interface ResolvedFrame {
   id: string;
   title: string;
 }
 
-/** read_frame 返回 playbook 时统一前置的口径声明:frame recipes 的 px 是 1920 宽
- *  预览参考系,compose 是 1080 宽竖屏参考系 —— 绝对 px 不能照抄,尺寸听 compose
- *  的 SIZING 表,frame 管母题/比例/token。单点注入,所有 frame 生效。 */
+/** Preamble prepended to every read_frame playbook: frame recipe px are for the
+ *  1920-wide preview reference; compose is a 1080-wide vertical reference — don't
+ *  copy absolute px, sizes follow compose's SIZING table, frame governs
+ *  motif/proportion/token. Injected once, applies to all frames. */
 export const FRAME_PLAYBOOK_PREAMBLE = `NOTE ON UNITS: px values in this playbook's motifs and block recipes were written for the frame gallery's 1920px-wide landscape PREVIEW reference. The composing canvas is 1080px wide (vertical) — do NOT copy absolute px into add_block/edit_block/add_graphics instructions. Carry the frame's MOTIFS, PROPORTIONS and voice; let the compose-side SIZING table govern actual px. Token-level rules (palette, radius, shadow, fonts) apply as-is.`;
 
-/* ============================ 身份/剧本 ============================ */
+/* ============================ Identity / script ============================ */
 
 
 export const CHAT_IDENTITY = `You are the editing agent inside Studio — an AI video DIRECTOR that turns a vertical (1080×1920) talking-head short into a designed piece: storyboard the video track (shots, framing, cuts) and lay DESIGNED graphic fragments over it (metric cards, comparisons, charts, flow/structure diagrams, callouts). Designed graphics are the main event; keyword overlays/subtitles are an optional theme-gated extra, not the default.
@@ -117,28 +126,31 @@ REPLY STYLE — NARRATE THE WORK
 - SMALL EDITS (one or two tools): no play-by-play — just ONE short recap sentence after the tools run.
 - END OF A MULTI-STEP JOB: a short structured recap of what the user actually got (a few bullets: theme, shots/framing changes, graphics count, captions, duration), then stop — no filler questions.`;
 
-/* ============================ 局势拼装 + system 总装 ============================ */
+/* ============================ Situation assembly + system assembly ============================ */
 
 const n = (x: number | undefined): string =>
   typeof x === 'number' ? (Math.round(x * 10) / 10).toString() : '?';
 
-/** 发消息时拼一份当前局势(客户端调用,挂到 user 消息的 metadata.situation;
- *  路由物化成 <composition_state> text part——不进 system,前缀缓存才立得住)。 */
+/** Build the current situation when sending a message (called client-side,
+ *  attached to the user message's metadata.situation; the route materializes it
+ *  into a <composition_state> text part — kept out of system so prefix caching holds). */
 export function buildSituation(body: ChatSituation): string {
   const c = body.composition ?? {};
   const lines: string[] = [];
   lines.push(`Edited duration: ${n(c.durationSec)}s. Theme: ${c.theme ?? 'general'}.`);
 
-  // 流水线状态:agent 知道哪步已跑过,不盲目重跑、也不会声称有并不存在的转写
+  // Pipeline state: agent knows which steps ran, won't blindly re-run or claim a transcript that doesn't exist
   const p = body.pipeline;
   if (p) {
     const flag = (b: boolean | undefined) => (b ? 'done' : 'not yet');
     lines.push(`Pipeline: transcript ${flag(p.asr)} · narration plan ${flag(p.plan)} · visual analysis ${flag(p.visual)}.`);
   }
 
-  // 字节挂载态:标签页刚打开时源视频可能还在 OPFS/云端取回——数据面是全的,
-  // 但视频类工具(capture_frame/extract_asr/visual_brief/lay_out/export)会失败,
-  // 必须明告,防 agent 把"画面没接上"误读成"项目没视频"或跟别的标签页不同步
+  // Bytes-loaded state: when the tab just opened the source video may still be
+  // restoring from OPFS/cloud — data is complete, but video tools
+  // (capture_frame/extract_asr/visual_brief/lay_out/export) will fail. Must say
+  // so, to stop the agent misreading "video not attached" as "project has no
+  // video" or out of sync with another tab
   if (body.videoBytesReady === false) {
     lines.push(
       'VIDEO BYTES NOT LOADED (yet): this tab has the full project DATA, but the source video bytes are still being restored (local cache / cloud vault) or missing. Video-dependent tools (capture_frame, extract_asr, visual_brief, lay_out, export) will fail until loaded — re-check get_state in ~10s. Data-level edits are safe now. If it stays not-loaded, the video may exceed the backup size limit — ask the user to open the project in the browser where they originally added the video.',
@@ -190,11 +202,14 @@ export function buildSituation(body: ChatSituation): string {
   return lines.join('\n');
 }
 
-/** chat 的完整 system = 身份/剧本 + frame 挂载通告(或未挂载时的目录+推荐规则)。
- *  **完全静态**(同一 frame 态下逐轮字节相同):局势快照在 user 消息里,playbook
- *  正文经 read_frame 工具按需读——都不进 system,缓存前缀不被打穿。 */
-/** 字幕预设目录(完全静态,进 system:set_captions 从这里选 id,不自造样式)。
- *  也进 MCP instructions(prompts/mcp.ts)——外部 agent 同一份目录。 */
+/** Full chat system = identity/script + frame attach notice (or, when none is
+ *  attached, the catalog + recommendation rules). Fully static (same bytes each
+ *  turn under one frame state): the situation snapshot lives in the user message
+ *  and the playbook body is read on demand via read_frame — neither goes into
+ *  system, so the cache prefix isn't broken. */
+/** Caption preset catalog (fully static, goes into system: set_captions picks an
+ *  id from here, never invents styles). Also in the MCP instructions
+ *  (prompts/mcp.ts) — external agents get the same catalog. */
 export const CAPTION_CATALOG_BLOCK = `\n\n<caption_catalog>\nCaption style presets for set_captions — two modes: emphasis (word-by-word: whole line shown, the spoken word highlighted) / line (clean full-line fade-in). Pick by fit (name + mode); NEVER invent an id. yPct/scale tune position & size separately.\n${CAPTION_PRESETS.map((p) => `- ${p.id} · ${p.name} · ${p.mode}`).join('\n')}\n</caption_catalog>`;
 
 export function buildChatSystem(frame?: ResolvedFrame | null, frameCatalog?: string): string {

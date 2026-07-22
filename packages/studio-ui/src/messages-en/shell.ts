@@ -1,4 +1,4 @@
-/** en 词典分片:app 壳(projects-home / providers 等 src/features/studio-shell)。 */
+/** en dictionary shard: the app shell (projects-home / providers etc. under src/features/studio-shell). */
 const dict: Record<string, string> = {
   '我的项目': 'My projects',
   '一个项目一条视频：分镜、取景、设计组件、字幕、导出。': 'One project per video: shots, framing, elements, captions, export.',

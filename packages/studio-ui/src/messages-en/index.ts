@@ -1,6 +1,7 @@
 /**
- * studio-ui en 词典总装(key=源码中文原文)。分文件按源码文件维护,一个源文件
- * 一个词典文件,避免多人/多 agent 改同一文件冲突;新增源文件转换时在这里补一行。
+ * studio-ui en dictionary assembly (key = the original source Chinese). Maintained split by source file,
+ * one dictionary file per source file, to avoid conflicts when multiple people/agents edit the same file;
+ * add a line here when converting a new source file.
  */
 import workbench from './workbench';
 import captionsPanel from './captions-panel';

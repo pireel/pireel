@@ -1,13 +1,13 @@
 'use client';
 
 /**
- * 进场 boot 层:两件事都不做完不放行——
- *  1. 预热重资源(MODNet 26M + ort wasm 27M + GSAP):流式 fetch 进 HTTP 缓存,
- *     字节级真实进度;人像抠像/预览后续用到时秒开。失败/404 不拦进场(OSS 壳可能没这些文件)。
- *  2. 等项目数据落定(云端优先回落本地的 auto-restore 效果跑完,由 dataReady 传入)。
- * 背景 = 主题目录(useFrameCatalog)按 palette 画的纯 CSS 主题卡墙,列交叉滚动 + 虚化
- * ——不跑 22 个 GSAP iframe(loading 屏上自重就该轻);虚化后差别本也看不出。
- * 预热是模块级单次:换项目重挂工作台不重拉,进度直接续在已完成态。
+ * Entry boot layer: won't let you through until both are done —
+ *  1. Warm up heavy assets (MODNet 26M + ort wasm 27M + GSAP): streaming fetch into HTTP cache,
+ *     real byte-level progress; person matte/preview open instantly when later needed. Failure/404 doesn't block entry (an OSS shell may lack these files).
+ *  2. Wait for project data to settle (the cloud-first-then-local auto-restore finishing, passed in via dataReady).
+ * Background = a pure-CSS theme card wall drawn from the frame catalog (useFrameCatalog) palettes, columns cross-scrolling + blurred
+ * — not running 22 GSAP iframes (a loading screen should be lightweight); the blur hides the difference anyway.
+ * Warm-up is module-level, once: switching projects and remounting the workbench doesn't refetch, progress just continues from its completed state.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -18,29 +18,29 @@ import { t } from './i18n';
 
 interface WarmAsset {
   url: string;
-  /** 磁盘实际字节数(进度分母;传输压缩不影响 reader 读到的解压字节) */
+  /** Actual on-disk byte count (the progress denominator; transfer compression doesn't affect the decompressed bytes the reader sees) */
   bytes: number;
 }
 
-// 尺寸手抄自 public/ 实际文件——只是进度权重,不需要精确到字节。
-// URL 从 matte-assets 取(与 person-matte 实际加载同 URL 含 ?v= 戳,预热才真命中缓存;
-// 常量 rev 与运行时 ort 版本漂移时只浪费这次预热,功能不受影响)。
-// 惰性求值:URL 里的 CDN base 由壳层注入(setMatteAssetBase),模块顶层取会抢跑在注入前。
+// Sizes hand-copied from the actual files in public/ — just progress weights, no need for byte accuracy.
+// URLs come from matte-assets (same URL with ?v= stamp as person-matte's real load, so warm-up actually hits the cache;
+// if the constant rev drifts from the runtime ort version it only wastes this warm-up, functionality unaffected).
+// Lazy evaluation: the CDN base in the URL is injected by the shell (setMatteAssetBase); reading at module top level would race ahead of injection.
 const warmAssets = (): WarmAsset[] => [
   { url: modnetUrl(), bytes: 25_888_640 },
   { url: ortWasmUrls().wasm, bytes: 26_827_543 },
   { url: '/vendor/gsap.min.js', bytes: 72_927 },
 ];
 const TOTAL_WARM_BYTES = 25_888_640 + 26_827_543 + 72_927;
-/** 资源等待硬顶:慢网下不无限拦门,到点先进(预热在背后继续跑完)。 */
+/** Hard ceiling on asset waiting: don't block the door forever on slow networks, enter at the deadline (warm-up keeps running in the background). */
 const WARM_WAIT_CEILING_MS = 20_000;
-const MIN_HOLD_MS = 1_800; // 全命中缓存时也完整演一遍开场(用户定的:太快反而没体验)
+const MIN_HOLD_MS = 1_800; // play the full intro even on a full cache hit (user's call: too fast feels like no experience)
 const FADE_MS = 450;
-/** 进度条显示打底:实际进度再快,显示值也按这个时长匀速涨满——不闪跳 100% 干等 */
+/** Progress-bar display floor: however fast real progress is, the shown value fills evenly over this duration — no flash to 100% then idle wait */
 const PROGRESS_RAMP_MS = 1_400;
 
 let warmStarted = false;
-let warmLoaded = 0; // 单调递增,模块级 —— 重挂/换项目续用
+let warmLoaded = 0; // monotonically increasing, module-level — reused across remount/project switch
 const warmListeners = new Set<(ratio: number) => void>();
 const warmRatio = () => Math.min(1, warmLoaded / TOTAL_WARM_BYTES);
 
@@ -65,12 +65,12 @@ async function warmOne(a: WarmAsset): Promise<void> {
       }
     }
   } catch {
-    /* 网络失败不拦进场 */
+    /* network failure doesn't block entry */
   }
-  bump(a.bytes); // 失败/404/尺寸偏差一律补记满:进度只代表"预热流程走完"
+  bump(a.bytes); // failure/404/size mismatch: top up to full regardless — progress only means "the warm-up flow ran to completion"
 }
 
-/** 预热进度 0..1(挂上即启动,模块级只跑一次)。 */
+/** Warm-up progress 0..1 (starts on mount, runs once at module level). */
 function useWarmProgress(): number {
   const [ratio, setRatio] = useState(warmRatio);
   useEffect(() => {
@@ -87,13 +87,13 @@ function useWarmProgress(): number {
   return ratio;
 }
 
-/** 进场 boot 覆盖层:资源预热 + dataReady 双闸;结束淡出后自卸。 */
+/** Entry boot overlay: asset warm-up + dataReady dual gate; fades out and self-unmounts when done. */
 export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
   const warm = useWarmProgress();
   const frames = useFrameCatalog();
   const [minHoldDone, setMinHoldDone] = useState(false);
   const [warmWaived, setWarmWaived] = useState(false);
-  const [ramp, setRamp] = useState(0); // 显示打底斜坡 0..1
+  const [ramp, setRamp] = useState(0); // display floor ramp 0..1
   const [leaving, setLeaving] = useState(false);
   const [gone, setGone] = useState(false);
 
@@ -113,11 +113,11 @@ export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
     };
   }, []);
 
-  // 显示进度 = min(真实, 斜坡):真下载时看真实,全命中缓存时也匀速演满而不是瞬间 100%
+  // Shown progress = min(real, ramp): during a real download show real, on a full cache hit still fill evenly instead of an instant 100%
   const shown = Math.min(warm, ramp);
   const ready = dataReady && minHoldDone && (warm >= 1 || warmWaived);
-  // 注意 deps 只有 ready(单调 false→true):这里若把 leaving 也放进 deps,
-  // setLeaving 触发的重跑会先 cleanup 掉 setGone 定时器再被 guard 挡住 —— 覆盖层永不卸载
+  // Note deps is only ready (monotonic false→true): if leaving were also in deps,
+  // the re-run triggered by setLeaving would first clean up the setGone timer then be blocked by the guard — overlay never unmounts
   useEffect(() => {
     if (!ready) return;
     setLeaving(true);
@@ -125,8 +125,8 @@ export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
     return () => window.clearTimeout(t);
   }, [ready]);
 
-  // 交叉滚动列:目录 round-robin 分列;每列 4 份同栈循环(位移 -50% = 两份,
-  // 另两份保证高窗口下窗口高 + 半周期内容始终有得看,不露底)
+  // Cross-scrolling columns: catalog split round-robin into columns; each column loops 4 copies of the same stack
+  // (a -50% shift = two copies, the other two keep content visible on tall windows through the half-cycle, no gap)
   const columns = useMemo(() => {
     const COLS = 5;
     if (!frames.length) return [];
@@ -147,8 +147,8 @@ export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
       aria-busy={!ready}
       aria-label={t('正在进入工作台')}
     >
-      {/* 主题卡墙(虚化背景):blur + 轻放大藏边缘,列交叉滚动。
-          目录还没回来(首访且无镜像)先滚骨架卡——首帧就有背景,不空窗 */}
+      {/* Theme card wall (blurred background): blur + slight scale-up to hide edges, columns cross-scroll.
+          Before the catalog arrives (first visit, no mirror) scroll skeleton cards — background from the first frame, no blank gap */}
       <div className="absolute inset-0" style={{ filter: 'blur(4px) saturate(1.05)', transform: 'scale(1.04)' }} aria-hidden>
         <div className="flex h-full justify-center gap-4 px-4">
           {(columns.length ? columns : SKELETON_COLUMNS).map((col, i) => (
@@ -168,11 +168,11 @@ export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
           ))}
         </div>
       </div>
-      {/* 压暗层:让前景进度浮起来,四周再加 vignette */}
+      {/* Dim layer: lift the foreground progress up, plus a vignette around the edges */}
       <div className="bg-canvas/45 absolute inset-0" aria-hidden />
       <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at center, transparent 30%, rgb(0 0 0 / 0.25) 100%)' }} aria-hidden />
 
-      {/* 前景:π 描边 loading + 进度 */}
+      {/* Foreground: π outline loading + progress */}
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
         <svg viewBox="0 0 100 100" width={56} height={56} className="sb-pi" aria-hidden>
           <PiGlyph stroke="var(--color-ink)" strokeWidth={12} />
@@ -189,10 +189,10 @@ export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
   );
 }
 
-/** 首访骨架列(目录到达前的占位):首帧就有列在滚,目录回来原位换真卡。 */
+/** First-visit skeleton columns (placeholder before the catalog arrives): columns scroll from the first frame, real cards swap in place once the catalog returns. */
 const SKELETON_COLUMNS: null[][] = Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => null));
 
-/** 中性占位卡(token 配色,深浅色模式都对):形状与真卡同构,换卡不跳版。 */
+/** Neutral placeholder card (token colors, correct in both light/dark): same shape as a real card, swapping doesn't shift layout. */
 function SkeletonWallCard() {
   return (
     <div className="bg-panel border-line flex shrink-0 flex-col gap-2.5 rounded-xl border p-4">
@@ -211,8 +211,8 @@ function SkeletonWallCard() {
   );
 }
 
-/** 主题卡(纯 CSS 迷你详情卡):palette 直出——纸底/面板/强调色/主题圆角,
- *  虚化下传达的是每套主题的色彩与形状性格,不追封面像素级还原。 */
+/** Theme card (pure-CSS mini detail card): straight from the palette — paper/panel/accent/theme radius;
+ *  under blur it conveys each theme's color and shape character, not a pixel-level cover reproduction. */
 function ThemeWallCard({ frame }: { frame: FrameCatalogItem }) {
   const p = frame.palette ?? {};
   const paper = p.paper ?? '#17181B';

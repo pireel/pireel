@@ -1,25 +1,26 @@
 /**
- * Studio 的 MCP server 核心(纯函数,零 I/O)—— 外部 agent(Codex / Claude Code)
- * 经 /api/studio/mcp 用自己的模型驱动 studio 的全套编辑工具。
+ * Studio's MCP server core (pure functions, zero I/O) — external agents (Codex / Claude Code)
+ * drive studio's full editing toolset with their own models via /api/studio/mcp.
  *
- * 商业模式基石:LLM 编排烧的是用户自己的 Codex/Claude 订阅(这个端点不过
- * credits gate);块生成(add_block 等)仍由浏览器打回 /api/studio/compose,
- * 走既有 session 计费——生成照收费,编排免费。
+ * Business-model cornerstone: LLM orchestration burns the user's own Codex/Claude subscription (this endpoint
+ * bypasses the credits gate); block generation (add_block etc.) still bounces through the browser to
+ * /api/studio/compose on the existing session billing — generation still charges, orchestration is free.
  *
- * 架构:工具面 = STUDIO_TOOLS 原封复用(与内部 chat 同一张表,registry 加一个
- * 工具这里自动长出来),执行经 StudioBridge DO 转发回打开着的 studio 标签页
- * (bridge-do.ts 顶注释讲了为什么是桥不是服务端执行)。仅内容类工具服务端直答:
- * read_editing_guide / read_frame(正文只在 server)+ MCP 专属 list_frames。
- * get_state 过桥(局势在浏览器)——MCP 没有 system 注入快照的机制,靠它补。
+ * Architecture: the tool surface reuses STUDIO_TOOLS verbatim (same table as internal chat, so adding a tool
+ * to the registry grows one here automatically); execution forwards through the StudioBridge DO back to the open
+ * studio tab (bridge-do.ts's header comment explains why it's a bridge, not server-side execution). Only content
+ * tools are answered directly on the server: read_editing_guide / read_frame (body lives only on the server) +
+ * MCP-only list_frames. get_state goes over the bridge (state is in the browser) — MCP has no mechanism to inject
+ * a snapshot into the system prompt, so this fills the gap.
  *
- * 协议:MCP streamable HTTP 的无状态子集(单请求单响应 JSON,无 SSE/会话头)。
- * Codex 与 Claude Code 的 HTTP transport 都兼容。本文件不做鉴权/不碰 DO——
- * 那是路由层的事,经 McpDeps 注入,好让 vitest 直接钉契约。
+ * Protocol: the stateless subset of MCP streamable HTTP (single request → single JSON response, no SSE/session
+ * headers). Compatible with both Codex's and Claude Code's HTTP transports. This file does no auth / doesn't touch
+ * the DO — that's the routing layer's job, injected via McpDeps so vitest can pin the contract directly.
  */
 
 import { MCP_DESCRIPTION_OVERRIDES, MCP_INSTRUCTIONS, STUDIO_TOOLS, STUDIO_TOOL_MAP } from './prompts';
 
-/* ============================ JSON-RPC 形状 ============================ */
+/* ============================ JSON-RPC shapes ============================ */
 
 export interface JsonRpcRequest {
   jsonrpc?: string;
@@ -35,9 +36,9 @@ export interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
-/* ============================ 依赖注入 ============================ */
+/* ============================ Dependency injection ============================ */
 
-/** 桥回执(浏览器 runStudioTool 的 StudioToolResult + get_state 的 state)。 */
+/** Bridge return (the browser runStudioTool's StudioToolResult + get_state's state). */
 export interface McpBridgeResult {
   ok: boolean;
   summary?: string;
@@ -48,51 +49,60 @@ export interface McpBridgeResult {
 }
 
 export interface McpDeps {
-  /** 过桥执行(路由层 = StudioBridge DO stub fetch /call)。 */
+  /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
-  /** frame 目录(路由层 = frameRegistry.list())。 */
+  /** Frame catalog (routing layer = frameRegistry.list()). */
   listFrames: () => { id: string; title: string; summary: string }[];
-  /** frame playbook 正文(路由层 = frameRegistry.get + FRAME_PLAYBOOK_PREAMBLE)。 */
+  /** Frame playbook body (routing layer = frameRegistry.get + FRAME_PLAYBOOK_PREAMBLE). */
   readFrame: (frameId: string) => McpBridgeResult;
-  /** 口播剪辑手册正文(路由层 = AROLL_GUIDE)。 */
+  /** A-roll editing guide body (routing layer = AROLL_GUIDE). */
   readEditingGuide: () => McpBridgeResult;
-  /** BYO 块简报:桥回的 compose 上下文 + agent 的 instruction → {system,prompt}(路由层 = briefs.assembleComposeBrief + frameRegistry)。 */
+  /** BYO block brief: bridge-returned compose context + the agent's instruction → {system,prompt} (routing layer = briefs.assembleComposeBrief + frameRegistry). */
   assembleComposeBrief: (bridgeData: Record<string, unknown>, instruction: string) => McpBridgeResult;
-  /** BYO 规划简报:桥回的 plan 上下文 → {system,prompt}(路由层 = briefs.assemblePlanBrief)。 */
+  /** BYO plan brief: bridge-returned plan context → {system,prompt} (routing layer = briefs.assemblePlanBrief). */
   assemblePlanBrief: (bridgeData: Record<string, unknown>) => McpBridgeResult;
-  /** 图标查询(路由层 = icons.lookupIcons)——BYO 生成里 BLOCK_SYSTEM 引用的 get_icons 在 MCP 面同名可用。 */
+  /** Icon lookup (routing layer = icons.lookupIcons) — get_icons, referenced by BLOCK_SYSTEM in BYO generation, is available under the same name on the MCP surface. */
   lookupIcons: (names: string[], kind?: string) => McpBridgeResult;
-  /** 本地媒体导入登记(路由层 = 验 R2 对象 + 写/建项目行):agent 把用户本地视频传上
-   *  字节汇合点后,用它把视频挂到项目上(含可选转写),全程不需要浏览器。 */
+  /** Local media import registration (routing layer = verify R2 object + write/create project row): after the agent
+   *  uploads the user's local video to the byte rendezvous, this attaches it to a project (with optional transcript), no browser needed. */
   importMedia: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
-  /** 浏览器会话交接(路由层 = 一次性码落库 + 拼 /auth/handoff URL):agent 用它
-   *  在自己的内置浏览器里拿到已登录的 studio 标签页——桥类工具的执行面。 */
+  /** Browser session handoff (routing layer = store one-time code + build /auth/handoff URL): the agent uses it
+   *  to get a logged-in studio tab in its own built-in browser — the execution surface for bridge tools. */
   createBrowserHandoff: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Create a new empty project (routing layer = write a studioProjects row, comp=emptyComposition). A new project is the "most recent" →
+   *  becomes the offline active project. No browser. */
+  createProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** List the current user's projects (routing layer = query studioProjects, lightweight metadata; most recent first = offline active project). */
+  listProjects: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Switch active project (routing layer = bump the project's updatedAt to newest → offline tools operate on it, and return its state). */
+  switchProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Rename a project's title (routing layer = update title where id+userId). */
+  renameProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
 }
 
-/* ============================ 工具面 ============================ */
+/* ============================ Tool surface ============================ */
 
-/** 服务端直答的工具(正文只在 server / 纯目录 / 直操作云状态):不过桥。 */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff']);
+/** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
+export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project']);
 
-/** MCP 专属过桥工具(不在 STUDIO_TOOLS 里,内部 chat 不可见):
- *  get_state=局势快照;apply_block/submit_plan=BYO 生成物的校验落块面;
- *  capture_frame=视觉验证(截帧回 image content,agent 能"看"自己改的效果)。
- *  compose_block_brief/plan_brief 是「桥取上下文+服务端组装」复合工具,单列于 dispatch。 */
+/** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
+ *  get_state=state snapshot; apply_block/submit_plan=the validate-and-place surface for BYO generation output;
+ *  capture_frame=visual verification (returns a captured frame as image content so the agent can "see" its own edits).
+ *  compose_block_brief/plan_brief are "bridge-fetch context + server-assemble" composite tools, dispatched separately. */
 export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'submit_plan', 'capture_frame', 'visual_brief', 'submit_visual']);
 
-/** brief 复合工具 → 桥上下文操作名(浏览器侧 runExternalTool 实现)。 */
+/** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
 export const MCP_BRIEF_TOOLS: Record<string, string> = {
   compose_block_brief: 'compose_context',
   plan_brief: 'plan_context',
 };
 
-/** 慢工具(浏览器里跑生成/分析,分钟级)的桥超时;即时操作给 60s。 */
+/** Bridge timeout for slow tools (generation/analysis in the browser, minutes-scale); instant ops get 60s. */
 const CARD_TIMEOUT_MS = 600_000;
 const BADGE_TIMEOUT_MS = 60_000;
 
 export function bridgeTimeoutMs(toolId: string): number {
-  if (toolId === 'visual_brief') return CARD_TIMEOUT_MS; // 里面跑免费几何遍(分钟级),别按 extra 的 60s 掐
+  if (toolId === 'visual_brief') return CARD_TIMEOUT_MS; // runs the free geometry pass inside (minutes-scale); don't cap it at extra's 60s
   return STUDIO_TOOL_MAP[toolId]?.kind === 'card' ? CARD_TIMEOUT_MS : BADGE_TIMEOUT_MS;
 }
 
@@ -104,12 +114,12 @@ export interface McpToolDef {
 
 const EMPTY_SCHEMA = { type: 'object', properties: {}, additionalProperties: false };
 
-/** MCP 工具列表:STUDIO_TOOLS 全量(description 按 MCP 语境改写)+ MCP 专属三件。 */
+/** MCP tool list: all of STUDIO_TOOLS (descriptions rewritten for the MCP context) + the MCP-only extras. */
 export function buildMcpTools(): McpToolDef[] {
   const out: McpToolDef[] = [];
   for (const d of STUDIO_TOOLS) {
     if (d.id === 'read_frame') {
-      // MCP 版带 frame_id 参数(内部 chat 版从会话挂载态取,MCP 没有会话)
+      // MCP version takes a frame_id param (the internal chat version reads it from session mount state; MCP has no session)
       out.push({
         name: d.id,
         description: MCP_DESCRIPTION_OVERRIDES.read_frame!,
@@ -141,7 +151,7 @@ export function buildMcpTools(): McpToolDef[] {
         'List available frames (theme content packs that define the whole design language: palette, fonts, composition rules). Use before recommending or attaching a theme; apply one with attach_frame, read its playbook with read_frame.',
       inputSchema: EMPTY_SCHEMA,
     },
-    /* ---------- BYO-brain 生成面:brief → 你生成 → apply 校验落块(不烧 Pireel credits) ---------- */
+    /* ---------- BYO-brain generation surface: brief → you generate → apply validates and places (no Pireel credits burned) ---------- */
     {
       name: 'compose_block_brief',
       description:
@@ -228,7 +238,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'import_media',
       description:
-        "Import LOCAL files into Pireel (no browser, no manual API key). Videos land on a project; images (png/jpg/webp/gif) land in the asset library and return a reference URL for composed blocks. TWO STEPS: ① call with NO arguments → returns a short-lived import `token`; ② run the plugin's import helper (skills/asset-import/scripts/import-media.mjs) with `--token <token>` and the file paths — it uploads the bytes, probes metadata, transcribes audio (if ffmpeg is available), and registers everything by itself. You normally never call this tool WITH `sig` — the helper does that registration call. A project with existing footage is never clobbered (a new project is created). After import, offline tools (read_script/cut_narration/plan/captions) work immediately if a transcript was produced.",
+        "Import LOCAL files into Pireel (no manual API key). TWO STEPS: ① call with NO arguments → returns a short-lived import `token`; ② run the plugin's import helper (skills/pireel/scripts/import-media.mjs) with `--token <token>` and the file paths — it probes metadata, transcribes audio (if ffmpeg is available), and registers everything by itself. You normally never call this tool WITH `sig` — the helper does that registration call. IMPORTANT — the main VIDEO streams straight into the OPEN studio tab over your machine (no cloud upload, fast even for big files), so a studio tab MUST be open first: if none is, the helper exits saying so — open one (create_browser_handoff, then open the url with YOUR browser) and re-run the helper. Images and b-roll (--broll) do NOT need a tab (they go to the cloud). A project with existing footage is never clobbered (a new project is created). After import, transcript tools (read_script/cut_narration/plan/captions) work immediately if a transcript was produced.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -287,11 +297,51 @@ export function buildMcpTools(): McpToolDef[] {
         required: ['names'],
       },
     },
+    {
+      name: 'create_project',
+      description:
+        "Create a NEW empty Pireel project (no video yet) — no browser needed. Use it when the user wants to start fresh, or when get_state / offline tools report 'no cloud project'. The new project immediately becomes your ACTIVE project (offline tools operate on your most-recently-touched project). To also add footage, follow with import_media; to open it in a live tab, use create_browser_handoff {project_id}.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { title: { type: 'string', description: 'Optional project title (defaults to a dated name).' } },
+      },
+    },
+    {
+      name: 'list_projects',
+      description:
+        "List the connected user's Pireel projects (lightweight: id, title, updated time, whether it has video). Newest first — the top one is your current ACTIVE project for offline tools. Use it to find a project by name before switch_project / rename_project / create_browser_handoff.",
+      inputSchema: EMPTY_SCHEMA,
+    },
+    {
+      name: 'switch_project',
+      description:
+        "Make PROJECT the ACTIVE project for subsequent OFFLINE edits, and return its current state. Offline tools (get_state, cuts, blocks, captions, plan) operate on your most-recently-touched project; this brings the chosen one to the front so you can edit it without a browser tab. (To open it in a live browser tab instead, use create_browser_handoff {project_id}.)",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { project_id: { type: 'string', description: 'Project id from list_projects.' } },
+        required: ['project_id'],
+      },
+    },
+    {
+      name: 'rename_project',
+      description: "Rename a Pireel project's title. No browser needed.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          project_id: { type: 'string', description: 'Project id from list_projects.' },
+          title: { type: 'string', description: 'New title.' },
+        },
+        required: ['project_id', 'title'],
+      },
+    },
   );
   return out;
 }
 
-/* ============================ 协议处理 ============================ */
+/* ============================ Protocol handling ============================ */
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 export const MCP_SERVER_INFO = { name: 'pireel-studio', version: '1.0.0' };
@@ -303,11 +353,11 @@ function rpcError(id: JsonRpcRequest['id'], code: number, message: string): Json
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } };
 }
 
-/** 工具执行结果 → MCP content(文本 JSON;isError 让 agent 知道该改口而不是复述)。
- *  截帧结果转 image content(agent 直接"看");快照直接给正文(不裹 JSON)。 */
+/** Tool result → MCP content (text JSON; isError tells the agent to correct course rather than parrot it).
+ *  Captured frames become image content (the agent "sees" directly); snapshots are given as raw body (not wrapped in JSON). */
 function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResponse {
   if (r.ok && Array.isArray(r.images) && r.images.length) {
-    // 多图(visual_brief 采样帧):文本(index/时刻/标注契约)在前,帧按 index 顺序跟随
+    // multiple images (visual_brief sample frames): text (index/timestamp/labeling contract) first, frames follow in index order
     const imgs = (r.images as { data: string; mimeType?: string }[]).filter((i) => typeof i?.data === 'string');
     const { images: _drop, ...rest } = r;
     return rpcResult(id, {
@@ -332,12 +382,12 @@ function toolResponse(id: JsonRpcRequest['id'], r: McpBridgeResult): JsonRpcResp
   return rpcResult(id, { content: [{ type: 'text', text }], isError: !r.ok });
 }
 
-/** 处理一条 JSON-RPC 消息。返回 null = 通知(notification),路由回 202 空响应。 */
+/** Handle one JSON-RPC message. Returns null = a notification, routed back as an empty 202 response. */
 export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Promise<JsonRpcResponse | null> {
   const method = raw.method;
   if (typeof method !== 'string') return rpcError(raw.id, -32600, 'invalid request: method required');
 
-  // 通知(initialized/cancelled/…):无需响应
+  // notifications (initialized/cancelled/…): no response needed
   if (method.startsWith('notifications/')) return null;
 
   switch (method) {
@@ -376,10 +426,14 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         }
         if (name === 'import_media') return toolResponse(raw.id, await deps.importMedia(args));
         if (name === 'create_browser_handoff') return toolResponse(raw.id, await deps.createBrowserHandoff(args));
+        if (name === 'create_project') return toolResponse(raw.id, await deps.createProject(args));
+        if (name === 'list_projects') return toolResponse(raw.id, await deps.listProjects(args));
+        if (name === 'switch_project') return toolResponse(raw.id, await deps.switchProject(args));
+        if (name === 'rename_project') return toolResponse(raw.id, await deps.renameProject(args));
         return toolResponse(raw.id, deps.readEditingGuide());
       }
 
-      // BYO 简报(复合:桥取上下文 → 服务端组装 prompt):LLM 归调用方,不烧 credits
+      // BYO brief (composite: bridge-fetch context → server-assemble prompt): the LLM belongs to the caller, no credits burned
       if (MCP_BRIEF_TOOLS[name]) {
         const ctx = await deps.callBridge(MCP_BRIEF_TOOLS[name], args, BADGE_TIMEOUT_MS);
         if (!ctx.ok) return toolResponse(raw.id, ctx);

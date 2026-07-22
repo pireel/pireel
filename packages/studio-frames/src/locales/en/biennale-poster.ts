@@ -5,37 +5,37 @@ export const pack: FrameLocalePack = {
   summary:
     'Constructivist gallery poster — giant type bleeding off the edge with one inverted ink plate, for manifestos, hot takes and launches.',
   copy: {
-    // 标题卡(两行巨字 → 英文海报口号)
+    // Title card (two lines of giant type -> English poster slogan)
     把观点: 'SHOW,',
     讲成画面: "DON'T TELL",
-    // 大数字
+    // Big number
     本月增长: 'THIS MONTH',
-    // 数字变化(条数计数,单位在反白块里)
+    // Number change (clip counter, unit in the inverted block)
     条: 'CLIPS',
     规律是拆出来的: 'MINED, NOT GUESSED',
-    // 章节(幕次横带,巨字=当前幕名)
+    // Sections (act banner, giant type = current act name)
     '第Ⅰ幕': 'ACT Ⅰ',
     '第Ⅱ幕': 'ACT Ⅱ',
     '第Ⅲ幕': 'ACT Ⅲ',
     亮出判断: 'VERDICT',
-    // 对比(300px 巨字,数字压到最短:72H vs 3H)
+    // Comparison (300px giant type, numbers shortened: 72H vs 3H)
     老办法: 'OLD WAY',
     新办法: 'NEW WAY',
     '3天': '72H',
     '3小时': '3H',
-    // 引导(340px 巨字,FOLLOW 塞不下,底部跑马灯已循环 FOLLOW)
+    // Call to action (340px giant type; FOLLOW won't fit, bottom marquee already loops FOLLOW)
     关注: 'JOIN',
-    // 列表(MANIFESTO)
+    // List (manifesto)
     先说结论: 'POINT FIRST',
     一图一论点: 'IDEA = IMAGE',
     回扣钩子: 'CLOSE THE LOOP',
-    // 金句(em 反白板压在动词上)
+    // Quote (em inverted plate over the verb)
     别追热点: "DON'T CHASE",
     做: 'OWN',
     热点: 'IT',
     '摘自口播 02\'14"': 'VO 02\'14"',
-    // 封面(520px 巨字出血是该方言的本体,下方横条拼全名)
-    // 封面巨字:BIENNALE 8 个拉丁字母在 520px 下 ~2360px 爆画布,借上下文键顺手压字号
+    // Cover (520px giant bleeding type is this dialect's core; the bottom bar spells the full name)
+    // Cover giant type: BIENNALE's 8 Latin letters at 520px ~2360px overflow the canvas; use the context key to shrink the font size
     'class="h">双年展': 'class="h" style="font-size:330px">BIENNALE',
   },
 };

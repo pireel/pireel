@@ -1,11 +1,12 @@
 /**
- * 影院 Cinema —— 电影字幕方言:上下遮幅滑入、双语字幕居中压底、场记/时间码贴角。
- * 金色配给制:每张卡只给一个强调词或一根细金线;动效只有滑入与慢淡。
+ * Cinema — film-subtitle dialect: top/bottom letterbox bars slide in, bilingual subtitles centered
+ * at the bottom, slate/timecode tucked in a corner. Gold on a ration: only one emphasis word or one
+ * thin gold line per card; motion is only slide-in and slow fade.
  */
 
 import { type Block, mk } from './shared';
 
-/* 遮幅 + 场记角标共用底座:bars 永远最上层,内容只住画幅中带 */
+/* Shared base for letterbox bars + slate corner: bars always on top, content lives only in the middle band */
 const cineRoot = (id: string) => `
 #${id} .cn{position:absolute;inset:0;color:var(--fg);font-family:var(--font-head);overflow:hidden;}
 #${id} .lb{position:absolute;left:0;right:0;height:150px;background:var(--panel-2);z-index:3;}

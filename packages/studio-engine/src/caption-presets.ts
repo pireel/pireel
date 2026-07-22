@@ -1,41 +1,46 @@
 /**
- * 花字视觉预设表 —— 对照 Google Vids Captions 的两类字幕(temp/captions.html 扒的实际配色):
- *   emphasis(Word emphasis)= 整句常显,读到哪个词强调哪个词(变色 / 划线 / 底色块);
- *   line(Line by line)= 整句浮现的干净字幕,无逐词动画。
- * Vids 的第三类 Word by word(逐词单显)不做 —— 关键词重击(kinetic-slam)已经占了这个生态位。
+ * Caption visual preset table — mirrors Google Vids Captions' two caption kinds
+ * (actual colors lifted from temp/captions.html):
+ *   emphasis (Word emphasis) = whole line always shown, the spoken word
+ *     highlighted (color / underline / highlight box);
+ *   line (Line by line) = clean full-line fade-in, no per-word animation.
+ * Vids' third kind, Word by word (one word at a time), is not done — the keyword
+ * kinetic-slam already occupies that niche.
  *
- * 预设只管**视觉**(配色/底板/装饰/字体);动画行为由 mode 定,渲染在 templates.renderCaption。
- * 无依赖叶子模块:composition-core / templates / 面板都从这里取,别在各处内联色值。
+ * Presets govern VISUALS only (colors/backing/decoration/fonts); animation
+ * behavior is defined by mode, rendered in templates.renderCaption. Dependency-
+ * free leaf module: composition-core / templates / panels all read from here,
+ * don't inline color values elsewhere.
  */
 
 export type CaptionMode = 'emphasis' | 'line';
 
 export interface CaptionPreset {
   id: string;
-  /** 面板上的中文名。 */
+  /** Display name shown on the panel. */
   name: string;
   mode: CaptionMode;
-  /** 正文字色。 */
+  /** Body text color. */
   text: string;
-  /** 强调词色(emphasis 模式;缺省 = 不变色,靠 deco)。 */
+  /** Emphasized-word color (emphasis mode; absent = no color change, relies on deco). */
   emphasis?: string;
-  /** 整行底板色(圆角横条,CSS color 可带 alpha);缺省 = 裸字。 */
+  /** Full-line backing color (rounded bar, CSS color may carry alpha); absent = bare text. */
   bg?: string;
-  /** 逐词强调装饰:当前词底下滑入划线 / 身后弹出色块。 */
+  /** Per-word emphasis decoration: underline sliding under the current word / highlight box popping behind it. */
   deco?: 'underline' | 'highlight';
   decoColor?: string;
-  /** 字体:缺省主题 sans;serif = 衬线(Noto Serif SC),mono = 等宽(--font-num)。 */
+  /** Font: default theme sans; serif = Noto Serif SC, mono = --font-num. */
   font?: 'serif' | 'mono';
-  /** 裸字时的投影(有底板不需要)。 */
+  /** Drop shadow for bare text (not needed when there's a backing). */
   shadow?: boolean;
   italic?: boolean;
-  /** 基准字号 px(1080 宽画布,scale=1)。 */
+  /** Base font size px (1080-wide canvas, scale=1). */
   size: number;
   weight: number;
 }
 
 export const CAPTION_PRESETS: CaptionPreset[] = [
-  // —— 逐词强调(Word emphasis)——
+  // —— Word emphasis ——
   { id: 'em-yellow', name: '白字黄词', mode: 'emphasis', text: '#ffffff', emphasis: '#ffe34f', shadow: true, size: 50, weight: 800 },
   { id: 'em-green', name: '白字荧绿', mode: 'emphasis', text: '#ffffff', emphasis: '#5affb6', shadow: true, size: 50, weight: 800 },
   { id: 'em-purple-black', name: '黑底紫词', mode: 'emphasis', text: '#ffffff', emphasis: '#cf96ff', bg: 'rgba(0,0,0,0.72)', size: 47, weight: 700 },
@@ -46,7 +51,7 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
   { id: 'em-box-blue', name: '蓝底黑块', mode: 'emphasis', text: '#ffffff', bg: 'rgba(0,89,255,0.85)', deco: 'highlight', decoColor: '#000000', size: 45, weight: 800 },
   { id: 'em-pink', name: '粉底提白', mode: 'emphasis', text: '#fccfcf', emphasis: '#ffffff', bg: 'rgba(236,137,134,0.85)', size: 47, weight: 800 },
   { id: 'em-gold-serif', name: '米底金字', mode: 'emphasis', text: '#b89d4c', emphasis: '#7f6000', bg: 'rgba(248,233,192,0.85)', font: 'serif', size: 47, weight: 700 },
-  // —— 整句字幕(Line by line)——
+  // —— Line by line ——
   { id: 'ln-clean', name: '干净白字', mode: 'line', text: '#ffffff', shadow: true, size: 40, weight: 700 },
   { id: 'ln-black', name: '黑条白字', mode: 'line', text: '#ffffff', bg: 'rgba(0,0,0,0.85)', size: 36, weight: 600 },
   { id: 'ln-navy', name: '蓝灰衬线', mode: 'line', text: '#ffffff', bg: 'rgba(70,80,109,0.85)', font: 'serif', size: 39, weight: 700 },
@@ -61,7 +66,7 @@ export const DEFAULT_CAPTION_PRESET = 'em-yellow';
 
 const BY_ID = new Map(CAPTION_PRESETS.map((p) => [p.id, p]));
 
-/** 取预设;未知 id 落回默认款(别让坏 id 渲空)。 */
+/** Get a preset; unknown id falls back to the default (don't let a bad id render empty). */
 export function getCaptionPreset(id: string | undefined): CaptionPreset {
   return (id && BY_ID.get(id)) || BY_ID.get(DEFAULT_CAPTION_PRESET)!;
 }

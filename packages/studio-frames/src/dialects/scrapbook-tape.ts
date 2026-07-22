@@ -1,11 +1,12 @@
 /**
- * 手帐 Scrapbook —— 牛皮纸拼贴方言:胶带、拍立得白框卡、便签、手写歪线。
- * 结构逻辑:万物皆"贴上去的实物"——必带投影 + 1-6° 旋转 + 叠压,禁止对齐网格。
+ * Scrapbook — kraft-paper collage dialect: tape, Polaroid white-frame cards, sticky notes, crooked
+ * handwritten lines. Structure logic: everything is a "stuck-on physical object" — must have a shadow
+ * + 1-6° rotation + overlap; no alignment grid.
  */
 
 import { type Block, mk } from './shared';
 
-/** 胶带:accent-2 实色 + 0.75 透明度,压角或压便签顶边。 */
+/** Tape: solid accent-2 at 0.75 opacity, pinning a corner or the top edge of a note. */
 const tape = (id: string) =>
   `#${id} .tp{position:absolute;width:250px;height:66px;background:var(--accent-2);opacity:0.75;border-radius:var(--radius);}`;
 

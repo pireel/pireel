@@ -1,12 +1,12 @@
 /**
- * 安全区几何算法(纯函数,无 IO/无依赖,可单测)。
- * 占用网格 → 段内并集 → 最大空矩形 top-K。坐标全归一 [0..1],原点左上。
+ * Safe-zone geometry (pure functions, no IO/no deps, unit-testable).
+ * Occupancy grid → union over the segment → top-K largest empty rects. All coords normalized [0..1], origin top-left.
  */
 
 export const GRID_W = 18;
 export const GRID_H = 32; // ~9:16
 
-/** 归一矩形 [0..1],原点左上。 */
+/** Normalized rect [0..1], origin top-left. */
 export interface NRect {
   x: number;
   y: number;
@@ -16,25 +16,25 @@ export interface NRect {
 export interface FrameGeom {
   t: number;
   face: NRect | null;
-  /** GRID_W×GRID_H 占用(1=人物)。 */
+  /** GRID_W×GRID_H occupancy (1 = person). */
   occ: Uint8Array;
 }
 export interface SafeZone {
-  /** 可放置的最大空矩形(从大到小,归一)。 */
+  /** Largest placeable empty rects (largest first, normalized). */
   rects: NRect[];
-  /** 段内人脸并集(硬禁区)。 */
+  /** Face union over the segment (hard exclusion). */
   face: NRect | null;
-  /** 段内人物占用 bbox。 */
+  /** Subject occupancy bbox over the segment. */
   subject: NRect | null;
-  /** 额外硬禁区(如底部预留的字幕带,已并进占用、从安全区扣掉)。给调试叠加看。 */
+  /** Extra hard-exclusion zones (e.g. a reserved bottom caption band, already merged into occupancy and subtracted from the safe zone). For debug overlay. */
   text?: NRect[];
 }
 
-/** 某时段安全区 = 段内各帧占用的并集(主体曾出现处全避开)→ 补集上的最大空矩形。 */
+/** Safe zone for a time range = union of per-frame occupancy in the segment (avoid everywhere the subject ever appeared) → largest empty rects in the complement. */
 export function safeZoneForRange(frames: FrameGeom[], start: number, end: number, blockRects: NRect[] = []): SafeZone {
   const inRange = frames.filter((f) => f.t >= start - 0.01 && f.t <= end + 0.01);
-  // 区间内没采到帧(长片降采样后短段可能 0 帧)→ 用**时间最近的一帧**;
-  // 别退成全片并集,否则所有空段 geom 都会变成同一份(就是之前 >90s 段全相同的原因)。
+  // No frames sampled in the range (short segments can end up with 0 frames after downsampling long videos) → use the nearest-in-time frame;
+  // don't fall back to a whole-video union, or every empty segment's geom becomes identical (that was the cause of all >90s segments being the same).
   let use = inRange;
   if (!use.length && frames.length) {
     const mid = (start + end) / 2;
@@ -48,8 +48,8 @@ export function safeZoneForRange(frames: FrameGeom[], start: number, end: number
   for (const f of use) if (f.face) face = face ? unionRect(face, f.face) : { ...f.face };
 
   const blocked = Uint8Array.from(occ);
-  if (face) markRect(blocked, padRect(face, 0.04)); // 脸 = 硬禁,带 padding 并进占用
-  for (const r of blockRects) markRect(blocked, r); // 烧进原片的字幕/水印带 = 硬禁,扣掉
+  if (face) markRect(blocked, padRect(face, 0.04)); // face = hard exclusion, merged in with padding
+  for (const r of blockRects) markRect(blocked, r); // caption/watermark bands burned into the source = hard exclusion, subtracted
 
   const subject = occBBox(occ);
   const rects = topKEmptyRects(blocked, 3);
@@ -61,14 +61,14 @@ function topKEmptyRects(blocked: Uint8Array, k: number): NRect[] {
   const rects: NRect[] = [];
   for (let i = 0; i < k; i++) {
     const r = largestEmptyRect(work);
-    if (!r || r.w * r.h < 8) break; // 太小不算(<8 格)
+    if (!r || r.w * r.h < 8) break; // too small to count (<8 cells)
     rects.push({ x: r.x / GRID_W, y: r.y / GRID_H, w: r.w / GRID_W, h: r.h / GRID_H });
     for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) work[y * GRID_W + x] = 1;
   }
   return rects;
 }
 
-/** 网格上最大全空矩形(直方图法,O(W·H))。 */
+/** Largest all-empty rect on the grid (histogram method, O(W·H)). */
 export function largestEmptyRect(blocked: Uint8Array): { x: number; y: number; w: number; h: number } | null {
   const heights = new Array<number>(GRID_W).fill(0);
   let best: { x: number; y: number; w: number; h: number } | null = null;

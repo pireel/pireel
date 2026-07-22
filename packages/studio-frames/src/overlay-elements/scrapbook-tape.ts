@@ -1,8 +1,12 @@
 /**
- * 手帐 Scrapbook 的口播叠加件:贴在画面上的实物语言——白底拍立得卡(厚下边距当白框、
- * 真实投影、旋转 2-4°)、半透明绿 washi 胶带压角(opacity 0.75,±30-45°)、米黄便签、
- * 歪 1° 的橙色手写粗下划线(scaleX 画出)、手绘 SVG 圈/箭头 dash 自绘、✓ 勾选。
- * 动效是贴上去的:back.out 落纸带旋转过冲,胶带后贴,墨迹最后画,元素必须叠压。
+ * Scrapbook talking-head overlays: physical-object language stuck onto the shot.
+ * White Polaroid cards (thick bottom margin as the white border, real drop
+ * shadow, rotated 2-4deg), translucent green washi tape pinning the corners
+ * (opacity 0.75, ±30-45deg), cream sticky notes, a 1deg-tilted orange handwritten
+ * thick underline (drawn via scaleX), hand-drawn SVG circles/arrows that
+ * self-draw via dash, and ✓ checkmarks. Motion is applied-by-hand: back.out
+ * drops with rotation overshoot, tape applied after, ink drawn last, elements
+ * must overlap.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

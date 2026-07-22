@@ -1,6 +1,7 @@
 /**
- * 块构造器:代码侧「加块」的便捷入口(agent 工具/分镜落块/面板插入共用)。
- * 全部经模板注册表取默认槽位/默认轨 —— 加模板即自动可构造。
+ * Block factory: the code-side convenience entry for "add block" (shared by
+ * agent tools / shot placement / panel insertion). All go through the template
+ * registry for default slots/track — adding a template automatically makes it constructible.
  */
 
 import {
@@ -14,9 +15,9 @@ import {
 } from './composition-core';
 import { t } from './i18n';
 
-/* ============================ 块构造器 ============================ */
+/* ============================ Block factory ============================ */
 
-/** 注册表驱动的新块:按模板 slot schema 填占位数据,放模板默认轨。供"加块"用 —— 加模板即自动可加。 */
+/** Registry-driven new block: fills placeholder data per the template slot schema, on the template's default track. For "add block" — adding a template makes it addable automatically. */
 export function newBlock(templateId: string, opts: { startSec: number; durationSec?: number }): Block {
   const tpl = getTemplate(templateId);
   const slots: Slots = {};
@@ -25,7 +26,7 @@ export function newBlock(templateId: string, opts: { startSec: number; durationS
     else if (spec.type === 'text[]') slots[key] = ['要点一', '要点二', '要点三'];
     else if (spec.type === 'enum') slots[key] = spec.options?.[0] ?? '';
     else if (spec.type === 'words') slots[key] = [{ text: '示例文字', start: opts.startSec, end: opts.startSec + 1.2 }];
-    // image / 其它:留空
+    // image / others: leave empty
   }
   return {
     id: blockId(templateId),
@@ -38,7 +39,7 @@ export function newBlock(templateId: string, opts: { startSec: number; durationS
   };
 }
 
-/** 素材位块(空区占位)。空 slots = 占位;填 `slots.media={type,url}` 后铺图/视频。box 一般用 treatmentVacancyBox。 */
+/** Media-slot block (empty-area placeholder). Empty slots = placeholder; fill `slots.media={type,url}` to lay in image/video. box usually uses treatmentVacancyBox. */
 export function mediaBlock(opts: {
   startSec: number;
   durationSec: number;
@@ -113,16 +114,16 @@ export function bulletListBlock(opts: { title?: string; items: string[]; startSe
   };
 }
 
-/** 花字块(词时间驱动时长)。字幕归字幕、组件归组件:
- *  - 句级字幕:只带 words(+可选 preset/yPct 作 captionStyle 未设时的初始形态),视觉由全局预设定;
- *  - effect='kinetic-slam' = 关键词重击 **组件**(带 box 独立定位,不吃全局字幕样式)。 */
+/** Caption block (duration driven by word timing). Captions are captions, components are components:
+ *  - sentence-level caption: carries only words (+ optional preset/yPct as the initial form when captionStyle is unset); visuals come from the global preset;
+ *  - effect='kinetic-slam' = keyword-slam component (has its own box, independently positioned, ignores the global caption style). */
 export function captionBlock(opts: {
   words: FxWord[];
-  /** 仅组件用:关键词重击。句级字幕不传。 */
+  /** Component-only: keyword slam. Not passed for sentence-level captions. */
   effect?: 'kinetic-slam';
-  /** 双语字幕副行(整句译文,渲染在主行正下方,视觉随预设)。 */
+  /** Bilingual caption sub-line (full-sentence translation, rendered directly below the main line, visuals follow the preset). */
   sub?: string;
-  /** 视觉预设 id(caption-presets;captionStyle 未设时的初始形态)。 */
+  /** Visual preset id (caption-presets; initial form when captionStyle is unset). */
   preset?: string;
   yPct?: number;
   label?: string;
@@ -146,8 +147,8 @@ export function captionBlock(opts: {
   };
 }
 
-/** 转场**遮罩块**(旧形态,仅存量渲染兼容):真转场是切点上的内容交接,走
- *  VideoShot.transIn(cutTransitions)——UI/工具已不再产出这种块。 */
+/** Transition mask block (legacy form, kept only for rendering existing data): a real
+ *  transition is a content handoff at the cut point, via VideoShot.transIn (cutTransitions) — UI/tools no longer produce this block. */
 export function transitionBlock(opts: { startSec: number; durationSec?: number; effect?: 'wipe' | 'flash' | 'fade' | 'slide'; trackIndex?: number }): Block {
   return {
     id: blockId('tr'),

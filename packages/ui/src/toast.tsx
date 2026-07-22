@@ -1,14 +1,14 @@
 'use client';
 
 /**
- * 轻量 Toast —— 替代 alert()。无依赖，singleton store + useSyncExternalStore。
+ * Lightweight Toast — replaces alert(). No deps, singleton store + useSyncExternalStore.
  *
- * 用法：
+ * Usage:
  *   import { toast } from './toast';
- *   toast.error('上传失败，请重试');
- *   toast.success('已保存');
+ *   toast.error('Upload failed, please retry');
+ *   toast.success('Saved');
  *
- * 在 root layout 里挂 <Toaster />（一次即可，多挂会显示多份）。
+ * Mount <Toaster /> in the root layout (once; mounting more than once shows duplicates).
  */
 
 import { useSyncExternalStore } from 'react';
@@ -49,7 +49,7 @@ export const toast = {
   success: (message: string, title?: string) => push({ level: 'success', message, title }),
   error: (message: string, title?: string) => push({ level: 'error', message, title }),
   warn: (message: string, title?: string) => push({ level: 'warn', message, title }),
-  /** 手动 dismiss 用得不多，先暴露给少数需要"持久 toast 配按钮"的场景 */
+  /** Manual dismiss is rarely needed; exposed for the few cases wanting a "persistent toast with a button" */
   dismiss,
 };
 

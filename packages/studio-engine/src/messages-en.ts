@@ -1,10 +1,10 @@
 /**
- * engine 包自己的 en 词典(key=源码里的中文原文;由 i18n.ts 模块体注册)。
- * 覆盖:caption-presets 名称、templates/assemble 编辑器占位、composition-core/
- * build-draft/block-factory 里用户可见的标签与报错。词条由各文件转换时补齐。
+ * The engine package's own en dictionary (key = the Chinese source string; registered by the i18n.ts module body).
+ * Covers: caption-presets names, templates/assemble editor placeholders, and user-facing
+ * labels and errors in composition-core/build-draft/block-factory. Entries are filled in as each file is converted.
  */
 export const EN_ENGINE: Record<string, string> = {
-  // —— caption-presets.ts:预设名(studio-ui 经 t(preset.name) 显示) ——
+  // —— caption-presets.ts: preset names (studio-ui shows them via t(preset.name)) ——
   '白字黄词': 'Yellow pop',
   '白字荧绿': 'Neon green',
   '黑底紫词': 'Purple on black',
@@ -23,7 +23,7 @@ export const EN_ENGINE: Record<string, string> = {
   '黄条黑字': 'Yellow tape',
   '红条等宽': 'Red mono',
   '青字投影': 'Mint glow',
-  // —— composition-core.ts:切点转场效果名(CUT_TRANSITION_EFFECTS) ——
+  // —— composition-core.ts: cut transition effect names (CUT_TRANSITION_EFFECTS) ——
   '叠化': 'Dissolve',
   '渐黑': 'Dip to black',
   '推移': 'Push',
@@ -34,14 +34,14 @@ export const EN_ENGINE: Record<string, string> = {
   '旋转': 'Rotate',
   '故障': 'Glitch',
   '波浪': 'Wave',
-  // —— composition-core.ts:取景类型名(SHOT_TREATMENTS) ——
+  // —— composition-core.ts: shot treatment names (SHOT_TREATMENTS) ——
   '无': 'None',
   '放大': 'Zoom in',
   '缩右下': 'Bottom right',
   '缩左上': 'Top left',
   '左半': 'Left half',
   '右半': 'Right half',
-  // —— templates.ts:模板名 + 槽位 label(模块作用域常量,使用点在 UI 包包 t()) ——
+  // —— templates.ts: template names + slot labels (module-scope constants; wrapped in t() at the UI call site) ——
   '自定义 HTML': 'Custom HTML',
   'GSAP 动画体': 'GSAP timeline body',
   '标题卡': 'Title card',
@@ -60,11 +60,11 @@ export const EN_ENGINE: Record<string, string> = {
   '译文副行': 'Translation line',
   '素材位': 'Media',
   '图片/视频': 'Image / video',
-  // —— templates.ts:编辑态素材占位提示(hf-ph-tip,仅编辑态可见) ——
+  // —— templates.ts: edit-mode media placeholder hint (hf-ph-tip, only visible while editing) ——
   '选中后可 AI 生成<br/>或上传图片 / 视频': 'Select to generate with AI<br/>or upload an image / video',
-  // —— build-draft.ts:待配图占位块的时间轴标签 ——
+  // —— build-draft.ts: timeline label for the pending-graphic placeholder block ——
   '待配图': 'Graphic pending',
-  // —— prompts/agent-tools.ts:chat 工具卡的 label/busyText(studio-chat 显示点包 t) ——
+  // —— prompts/agent-tools.ts: label/busyText for chat tool cards (wrapped in t() at the studio-chat display site) ——
   '翻开主题手册…': 'Opening the theme handbook…',
   '读取 frame 主题': 'Read theme',
   '挂载主题…': 'Applying theme…',

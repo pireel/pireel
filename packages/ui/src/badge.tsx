@@ -8,7 +8,7 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        // 品牌
+        // brand
         default: 'bg-panel-2 border-line text-ink-2',
         solid: 'bg-ink border-ink text-white',
         accent: 'bg-accent/8 border-accent/18 text-accent',
@@ -18,7 +18,7 @@ const badgeVariants = cva(
         violet: 'bg-violet/8 border-violet/20 text-violet',
         amber: 'bg-amber/9 border-amber/25 text-[#B87800]',
         lime: 'bg-lime-soft border-[#D9F08E] text-lime-ink',
-        // shadcn 兼容
+        // shadcn compat
         secondary: 'bg-panel-2 border-line-2 text-ink',
         destructive: 'bg-rose/10 border-rose/30 text-rose',
         outline: 'border-line-2 bg-transparent text-ink',

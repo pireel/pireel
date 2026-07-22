@@ -1,12 +1,15 @@
 'use client';
 
 /**
- * 项目草稿持久化 —— 多项目:一个项目一个 localStorage key(studio:draft:<id>),
- * composition 防抖落盘,刷新不丢。项目列表 = 扫 key 前缀派生,不另维护索引。
+ * Project draft persistence — multi-project: one localStorage key per project
+ * (studio:draft:<id>), composition debounce-saved so a refresh doesn't lose it. The project
+ * list is derived by scanning the key prefix, no separate index maintained.
  *
- * 视频本体是本地 File 存不了 —— 存 fileSig + 时长;恢复后重选同一个文件即完整归位
- * (pickVideoFile 按 sig 识别恢复场景,不走「换片=新作品」清空)。
- * 旧单草稿(studio:draft:v1)在项目列表首次加载时迁移成一个项目(含 chat 会话 key)。
+ * The video itself is a local File and can't be stored — we store fileSig + duration; reselecting
+ * the same file after restore snaps it fully back into place (pickVideoFile recognizes the restore
+ * case by sig and skips the "new file = new project" clear).
+ * The legacy single draft (studio:draft:v1) migrates into a project (with its chat key) on the
+ * project list's first load.
  */
 
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
@@ -15,31 +18,32 @@ import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayloa
 import { t } from './i18n';
 
 const PREFIX = 'studio:draft:';
-const LEGACY_KEY = 'studio:draft:v1'; // 单草稿时代;'v1' 视作保留 id,扫描时跳过
+const LEGACY_KEY = 'studio:draft:v1'; // single-draft era; 'v1' is a reserved id, skipped during scans
 const LEGACY_CHAT_KEY = 'studio:chat:v1';
 
 const keyFor = (id: string) => `${PREFIX}${id}`;
-/** 项目的 chat 会话存储 key(会话属于项目,不跨项目混流)。 */
+/** A project's chat session storage key (sessions belong to a project, never mixed across projects). */
 export const chatKeyFor = (id: string) => `studio:chat:v1:${id}`;
 
 export interface StudioDraft {
-  /** 项目 id(= 草稿 id,跨保存稳定)。 */
+  /** Project id (= draft id, stable across saves). */
   id: string;
-  /** 项目名(列表/徽标显示;autosave 原样保留)。 */
+  /** Project name (shown in list/badge; autosave preserves it as-is). */
   title?: string;
-  /** 首帧缩略(jpeg dataURL,~480 宽):项目列表卡片封面。工作台缩率图就绪时更新。 */
+  /** First-frame thumbnail (jpeg dataURL, ~480 wide): project list card cover. Updated when the workbench thumbnail is ready. */
   coverThumb?: string;
-  comp: Composition; // video 恒为 null(blob 不可持久化)
+  comp: Composition; // video is always null (blobs aren't persistable)
   videoSig: string | null;
   videoDurationSec: number | null;
   savedAt: number;
-  /** 这份草稿基于的云端版本(上次拉取/保存成功时的 version)。开局判"云端 vs 本地
-   *  谁新"的唯一可靠依据——savedAt 每次打开都被本地 autosave 自刷新,拿它比会让
-   *  每个浏览器都觉得"我最新",各用各的还互相反写云端。旧草稿无此字段=云端胜。 */
+  /** The cloud version this draft is based on (the version at last successful fetch/save). The only
+   *  reliable basis for "cloud vs local, which is newer" at startup — savedAt self-refreshes on every
+   *  open via local autosave, so comparing it would make every browser think it's newest, each using
+   *  its own copy and overwriting the cloud. Old drafts lack this field = cloud wins. */
   baseVersion?: number | null;
 }
 
-/** 裸读(不过滤空内容):列表/改名要读空项目。 */
+/** Raw read (no empty-content filter): list/rename need to read empty projects. */
 function rawDraft(id: string): StudioDraft | null {
   try {
     const raw = window.localStorage.getItem(keyFor(id));
@@ -51,7 +55,7 @@ function rawDraft(id: string): StudioDraft | null {
   }
 }
 
-/** 有内容才算可恢复的草稿(空项目打开=全新工作台,不弹恢复条)。 */
+/** Only a draft with content counts as recoverable (opening an empty project = fresh workbench, no recovery bar). */
 export function loadDraft(id: string): StudioDraft | null {
   const d = rawDraft(id);
   if (!d || (!d.comp.blocks?.length && !d.comp.shots?.length)) return null;
@@ -66,7 +70,7 @@ export function clearDraft(id: string) {
   }
 }
 
-/* ============================ 项目层 ============================ */
+/* ============================ Project layer ============================ */
 
 export interface ProjectMeta {
   id: string;
@@ -104,7 +108,7 @@ export function listProjects(): ProjectMeta[] {
   return out.sort((a, b) => b.savedAt - a.savedAt);
 }
 
-/** 新建项目:先落一个空壳草稿(否则没保存过的新项目在列表里凭空消失)。 */
+/** New project: write an empty-shell draft first (otherwise an unsaved new project vanishes from the list). */
 export function createProject(comp: Composition, title = t('未命名项目')): string {
   const id = newProjectId();
   const draft: StudioDraft = { id, title, comp: { ...comp, video: null }, videoSig: null, videoDurationSec: null, savedAt: Date.now() };
@@ -116,8 +120,8 @@ export function createProject(comp: Composition, title = t('未命名项目')): 
   return id;
 }
 
-/** 首帧缩略就绪时直接补写进已存草稿:缩略图生成晚于防抖保存,之后若无新编辑
- *  就没有下一次 autosave,不补写封面会一直缺。 */
+/** Patch the cover into an existing draft when the first-frame thumbnail is ready: thumbnail generation
+ *  lags the debounced save, and with no further edits there's no next autosave, so without this patch the cover stays missing. */
 export function saveCoverThumb(id: string, thumb: string) {
   const d = rawDraft(id);
   if (!d) return;
@@ -147,7 +151,7 @@ export function deleteProject(id: string) {
   }
 }
 
-/** 单草稿时代 → 项目:老 key 的草稿按它自己的 id 落新 key,chat 会话一并归它名下。 */
+/** Single-draft era → project: the old key's draft moves to a new key under its own id, with its chat session reassigned to it. */
 export function migrateLegacyDraft() {
   try {
     const raw = window.localStorage.getItem(LEGACY_KEY);
@@ -167,9 +171,9 @@ export function migrateLegacyDraft() {
   }
 }
 
-/* ============================ 服务端同步(云端为准 + 本地缓存) ============================ */
+/* ============================ Server sync (cloud wins + local cache) ============================ */
 
-/** 会话线程读出口(chatKeyFor 的原始数组):折进项目行一起上云。存取都容错。 */
+/** Chat thread read path (chatKeyFor's raw array): folded into the project row for upload. Read/write are fault-tolerant. */
 export function readChatThreads(projectId: string): unknown[] {
   try {
     const raw = window.localStorage.getItem(chatKeyFor(projectId));
@@ -183,16 +187,16 @@ export function writeChatThreads(projectId: string, threads: unknown[]) {
   try {
     window.localStorage.setItem(chatKeyFor(projectId), JSON.stringify(threads));
   } catch {
-    /* 配额满/隐私模式 */
+    /* quota full / private mode */
   }
 }
 
-/** 项目行读到的 version(乐观并发用):每项目一个,保存时回带,冲突刷新即更新。 */
+/** The version read from a project row (for optimistic concurrency): one per project, sent back on save, refreshed on conflict. */
 const versions = new Map<string, number>();
 export const projectVersion = (id: string) => versions.get(id) ?? null;
 export const setProjectVersion = (id: string, v: number) => versions.set(id, v);
 
-/** 服务端项目列表(换设备可见)。失败返回 null,调用方回落本地缓存。 */
+/** Server project list (visible across devices). Returns null on failure; caller falls back to local cache. */
 export async function serverListProjects(): Promise<StudioProjectMeta[] | null> {
   try {
     const r = await fetch('/api/studio/projects');
@@ -204,7 +208,7 @@ export async function serverListProjects(): Promise<StudioProjectMeta[] | null> 
   }
 }
 
-/** 拉单个项目全量(打开项目/换设备恢复)。404/失败返回 null。 */
+/** Fetch a single project in full (open project / cross-device restore). Returns null on 404/failure. */
 export async function serverLoadProject(id: string): Promise<StudioProjectDto | null> {
   try {
     const r = await fetch(`/api/studio/projects/${id}`);
@@ -212,7 +216,7 @@ export async function serverLoadProject(id: string): Promise<StudioProjectDto | 
     const { project } = (await r.json()) as { project: StudioProjectDto };
     if (project) {
       setProjectVersion(project.id, project.version);
-      // 内存态即将被云端覆盖,旧段哈希不再代表"服务端已有":清掉,下次保存全量对齐
+      // In-memory state is about to be overwritten by cloud; old section hashes no longer mean "server already has": clear them so the next save aligns in full
       sectionCache.delete(project.id);
     }
     return project ?? null;
@@ -223,12 +227,13 @@ export async function serverLoadProject(id: string): Promise<StudioProjectDto | 
 
 export type { ProjectSavePayload } from '@pireel/studio-engine/project-dto';
 
-/** 上次保存成功的差分基准(段哈希 + 段值,段值是 JSON Patch diff 的底):只在 'ok'
- *  时推进——失败的段保持脏下次重发;409 用服务端返回的全量重播种(重试 diff 对齐真相)。 */
+/** The diff baseline from the last successful save (section hashes + section values, values being the base
+ *  for JSON Patch diffs): only advanced on 'ok' — failed sections stay dirty and resend next time; a 409
+ *  reseeds from the server's returned full state (so the retry diff aligns with truth). */
 const sectionCache = new Map<string, AckedSections>();
 
-/** PUT 差分体:大体积走 gzip(自定义头;content-encoding 有中间层私自解压的坑),
- *  不支持 CompressionStream 的环境回落明文。 */
+/** PUT the diff body: large bodies use gzip (custom header; content-encoding risks a middlebox
+ *  decompressing it on its own), environments without CompressionStream fall back to plaintext. */
 async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
   const json = JSON.stringify(wire);
   if (json.length > 8192 && typeof CompressionStream !== 'undefined') {
@@ -240,24 +245,24 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
         body,
       });
     } catch {
-      /* 压缩失败走明文 */
+      /* compression failed; use plaintext */
     }
   }
   return fetch(`/api/studio/projects/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: json });
 }
 
-/** upsert 到服务端(**差分**:只发相对上次成功保存变了的段,全没变零请求)。
- *  带上一次读到的 baseVersion;409(别处已写更新)时记下新版回 'conflict'(调用方
- *  立即重试,段哈希未推进=同批段重发)。422 need_full(服务端没这行)清基准重发全量。
- *  网络/db 不可用回 'skip'(本地缓存兜底)。 */
+/** Upsert to the server (diff: only send sections changed since the last successful save; nothing changed = zero requests).
+ *  Sends the last-read baseVersion; on 409 (someone else wrote a newer version) record the new version and return
+ *  'conflict' (caller retries immediately; section hashes not advanced = same sections resend). On 422 need_full
+ *  (server has no such row) clear the baseline and resend in full. Network/db unavailable returns 'skip' (local cache covers it). */
 export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'> {
   try {
     const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
-    if (!built) return 'ok'; // 五段全没变:零请求
+    if (!built) return 'ok'; // all five sections unchanged: zero requests
     let r = await putWire(id, built.wire);
     let acked = built.acked;
     if (r.status === 422) {
-      // need_full:服务端没这行 / 补丁应用不成立(基漂了)——清基准整段重发
+      // need_full: server has no such row / the patch doesn't apply (base drifted) — clear baseline and resend all sections
       sectionCache.delete(id);
       const full = buildSaveWire(p, projectVersion(id), null);
       if (!full) return 'skip';
@@ -265,9 +270,10 @@ export async function serverSaveProject(id: string, p: ProjectSavePayload): Prom
       acked = full.acked;
     }
     if (r.status === 409) {
-      // 别处已写更新:记新 version + 用服务端全量**重播种差分基准**——立即重试的 diff
-      // 就是对着服务端真相算的(别处改过的段如果本端没动,不会被反写;段级收敛)。
-      // 不回写本地 UI——in-memory 的用户改动才是本会话真相。
+      // Someone else wrote a newer version: record the new version + reseed the diff baseline from the server's
+      // full state — so the immediate retry's diff is computed against server truth (sections others changed
+      // but we didn't touch won't get overwritten; section-level convergence). Don't write back to local UI —
+      // the in-memory user edits are this session's truth.
       const { project } = (await r.json()) as { project: StudioProjectDto };
       if (project) {
         setProjectVersion(id, project.version);
@@ -294,17 +300,18 @@ export async function serverDeleteProject(id: string): Promise<void> {
   try {
     await fetch(`/api/studio/projects/${id}`, { method: 'DELETE' });
   } catch {
-    /* 本地删已生效,云端稍后重试也行 */
+    /* local delete already applied; a later cloud retry is fine */
   }
 }
 
-/** 服务端项目 → 本地 localStorage 缓存(草稿 + 会话):换设备打开后本地也有一份,
- *  下次秒开、离线可看。version 一并记住供保存回带。
- *  返回内存草稿供调用方**直接应用**——落盘可能因配额静默失败,写完再从 localStorage
- *  读回会拿到陈年旧草稿(应用后 autosave 还会拿旧状态反写云端,别走那条路)。 */
+/** Server project → local localStorage cache (draft + sessions): after opening on a new device there's a local
+ *  copy too, for instant open next time and offline viewing. Also remembers version to send back on save.
+ *  Returns the in-memory draft for the caller to apply directly — persistence can silently fail on quota, and
+ *  reading back from localStorage afterward would yield a stale draft (then autosave would write that stale state
+ *  back to cloud; don't go down that path). */
 export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
   setProjectVersion(p.id, p.version);
-  sectionCache.delete(p.id); // 内存态换成了云端版:差分基准作废,下次保存全量对齐
+  sectionCache.delete(p.id); // in-memory state swapped for the cloud version: diff baseline is void, next save aligns in full
   const draft: StudioDraft = {
     id: p.id,
     ...(p.title ? { title: p.title } : {}),
@@ -318,15 +325,15 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
   try {
     window.localStorage.setItem(keyFor(p.id), JSON.stringify(draft));
   } catch {
-    /* 配额满:只影响下次秒开,调用方拿返回值直接应用不受影响 */
+    /* quota full: only affects next instant-open; the caller applying the return value directly is unaffected */
   }
   writeChatThreads(p.id, p.chat);
   return draft;
 }
 
-/** 防抖自动保存:空画布不写(刚打开别把已有草稿冲掉);blob 视频剥掉只存 sig/时长;
- *  title 原样保留(改名在项目列表做);首帧缩略从 ref 读(就绪前保留上次的,不抖没)。
- *  返回 lastSavedAt 给工作台徽标外显。 */
+/** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
+ *  video down to sig/duration; preserve title as-is (renaming happens in the project list); read the first-frame
+ *  thumbnail from a ref (keep the last one until ready, so it doesn't flicker away). Returns lastSavedAt for the workbench badge. */
 export function useDraftAutosave(comp: Composition, videoSig: string | null, projectId: string, coverThumbRef?: MutableRefObject<string | null>) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -351,7 +358,7 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
         window.localStorage.setItem(keyFor(projectId), JSON.stringify(draft));
         setLastSavedAt(draft.savedAt);
       } catch {
-        /* 配额满/隐私模式:静默(草稿是增益不是承诺) */
+        /* quota full / private mode: silent (a draft is a bonus, not a promise) */
       }
     }, 1000);
     return () => {

@@ -1,6 +1,6 @@
 /**
- * 口播 ASR 结果持久缓存(localStorage,按视频 URL)。
- * 同一条口播后面会反复用——转写一次,之后导入/刷新/再来都秒回,不重复烧 ASR。
+ * Persistent cache of ASR results (localStorage, keyed by video URL).
+ * The same narration gets reused repeatedly — transcribe once, then import/refresh/return all hit instantly, no repeat ASR spend.
  */
 
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -24,6 +24,6 @@ export function setCachedAsr(url: string, segs: AsrSegment[]): void {
   try {
     localStorage.setItem(PREFIX + url, JSON.stringify(segs));
   } catch {
-    // 配额满 / 隐私模式:静默降级(内存里仍有)
+    // Quota full / private mode: degrade silently (still in memory)
   }
 }

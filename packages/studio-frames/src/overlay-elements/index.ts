@@ -1,16 +1,21 @@
 /**
- * 主题叠加件(口播画面上的组件,与整页 showcase 分工):每主题一个文件,导出
- *   export const overlays: Record<string, () => Block>   // 件名(zh)→ 构造器
+ * Theme overlay elements (components layered on the talking-head frame, distinct from
+ * the full-page showcase): one file per theme, each exporting
+ *   export const overlays: Record<string, () => Block>   // element name (zh) -> builder
  *
- * 设计铁律(用户两轮纠偏后定,别再犯):
- *  - **件,不是页**:根透明,件占画面一个区域(卡 ≤~45% 宽、标题条 ≤~62%×矮条、
- *    关键词 ≤~52% 居中),永远给说话的人留出画面——禁满幅底。
- *  - **特色长在件上**:必须用该方言的签名语汇(硬影墨块/木框粉笔/胶带拍立得/
- *    镀金细线/像素斜面…),从 showcase 的 CSS 语汇里取——同骨架换配色=没做。
- *  - 画布 1920×1080 标定;样式只用 token(var(--…),库侧按主题 palette 烘焙);
- *    选择器 #${id} 作用域;文本节点打 data-edit;GSAP ≤1.2s 落定,无循环。
- *  - 件名跨主题统一(标题条/大数字/要点列表/关键词重击/标注/关注引导/金句/左右对比),
- *    分组与词典靠它对齐;布局/装饰/动效各主题自便。
+ * Design rules (settled after two rounds of user correction — don't regress):
+ *  - **Element, not page**: transparent root; each element occupies one region of the
+ *    frame (card <=~45% wide, title bar <=~62% x short strip, keyword <=~52% centered).
+ *    Always leave room for the speaker — no full-bleed backgrounds.
+ *  - **Character lives in the element**: use the dialect's signature vocabulary (hard-shadow
+ *    ink blocks / wood-framed chalk / taped Polaroid / gilded hairlines / pixel bevels...),
+ *    taken from the showcase CSS. Same skeleton with a recolor = not done.
+ *  - Canvas is 1920x1080; styles use tokens only (var(--…), baked from the theme palette by
+ *    the library); selectors scoped to #${id}; text nodes get data-edit; GSAP settles in
+ *    <=1.2s, no loops.
+ *  - Element names are shared across themes (title bar / big number / bullet list / keyword
+ *    hit / callout / follow CTA / quote / A-vs-B). Grouping and the dictionary align on them;
+ *    layout/decoration/animation are each theme's own choice.
  */
 
 import type { Block } from '../dialects/shared';
@@ -68,7 +73,7 @@ const SETS: Record<string, Record<string, () => Block>> = {
   'zen-white': zenWhite,
 };
 
-/** 该主题的叠加件清单(无专属集=null,库侧回落通用结构)。 */
+/** Overlay elements for this theme (no dedicated set = null; library falls back to a generic structure). */
 export function overlayElements(frameId: string): { kind: string; make: () => Block }[] | null {
   const set = SETS[frameId];
   if (!set) return null;

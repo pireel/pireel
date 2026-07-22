@@ -205,7 +205,7 @@ function putWithProgress(
     xhr.addEventListener('abort', () => reject(new Error('上传被中断')));
     xhr.open('PUT', url);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-    // presign 把 Cache-Control 签进了 SigV4 签名，PUT 必须带同值，否则 R2 拒签 SignatureDoesNotMatch
+    // presign signed Cache-Control into the SigV4 signature; the PUT must send the same value or R2 rejects with SignatureDoesNotMatch
     if (cacheControl) xhr.setRequestHeader('Cache-Control', cacheControl);
     xhr.send(file);
   });

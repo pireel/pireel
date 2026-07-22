@@ -19,6 +19,10 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     lookupIcons: vi.fn(() => ({ ok: true, data: { icons: [], misses: [] } })),
     importMedia: vi.fn(async () => ({ ok: true, summary: 'imported', data: { projectId: 'p1' } })),
     createBrowserHandoff: vi.fn(async () => ({ ok: true, summary: 'handoff', data: { url: 'https://x/auth/handoff?code=c', project_id: 'p2' } })),
+    createProject: vi.fn(async () => ({ ok: true, summary: 'created', data: { projectId: 'p3', title: 'New' } })),
+    listProjects: vi.fn(async () => ({ ok: true, summary: '0', data: { projects: [], active: null } })),
+    switchProject: vi.fn(async () => ({ ok: true, summary: 'switched', data: { projectId: 'p1' } })),
+    renameProject: vi.fn(async () => ({ ok: true, summary: 'renamed', data: { projectId: 'p1', title: 'X' } })),
     ...overrides,
   };
 }
@@ -82,7 +86,7 @@ describe('MCP 协议处理', () => {
     expect(d.readEditingGuide).toHaveBeenCalled();
     expect(d.readFrame).toHaveBeenCalledWith('f1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['create_browser_handoff', 'get_icons', 'import_media', 'list_frames', 'read_editing_guide', 'read_frame']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['create_browser_handoff', 'create_project', 'get_icons', 'import_media', 'list_frames', 'list_projects', 'read_editing_guide', 'read_frame', 'rename_project', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);

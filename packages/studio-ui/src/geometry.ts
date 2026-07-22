@@ -1,20 +1,22 @@
 'use client';
 
 /**
- * 几何遍(免费,不耗 token)—— 用 MediaPipe 在浏览器里密集分割人物 + 检测人脸,
- * 算出每段画面的【安全区】具体坐标(归一 [0..1],原点左上,可直接 ×comp 尺寸 → block 定位)。
+ * Geometry pass (free, no tokens): dense person segmentation + face detection
+ * in-browser via MediaPipe, computing each segment's safe-zone coordinates
+ * (normalized [0..1], origin top-left, multiply by comp size for block placement).
  *
- * 分工:这里只管几何(人在哪、哪里空);语义(主题/构图/内容)归 VLM(稀疏,见 visual.ts)。
- * 失败一律降级返回 null,主链路退回 VLM 的粗 safe,不崩。
+ * Split of duties: geometry only (where the person is, where it's empty). Semantics
+ * (theme/composition/content) belong to the VLM (sparse, see visual.ts).
+ * Any failure degrades to null; the main path falls back to the VLM's coarse safe zone.
  *
- * 安全区算法:
- *  - 每帧分割 → 人物占用降采样到粗网格;人脸框单独留(硬禁)。
- *  - 某时段安全区 = 段内各帧占用的【并集】(主体曾出现处全避开)→ 取补集。
- *  - 在补集网格上跑【最大空矩形】top-K,给出可放置的矩形({x,y,w,h} 归一)。
+ * Safe-zone algorithm:
+ *  - Per frame: segment -> downsample person occupancy to a coarse grid; keep the face box separate (hard no-go).
+ *  - Segment safe zone = union of per-frame occupancy (avoid everywhere the subject ever appeared) -> take the complement.
+ *  - Run top-K max-empty-rectangle over the complement grid -> placeable rects ({x,y,w,h} normalized).
  */
 
-// mediabunny / @mediapipe/tasks-vision 都是重库且只在「用户选了视频 + 跑画面分析」后才需要——
-// 一律动态加载,别压进 /studio 首包。类型导入不进 bundle。
+// mediabunny / @mediapipe/tasks-vision are heavy and only needed after "user picked a video + ran visual analysis":
+// always dynamic-import, keep them out of the /studio initial bundle. Type imports don't enter the bundle.
 import type { FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { GRID_H, GRID_W, type FrameGeom, type NRect, type SafeZone, safeZoneForRange } from '@pireel/studio-engine/geometry-math';
 import { t } from './i18n';
@@ -23,11 +25,11 @@ export type { NRect, FrameGeom, SafeZone } from '@pireel/studio-engine/geometry-
 export { safeZoneForRange } from '@pireel/studio-engine/geometry-math';
 
 const GEOM_FPS = 2;
-const MAX_FRAMES = 420; // 短片 2fps;长片把这些帧摊到整段(约每 1.5s 一帧 @10min),给每段都留下几何
+const MAX_FRAMES = 420; // short clips at 2fps; long clips spread these frames across the whole span (~1 frame/1.5s @10min) so every segment gets geometry
 const SEG_THRESHOLD = 0.4;
 
-// self-host:WASM + 模型放 public/mediapipe/(同域、国内可达、不依赖 Google/jsdelivr)。
-// 升级 @mediapipe/tasks-vision 后重跑 scripts/sync-mediapipe.sh 重拷 wasm。
+// self-host: WASM + models live in public/mediapipe/ (same-origin, no dependency on Google/jsdelivr).
+// After upgrading @mediapipe/tasks-vision, rerun scripts/sync-mediapipe.sh to re-copy the wasm.
 const WASM = '/mediapipe/wasm';
 const SEG_MODEL = '/mediapipe/selfie_segmenter.tflite';
 const FACE_MODEL = '/mediapipe/blaze_face_short_range.tflite';
@@ -39,8 +41,8 @@ interface MP {
 }
 let _mp: Promise<MP | null> | null = null;
 
-// 诊断:几何遍最近一次状态(给 🧪 面板 + console 看,别再静默失败)
-let _note: string | null = null; // null = 未运行(模块作用域禁 t(),缺省文案在 geomNote 使用点翻)
+// Diagnostics: last geometry-pass status (for the 🧪 panel + console; no more silent failures)
+let _note: string | null = null; // null = not run (t() banned at module scope; default string is translated at geomNote's use site)
 export function geomNote(): string {
   return _note ?? t('未运行');
 }
@@ -49,8 +51,9 @@ function loadMP(): Promise<MP | null> {
   if (_mp) return _mp;
   const p = (async () => {
     const { FaceDetector, FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision');
-    // CPU(XNNPACK)优先:浏览器 WebGL GPU delegate 常「创建成功但推理返回空/垃圾」(人脸/分割同时哑),
-    // 而这是 2fps×256px 的离线分析,CPU 完全够且是参考实现,最可靠。GPU 仅作 CPU 创建失败的兜底。
+    // Prefer CPU (XNNPACK): the browser WebGL GPU delegate often "creates fine but inference returns empty/garbage"
+    // (face + segmentation both go dead). This is offline 2fps×256px analysis, so CPU is plenty and is the reference
+    // impl — most reliable. GPU is only a fallback if CPU creation fails.
     for (const delegate of ['CPU', 'GPU'] as const) {
       try {
         const fileset = await FilesetResolver.forVisionTasks(WASM);
@@ -64,18 +67,18 @@ function loadMP(): Promise<MP | null> {
           baseOptions: { modelAssetPath: FACE_MODEL, delegate },
           runningMode: 'IMAGE',
         });
-        console.info(`[studio/geometry] MediaPipe 就绪(${delegate})`);
+        console.info(`[studio/geometry] MediaPipe ready (${delegate})`);
         return { seg, face, delegate };
       } catch (e) {
         _note = t('MediaPipe({delegate}) 加载失败: {msg}', { delegate, msg: e instanceof Error ? e.message : String(e) });
-        console.warn('[studio/geometry]', _note); // GPU 失败会自动再试 CPU
+        console.warn('[studio/geometry]', _note); // on GPU failure it auto-retries CPU
       }
     }
     return null;
   })();
   _mp = p;
-  // 加载失败(resolve null / reject)不永久缓存——重置后下次调用重试,
-  // 否则一次网络抖动就把整个会话的几何遍钉死成 null。
+  // Don't permanently cache a load failure (resolve null / reject): reset so the next call retries,
+  // otherwise one network hiccup pins the whole session's geometry pass to null.
   p.then(
     (mp) => {
       if (!mp && _mp === p) _mp = null;
@@ -87,12 +90,12 @@ function loadMP(): Promise<MP | null> {
   return p;
 }
 
-/** 单帧推理:分割 → 人物占用网格 + 人脸框。两个入口(密集分析 / 实时单帧)共用。 */
+/** Single-frame inference: segment -> person occupancy grid + face box. Shared by both entry points (dense analysis / realtime single frame). */
 function inferFrame(mp: MP, canvas: HTMLCanvasElement, cw: number, ch: number): { face: NRect | null; occ: Uint8Array } {
   const occ = new Uint8Array(GRID_W * GRID_H);
   try {
     const res = mp.seg.segment(canvas);
-    // mask 是 WASM 侧内存,close 必须走 finally——中途抛异常也不能泄漏(密集遍逐帧调,漏一帧攒一帧)
+    // mask is WASM-side memory; close must run in finally so an exception mid-way can't leak (dense pass calls per-frame, leaks accumulate)
     try {
       const conf = res.confidenceMasks?.[0];
       const cat = res.categoryMask;
@@ -124,23 +127,24 @@ function inferFrame(mp: MP, canvas: HTMLCanvasElement, cw: number, ch: number): 
       res.categoryMask?.close();
     }
   } catch {
-    /* 这帧分割失败 → 当全空 */
+    /* segmentation failed for this frame -> treat as all-empty */
   }
   let face: NRect | null = null;
   try {
     const b = mp.face.detect(canvas).detections?.[0]?.boundingBox;
     if (b) face = { x: b.originX / cw, y: b.originY / ch, w: b.width / cw, h: b.height / ch };
   } catch {
-    /* 没检到脸 */
+    /* no face detected */
   }
   return { face, occ };
 }
 
 /**
- * 实时人像 mask(「文字穿人」预览用):优先 RVM matting(WebGPU,发丝级软边 + 时序稳定),
- * WebGPU 不可用/失败退回 selfie 分割(256 网格,低质量兜底;0.2–0.8 置信区间宽过渡,
- * 保住模型自身的软边不被二次硬化)。失败/未就绪返回 null,调用方跳过这帧。
- * 无论成败都负责 close 传入的 bitmap(它是 postMessage 转移来的,不还回去)。
+ * Realtime person mask (for the "text behind person" preview): prefer RVM matting (WebGPU, hair-level soft edges +
+ * temporal stability); if WebGPU is unavailable/fails, fall back to selfie segmentation (256 grid, low-quality fallback;
+ * 0.2–0.8 confidence gives a wide soft transition, preserving the model's own soft edge from being re-hardened).
+ * Returns null on failure/not-ready; the caller skips that frame.
+ * Closes the passed-in bitmap either way (it was transferred via postMessage and isn't returned).
  */
 export async function segmentPersonMask(src: ImageBitmap): Promise<ImageBitmap | null> {
   try {
@@ -181,14 +185,14 @@ export async function segmentPersonMask(src: ImageBitmap): Promise<ImageBitmap |
   }
 }
 
-/** 密集分割每帧 → 人物占用网格 + 人脸框。失败返回 null。 */
+/** Dense per-frame segmentation -> person occupancy grid + face box. Returns null on failure. */
 export async function analyzeGeometry(
   file: File,
   durationSec: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<FrameGeom[] | null> {
   const mp = await loadMP();
-  if (!mp) return null; // _note 已记录加载失败原因
+  if (!mp) return null; // _note already recorded the load-failure reason
 
   const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
@@ -200,7 +204,7 @@ export async function analyzeGeometry(
     }
     const vw = track.displayWidth || 720;
     const vh = track.displayHeight || 1280;
-    const scale = Math.min(1, 256 / Math.max(vw, vh)); // 推理输入压到长边 ≤256
+    const scale = Math.min(1, 256 / Math.max(vw, vh)); // shrink inference input to long edge ≤256
     const cw = Math.max(2, Math.round(vw * scale));
     const ch = Math.max(2, Math.round(vh * scale));
     const canvas = document.createElement('canvas');
@@ -209,14 +213,14 @@ export async function analyzeGeometry(
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
 
-    // 跨整片均匀采样:短片用 GEOM_FPS;长片把 MAX_FRAMES 帧摊到整段
-    // (否则只覆盖前 MAX_FRAMES/GEOM_FPS 秒 = 90s,后面的段全没几何、吃同一份兜底)。
+    // Sample uniformly across the whole clip: short clips use GEOM_FPS; long clips spread MAX_FRAMES over the full span
+    // (otherwise only the first MAX_FRAMES/GEOM_FPS seconds = 90s get covered, and later segments have no geometry and share one fallback).
     const stamps: number[] = [];
     const step = Math.max(1 / GEOM_FPS, durationSec / MAX_FRAMES);
     for (let t = 0; t < durationSec && stamps.length < MAX_FRAMES; t += step) stamps.push(t);
 
-    // 时间基归零:stamps 是播放口径(durationSec 已归零),请求加回原始偏移、
-    // 回带时间减掉(首包非零的 mp4 详见 thumbnails.ts)
+    // Zeroed timebase: stamps are in playback terms (durationSec already zeroed); add the original offset back for the
+    // request and subtract it on the returned time (for mp4s whose first packet is non-zero, see thumbnails.ts)
     const t0 = Math.max(0, await input.getFirstTimestamp());
     const sink = new VideoSampleSink(track);
     const out: FrameGeom[] = [];
@@ -234,7 +238,7 @@ export async function analyzeGeometry(
     }
     const withSubject = out.filter((f) => f.occ.some((v) => v)).length;
     const faceHits = out.filter((f) => f.face).length;
-    // 平均人物占用率(粗判分割是否真在工作:口播一般 15~60%;≈0 = 分割没抓到人,极高 = 可能极性反了)
+    // Average person occupancy (rough check that segmentation is working: talking-head is usually 15~60%; ≈0 = segmentation missed the person, very high = polarity may be inverted)
     const avgOcc = out.length ? Math.round((out.reduce((s, f) => s + f.occ.reduce((a, v) => a + v, 0), 0) / out.length / (GRID_W * GRID_H)) * 100) : 0;
     _note = t('已分析 {n} 帧({delegate}) · 人 {subject}帧/占{occ}% · 脸 {face}帧', { n: out.length, delegate: mp.delegate, subject: withSubject, occ: avgOcc, face: faceHits });
     return out;
@@ -248,9 +252,10 @@ export async function analyzeGeometry(
 }
 
 /**
- * 区间几何(插入片段用):在源时间 [start,end] 内均匀抽 frames 帧(帧取每格中点,
- * 避开贴切点的转场糊帧)跑分割+人脸。只抽几帧,快;不进 _note 诊断(那是主源遍的)。
- * MediaPipe 不可用/无视频轨/一帧都没解出 → null,调用方退兜底。
+ * Range geometry (for inserted clips): sample `frames` frames uniformly over source time [start,end]
+ * (each at its cell midpoint, avoiding transition-blur frames near cut points) and run segmentation + face.
+ * Only a few frames, so it's fast; doesn't touch _note diagnostics (those belong to the main-source pass).
+ * MediaPipe unavailable / no video track / not a single frame decoded -> null; the caller falls back.
  */
 export async function analyzeGeometryRange(file: File, start: number, end: number, frames = 6): Promise<FrameGeom[] | null> {
   const mp = await loadMP();
@@ -285,7 +290,7 @@ export async function analyzeGeometryRange(file: File, start: number, end: numbe
     }
     return out.length ? out : null;
   } catch (e) {
-    console.warn('[studio/geometry] 区间几何失败:', e instanceof Error ? e.message : String(e));
+    console.warn('[studio/geometry] interval geometry failed:', e instanceof Error ? e.message : String(e));
     return null;
   } finally {
     await input.dispose();
@@ -293,8 +298,9 @@ export async function analyzeGeometryRange(file: File, start: number, end: numbe
 }
 
 /**
- * 实时单帧检测(调试用):抓时刻 t 那一帧,现算分割+人脸 → 该帧的安全区/脸/主体。
- * 给预览叠加层「拖到哪测哪帧」,比稀疏缓存准。每次开关 Input,适合 debounce 调用。
+ * Realtime single-frame detection (for debugging): grab the frame at time t, compute segmentation + face on the fly
+ * -> that frame's safe zone / face / subject. Feeds the preview overlay's "measure wherever you drag" — more accurate
+ * than the sparse cache. Opens/closes Input each call, so debounce it.
  */
 export async function detectFrameAt(file: File, t: number): Promise<SafeZone | null> {
   const mp = await loadMP();

@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * Studio 右侧 rail 生图/生视频面板的客户端 API 层。
+ * Client API layer for the Studio right-rail image/video generation panels.
  *
- * 复用 /create 的统一生成基建:POST /api/create(tool_id 选工具、计费、异步 atlas)+
- * GET /api/create/:id 轮询单条状态。creation 必须挂在 space 下——studio 不建项目,
- * 用一个懒建的专属空间(localStorage 记 id,跨账号/被删时清缓存重建一次)。
- * 资产落库是裸 R2 key,展示走 imageThumb 预设,插入 composition 用 'original' 全 URL。
+ * Reuses /create's unified generation infra: POST /api/create (tool_id picks the tool, billing, async
+ * atlas) + GET /api/create/:id to poll one item's status. A creation must hang off a space — studio
+ * doesn't create projects, so it uses one lazily-created dedicated space (id in localStorage; on
+ * account change / deletion, clear the cache and recreate once).
+ * Assets are stored as bare R2 keys; display uses the imageThumb preset; inserting into a composition uses the 'original' full URL.
  */
 
 import { imageThumb } from '@pireel/ui/image-url';
@@ -15,9 +16,9 @@ import { t } from './i18n';
 const SPACE_LS_KEY = 'pireel.studio.gen-space';
 
 export interface GenAsset {
-  /** 裸 key 或完整 URL(原样来自 output_data.assets[].url) */
+  /** Bare key or full URL (verbatim from output_data.assets[].url) */
   key: string;
-  /** 插入 composition 用的完整原始 URL */
+  /** Full original URL for inserting into a composition */
   url: string;
   mime: string;
 }
@@ -42,11 +43,11 @@ function clearSpaceCache() {
   try {
     localStorage.removeItem(SPACE_LS_KEY);
   } catch {
-    /* SSR/隐私模式忽略 */
+    /* Ignore under SSR/private mode */
   }
 }
 
-/** studio 专属生成空间:localStorage 缓存,没有就建一个。 */
+/** Studio's dedicated generation space: cached in localStorage, created if absent. */
 export async function getStudioSpaceId(): Promise<string> {
   try {
     const v = localStorage.getItem(SPACE_LS_KEY);
@@ -70,7 +71,7 @@ export async function getStudioSpaceId(): Promise<string> {
   return id;
 }
 
-/** 发起一次生成。402 积分不足单独成 kind;space 失效(换号/被删)清缓存重试一次。 */
+/** Start one generation. 402 insufficient credits becomes its own kind; on invalid space (account change/deletion) clear the cache and retry once. */
 export async function startGeneration(
   toolId: 'image-gen' | 'video-gen',
   params: Record<string, unknown>,
@@ -94,7 +95,7 @@ export async function startGeneration(
       return { ok: false, kind: 'credits', need: j.need ?? 0, balance: j.balance ?? 0 };
     }
     if (!r.ok || !j?.ok || !j.id) {
-      // 4xx 且还没重试过 → 大概率 space 失效,清缓存换新空间再试
+      // 4xx and not yet retried → most likely an invalid space; clear the cache, get a new space, and retry
       if (attempt === 0 && (r.status === 400 || r.status === 404)) {
         clearSpaceCache();
         continue;
@@ -135,7 +136,7 @@ function toJob(raw: RawCreation): GenJob {
   };
 }
 
-/** 轮询单条 creation。网络抖动当 pending 处理,下一轮再看。 */
+/** Poll one creation. Network hiccups are treated as pending, checked again next round. */
 export async function pollCreation(id: string): Promise<GenJob | null> {
   const r = await fetch(`/api/create/${encodeURIComponent(id)}`);
   if (!r.ok) return null;
@@ -144,7 +145,7 @@ export async function pollCreation(id: string): Promise<GenJob | null> {
   return toJob({ ...j, id });
 }
 
-/** 拉 studio 空间的生成历史(含 pending——挂载即恢复轮询)。没建过空间 = 没历史。 */
+/** Fetch the studio space's generation history (including pending — resume polling on mount). No space ever created = no history. */
 export async function listStudioGens(type: 'image' | 'video', limit = 30): Promise<GenJob[]> {
   let spaceId: string | null = null;
   try {

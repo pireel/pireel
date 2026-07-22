@@ -1,11 +1,12 @@
 /**
- * 玻璃 Glass —— 毛玻璃科技方言:深底双光斑先亮,玻璃层错位叠浮其上。
- * 主卡偏轴 + 小卡压角,顶边高光读作受光棱;数据 mono 冰蓝发光。
+ * Glass — frosted-glass tech dialect: dark base with two glow orbs lighting first,
+ * glass panes floating over them offset. Main card off-axis + mini card in the corner,
+ * top-edge highlight reads as a lit bevel; mono data glows ice-blue.
  */
 
 import { type Block, mk } from './shared';
 
-/* 光斑 + 玻璃面共用底座:光斑永远在最底层,玻璃浮在光上 */
+/* Shared base for orbs + glass panes: orbs always sit at the bottom, glass floats on the light */
 const glassRoot = (id: string) => `
 #${id} .rt{position:absolute;inset:0;color:var(--fg);font-family:var(--font-head);overflow:hidden;}
 #${id} .orb{position:absolute;border-radius:999px;filter:blur(90px);opacity:0.5;}

@@ -1,22 +1,24 @@
 /**
- * gl-transitions 合成层(单一来源,三端共用):
- *  - GLSL 着色器本体逐字取自 gl-transitions(gl-transitions.com,MIT),参数烤成常量,
- *    只保留 direction 作 uniform(推移/划开用);
- *  - GL_MIXER_SRC = 纯 ES5 的 WebGL 渲染器**函数源码字符串**——预览 shim(iframe 内联
- *    脚本,不能 import)直接字符串拼接,导出端/面板用 createGlMixer(new Function 同一份
- *    源码)——合成器只有一份实现,不存在"改一处忘一处"。
- *  - 纹理上传 UNPACK_FLIP_Y(gl-transitions uv 原点在左下);from/to 任意 TexImageSource
- *    (ImageBitmap / Canvas / OffscreenCanvas)。
+ * gl-transitions mixing layer (single source, shared by all three ends):
+ *  - GLSL shader bodies taken verbatim from gl-transitions (gl-transitions.com,
+ *    MIT), params baked to constants, keeping only direction as a uniform (for
+ *    push/wipe);
+ *  - GL_MIXER_SRC = pure-ES5 WebGL renderer as a **function source string** — the
+ *    preview shim (inline iframe script, can't import) concatenates it directly,
+ *    while the export end/panel use createGlMixer (new Function over the same
+ *    source) — one mixer implementation, no "change one place, forget another".
+ *  - Texture upload with UNPACK_FLIP_Y (gl-transitions uv origin is bottom-left);
+ *    from/to are any TexImageSource (ImageBitmap / Canvas / OffscreenCanvas).
  */
 
 import type { CutTransitionEffect } from './composition-core';
 
-/** 效果 id → transition GLSL(gl-transitions 规范:实现 vec4 transition(vec2 uv),
- *  可用 getFromColor/getToColor/progress/ratio/direction)。 */
+/** effect id → transition GLSL (gl-transitions spec: implement vec4 transition(vec2 uv),
+ *  with getFromColor/getToColor/progress/ratio/direction available). */
 export const TRANSITION_GLSL: Record<CutTransitionEffect, string> = {
   // fade (gre)
   fade: `vec4 transition(vec2 uv){ return mix(getFromColor(uv), getToColor(uv), progress); }`,
-  // fadecolor (gre) —— 烤黑色
+  // fadecolor (gre) — baked to black
   fadeblack: `
 const vec3 fcolor = vec3(0.0);
 const float colorPhase = 0.4;
@@ -36,10 +38,10 @@ vec4 transition(vec2 uv){
     getFromColor(f),
     step(0.0, p.y) * step(p.y, 1.0) * step(0.0, p.x) * step(p.x, 1.0));
 }`,
-  // directionalwipe (gre) —— smoothness=0.5
+  // directionalwipe (gre) — smoothness=0.5
   directionalwipe: `
 const vec2 wcenter = vec2(0.5, 0.5);
-const float wsmoothness = 0.1; // 上游默认 0.5=半屏羽化,真实画面读作叠化——收紧才有"划"感
+const float wsmoothness = 0.1; // upstream default 0.5 = half-screen feather, reads as a dissolve on real footage — tighten it to feel like a wipe
 vec4 transition(vec2 uv){
   vec2 v = normalize(direction);
   v /= abs(v.x) + abs(v.y);
@@ -49,9 +51,9 @@ vec4 transition(vec2 uv){
     (1.0 - smoothstep(-wsmoothness, 0.0, v.x * uv.x + v.y * uv.y - (d - 0.5 + progress * (1.0 + wsmoothness))));
   return mix(getFromColor(uv), getToColor(uv), m);
 }`,
-  // circleopen (gre) —— smoothness=0.3, opening=true
+  // circleopen (gre) — smoothness=0.3, opening=true
   circleopen: `
-const float csmoothness = 0.08; // 收紧圆形边缘(上游默认 0.3 太软)
+const float csmoothness = 0.08; // tighten the circle edge (upstream default 0.3 too soft)
 const vec2 ccenter = vec2(0.5, 0.5);
 const float SQRT_2 = 1.414213562373;
 vec4 transition(vec2 uv){
@@ -59,10 +61,10 @@ vec4 transition(vec2 uv){
   float m = smoothstep(-csmoothness, 0.0, SQRT_2 * distance(ccenter, uv) - x * (1.0 + csmoothness));
   return mix(getFromColor(uv), getToColor(uv), 1.0 - m);
 }`,
-  // windowslice (gre) —— count=10, smoothness=0.5
+  // windowslice (gre) — count=10, smoothness=0.5
   windowslice: `
 const float wscount = 10.0;
-const float wssmoothness = 0.5; // 上游默认:宽 ramp = 多条百叶同时开合的机理,收紧会退化成硬边擦
+const float wssmoothness = 0.5; // upstream default: a wide ramp is what makes multiple blinds open/close at once; tightening degrades it to a hard-edge wipe
 vec4 transition(vec2 p){
   float pr = smoothstep(-wssmoothness, 0.0, p.x - progress * (1.0 + wssmoothness));
   float s = step(pr, fract(wscount * p.x));
@@ -151,10 +153,11 @@ vec4 transition(vec2 p){
 };
 
 /**
- * WebGL 合成器(ES5 函数源码,单一来源):(W, H, defs) => { canvas, render } | null。
- * render(fromSrc, toSrc, effectId, progress, dirX, dirY) 把结果画在自己的 canvas 上,
- * 返回 false = 该效果编译失败/GL 不可用(调用方降级)。上传 FLIP_Y(gl-transitions
- * uv 左下原点);程序按效果懒编译缓存。
+ * WebGL mixer (ES5 function source, single source): (W, H, defs) => { canvas, render } | null.
+ * render(fromSrc, toSrc, effectId, progress, dirX, dirY) draws the result onto its
+ * own canvas; returns false = that effect failed to compile / GL unavailable
+ * (caller degrades). Uploads with FLIP_Y (gl-transitions bottom-left uv origin);
+ * programs are lazily compiled and cached per effect.
  */
 export const GL_MIXER_SRC = `function (W, H, defs) {
   var cv = typeof OffscreenCanvas !== 'undefined' && typeof document === 'undefined' ? new OffscreenCanvas(W, H) : (function(){ var c = document.createElement('canvas'); c.width = W; c.height = H; return c; })();
@@ -205,7 +208,7 @@ export const GL_MIXER_SRC = `function (W, H, defs) {
     };
     return progs[id];
   };
-  var keyA = null, keyB = null; // 纹理内容版本:同 key 跳过 texImage2D(全分辨率上传是逐 tick 重合成的大头)
+  var keyA = null, keyB = null; // texture content version: same key skips texImage2D (full-res upload is the bulk of per-tick recompositing)
   var upload = function (unit, tex, srcImg, key, cur) {
     if (key != null && key === cur) return cur;
     gl.activeTexture(gl.TEXTURE0 + unit);
@@ -244,7 +247,7 @@ export interface GlMixer {
   render: (fromSrc: TexImageSource, toSrc: TexImageSource, id: string, p: number, dx?: number, dy?: number, fromKey?: string, toKey?: string) => boolean;
 }
 
-/** 导出端/面板用:同一份 GL_MIXER_SRC 实例化(与 shim 里的合成器逐字节同源)。 */
+/** For export end/panel: instantiate the same GL_MIXER_SRC (byte-for-byte identical to the shim's mixer). */
 export function createGlMixer(W: number, H: number): GlMixer | null {
   try {
     const factory = new Function(`return (${GL_MIXER_SRC})`)() as (w: number, h: number, defs: Record<string, string>) => GlMixer | null;
@@ -254,7 +257,7 @@ export function createGlMixer(W: number, H: number): GlMixer | null {
   }
 }
 
-/** 我们的方向语义(B 的行进方向)→ gl-transitions 的 direction uniform(y 轴朝上)。 */
+/** Our direction semantics (B's travel direction) → gl-transitions' direction uniform (y-axis up). */
 export function glDirection(dir: 'up' | 'down' | 'left' | 'right'): [number, number] {
   switch (dir) {
     case 'left':

@@ -1,11 +1,12 @@
 /**
- * 漫画 Manga —— 黑白分镜方言:6px 墨线格、速度线、对话泡、网点、每卡至多一处红。
- * 结构逻辑:格子大小不等且各歪 1-2°;能量来自线条与倾斜,不来自颜色;强调用反白格。
+ * Manga — black-and-white panel dialect: 6px ink-line panels, speed lines, speech bubbles,
+ * screentone, at most one red per card. Structure logic: panels are unequal in size and each
+ * tilted 1-2°; energy comes from line and tilt, not color; emphasis uses an inverted panel.
  */
 
 import { type Block, mk } from './shared';
 
-/** 速度线(裁进角落)+ 网点补丁。 */
+/** Speed lines (clipped into a corner) + screentone patch. */
 const tones = (id: string) => `
 #${id} .spd{position:absolute;background:repeating-linear-gradient(65deg,var(--fg) 0 3px,transparent 3px 26px);clip-path:polygon(0 0,100% 0,0 100%);}
 #${id} .ht{position:absolute;background-image:radial-gradient(var(--fg) 2.4px,transparent 2.4px);background-size:18px 18px;}`;

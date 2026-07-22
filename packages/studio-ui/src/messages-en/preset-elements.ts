@@ -1,11 +1,11 @@
-/** en 词典分片:preset-elements.ts(预置组件 label/分类/占位文案;key=源码中文原文)。 */
+/** en dictionary shard: preset-elements.ts (preset element labels/categories/placeholder copy; key = the original source Chinese). */
 const dict: Record<string, string> = {
-  // 分类(数据键保持中文,显示点包 t;'标题' 与 engine 词条共 key='Title' 不重复)
+  // Categories (data keys stay Chinese, wrapped in t at display; '标题' shares key 'Title' with the engine entry, no duplicate)
   '数据': 'Data',
   '结构': 'Structure',
   '强调': 'Emphasis',
   '社交': 'Social',
-  // 组件名
+  // Element names
   '大数字': 'Big number',
   '左右对比': 'Comparison',
   '环形占比': 'Progress ring',
@@ -21,7 +21,7 @@ const dict: Record<string, string> = {
   '关注引导': 'Follow CTA',
   '评论气泡': 'Comment bubble',
   '蹲链接条': 'Link bar',
-  // 占位文案(通用壳,「同步内容」会按口播稿改写)
+  // Placeholder copy (generic shell; "Sync content" rewrites it from the transcript)
   '主标题写这里': 'Main title here',
   '副标题写这里': 'Subtitle here',
   '补充说明': 'More detail',

@@ -1,6 +1,7 @@
 /**
- * 爆炸 Mega Sale 方言 —— 大促红底裸露,金色只做爆炸贴/斜彩带/CTA,金底字一律深酒红;
- * 巨价签白字加深酒红描边;倒计时深红瓷砖;动效硬砸(power4.in 落版 + 一次脉冲)。
+ * Mega Sale dialect — bare red promo base; gold only for burst badges/diagonal banners/CTA,
+ * gold-on-text always deep wine. Giant price tags in white with deep-wine stroke;
+ * countdown on dark-red tiles; motion slams in (power4.in landing + one pulse).
  */
 
 import { type Block, mk } from './shared';

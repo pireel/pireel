@@ -1,25 +1,26 @@
 /**
- * 外部 agent 桥(浏览器侧)—— 连 /api/studio/bridge(StudioBridge DO),
- * 让 Codex/Claude Code 经 /api/studio/mcp 驱动本标签页的 runStudioTool。
+ * External agent bridge (browser side) — connects to /api/studio/bridge (StudioBridge DO),
+ * letting Codex/Claude Code drive this tab's runStudioTool via /api/studio/mcp.
  *
- * 语义:
- *  - 串行执行:外部调用排队跑,不与彼此并发改 comp(与内部 chat 的 onToolCall
- *    同一执行面,undo 快照/生成锁都在 runStudioTool 里,无需另做)。
- *  - get_state 特殊处理:局势快照在浏览器,直接回 <composition_state> 文本。
- *  - 单活跃标签:DO 侧新连接顶旧连接(close 4000),被顶的这边不再重连。
- *  - 重连退避 1s→30s;从未连上过(未登录/无 DO)连 6 次就放弃,不空转。
- *  - 'ping' 25s 保活(DO auto-response 应答,不吵醒休眠实例)。
+ * Semantics:
+ *  - Serial execution: external calls queue up, never mutate comp concurrently with each other
+ *    (same execution surface as the internal chat's onToolCall; undo snapshots / gen locks all
+ *    live inside runStudioTool, nothing extra needed).
+ *  - get_state special-cased: the state snapshot is in the browser, return <composition_state> text directly.
+ *  - Single active tab: DO side kicks the old connection when a new one arrives (close 4000); the kicked side doesn't reconnect.
+ *  - Reconnect backoff 1s→30s; if never connected (not logged in / no DO), give up after 6 tries instead of spinning.
+ *  - 'ping' every 25s keep-alive (answered by DO auto-response, doesn't wake a hibernating instance).
  */
 
 import { useEffect, useRef } from 'react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 
 export interface AgentBridgeOpts {
-  /** 执行一个工具(与内部 chat 完全同一 runStudioTool)。 */
+  /** Run one tool (the exact same runStudioTool as the internal chat). */
   runTool: (tool: string, input: Record<string, unknown>) => Promise<StudioToolResult>;
-  /** 当前局势快照(get_state 的回执正文)。 */
+  /** Current state snapshot (the body of get_state's reply). */
   getState: () => string;
-  /** 外部调用完成的回调(UI 反馈用,如 toast)。 */
+  /** Callback when an external call completes (for UI feedback, e.g. toast). */
   onExternalCall?: (tool: string, result: StudioToolResult) => void;
 }
 
@@ -42,7 +43,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
       try {
         sock = new WebSocket(url);
       } catch {
-        return; // 环境不支持,放弃
+        return; // environment unsupported, give up
       }
       ws = sock;
       sock.onopen = () => {
@@ -69,7 +70,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
           try {
             sock.send(JSON.stringify({ id, ...out }));
           } catch {
-            /* socket 已死,DO 侧会超时/失败 */
+            /* socket already dead, DO side will time out / fail */
           }
           optsRef.current.onExternalCall?.(tool, out);
         });
@@ -77,8 +78,8 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
       sock.onclose = (ev) => {
         if (ws === sock) ws = null;
         if (!alive) return;
-        if (ev.code === 4000) return; // 被新标签页顶掉:本页退出桥,不抢
-        if (!everConnected && retries >= 6) return; // 从未连上(未登录等):别空转
+        if (ev.code === 4000) return; // kicked by a new tab: this page exits the bridge, don't fight for it
+        if (!everConnected && retries >= 6) return; // never connected (not logged in, etc.): don't spin
         setTimeout(connect, Math.min(30_000, 1_000 * 2 ** retries++));
       };
     };
@@ -89,7 +90,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
         try {
           ws.send('ping');
         } catch {
-          /* onclose 会接手重连 */
+          /* onclose will take over reconnecting */
         }
       }
     }, 25_000);
@@ -100,7 +101,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
       try {
         ws?.close();
       } catch {
-        /* 已关 */
+        /* already closed */
       }
     };
   }, []);

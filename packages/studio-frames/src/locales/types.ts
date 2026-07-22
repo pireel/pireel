@@ -1,30 +1,32 @@
-/** 包自持的 locale 键(与 app 的 Locale 结构一致,开源包不反向依赖 app i18n)。 */
+/** Self-contained locale keys (same shape as the app's Locale; the OSS package doesn't depend back on app i18n). */
 export type SupportedLocale = 'en' | 'zh';
 
 /**
- * frame 国际化 —— **单独一份的适配层**(用户定的:不做一比一翻译,按语言/文化特性适配)。
+ * Frame i18n — a separate adaptation layer (by design: not a one-to-one translation,
+ * adapted per language/culture).
  *
- * 结构:每个 frame 一个 locale 包(locales/en/<frameId>.ts),含
- *  - title/summary:目录与面板显示名(英文语境下的名字,不是拼音直译);
- *  - copy:预览文案替换表 —— 方言块源码里的中文字面量 → 适配后的英文文案。
- *    适配原则:英文版要像"那个文化里原生的东西"(报刊=英文大报语感、双年展=英文海报口号、
- *    霓虹=终端指令),长度要塞得进原版式;涉及汉字美学的元素(剪纸对联/报头)可保留汉字,
- *    只翻功能性文案。
- * 替换发生在 showcaseBlock/coverBlock 构块之后(apply.ts),对 slots.innerHtml 与 label
- * 做最长优先的字面量替换 —— 方言源码保持中文单一来源,i18n 永远独立在这一层。
- * zh 是 canonical(无包);新增语言 = 新建 locales/<locale>/ 一套包。
+ * Structure: one locale pack per frame (locales/en/<frameId>.ts), with
+ *  - title/summary: directory and panel display name (a native English name, not pinyin);
+ *  - copy: preview copy substitution table — Chinese literals in the dialect source → adapted
+ *    English copy. Principle: the English should read like a native artifact of that culture
+ *    (Journal = broadsheet voice, Biennale = poster slogans, Neon = terminal commands) and must
+ *    fit the original layout; elements that rely on Han-character aesthetics (paper-cut couplets,
+ *    mastheads) may keep the characters and translate only the functional copy.
+ * Substitution runs after showcaseBlock/coverBlock builds the block (apply.ts), longest-first over
+ * slots.innerHtml and label — the dialect source stays single-source Chinese, i18n lives only here.
+ * zh is canonical (no pack); a new language = a new locales/<locale>/ set of packs.
  */
 
 export interface FrameLocalePack {
-  /** 该语言下的主题名(适配,非直译)。 */
+  /** Theme name in this language (adapted, not literal). */
   title: string;
-  /** 一句话简介。 */
+  /** One-line summary. */
   summary: string;
-  /** 预览文案替换表:方言源码中文字面量 → 适配文案。键必须与源码逐字一致(有测试钉)。 */
+  /** Preview copy substitution table: Chinese literal in dialect source → adapted copy. Keys must match the source verbatim (pinned by tests). */
   copy: Record<string, string>;
 }
 
-/** showcase 词(canonical 中文键)→ 各语言显示标签。 */
+/** showcase kind (canonical Chinese key) → per-language display label. */
 export const KIND_LABELS_EN: Record<string, string> = {
   标题卡: 'Title card',
   金句: 'Quote',

@@ -1,11 +1,12 @@
 /**
- * 星尘 Particle —— 深空星尘方言:粒子散点汇聚、星座连线、光晕聚拢。
- * 无卡片无边框,文字直接悬浮;签名动效 = 每颗粒子从写死的 x/y 偏移飞入落位。
+ * Particle — deep-space stardust dialect: scattered particles converging, constellation lines,
+ * halos gathering. No cards, no borders, text floats directly; signature motion = each particle
+ * flies in from a hardcoded x/y offset to its resting spot.
  */
 
 import { type Block, mk } from './shared';
 
-/* 粒子场:位置/尺寸/颜色/透明度/飞入偏移全部写死(禁运行时随机) */
+/* Particle field: position/size/color/opacity/fly-in offset are all hardcoded (no runtime randomness) */
 type Dust = { l: number; t: number; s: number; c: 'a' | 'b' | 'f'; o: number; dx: number; dy: number };
 const DUST: Dust[] = [
   { l: 150, t: 170, s: 7, c: 'a', o: 0.9, dx: -160, dy: -90 },
@@ -34,7 +35,7 @@ const dustCss = (id: string): string =>
       `#${id} .d${i}{left:${d.l}px;top:${d.t}px;width:${d.s}px;height:${d.s}px;background:${DUST_COLOR[d.c]};opacity:${d.o};}`,
   ).join('\n');
 
-/** 签名动效:粒子从各自写死的偏移汇聚落位,逐粒错峰。 */
+/** Signature motion: particles converge from their hardcoded offsets, staggered one by one. */
 const dustTl = (id: string): string =>
   DUST.map(
     (d, i) =>

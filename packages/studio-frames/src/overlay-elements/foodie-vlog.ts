@@ -1,8 +1,11 @@
 /**
- * 奶油 Cream(foodie-vlog)的口播叠加件:餐桌道具语言——菜单便签式白色大圆角贴纸
- * (歪 2-5° 相邻反号、软影无描边)、药丸 chip 清单、食欲橙价格章 pill(一件只一个橙点,
- * 可 glow)、蜂蜜黄次强调、糖珠圆点缀饰、blob 异形盘托数字、蒸汽线。画面里的菜是主角,
- * 件是摆在旁边的可爱道具,动效 back.out 弹入。
+ * Cream (foodie-vlog) talking-head overlays: tabletop-prop language. Menu-note
+ * white rounded stickers (tilted 2-5deg, alternating sign, soft shadow, no
+ * outline), pill chip lists, appetite-orange price-stamp pills (one orange accent
+ * per element, may glow), honey-yellow secondary accents, candy dot flourishes,
+ * blob-shaped plates holding numbers, and steam lines. The dish in the shot is
+ * the hero; elements are cute props placed beside it, entering with a back.out
+ * bounce.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

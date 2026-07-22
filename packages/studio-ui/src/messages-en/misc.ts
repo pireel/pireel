@@ -1,4 +1,4 @@
-/** en 词典分片(key=源码中文原文),归属见 index.ts。 */
+/** en dictionary shard (key = the original source Chinese); see index.ts for ownership. */
 const dict: Record<string, string> = {
   // use-export.ts
   '成片-{res}p-{stamp}.{format}': 'export-{res}p-{stamp}.{format}',

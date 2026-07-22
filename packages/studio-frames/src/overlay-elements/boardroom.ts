@@ -1,7 +1,8 @@
 /**
- * 简报 Boardroom 的口播叠加件:咨询报告碎片语言——白 --panel 镶边卡(1px line 边 +
- * radius + shadow)顶着 8px accent 行动色条、mono 字距页眉、SOURCE 脚注、
- * 涨跌配色(accent 涨 / accent-2 跌)。零旋转零装饰,每件像从简报裁下的一块贴在画面上。
+ * Boardroom overlay elements: consulting-report-fragment language — white --panel bordered cards
+ * (1px line border + radius + shadow) capped by an 8px accent action bar, mono-tracked headers,
+ * a SOURCE footnote, up/down coloring (accent = up / accent-2 = down). No rotation, no ornament;
+ * each element looks cut from a slide deck and pasted on the frame.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

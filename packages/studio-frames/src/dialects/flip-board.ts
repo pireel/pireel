@@ -1,7 +1,8 @@
 /**
- * 翻牌 Flipboard 方言 —— 起落牌翻板(Solari):翻牌格上半 panel 下半 panel-2 中缝 4px paper,
- * 出发信息行(航班/目的地/时间/状态)、琥珀目的地、准点绿 chip;
- * 动效只许翻:rotationX -90→0 逐格波浪、行自上而下级联、格内 innerText 滚数。
+ * Flipboard dialect — a Solari split-flap departure board: each flap has a panel top half, panel-2
+ * bottom half, and a 4px paper split; departure info rows (flight/destination/time/status), amber
+ * destinations, on-time green chip. Motion is flips only: rotationX -90→0 in a per-flap wave,
+ * rows cascading top-to-bottom, innerText rolling numbers inside a flap.
  */
 
 import { type Block, mk } from './shared';

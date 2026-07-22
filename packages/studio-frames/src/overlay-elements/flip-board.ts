@@ -1,8 +1,10 @@
 /**
- * 翻牌 Flipboard 的口播叠加件:单条 departure row 语言——每件带一小段 --paper 候机厅
- * 墙面(自带横向 ruled 线),上面钉翻牌格(上半 --panel / 下半 --panel-2 / 4px --paper 中缝),
- * mono 大写字距、琥珀目的地、准点绿 chip(每屏限一枚)。动效只许翻:rotationX -90→0
- * 逐格波浪 + chip steps 闪,不淡入不弹跳不发光。
+ * Flipboard talking-head overlays: single departure-row language. Each element
+ * carries a small strip of --paper terminal wall (with its own horizontal ruled
+ * lines), with split-flap tiles pinned on top (top half --panel / bottom half
+ * --panel-2 / 4px --paper seam), mono uppercase tracking, amber destinations, and
+ * an on-time green chip (max one per screen). Motion is flip-only: rotationX
+ * -90->0 rippling tile by tile + stepped chip blink. No fade, no bounce, no glow.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

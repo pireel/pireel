@@ -1,7 +1,9 @@
 /**
- * 黑板 Chalkboard 的口播叠加件:手持小黑板语言——小片墨绿板面(--paper)配木框
- * (--panel-2 粗边),粉笔字、虚线粉笔框、手绘下划线、①②③、微倾斜、粉笔灰点。
- * 每件像老师举起的一块小板,贴在画面上。
+ * Chalkboard talking-head overlays: handheld-slate language. A small dark-green
+ * board surface (--paper) in a wood frame (thick --panel-2 border), chalk type,
+ * dashed chalk frames, hand-drawn underlines, ①②③, slight tilt, and chalk-dust
+ * specks. Each element reads like a small slate the teacher holds up, stuck onto
+ * the shot.
  */
 
 import { mk, txt, type Block } from '../dialects/shared';

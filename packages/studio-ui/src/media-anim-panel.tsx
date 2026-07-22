@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * 素材块动效面板(浮动条「动效」入口):入场/出场各一组 SVG 效果卡(与取景面板同范式,
- * 1:1 画框 + 运动示意,标题在图下),时长胶囊。作用于当前选中的素材块;选中一走父层自动关。
+ * Media block motion panel (the "Motion" entry on the floating bar): one set of SVG effect cards each
+ * for enter/exit (same pattern as the framing panel — 1:1 frame + motion sketch, title below the image),
+ * plus duration pills. Applies to the currently selected media block; closes automatically when selection clears.
  */
 
 import { t } from './i18n';
@@ -26,20 +27,20 @@ const EXITS = [
 
 const ACCENT = 'var(--color-accent, #3f4be8)';
 
-/** 单张动效卡:96×96 画框,素材=浅底圆角矩形,运动轨迹=残影 + accent 箭头。 */
+/** A single motion card: 96×96 frame, media = light rounded rect, motion trail = afterimages + accent arrow. */
 function AnimPreview({ effect, phase }: { effect: string; phase: 'in' | 'out' }) {
-  // 素材占位矩形(残影用低透明度同形)
+  // Media placeholder rect (afterimages reuse the same shape at low opacity)
   const R = (x: number, y: number, o: number, w = 40, h = 28) => <rect x={x} y={y} width={w} height={h} rx="5" className="fill-ink-4/40" opacity={o} />;
-  // 虚线轮廓(缩放的目标/起点形)
+  // Dashed outline (scale target/start shape)
   const D = (x: number, y: number, w: number, h: number) => (
     <rect x={x} y={y} width={w} height={h} rx="5" fill="none" stroke="currentColor" strokeOpacity="0.4" strokeWidth="1.5" strokeDasharray="4 3" />
   );
-  // accent 箭头:杆 + 头
+  // Accent arrow: shaft + head
   const A = (d: string) => <path d={d} fill="none" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />;
   let inner: React.ReactNode;
   switch (effect) {
     case 'fade':
-      // 淡:同形三格透明度渐变(入=越来越实,出=越来越虚)
+      // Fade: three same-shape cells with an opacity gradient (in = more solid, out = more faint)
       inner = (
         <>
           {R(7, 40, phase === 'in' ? 0.15 : 0.95, 24, 16)}
@@ -49,7 +50,7 @@ function AnimPreview({ effect, phase }: { effect: string; phase: 'in' | 'out' })
       );
       break;
     case 'slide':
-      // 滑:横向残影拖尾 + 向右箭头(入=拖尾在左落到实体,出=实体甩出拖尾)
+      // Slide: horizontal afterimage trail + rightward arrow (in = trail on the left settling into solid, out = solid throwing off a trail)
       inner =
         phase === 'in' ? (
           <>
@@ -68,7 +69,7 @@ function AnimPreview({ effect, phase }: { effect: string; phase: 'in' | 'out' })
         );
       break;
     case 'rise':
-      // 升:纵向残影 + 向上箭头(入=从下浮上来,出=继续上浮离场)
+      // Rise: vertical afterimage + upward arrow (in = floats up from below, out = keeps floating up and off)
       inner =
         phase === 'in' ? (
           <>
@@ -87,7 +88,7 @@ function AnimPreview({ effect, phase }: { effect: string; phase: 'in' | 'out' })
         );
       break;
     case 'scale':
-      // 缩放:虚线形→实体形 + 对角箭头(入=由小放大箭头向外,出=收小箭头向内)
+      // Scale: dashed shape → solid shape + diagonal arrows (in = grows with arrows pointing out, out = shrinks with arrows pointing in)
       inner =
         phase === 'in' ? (
           <>
@@ -106,7 +107,7 @@ function AnimPreview({ effect, phase }: { effect: string; phase: 'in' | 'out' })
         );
       break;
     default:
-      // 无:空画框 + 斜杠(与取景面板「无」同款标识)
+      // None: empty frame + slash (same marker as "None" in the framing panel)
       inner = <line x1="14" y1="82" x2="82" y2="14" stroke="currentColor" strokeOpacity="0.45" strokeWidth="3" strokeLinecap="round" />;
   }
   return (
@@ -160,7 +161,7 @@ export function MediaAnimPanel({
   const dur = anim.dur ?? 0.5;
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      {/* 标题/关闭归浮窗头部,这里只剩一行说明 */}
+      {/* Title/close live in the popover header; only a one-line note remains here */}
       <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('作用于当前选中的图片 / 视频块')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
         <section className="flex flex-col gap-1.5">

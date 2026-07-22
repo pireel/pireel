@@ -1,15 +1,18 @@
 'use client';
 
 /**
- * 预置组件库 —— 素材库·组件的官方种子(用户定的形态:「我的」排第一类,每类概览一行
- * 两卡,分类头右箭头进详情)。设计约束:
- *  - **一套中性组件,变体交给主题**:全部只用 token(--panel/--fg/--accent…),挂不同
- *    frame 自动变脸,不做 25×N 的主题变体卡。
- *  - 文字节点全打 data-edit(插入后单击就地改字);**文案=通用占位(标题一/要点一…,用户定的)**——配套浮动条「同步内容」按块时间窗的口播稿一键填充,占位是"待填的壳"的明确示意。
- *  - 选择器 #seedId 作用域;插入端 replaceAll(seedId→新块 id) 重作用域,可反复插。
- *  - 尺寸按 1080 宽画布标定,卡片居中自持(不吃画布高度,16:9/9:16 都成立);
- *    动效 ≤1.2s 落定,无循环;最小字号 28px。
- * 与 LLM 生成路径无关(compose 不套预置);它是人的手动路径,插完就是普通 custom 块。
+ * Preset element library — the official seeds for the Assets · Elements section. Design constraints:
+ *  - **One neutral element set, variants delegated to the theme**: everything uses only
+ *    tokens (--panel/--fg/--accent…), so a different frame changes its look automatically;
+ *    no 25×N theme-variant cards.
+ *  - Every text node carries data-edit (click to edit in place after insert). Copy is
+ *    generic placeholder text — the floating toolbar's "sync content" fills it from the
+ *    block's time-window script in one tap; the placeholder clearly signals "shell to fill".
+ *  - Selectors scoped to #seedId; on insert, replaceAll(seedId → new block id) re-scopes it, so it can be inserted repeatedly.
+ *  - Sized against a 1080-wide canvas, cards self-centered (don't depend on canvas height,
+ *    works for both 16:9 and 9:16); animation settles in ≤1.2s, no loop; min font size 28px.
+ * Unrelated to the LLM generation path (compose doesn't wrap presets); this is the manual
+ * path — once inserted it's just an ordinary custom block.
  */
 
 import type { GenElementResult } from './element-history';
@@ -31,10 +34,10 @@ const pe = (id: string, category: string, labelZh: string, innerHtml: string, ti
   element: { seedId: id, innerHtml, timelineBody, label: t(labelZh), presetId: id },
 });
 
-/* 公共骨架:每个组件自带 <style>,不共享 CSS(块必须自包含,导出/复插不依赖外部)。 */
+/* Shared skeleton: each element ships its own <style>, no shared CSS (blocks must be self-contained; export/re-insert can't depend on anything external). */
 
 const buildPresets = (): PresetElement[] => [
-  /* ---------------- 数据 ---------------- */
+  /* ---------------- Data ---------------- */
   pe(
     'pe_num',
     '数据',
@@ -136,7 +139,7 @@ tl.from('#pe_bars .ttl',{autoAlpha:0,y:14,duration:0.24},0.16);
 tl.from('#pe_bars .bar',{scaleX:0,duration:0.5,stagger:0.12,ease:'power3.out'},0.3);
 tl.from('#pe_bars .v',{autoAlpha:0,duration:0.2,stagger:0.12},0.5);`,
   ),
-  /* ---------------- 结构 ---------------- */
+  /* ---------------- Structure ---------------- */
   pe(
     'pe_list',
     '结构',
@@ -207,7 +210,7 @@ tl.from('#pe_steps .s3',{y:46,autoAlpha:0,duration:0.3,ease:'back.out(1.5)'},0.6
 tl.from('#pe_tline .line',{scaleX:0,transformOrigin:'left center',duration:0.5,ease:'power2.out'},0.2);
 tl.from('#pe_tline .nd',{y:26,autoAlpha:0,duration:0.28,stagger:0.16,ease:'back.out(1.6)'},0.4);`,
   ),
-  /* ---------------- 强调 ---------------- */
+  /* ---------------- Emphasis ---------------- */
   pe(
     'pe_quote',
     '强调',
@@ -263,7 +266,7 @@ tl.from('#pe_slam .s',{y:30,autoAlpha:0,duration:0.26,ease:'back.out(1.6)'},0.5)
     `tl.from('#pe_callout .pill',{scale:0.6,autoAlpha:0,rotation:-10,duration:0.3,ease:'back.out(1.7)'},0);
 tl.from('#pe_callout .ar path',{strokeDasharray:260,strokeDashoffset:260,duration:0.45,ease:'power2.out'},0.24);`,
   ),
-  /* ---------------- 标题 ---------------- */
+  /* ---------------- Title ---------------- */
   pe(
     'pe_title',
     '标题',
@@ -324,7 +327,7 @@ tl.from('#pe_chap .tx span',{autoAlpha:0,duration:0.22},0.58);`,
 tl.from('#pe_cta .btn',{scale:0.6,duration:0.28,ease:'back.out(2)'},0.24);
 tl.to('#pe_cta .btn',{scale:1.06,duration:0.12,yoyo:true,repeat:1,ease:'power2.inOut'},0.9);`,
   ),
-  /* ---------------- 社交 ---------------- */
+  /* ---------------- Social ---------------- */
   pe(
     'pe_cmt',
     '社交',
@@ -368,8 +371,9 @@ tl.from('#pe_link .ans',{scale:0.6,autoAlpha:0,duration:0.28,ease:'back.out(1.7)
   ),
 ];
 
-/** 预置组件(惰性构建 + 按 locale 缓存):占位文案/label 经 t() 随界面语言;
- *  必须在壳注入 locale 后调用(渲染期天然满足),别退回模块级常量。 */
+/** Preset elements (lazily built + cached per locale): placeholder copy/labels go through
+ *  t() to follow the UI language; must be called after the shell injects locale (naturally
+ *  true at render time), don't fall back to a module-level constant. */
 let peCache: { locale: string; list: PresetElement[] } | null = null;
 export function presetElements(): PresetElement[] {
   const loc = studioLocale();
