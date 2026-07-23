@@ -22,6 +22,7 @@ export const COMMON_EN: Record<string, string> = {
   'common.exportAlreadyProgress': 'An export is already in progress',
   'common.exportCanceled': 'Export canceled',
   'common.exportCompleteDownloadStarted': 'Export complete — download started',
+  'common.exportCompleteDelivered': 'Export complete — delivered to the local receiver',
   'common.exportFailed': 'Export failed',
   'common.exportFailedTryAgain': 'Export failed — try again in a moment',
   'common.exportFilename': 'export-{res}p-{stamp}.{format}',

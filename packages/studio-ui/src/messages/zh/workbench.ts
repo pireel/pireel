@@ -106,6 +106,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.expandAssetsBar': '展开素材栏',
   'workbench.export': '导出',
   'workbench.exportDoneDownloadedVia': '导出完成,已经浏览器下载落盘',
+  'workbench.exportDoneLocalSink': '导出完成,已交付到本地接收器(export-sink helper 会打印落盘路径)',
   'workbench.exportingPct': '导出中 {pct}%',
   'workbench.exportingPctShort': '导出 {pct}%',
   'workbench.exportStartedLocalClient': '开始导出(本地客户端合成,约 1x 片长)',

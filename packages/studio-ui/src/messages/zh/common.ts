@@ -22,6 +22,7 @@ export const COMMON_ZH: Record<string, string> = {
   'common.exportAlreadyProgress': '已有导出在进行中',
   'common.exportCanceled': '已取消导出',
   'common.exportCompleteDownloadStarted': '导出完成，已开始下载',
+  'common.exportCompleteDelivered': '导出完成，已交付到本地接收器',
   'common.exportFailed': '导出失败',
   'common.exportFailedTryAgain': '导出失败，稍后重试',
   'common.exportFilename': '成片-{res}p-{stamp}.{format}',

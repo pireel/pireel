@@ -106,6 +106,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.expandAssetsBar': 'Expand the assets bar',
   'workbench.export': 'Export',
   'workbench.exportDoneDownloadedVia': 'Export done — downloaded via the browser',
+  'workbench.exportDoneLocalSink': 'Export done — delivered to the local receiver (the export-sink helper prints the saved path)',
   'workbench.exportingPct': 'Exporting {pct}%',
   'workbench.exportingPctShort': 'Exporting {pct}%',
   'workbench.exportStartedLocalClient': 'Export started (local client render, about 1x video length)',

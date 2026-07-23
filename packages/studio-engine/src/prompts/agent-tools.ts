@@ -483,12 +483,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.export_video.label',
     description:
-      "Start exporting the final video. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Defaults: 1080p / 30fps / mp4.",
+      "Start exporting the final video. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Defaults: 1080p / 30fps / mp4. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
     inputSchema: obj(
       {
         resolution: { type: 'number', description: 'Output height: 2160/1440/1080/720/540 (default 1080).' },
         fps: { type: 'number', description: '24/30/60 (default 30).' },
         format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Container (default mp4).' },
+        sink_url: { type: 'string', description: 'Loopback receiver URL from the export-sink helper (scripts/export-sink.mjs) — the finished file is PUT there instead of a browser download. Use when driving a headless/embedded browser.' },
       },
       [],
     ),

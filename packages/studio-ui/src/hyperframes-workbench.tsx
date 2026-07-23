@@ -653,7 +653,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
-  const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null }>({ running: false, filename: null, error: null });
+  const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>({
+    running: false,
+    filename: null,
+    error: null,
+  });
   const exportPctRef = useRef(0);
   exportPctRef.current = exportPct;
   // Export dialog: options persist (remembers last choice within this session), only runs on confirm
@@ -4701,20 +4705,54 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               fps: [24, 30, 60].includes(Number(input.fps)) ? (Number(input.fps) as 24 | 30 | 60) : (30 as const),
               format: input.format === 'webm' || input.format === 'mov' ? (input.format as 'webm' | 'mov') : ('mp4' as const),
             };
+            // Local sink (export-sink helper): the reliable delivery path for agent-driven
+            // browsers, which discard page downloads. Loopback-only — the sink's whole point
+            // is same-machine delivery, and this keeps the finished video from being POSTed anywhere else.
+            const sinkUrl = typeof input.sink_url === 'string' && input.sink_url ? input.sink_url : undefined;
+            if (sinkUrl && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//.test(sinkUrl)) {
+              return { ok: false, error: 'sink_url must be a loopback URL from the export-sink helper (http://127.0.0.1:<port>/…)' };
+            }
             agentExportRef.current = { running: true, filename: null, error: null };
-            void exportVideo(opts)
+            void exportVideo(opts, sinkUrl)
               .then((r) => {
-                agentExportRef.current = { running: false, filename: r.ok ? (r.filename ?? null) : null, error: r.ok ? null : (r.error ?? t('common.exportFailed')) };
+                agentExportRef.current = {
+                  running: false,
+                  filename: r.ok ? (r.filename ?? null) : null,
+                  error: r.ok ? null : (r.error ?? t('common.exportFailed')),
+                  ...(r.delivered ? { delivered: r.delivered } : {}),
+                  ...(r.sinkError ? { sinkError: r.sinkError } : {}),
+                };
               })
               .catch((e) => {
                 agentExportRef.current = { running: false, filename: null, error: e instanceof Error ? e.message : String(e) };
               });
-            return { ok: true, summary: t('workbench.exportStartedLocalClient'), data: { status: 'running', options: opts, hint: 'poll track_export every ~15s; keep this studio tab open' } };
+            return {
+              ok: true,
+              summary: t('workbench.exportStartedLocalClient'),
+              data: { status: 'running', options: opts, ...(sinkUrl ? { delivery: 'local_sink' } : {}), hint: 'poll track_export every ~15s; keep this studio tab open' },
+            };
           }
           case 'track_export': {
             const j = agentExportRef.current;
             if (j.running) return { ok: true, summary: t('workbench.exportingPct', { pct: exportPctRef.current }), data: { status: 'running', progress: exportPctRef.current } };
-            if (j.filename) return { ok: true, summary: t('workbench.exportDoneDownloadedVia'), data: { status: 'done', filename: j.filename, saved_via: 'browser download (user Downloads folder by default)' } };
+            if (j.filename) {
+              // Honest delivery receipts: a page download is only a hand-off to the browser —
+              // agent-driven headless browsers often drop it silently, so say so and point at the sink.
+              if (j.delivered === 'local_sink') {
+                return { ok: true, summary: t('workbench.exportDoneLocalSink'), data: { status: 'done', filename: j.filename, saved_via: 'local sink (the export-sink helper prints the absolute saved path)' } };
+              }
+              return {
+                ok: true,
+                summary: t('workbench.exportDoneDownloadedVia'),
+                data: {
+                  status: 'done',
+                  filename: j.filename,
+                  saved_via: 'browser download (user Downloads folder by default)',
+                  ...(j.sinkError ? { sink_error: `sink delivery failed (${j.sinkError}) — fell back to the browser download` } : {}),
+                  caveat: 'a download is a hand-off to the browser; agent-driven/headless browsers may discard it — if the file is missing, re-export with sink_url from the export-sink helper',
+                },
+              };
+            }
             if (j.error) return { ok: false, error: j.error };
             return { ok: true, summary: t('workbench.noExportStarted'), data: { status: 'idle', hint: 'call export_video first' } };
           }

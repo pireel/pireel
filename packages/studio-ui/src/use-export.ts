@@ -36,6 +36,34 @@ function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+export interface ExportDelivery {
+  delivered: 'local_sink' | 'browser_download';
+  /** Set when a sink was requested but the PUT failed (delivery fell back to the browser download). */
+  sinkError?: string;
+}
+
+/** Hand the finished blob over: to the local sink when one was requested (agent-driven
+ *  headless browsers discard page downloads, so the sink is the reliable path there),
+ *  otherwise — or when the sink PUT fails — via the browser download. */
+async function deliverBlob(blob: Blob, name: string, sinkUrl?: string): Promise<ExportDelivery> {
+  if (sinkUrl) {
+    try {
+      const r = await fetch(sinkUrl, {
+        method: 'PUT',
+        headers: { 'content-type': blob.type || 'video/mp4', 'x-pireel-filename': encodeURIComponent(name) },
+        body: blob,
+      });
+      if (r.ok) return { delivered: 'local_sink' };
+      throw new Error(`sink responded HTTP ${r.status}`);
+    } catch (e) {
+      downloadBlob(blob, name);
+      return { delivered: 'browser_download', sinkError: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  downloadBlob(blob, name);
+  return { delivered: 'browser_download' };
+}
+
 const stamp = () => new Date().toISOString().slice(11, 19).replace(/:/g, '');
 const filenameFor = (o: ExportRenderOpts) => t('common.exportFilename', { res: o.res, stamp: stamp(), format: o.format });
 
@@ -83,9 +111,11 @@ export function useStudioExport(deps: {
     return blob;
   };
 
-  /** Export = client compositing + auto download. Unsupported → honest error (no longer silently routed to server render that produces a black clip).
-   *  Returns a result for the agent export tools (export_video/track_export): on success includes the saved filename. */
-  async function exportVideo(opts: ExportRenderOpts): Promise<{ ok: boolean; filename?: string; error?: string }> {
+  /** Export = client compositing + delivery (local sink when requested, browser download otherwise).
+   *  Unsupported → honest error (no longer silently routed to server render that produces a black clip).
+   *  Returns a result for the agent export tools (export_video/track_export): on success includes the
+   *  saved filename and how the file was delivered. */
+  async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
     const c = compRef.current;
     if (!c.video?.url) {
       toast.error(t('common.uploadBeforeExport'));
@@ -100,17 +130,17 @@ export function useStudioExport(deps: {
     const name = filenameFor(opts);
     if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
       toast.success(t('common.downloadedPreviousExport'));
-      downloadBlob(lastExportRef.current.blob, name);
-      return { ok: true, filename: name };
+      const delivery = await deliverBlob(lastExportRef.current.blob, name, sinkUrl);
+      return { ok: true, filename: name, ...delivery };
     }
     setExporting(true);
     setExportPct(0);
     exportCancelRef.current = false;
     try {
       const blob = await renderBlob(c, key, opts);
-      downloadBlob(blob, name);
-      toast.success(t('common.exportCompleteDownloadStarted'));
-      return { ok: true, filename: name };
+      const delivery = await deliverBlob(blob, name, sinkUrl);
+      toast.success(delivery.delivered === 'local_sink' ? t('common.exportCompleteDelivered') : t('common.exportCompleteDownloadStarted'));
+      return { ok: true, filename: name, ...delivery };
     } catch (e) {
       if (e instanceof ExportCanceled) {
         toast.info(t('common.exportCanceled'));
