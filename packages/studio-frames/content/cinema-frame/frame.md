@@ -3,7 +3,7 @@ id: cinema-frame
 title: 影院 Cinema
 summary: 黑边宽幕:中英双语字幕、时间码、片名卡,适合剧情/影评/vlog 大片感
 icon: 🎬
-showcase: [标题卡, 章节, 金句, 引导, 大数字, 对比, 列表, 人名条]
+showcase: [title-card, chapters, quote, cta, big-number, compare, list, lower-third]
 palette: { paper: "#0B0B0B", panel: "#141414", panel-2: "#101010", fg: "#EDEAE4", muted: "#EDEAE480", accent: "#E8B54D", accent-2: "#6E7F8D", line: "#EDEAE41F", grid: "#EDEAE40A", radius: "2px", shadow: "0 20px 50px rgb(0 0 0 / 0.7)", glow: "0 0 0 rgb(0 0 0 / 0)", font-head: "'Noto Serif SC', 'Songti SC', serif" }
 version: 0.1.2
 ---
@@ -34,14 +34,14 @@ Most blocks are LETTERBOX OVERLAYS, not pages: the block root stays transparent 
 - Cut-fade motion: bars slide (`y:-150` / `y:150`, 0.5s power2.out), then contents fade 0.5-0.7s with tiny 20px drifts. Nothing scales, nothing bounces.
 
 ## Block recipes
-- 标题卡: bars slide in → gold rule draws (scaleX from 0) → serif title (165px) fades below it → micro-credits row (出品/导演/剪辑) fades → slate + timecode appear last in the corners. Everything centered horizontally, weighted slightly above middle.
-- 章节: a slate-board chapter strip — three mono tabs (`SCENE 01 / 02 / 03`, 32px, +0.18em) centered in the band, the current tab alone in ivory with a thin 2px gold underline beneath it (the card's entire gold ration); below, the current chapter's serif name (150px) and a 30px caps subtitle; slate + timecode in the corners. Bars slide, tabs fade in order, the name fades up 20px, the underline draws in last.
-- 金句: the widescreen band stays EMPTY except the corners (slate left, timecode right) and the subtitle stack at the bottom: 76px Chinese line with ONE gold word, then the 30px English caps translation. Bars slide, subtitles fade up 20px like dialogue appearing — the emptiness above is the shot.
-- 引导: an end-title card — `NEXT EPISODE` caps kicker, serif line `关注,别错过下一幕` (110px), thin gold rule beneath, then a schedule line (`每周五 20:00 · 首映`) in mono muted; corners keep slate + timecode. Pure fades after the bars land.
-- 大数字: a box-office card — caps kicker (`BOX OFFICE · DAY 07`), ONE giant serif numeral in gold (280px, the card's entire gold ration) with a small cream unit character, then a micro-credits row of short claims; slate + timecode in the corners. Bars slide, numeral fades up 20px, credits stagger in.
-- 对比: two widescreen take-bands stacked inside the letterbox band, each a `--panel` strip with a mono slate label (`SC.04A` / `SC.04B`), a 64px serif take description over a caps verdict note, and a mono verdict at the right (the chosen take's `OK` in `--accent-2`); the chosen take's line carries a thin 2px gold underline that draws in last. Bands fade up 20px in sequence; nothing scales.
-- 列表: a rolling-credits list — thin 220px gold rule, `CAST · …` caps header, then three centered serif rows `角色 …… 演员` (54px) joined by dotted leaders (`border-bottom: dotted var(--line)`), the right column muted. Bars slide, rule draws, rows fade up 20px in credit order.
-- 人名条: a CAST lower-third — the widescreen band stays EMPTY like a printed frame except the corner slate + timecode; anchored lower-left at the slate margin (`left:80px`, just above the bottom bar), a name block SLIDES IN horizontally: a 120px × 2px gold overline, a `CAST · …` caps kicker, the serif name (96px), then a 32px mono role line in muted. Bars slide, the strip glides in 60px from the left, the overline draws, kicker and role fade last.
+- title-card: bars slide in → gold rule draws (scaleX from 0) → serif title (165px) fades below it → micro-credits row (出品/导演/剪辑) fades → slate + timecode appear last in the corners. Everything centered horizontally, weighted slightly above middle.
+- chapters: a slate-board chapter strip — three mono tabs (`SCENE 01 / 02 / 03`, 32px, +0.18em) centered in the band, the current tab alone in ivory with a thin 2px gold underline beneath it (the card's entire gold ration); below, the current chapter's serif name (150px) and a 30px caps subtitle; slate + timecode in the corners. Bars slide, tabs fade in order, the name fades up 20px, the underline draws in last.
+- quote: the widescreen band stays EMPTY except the corners (slate left, timecode right) and the subtitle stack at the bottom: 76px Chinese line with ONE gold word, then the 30px English caps translation. Bars slide, subtitles fade up 20px like dialogue appearing — the emptiness above is the shot.
+- cta: an end-title card — `NEXT EPISODE` caps kicker, serif line `关注,别错过下一幕` (110px), thin gold rule beneath, then a schedule line (`每周五 20:00 · 首映`) in mono muted; corners keep slate + timecode. Pure fades after the bars land.
+- big-number: a box-office card — caps kicker (`BOX OFFICE · DAY 07`), ONE giant serif numeral in gold (280px, the card's entire gold ration) with a small cream unit character, then a micro-credits row of short claims; slate + timecode in the corners. Bars slide, numeral fades up 20px, credits stagger in.
+- compare: two widescreen take-bands stacked inside the letterbox band, each a `--panel` strip with a mono slate label (`SC.04A` / `SC.04B`), a 64px serif take description over a caps verdict note, and a mono verdict at the right (the chosen take's `OK` in `--accent-2`); the chosen take's line carries a thin 2px gold underline that draws in last. Bands fade up 20px in sequence; nothing scales.
+- list: a rolling-credits list — thin 220px gold rule, `CAST · …` caps header, then three centered serif rows `角色 …… 演员` (54px) joined by dotted leaders (`border-bottom: dotted var(--line)`), the right column muted. Bars slide, rule draws, rows fade up 20px in credit order.
+- lower-third: a CAST lower-third — the widescreen band stays EMPTY like a printed frame except the corner slate + timecode; anchored lower-left at the slate margin (`left:80px`, just above the bottom bar), a name block SLIDES IN horizontally: a 120px × 2px gold overline, a `CAST · …` caps kicker, the serif name (96px), then a 32px mono role line in muted. Bars slide, the strip glides in 60px from the left, the overline draws, kicker and role fade last.
 
 ## Compose-instruction crib
 Embed directives like:

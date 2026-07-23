@@ -44,10 +44,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'gl_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -74,10 +74,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.5);\n` +
         `tl.from('#${id} .mini',{y:80,autoAlpha:0,duration:0.4,ease:'power2.out'},0.5);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'gl_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -102,10 +102,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.65);\n` +
         `tl.from('#${id} .mini',{y:-60,autoAlpha:0,duration:0.4,ease:'power2.out'},0.5);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'gl_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -134,10 +134,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.7);\n` +
         `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.6);`,
     ),
-  图表: () =>
+  'chart': () =>
     mk(
       'gl_bar',
-      '图表',
+      'chart',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -172,10 +172,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .col em',{autoAlpha:0,y:16,duration:0.25,stagger:0.07},0.6);\n` +
         `tl.from('#${id} .col span',{autoAlpha:0,duration:0.25},0.8);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'gl_cde',
-      '代码',
+      'code',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -217,10 +217,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .hl',{scaleX:0,transformOrigin:'left center',duration:0.32,ease:'power2.out'},0.82);\n` +
         `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.35,ease:'power2.out'},0.85);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'gl_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -246,10 +246,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.55);\n` +
         `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.55);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'gl_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -276,10 +276,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .n.a',{scale:0.6,duration:0.25,ease:'back.out(2)'},0.7);\n` +
         `tl.from('#${id} .tx em',{autoAlpha:0,duration:0.25},0.8);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'gl_chp',
-      '章节',
+      'chapters',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>
@@ -316,10 +316,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.75);\n` +
         `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.7);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'gl_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="orb o1"></div><div class="orb o2"></div>

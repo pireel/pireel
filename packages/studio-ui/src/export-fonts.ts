@@ -102,14 +102,14 @@ export async function buildInlineFontCss(
   let res: Response | null = null;
   if (uniq.length > 0 && uniq.length <= 600) {
     res = await fetchFont(`${FONT_CSS_URL}&text=${encodeURIComponent(uniq)}`);
-    if (res) log(`字体精确子集:${uniq.length} 字符`);
+    if (res) log(`font exact subset: ${uniq.length} chars`);
   }
   if (!res) res = await fetchFont(FONT_CSS_URL);
   if (!res) {
     // Google Fonts unreachable even via the proxy (offline / OSS shell). Degrade to NO inlined fonts
     // instead of throwing: the frame/export still renders with system fallback fonts. A hard
     // "Failed to fetch" here used to kill capture_frame outright.
-    log('字体 CSS 拉取失败,退化为系统字体(不内联)');
+    log('font CSS fetch failed — falling back to system fonts (no inlining)');
     return '';
   }
   const faces = parseFontFaces(await res.text());
@@ -120,7 +120,7 @@ export async function buildInlineFontCss(
     !f.ranges || f.ranges.some(([lo, hi]) => { for (const cp of used) if (cp >= lo && cp <= hi) return true; return false; });
 
   const kept = faces.filter(hit);
-  log(`字体子集:${faces.length} 个 @font-face 命中 ${kept.length} 个`);
+  log(`font subset: ${kept.length} of ${faces.length} @font-face rules kept`);
 
   const parts = await Promise.all(
     kept.map(async (f) => {
@@ -132,6 +132,6 @@ export async function buildInlineFontCss(
     }),
   );
   const css = parts.filter(Boolean).join('\n');
-  log(`字体内联完成:${(css.length / 1024 / 1024).toFixed(2)}MB css · ${((performance.now() - t0) / 1000).toFixed(2)}s`);
+  log(`font inlining done: ${(css.length / 1024 / 1024).toFixed(2)}MB css · ${((performance.now() - t0) / 1000).toFixed(2)}s`);
   return css;
 }

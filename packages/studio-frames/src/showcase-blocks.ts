@@ -52,10 +52,10 @@ const bpRoot = (id: string) => `
 #${id} .dwg span:first-child{border-left:none;color:var(--accent);}`;
 
 const blueprint: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'bp_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="body">
@@ -81,10 +81,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .h',{y:46,autoAlpha:0,duration:0.34,ease:'power3.out'},0.18);\n` +
         `tl.from('#${id} .dim,#${id} .dwg',{autoAlpha:0,duration:0.3},0.42);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'bp_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="v">38<i>%</i></div>
@@ -106,10 +106,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.3},0.4);\n` +
         `tl.from('#${id} .note,#${id} .dot',{autoAlpha:0,duration:0.25},0.55);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'bp_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="k">FIG.04 — LIVE COUNT</div>
@@ -141,10 +141,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.26},0.5);\n` +
         `tl.from('#${id} .dot,#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.25},0.6);`,
     ),
-  图表: () =>
+  'chart': () =>
     mk(
       'bp_bar',
-      '图表',
+      'chart',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="h">季度增速 <span>FIG.03</span></div>
@@ -165,10 +165,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .b',{scaleY:0,transformOrigin:'bottom',duration:0.38,stagger:0.1,ease:'power3.out'},0.15);\n` +
         `tl.from('#${id} .b em',{autoAlpha:0,duration:0.22},0.7);`,
     ),
-  走势: () =>
+  'trend': () =>
     mk(
       'bp_trd',
-      '走势',
+      'trend',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="h">增长轨迹 <span>PROJECTED</span></div>
@@ -192,10 +192,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .proj',{autoAlpha:0,duration:0.4},0.8);\n` +
         `tl.from('#${id} .nd circle',{scale:0,transformOrigin:'center',duration:0.2,stagger:0.08},0.3);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'bp_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="tbl">
@@ -219,10 +219,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .tbl',{y:40,autoAlpha:0,duration:0.3,ease:'power2.out'},0.1);\n` +
         `tl.from('#${id} .r',{autoAlpha:0,duration:0.22,stagger:0.1},0.3);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'bp_sec',
-      '章节',
+      'chapters',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="tabs">
@@ -263,10 +263,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .h',{y:46,autoAlpha:0,duration:0.34,ease:'power3.out'},0.48);\n` +
         `tl.from('#${id} .dim,#${id} .dwg',{autoAlpha:0,duration:0.28},0.72);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'bp_cod',
-      '代码',
+      'code',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="win">
@@ -305,10 +305,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .lw',{scaleX:0,transformOrigin:'left center',duration:0.26},0.72);\n` +
         `tl.from('#${id} .dot,#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.25},0.85);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'bp_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="body">
@@ -339,10 +339,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.26},0.5);\n` +
         `tl.from('#${id} .dot,#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.25},0.62);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'bp_qa',
-      '问答',
+      'qa',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="q"><span class="dot"></span><span class="lw"></span><span class="tag">FIG.Q1</span><span class="qt">为什么你的视频没人看完?</span></div>
@@ -371,10 +371,10 @@ const blueprint: Record<string, () => Block> = {
         `tl.from('#${id} .a',{y:40,autoAlpha:0,duration:0.32,ease:'power3.out'},0.68);\n` +
         `tl.from('#${id} .dwg',{autoAlpha:0,duration:0.24},0.9);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'bp_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="bp"><div class="frame"></div>
   <div class="k">FIG.06 — CALL TO ACTION</div>
@@ -422,10 +422,10 @@ const blueprint: Record<string, () => Block> = {
    ================================================================ */
 
 const cream: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'cr_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="stick">
@@ -453,10 +453,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .badge',{scale:0,duration:0.3,ease:'back.out(2)'},0.24);\n` +
         `tl.from('#${id} .pearl',{scale:0,duration:0.25,stagger:0.08,ease:'back.out(2)'},0.3);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'cr_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="rt">
   <div class="c c1"><b>1</b><span>备料</span></div>
@@ -475,10 +475,10 @@ const cream: Record<string, () => Block> = {
 </style>`,
       (id) => `tl.from('#${id} .c',{y:90,autoAlpha:0,duration:0.34,stagger:0.12,ease:'back.out(1.7)'},0);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'cr_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt">
   <div class="h">食材清单</div>
@@ -499,10 +499,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .h',{autoAlpha:0,y:30,duration:0.26},0);\n` +
         `tl.from('#${id} .chip',{scale:0,duration:0.26,stagger:0.07,ease:'back.out(1.8)'},0.12);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'cr_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="blob"><b>180°C</b><span>· 12 分钟 ·</span></div>
@@ -522,10 +522,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .blob',{scale:0.6,autoAlpha:0,duration:0.38,ease:'back.out(1.5)'},0);\n` +
         `tl.from('#${id} .spr',{scale:0,duration:0.26,stagger:0.09,ease:'back.out(2)'},0.24);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'cr_prc',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="rt">
   <div class="old"><span class="tag">原价</span><b>¥29.9</b><i class="strike"></i></div>
@@ -562,10 +562,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .save',{scale:0,duration:0.3,ease:'back.out(2)'},0.6);\n` +
         `tl.from('#${id} .spr',{scale:0,duration:0.26,stagger:0.09,ease:'back.out(2)'},0.66);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'cr_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="t">收藏防丢 · 配方在评论区</div>
@@ -586,10 +586,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .btn',{scale:0.4,autoAlpha:0,duration:0.32,ease:'back.out(1.8)'},0.14);\n` +
         `tl.from('#${id} .hearts i',{y:40,autoAlpha:0,duration:0.26,stagger:0.08,ease:'back.out(2)'},0.34);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'cr_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="stick">
@@ -618,10 +618,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .q b',{autoAlpha:0,duration:0.24},0.28);\n` +
         `tl.from('#${id} .dots i,#${id} .pearl',{scale:0,duration:0.25,stagger:0.07,ease:'back.out(2)'},0.32);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'cr_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="rt">
   <div class="h">评论区炸了</div>
@@ -651,10 +651,10 @@ const cream: Record<string, () => Block> = {
         `tl.from('#${id} .cm',{y:80,autoAlpha:0,rotation:5,duration:0.34,stagger:0.12,ease:'back.out(1.7)'},0.1);\n` +
         `tl.from('#${id} .lk',{scale:0,duration:0.26,stagger:0.1,ease:'back.out(2)'},0.5);`,
     ),
-  图表: () =>
+  'chart': () =>
     mk(
       'cr_bar',
-      '图表',
+      'chart',
       (id) => `
 <div class="rt">
   <div class="h">全网人气打分</div>
@@ -690,10 +690,10 @@ const cream: Record<string, () => Block> = {
    ================================================================ */
 
 const biennale: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'bi_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="l1">把观点</div>
@@ -713,10 +713,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .l2',{x:140,autoAlpha:0,duration:0.3,ease:'power3.out'},0.12);\n` +
         `tl.from('#${id} .side,#${id} .ft',{autoAlpha:0,duration:0.26},0.34);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'bi_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="v">38</div>
@@ -734,10 +734,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .pct',{scale:0,duration:0.28,ease:'power3.out'},0.2);\n` +
         `tl.from('#${id} .lab',{autoAlpha:0,duration:0.24},0.4);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'bi_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="rt">
   <div class="cap">LIVE COUNT — EVIDENCE</div>
@@ -764,10 +764,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .claim',{x:-120,autoAlpha:0,duration:0.28,ease:'power3.out'},0.5);\n` +
         `tl.from('#${id} .side,#${id} .ft',{autoAlpha:0,duration:0.26},0.7);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'bi_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="rt">
   <div class="half a"><span>老办法</span><b>3天</b></div>
@@ -788,10 +788,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .half.b',{x:160,autoAlpha:0,duration:0.3,ease:'power3.out'},0.1);\n` +
         `tl.from('#${id} .seam',{scale:0,rotation:20,duration:0.3,ease:'back.out(1.8)'},0.32);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'bi_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="plate"><span>关注</span><i>↗</i></div>
@@ -809,10 +809,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .plate i',{x:60,y:60,autoAlpha:0,duration:0.3,ease:'power2.out'},0.24);\n` +
         `tl.from('#${id} .strip',{x:200,autoAlpha:0,duration:0.4,ease:'power2.out'},0.3);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'bi_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt">
   <div class="cap">MANIFESTO</div>
@@ -836,10 +836,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .r.inv',{x:200,autoAlpha:0,duration:0.28,ease:'power3.out'},0.2);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.44);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'bi_sec',
-      '章节',
+      'chapters',
       (id) => `
 <div class="rt">
   <div class="tabs">
@@ -867,10 +867,10 @@ const biennale: Record<string, () => Block> = {
         `tl.from('#${id} .h',{x:-160,autoAlpha:0,duration:0.3,ease:'power3.out'},0.32);\n` +
         `tl.from('#${id} .side,#${id} .ft',{autoAlpha:0,duration:0.26},0.56);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'bi_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="l1">别追热点</div>
@@ -903,10 +903,10 @@ const noirFrame = (id: string) => `
 #${id} .nf::before{content:'';position:absolute;inset:14px;border:1px solid var(--line);}`;
 
 const noir: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'nr_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">COLLECTION · 2026</div>
@@ -929,10 +929,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .h',{autoAlpha:0,duration:0.55},0.3);\n` +
         `tl.from('#${id} .orn,#${id} .f',{autoAlpha:0,duration:0.4},0.55);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'nr_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="q">“</div>
@@ -951,10 +951,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.6},0.3);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.4},0.6);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'nr_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">LIMITED TO</div>
@@ -974,10 +974,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .v',{autoAlpha:0,letterSpacing:'0.3em',duration:0.6,ease:'power2.out'},0.25);\n` +
         `tl.from('#${id} .u',{autoAlpha:0,duration:0.4},0.6);`,
     ),
-  倒计时: () =>
+  'countdown': () =>
     mk(
       'nr_cnt',
-      '倒计时',
+      'countdown',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">LIMITED DROP</div>
@@ -1004,10 +1004,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .l span',{autoAlpha:0,duration:0.4},0.55);\n` +
         `tl.from('#${id} .f',{autoAlpha:0,duration:0.4},0.7);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'nr_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">JOIN THE HOUSE</div>
@@ -1026,10 +1026,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .btn',{autoAlpha:0,scale:0.96,duration:0.5,ease:'power1.out'},0.3);\n` +
         `tl.from('#${id} .f',{autoAlpha:0,duration:0.4},0.6);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'nr_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">SIDE BY SIDE</div>
@@ -1060,10 +1060,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .c,#${id} .f',{autoAlpha:0,duration:0.5,stagger:0.14},0.3);\n` +
         `tl.from('#${id} .d',{autoAlpha:0,y:-14,duration:0.4},0.75);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'nr_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">LA CARTE</div>
@@ -1093,10 +1093,10 @@ const noir: Record<string, () => Block> = {
         `tl.from('#${id} .r',{autoAlpha:0,duration:0.45,stagger:0.14},0.25);\n` +
         `tl.from('#${id} .orn,#${id} .f',{autoAlpha:0,duration:0.4},0.75);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'nr_sec',
-      '章节',
+      'chapters',
       (id) => `
 <div class="rt"><div class="nf"></div>
   <div class="k">SOMMAIRE</div>
@@ -1138,10 +1138,10 @@ const jnFake = (n: number, w = 100): string =>
   Array.from({ length: n }, (_, i) => `<i style="width:${i === n - 1 ? 62 : w}%"></i>`).join('');
 
 const journal: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'jn_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="mast"><span class="d">VOL.24</span><span class="m">视 频 日 报</span><span class="d">2026·07</span></div>
@@ -1169,10 +1169,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .deck,#${id} .cols',{autoAlpha:0,duration:0.3},0.3);\n` +
         `tl.from('#${id} .stamp',{scale:1.7,autoAlpha:0,rotation:24,duration:0.3,ease:'power3.in'},0.5);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'jn_sec',
-      '章节',
+      'chapters',
       (id) => `
 <div class="rt">
   <div class="nav">
@@ -1206,10 +1206,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .h',{autoAlpha:0,duration:0.32},0.46);\n` +
         `tl.from('#${id} .cols',{autoAlpha:0,duration:0.3},0.66);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'jn_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt">
   <div class="cap">本 期 要 目</div>
@@ -1229,10 +1229,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .cap',{autoAlpha:0,duration:0.28},0);\n` +
         `tl.from('#${id} .r',{autoAlpha:0,x:-40,duration:0.26,stagger:0.11},0.16);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'jn_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="rt">
   <div class="cap">本报评测</div>
@@ -1261,10 +1261,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .tr',{autoAlpha:0,duration:0.24,stagger:0.1},0.14);\n` +
         `tl.from('#${id} .mark',{scale:1.4,duration:0.24,ease:'power3.in'},0.5);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'jn_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="rule top"></div>
@@ -1286,10 +1286,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.34},0.26);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.26},0.5);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'jn_qa',
-      '问答',
+      'qa',
       (id) => `
 <div class="rt">
   <div class="cap">读 者 来 信</div>
@@ -1324,10 +1324,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .ans',{autoAlpha:0,duration:0.26},0.5);\n` +
         `tl.from('#${id} .at,#${id} .fk,#${id} .sig',{autoAlpha:0,y:20,duration:0.26,stagger:0.08},0.6);`,
     ),
-  图表: () =>
+  'chart': () =>
     mk(
       'jn_bar',
-      '图表',
+      'chart',
       (id) => `
 <div class="rt">
   <div class="cap">数 据 版</div>
@@ -1359,10 +1359,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .b em',{autoAlpha:0,duration:0.22,stagger:0.07},0.34);\n` +
         `tl.from('#${id} .src',{autoAlpha:0,duration:0.26},0.7);`,
     ),
-  人名条: () =>
+  'lower-third': () =>
     mk(
       'jn_low',
-      '人名条',
+      'lower-third',
       (id) => `
 <div class="rt">
   <div class="ph"><span class="sec">人物专访</span><span class="no">A04</span></div>
@@ -1389,10 +1389,10 @@ const journal: Record<string, () => Block> = {
         `tl.from('#${id} .by b,#${id} .role,#${id} .desk',{autoAlpha:0,duration:0.24,stagger:0.08},0.42);\n` +
         `tl.from('#${id} .lead',{scaleX:0,transformOrigin:'left center',duration:0.3},0.5);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'jn_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="cap">读 者 服 务</div>
@@ -1439,10 +1439,10 @@ const neonChrome = (id: string) => `
 #${id} .ck.br{right:70px;bottom:70px;border-left:none;border-top:none;}`;
 
 const neon: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'ne_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● REC</b>&nbsp; SESSION_04</span><span>00:03 / FPS 60</span></div>
@@ -1467,10 +1467,10 @@ const neon: Record<string, () => Block> = {
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.12,yoyo:true,repeat:5,ease:'steps(1)'},0.4);\n` +
         `tl.from('#${id} .sub',{autoAlpha:0,duration:0.24},0.4);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'ne_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● LIVE</b>&nbsp; PACE_MONITOR</span><span>GPS LOCKED</span></div>
@@ -1489,10 +1489,10 @@ const neon: Record<string, () => Block> = {
         `tl.from('#${id} .alert',{autoAlpha:0,scale:1.3,duration:0.22,ease:'power3.in'},0.4);\n` +
         `tl.to('#${id} .alert',{autoAlpha:0.4,duration:0.14,yoyo:true,repeat:3},0.66);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'ne_bch',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● SYS</b>&nbsp; BENCH_SCORE</span><span>RUN 03/03</span></div>
@@ -1525,10 +1525,10 @@ const neon: Record<string, () => Block> = {
         `tl.from('#${id} .tag',{autoAlpha:0,scale:1.3,duration:0.22,ease:'power3.in'},0.4);\n` +
         `tl.to('#${id} .tag',{autoAlpha:0.4,duration:0.14,yoyo:true,repeat:3},0.64);`,
     ),
-  倒计时: () =>
+  'countdown': () =>
     mk(
       'ne_cdn',
-      '倒计时',
+      'countdown',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● SYS</b>&nbsp; T_MINUS</span><span>GATE B · ARMED</span></div>
@@ -1552,10 +1552,10 @@ const neon: Record<string, () => Block> = {
         `tl.from('#${id} .warn',{autoAlpha:0,scale:1.3,duration:0.22,ease:'power3.in'},0.4);\n` +
         `tl.to('#${id} .warn',{autoAlpha:0.4,duration:0.14,yoyo:true,repeat:3},0.64);`,
     ),
-  走势: () =>
+  'trend': () =>
     mk(
       'ne_trd',
-      '走势',
+      'trend',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● LIVE</b>&nbsp; HEART_RATE</span><span>ZONE 4</span></div>
@@ -1577,10 +1577,10 @@ const neon: Record<string, () => Block> = {
         `tl.to('#${id} .ln',{strokeDashoffset:0,duration:0.9,ease:'none'},0.1);\n` +
         `tl.from('#${id} .ro',{autoAlpha:0,duration:0.26},0.5);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'ne_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● TASK</b>&nbsp; WARMUP_SEQ</span><span>2/3 DONE</span></div>
@@ -1607,10 +1607,10 @@ const neon: Record<string, () => Block> = {
         `tl.from('#${id} .r',{x:-60,autoAlpha:0,duration:0.26,stagger:0.12,ease:'power2.out'},0.1);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.14,yoyo:true,repeat:5,ease:'steps(1)'},0.5);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'ne_cod',
-      '代码',
+      'code',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● SRC</b>&nbsp; NIGHT_RUN.SH</span><span>TTY 04 · BASH</span></div>
@@ -1641,10 +1641,10 @@ const neon: Record<string, () => Block> = {
         `tl.from('#${id} .r',{autoAlpha:0,x:-40,duration:0.2,stagger:0.08},0.18);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.12,yoyo:true,repeat:5,ease:'steps(1)'},0.45);`,
     ),
-  图表: () =>
+  'chart': () =>
     mk(
       'ne_eq',
-      '图表',
+      'chart',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● LIVE</b>&nbsp; AUDIO_LEVELS</span><span>CH 06 / 48kHz</span></div>
@@ -1673,10 +1673,10 @@ const neon: Record<string, () => Block> = {
         `tl.from('#${id} .pk i',{autoAlpha:0,duration:0.16},0.6);\n` +
         `tl.to('#${id} .pk i',{autoAlpha:0.3,duration:0.1,yoyo:true,repeat:3},0.8);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'ne_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="hud">
   <div class="bar"><span><b>● SYS</b>&nbsp; CTA_MODULE</span><span>LOADED</span></div>

@@ -25,13 +25,13 @@ export interface PresetElement {
   element: GenElementResult;
 }
 
-export const PRESET_CATEGORIES = ['数据', '结构', '强调', '标题', '社交'] as const;
+export const PRESET_CATEGORIES = ['presets.data', 'presets.structure', 'presets.emphasis', 'common.title', 'presets.social'] as const;
 
-const pe = (id: string, category: string, labelZh: string, innerHtml: string, timelineBody: string): PresetElement => ({
+const pe = (id: string, category: string, labelKey: string, innerHtml: string, timelineBody: string): PresetElement => ({
   id,
   category,
-  label: t(labelZh),
-  element: { seedId: id, innerHtml, timelineBody, label: t(labelZh), presetId: id },
+  label: t(labelKey),
+  element: { seedId: id, innerHtml, timelineBody, label: t(labelKey), presetId: id },
 });
 
 /* Shared skeleton: each element ships its own <style>, no shared CSS (blocks must be self-contained; export/re-insert can't depend on anything external). */
@@ -40,12 +40,12 @@ const buildPresets = (): PresetElement[] => [
   /* ---------------- Data ---------------- */
   pe(
     'pe_num',
-    '数据',
-    '大数字',
+    'presets.data',
+    'common.bigNumber',
     `<div class="w"><div class="card">
-  <div class="lab" data-edit="label">${t('标题')}</div>
+  <div class="lab" data-edit="label">${t('common.title')}</div>
   <div class="row"><b class="n" data-edit="num">100</b><i class="u" data-edit="unit">%</i></div>
-  <div class="sub" data-edit="sub">${t('补充说明')}</div>
+  <div class="sub" data-edit="sub">${t('presets.moreDetail')}</div>
 </div></div>
 <style>
 #pe_num .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -63,12 +63,12 @@ tl.from('#pe_num .sub',{autoAlpha:0,y:16,duration:0.25,ease:'power2.out'},0.85);
   ),
   pe(
     'pe_cmp',
-    '数据',
-    '左右对比',
+    'presets.data',
+    'presets.comparison',
     `<div class="w">
-  <div class="side a"><div class="t" data-edit="lt">${t('选项一')}</div><b class="v" data-edit="lv">${t('数值一')}</b><div class="d" data-edit="ld">${t('说明一')}</div></div>
+  <div class="side a"><div class="t" data-edit="lt">${t('presets.optionA')}</div><b class="v" data-edit="lv">${t('presets.valueA')}</b><div class="d" data-edit="ld">${t('presets.detailA')}</div></div>
   <div class="vs">VS</div>
-  <div class="side b"><div class="t" data-edit="rt">${t('选项二')}</div><b class="v" data-edit="rv">${t('数值二')}</b><div class="d" data-edit="rd">${t('说明二')}</div></div>
+  <div class="side b"><div class="t" data-edit="rt">${t('presets.optionB')}</div><b class="v" data-edit="rv">${t('presets.valueB')}</b><div class="d" data-edit="rd">${t('presets.detailB')}</div></div>
 </div>
 <style>
 #pe_cmp .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:36px;font-family:var(--font-head);}
@@ -87,12 +87,12 @@ tl.from('#pe_cmp .b .v',{scale:0.7,duration:0.28,ease:'back.out(1.7)'},0.62);`,
   ),
   pe(
     'pe_ring',
-    '数据',
-    '环形占比',
+    'presets.data',
+    'presets.progressRing',
     `<div class="w"><div class="card">
   <svg viewBox="0 0 200 200" class="g"><circle class="bg" cx="100" cy="100" r="84"/><circle class="fg" cx="100" cy="100" r="84" pathLength="100"/></svg>
   <div class="c"><b class="p" data-edit="pct">73</b><i>%</i></div>
-  <div class="lab" data-edit="label">${t('标题')}</div>
+  <div class="lab" data-edit="label">${t('common.title')}</div>
 </div></div>
 <style>
 #pe_ring .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -113,13 +113,13 @@ tl.from('#pe_ring .lab',{autoAlpha:0,y:14,duration:0.24},1.0);`,
   ),
   pe(
     'pe_bars',
-    '数据',
-    '条形图',
+    'presets.data',
+    'presets.barChart',
     `<div class="w"><div class="card">
-  <div class="ttl" data-edit="title">${t('标题')}</div>
-  <div class="row r1"><span class="k" data-edit="k1">${t('条目一')}</span><div class="tr"><div class="bar b1"></div></div><b class="v" data-edit="v1">60%</b></div>
-  <div class="row r2"><span class="k" data-edit="k2">${t('条目二')}</span><div class="tr"><div class="bar b2"></div></div><b class="v" data-edit="v2">40%</b></div>
-  <div class="row r3"><span class="k" data-edit="k3">${t('条目三')}</span><div class="tr"><div class="bar b3"></div></div><b class="v" data-edit="v3">20%</b></div>
+  <div class="ttl" data-edit="title">${t('common.title')}</div>
+  <div class="row r1"><span class="k" data-edit="k1">${t('presets.item1')}</span><div class="tr"><div class="bar b1"></div></div><b class="v" data-edit="v1">60%</b></div>
+  <div class="row r2"><span class="k" data-edit="k2">${t('presets.item2')}</span><div class="tr"><div class="bar b2"></div></div><b class="v" data-edit="v2">40%</b></div>
+  <div class="row r3"><span class="k" data-edit="k3">${t('presets.item3')}</span><div class="tr"><div class="bar b3"></div></div><b class="v" data-edit="v3">20%</b></div>
 </div></div>
 <style>
 #pe_bars .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -142,13 +142,13 @@ tl.from('#pe_bars .v',{autoAlpha:0,duration:0.2,stagger:0.12},0.5);`,
   /* ---------------- Structure ---------------- */
   pe(
     'pe_list',
-    '结构',
-    '要点列表',
+    'presets.structure',
+    'common.bulletList',
     `<div class="w"><div class="card">
-  <div class="ttl" data-edit="title">${t('标题')}</div>
-  <div class="it it1"><span class="ix">1</span><b data-edit="i1">${t('要点一')}</b></div>
-  <div class="it it2"><span class="ix">2</span><b data-edit="i2">${t('要点二')}</b></div>
-  <div class="it it3"><span class="ix">3</span><b data-edit="i3">${t('要点三')}</b></div>
+  <div class="ttl" data-edit="title">${t('common.title')}</div>
+  <div class="it it1"><span class="ix">1</span><b data-edit="i1">${t('presets.point1')}</b></div>
+  <div class="it it2"><span class="ix">2</span><b data-edit="i2">${t('presets.point2')}</b></div>
+  <div class="it it3"><span class="ix">3</span><b data-edit="i3">${t('presets.point3')}</b></div>
 </div></div>
 <style>
 #pe_list .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -164,14 +164,14 @@ tl.from('#pe_list .ix',{scale:0,duration:0.24,stagger:0.14,ease:'back.out(2)'},0
   ),
   pe(
     'pe_steps',
-    '结构',
-    '三步流程',
+    'presets.structure',
+    'presets.threeStepFlow',
     `<div class="w">
-  <div class="st s1"><em>STEP 1</em><b data-edit="s1">${t('步骤一')}</b></div>
+  <div class="st s1"><em>STEP 1</em><b data-edit="s1">${t('presets.step1')}</b></div>
   <svg class="ar" viewBox="0 0 60 24"><path d="M4,12 H48 M40,4 L50,12 L40,20"/></svg>
-  <div class="st s2"><em>STEP 2</em><b data-edit="s2">${t('步骤二')}</b></div>
+  <div class="st s2"><em>STEP 2</em><b data-edit="s2">${t('presets.step2')}</b></div>
   <svg class="ar" viewBox="0 0 60 24"><path d="M4,12 H48 M40,4 L50,12 L40,20"/></svg>
-  <div class="st s3"><em>STEP 3</em><b data-edit="s3">${t('步骤三')}</b></div>
+  <div class="st s3"><em>STEP 3</em><b data-edit="s3">${t('presets.step3')}</b></div>
 </div>
 <style>
 #pe_steps .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:20px;font-family:var(--font-head);}
@@ -188,13 +188,13 @@ tl.from('#pe_steps .s3',{y:46,autoAlpha:0,duration:0.3,ease:'back.out(1.5)'},0.6
   ),
   pe(
     'pe_tline',
-    '结构',
-    '时间轴',
+    'presets.structure',
+    'presets.timeline',
     `<div class="w"><div class="card">
   <div class="line"></div>
-  <div class="nd n1"><i class="p"></i><em data-edit="t1">${t('时点一')}</em><b data-edit="d1">${t('事件一')}</b></div>
-  <div class="nd n2"><i class="p"></i><em data-edit="t2">${t('时点二')}</em><b data-edit="d2">${t('事件二')}</b></div>
-  <div class="nd n3"><i class="p"></i><em data-edit="t3">${t('时点三')}</em><b data-edit="d3">${t('事件三')}</b></div>
+  <div class="nd n1"><i class="p"></i><em data-edit="t1">${t('presets.moment1')}</em><b data-edit="d1">${t('presets.event1')}</b></div>
+  <div class="nd n2"><i class="p"></i><em data-edit="t2">${t('presets.moment2')}</em><b data-edit="d2">${t('presets.event2')}</b></div>
+  <div class="nd n3"><i class="p"></i><em data-edit="t3">${t('presets.moment3')}</em><b data-edit="d3">${t('presets.event3')}</b></div>
 </div></div>
 <style>
 #pe_tline .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -213,13 +213,13 @@ tl.from('#pe_tline .nd',{y:26,autoAlpha:0,duration:0.28,stagger:0.16,ease:'back.
   /* ---------------- Emphasis ---------------- */
   pe(
     'pe_quote',
-    '强调',
-    '金句',
+    'presets.emphasis',
+    'presets.quote',
     `<div class="w"><div class="card">
   <div class="qm">“</div>
-  <div class="ln l1" data-edit="l1">${t('金句上半句,')}</div>
-  <div class="ln l2"><b class="hi" data-edit="l2">${t('下半句。')}</b></div>
-  <div class="who" data-edit="who">${t('—— 署名')}</div>
+  <div class="ln l1" data-edit="l1">${t('presets.firstHalfLine')}</div>
+  <div class="ln l2"><b class="hi" data-edit="l2">${t('presets.secondHalf')}</b></div>
+  <div class="who" data-edit="who">${t('presets.attribution')}</div>
 </div></div>
 <style>
 #pe_quote .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -236,9 +236,9 @@ tl.from('#pe_quote .who',{autoAlpha:0,duration:0.24},0.8);`,
   ),
   pe(
     'pe_slam',
-    '强调',
-    '关键词重击',
-    `<div class="w"><div class="k" data-edit="word">${t('关键词')}</div><div class="s" data-edit="sub">${t('一句补充说明')}</div></div>
+    'presets.emphasis',
+    'presets.keywordSlam',
+    `<div class="w"><div class="k" data-edit="word">${t('presets.keyword')}</div><div class="s" data-edit="sub">${t('presets.oneLineDetail')}</div></div>
 <style>
 #pe_slam .w{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font-family:var(--font-head);}
 #pe_slam .k{font-size:240px;font-weight:900;letter-spacing:0.04em;color:var(--fg);background:var(--panel);border-radius:var(--radius);box-shadow:var(--shadow);padding:10px 70px;border-bottom:14px solid var(--accent);}
@@ -250,11 +250,11 @@ tl.from('#pe_slam .s',{y:30,autoAlpha:0,duration:0.26,ease:'back.out(1.6)'},0.5)
   ),
   pe(
     'pe_callout',
-    '强调',
-    '标注',
+    'presets.emphasis',
+    'presets.callout',
     `<div class="w"><div class="box">
   <svg class="ar" viewBox="0 0 80 90"><path d="M64,82 C30,70 18,44 22,10 M22,10 L10,26 M22,10 L38,20"/></svg>
-  <div class="pill" data-edit="note">${t('标注说明写在这里')}</div>
+  <div class="pill" data-edit="note">${t('presets.calloutNoteGoesHere')}</div>
 </div></div>
 <style>
 #pe_callout .w{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:flex-end;padding:0 90px 130px 0;font-family:var(--font-head);}
@@ -269,12 +269,12 @@ tl.from('#pe_callout .ar path',{strokeDasharray:260,strokeDashoffset:260,duratio
   /* ---------------- Title ---------------- */
   pe(
     'pe_title',
-    '标题',
-    '标题卡',
+    'common.title',
+    'common.titleCard',
     `<div class="w"><div class="card">
-  <div class="tag" data-edit="tag">${t('标签')}</div>
-  <div class="h" data-edit="title">${t('主标题写这里')}</div>
-  <div class="sub" data-edit="sub">${t('副标题写这里')}</div>
+  <div class="tag" data-edit="tag">${t('presets.label')}</div>
+  <div class="h" data-edit="title">${t('presets.mainTitleHere')}</div>
+  <div class="sub" data-edit="sub">${t('presets.subtitleHere')}</div>
 </div></div>
 <style>
 #pe_title .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;}
@@ -290,11 +290,11 @@ tl.from('#pe_title .sub',{autoAlpha:0,y:18,duration:0.24},0.52);`,
   ),
   pe(
     'pe_chap',
-    '标题',
-    '章节页',
+    'common.title',
+    'presets.chapter',
     `<div class="w">
   <div class="no" data-edit="no">02</div>
-  <div class="tx"><b data-edit="title">${t('章节标题')}</b><div class="rule"></div><span data-edit="sub">${t('副标题写这里')}</span></div>
+  <div class="tx"><b data-edit="title">${t('presets.chapterTitle')}</b><div class="rule"></div><span data-edit="sub">${t('presets.subtitleHere')}</span></div>
 </div>
 <style>
 #pe_chap .w{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:44px;font-family:var(--font-head);}
@@ -310,11 +310,11 @@ tl.from('#pe_chap .tx span',{autoAlpha:0,duration:0.22},0.58);`,
   ),
   pe(
     'pe_cta',
-    '标题',
-    '关注引导',
+    'common.title',
+    'presets.followCta',
     `<div class="w"><div class="card">
-  <div class="btn" data-edit="btn">${t('+ 关注')}</div>
-  <div class="tx"><b data-edit="t">${t('标题')}</b><span data-edit="s">${t('副标题写这里')}</span></div>
+  <div class="btn" data-edit="btn">${t('presets.follow')}</div>
+  <div class="tx"><b data-edit="t">${t('common.title')}</b><span data-edit="s">${t('presets.subtitleHere')}</span></div>
 </div></div>
 <style>
 #pe_cta .w{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding-bottom:140px;font-family:var(--font-head);}
@@ -330,11 +330,11 @@ tl.to('#pe_cta .btn',{scale:1.06,duration:0.12,yoyo:true,repeat:1,ease:'power2.i
   /* ---------------- Social ---------------- */
   pe(
     'pe_cmt',
-    '社交',
-    '评论气泡',
+    'presets.social',
+    'presets.commentBubble',
     `<div class="w">
-  <div class="bub b1"><i class="av">A</i><div class="tx"><em data-edit="n1">${t('@用户一')}</em><b data-edit="c1">${t('评论内容一')}</b></div></div>
-  <div class="bub b2"><i class="av v2">L</i><div class="tx"><em data-edit="n2">${t('@用户二')}</em><b data-edit="c2">${t('评论内容二')}</b></div></div>
+  <div class="bub b1"><i class="av">A</i><div class="tx"><em data-edit="n1">${t('presets.userOne')}</em><b data-edit="c1">${t('presets.firstCommentGoesHere')}</b></div></div>
+  <div class="bub b2"><i class="av v2">L</i><div class="tx"><em data-edit="n2">${t('presets.userTwo')}</em><b data-edit="c2">${t('presets.secondCommentGoesHere')}</b></div></div>
 </div>
 <style>
 #pe_cmt .w{position:absolute;inset:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:30px;padding-left:110px;font-family:var(--font-head);}
@@ -351,13 +351,13 @@ tl.from('#pe_cmt .av',{scale:0,duration:0.24,stagger:0.2,ease:'back.out(2)'},0.1
   ),
   pe(
     'pe_link',
-    '社交',
-    '蹲链接条',
+    'presets.social',
+    'presets.linkBar',
     `<div class="w"><div class="bar">
-  <span class="chip c1" data-edit="c1">${t('弹幕一')}</span>
-  <span class="chip c2" data-edit="c2">${t('弹幕二')}</span>
-  <span class="chip c3" data-edit="c3">${t('弹幕三')}</span>
-  <b class="ans" data-edit="ans">${t('回复内容')}</b>
+  <span class="chip c1" data-edit="c1">${t('presets.chatMessage1')}</span>
+  <span class="chip c2" data-edit="c2">${t('presets.chatMessage2')}</span>
+  <span class="chip c3" data-edit="c3">${t('presets.chatMessage3')}</span>
+  <b class="ans" data-edit="ans">${t('presets.replyGoesHere')}</b>
 </div></div>
 <style>
 #pe_link .w{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding-bottom:150px;font-family:var(--font-head);}

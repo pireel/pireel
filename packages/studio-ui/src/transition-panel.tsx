@@ -25,16 +25,16 @@ import fromJpg from './assets/transition-from.jpg';
 import toJpg from './assets/transition-to.jpg';
 
 const HINTS: Record<CutTransitionEffect, string> = {
-  fade: '交叉叠化',
-  fadeblack: '黑场吸入吐出',
-  directional: '后镜把前镜推出画面',
-  directionalwipe: '柔边斜向擦过',
-  circleopen: '圆形光圈打开',
-  windowslice: '竖条百叶窗',
-  crosszoom: '变焦冲击(动态模糊)',
-  rotatescale: '旋转缩放对切',
-  glitch: '故障色散',
-  dreamy: '波浪浮动',
+  fade: 'panels.crossfade',
+  fadeblack: 'panels.dipBlackBack',
+  directional: 'panels.nextShotPushesPrevious',
+  directionalwipe: 'panels.softEdgedDiagonalWipe',
+  circleopen: 'panels.circularIrisOpens',
+  windowslice: 'panels.verticalBlinds',
+  crosszoom: 'panels.zoomPunchMotionBlur',
+  rotatescale: 'panels.rotateScaleSwap',
+  glitch: 'panels.glitchColorFringing',
+  dreamy: 'panels.wavyFloat',
 };
 
 const CW = 168;
@@ -113,10 +113,10 @@ function EffectCard({ effect, dir }: { effect: CutTransitionEffect | null; dir: 
 }
 
 const DIRS: { id: TransitionDirection; icon: typeof ArrowUp; name: string }[] = [
-  { id: 'up', icon: ArrowUp, name: '向上' },
-  { id: 'down', icon: ArrowDown, name: '向下' },
-  { id: 'left', icon: ArrowLeft, name: '向左' },
-  { id: 'right', icon: ArrowRight, name: '向右' },
+  { id: 'up', icon: ArrowUp, name: 'panels.up' },
+  { id: 'down', icon: ArrowDown, name: 'panels.down' },
+  { id: 'left', icon: ArrowLeft, name: 'panels.left' },
+  { id: 'right', icon: ArrowRight, name: 'panels.right' },
 ];
 
 export function TransitionPanel({
@@ -132,13 +132,13 @@ export function TransitionPanel({
   onPick: (effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
 }) {
   const cards: { id: CutTransitionEffect | null; name: string; hint: string }[] = [
-    { id: null, name: '无', hint: '跳切(默认)' },
+    { id: null, name: 'common.none', hint: 'panels.hardCutDefault' },
     ...CUT_TRANSITION_EFFECTS.map((e) => ({ id: e.id as CutTransitionEffect | null, name: e.name, hint: HINTS[e.id] })),
   ];
   const directional = effect != null && DIRECTIONAL_TRANSITIONS.has(effect);
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('两镜内容在切点交接,悬停卡片预览;时长拖时间轴上转场区两侧的柄(对称,最长 4 秒);区内不能分割')}</div>
+      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.transitionHint')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
         <div className="grid grid-cols-2 gap-2">
           {cards.map((ef) => {
@@ -148,7 +148,7 @@ export function TransitionPanel({
                 key={ef.id ?? 'none'}
                 type="button"
                 onClick={() => onPick(ef.id, direction)}
-                aria-label={t('转场:{name}', { name: t(ef.name) })}
+                aria-label={t('panels.transitionName', { name: t(ef.name) })}
                 title={t(ef.hint)}
                 className="group flex flex-col items-center gap-1"
               >
@@ -162,14 +162,14 @@ export function TransitionPanel({
         </div>
         {directional && (
           <section className="flex flex-col gap-1.5 text-[11.5px]">
-            <span className="text-ink font-medium">{t('方向')}</span>
+            <span className="text-ink font-medium">{t('panels.direction')}</span>
             <div className="flex gap-1.5">
               {DIRS.map(({ id, icon: Icon, name }) => (
                 <button
                   key={id}
                   type="button"
                   title={t(name)}
-                  aria-label={t('方向:{name}', { name: t(name) })}
+                  aria-label={t('panels.directionName', { name: t(name) })}
                   onClick={() => onPick(effect, id)}
                   className={`border-line flex h-8 w-10 items-center justify-center rounded-md border transition ${
                     direction === id ? 'bg-accent/15 border-accent text-ink' : 'text-ink-3 hover:text-ink hover:bg-panel-2'

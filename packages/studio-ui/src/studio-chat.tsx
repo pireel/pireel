@@ -210,7 +210,7 @@ function recordToolDuration(toolId: string, ms: number) {
 }
 
 /** Thinking dots: cover every dead gap where "nothing is moving" (awaiting first response, tool finished awaiting continuation). */
-function ThinkingDots({ label = t('思考中') }: { label?: string }) {
+function ThinkingDots({ label = t('chatGen.thinking') }: { label?: string }) {
   return (
     <span className="text-ink-3 inline-flex items-center gap-1.5 pt-0.5 text-[13px]">
       {label}
@@ -242,12 +242,12 @@ function toolIdOf(part: ToolPartLike): string {
 /** Normalize tool-call status. */
 function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'error'; text: string } {
   const out = part.output as StudioToolResult | undefined;
-  if (part.state === 'output-error') return { kind: 'error', text: part.errorText?.slice(0, 40) || t('失败') };
+  if (part.state === 'output-error') return { kind: 'error', text: part.errorText?.slice(0, 40) || t('chatGen.failed') };
   if (part.state === 'output-available') {
-    if (out && out.ok === false) return { kind: 'error', text: out.error?.slice(0, 40) || t('失败') };
-    return { kind: 'done', text: out?.summary?.slice(0, 60) || t('完成') };
+    if (out && out.ok === false) return { kind: 'error', text: out.error?.slice(0, 40) || t('chatGen.failed') };
+    return { kind: 'done', text: out?.summary?.slice(0, 60) || t('chatGen.done') };
   }
-  return { kind: 'running', text: t('执行中…') };
+  return { kind: 'running', text: t('chatGen.running') };
 }
 
 function ToolBadge({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
@@ -314,7 +314,7 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
   let timeText = '';
   if (running && elapsedS >= 1) {
     if (live?.frac != null && live.frac >= 0.99) {
-      timeText = t('收尾中 · 已 {s}s', { s: Math.floor(elapsedS) }); // bar full but not returned yet: stop lying with "~1s left"
+      timeText = t('chatGen.wrappingUp', { s: Math.floor(elapsedS) }); // bar full but not returned yet: stop lying with "~1s left"
     } else {
       let remain: number | null = null;
       if (live?.frac != null && live.frac > 0.05) remain = (elapsedS / live.frac) * (1 - live.frac);
@@ -322,7 +322,7 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
         const typ = typicalToolDuration(def.id);
         if (typ != null) remain = typ / 1000 - elapsedS;
       }
-      timeText = remain != null && remain >= 1 ? t('已 {a}s · 约剩 {b}s', { a: Math.floor(elapsedS), b: Math.ceil(remain) }) : t('已 {s}s', { s: Math.floor(elapsedS) });
+      timeText = remain != null && remain >= 1 ? t('chatGen.elapsedRemaining', { a: Math.floor(elapsedS), b: Math.ceil(remain) }) : t('chatGen.elapsed', { s: Math.floor(elapsedS) });
     }
   }
 
@@ -334,7 +334,7 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
         {instruction && <span className="text-ink-4 truncate text-[12px]">{instruction}</span>}
         <span className={`ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5 text-[11px] ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {running ? <Loader2 size={11} className="animate-spin" /> : st.kind === 'error' ? <X size={11} /> : <Check size={11} />}
-          {running && <span className="tabular-nums">{timeText || t('启动中…')}</span>}
+          {running && <span className="tabular-nums">{timeText || t('chatGen.starting')}</span>}
         </span>
       </div>
       {/* Done/failed: result text on its own full-width body row (same spec as the badge), wraps instead of hanging in the right column */}
@@ -346,7 +346,7 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
       {/* Running: stage-text body row (stream note > progress text > default busy text), multi-line readable */}
       {running && (
         <div className="border-line/70 text-ink-3 line-clamp-3 border-t px-2.5 py-1.5 text-[12px] leading-relaxed">
-          {live?.text || (def.busyText ? t(def.busyText) : t('执行中…'))}
+          {live?.text || (def.busyText ? t(def.busyText) : t('chatGen.running'))}
         </div>
       )}
       {/* Progress bar: determinate with frac; indeterminate slider without (always something moving) */}
@@ -651,7 +651,7 @@ function Composer({
               type="button"
               className="text-ink-3 hover:bg-line hover:text-ink inline-flex h-7 w-7 items-center justify-center rounded-md"
               onClick={(e) => refPopoverRef.current?.open(e.currentTarget)}
-              title={t('@ 引用组件 / 分镜')}
+              title={t('chatGen.mentionElementShot')}
             >
               <AtSign className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
@@ -662,7 +662,7 @@ function Composer({
                 frame ? 'bg-accent/15 text-accent hover:bg-accent/25' : 'text-ink-3 hover:bg-line hover:text-ink'
               }`}
               onClick={(e) => framePopoverRef.current?.open(e.currentTarget)}
-              title={frame ? t('主题:{title}', { title: frame.title }) : t('选主题')}
+              title={frame ? t('chatGen.themeTitle', { title: frame.title }) : t('chatGen.pickTheme')}
             >
               <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
@@ -672,7 +672,7 @@ function Composer({
               type="button"
               className="bg-destructive inline-flex h-7 w-7 items-center justify-center rounded-md text-white hover:brightness-110"
               onClick={onStop}
-              title={t('停止')}
+              title={t('chatGen.stop')}
             >
               <Square className="h-3 w-3" fill="currentColor" />
             </button>
@@ -682,7 +682,7 @@ function Composer({
               className="bg-ink inline-flex h-7 w-7 items-center justify-center rounded-md text-white hover:bg-black disabled:opacity-30"
               disabled={empty}
               onClick={fireSubmit}
-              title={t('发送(回车)')}
+              title={t('chatGen.sendEnter')}
             >
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
             </button>
@@ -697,9 +697,9 @@ function Composer({
         items={elements}
         itemSearchText={(el) => `${el.label} ${el.kind}`}
         itemKey={(el) => el.id}
-        title={t('@ 引用组件 · {n} 个', { n: elements.length })}
+        title={t('chatGen.mentionElementN', { n: elements.length })}
         className="w-[260px]"
-        emptyOriginal={<div className="text-ink-3 px-2 py-3 text-center text-[12px]">{t('还没有组件 / 分镜')}</div>}
+        emptyOriginal={<div className="text-ink-3 px-2 py-3 text-center text-[12px]">{t('chatGen.noElementsShotsYet')}</div>}
         onPick={pickElement}
         renderItem={(el, { active, pick, setActive }) => (
           <button
@@ -712,7 +712,7 @@ function Composer({
           >
             <span className="shrink-0">{elementIcon(el)}</span>
             <span className="text-ink truncate">{el.label}</span>
-            <span className="text-ink-4 ml-auto shrink-0 text-[11px]">{el.isShot ? (studioLocale() === 'en' ? 'Shot' : '分镜') : el.kind}</span>
+            <span className="text-ink-4 ml-auto shrink-0 text-[11px]">{el.isShot ? t('common.shot') : el.kind}</span>
           </button>
         )}
       />
@@ -724,9 +724,9 @@ function Composer({
         items={frames}
         itemSearchText={(s) => `${s.title} ${s.summary} ${framePack(locale, s.id)?.title ?? ''}`}
         itemKey={(s) => s.id}
-        title={t('选主题 · {n} 个', { n: frames.length })}
+        title={t('chatGen.pickThemeN', { n: frames.length })}
         className="w-[360px]"
-        emptyOriginal={<div className="text-ink-3 px-2 py-3 text-center text-[12px]">{t('主题目录加载中…')}</div>}
+        emptyOriginal={<div className="text-ink-3 px-2 py-3 text-center text-[12px]">{t('chatGen.loadingThemes')}</div>}
         onPick={pickFrame}
         renderItem={(s, { active, pick, setActive }) => (
           <FrameOptionRow item={s} locale={locale} selected={frame?.id === s.id} active={active} pick={pick} setActive={setActive} />
@@ -766,7 +766,7 @@ function FrameOptionRow({
       onMouseEnter={setActive}
       onMouseDown={(e) => e.preventDefault()}
       onClick={pick}
-      title={selected ? t('再点一次移除主题') : (framePack(locale, item.id)?.title ?? item.title)}
+      title={selected ? t('chatGen.clickAgainRemoveTheme') : (framePack(locale, item.id)?.title ?? item.title)}
       className={`flex w-full items-center gap-2.5 rounded-md p-1.5 text-left ${active ? 'bg-panel-2' : ''}`}
     >
       <span className={`border-line relative w-[112px] shrink-0 overflow-hidden rounded-md border ${selected ? 'ring-accent ring-2' : ''}`}>
@@ -853,7 +853,7 @@ function ChatThread({
       try {
         const out = await runToolRef.current(id, (toolCall.input ?? {}) as Record<string, unknown>);
         if (out.ok) addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output: out });
-        else addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, state: 'output-error', errorText: out.error ?? t('执行失败') });
+        else addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, state: 'output-error', errorText: out.error ?? t('chatGen.executionFailed') });
       } catch (e) {
         addToolOutput({
           tool: id,
@@ -996,16 +996,16 @@ function ChatThread({
             <div className="flex h-full flex-col items-center justify-center gap-4">
               <ConversationEmptyState
                 icon={<PiAvatar size={44} />}
-                title={t('我来帮你做这条视频')}
-                description={t('上传视频后点「一键成片」,自动分镜、配设计图形;也可以直接说要加什么、怎么改,@ 指定某个组件或分镜。')}
+                title={t('chatGen.greeting')}
+                description={t('chatGen.emptyStateIntro')}
               />
               {/* Onboarding: the film pipeline is entirely agent-driven, one tap = one sentence sent */}
               {/* Not using Suggestions (horizontal scrollbar): quick prompts wrap across lines instead.
                   Click = fill into the input (editable/deletable, send authority stays with the user), doesn't send directly */}
               <div className="flex max-w-full flex-wrap items-center justify-center gap-2 px-3">
-                <Suggestion suggestion={t('一键成片,分镜、配图、字幕一步到位')} onClick={fillComposer} />
-                <Suggestion suggestion={t('先分镜看看结构,我再决定怎么改')} onClick={fillComposer} />
-                <Suggestion suggestion={t('提取口播稿,用文字直接剪视频')} onClick={fillComposer} />
+                <Suggestion suggestion={t('chatGen.autoCreateHint')} onClick={fillComposer} />
+                <Suggestion suggestion={t('chatGen.cutShotsFirst')} onClick={fillComposer} />
+                <Suggestion suggestion={t('chatGen.transcribeToEdit')} onClick={fillComposer} />
               </div>
             </div>
           ) : (
@@ -1068,14 +1068,14 @@ function ChatThread({
             <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
               <X size={12} className="shrink-0 text-destructive" />
               <span className="min-w-0 flex-1 truncate text-destructive">
-                {error.message?.includes('insufficient_tokens') ? t('积分不足，充值后继续') : t('出错了:{msg}', { msg: error.message || t('请求失败') })}
+                {error.message?.includes('insufficient_tokens') ? t('chatGen.notEnoughCreditsTop') : t('chatGen.somethingWentWrongMsg', { msg: error.message || t('chatGen.requestFailed') })}
               </span>
               <button
                 type="button"
                 onClick={() => void regenerate()}
                 className="text-ink-2 hover:bg-line hover:text-ink shrink-0 rounded px-1.5 py-0.5 font-medium"
               >
-                {t('重试')}
+                {t('common.retry')}
               </button>
             </div>
           )}
@@ -1085,7 +1085,7 @@ function ChatThread({
 
       <div className="p-2.5 pt-1">
         <Composer
-          placeholder={t('说说要加什么、怎么改(@ 指定组件)…')}
+          placeholder={t('chatGen.sayWhatAddChange')}
           status={status}
           elements={elements}
           frame={frame}
@@ -1141,7 +1141,7 @@ function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
     const parts = (m.parts ?? []).map((p) => {
       const tp = p as { type: string; state?: string };
       if (tp.type.startsWith('tool-') && (tp.state === 'input-streaming' || tp.state === 'input-available')) {
-        return { ...p, state: 'output-error', errorText: t('生成被打断(切换了会话或刷新了页面)') } as typeof p;
+        return { ...p, state: 'output-error', errorText: t('chatGen.generationInterrupted') } as typeof p;
       }
       return p;
     });
@@ -1198,7 +1198,7 @@ export const StudioChat = memo(
   const onSnapshot = useCallback(
     (messages: UIMessage[], frame: AttachedFrame | null) => {
       if (messages.length === 0) return;
-      const title = firstUserText(messages).slice(0, 24) || t('新对话');
+      const title = firstUserText(messages).slice(0, 24) || t('chatGen.newConversation');
       const next: StoredThread = { id: activeId, title, messages, updatedAt: Date.now(), frame };
       const merged = [next, ...threadsRef.current.filter((t) => t.id !== activeId)];
       setThreads(merged);
@@ -1232,13 +1232,13 @@ export const StudioChat = memo(
       {/* Header: title + history + new chat */}
       <div className="border-line text-ink-3 relative flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
         <Sparkles size={13} className="text-accent" />
-        <span className="truncate">{active?.title ?? t('对话')}</span>
+        <span className="truncate">{active?.title ?? t('chatGen.chat')}</span>
         <div className="ml-auto flex items-center gap-0.5">
           <button
             type="button"
             className="hover:bg-panel-2 hover:text-ink inline-flex h-6 w-6 items-center justify-center rounded"
             onClick={() => setHistOpen((v) => !v)}
-            title={t('历史会话')}
+            title={t('chatGen.conversationHistory')}
           >
             <History size={13} />
           </button>
@@ -1247,7 +1247,7 @@ export const StudioChat = memo(
             disabled={!active || active.messages.length === 0}
             className="hover:bg-panel-2 hover:text-ink inline-flex h-6 w-6 items-center justify-center rounded disabled:pointer-events-none disabled:opacity-30"
             onClick={newConversation}
-            title={!active || active.messages.length === 0 ? t('已是新对话') : t('新对话')}
+            title={!active || active.messages.length === 0 ? t('chatGen.alreadyNewConversation') : t('chatGen.newConversation')}
           >
             <MessageSquarePlus size={14} />
           </button>
@@ -1256,8 +1256,8 @@ export const StudioChat = memo(
               type="button"
               className="hover:bg-panel-2 hover:text-ink inline-flex h-6 w-6 items-center justify-center rounded"
               onClick={onClose}
-              title={t('关闭对话')}
-              aria-label={t('关闭对话')}
+              title={t('chatGen.closeChat')}
+              aria-label={t('chatGen.closeChat')}
             >
               <X size={14} />
             </button>
@@ -1266,7 +1266,7 @@ export const StudioChat = memo(
         {histOpen && (
           <div className="border-line bg-panel absolute right-2 top-9 z-20 max-h-[50vh] w-[260px] overflow-y-auto rounded-md border shadow-md">
             {threads.length === 0 ? (
-              <div className="text-ink-4 px-3 py-3 text-center text-[12px]">{t('还没有历史会话')}</div>
+              <div className="text-ink-4 px-3 py-3 text-center text-[12px]">{t('chatGen.noPastConversationsYet')}</div>
             ) : (
               threads.map((th) => (
                 <button
@@ -1278,7 +1278,7 @@ export const StudioChat = memo(
                   }}
                   className={`hover:bg-panel-2 flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] ${th.id === activeId ? 'bg-panel-2' : ''}`}
                 >
-                  <span className="text-ink truncate">{th.title || t('新对话')}</span>
+                  <span className="text-ink truncate">{th.title || t('chatGen.newConversation')}</span>
                 </button>
               ))
             )}

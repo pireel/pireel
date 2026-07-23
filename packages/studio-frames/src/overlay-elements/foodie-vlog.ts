@@ -19,10 +19,10 @@ const BOUNCE = `{y:70,autoAlpha:0,rotation:-6,duration:0.34,ease:'back.out(1.6)'
 const POP = `{scale:0,autoAlpha:0,duration:0.26,ease:'back.out(2)'}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'fo_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="stick">
@@ -46,10 +46,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .badge',${POP.replace('0.26', '0.3')},0.24);\n` +
         `tl.from('#${id} .dots i',{scale:0,duration:0.22,stagger:0.07,ease:'back.out(2)'},0.34);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'fo_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="blob">
@@ -75,10 +75,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .v b',{innerText:0,snap:{innerText:1},duration:0.7,ease:'power1.out'},0.14);\n` +
         `tl.from('#${id} .spr',{scale:0,duration:0.26,stagger:0.09,ease:'back.out(2)'},0.3);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'fo_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="badge hd" data-edit="title">${txt('列表标题', 'List title')}</div>
@@ -100,10 +100,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .hd',${POP.replace('0.26', '0.3')},0);\n` +
         `tl.from('#${id} .chip',{scale:0,duration:0.26,stagger:0.09,ease:'back.out(1.8)'},0.16);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'fo_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <b class="t" data-edit="word">${txt('关键词', 'Keyword')}</b>
@@ -120,10 +120,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .w',{scale:0.5,autoAlpha:0,rotation:'-=8',duration:0.32,ease:'back.out(1.7)'},0);\n` +
         `tl.from('#${id} .spr',{scale:0,duration:0.24,stagger:0.1,ease:'back.out(2)'},0.28);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'fo_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <svg class="steam" viewBox="0 0 200 130">
@@ -143,10 +143,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{scale:0.5,y:30,autoAlpha:0,duration:0.28,ease:'back.out(1.7)'},0);\n` +
         `tl.from('#${id} .steam path',{strokeDashoffset:210,autoAlpha:0,duration:0.5,stagger:0.12,ease:'power1.out'},0.2);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'fo_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="chip top" data-edit="side">${txt('说明一', 'Detail 1')}</div>
@@ -167,10 +167,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .top',${POP},0.2);\n` +
         `tl.from('#${id} .hearts i',{y:40,autoAlpha:0,duration:0.26,stagger:0.08,ease:'back.out(2)'},0.34);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'fo_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="stick">
@@ -197,10 +197,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .q b',{autoAlpha:0,duration:0.24},0.3);\n` +
         `tl.from('#${id} .dots i,#${id} .pearl',{scale:0,duration:0.24,stagger:0.07,ease:'back.out(2)'},0.4);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'fo_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">¥29.9</b><u class="strike"></u></div>

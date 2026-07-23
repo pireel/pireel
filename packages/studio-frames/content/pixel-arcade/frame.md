@@ -3,7 +3,7 @@ id: pixel-arcade
 title: 像素 Arcade
 summary: 8-bit 街机:硬像素块、血条金币、PRESS START,适合游戏/测评/整活
 icon: 👾
-showcase: [标题卡, 大数字, 数字变化, 倒计时, 步骤, 代码, 金句, 对比, 引导]
+showcase: [title-card, big-number, count-up, countdown, steps, code, quote, compare, cta]
 palette: { paper: "#14122B", panel: "#221F45", panel-2: "#1A1738", fg: "#F4F1FF", muted: "#F4F1FF99", accent: "#FFD23F", accent-2: "#3EE6C1", line: "#F4F1FF2E", grid: "#F4F1FF12", radius: "0px", shadow: "8px 8px 0 rgb(0 0 0 / 0.55)", glow: "0 0 30px rgb(62 230 193 / 0.4)", font-num: "'IBM Plex Mono', ui-monospace, monospace" }
 version: 0.1.2
 ---
@@ -47,23 +47,23 @@ By default blocks are HUD SPRITES over the live feed: the block root stays trans
   `tl.from(el,{y:-30,autoAlpha:0,duration:0.22,ease:'power3.out'})` for plates; `steps(1)` staggers for cells/arrows; no back.out, no elastic, no rotation ever.
 
 ## Block recipes
-- 标题卡: HUD strip (coins `× 12`, `STAGE 1-1`) → pixel-corner plate holding a mono `NEW GAME` cap and the 116px stamped headline → `PRESS START ▶` blinking below → HP bar bottom-left.
+- title-card: HUD strip (coins `× 12`, `STAGE 1-1`) → pixel-corner plate holding a mono `NEW GAME` cap and the 116px stamped headline → `PRESS START ▶` blinking below → HP bar bottom-left.
   Motion: HUD snaps in, plate slams y-30 `power3.out` 0.22s, HP appears, START blinks `steps(1)` ×6 ending visible by 1.18s.
-- 大数字: giant mono score `9.8` (≈460px, `--accent`, stamped shadow) left-anchored; mono muted label `总评分 SCORE` above; XP bar below with enlarged `110×60px` cells filling 9 of 10; coin counter in the HUD.
+- big-number: giant mono score `9.8` (≈460px, `--accent`, stamped shadow) left-anchored; mono muted label `总评分 SCORE` above; XP bar below with enlarged `110×60px` cells filling 9 of 10; coin counter in the HUD.
   Motion: label first, digits snap from y+50 `power3.out`, then cells tick on one by one with `steps(1)` stagger 0.05.
-- 数字变化: SCORE roll screen — HUD (`STAGE 2-2`), mono muted cap `本局得分 SCORE`, giant gold mono score (≈310px, stamped shadow) rolling up to `128500` via an innerText tween; a mint mono `+1000` bonus pops beside the digits mid-roll; a wide pixel-corner plate at the bottom pairs `HI-SCORE 999900` against a taunt line for contrast.
+- count-up: SCORE roll screen — HUD (`STAGE 2-2`), mono muted cap `本局得分 SCORE`, giant gold mono score (≈310px, stamped shadow) rolling up to `128500` via an innerText tween; a mint mono `+1000` bonus pops beside the digits mid-roll; a wide pixel-corner plate at the bottom pairs `HI-SCORE 999900` against a taunt line for contrast.
   Motion: HUD snaps, label first, score rolls 0→128500 (`snap:{innerText:1}`, 0.8s power1.out), HI-SCORE plate slams y+30, `+1000` ticks on `steps(1)` and blinks finite ending visible by 1.18s — the card's only blinker.
-- 倒计时: arcade TIME screen — HUD (`STAGE 3-4`), centered mono muted `TIME` cap over giant gold mono seconds (≈400px, stamped shadow) counting DOWN and landing on `10`; a short stamped urgency line below the digits; gold `HURRY UP!` blinking at the bottom.
+- countdown: arcade TIME screen — HUD (`STAGE 3-4`), centered mono muted `TIME` cap over giant gold mono seconds (≈400px, stamped shadow) counting DOWN and landing on `10`; a short stamped urgency line below the digits; gold `HURRY UP!` blinking at the bottom.
   Motion: HUD snaps, cap appears, seconds tick 60→10 via innerText snap (0.8s), the line slams y+30, `HURRY UP!` blinks `steps(1)` ×6 ending visible by 1.18s.
-- 步骤: three level plates in a row — `LEVEL 1 开箱 CLEAR`(dim) `LEVEL 2 实测 ▸ PLAY`(active mint+glow) `LEVEL 3 结论 ???`(locked) — joined by `▶▶` mono arrows in `--accent-2`.
+- steps: three level plates in a row — `LEVEL 1 开箱 CLEAR`(dim) `LEVEL 2 实测 ▸ PLAY`(active mint+glow) `LEVEL 3 结论 ???`(locked) — joined by `▶▶` mono arrows in `--accent-2`.
   Motion: plates slam from x-60 stagger 0.12, arrows tick on `steps(1)`, the active `▸ PLAY` blinks finite and ends visible.
-- 代码: cheat-code entry — HUD (`DEBUG MODE`); a pixel-corner terminal plate holding a gold mono `ENTER CODE 输入秘籍` cap, ten square key cells `↑↑↓↓←→←→BA` filled mint (paper glyphs) that light on one by one like button presses, and a `>` status line in stamped head type confirming the unlock, closed by a mint block cursor `▌`; HP bar bottom-left.
+- code: cheat-code entry — HUD (`DEBUG MODE`); a pixel-corner terminal plate holding a gold mono `ENTER CODE 输入秘籍` cap, ten square key cells `↑↑↓↓←→←→BA` filled mint (paper glyphs) that light on one by one like button presses, and a `>` status line in stamped head type confirming the unlock, closed by a mint block cursor `▌`; HP bar bottom-left.
   Motion: plate slams y-30 `power3.out`, cap ticks on, keys light `steps(1)` stagger 0.04, HP cells fill in parallel, status line snaps on, cursor blinks finite ending visible by 1.18s.
-- 金句: NPC dialog box — HUD strip on top, then a wide pixel-corner plate anchored at the bottom like an RPG text window: mono gold speaker tag (`NPC · 通关的老玩家`), two quote lines in 92px stamped head type each prefixed by a mint mono `>`, and a mint block cursor `▌` closing the last line.
+- quote: NPC dialog box — HUD strip on top, then a wide pixel-corner plate anchored at the bottom like an RPG text window: mono gold speaker tag (`NPC · 通关的老玩家`), two quote lines in 92px stamped head type each prefixed by a mint mono `>`, and a mint block cursor `▌` closing the last line.
   Motion: HUD snaps, window slams y+30 `power3.out`, lines snap on one after another with `steps(1)`, cursor blinks finite (`yoyo repeat 3`) ending visible by 1.1s.
-- 对比: 1P vs 2P versus screen — HUD (`VS MODE`), two pixel-corner fighter plates left/right each with a mono tag, an 76px stamped word, and an HP cell bar (loser 2/5 cells, winner 4/5); the right plate is the active one (mint extension shadows + `--glow`, white tag); giant 170px mono gold `VS` stamped between them.
+- compare: 1P vs 2P versus screen — HUD (`VS MODE`), two pixel-corner fighter plates left/right each with a mono tag, an 76px stamped word, and an HP cell bar (loser 2/5 cells, winner 4/5); the right plate is the active one (mint extension shadows + `--glow`, white tag); giant 170px mono gold `VS` stamped between them.
   Motion: plates snap in from opposite x±60, `VS` ticks on `steps(1)`, HP cells fill cell-by-cell stagger 0.05, `VS` blinks finite and ends visible.
-- 引导: INSERT COIN screen — HUD reads `CREDIT 00`; a giant pixel coin built from stacked gold squares (plus-extension shadows at 34px) drops center; below it the gold mono line `PRESS ❤ TO FOLLOW` blinking, and a muted `CONTINUE? 9` under it.
+- cta: INSERT COIN screen — HUD reads `CREDIT 00`; a giant pixel coin built from stacked gold squares (plus-extension shadows at 34px) drops center; below it the gold mono line `PRESS ❤ TO FOLLOW` blinking, and a muted `CONTINUE? 9` under it.
   Motion: HUD snaps, coin drops y-40 `power3.out`, captions tick on, `PRESS ❤ TO FOLLOW` blinks `steps(1)` ×6 ending visible by 1.18s — the card's only blinker.
 
 ## Compose-instruction crib

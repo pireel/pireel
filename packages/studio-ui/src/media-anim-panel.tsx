@@ -11,18 +11,18 @@ import { t } from './i18n';
 export type MediaAnimValue = { enter?: string; exit?: string; dur?: number };
 
 const ENTERS = [
-  ['none', '无'],
-  ['fade', '淡入'],
-  ['slide', '滑入'],
-  ['rise', '升起'],
-  ['scale', '放大'],
+  ['none', 'common.none'],
+  ['fade', 'panels.fadeIn'],
+  ['slide', 'panels.slide'],
+  ['rise', 'panels.rise'],
+  ['scale', 'common.zoomIn'],
 ] as const;
 const EXITS = [
-  ['none', '无'],
-  ['fade', '淡出'],
-  ['slide', '滑出'],
-  ['rise', '上浮'],
-  ['scale', '缩小'],
+  ['none', 'common.none'],
+  ['fade', 'panels.fadeOut'],
+  ['slide', 'panels.slideOut'],
+  ['rise', 'panels.floatUp'],
+  ['scale', 'panels.zoomOut'],
 ] as const;
 
 const ACCENT = 'var(--color-accent, #3f4be8)';
@@ -137,7 +137,7 @@ function AnimCards({
       {options.map(([v, name]) => {
         const active = value === v;
         return (
-          <button key={v} type="button" onClick={() => onPick(v)} aria-label={`${t(phase === 'in' ? '入场' : '出场')}:${t(name)}`} className="group flex flex-col items-center gap-1">
+          <button key={v} type="button" onClick={() => onPick(v)} aria-label={`${t(phase === 'in' ? 'panels.enter' : 'panels.exit')}:${t(name)}`} className="group flex flex-col items-center gap-1">
             <div className={`w-full rounded-lg border-2 transition ${active ? 'border-accent' : 'border-transparent group-hover:border-line-2'}`}>
               <AnimPreview effect={v} phase={phase} />
             </div>
@@ -162,18 +162,18 @@ export function MediaAnimPanel({
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Title/close live in the popover header; only a one-line note remains here */}
-      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('作用于当前选中的图片 / 视频块')}</div>
+      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.appliesSelectedImageVideo')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
         <section className="flex flex-col gap-1.5">
-          <div className="text-ink font-medium">{t('入场')}</div>
+          <div className="text-ink font-medium">{t('panels.enter')}</div>
           <AnimCards options={ENTERS} phase="in" value={enter} onPick={(v) => onChange({ enter: v })} />
         </section>
         <section className="flex flex-col gap-1.5">
-          <div className="text-ink font-medium">{t('出场')}</div>
+          <div className="text-ink font-medium">{t('panels.exit')}</div>
           <AnimCards options={EXITS} phase="out" value={exit} onPick={(v) => onChange({ exit: v })} />
         </section>
         <section className="flex flex-col gap-1.5">
-          <div className="text-ink font-medium">{t('时长')}</div>
+          <div className="text-ink font-medium">{t('common.duration')}</div>
           <div className="flex items-center gap-1.5">
             {([0.3, 0.5, 0.8] as const).map((dv) => (
               <button

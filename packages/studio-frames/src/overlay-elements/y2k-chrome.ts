@@ -23,10 +23,10 @@ const SPOP = `{scale:0,autoAlpha:0,duration:0.22,stagger:0.08,ease:'back.out(2)'
 const BLINK = `{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'yo_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="kick">${txt('标签', 'Label')}</div>
@@ -51,10 +51,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',${SPOP},0.4);\n` +
         `tl.to('#${id} .s1',${BLINK},0.66);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'yo_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="card"><b class="n" data-edit="num">38</b><i class="u" data-edit="unit">%</i></div>
@@ -83,10 +83,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',${SPOP},0.44);\n` +
         `tl.to('#${id} .s1',${BLINK},0.68);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'yo_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="chip hd" data-edit="title">${txt('列表标题', 'List title')}</div>
@@ -114,10 +114,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',${SPOP},0.6);\n` +
         `tl.to('#${id} .s1',${BLINK},0.72);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'yo_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="ring2"></div>
@@ -142,10 +142,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',${SPOP},0.36);\n` +
         `tl.to('#${id} .s1',${BLINK},0.66);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'yo_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="note">${txt('标注一', 'Note 1')}</div>
@@ -165,10 +165,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.36);\n` +
         `tl.to('#${id} .sp',${BLINK},0.62);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'yo_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="cta" data-edit="cta">${txt('+ 关注', '+ Follow')}</div>
@@ -193,10 +193,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',${SPOP},0.38);\n` +
         `tl.to('#${id} .s1',${BLINK},0.68);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'yo_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="ring2"></div>
@@ -225,10 +225,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sp',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.52);\n` +
         `tl.to('#${id} .sp',${BLINK},0.7);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'yo_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

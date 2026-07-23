@@ -17,10 +17,10 @@ const HALO =
 const DOT = 'position:absolute;border-radius:999px;';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'pd_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <i class="void"></i><i class="halo"></i>
@@ -53,10 +53,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .k',{autoAlpha:0,duration:0.35},0.2);\n` +
         `tl.from('#${id} .h',{autoAlpha:0,y:40,duration:0.4,ease:'power2.out'},0.35);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'pd_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <i class="void"></i><i class="halo"></i>
@@ -88,10 +88,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .k',{autoAlpha:0,duration:0.3},0.1);\n` +
         `tl.from('#${id} .u',{autoAlpha:0,duration:0.3},0.85);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'pd_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <i class="void"></i>
@@ -121,10 +121,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .l2 line',{strokeDashoffset:0,duration:0.35,ease:'power1.inOut'},0.54);\n` +
         `tl.from('#${id} .r3',{autoAlpha:0,y:24,duration:0.3,ease:'power2.out'},0.62);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'pd_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <i class="void"></i><i class="halo"></i>
@@ -152,10 +152,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .d4',{x:-120,y:130,autoAlpha:0,duration:0.55,ease:'power2.out'},0.42);\n` +
         `tl.from('#${id} .d5',{x:150,y:100,autoAlpha:0,duration:0.55,ease:'power2.out'},0.46);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'pd_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="note" data-edit="note">${txt('标注一', 'Note 1')}</div>
@@ -178,10 +178,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .n1,#${id} .n2,#${id} .n3',{scale:0,transformOrigin:'center',duration:0.18,stagger:0.1,ease:'power2.out'},0.3);\n` +
         `tl.from('#${id} .n4',{scale:0,transformOrigin:'center',duration:0.25,ease:'power2.out'},0.75);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'pd_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <i class="halo"></i>
@@ -209,10 +209,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .d4',{x:-100,y:-110,autoAlpha:0,duration:0.45,ease:'power2.in'},0.58);\n` +
         `tl.from('#${id} .f',{autoAlpha:0,duration:0.3},0.6);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'pd_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <i class="void"></i>
@@ -247,10 +247,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ul .n1,#${id} .ul .n2',{scale:0,transformOrigin:'center',duration:0.18,stagger:0.1},0.85);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.3},0.8);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'pd_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <i class="void"></i><i class="halo"></i>

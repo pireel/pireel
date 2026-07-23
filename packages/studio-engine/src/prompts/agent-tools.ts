@@ -47,9 +47,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'read_frame',
     kind: 'card',
-    busyText: '翻开主题手册…',
+    busyText: 'tools.read_frame.busy',
     icon: '🎨',
-    label: '读取 frame 主题',
+    label: 'tools.read_frame.label',
     description:
       "Load the attached frame's playbook (theme content pack: design tokens, composition rules, per-block build recipes). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then follow the playbook. Its result persists in the conversation: if a read_frame result for this frame is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
@@ -57,9 +57,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'attach_frame',
     kind: 'badge',
-    busyText: '挂载主题…',
+    busyText: 'tools.attach_frame.busy',
     icon: '🖼️',
-    label: '挂载 frame 主题',
+    label: 'tools.attach_frame.label',
     description:
       "Attach a frame (theme content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. Call this when the user picks a frame from your recommendation, or names one explicitly. The catalog of ids appears in <frame_catalog> when none is attached. Also usable to SWITCH to a different frame.",
     inputSchema: obj({ frame_id: { type: 'string', description: 'Frame id from the catalog, e.g. "biennale-poster"' } }, ['frame_id']),
@@ -68,9 +68,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'read_editing_guide',
     kind: 'card',
-    busyText: '翻开口播剪辑手册…',
+    busyText: 'tools.read_editing_guide.busy',
     icon: '✂️',
-    label: '读取剪辑手册',
+    label: 'tools.read_editing_guide.label',
     description:
       "Load the A-roll speech-cleanup playbook (complete-semantic-unit editing, retakes, false starts, two-tier fillers, boundary discipline). Call this ONCE — BEFORE any transcript-based speech cut (cleanup / de-filler / tighten / cut_narration / a highlight or short version) — then follow it. Its result persists in the conversation: if a read_editing_guide result is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
@@ -79,9 +79,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'extract_asr',
     kind: 'card',
-    busyText: '抽音频、转写口播稿…',
+    busyText: 'tools.extract_asr.busy',
     icon: '📝',
-    label: '提取口播稿',
+    label: 'tools.extract_asr.label',
     description:
       'Transcribe the spoken audio (extract audio → ASR) into timed sentences — the raw material for planning and storyboarding. Covers the main video AND every inserted other-source segment (each transcript section on its own source clock). It does NOT add captions and does NOT cut shots (captions are a theme option; storyboarding is lay_out). Run to (re)fetch the transcript. No input. Cheap to re-run (cached per file).',
     inputSchema: obj({}, []),
@@ -89,9 +89,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'read_script',
     kind: 'badge',
-    busyText: '读取口播稿…',
+    busyText: 'tools.read_script.busy',
     icon: '📖',
-    label: '读取口播稿',
+    label: 'tools.read_script.label',
     description:
       "Read the full spoken transcript: main narration sentences (source-video seconds — the same clock as shot src in→out, never shifted by cutting) PLUS what each clip inserted from another source file says (in that file's own seconds). Call it for content-level requests — locating a sentence for cut_range / turning a claim into a graphic / answering what a segment says — when no transcript is in the conversation yet (an extract_asr result also carries it; don't call both). Transcribes inserted clips on demand; main narration requires extract_asr first. No input.",
     inputSchema: obj({}, []),
@@ -99,9 +99,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'analyze_narration',
     kind: 'card',
-    busyText: '通读文稿、规划场景…',
+    busyText: 'tools.analyze_narration.busy',
     icon: '🧠',
-    label: '分析口播稿',
+    label: 'tools.analyze_narration.label',
     description:
       'Plan the whole piece from the narration: SEGMENT the script into scenes (group consecutive sentences by meaning), and for each scene pick a framing (full / punch-in / corner / split) + a DESIGNED graphic brief (metric / comparison / chart / pipeline / structure / KPI / timeline / callout, with real data pulled from the script). Designed graphics are the main event. Auto-runs extract_asr first if needed. No input.',
     inputSchema: obj({}, []),
@@ -109,9 +109,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'analyze_visual',
     kind: 'card',
-    busyText: '逐帧分析画面…',
+    busyText: 'tools.analyze_visual.busy',
     icon: '🎬',
-    label: '分析画面',
+    label: 'tools.analyze_visual.label',
     description:
       'Analyze the footage LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content) so graphics avoid the speaker. Slow (runs frame-by-frame in the browser) — shows a live progress + ETA. No input. Cached per file.',
     inputSchema: obj({}, []),
@@ -119,9 +119,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'lay_out',
     kind: 'card',
-    busyText: '铺分镜结构、落占位…',
+    busyText: 'tools.lay_out.busy',
     icon: '✦',
-    label: '分镜',
+    label: 'tools.lay_out.label',
     description:
       'STORYBOARD the video: slice shots (by sentence ∪ scene cuts), apply framing (punch-in / corner / split) per the plan, and drop PLACEHOLDER slots where graphics should go (no graphics drawn yet — that is the next step). Auto-runs any missing prerequisite (ASR → narration plan ‖ visual analysis). Overwrites the composition structure, EXCEPT segments inserted from other source files — those are preserved at their timeline positions. No input. Captions/keyword overlays are added only if the theme enables them (general theme: off). Follow with add_graphics.',
     inputSchema: obj({}, []),
@@ -129,9 +129,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'add_graphics',
     kind: 'card',
-    busyText: '设计图形生成中…',
+    busyText: 'tools.add_graphics.busy',
     icon: '🎨',
-    label: '配图',
+    label: 'tools.add_graphics.label',
     description:
       'ILLUSTRATE: fill placeholder slots from lay_out with DESIGNED fragments (card / chart / flow-or-structure diagram / KPI / callout), generated concurrently with live progress. Auto-runs lay_out first if there are no placeholders yet. Use after lay_out, when the user asks for the graphics to be drawn, or for a fresh full-draft run lay_out then add_graphics. Optional `blockIds` = only (re)illustrate these placeholder blocks (marked [placeholder] in <composition_state>); omit to fill ALL pending placeholders.',
     inputSchema: obj(
@@ -146,9 +146,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'add_block',
     kind: 'card',
-    busyText: '构思并编写这个组件…',
+    busyText: 'tools.add_block.busy',
     icon: '✨',
-    label: '加组件',
+    label: 'tools.add_block.label',
     description:
       'Add a NEW overlay element (a title card, big number/stat, bullet list, or an animated keyword caption). The actual HTML/animation is generated from your instruction. Use when the user wants something that is not on screen yet. Put a concrete, self-contained instruction in `instruction` (what it says + the look), written in the video\'s language (match the transcript unless the user says otherwise). Optional `atSec` = where on the timeline it starts (defaults to the current playhead).',
     inputSchema: obj(
@@ -162,9 +162,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'edit_block',
     kind: 'card',
-    busyText: '重写这块的排版/动画…',
+    busyText: 'tools.edit_block.busy',
     icon: '🎨',
-    label: '改这块',
+    label: 'tools.edit_block.label',
     description:
       "Edit ONE existing overlay block's content, styling or animation (e.g. make the keyword red and bigger, change the caption effect, add an outline, slow it down). Pass the target `blockId` (from <composition_state>; if the user wrote @id use that) and a concrete `instruction`. Do NOT use this for moving/resizing on the timeline — use move_block/resize_block for that.",
     inputSchema: obj(
@@ -181,7 +181,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'move_block',
     kind: 'badge',
     icon: '↔️',
-    label: '移动',
+    label: 'tools.move_block.label',
     description:
       'Move an overlay block to a new start time on the timeline (keeps its duration). `startSec` is the new absolute start in seconds.',
     inputSchema: obj(
@@ -196,7 +196,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'resize_block',
     kind: 'badge',
     icon: '⌛',
-    label: '改时长',
+    label: 'tools.resize_block.label',
     description:
       "Change an overlay block's start and/or duration on the timeline. Provide the full new `startSec` and `durationSec` (seconds).",
     inputSchema: obj(
@@ -212,7 +212,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'delete_block',
     kind: 'badge',
     icon: '🗑️',
-    label: '删除',
+    label: 'tools.delete_block.label',
     description: 'Delete an overlay block entirely.',
     inputSchema: obj({ blockId: { type: 'string' } }, ['blockId']),
   },
@@ -220,7 +220,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'delete_blocks',
     kind: 'badge',
     icon: '🗑️',
-    label: '批量删除',
+    label: 'tools.delete_blocks.label',
     description: 'Delete SEVERAL overlay blocks in one call (e.g. clearing every caption-like block at once). Pass all target ids.',
     inputSchema: obj({ blockIds: { type: 'array', items: { type: 'string' } } }, ['blockIds']),
   },
@@ -228,7 +228,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'duplicate_block',
     kind: 'badge',
     icon: '⧉',
-    label: '复制',
+    label: 'tools.duplicate_block.label',
     description:
       'Duplicate an overlay block (same content/box/track, new id). `atSec` = where the copy starts; omit to place it right after the original. Use then edit_block to vary the copy.',
     inputSchema: obj({ blockId: { type: 'string' }, atSec: { type: 'number' } }, ['blockId']),
@@ -237,7 +237,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'get_block',
     kind: 'badge',
     icon: '🔍',
-    label: '查看块',
+    label: 'tools.get_block.label',
     description:
       "INSPECT one overlay block: returns its timing/track/box plus its actual content (HTML + animation, truncated). Use BEFORE edit_block when you need to know what's inside (e.g. to answer questions about it, or to make a precise change), or to debug why something looks wrong.",
     inputSchema: obj({ blockId: { type: 'string' } }, ['blockId']),
@@ -246,19 +246,52 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'focus_element',
     kind: 'badge',
     icon: '🎯',
-    label: '定位',
+    label: 'tools.focus_element.label',
     description:
       'SHOW the user an element: select it and move the playhead/preview to it. Use when you reference something the user should look at, or after creating/changing an element so the user sees the result.',
     inputSchema: obj({ id: { type: 'string', description: 'block or shot id' } }, ['id']),
+  },
+
+  {
+    id: 'seek',
+    kind: 'badge',
+    icon: '⏱️',
+    label: 'tools.seek.label',
+    description:
+      'Move the playhead (and the preview) to a time on the EDITED timeline — the transport jump. `toSec` = target in edited seconds: 0 = back to the start; values past the end clamp to the last frame. Use for jump-to-a-moment asks ("back to the beginning", "go to 12s", "show me the ending"), or to park the playhead where tools that default to it (add_block / split_shot / trim_shot) should act. To show a specific element or shot, prefer focus_element.',
+    inputSchema: obj({ toSec: { type: 'number', description: 'Target time in edited seconds (0 = start; clamped to the video length).' } }, ['toSec']),
+  },
+  {
+    id: 'play',
+    kind: 'badge',
+    icon: '▶️',
+    label: 'tools.play.label',
+    description:
+      "Start playback in the preview. Optional `fromSec` = jump there first (edited seconds; omit to play from the current playhead — at the end it restarts from 0 like the transport button). Optional `toSec` = auto-pause when playback reaches it. Use a from+to RANGE to SHOW the user a moment you just changed (a couple seconds around a cut seam, a transition window, a new element's entry) so they can judge the result without hunting for it.",
+    inputSchema: obj(
+      {
+        fromSec: { type: 'number', description: 'Start playing from here (edited seconds). Omit = current playhead.' },
+        toSec: { type: 'number', description: 'Auto-pause when playback reaches this time (edited seconds). Omit = play to the end.' },
+      },
+      [],
+    ),
+  },
+  {
+    id: 'pause',
+    kind: 'badge',
+    icon: '⏸️',
+    label: 'tools.pause.label',
+    description: 'Pause playback (the playhead stays where it is). No input.',
+    inputSchema: obj({}, []),
   },
 
   /* ---------- captions (global preset layer: full-line captions / per-word emphasis, laid from the transcript, one setting applies to the whole video) ---------- */
   {
     id: 'set_captions',
     kind: 'card',
-    busyText: '按口播稿铺字幕…',
+    busyText: 'tools.set_captions.busy',
     icon: '💬',
-    label: '设字幕',
+    label: 'tools.set_captions.label',
     description:
       "Turn sentence captions ON and/or restyle them — the global subtitle layer laid from the transcript (ONE setting styles the WHOLE video; this is NOT a per-block edit). `preset` = a style id from <caption_catalog> (enabling captions if off, rebuilding the layer from the transcript — runs ASR first if needed). `yPct` = caption baseline's distance from the top as a % (smaller = higher). `scale` = size multiplier (1 = preset default). Use for turning captions on, switching their style, or nudging position/size. Pick the preset whose name+mode fits the ask; default to a clean full-line style (a `line` preset) when no style is named. Turn captions OFF with remove_captions. The keyword-slam overlay is a different thing — that is a block (add_block/edit_block).",
     inputSchema: obj(
@@ -274,7 +307,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'remove_captions',
     kind: 'badge',
     icon: '🚫',
-    label: '移除字幕',
+    label: 'tools.remove_captions.label',
     description:
       'Remove the whole sentence-caption layer (turn subtitles off). Does not touch keyword overlay elements (delete those with delete_block).',
     inputSchema: obj({}, []),
@@ -283,7 +316,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'set_caption_translations',
     kind: 'badge',
     icon: '🌐',
-    label: '双语字幕',
+    label: 'tools.set_caption_translations.label',
     description:
       'Add a translation line under the sentence captions (bilingual subtitles) — YOU do the translating, this tool only stores it. Workflow: read_script → translate each numbered sentence yourself → pass `items` as {index (the row number from read_script), text (your translation)}. Translations attach to the transcript, so they survive cuts, restyles and re-lays; a re-transcription (extract_asr on a new file) drops them. Main narration by default; pass `shotId` (an inserted-clip shot) to translate that clip\'s own transcript instead. `text: ""` removes one line; `clear: true` removes ALL translations. If captions are off, translations are stored and appear once set_captions turns them on. Use for bilingual / translated subtitles.',
     inputSchema: obj(
@@ -305,7 +338,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'set_shot_treatment',
     kind: 'badge',
     icon: '🎯',
-    label: '取景',
+    label: 'tools.set_shot_treatment.label',
     description:
       'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r (video takes the left/right half, the other half left for blocks). Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
     inputSchema: obj(
@@ -320,7 +353,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'set_video_filter',
     kind: 'badge',
     icon: '🎨',
-    label: '调色',
+    label: 'tools.set_video_filter.label',
     description:
       "Color-grade ONE shot's footage: brightness / contrast / saturate as coefficients (1 = untouched; e.g. 1.15 = +15%). The values you pass REPLACE that shot's whole grade — omit a field to reset it to neutral, pass no fields at all to remove the grade. Applies to the WHOLE shot and snaps at the cut (no cross-shot blend) — split_shot first to grade only part. Typical asks: brighter → brightness 1.1–1.2; more vivid → saturate 1.2–1.4 (+ contrast 1.05); black & white → saturate 0; muted/cinematic gray → saturate 0.7–0.85. Preview and export share the same filter pipeline.",
     inputSchema: obj(
@@ -337,7 +370,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'split_shot',
     kind: 'badge',
     icon: '✂️',
-    label: '剪开',
+    label: 'tools.split_shot.label',
     description:
       'Split the video at a point into two shots (content unchanged). `atSec` = where to cut (edited timeline seconds); omit to use the playhead.',
     inputSchema: obj({ atSec: { type: 'number' } }, []),
@@ -346,7 +379,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'trim_shot',
     kind: 'badge',
     icon: '🔪',
-    label: '裁剪',
+    label: 'tools.trim_shot.label',
     description:
       'Trim away footage to one side of a point, within that point\'s shot. `side` = "left" or "right". Optional `atSec` = the anchor (edited timeline seconds); omit to use the playhead. Everything after shifts left to close the gap.',
     inputSchema: obj(
@@ -361,7 +394,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'delete_shot',
     kind: 'badge',
     icon: '🚫',
-    label: '删场景',
+    label: 'tools.delete_shot.label',
     description: 'Remove a whole video shot (its source footage is cut; later shots shift earlier). Works on inserted other-source segments too.',
     inputSchema: obj({ shotId: { type: 'string' } }, ['shotId']),
   },
@@ -369,7 +402,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'cut_range',
     kind: 'badge',
     icon: '✂️',
-    label: '删区间',
+    label: 'tools.cut_range.label',
     description:
       'Remove a TIME RANGE of footage by EDITED-timeline seconds: everything between fromSec and toSec is cut (can span shots), later content shifts left, overlay blocks compress. To cut BY THE SCRIPT (remove the passage that says X) use cut_narration instead — it takes the transcript timestamps directly. Use cut_range for a raw edited-timeline range, or for footage inside an inserted [clip X] segment (its own clock — read that shot\'s edited a→b from <composition_state>). Preferred over split+split+delete.',
     inputSchema: obj(
@@ -384,7 +417,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'cut_narration',
     kind: 'badge',
     icon: '✂️',
-    label: '删口播',
+    label: 'tools.cut_narration.label',
     description:
       'Delete spoken passages BY THE TRANSCRIPT — the script-editing cut. Pass MAIN NARRATION timestamps straight from read_script / the transcript (the [x–y s], which are SOURCE seconds): this tool converts them to the edited timeline itself, cuts the footage, compresses overlays, and re-lays captions so the deleted words drop out. Use for any remove-what-was-said request (a passage, one sentence, several sentences). `ranges` = one or more {fromSec,toSec} removed in ONE call; already-partly-cut spans just remove whatever survives. MAIN narration only — inserted [clip X] segments have their own clock: cut those with cut_range (edited seconds) or delete_shot.',
     inputSchema: obj(
@@ -401,9 +434,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'insert_clip',
     kind: 'card',
-    busyText: '拉取并插入片段…',
+    busyText: 'tools.insert_clip.busy',
     icon: '🎞️',
-    label: '插入片段',
+    label: 'tools.insert_clip.label',
     description:
       "Insert a B-roll video segment into the main track. The bytes must already be on Pireel storage — pass `sig` (the fingerprint the asset-import helper returns after uploading a local file) OR `url` (a video from the user's asset library / a generated video; external URLs are rejected — upload them first). `atSec` = where on the EDITED timeline (defaults to the playhead); it snaps to the nearest shot boundary and shifts later overlays right. The inserted segment is a full peer: framing, captions, matting and its own audio all apply, and its speech gets transcribed on demand. Needs the studio tab open (video bytes live in the browser). Then verify with get_state.",
     inputSchema: obj(
@@ -419,7 +452,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'add_transition',
     kind: 'badge',
     icon: '🎬',
-    label: '转场',
+    label: 'tools.add_transition.label',
     description:
       "Set/replace/remove the CONTENT transition at a cut between two shots (the footage of the two shots hands over — not an overlay). `atSec` must be a shot boundary from <composition_state> (±0.3s snap; anything else is rejected). One transition per cut, symmetric around it. `effect` (gl-transitions set): fade (cross-fade, the default), fadeblack (dip to black), directional (push), directionalwipe (wipe), circleopen (iris), windowslice (blinds), crosszoom (zoom blur punch), rotatescale (rotate+zoom), glitch (glitch memories), dreamy (wavy); 'none' removes. `direction` (directional/directionalwipe only) = the incoming footage's travel direction, default left. `durationSec` = TOTAL length (max 4, clamped by both shots' lengths; default 1). The region shows on the timeline and cannot be split inside; deleting either adjacent shot clears the transition. Use sparingly — hard jump-cuts are the default look.",
     inputSchema: obj(
@@ -436,7 +469,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'undo',
     kind: 'badge',
     icon: '↩️',
-    label: '撤销',
+    label: 'tools.undo.label',
     description:
       'Undo the last composition change made through tools (one step per call; a small history is kept). Use when the user rejects a change or asks to roll back. Does not cover manual timeline drags.',
     inputSchema: obj({}, []),
@@ -446,9 +479,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'export_video',
     kind: 'card',
-    busyText: '本地合成成片…',
+    busyText: 'tools.export_video.busy',
     icon: '🎞️',
-    label: '导出成片',
+    label: 'tools.export_video.label',
     description:
       "Start exporting the final video. Renders LOCALLY in the user's open studio tab (WebCodecs; roughly realtime, so a 3-min video takes ~3 min) and saves it via the browser's download — the file lands on the user's machine (Downloads folder by default), nothing is uploaded. Poll track_export for progress and the final filename. The tab must stay open until done. Options: resolution 2160/1440/1080/720/540 (default 1080), fps 24/30/60 (default 30), format mp4/webm/mov (default mp4).",
     inputSchema: obj(
@@ -464,7 +497,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'track_export',
     kind: 'badge',
     icon: '⏳',
-    label: '查询导出',
+    label: 'tools.track_export.label',
     description:
       "Check the running export: returns {status: running|done|idle, progress %, filename when done}. Poll every ~15s after export_video. When done, the file was already saved by the browser's download (Downloads folder by default) — locate it there by the returned filename (watch for an in-progress .crdownload first) and confirm the path to the user.",
     inputSchema: obj({}, []),

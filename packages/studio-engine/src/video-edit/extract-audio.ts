@@ -21,7 +21,7 @@ export async function extractAudio(file: File): Promise<Blob> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
     const audioTrack = await input.getPrimaryAudioTrack();
-    if (!audioTrack) throw new Error('视频没有音轨,无法抽音频');
+    if (!audioTrack) throw new Error('The video has no audio track — cannot extract audio');
 
     const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
     const conversion = await Conversion.init({

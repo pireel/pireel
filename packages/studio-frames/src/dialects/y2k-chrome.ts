@@ -51,10 +51,10 @@ ${orbits(id)}
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'yk_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="chip">本周穿搭企划</div>
@@ -92,10 +92,10 @@ ${orbits(id)}
         `tl.from('#${id} .sub',{autoAlpha:0,duration:0.24},0.6);\n` +
         `tl.to('#${id} .sp.s1',{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3},0.7);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'yk_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="ring2"></div>
@@ -126,10 +126,10 @@ ${orbits(id)}
         `tl.from('#${id} .sp',{scale:0,autoAlpha:0,duration:0.22,stagger:0.08,ease:'back.out(2)'},0.5);\n` +
         `tl.to('#${id} .sp.s2',{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3},0.7);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'yk_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="bb b1"><i class="hl"></i></div>
@@ -161,10 +161,10 @@ ${orbits(id)}
         `tl.from('#${id} .sub',{autoAlpha:0,y:24,duration:0.24},0.56);\n` +
         `tl.to('#${id} .sp.s1,#${id} .sp.s4',{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3},0.7);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'yk_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="chip">播放量突破</div>
@@ -200,10 +200,10 @@ ${orbits(id)}
         `tl.from('#${id} .sub',{autoAlpha:0,duration:0.24},0.58);\n` +
         `tl.to('#${id} .sp.s2',{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3},0.7);`,
     ),
-  倒计时: () =>
+  'countdown': () =>
     mk(
       'yk_cnt',
-      '倒计时',
+      'countdown',
       (id) => `
 <div class="rt">
   <div class="chip">距千年虫还剩</div>
@@ -242,10 +242,10 @@ ${orbits(id)}
         `tl.to('#${id} .sp.s2',{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3},0.62);\n` +
         `tl.to('#${id} .h',{x:-16,skewX:6,autoAlpha:0.55,duration:0.06,yoyo:true,repeat:3},0.9);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'yk_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt">
   <div class="chip">今日歌单</div>
@@ -278,10 +278,10 @@ ${orbits(id)}
         `tl.from('#${id} .sp',{scale:0,autoAlpha:0,duration:0.22,stagger:0.08,ease:'back.out(2)'},0.48);\n` +
         `tl.to('#${id} .sp.s1',{autoAlpha:0.25,duration:0.12,yoyo:true,repeat:3},0.72);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'yk_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="rt">
   <div class="win">
@@ -323,10 +323,10 @@ ${orbits(id)}
         `tl.from('#${id} .toast',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.48);\n` +
         `tl.to('#${id} .toast',{autoAlpha:0.3,duration:0.12,yoyo:true,repeat:3},0.72);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'yk_cod',
-      '代码',
+      'code',
       (id) => `
 <div class="rt">
   <div class="chip">主页皮肤源码</div>
@@ -374,10 +374,10 @@ ${orbits(id)}
         `tl.from('#${id} .bb,#${id} .sp',{scale:0,autoAlpha:0,duration:0.22,stagger:0.08,ease:'back.out(2)'},0.5);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.12,yoyo:true,repeat:3},0.72);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'yk_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="rt">
   <div class="chip">出片三步曲</div>

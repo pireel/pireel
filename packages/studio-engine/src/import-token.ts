@@ -22,7 +22,7 @@ const b64urlDecode = (s: string): string => atob(s.replace(/-/g, '+').replace(/_
 
 async function hmac(payload: string): Promise<string> {
   const secret = process.env.BETTER_AUTH_SECRET;
-  if (!secret) throw new Error('BETTER_AUTH_SECRET 未配置(导入令牌需要它签名)');
+  if (!secret) throw new Error('BETTER_AUTH_SECRET is not configured (import tokens are signed with it)');
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return b64url(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
 }

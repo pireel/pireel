@@ -1,0 +1,15 @@
+export const SHELL_ZH: Record<string, string> = {
+  'shell.createFirstProject': '新建第一个项目',
+  'shell.deleteProject': '删除项目',
+  'shell.deleteTitleProjectChat': '删除「{title}」？项目内容与对话记录一并删除，不可恢复。',
+  'shell.myProjects': '我的项目',
+  'shell.nElements': '{n} 组件',
+  'shell.newProject': '新建项目',
+  'shell.nShots': '{n} 镜',
+  'shell.oneProjectPerVideo': '一个项目一条视频：分镜、取景、设计组件、字幕、导出。',
+  'shell.planningFailed': '规划失败',
+  'shell.rename': '重命名',
+  'shell.syncFailed': '同步失败',
+  'shell.translationFailed': '翻译失败',
+  'shell.uploadVideoAiCuts': '上传一条视频，AI 分镜、配图、加字幕，浏览器里直接导出成片',
+};

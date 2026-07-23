@@ -43,10 +43,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'px_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 12</span><span>STAGE 1-1</span></div>
@@ -70,10 +70,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ps',{autoAlpha:0,duration:0.14},0.34);\n` +
         `tl.to('#${id} .ps',{autoAlpha:0,duration:0.12,yoyo:true,repeat:5,ease:'steps(1)'},0.46);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'px_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 38</span><span>REVIEW MODE</span></div>
@@ -94,10 +94,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .bar em,#${id} .cells',{autoAlpha:0,duration:0.14},0.4);\n` +
         `tl.from('#${id} .cells i',{autoAlpha:0,duration:0.06,stagger:0.05,ease:'steps(1)'},0.5);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'px_scr',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 52</span><span>STAGE 2-2</span></div>
@@ -124,10 +124,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .pop',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.55);\n` +
         `tl.to('#${id} .pop',{autoAlpha:0,duration:0.12,yoyo:true,repeat:3,ease:'steps(1)'},0.7);`,
     ),
-  倒计时: () =>
+  'countdown': () =>
     mk(
       'px_cnt',
-      '倒计时',
+      'countdown',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 38</span><span>STAGE 3-4</span></div>
@@ -150,10 +150,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ps',{autoAlpha:0,duration:0.14},0.34);\n` +
         `tl.to('#${id} .ps',{autoAlpha:0,duration:0.12,yoyo:true,repeat:5,ease:'steps(1)'},0.46);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'px_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 07</span><span>WORLD MAP</span></div>
@@ -185,10 +185,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ar',{autoAlpha:0,duration:0.12,stagger:0.1,ease:'steps(1)'},0.34);\n` +
         `tl.to('#${id} .act em',{autoAlpha:0,duration:0.12,yoyo:true,repeat:5,ease:'steps(1)'},0.45);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'px_cod',
-      '代码',
+      'code',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 07</span><span>DEBUG MODE</span></div>
@@ -218,10 +218,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ok',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.76);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.07,yoyo:true,repeat:3,ease:'steps(1)'},0.9);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'px_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 24</span><span>STAGE 2-1</span></div>
@@ -246,10 +246,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ln',{autoAlpha:0,duration:0.12,stagger:0.14,ease:'steps(1)'},0.34);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.12,yoyo:true,repeat:3,ease:'steps(1)'},0.62);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'px_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 24</span><span>VS MODE</span></div>
@@ -276,10 +276,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cells i',{autoAlpha:0,duration:0.06,stagger:0.05,ease:'steps(1)'},0.5);\n` +
         `tl.to('#${id} .vs',{autoAlpha:0,duration:0.12,yoyo:true,repeat:3,ease:'steps(1)'},0.7);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'px_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="px">
   <div class="hud"><span class="coin"><i></i>× 99</span><span>CREDIT 00</span></div>

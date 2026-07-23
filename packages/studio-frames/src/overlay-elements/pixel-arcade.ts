@@ -17,10 +17,10 @@ const COIN =
   'width:36px;height:36px;background:var(--accent);box-shadow:0 10px 0 var(--accent),0 -10px 0 var(--accent),10px 0 0 var(--accent),-10px 0 0 var(--accent);';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'px_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="hud"><span class="c"><i></i><b data-edit="coin">× 12</b></span><span data-edit="stage">STAGE 1-1</span></div>
@@ -47,10 +47,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .st',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.4);\n` +
         `tl.to('#${id} .st',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.6);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'px_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="label">${txt('数据说明 SCORE', 'DATA LABEL')}</div>
@@ -72,10 +72,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .v',{y:50,autoAlpha:0,duration:0.22,ease:'power3.out'},0.16);\n` +
         `tl.from('#${id} .bar i.on',{autoAlpha:0,duration:0.1,ease:'steps(1)',stagger:0.08},0.44);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'px_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="r r1 done"><b>LEVEL 1</b><span data-edit="p1">${txt('要点一', 'Point 1')}</span><em>CLEAR</em></div>
@@ -100,10 +100,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r3',{x:-60,autoAlpha:0,duration:0.2,ease:'power3.out'},0.24);\n` +
         `tl.to('#${id} .act em',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.55);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'px_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="kick">CRITICAL HIT!</div>
@@ -119,10 +119,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{y:-20,duration:0.12,ease:'steps(2)'},0.2);\n` +
         `tl.to('#${id} .cap',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.45);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'px_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip"><i></i><span data-edit="note">× CHECK</span></div>
@@ -141,10 +141,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .a2',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.4);\n` +
         `tl.to('#${id} .a2',{autoAlpha:0,duration:0.1,yoyo:true,repeat:3,ease:'steps(1)'},0.6);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'px_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="coin"></div>
@@ -163,10 +163,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .f',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.38);\n` +
         `tl.to('#${id} .p',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.58);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'px_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="tag" data-edit="sig">${txt('NPC · 署名', 'NPC · Attribution')}</div>
@@ -186,10 +186,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .l2',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.44);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.1,yoyo:true,repeat:3,ease:'steps(1)'},0.7);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'px_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><b>1P</b><span data-edit="lt">${txt('选项一', 'Option A')}</span><div class="hp"><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div><em data-edit="lv">${txt('数值一', 'Value A')}</em></div>

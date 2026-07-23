@@ -3,7 +3,7 @@ id: flip-board
 title: 翻牌 Flipboard
 summary: 起落牌翻板:字符逐格翻落、航班行、准点绿,适合盘点/榜单/行程叙事
 icon: 🎴
-showcase: [标题卡, 大数字, 数字变化, 倒计时, 步骤, 对比, 金句, 引导]
+showcase: [title-card, big-number, count-up, countdown, steps, compare, quote, cta]
 palette: { paper: "#12151A", panel: "#1D2129", panel-2: "#171A20", fg: "#F4F1E8", muted: "#F4F1E899", accent: "#FFB300", accent-2: "#43D9A3", line: "#F4F1E824", grid: "#F4F1E80D", radius: "10px", shadow: "0 18px 44px rgb(0 0 0 / 0.5)", glow: "0 0 0 rgb(0 0 0 / 0)", font-num: "'IBM Plex Mono', ui-monospace, monospace" }
 version: 0.1.2
 ---
@@ -45,21 +45,21 @@ By default blocks are SINGLE DEPARTURE ROWS mounted over the footage: the block 
 - Chip flick: `tl.to(chip,{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'})` — finite repeats, ENDS VISIBLE, at most one flicking chip per screen.
 
 ## Block recipes
-- 标题卡: header strip (`出发 DEPARTURES` / amber `FLIGHT PR-101`) → muted `目的地 DEST` cap → the headline as two amber word-flap tiles (150px) → a 44px mono subline → a bottom `GATE 24 · 20:00` + green ON TIME chip.
+- title-card: header strip (`出发 DEPARTURES` / amber `FLIGHT PR-101`) → muted `目的地 DEST` cap → the headline as two amber word-flap tiles (150px) → a 44px mono subline → a bottom `GATE 24 · 20:00` + green ON TIME chip.
   Motion: strip flips in, cap flips, headline tiles flip in a wave (stagger 0.07), subline flips, footer flips, chip flicks ×finite ending visible by 1.17s.
-- 大数字: giant amber digit flap-tiles (250×400px, 280px glyphs) center stage; muted mono cap above (`本月新增粉丝 NEW FOLLOWERS`); footer pairs a green record chip with a muted `+42%` delta note.
+- big-number: giant amber digit flap-tiles (250×400px, 280px glyphs) center stage; muted mono cap above (`本月新增粉丝 NEW FOLLOWERS`); footer pairs a green record chip with a muted `+42%` delta note.
   Motion: strip, cap, then digits flip left→right stagger 0.06 like the board updating, footer flips, chip flicks finite.
-- 数字变化: one wide amber flap tile whose number ROLLS — innerText snap 0→86400 over 0.7s — with a small rotationX jitter mid-roll (the flap clacking); cap `本周播放 VIEWS`; footer shows a green `+240%` chip and yesterday's figure for scale.
+- count-up: one wide amber flap tile whose number ROLLS — innerText snap 0→86400 over 0.7s — with a small rotationX jitter mid-roll (the flap clacking); cap `本周播放 VIEWS`; footer shows a green `+240%` chip and yesterday's figure for scale.
   Motion: tile flips in, number rolls up, jitter at midpoint, footer flips last; the roll is the star — no chip flick here.
-- 倒计时: FINAL CALL screen — header `最后登机 FINAL CALL` / amber `GATE 24`; `时间 TIME` cap; one giant amber flap tile counting DOWN (innerText 60→10) with a muted `SEC` unit under it; footer pairs an amber CLOSING chip with the deadline line.
+- countdown: FINAL CALL screen — header `最后登机 FINAL CALL` / amber `GATE 24`; `时间 TIME` cap; one giant amber flap tile counting DOWN (innerText 60→10) with a muted `SEC` unit under it; footer pairs an amber CLOSING chip with the deadline line.
   Motion: tile flips in, seconds roll down, unit flips, footer flips, the amber chip flicks finite ending visible — the countdown is the only card where a number rolls down.
-- 步骤: three departure rows as legs of ONE journey under the four column headers — `LEG 1 已完成 DONE`(dimmed) / `LEG 2 进行中 GO`(green chip, the active leg) / `LEG 3 候机 HOLD`(muted dest); times advance 09:00 → 14:30 → 20:00.
+- steps: three departure rows as legs of ONE journey under the four column headers — `LEG 1 已完成 DONE`(dimmed) / `LEG 2 进行中 GO`(green chip, the active leg) / `LEG 3 候机 HOLD`(muted dest); times advance 09:00 → 14:30 → 20:00.
   Motion: headers flip, rows cascade top→bottom stagger 0.12, the GO chip flicks finite — exactly one green, exactly one active leg.
-- 对比: two rows, SAME destination, different status — `PLAN A` delayed amber and dimmed, `PLAN B` on-time green with a green destination; a muted verdict line at the bottom calls the winner.
+- compare: two rows, SAME destination, different status — `PLAN A` delayed amber and dimmed, `PLAN B` on-time green with a green destination; a muted verdict line at the bottom calls the winner.
   Motion: headers flip, both rows cascade, verdict flips, the winner's ON TIME chip flicks finite.
-- 金句: PA announcement — header `广播 ANNOUNCEMENT` / `PA SYSTEM`; the sentence flips in as two FULL-WIDTH flap cards in `var(--font-head)` 88px (a word-marquee flap), attribution line muted below.
+- quote: PA announcement — header `广播 ANNOUNCEMENT` / `PA SYSTEM`; the sentence flips in as two FULL-WIDTH flap cards in `var(--font-head)` 88px (a word-marquee flap), attribution line muted below.
   Motion: line one flips shut, line two follows 0.27s later, attribution flips last — whole-card flips, no per-character dicing of the quote.
-- 引导: boarding call — cap `现在登机 NOW BOARDING`; two amber word-flap tiles as the call to action; a `GATE ❤ · SEAT` row beside a green BOARD NOW chip; muted schedule footnote (`每周三班`).
+- cta: boarding call — cap `现在登机 NOW BOARDING`; two amber word-flap tiles as the call to action; a `GATE ❤ · SEAT` row beside a green BOARD NOW chip; muted schedule footnote (`每周三班`).
   Motion: cap flips, tiles flip in a wave, gate row flips, chip flicks finite ending visible — boarding idiom, never a web button.
 
 ## Compose-instruction crib

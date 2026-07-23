@@ -17,10 +17,10 @@ const DRIFT = `{autoAlpha:0,y:10,duration:0.7,ease:'power1.out'}`;
 const SEAL = `{autoAlpha:0,duration:0.4}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'zo_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="t" data-edit="title">${txt('标题一', 'Title 1')}</div>
@@ -42,10 +42,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cap',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'zo_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="v" data-edit="num">100</div>
@@ -67,10 +67,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .lab',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'zo_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="vr"></div>
@@ -95,10 +95,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .it',{autoAlpha:0,y:10,duration:0.6,ease:'power1.out',stagger:0.15},0.2);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'zo_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <span class="t" data-edit="word">${txt('关键词', 'Keyword')}</span>
@@ -114,10 +114,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',${DRIFT.replace('0.7', '0.8')},0.1);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'zo_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="t" data-edit="note">${txt('标 注 一', 'Note 1')}</div>
@@ -133,10 +133,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.7},0.15);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'zo_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="f"><span data-edit="cta">${txt('+ 关注', '+ Follow')}</span><i class="dot"></i></div>
@@ -157,10 +157,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .hr,#${id} .cap',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'zo_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="q"><span data-edit="l1">${txt('金句上半句,', 'Quote line one,')}</span><span data-edit="l2">${txt('下半句。', 'and line two.')}</span></div>
@@ -179,10 +179,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',${SEAL},0.8);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'zo_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

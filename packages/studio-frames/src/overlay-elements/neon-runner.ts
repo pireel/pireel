@@ -12,10 +12,10 @@ const SCAN =
   'background-color:var(--panel);background-image:repeating-linear-gradient(0deg,var(--grid) 0 2px,transparent 2px 8px);border:2px solid var(--line);';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'nn_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="bar"><span><b>●</b> REC</span><span data-edit="kick">SESSION_04</span></div>
@@ -44,10 +44,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .h',{autoAlpha:0,duration:0.24},0.36);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.55);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'nn_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="ck tl"></div><div class="ck br"></div>
@@ -72,10 +72,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .tag',{autoAlpha:0,scale:1.3,duration:0.18,ease:'power3.in'},0.6);\n` +
         `tl.to('#${id} .tag',{autoAlpha:0.4,duration:0.12,yoyo:true,repeat:3},0.85);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'nn_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="hd">&gt; <span data-edit="title">checklist --run</span></div>
@@ -100,10 +100,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r3',{x:-70,autoAlpha:0,duration:0.2,ease:'power3.out'},0.42);\n` +
         `tl.to('#${id} .r3 em',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.7);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'nn_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="ck tl"></div><div class="ck br"></div>
@@ -122,10 +122,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ck',{autoAlpha:0,duration:0.16},0.22);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.44);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'nn_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="note">TARGET LOCKED</div>
@@ -144,10 +144,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .dot',{scale:0,autoAlpha:0,duration:0.16,ease:'power3.out'},0.36);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0.45,duration:0.12,yoyo:true,repeat:3},0.6);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'nn_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="p">&gt; <span data-edit="cmd">exec follow --confirm</span></div>
@@ -168,10 +168,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sub',{autoAlpha:0,duration:0.18},0.4);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.1,yoyo:true,repeat:5,ease:'steps(1)'},0.62);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'nn_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="ck tl"></div><div class="ck br"></div>
@@ -192,10 +192,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .p',{autoAlpha:0,x:-20,duration:0.18},0.2);\n` +
         `tl.from('#${id} .t b',{autoAlpha:0,duration:0.2},0.4);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'nn_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

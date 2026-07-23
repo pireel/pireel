@@ -37,7 +37,7 @@ function downloadBlob(blob: Blob, name: string) {
 }
 
 const stamp = () => new Date().toISOString().slice(11, 19).replace(/:/g, '');
-const filenameFor = (o: ExportRenderOpts) => t('成片-{res}p-{stamp}.{format}', { res: o.res, stamp: stamp(), format: o.format });
+const filenameFor = (o: ExportRenderOpts) => t('common.exportFilename', { res: o.res, stamp: stamp(), format: o.format });
 
 export function useStudioExport(deps: {
   compRef: MutableRefObject<Composition>;
@@ -65,7 +65,7 @@ export function useStudioExport(deps: {
   /** Whether client compositing is possible locally (WebCodecs + a source File). If not = honest error, no longer handed to the deprecated server render. */
   const canClientExport = () => typeof window !== 'undefined' && 'VideoEncoder' in window && !!videoFileRef.current;
   const noExportReason = () =>
-    !videoFileRef.current ? t('本地视频丢失，重新上传原片后再导出') : t('这个浏览器不支持本地导出，换 Chrome/Edge 打开再试');
+    !videoFileRef.current ? t('common.localSourceVideoMissing') : t('workbench.browserCannotExport');
 
   /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
   const renderBlob = async (c: Composition, key: string, opts: ExportRenderOpts): Promise<Blob> => {
@@ -88,10 +88,10 @@ export function useStudioExport(deps: {
   async function exportVideo(opts: ExportRenderOpts): Promise<{ ok: boolean; filename?: string; error?: string }> {
     const c = compRef.current;
     if (!c.video?.url) {
-      toast.error(t('先上传口播视频再导出'));
-      return { ok: false, error: t('先上传口播视频再导出') };
+      toast.error(t('common.uploadBeforeExport'));
+      return { ok: false, error: t('common.uploadBeforeExport') };
     }
-    if (exporting || publishing) return { ok: false, error: t('已有导出在进行中') };
+    if (exporting || publishing) return { ok: false, error: t('common.exportAlreadyProgress') };
     if (!canClientExport()) {
       toast.error(noExportReason());
       return { ok: false, error: noExportReason() };
@@ -99,7 +99,7 @@ export function useStudioExport(deps: {
     const key = exportKey(c, opts);
     const name = filenameFor(opts);
     if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
-      toast.success(t('内容没有改动，已下载上次的成片'));
+      toast.success(t('common.downloadedPreviousExport'));
       downloadBlob(lastExportRef.current.blob, name);
       return { ok: true, filename: name };
     }
@@ -109,16 +109,16 @@ export function useStudioExport(deps: {
     try {
       const blob = await renderBlob(c, key, opts);
       downloadBlob(blob, name);
-      toast.success(t('导出完成，已开始下载'));
+      toast.success(t('common.exportCompleteDownloadStarted'));
       return { ok: true, filename: name };
     } catch (e) {
       if (e instanceof ExportCanceled) {
-        toast.info(t('已取消导出'));
-        return { ok: false, error: t('导出被取消') };
+        toast.info(t('common.exportCanceled'));
+        return { ok: false, error: t('common.exportWasCanceled') };
       }
       console.warn('[studio] client export failed', e);
-      toast.error(t('导出失败，稍后重试'));
-      return { ok: false, error: e instanceof Error ? e.message : t('导出失败') };
+      toast.error(t('common.exportFailedTryAgain'));
+      return { ok: false, error: e instanceof Error ? e.message : t('common.exportFailed') };
     } finally {
       setExporting(false);
     }
@@ -129,7 +129,7 @@ export function useStudioExport(deps: {
   async function publishVideo(opts: ExportRenderOpts): Promise<string | null> {
     const c = compRef.current;
     if (!c.video?.url) {
-      toast.error(t('先上传口播视频'));
+      toast.error(t('common.uploadVideoFirst'));
       return null;
     }
     if (exporting || publishing) return null;
@@ -149,19 +149,19 @@ export function useStudioExport(deps: {
     try {
       const blob = await renderBlob(c, key, opts);
       if (blob.size > MAX_PUBLISH_BYTES) {
-        toast.error(t('成片超过 200MB，发布上传装不下——降低分辨率或缩短时长再试'));
+        toast.error(t('common.exportTooLargeToPublish'));
         return null;
       }
-      toast.success(t('上传成片中…'));
+      toast.success(t('common.uploadingExport'));
       const { url } = await studioProviders().uploads.upload(blob, { contentType: blob.type || 'video/mp4', filename: filenameFor(opts) });
       uploadedExportRef.current = { key, url };
       setPublishUrl(url);
       return url;
     } catch (e) {
-      if (e instanceof ExportCanceled) toast.info(t('已取消'));
+      if (e instanceof ExportCanceled) toast.info(t('common.canceled'));
       else {
         console.warn('[studio] publish upload failed', e);
-        toast.error(t('发布准备失败，稍后重试'));
+        toast.error(t('workbench.publishPrepareFailed'));
       }
       return null;
     } finally {

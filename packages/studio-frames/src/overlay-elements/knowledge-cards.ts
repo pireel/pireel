@@ -22,10 +22,10 @@ const DIM = (id: string, cls = 'dim') => `
 const HATCH = 'repeating-linear-gradient(45deg,var(--accent) 0 10px,transparent 10px 24px)';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'kc_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="k" data-edit="kick">FIG.01 — OPENING</div>
@@ -45,10 +45,10 @@ ${DIM(id)}
         `tl.from('#${id} .h',{y:36,autoAlpha:0,duration:0.32,ease:'power3.out'},0.14);\n` +
         `tl.from('#${id} .dim',{autoAlpha:0,duration:0.26},0.38);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'kc_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="v"><b data-edit="num">38</b><i data-edit="unit">%</i></div>
@@ -71,10 +71,10 @@ ${DIM(id)}
         `tl.from('#${id} .v b',{innerText:0,snap:{innerText:1},duration:0.7,ease:'power1.out'},0.15);\n` +
         `tl.from('#${id} .lab,#${id} .dwg',{autoAlpha:0,duration:0.24},0.45);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'kc_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="title">${txt('SPEC — 列表标题', 'SPEC — LIST TITLE')}</div>
@@ -97,10 +97,10 @@ ${DIM(id)}
         `tl.from('#${id} .r2',{autoAlpha:0,duration:0.22},0.3);\n` +
         `tl.from('#${id} .r3',{autoAlpha:0,duration:0.22},0.4);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'kc_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <i class="ch a">+</i><i class="ch b">+</i>
@@ -124,10 +124,10 @@ ${DIM(id)}
         `tl.from('#${id} .hl',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0.4);\n` +
         `tl.from('#${id} .ch',{autoAlpha:0,duration:0.2},0.5);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'kc_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <span class="dot"></span><span class="ln"></span>
@@ -146,10 +146,10 @@ ${DIM(id)}
         `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.26,ease:'power2.out'},0.12);\n` +
         `tl.from('#${id} .note',{x:-30,autoAlpha:0,duration:0.26,ease:'power3.out'},0.3);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'kc_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <i class="ch a">+</i><i class="ch b">+</i>
@@ -175,10 +175,10 @@ ${DIM(id)}
         `tl.from('#${id} .fill',{scaleX:0,transformOrigin:'left center',duration:0.34,ease:'power2.out'},0.3);\n` +
         `tl.from('#${id} .dim,#${id} .m,#${id} .ch',{autoAlpha:0,duration:0.24},0.5);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'kc_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="dim"><i></i><b data-edit="spec">SPEC — QUOTE</b><i></i></div>
@@ -196,10 +196,10 @@ ${DIM(id)}
         `tl.from('#${id} .dim',{scaleX:0.5,autoAlpha:0,transformOrigin:'center',duration:0.28,stagger:0.1},0.06);\n` +
         `tl.from('#${id} .t',{y:26,autoAlpha:0,duration:0.3,ease:'power3.out'},0.24);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'kc_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

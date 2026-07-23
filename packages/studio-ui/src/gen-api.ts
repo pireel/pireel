@@ -58,7 +58,7 @@ export async function getStudioSpaceId(): Promise<string> {
   const r = await fetch('/api/create/spaces', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: t('Studio 生成') }),
+    body: JSON.stringify({ title: t('chatGen.studioGenerations') }),
   });
   const j = (await r.json().catch(() => null)) as { space?: { id?: string } } | null;
   const id = j?.space?.id;
@@ -81,7 +81,7 @@ export async function startGeneration(
     try {
       spaceId = await getStudioSpaceId();
     } catch {
-      return { ok: false, kind: 'error', message: t('生成空间创建失败，稍后再试') };
+      return { ok: false, kind: 'error', message: t('common.generationSpaceFailed') };
     }
     const r = await fetch('/api/create', {
       method: 'POST',
@@ -100,11 +100,11 @@ export async function startGeneration(
         clearSpaceCache();
         continue;
       }
-      return { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('生成请求失败（{status}）', { status: r.status }) };
+      return { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) };
     }
     return { ok: true, ids: Array.isArray(j.ids) && j.ids.length > 0 ? j.ids : [j.id] };
   }
-  return { ok: false, kind: 'error', message: t('生成请求失败') };
+  return { ok: false, kind: 'error', message: t('chatGen.generationRequestFailed') };
 }
 
 interface RawCreation {

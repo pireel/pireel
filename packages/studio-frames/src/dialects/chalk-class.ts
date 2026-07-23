@@ -53,10 +53,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'ck_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="board">
   <div class="date">第 4 课 · 理财入门</div>
@@ -84,10 +84,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .sub',{autoAlpha:0,y:16,duration:0.24},0.58);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.8);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'ck_chp',
-      '章节',
+      'chapters',
       (id) => `
 <div class="board">
   <div class="cap"><span class="hw">今日课表<i class="ul"></i></span></div>
@@ -127,10 +127,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .sub',{autoAlpha:0,duration:0.24},0.92);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.94);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'ck_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="board">
   <div class="cap"><span class="hw">今日板书 · 攒钱三步<i class="ul"></i></span></div>
@@ -164,10 +164,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .r',{x:-40,autoAlpha:0,duration:0.26,stagger:0.13,ease:'power2.out'},0.3);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.84);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'ck_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="board">
   <div class="qm">“</div>
@@ -192,10 +192,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.24},0.66);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.84);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'ck_qa',
-      '问答',
+      'qa',
       (id) => `
 <div class="board">
   <div class="cap">课堂提问 · 想好再举手</div>
@@ -225,10 +225,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power2.out'},0.84);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.94);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'ck_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="board">
   <div class="cap">复利里最狠的变量,是时间</div>
@@ -254,10 +254,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .sub',{autoAlpha:0,y:16,duration:0.24},0.6);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.8);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'ck_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="board">
   <div class="cap">解题三步 · 抄在笔记本上</div>
@@ -296,10 +296,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power2.out'},0.92);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.94);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'ck_cod',
-      '代码',
+      'code',
       (id) => `
 <div class="board">
   <div class="cap"><span class="hw">板书代码 · 复利一行<i class="ul"></i></span></div>
@@ -337,10 +337,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .l4',{x:-40,autoAlpha:0,duration:0.24,ease:'power2.out'},0.86);\n` +
         `tl.from('#${id} .tag',{scale:1.5,autoAlpha:0,rotation:14,duration:0.24,ease:'power3.in'},0.94);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'ck_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="board">
   <div class="box">

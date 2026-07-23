@@ -24,10 +24,10 @@ const POP = `{scale:0,autoAlpha:0,duration:0.26,ease:'back.out(2)'}`;
 const SWEEP = `{scaleX:0,transformOrigin:'left center',duration:0.25,ease:'power3.out'}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'sk_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="kick">${txt('标签', 'LABEL')}</div>
@@ -45,10 +45,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0.18);\n` +
         `tl.from('#${id} .burst',${POP},0.4);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'sk_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="label">${txt('数据说明', 'Data label')}</div>
@@ -67,10 +67,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0.3);\n` +
         `tl.from('#${id} .v i',${SWEEP},0.5);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'sk_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="cap hd" data-edit="title">${txt('列表标题 LIST', 'LIST TITLE')}</div>
@@ -96,10 +96,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r3',{x:-90,scale:0.85,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.42);\n` +
         `tl.from('#${id} .d',{scale:0,duration:0.22,stagger:0.12,ease:'back.out(2)'},0.4);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'sk_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <b class="t mk" data-edit="word">${txt('关键词', 'Keyword')}</b>
@@ -115,10 +115,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',${SWEEP},0.26);\n` +
         `tl.from('#${id} .burst',${POP},0.52);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'sk_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="note">${txt('标注一', 'Note 1')}</div>
@@ -134,10 +134,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0);\n` +
         `tl.from('#${id} .ar path',{strokeDashoffset:240,duration:0.32,ease:'power2.out'},0.22);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'sk_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="pill"><b class="mk" data-edit="cta">${txt('+ 关注', '+ Follow')}</b><span data-edit="tail">${txt(',说明一。', ', Detail 1.')}</span></div>
@@ -155,10 +155,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .mk',${SWEEP},0.26);\n` +
         `tl.from('#${id} .cap',${POP},0.48);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'sk_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="board">
@@ -177,10 +177,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .mk',${SWEEP},0.3);\n` +
         `tl.from('#${id} .qm',{scale:0,rotation:-30,autoAlpha:0,duration:0.3,ease:'back.out(1.8)'},0.5);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'sk_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

@@ -42,10 +42,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'bd_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">01</span><span class="sec">执行摘要</span><span class="sp"></span><span class="pg">P.01 / 12</span></div>
@@ -76,10 +76,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .kpi',{y:26,autoAlpha:0,duration:0.26,stagger:0.09,ease:'power2.out'},0.42);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.78);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'bd_agd',
-      '章节',
+      'chapters',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">02</span><span class="sec">议程</span><span class="sp"></span><span class="pg">P.03 / 12</span></div>
@@ -115,10 +115,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .sub',{autoAlpha:0,duration:0.24},0.76);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.88);`,
     ),
-  图表: () =>
+  'chart': () =>
     mk(
       'bd_bar',
-      '图表',
+      'chart',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">03</span><span class="sec">季度营收</span><span class="sp"></span><span class="pg">P.07 / 12</span></div>
@@ -158,10 +158,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .bg b,#${id} .bg span',{autoAlpha:0,duration:0.22},0.78);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.9);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'bd_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">02</span><span class="sec">三项行动</span><span class="sp"></span><span class="pg">P.04 / 12</span></div>
@@ -192,10 +192,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .r',{x:-24,autoAlpha:0,duration:0.26,stagger:0.11,ease:'power2.out'},0.3);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.78);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'bd_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">04</span><span class="sec">核心指标</span><span class="sp"></span><span class="pg">P.09 / 12</span></div>
@@ -221,10 +221,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .row',{y:20,autoAlpha:0,duration:0.26,ease:'power2.out'},0.52);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.72);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'bd_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">06</span><span class="sec">年度盘点</span><span class="sp"></span><span class="pg">P.11 / 12</span></div>
@@ -252,10 +252,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .yoy',{y:20,autoAlpha:0,duration:0.26,ease:'power2.out'},0.62);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.86);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'bd_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">05</span><span class="sec">方案对比</span><span class="sp"></span><span class="pg">P.10 / 12</span></div>
@@ -296,10 +296,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .col',{y:26,autoAlpha:0,duration:0.28,stagger:0.12,ease:'power2.out'},0.3);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.74);`,
     ),
-  走势: () =>
+  'trend': () =>
     mk(
       'bd_trd',
-      '走势',
+      'trend',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">03</span><span class="sec">增长走势</span><span class="sp"></span><span class="pg">P.08 / 12</span></div>
@@ -343,10 +343,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .co',{autoAlpha:0,y:16,duration:0.26,ease:'power2.out'},0.9);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.94);`,
     ),
-  时间线: () =>
+  'timeline': () =>
     mk(
       'bd_rmp',
-      '时间线',
+      'timeline',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">05</span><span class="sec">路线图</span><span class="sp"></span><span class="pg">P.06 / 12</span></div>
@@ -386,10 +386,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .nd.cur em',{autoAlpha:0,duration:0.22},0.9);\n` +
         `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.94);`,
     ),
-  人名条: () =>
+  'lower-third': () =>
     mk(
       'bd_spk',
-      '人名条',
+      'lower-third',
       (id) => `
 <div class="bd"><div class="top"></div>
   <div class="hd"><span class="no">01</span><span class="sec">发言人</span><span class="sp"></span><span class="pg">P.02 / 12</span></div>

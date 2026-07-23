@@ -16,10 +16,10 @@ const PILL =
   'background:var(--accent);color:var(--paper);font-weight:800;border-radius:999px;box-shadow:var(--glow);';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'kb_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="bub">
@@ -43,10 +43,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .pill',{scale:0,autoAlpha:0,duration:0.26,ease:'back.out(2)'},0.26);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.42);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'kb_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="bub">
@@ -73,10 +73,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .mini',{scale:0,autoAlpha:0,duration:0.28,ease:'back.out(2)'},0.4);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.6);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'kb_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="hd" data-edit="title">${txt('列表标题', 'List title')}</div>
@@ -101,10 +101,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r2',{y:60,autoAlpha:0,duration:0.3,ease:'back.out(1.7)'},0.28);\n` +
         `tl.from('#${id} .r3',{y:60,autoAlpha:0,duration:0.3,ease:'back.out(1.7)'},0.4);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'kb_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="bub"><span class="t" data-edit="word">${txt('关键词', 'Keyword')}</span><span class="blush"><i></i><i></i></span></div>
@@ -124,10 +124,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .bub',{scale:0,autoAlpha:0,rotation:-14,duration:0.34,ease:'back.out(2)'},0);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.22,stagger:0.1,ease:'back.out(2)'},0.3);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'kb_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="qb"><span data-edit="note">${txt('标注一!', 'Note 1!')}</span><i class="tail"></i></div>
@@ -143,10 +143,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .qb',{scale:0,autoAlpha:0,rotation:-16,duration:0.3,ease:'back.out(2)'},0);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.26);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'kb_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="bal"><span data-edit="side">${txt('说明一', 'Detail 1')}</span><i class="tail"></i></div>
@@ -166,10 +166,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .pill',{y:-14,duration:0.16,yoyo:true,repeat:1,ease:'power1.inOut'},0.62);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.6);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'kb_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="bal">
@@ -196,10 +196,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .who',{autoAlpha:0,duration:0.24},0.34);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.46);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'kb_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

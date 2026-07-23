@@ -30,7 +30,7 @@ export function useGenerationLock() {
   /** Gesture entry points like timeline drag: if locked → toast blocks it, returns true meaning "don't move". */
   const genLockToast = useCallback((id: string): boolean => {
     if (!genIdsRef.current.has(id)) return false;
-    toast.info(t('这个组件正在生成中，先不能动它'));
+    toast.info(t('workbench.elementStillGenerating'));
     return true;
   }, []);
   return { genIds, genIdsRef, markGenerating, genLockToast };

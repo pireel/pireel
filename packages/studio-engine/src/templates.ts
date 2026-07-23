@@ -358,7 +358,7 @@ function renderMedia(slots: Slots, id: string, startSec = 0, durationSec?: numbe
   }
   // empty → placeholder (.hf-ph is display:none by default, shown only under body.hf-editor; styles in assembleHtml head)
   return {
-    innerHtml: `<div class="hf-ph"><div class="hf-ph-plus">+</div><div class="hf-ph-tip">${t('选中后可 AI 生成<br/>或上传图片 / 视频')}</div></div>`,
+    innerHtml: `<div class="hf-ph"><div class="hf-ph-plus">+</div><div class="hf-ph-tip">${t('engine.mediaPlaceholderTip')}</div></div>`,
     timelineBody: '',
   };
 }
@@ -367,62 +367,62 @@ function renderMedia(slots: Slots, id: string, startSec = 0, durationSec?: numbe
 
 registerTemplate({
   id: 'custom',
-  name: '自定义 HTML',
+  name: 'engine.customHtml',
   kind: 'custom',
   defaultTrackIndex: 2,
-  slots: { innerHtml: { type: 'text', label: 'HTML' }, timelineBody: { type: 'text', label: 'GSAP 动画体' } },
+  slots: { innerHtml: { type: 'text', label: 'HTML' }, timelineBody: { type: 'text', label: 'engine.gsapTimelineBody' } },
   render: (slots) => ({ innerHtml: str(slots.innerHtml, '<div></div>'), timelineBody: str(slots.timelineBody) }),
 });
 registerTemplate({
   id: 'title',
-  name: '标题卡',
+  name: 'common.titleCard',
   kind: 'title',
   defaultTrackIndex: 2,
-  slots: { text: { type: 'text', label: '标题', required: true }, sub: { type: 'text', label: '副标题' } },
+  slots: { text: { type: 'text', label: 'common.title', required: true }, sub: { type: 'text', label: 'engine.subtitle' } },
   render: renderTitle,
 });
 registerTemplate({
   id: 'stat',
-  name: '大数字',
+  name: 'common.bigNumber',
   kind: 'stat',
   defaultTrackIndex: 2,
-  slots: { value: { type: 'text', label: '数字', required: true }, label: { type: 'text', label: '说明' } },
+  slots: { value: { type: 'text', label: 'common.number', required: true }, label: { type: 'text', label: 'engine.label' } },
   render: renderStat,
 });
 registerTemplate({
   id: 'list',
-  name: '要点列表',
+  name: 'common.bulletList',
   kind: 'list',
   defaultTrackIndex: 2,
-  slots: { title: { type: 'text', label: '小标题' }, items: { type: 'text[]', label: '要点', required: true } },
+  slots: { title: { type: 'text', label: 'engine.heading' }, items: { type: 'text[]', label: 'engine.bulletPoints', required: true } },
   render: renderList,
 });
 registerTemplate({
   id: 'transition',
-  name: '转场',
+  name: 'tools.add_transition.label',
   kind: 'transition',
   defaultTrackIndex: 3, // topmost, covers the cut beneath
-  slots: { effect: { type: 'enum', label: '效果', options: ['wipe', 'flash', 'fade', 'slide'] } },
+  slots: { effect: { type: 'enum', label: 'engine.effect', options: ['wipe', 'flash', 'fade', 'slide'] } },
   render: renderTransition,
 });
 registerTemplate({
   id: 'caption',
-  name: '动效字幕',
+  name: 'engine.animatedCaptions',
   kind: 'caption',
   defaultTrackIndex: 1,
   slots: {
-    words: { type: 'words', label: '词级时间', required: true },
-    effect: { type: 'enum', label: '效果', options: ['kinetic-slam'] },
-    sub: { type: 'text', label: '译文副行' },
+    words: { type: 'words', label: 'engine.wordTimings', required: true },
+    effect: { type: 'enum', label: 'engine.effect', options: ['kinetic-slam'] },
+    sub: { type: 'text', label: 'engine.translationLine' },
   },
   render: renderCaption,
 });
 registerTemplate({
   id: 'media',
-  name: '素材位',
+  name: 'common.media',
   kind: 'media',
   defaultTrackIndex: 2,
-  slots: { media: { type: 'image', label: '图片/视频' } },
+  slots: { media: { type: 'image', label: 'engine.imageVideo' } },
   render: renderMedia,
 });
 

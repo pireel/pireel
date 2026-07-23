@@ -48,10 +48,10 @@ ${tape(id)}
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'st_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="card back"><div class="ph"></div></div>
@@ -84,10 +84,10 @@ ${tape(id)}
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.26},0.56);\n` +
         `tl.from('#${id} .note',{y:60,rotation:14,autoAlpha:0,duration:0.3,ease:'back.out(1.6)'},0.5);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'st_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt">
   <div class="sticky">
@@ -120,10 +120,10 @@ ${tape(id)}
         `tl.from('#${id} .r i',{scale:0,duration:0.2,stagger:0.1,ease:'back.out(2)'},0.44);\n` +
         `tl.from('#${id} .card.mini',{y:70,rotation:12,autoAlpha:0,duration:0.3,ease:'back.out(1.5)'},0.5);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'st_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="card q">
@@ -155,10 +155,10 @@ ${tape(id)}
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.26},0.62);\n` +
         `tl.from('#${id} .note',{y:50,rotation:-12,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.6);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'st_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="rt">
   <div class="tag"><div class="tp top"></div>读者留言墙</div>
@@ -186,10 +186,10 @@ ${tape(id)}
         `tl.from('#${id} .tp',{scale:0,autoAlpha:0,duration:0.22,stagger:0.07,ease:'back.out(2)'},0.46);\n` +
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.24},0.82);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'st_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="rt">
   <div class="note n1"><div class="tp top"></div><b>STEP 1</b><span>拍下来</span></div>
@@ -218,10 +218,10 @@ ${tape(id)}
         `tl.from('#${id} .tp',{scale:0,autoAlpha:0,duration:0.22,stagger:0.08,ease:'back.out(2)'},0.34);\n` +
         `tl.to('#${id} .ar path',{strokeDashoffset:0,duration:0.3,stagger:0.08,ease:'power2.out'},0.6);`,
     ),
-  时间线: () =>
+  'timeline': () =>
     mk(
       'st_tml',
-      '时间线',
+      'timeline',
       (id) => `
 <div class="rt">
   <div class="tag"><div class="tp top"></div>三天小环线</div>
@@ -257,10 +257,10 @@ ${tape(id)}
         `tl.from('#${id} .lb',{y:44,rotation:6,autoAlpha:0,duration:0.26,stagger:0.14,ease:'back.out(1.5)'},0.4);\n` +
         `tl.from('#${id} .tp',{scale:0,autoAlpha:0,duration:0.2,stagger:0.07,ease:'back.out(2)'},0.72);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'st_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="card main">
@@ -291,10 +291,10 @@ ${tape(id)}
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.26},0.66);\n` +
         `tl.from('#${id} .note',{y:60,rotation:-12,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.6);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'st_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="card main">

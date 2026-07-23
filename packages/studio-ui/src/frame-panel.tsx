@@ -66,7 +66,7 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
             type="button"
             onClick={() => setOpenId(null)}
             className="text-ink-3 hover:bg-panel-2 hover:text-ink -ml-1 inline-flex h-6 w-6 items-center justify-center rounded"
-            title={t('返回列表')}
+            title={t('panels.backList')}
           >
             <ArrowLeft size={13} />
           </button>
@@ -78,7 +78,7 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
           <div className="text-ink-2 text-[11.5px] leading-relaxed">{open.summary}</div>
           {open.showcase.length > 0 ? (
             <>
-              <div className="text-ink mb-1.5 mt-3 text-[11px] font-medium">{t('这个主题会产出')}</div>
+              <div className="text-ink mb-1.5 mt-3 text-[11px] font-medium">{t('panels.themeProduces')}</div>
               <div className="flex flex-col gap-2">
                 {open.showcase.map((kind) => (
                   <ShowcaseCard key={kind} comp={comp} frame={open} kind={kind} locale={locale} />
@@ -86,7 +86,7 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
               </div>
             </>
           ) : (
-            <div className="text-ink-4 mt-3 text-[10.5px]">{t('这个主题没有产出预览——使用后直接对话即可。')}</div>
+            <div className="text-ink-4 mt-3 text-[10.5px]">{t('panels.noPreviewsThemeUse')}</div>
           )}
         </div>
         <div className="border-line border-t p-2.5">
@@ -95,7 +95,7 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
             onClick={() => onUse(open)}
             className="bg-accent w-full rounded-md py-2 text-[12px] font-medium text-white transition hover:brightness-110"
           >
-            {t('使用')}
+            {t('captions.use')}
           </button>
         </div>
       </div>
@@ -106,11 +106,11 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Single-level title: "Theme" lives in the material bar tabs header; only the description row stays here (same convention as the captions panel) */}
       <div className="border-line border-b px-3 py-2">
-        <div className="text-ink-4 text-[10.5px]">{t('点开看产出，「使用」后生成的内容都走这套设计；对话里的主题按钮也能换')}</div>
+        <div className="text-ink-4 text-[10.5px]">{t('panels.openOneSeeWhat')}</div>
       </div>
       <div ref={attachList} className="min-h-0 flex-1 overflow-auto p-2.5">
         {frames.length === 0 ? (
-          <div className="text-ink-4 pt-10 text-center text-[11px]">{t('目录加载中…')}</div>
+          <div className="text-ink-4 pt-10 text-center text-[11px]">{t('panels.loadingCatalog')}</div>
         ) : (
           <div className="flex flex-col gap-2.5">
             {frames.map((f) => (

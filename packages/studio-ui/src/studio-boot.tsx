@@ -138,14 +138,14 @@ export function StudioBootOverlay({ dataReady }: { dataReady: boolean }) {
   if (gone) return null;
 
   const pct = Math.round(shown * 100);
-  const status = shown < 1 && !warmWaived ? t('正在准备创作引擎…') : dataReady ? t('进入工作台') : t('正在同步项目…');
+  const status = shown < 1 && !warmWaived ? t('common.warmingUpCreativeEngine') : dataReady ? t('common.enteringWorkspace') : t('common.syncingProject');
 
   return (
     <div
       className={`bg-canvas absolute inset-0 z-[120] overflow-hidden rounded-lg transition-opacity ${leaving ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
       style={{ transitionDuration: `${FADE_MS}ms` }}
       aria-busy={!ready}
-      aria-label={t('正在进入工作台')}
+      aria-label={t('common.enteringWorkspaceNow')}
     >
       {/* Theme card wall (blurred background): blur + slight scale-up to hide edges, columns cross-scroll.
           Before the catalog arrives (first visit, no mirror) scroll skeleton cards — background from the first frame, no blank gap */}

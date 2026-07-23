@@ -44,7 +44,7 @@ let _mp: Promise<MP | null> | null = null;
 // Diagnostics: last geometry-pass status (for the 🧪 panel + console; no more silent failures)
 let _note: string | null = null; // null = not run (t() banned at module scope; default string is translated at geomNote's use site)
 export function geomNote(): string {
-  return _note ?? t('未运行');
+  return _note ?? t('common.notRunYet');
 }
 
 function loadMP(): Promise<MP | null> {
@@ -70,7 +70,7 @@ function loadMP(): Promise<MP | null> {
         console.info(`[studio/geometry] MediaPipe ready (${delegate})`);
         return { seg, face, delegate };
       } catch (e) {
-        _note = t('MediaPipe({delegate}) 加载失败: {msg}', { delegate, msg: e instanceof Error ? e.message : String(e) });
+        _note = t('common.mediapipeDelegateFailedLoad', { delegate, msg: e instanceof Error ? e.message : String(e) });
         console.warn('[studio/geometry]', _note); // on GPU failure it auto-retries CPU
       }
     }
@@ -199,7 +199,7 @@ export async function analyzeGeometry(
   try {
     const track = await input.getPrimaryVideoTrack();
     if (!track) {
-      _note = t('无视频轨,几何跳过');
+      _note = t('common.noVideoTrackGeometry');
       return null;
     }
     const vw = track.displayWidth || 720;
@@ -240,10 +240,10 @@ export async function analyzeGeometry(
     const faceHits = out.filter((f) => f.face).length;
     // Average person occupancy (rough check that segmentation is working: talking-head is usually 15~60%; ≈0 = segmentation missed the person, very high = polarity may be inverted)
     const avgOcc = out.length ? Math.round((out.reduce((s, f) => s + f.occ.reduce((a, v) => a + v, 0), 0) / out.length / (GRID_W * GRID_H)) * 100) : 0;
-    _note = t('已分析 {n} 帧({delegate}) · 人 {subject}帧/占{occ}% · 脸 {face}帧', { n: out.length, delegate: mp.delegate, subject: withSubject, occ: avgOcc, face: faceHits });
+    _note = t('common.analyzedFrames', { n: out.length, delegate: mp.delegate, subject: withSubject, occ: avgOcc, face: faceHits });
     return out;
   } catch (e) {
-    _note = t('几何遍异常: {msg}', { msg: e instanceof Error ? e.message : String(e) });
+    _note = t('common.geometryPassErrorMsg', { msg: e instanceof Error ? e.message : String(e) });
     console.warn('[studio/geometry]', _note);
     return null;
   } finally {

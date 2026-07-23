@@ -13,7 +13,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
-import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, RotateCw, Squircle } from 'lucide-react';
+import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
+  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, RotateCw, Squircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -102,7 +103,7 @@ import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { AssetsPanel, type GenType, type PanelDragAsset } from './assets-panel';
 import { addElementEntry } from './element-history';
 import { type ScriptCut, ScriptPanel } from './script-panel';
-import { CaptionsPanel } from './captions-panel';
+import { type CaptionLineRow, CaptionsPanel } from './captions-panel';
 import { FramePanel } from './frame-panel';
 import { PersonFxPanel, type MatteState } from './person-fx-panel';
 import { ShotTreatmentPanel } from './shot-treatment-panel';
@@ -213,18 +214,18 @@ function CardShapeControls({ block, onRadius }: { block: Block; onRadius: (v: nu
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
-            aria-label={t('圆角')}
+            aria-label={t('workbench.cornerRadius')}
             className={`rounded p-1 ${open ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
           >
             <Squircle size={13} />
           </button>
         </TooltipTrigger>
-        <TooltipContent>{t('圆角')}</TooltipContent>
+        <TooltipContent>{t('workbench.cornerRadius')}</TooltipContent>
       </Tooltip>
       {open && (
         <div className="border-line bg-panel absolute left-1/2 top-full z-50 mt-1.5 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border px-2.5 py-2 shadow-xl">
-          <span className="text-ink-4 w-8 shrink-0 text-[10px]">{t('圆角')}</span>
-          <input type="range" min={0} max={120} step={2} value={radius} onChange={(e) => onRadius(Number(e.target.value))} className="zoom-range w-32" aria-label={t('圆角')} />
+          <span className="text-ink-4 w-8 shrink-0 text-[10px]">{t('workbench.cornerRadius')}</span>
+          <input type="range" min={0} max={120} step={2} value={radius} onChange={(e) => onRadius(Number(e.target.value))} className="zoom-range w-32" aria-label={t('workbench.cornerRadius')} />
           <span className="text-ink-3 w-9 shrink-0 text-right font-mono text-[10px] tabular-nums">{radius}px</span>
         </div>
       )}
@@ -497,29 +498,29 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Test hook: readable snapshot of the narration script + visual analysis (also on window.__studio for devtools)
   const debugText = useMemo(() => {
-    const out: string[] = [`# 口播稿（${asrSentences?.length ?? 0} 句）`];
+    const out: string[] = [`# transcript (${asrSentences?.length ?? 0} lines)`];
     (asrSentences ?? []).forEach((s, i) => out.push(`${i}. [${s.start.toFixed(1)}–${s.end.toFixed(1)}] ${s.text}`));
-    out.push('', `# 画面分析（${visual?.segments.length ?? 0} 段 · 源切点 ${visual?.cuts.length ?? 0}）`);
-    out.push(`几何遍(MediaPipe):${geomNote()}`);
-    if (visual) out.push(`几何遍: ${visual.geomNote ?? '—'}`);
+    out.push('', `# visual analysis (${visual?.segments.length ?? 0} segments · ${visual?.cuts.length ?? 0} source cuts)`);
+    out.push(`geometry pass (MediaPipe): ${geomNote()}`);
+    if (visual) out.push(`geometry pass: ${visual.geomNote ?? '—'}`);
     const pct = (n: number) => Math.round(n * 100);
     const fmtRect = (r: { x: number; y: number; w: number; h: number }) => `(${pct(r.x)},${pct(r.y)} ${pct(r.w)}×${pct(r.h)})`;
     (visual?.segments ?? []).forEach((sg) => {
       out.push(
-        `[${sg.start.toFixed(1)}–${sg.end.toFixed(1)}] ${sg.label.content} · 人:${sg.label.person} · 粗安全:${sg.label.safe} · ${sg.label.hasText ? '有烧字' : '无烧字'}${sg.label.desc ? ` · ${sg.label.desc}` : ''}`,
+        `[${sg.start.toFixed(1)}–${sg.end.toFixed(1)}] ${sg.label.content} · person:${sg.label.person} · safe:${sg.label.safe} · ${sg.label.hasText ? 'burned-in text' : 'no burned-in text'}${sg.label.desc ? ` · ${sg.label.desc}` : ''}`,
       );
       if (sg.geom) {
         out.push(
-          `      安全区%: ${sg.geom.rects.map(fmtRect).join(' ') || '(无)'}` +
-            `${sg.geom.face ? ` · 脸${fmtRect(sg.geom.face)}` : ''}${sg.geom.subject ? ` · 主体${fmtRect(sg.geom.subject)}` : ''}`,
+          `      safe-zones%: ${sg.geom.rects.map(fmtRect).join(' ') || '(none)'}` +
+            `${sg.geom.face ? ` · face${fmtRect(sg.geom.face)}` : ''}${sg.geom.subject ? ` · subject${fmtRect(sg.geom.subject)}` : ''}`,
         );
       }
     });
     if (plan?.scenes.length) {
-      out.push('', `# 场景（${plan.scenes.length} 个）`);
+      out.push('', `# scenes (${plan.scenes.length})`);
       plan.scenes.forEach((s) => {
         const g = s.graphic ? ` · ${s.graphic.component}:${s.graphic.data ?? s.graphic.brief}` : '';
-        const e = s.emphasis?.length ? ` · 强调:${s.emphasis.join(' ')}` : '';
+        const e = s.emphasis?.length ? ` · emphasis:${s.emphasis.join(' ')}` : '';
         out.push(`[${s.from}-${s.to}] ${s.framing}${g}${e}`);
       });
     }
@@ -567,6 +568,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (vis.palette) setComp((c) => (c.frameId ? c : { ...c, palette: vis.palette }));
   };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Source video bytes unavailable on this device (OPFS miss + no cloud copy — browser switch or
+   *  cleared storage). The stage still renders and cloud-backed content (captions/blocks) stays
+   *  editable; a placeholder in the preview tells the user to re-pick the original file. */
+  const [mediaMissing, setMediaMissing] = useState(false);
   const objectUrlRef = useRef<string | null>(null); // current blob: preview URL, revoked on swap/unmount
   // Person matte: when enabled, the fully-budgeted mask track (source-time indexed, webp-compressed in memory; invalidated on video swap)
   // Parent-side video track engine (canvas render mode): decode/clock/audio stay resident, frames pushed to the iframe canvas
@@ -1002,7 +1007,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const setSlot = useCallback(
     (blockId: string, key: string, value: string) => {
       if (genIdsRef.current.has(blockId)) {
-        toast.info(t('组件正在生成，改动会被生成结果覆盖——等生成完成再改'));
+        toast.info(t('workbench.elementGeneratingEditWould'));
         return;
       }
       setComp((c) => ({
@@ -1091,7 +1096,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     };
   }, [videoFile, projectId]);
   // Autosave runs regardless (pure side effect: debounced draft write); the toolbar no longer shows a "project/saved" time
-  useDraftAutosave(comp, videoFile ? (videoSigRef.current ?? fileSig(videoFile)) : null, projectId, coverThumbRef);
+  // videoSigRef first: in the missing-media state (no File on this device) the draft's sig anchor
+  // must survive autosave — writing null would wipe the cloud row's reconnect anchor.
+  useDraftAutosave(comp, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef);
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
   // active buffer to apply live (fitScale isn't in the preview doc, so the write-back doesn't trigger a rebuild — see the assembled comment)
@@ -1255,7 +1262,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Commit: write back + advance the baseline to the applied state (closing after this no longer reverts). */
   const handleCodeApply = (id: string, draft: SourceDraft) => {
     if (genIdsRef.current.has(id)) {
-      toast.info(t('组件正在生成，完成后再应用'));
+      toast.info(t('workbench.elementGeneratingApplyAfter'));
       return;
     }
     handleCodeDraft(id, draft);
@@ -1281,7 +1288,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const parsed = await composeBlockChecked(seed, instruction, (acc) => onNote(noteOf(acc)));
       return { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody };
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('AI 修改失败'));
+      toast.error(e instanceof Error ? e.message : t('workbench.aiEditFailed'));
       return null;
     } finally {
       markGenerating([b.id], false);
@@ -1725,6 +1732,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     return () => window.removeEventListener('keydown', onKey);
   }, [applyT, setComp, setPlaying]);
 
+  // Agent range-play sentinel (play {toSec}): auto-pause when the playhead reaches it. Cleared on ANY pause —
+  // a manual resume must not inherit an old stop point.
+  const playStopAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!playing) {
+      playStopAtRef.current = null;
+      return;
+    }
+    return playhead.subscribe(() => {
+      const stop = playStopAtRef.current;
+      if (stop != null && playhead.get() >= stop - 0.02) {
+        playStopAtRef.current = null;
+        setPlaying(false);
+      }
+    });
+  }, [playing]);
+
   // Playback (canvas render mode): **the parent engine is the sole clock** — decode elements are resident in the parent,
   // not churned by doc rebuilds, so the whole "decode zombie / clock freeze / lost command" watchdog family retires with
   // the root cause. The iframe receives only two things: hf:frame (video frame drawn into the #vidEl canvas) +
@@ -1751,7 +1775,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  original sig, otherwise the draft-reconnect check fails and it's wiped as a "new project" (OPFS persistence/cloud backup also use the original sig). */
   async function pickVideoFile(file: File, opts?: { asSig?: string }) {
     if (!file.type.startsWith('video/') && !/\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
-      toast.error(t('请选择视频文件'));
+      toast.error(t('workbench.chooseVideoFile'));
       return;
     }
     const sig = opts?.asSig ?? fileSig(file);
@@ -1764,26 +1788,33 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       objectUrlRef.current = url;
       setVideoFile(file);
       videoSigRef.current = sig;
+      setMediaMissing(false);
       void saveLocalVideo(file, sig); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
       // Main video stays LOCAL (no auto R2 backup) — kept off deliberately; cross-device video
       // persistence is reserved for a future paid feature. Same-device reconnect uses OPFS above.
       // Inserted clips still back up (insert_clip fetches them from the cloud in another session).
 
-      // Swap video: clear pipeline products (else tools reuse the old plan/visual and skip recompute)
-      setAsrSentences(null);
-      setPlan(null);
-      setVisual(null);
-      asrRef.current = null;
-      planRef.current = null;
-      visualRef.current = null;
-      resetExport();
       const dur = p.durationSec || 30;
       const pr = pendingRestoreRef.current;
+      // Swap video: clear pipeline products (else tools reuse the old plan/visual and skip recompute).
+      // NOT on a same-video draft-restore reconnect: cloud hydration (hydrateContextRefs) already put the
+      // transcript/plan back, and wiping here left the captions/script panels empty while the timeline
+      // showed captions — the products belong to this very video, keep them (user hit this).
+      const sameVideoRestore = !!(pr && pr.videoSig && sig === pr.videoSig);
+      if (!sameVideoRestore) {
+        setAsrSentences(null);
+        setPlan(null);
+        setVisual(null);
+        asrRef.current = null;
+        planRef.current = null;
+        visualRef.current = null;
+      }
+      resetExport();
       if (pr && pr.videoSig && sig === pr.videoSig) {
         // Draft restore: re-picked the same original video — only reconnect the video, keep restored blocks/shots
         pendingRestoreRef.current = null;
         setComp((c) => ({ ...c, video: { url, durationSec: dur }, width: dims.width, height: dims.height }));
-        toast.success(t('原视频已接回，草稿完整恢复'));
+        toast.success(t('workbench.originalVideoReconnectedDraft'));
       } else {
         if (pr) pendingRestoreRef.current = null; // picked a different video = give up reconnecting, treat as new project
         // Swap video = new project: clear shots/blocks/palette (old shots' source spans point at the old video; leftovers seek out of range and misalign the scene bar).
@@ -1804,7 +1835,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       tRef.current = 0;
       playhead.set(0);
       setT(0);
-      toast.success(t('已读入 {w}×{h}', { w: dims.width, h: dims.height }) + (p.durationSec ? ` · ${p.durationSec.toFixed(1)}s` : '') + (p.hasAudio ? '' : t(' · 无音轨')));
+      toast.success(t('workbench.loadedSize', { w: dims.width, h: dims.height }) + (p.durationSec ? ` · ${p.durationSec.toFixed(1)}s` : '') + (p.hasAudio ? '' : t('workbench.noAudioTrack')));
       // Filmstrip: revoke old frame URLs, extract incrementally at a per-duration density (surface while decoding).
       // extractFilmstrip has no abort → generation guard: after a swap, late frames from the old video are revoked and dropped, never mixed into the new filmstrip.
       const gen = ++filmstripGenRef.current;
@@ -1822,7 +1853,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         setFilmstrip((prev) => [...prev, f].sort((a, b) => a.t - b.t));
       }).catch(() => {});
     } catch {
-      toast.error(t('读取视频失败(换 mp4/mov 试试)'));
+      toast.error(t('workbench.couldNotReadVideo'));
     } finally {
       setBusyImport(false);
     }
@@ -1856,15 +1887,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Debug hook: clear the visual-analysis cache + rerun (same video returns cache instantly by default; use this to re-measure analysis)
   async function rerunVisual() {
     if (!videoFile || !comp.video) {
-      toast.error(t('先上传口播视频'));
+      toast.error(t('common.uploadVideoFirst'));
       return;
     }
     clearVisualCache(videoSigRef.current ?? fileSig(videoFile));
     setVisual(null);
-    toast.success(t('已清除缓存,重新分析画面…'));
+    toast.success(t('workbench.cacheClearedReanalyzingVideo'));
     const vis = await analyzeVisual(videoFile, comp.video.durationSec).catch(() => null);
     setVisual(vis);
-    toast.success(vis ? t('画面分析完成') : t('画面分析无结果'));
+    toast.success(vis ? t('workbench.visualAnalysisDone') : t('workbench.visualAnalysisFoundNothing'));
   }
 
   /* ---------- Chat (streaming): a block is selected → edit it; none selected → AI creates a new component ---------- */
@@ -1883,7 +1914,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Capabilities go through the provider (open-source split phase 2): the hosted shell = server LLM + billing; the OSS shell can swap the implementation or use BYO
       return studioProviders().composer.composeStream(
         {
-          block: { id: seed.id, kind: seed.kind, innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, label: seed.label ?? '新组件', ...(seed.boxPx ? { boxPx: seed.boxPx } : {}), ...(seed.durationSec ? { durationSec: seed.durationSec } : {}) },
+          block: { id: seed.id, kind: seed.kind, innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, label: seed.label ?? t('workbench.newElement'), ...(seed.boxPx ? { boxPx: seed.boxPx } : {}), ...(seed.durationSec ? { durationSec: seed.durationSec } : {}) },
           instruction,
           theme: compRef.current.theme,
           ...(compRef.current.palette ? { palette: compRef.current.palette } : {}), // background-derived colors, so the LLM uses the real accent
@@ -1921,7 +1952,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         parsed = parseBlockResponse(raw2, { innerHtml: fixSeed.innerHtml, timelineBody: fixSeed.timelineBody });
         issues = lintBlock({ blockId: seed.id, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
-        if (hard.length) throw new Error(t('生成的块没通过检查:{message}', { message: hard[0]!.message }));
+        if (hard.length) throw new Error(t('workbench.generatedBlockFailedChecks', { message: hard[0]!.message }));
         if (issues.length) console.warn('[studio] block lint soft issues', seed.id, issues);
       }
       return parsed;
@@ -2045,7 +2076,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     } catch (e) {
       setMediaBusyPhase(blockId, null);
       console.warn('[studio] replace slot image failed', e);
-      toast.error(t('图片上传失败'));
+      toast.error(t('panels.imageUploadFailedTry'));
     }
   };
   /** Media block "replace": swap content of the same type (image↔image / video↔video), box/time-window/animation unchanged. */
@@ -2063,7 +2094,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     } catch (e) {
       setMediaBusyPhase(bid, null);
       console.warn('[studio] replace media failed', e);
-      toast.error(kind === 'image' ? t('图片上传失败') : t('视频上传失败'));
+      toast.error(kind === 'image' ? t('panels.imageUploadFailedTry') : t('workbench.videoUploadFailed'));
     }
   };
   /* ---------------- Insert actions for the asset library / component / frame panels ---------------- */
@@ -2131,7 +2162,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       durationSec: dur,
       box: mediaBoxFor(dims),
       trackIndex: freeTrack(compRef.current.blocks, startSec, dur),
-      label: label || (media.type === 'video' ? t('视频素材') : t('配图')),
+      label: label || (media.type === 'video' ? t('chatGen.videoClip') : t('tools.add_graphics.label')),
     });
     const b: Block = { ...base, slots: { media } };
     setComp((c) => ({ ...c, blocks: [...c.blocks, b] }));
@@ -2140,7 +2171,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setSelectedId(b.id);
     // Seek past the entry animation: +0.01 lands at the fade start, so the frame looks semi-transparent
     if (!playing) applyT(Math.max(0, startSec + Math.min(0.45, Math.max(0.01, dur - 0.06))));
-    toast.success(t('已插入画面，可拖动调整位置'));
+    toast.success(t('workbench.mediaInsertedDragReposition'));
   };
   /** Media being dragged out of the upload panel (the stage overlays a docking layer during the drag; the iframe swallows drop events). dims: known natural size, skip measuring on land. */
   const [dragAsset, setDragAsset] = useState<PanelDragAsset | null>(null);
@@ -2216,7 +2247,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setMediaBusyPhase(hit.id, 'swap');
       setSelectedShotId(null);
       setSelectedId(hit.id);
-      toast.success(t('已填入组件卡'));
+      toast.success(t('workbench.filledIntoElementCard'));
       return;
     }
     // Same as insertPanelMedia: measure aspect ratio first, then land the block to scale (centered on the drop point), so the loading placeholder is correct from the start
@@ -2230,7 +2261,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setMediaBusyPhase(nb.id, 'swap');
     setSelectedShotId(null);
     setSelectedId(nb.id);
-    toast.success(t('已新建组件卡'));
+    toast.success(t('workbench.createdNewElementCard'));
   };
   /** Empty component block "upload": pick a file, and on success fill it into the block. */
   const uploadIntoBlock = async (id: string) => {
@@ -2247,7 +2278,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     } catch (e) {
       setMediaBusyPhase(id, null);
       console.warn('[studio] upload into block failed', e);
-      toast.error(t('上传失败'));
+      toast.error(t('panels.uploadFailedTryAgain'));
     }
   };
   /** Move the playhead to a block's stable frame after the entry animation: rests mid-entry so the content looks like it has "built-in transparency". */
@@ -2262,7 +2293,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     elementTargetRef.current = id;
     setGenType('element');
     setFloatWin('gen');
-    toast.info(t('生成后点「插入」,会填进这张组件卡'));
+    toast.info(t('workbench.afterGeneratingClickInsert'));
   };
   /** Template panel → insert a new block of that template at the playhead (default slot data, edit text after). */
   const insertTemplateBlock = (templateId: string) => {
@@ -2274,7 +2305,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setSelectedShotId(null);
     setSelectedId(b.id);
     if (!playing) applyT(Math.max(0, startSec + 0.01));
-    toast.success(t('已插入「{label}」', { label: t(b.label ?? templateId) }));
+    toast.success(t('workbench.insertedLabel', { label: t(b.label ?? templateId) }));
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
@@ -2282,9 +2313,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const c = compRef.current;
     if (c.video || c.blocks.length > 0) {
       const ok = await confirm({
-        title: t('替换主视频？'),
-        description: t('换主视频会开始一个新作品，当前的分镜和组件会被清空。'),
-        confirmLabel: t('替换'),
+        title: t('workbench.replaceMainVideo'),
+        description: t('workbench.replacingMainVideoStarts'),
+        confirmLabel: t('panels.replace'),
         tone: 'danger',
       });
       if (!ok) return;
@@ -2296,7 +2327,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       await pickVideoFile(new File([blob], 'generated.mp4', { type: blob.type || 'video/mp4' }));
     } catch (e) {
       console.warn('[studio] set main video failed', e);
-      toast.error(t('替换主视频失败'));
+      toast.error(t('workbench.couldNotReplaceMain'));
     }
   };
   /** Frame panel "use" → attach the frame as a tag in chat (the request carries frameId to inject the playbook), switch back to chat. */
@@ -2329,10 +2360,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         setComp((c) => ({ ...c, shots: (c.shots ?? []).map((x) => (x.id === s.id ? { ...x, personMatte: true } : x)) }));
         void runMatteForShotRef.current?.(s);
       }
-      toast.success(t('已应用「{title}」主题——画面主体加上贴纸描边,生成的内容都走这套设计', { title: f.title }));
+      toast.success(t('workbench.appliedThemePersonFx', { title: f.title }));
       return;
     }
-    toast.success(t('已应用「{title}」主题——之后生成的内容都走这套设计', { title: f.title }));
+    toast.success(t('workbench.appliedTheme', { title: f.title }));
   }, []);
   /** Global caption style (shared by the captions panel + canvas handles): patch merged onto the current effective style, applied uniformly to all sentence-level captions. */
   const setCaptionStyle = useCallback((patch: Partial<CaptionStyle>) => {
@@ -2342,6 +2373,154 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
   const relayCaptionLayer = (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null): Block[] =>
     relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current);
+  /** Edit one caption line's TEXT (captions panel). Single source of truth = the transcript: the fix
+   *  reaches caption re-lay, read_script/agents and the script panel at once. Timing untouched; word
+   *  timing redistributed proportionally within the sentence (wordsFromText — karaoke presets keep working).
+   *  Bilingual on → the stale translation is dropped and that line auto-retranslates. */
+  const [captionLineBusyKey, setCaptionLineBusyKey] = useState<string | null>(null);
+  const retranslateCaptionLine = async (src: string | null, index: number, langIn?: string) => {
+    const tr = studioProviders().translate;
+    const lang = langIn ?? resolveCaptionStyle(compRef.current).sub?.lang;
+    if (!tr || !lang) return;
+    const segs = src ? clipAsrRef.current[src] : asrRef.current;
+    const seg = segs?.[index];
+    if (!seg) return;
+    const key = `${src ?? 'main'}:${index}`;
+    setCaptionLineBusyKey(key);
+    try {
+      const out = await tr([{ index, text: seg.text }], lang);
+      const textOut = out.find((o) => o.index === index)?.text?.trim();
+      if (!textOut) throw new Error(t('workbench.translationFailedTryAgain'));
+      if (src) {
+        const shot = ensureShots(compRef.current).find((s) => s.src === src);
+        if (shot) await runStudioTool('set_caption_translations', { shotId: shot.id, items: [{ index, text: textOut }] });
+      } else {
+        await runStudioTool('set_caption_translations', { items: [{ index, text: textOut }] });
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
+    } finally {
+      setCaptionLineBusyKey((k) => (k === key ? null : k));
+    }
+  };
+  /** Live-edited-but-not-committed lines (panel debounces keystrokes through phase 'live'):
+   *  commit uses it to know a retranslate is owed even when the final call's text is already current. */
+  const captionLiveDirtyRef = useRef<Set<string>>(new Set());
+  const editCaptionLine = (src: string | null, index: number, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
+    const segs = src ? clipAsrRef.current[src] : asrRef.current;
+    const old = segs?.[index];
+    if (!old || !nextText) return;
+    const key = `${src ?? 'main'}:${index}`;
+    const changed = nextText !== old.text;
+    if (changed) {
+      // Keep the existing sub while typing (nicer than flashing 未翻译); the commit-time retranslate replaces it
+      const nextSeg: AsrSegment = {
+        ...old,
+        text: nextText,
+        // Only rebuild word timing if ASR provided it (karaoke presets read words); sentence-level stays sentence-level
+        ...(old.words?.length ? { words: wordsFromText(nextText, old.start, old.end) } : {}),
+      };
+      const next = segs.map((s, i) => (i === index ? nextSeg : s));
+      if (src) {
+        const m = { ...clipAsrRef.current, [src]: next };
+        clipAsrRef.current = m;
+        setClipAsr(m);
+      } else {
+        asrRef.current = next;
+        setAsrSentences(next);
+      }
+      // Captions on → re-lay so the canvas reflects the text live (double-buffered doc swap, no flash)
+      if (compRef.current.blocks.some(isSentenceCaption)) {
+        setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
+      }
+    }
+    if (phase === 'live') {
+      if (changed) captionLiveDirtyRef.current.add(key);
+      return;
+    }
+    const dirty = captionLiveDirtyRef.current.delete(key);
+    if (phase === 'revert') return; // Esc: text restored above (if needed), old sub still matches — nothing else to do
+    // Commit + bilingual on → refresh this line's translation (also owed when live edits already landed the text)
+    if ((changed || dirty) && resolveCaptionStyle(compRef.current).sub?.lang && studioProviders().translate) {
+      void retranslateCaptionLine(src, index);
+    }
+  };
+  /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
+   *  may just want to edit lines; picking a style later re-lays from this transcript). */
+  const extractCaptionsNow = async () => {
+    if (!videoFileRef.current) {
+      toast.error(t('common.uploadVideoFirst'));
+      return;
+    }
+    if (captionGenBusyRef.current) return;
+    captionGenBusyRef.current = true;
+    setCapGenBusy(true);
+    try {
+      await stepAsr();
+      await ensureClipTranscripts();
+    } catch {
+      toast.error(t('workbench.transcriptExtractionFailedTry'));
+    } finally {
+      captionGenBusyRef.current = false;
+      setCapGenBusy(false);
+    }
+  };
+  /** Manually edit one line's TRANSLATION (bilingual second row). Same single-source semantics as the
+   *  text edit (seg.sub), same live re-lay; no auto-retranslate here — the user's wording wins
+   *  (only editing the SOURCE re-triggers translation). null = clear this line's translation. */
+  const editCaptionSubLine = (src: string | null, index: number, text: string | null, _phase: 'live' | 'commit' | 'revert' = 'commit') => {
+    const segs = src ? clipAsrRef.current[src] : asrRef.current;
+    const old = segs?.[index];
+    if (!old) return;
+    const nextSub = text?.trim() || undefined;
+    if (nextSub === old.sub) return;
+    const { sub: _drop, ...rest } = old;
+    const nextSeg: AsrSegment = nextSub ? { ...rest, sub: nextSub } : rest;
+    const next = segs.map((s, i) => (i === index ? nextSeg : s));
+    if (src) {
+      const m = { ...clipAsrRef.current, [src]: next };
+      clipAsrRef.current = m;
+      setClipAsr(m);
+    } else {
+      asrRef.current = next;
+      setAsrSentences(next);
+    }
+    if (compRef.current.blocks.some(isSentenceCaption)) {
+      setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
+    }
+  };
+  /** Shared props for the two CaptionsPanel mounts (docked rail + float window). */
+  const captionsPanelProps = () => ({
+    comp,
+    generating: capGenBusy,
+    onPickPreset: applyCaptionPreset,
+    onRemove: removeCaptionLayer,
+    rows: captionLineRows,
+    activeKey: (() => {
+      let hit: string | null = null;
+      for (const r of captionLineRows) if (r.editedStart <= tSec + 0.001) hit = r.key;
+      return hit;
+    })(),
+    onEditLine: editCaptionLine,
+    onEditSubLine: editCaptionSubLine,
+    onSeekTo: (sec: number) => {
+      if (playingRef.current) setPlaying(false);
+      applyT(sec);
+    },
+    onRetranslateLine: (src: string | null, index: number) => void retranslateCaptionLine(src, index),
+    lineBusyKey: captionLineBusyKey,
+    onExtract: () => void extractCaptionsNow(),
+    translation: studioProviders().translate
+      ? {
+          done: (asrSentences ?? []).filter((x) => x.sub).length + Object.values(clipAsr).flat().filter((x) => x.sub).length,
+          total: (asrSentences ?? []).length + Object.values(clipAsr).flat().length,
+          busy: capTransBusy,
+          lang: resolveCaptionStyle(comp).sub?.lang,
+          onTranslate: (lang: string) => void translateCaptionsTo(lang),
+          onClear: () => void runStudioTool('set_caption_translations', { clear: true }),
+        }
+      : undefined,
+  });
   /** Clicking a style card in the captions panel: **always re-lay the whole layer from the narration script** (segmentation/
    *  mapping are deterministic post-processing and shouldn't reuse old blocks — old blocks may predate a segmentation-algorithm change;
    *  the transcript is the single source of truth, and word replacements are recorded there too). Auto-run ASR if there's no transcript;
@@ -2351,7 +2530,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const applyCaptionPreset = async (preset: string) => {
     const has = compRef.current.blocks.some(isSentenceCaption);
     if (!compRef.current.video) {
-      toast.error(t('先上传视频,再应用字幕样式'));
+      toast.error(t('workbench.uploadVideoBeforeApplying'));
       return;
     }
     if (captionGenBusyRef.current) return;
@@ -2363,12 +2542,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // after loading a draft the transcript state was empty, took the "style-only" degrade path, and no matter how the user clicked they saw no segmentation)
       let segs = asrRef.current;
       if (!segs?.length) {
-        toast.info(t('正在提取口播稿…'));
+        toast.info(t('workbench.extractingTranscript'));
         segs = await stepAsr();
       }
       const caps = captionBlocksFromAsr(mappedCaptionSegs(ensureShots(compRef.current), segs ?? []));
       if (!caps.length) {
-        toast.error(t('口播稿是空的,生成不了字幕'));
+        toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
       }
       pushUndoSnapshot();
@@ -2380,11 +2559,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const within = caps.some((b) => t >= b.startSec && t < b.startSec + b.durationSec);
         if (!within) applyT(caps[0]!.startSec + Math.min(0.3, caps[0]!.durationSec / 2));
       }
-      toast.success(has ? t('已按口播稿重铺字幕并应用样式') : t('已按口播稿铺了 {n} 条字幕', { n: caps.length }));
+      toast.success(has ? t('workbench.reLaidCaptionsFrom') : t('workbench.laidNCaptionsFrom', { n: caps.length }));
     } catch (e) {
       console.warn('[studio] apply caption preset failed', e);
       setCaptionStyle({ preset }); // on transcription failure, at least swap the style
-      toast.error(t('提取口播稿失败——样式已更新,但字幕没能重新生成'));
+      toast.error(t('workbench.transcriptExtractionFailedStyle'));
     } finally {
       captionGenBusyRef.current = false;
       setCapGenBusy(false);
@@ -2402,7 +2581,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const n = new Set([...cur].filter((x) => !ids.includes(x)));
       return n.size === cur.size ? cur : n;
     });
-    toast.success(t('已移除字幕'));
+    toast.success(t('workbench.removedCaptions'));
   };
   /* ---------------- Unified gen panel (one chat interaction for image/video/component) ---------------- */
   /** Generate a standalone component (composeBlockChecked, not added to the video; only added via "insert" on a history card). */
@@ -2410,14 +2589,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // Draft iteration: a "reference" already-generated component enters the seed as the existing implementation, the instruction = edit on top of it
     const seed = base
       ? { id: blockId('ai'), kind: 'custom', innerHtml: base.innerHtml.replaceAll(base.seedId, 'SEED_'), timelineBody: base.timelineBody.replaceAll(base.seedId, 'SEED_'), label: base.label }
-      : { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: '新组件' };
+      : { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
     if (base) {
       seed.innerHtml = seed.innerHtml.replaceAll('SEED_', seed.id);
       seed.timelineBody = seed.timelineBody.replaceAll('SEED_', seed.id);
     }
     const instruction = base
-      ? `在这个组件的现有实现基础上按要求修改(没提到的部分保持原样):${prompt}`
-      : `新建一个叠加组件(标题/大数字/列表/花字等,按内容自己定):${prompt}`;
+      ? `Edit this element's current implementation as requested (keep everything not mentioned as-is): ${prompt}`
+      : `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${prompt}`;
     const parsed = await composeBlockChecked(seed, instruction);
     return { seedId: seed.id, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, label: prompt.slice(0, 12) };
   };
@@ -2593,7 +2772,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setSelectedShotId(null);
       setSelectedId(tb.id);
       if (!playing) applyT(Math.max(0, tb.startSec + 0.01));
-      toast.success(t('已填入组件卡'));
+      toast.success(t('workbench.filledIntoElementCard'));
       return;
     }
     pushUndoSnapshot();
@@ -2615,7 +2794,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setSelectedShotId(null);
     setSelectedId(newId);
     if (!playing) applyT(Math.max(0, nb.startSec + 0.01));
-    toast.success(t('已插入组件'));
+    toast.success(t('workbench.elementInserted'));
   };
   /** Layer: move a block up/down one layer (trackIndex±1, DOM order = stacking; 0 = video, clamped to [1,55]). */
   const bumpBlockLayer = (b: Block, dir: 1 | -1) => {
@@ -2641,12 +2820,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       : `${slots.innerHtml}\n<style data-hf-baked>#${b.id}{${themeVarsCss(getTheme(compRef.current.theme), compRef.current.palette)}}</style>`;
     addElementEntry({
       id: `saved:${b.id}`,
-      prompt: b.label || t('画布组件'),
+      prompt: b.label || t('workbench.canvasElement'),
       createdAt: Date.now(),
-      element: { seedId: b.id, innerHtml: baked, timelineBody: slots.timelineBody ?? '', label: b.label || t('组件'), ...((b.slots as { presetId?: string }).presetId ? { presetId: (b.slots as { presetId?: string }).presetId } : {}) },
+      element: { seedId: b.id, innerHtml: baked, timelineBody: slots.timelineBody ?? '', label: b.label || t('panels.element'), ...((b.slots as { presetId?: string }).presetId ? { presetId: (b.slots as { presetId?: string }).presetId } : {}) },
     });
     setGenRefreshTick((n) => n + 1); // refetch the asset library so it's visible immediately
-    toast.success(t('已存为组件(素材库 · 组件)'));
+    toast.success(t('workbench.savedAsElementAssets'));
   };
   /** Floating toolbar "sync content": one-click fill the component's data-edit text slots from the narration script in
    *  the block's time window (preset component copy = generic placeholder, this step matches it to real content). Slots
@@ -2661,7 +2840,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const nodes = Array.from(doc.querySelectorAll('#__root [data-edit]'));
     const items = nodes.map((n, i) => ({ index: i, text: (n.textContent ?? '').trim() })).filter((x) => x.text);
     if (!items.length) {
-      toast.error(t('这个组件没有可填充的文字槽'));
+      toast.error(t('workbench.elementNoFillableText'));
       return;
     }
     // Narration window: sentences whose final-cut time overlaps the block window (±3s breathing room); if none, take the two nearest.
@@ -2682,7 +2861,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       win = [...segs].sort((a, c) => Math.abs((a.start + a.end) / 2 - mid) - Math.abs((c.start + c.end) / 2 - mid)).slice(0, 2);
     }
     if (!win.length) {
-      toast.error(t('还没有口播稿——先提取口播(智能剪口播/字幕面板)再同步'));
+      toast.error(t('workbench.noTranscriptYetExtract'));
       return;
     }
     setSyncBusyId(b.id);
@@ -2748,9 +2927,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             : x,
         ),
       }));
-      toast.success(nextTlb ? t('已同步内容与节奏(块已对齐这段口播)') : t('已同步内容并对齐口播(节奏未变:时间轴改写没通过校验)'));
+      toast.success(nextTlb ? t('workbench.syncedContentTimingBlock') : t('workbench.syncedContentAlignedNarration'));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('同步失败,稍后再试'));
+      toast.error(e instanceof Error ? e.message : t('workbench.syncFailedTryAgain'));
     } finally {
       setSyncBusyId(null);
     }
@@ -2778,6 +2957,34 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Ensure there's a shot spanning the whole video (give one full segment when there are no shots) for trim operations to act on
   const ensureShots = (c: Composition): VideoShot[] =>
     c.shots && c.shots.length ? c.shots : c.video ? [{ id: shotId(), srcStart: 0, srcEnd: c.video.durationSec, treatment: 'full' as const }] : [];
+
+  /** Editable caption lines for the captions panel, in edited-timeline order across all sources.
+   *  Walk the shot spans; a sentence overlapping a span joins at that span's edited time; split shots
+   *  sharing a sentence dedupe to the first occurrence. */
+  const captionLineRows = useMemo<CaptionLineRow[]>(() => {
+    // NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed — caption editing
+    // must keep working in the missing-media state (browser switch / cleared storage).
+    const rows: CaptionLineRow[] = [];
+    const seen = new Set<string>();
+    for (const sp of clipSpans(ensureShots(comp))) {
+      const shot = sp.clip as VideoShot;
+      const src = shot.src ?? null;
+      const segs = src ? (clipAsr[src] ?? []) : (asrSentences ?? []);
+      segs.forEach((seg, i) => {
+        if (seg.end <= shot.srcStart + 0.05 || seg.start >= shot.srcEnd - 0.05) return;
+        const key = `${src ?? 'main'}:${i}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        rows.push({
+          key, src, index: i, text: seg.text, sub: seg.sub,
+          editedStart: sp.editedStart + Math.max(0, seg.start - shot.srcStart),
+          dur: Math.max(0.1, Math.min(seg.end, shot.srcEnd) - Math.max(seg.start, shot.srcStart)),
+        });
+      });
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.shots, asrSentences, clipAsr]);
 
   /** Read a remote video's duration (metadata only). Streaming webm (MediaRecorder output) has duration=Infinity at
    *  the metadata stage: seek to a huge value to force the browser to compute the real duration (classic fix), 3s fallback.
@@ -2888,7 +3095,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setSelectedId(null);
     setSelectedShotId(nb.id);
     applyT(at + Math.min(0.1, clipDur / 2));
-    toast.success(t('已插入片段'));
+    toast.success(t('workbench.insertedBRoll'));
     // Captions/translation already on → the new clip follows automatically (transcribe → re-lay captions; if a target language was chosen, also auto-fill the translation in that language)
     if (compRef.current.blocks.some(isSentenceCaption)) void autoCaptionNewClip(url, nb.id);
     return nb.id;
@@ -2943,7 +3150,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const dead = new Set(
       shots.map((s) => s.src).filter((src): src is string => !!src && src.startsWith('blob:') && !remap.has(src) && !clipFilesRef.current.has(src)),
     );
-    if (dead.size) toast.error(t('{n} 个插入片段的源文件没找回(预览是黑段)——点选该片段,在取景面板里重新选择文件接回', { n: dead.size }));
+    if (dead.size) toast.error(t('workbench.insertSourcesMissing', { n: dead.size }));
   };
 
   /** Reconnect a dead-link clip: re-pick a file to reconnect (srcSig verifies it's the original file; segments split from the same source reconnect together). */
@@ -2954,7 +3161,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!f) return;
     const sig = fileSig(f);
     if (s.srcSig && sig !== s.srcSig) {
-      toast.error(t('这不是原来的那个文件(校验不一致)——换文件会改变画面,已取消。要换画面请删掉这段重新插入'));
+      toast.error(t('workbench.checksumMismatch'));
       return;
     }
     backupMediaToCloud(f, sig, 'clip'); // manual reconnections also go to the cloud rendezvous, no re-prompt on the next device
@@ -2963,7 +3170,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     void saveLocalVideo(f, sig).catch(() => {});
     const old = s.src;
     setComp((c) => ({ ...c, shots: (c.shots ?? []).map((x) => (x.src === old ? { ...x, src: url, srcSig: sig } : x)) }));
-    toast.success(t('已接回插入片段'));
+    toast.success(t('workbench.bRollReconnected'));
   };
   /** Image → 5-second still-frame video (the user-defined default): freeze on canvas + MediaBunny avc mp4, no audio track
    *  = silent clip. Uses a video shape rather than adding an image branch to shots — trim/split/framing/captions/export
@@ -3016,7 +3223,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         if (r?.ok) blob = await r.blob();
       }
       if (!blob) {
-        toast.error(t('拉取素材失败,稍后再试'));
+        toast.error(t('workbench.couldNotFetchAsset'));
         return;
       }
       if (a.type === 'video') {
@@ -3026,7 +3233,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const dur = await videoDurationOf(url);
         if (!dur) {
           URL.revokeObjectURL(url);
-          toast.error(t('读取视频时长失败(换 mp4/mov 试试)'));
+          toast.error(t('workbench.couldNotReadDuration'));
           return;
         }
         void saveLocalVideo(f, fileSig(f)).catch(() => {});
@@ -3034,7 +3241,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       } else {
         const f = await stillClipFromImage(blob, a.label);
         if (!f) {
-          toast.error(t('图片转片段失败'));
+          toast.error(t('workbench.couldNotConvertImage'));
           return;
         }
         const url = URL.createObjectURL(f);
@@ -3056,7 +3263,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const dur = await videoDurationOf(url);
       if (!dur) {
         URL.revokeObjectURL(url);
-        toast.error(t('读取视频时长失败(换 mp4/mov 试试)'));
+        toast.error(t('workbench.couldNotReadDuration'));
         return;
       }
       void saveLocalVideo(f, fileSig(f)); // OPFS local library: draft restore fetches by srcSig
@@ -3086,7 +3293,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       shots = r.clips;
     }
     if (cut < 0.01) {
-      toast.info(t('这些区间已经不在片子里了'));
+      toast.info(t('workbench.thoseRangesAlreadyOut'));
       return;
     }
     blocks = relayCaptionLayer(blocks, shots, asrRef.current);
@@ -3096,7 +3303,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const lastSp = clipSpans(shots);
     const newDur = lastSp.length ? lastSp[lastSp.length - 1]!.editedEnd : 0;
     applyT(Math.max(0, Math.min(tRef.current, Math.max(0, newDur - 0.05))));
-    toast.success(t('{msg}(⌘Z 撤销)', { msg }));
+    toast.success(t('workbench.msgUndoHint', { msg }));
   };
   /** Script panel "restore": reconnect a deleted (source, source range) back into the video (the gap merges into an adjacent
    *  same-source shot or inserts a new shot); overlay blocks after the restore point shift right by the restored duration to stay content-aligned. */
@@ -3133,13 +3340,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       blocks = blocks.map((b) => (b.startSec >= at - 1e-3 ? { ...b, startSec: b.startSec + len } : b));
     }
     if (restored < 0.01) {
-      toast.info(t('这段内容本来就在片子里'));
+      toast.info(t('workbench.contentAlreadyInVideo'));
       return;
     }
     const relaid = relayCaptionLayer(blocks, shots, asrRef.current);
     setComp((c) => ({ ...c, shots, blocks: relaid }));
     setSelectedShotId(null);
-    toast.success(t('{msg}(⌘Z 撤销)', { msg }));
+    toast.success(t('workbench.msgUndoHint', { msg }));
   };
   /** Script panel "replace word": edit the transcript (word + sentence text), and the caption layer is **recomputed whole**
    *  (captions = a pure computed product of the transcript; changing a word may change segment width → segmentation boundaries
@@ -3167,7 +3374,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       clipAsrRef.current = next;
     }
     setComp((c) => ({ ...c, blocks: relayCaptionLayer(c.blocks, ensureShots(c), asrRef.current) }));
-    toast.success(t('已替换为「{text}」', { text: txt }));
+    toast.success(t('workbench.replacedText', { text: txt }));
   };
   /** The script panel's "extract narration script" (spinner prevents double-clicks; errors toast). */
   const [asrBusy, setAsrBusy] = useState(false);
@@ -3180,7 +3387,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       await stepAsr();
     } catch (e) {
       console.warn('[studio] extract asr failed', e);
-      toast.error(t('提取口播稿失败'));
+      toast.error(t('workbench.transcriptExtractionFailed'));
     } finally {
       asrBusyRef.current = false;
       setAsrBusy(false);
@@ -3201,7 +3408,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!c.video) return;
     const shots = ensureShots(c);
     if (splitBlockedByTransition(shots, tRef.current)) {
-      toast.error(t('转场覆盖区内不能分割——先移除转场'));
+      toast.error(t('workbench.removeTransitionToSplit'));
       return;
     }
     const r = splitAtEdited(shots, tRef.current, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
@@ -3217,7 +3424,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const shots = ensureShots(c);
     const r = side === 'left' ? trimLeftAtEdited(shots, tRef.current) : trimRightAtEdited(shots, tRef.current);
     if (!r.removed) {
-      toast.error(t('把播放头放到片段中间再剪'));
+      toast.error(t('workbench.movePlayheadToTrim'));
       return;
     }
     pushUndoSnapshot();
@@ -3231,7 +3438,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const shots = ensureShots(c);
     const r = deleteClipById(shots, sid);
     if (!r.removed) {
-      toast.error(t('至少保留一个场景'));
+      toast.error(t('workbench.keepLeastOneScene'));
       return;
     }
     pushUndoSnapshot();
@@ -3250,7 +3457,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (targets.length === 0) return;
     if (targets.length === 1) return deleteShot(targets[0]!.clip.id); // degrade to single delete (reuse guard/landing point)
     if (targets.length >= shots.length) {
-      toast.error(t('至少保留一个场景'));
+      toast.error(t('workbench.keepLeastOneScene'));
       return;
     }
     pushUndoSnapshot();
@@ -3266,7 +3473,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setComp((cur) => ({ ...cur, shots, blocks }));
     setSelectedShotId(null);
     applyT(Number.isFinite(firstStart) ? firstStart : 0);
-    toast.success(t('已删除 {n} 个场景', { n: targets.length }));
+    toast.success(t('workbench.deletedNScenes', { n: targets.length }));
   };
   /** Bulk-delete multiple component blocks (⌘ multi-select/marquee). The caption layer (pure computed product) and generating blocks are skipped; one undo snapshot. */
   const deleteBlocks = (ids: Set<string>) => {
@@ -3279,7 +3486,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setComp((c) => ({ ...c, blocks: c.blocks.filter((b) => !kill.has(b.id)) }));
     setSelectedIdRaw(null);
     setSelectedBlockIds(new Set());
-    toast.success(t('已删除 {n} 个组件', { n: targets.length }));
+    toast.success(t('workbench.deletedNElements', { n: targets.length }));
   };
   const selectedShot = comp.shots?.find((s) => s.id === selectedShotId) ?? null;
 
@@ -3287,31 +3494,31 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** ⌘Z undo: pop the snapshot stack (same stack as the agent undo tool; same guard — no rollback while generating). */
   const undoLast = () => {
     if (genIdsRef.current.size) {
-      toast.error(t('有组件正在生成,等完成再撤销'));
+      toast.error(t('workbench.elementGeneratingUndoAfter'));
       return;
     }
     const stack = undoStackRef.current;
     while (stack.length && stack[stack.length - 1] === compRef.current) stack.pop();
     const prev = stack.pop();
     if (!prev) {
-      toast.info(t('没有可撤销的改动'));
+      toast.info(t('workbench.nothingUndo'));
       return;
     }
     redoStackRef.current.push(compRef.current);
     setComp(prev);
     setSelectedId(null);
     setSelectedShotId(null);
-    toast.success(t('已撤销') + (stack.length ? t('(还可再撤 {n} 步)', { n: stack.length }) : ''));
+    toast.success(t('workbench.undone') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : ''));
   };
   /** ⇧⌘Z redo: pop the redo stack (only undo feeds it; a new edit voids the whole line). Push directly to the undo stack, not via pushUndoSnapshot — that would clear the redo line. */
   const redoLast = () => {
     if (genIdsRef.current.size) {
-      toast.error(t('有组件正在生成,等完成再重做'));
+      toast.error(t('workbench.elementGeneratingRedoAfter'));
       return;
     }
     const next = redoStackRef.current.pop();
     if (!next) {
-      toast.info(t('没有可重做的改动'));
+      toast.info(t('workbench.nothingRedo'));
       return;
     }
     undoStackRef.current.push(compRef.current);
@@ -3319,7 +3526,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setComp(next);
     setSelectedId(null);
     setSelectedShotId(null);
-    toast.success(t('已重做') + (redoStackRef.current.length ? t('(还可再重做 {n} 步)', { n: redoStackRef.current.length }) : ''));
+    toast.success(t('workbench.redone') + (redoStackRef.current.length ? t('workbench.nMoreRedoSteps', { n: redoStackRef.current.length }) : ''));
   };
   keysRef.current = {
     removeBlock,
@@ -3441,7 +3648,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     async (s: VideoShot) => {
       const src = await matteFileForShot(s);
       if (!src) {
-        toast.error(t('取不到该片段的源文件,无法抠像'));
+        toast.error(t('workbench.couldNotGetSource'));
         setMatteState({ status: 'error', done: 0, total: 0 });
         return;
       }
@@ -3509,8 +3716,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Border quick colors: theme accent first, white/black fallback
   const borderSwatches: [string, string][] = (() => {
     const raw: [string, string][] = [];
-    if (comp.palette?.accent) raw.push(['主题强调色', comp.palette.accent]);
-    raw.push(['白', '#ffffff'], ['黑', '#101114']);
+    if (comp.palette?.accent) raw.push(['panels.themeAccent', comp.palette.accent]);
+    raw.push(['panels.white', '#ffffff'], ['panels.black', '#101114']);
     const seen = new Set<string>();
     return raw.filter(([, v]) => !seen.has(v.toLowerCase()) && (seen.add(v.toLowerCase()), true));
   })();
@@ -3678,9 +3885,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const glass = (hex: string) => (/^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}e6` : hex);
   const bgSwatches = (() => {
     const raw: [string, string][] = [];
-    if (comp.palette?.paper) raw.push(['主题纸底', glass(comp.palette.paper)]);
-    if (comp.palette?.panel) raw.push(['主题面板', glass(comp.palette.panel)]);
-    raw.push(['白', '#ffffff'], ['黑', '#101114']);
+    if (comp.palette?.paper) raw.push(['panels.themePaper', glass(comp.palette.paper)]);
+    if (comp.palette?.panel) raw.push(['workbench.themePanel', glass(comp.palette.panel)]);
+    raw.push(['panels.white', '#ffffff'], ['panels.black', '#101114']);
     const seen = new Set<string>();
     return raw.filter(([, v]) => !seen.has(v.toLowerCase()) && (seen.add(v.toLowerCase()), true));
   })();
@@ -3694,7 +3901,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const chatElements = useMemo<StudioElementRef[]>(
     () => [
       ...compRef.current.blocks.map((b) => ({ id: b.id, label: b.label?.slice(0, 16) || blockKind(b), kind: blockKind(b), isShot: false })),
-      ...(compRef.current.shots ?? []).map((s, i) => ({ id: s.id, label: t('分镜 #{n}', { n: i + 1 }), kind: 'shot', isShot: true })),
+      ...(compRef.current.shots ?? []).map((s, i) => ({ id: s.id, label: t('workbench.shotN', { n: i + 1 }), kind: 'shot', isShot: true })),
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatElemsKey],
@@ -3711,7 +3918,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (b) sel = { id: b.id, type: 'block', label: b.label, kind: blockKind(b) };
     } else if (selectedShotIdRef.current) {
       const i = (c.shots ?? []).findIndex((s) => s.id === selectedShotIdRef.current);
-      if (i >= 0) sel = { id: selectedShotIdRef.current, type: 'shot', label: `分镜 #${i + 1}`, kind: 'shot' };
+      if (i >= 0) sel = { id: selectedShotIdRef.current, type: 'shot', label: `Shot #${i + 1}`, kind: 'shot' };
     }
     return {
       composition: {
@@ -3790,7 +3997,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const failClipAsr = (src: string) => {
       if (clipAsrFailRef.current.has(src)) return;
       clipAsrFailRef.current.add(src);
-      toast.error(t('插入片段转写失败——这段将没有字幕和卡点'));
+      toast.error(t('workbench.bRollTranscriptionFailed'));
     };
     const srcs = [...new Set((compRef.current.shots ?? []).filter((s) => s.src).map((s) => s.src!))];
     for (const src of srcs) {
@@ -3938,7 +4145,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Pipeline tools: push friendly progress to this tool's card (matched by toolId), cleared on finish
       const report = (text: string, frac?: number) => setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}) });
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
-      const READONLY_TOOLS = new Set(['get_block', 'focus_element', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
+      const READONLY_TOOLS = new Set(['get_block', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
       if (!READONLY_TOOLS.has(toolId)) {
         const targetIds = [input.blockId, ...(Array.isArray(input.blockIds) ? (input.blockIds as unknown[]) : [])].filter(
@@ -3947,30 +4154,30 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const hit = targetIds.find((id) => genIdsRef.current.has(id));
         if (hit) {
           const b = findBlock(hit);
-          return { ok: false, error: t('「{name}」正在生成中,等它完成再改', { name: b ? bname(b) : hit }) };
+          return { ok: false, error: t('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
       if (!READONLY_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         switch (toolId) {
           case 'extract_asr': {
-            if (!videoFileRef.current) return { ok: false, error: t('先上传口播视频') };
+            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
               const segs = await stepAsr(report);
-              if (!segs.length) return { ok: false, error: t('没有识别到人声,换条带口播的视频试试') };
+              if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
               // Transcribe inserted clips too — the agent's script must include them (otherwise in the one-click-render chat
               // it only saw the main-video script, and answering "what did the inserted clip say" needs a later read; user hit this)
               if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
               // The full text enters the feed with the receipt (injected once, cached after): the situation snapshot doesn't carry the script
-              return { ok: true, summary: t('已转写 {n} 句', { n: segs.length }), data: { transcript: transcriptForAgent() } };
+              return { ok: true, summary: t('workbench.transcribedNLines', { n: segs.length }), data: { transcript: transcriptForAgent() } };
             } finally {
               clearToolProgress(toolId);
             }
           }
           case 'read_script': {
-            if (!asrRef.current?.length) return { ok: false, error: t('还没有口播稿,先 extract_asr') };
+            if (!asrRef.current?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
             await ensureClipTranscripts(); // transcribe missing insert sources on demand (the failure blacklist avoids re-burning ASR)
-            return { ok: true, summary: t('已读取口播稿'), data: { transcript: transcriptForAgent() } };
+            return { ok: true, summary: t('workbench.readTranscript'), data: { transcript: transcriptForAgent() } };
           }
           case 'load_local_source': {
             // Agent local-import fast path: pull the video bytes straight from the import helper's
@@ -4002,21 +4209,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             }
           }
           case 'analyze_narration': {
-            if (!videoFileRef.current) return { ok: false, error: t('先上传口播视频') };
+            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
               const plan = await stepPlan(report);
-              return { ok: true, summary: t('已规划 {n} 个场景', { n: plan.scenes?.length ?? 0 }) };
+              return { ok: true, summary: t('workbench.plannedNScenes', { n: plan.scenes?.length ?? 0 }) };
             } finally {
               clearToolProgress(toolId);
             }
           }
           case 'analyze_visual': {
-            if (!videoFileRef.current) return { ok: false, error: t('先上传口播视频') };
+            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
               const vis = await stepVisual(report);
               return vis
-                ? { ok: true, summary: t('画面分析完成 · {segs} 段、源切点 {cuts}', { segs: vis.segments.length, cuts: vis.cuts.length }) }
-                : { ok: false, error: t('画面没分析出结果(无视频轨 / MediaPipe 没加载)') };
+                ? { ok: true, summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }) }
+                : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
             } finally {
               clearToolProgress(toolId);
             }
@@ -4025,20 +4232,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             // BYO visual semantic analysis: the free parts (cuts/frame extraction/geometry/background) run locally, and the
             // sampled frames are returned as images for the external agent to look at itself — no in-house VLM burned. The agent submits labels via submit_visual after looking.
             const vv = currentVideo();
-            if (!videoFileRef.current || !vv) return { ok: false, error: t('先上传口播视频') };
+            if (!videoFileRef.current || !vv) return { ok: false, error: t('common.uploadVideoFirst') };
             if (visualRef.current) {
-              return { ok: true, summary: t('画面分析已就绪'), data: { status: 'done', segments: visualRef.current.segments.length, hint: 'visual analysis already available — no need to look/submit' } };
+              return { ok: true, summary: t('workbench.visualAnalysisAlreadyAvailable'), data: { status: 'done', segments: visualRef.current.segments.length, hint: 'visual analysis already available — no need to look/submit' } };
             }
             try {
-              const r = await prepareVisualAnalysis(videoFileRef.current, vv.durationSec, (done, tot) => report(t('几何分析 {pct}%', { pct: tot ? Math.round((done / tot) * 100) : 0 }), tot ? done / tot : 0));
+              const r = await prepareVisualAnalysis(videoFileRef.current, vv.durationSec, (done, tot) => report(t('workbench.geometryPassPct', { pct: tot ? Math.round((done / tot) * 100) : 0 }), tot ? done / tot : 0));
               if ('cached' in r) {
                 applyVisualResult(r.cached);
-                return { ok: true, summary: t('画面分析命中缓存'), data: { status: 'done', segments: r.cached.segments.length } };
+                return { ok: true, summary: t('workbench.visualAnalysisCacheHit'), data: { status: 'done', segments: r.cached.segments.length } };
               }
               visualBriefRef.current = r.prep;
               return {
                 ok: true,
-                summary: t('备好 {n} 帧采样', { n: r.prep.frames.length }),
+                summary: t('workbench.preparedNSampledFrames', { n: r.prep.frames.length }),
                 data: {
                   frames: r.prep.frames.map((f, i) => ({ index: i, at_sec: Math.round(f.timestamp * 10) / 10 })),
                   instruction:
@@ -4052,7 +4259,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           }
           case 'submit_visual': {
             const prep = visualBriefRef.current;
-            if (!prep) return { ok: false, error: t('先 visual_brief 拿采样帧(或画面分析已就绪,无需提交)') };
+            if (!prep) return { ok: false, error: t('workbench.runVisualBriefFirst') };
             const rawLabels = Array.isArray(input.labels) ? (input.labels as Record<string, unknown>[]) : [];
             const CONTENTS = new Set(['talkinghead', 'screen', 'broll', 'slide', 'other']);
             const PERSONS = new Set(['left', 'center', 'right', 'none']);
@@ -4069,21 +4276,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 desc: typeof l.desc === 'string' ? l.desc.slice(0, 200) : '',
               };
             }
-            if (!labels.some(Boolean)) return { ok: false, error: t('labels 为空或 index 全不合法——按 visual_brief 回的 frames index 逐帧给标签') };
+            if (!labels.some(Boolean)) return { ok: false, error: t('workbench.labelsEmptyAllIndexes') };
             const vis = finishVisualAnalysis(prep, labels);
             visualBriefRef.current = null;
             applyVisualResult(vis);
-            return { ok: true, summary: t('画面分析完成(BYO)· {segs} 段、源切点 {cuts}', { segs: vis.segments.length, cuts: vis.cuts.length }), data: { segments: vis.segments.length, cuts: vis.cuts.length } };
+            return { ok: true, summary: t('workbench.visualAnalysisDoneByo', { segs: vis.segments.length, cuts: vis.cuts.length }), data: { segments: vis.segments.length, cuts: vis.cuts.length } };
           }
           case 'lay_out': {
             const v = currentVideo();
-            if (!v || !videoFileRef.current) return { ok: false, error: t('先上传口播视频') };
+            if (!v || !videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
               const segs = await stepAsr(report);
-              if (!segs.length) return { ok: false, error: t('没有识别到人声,换条带口播的视频试试') };
+              if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
               // Planning ‖ visual analysis in parallel (visual is the long pole, progress driven by it)
               const [plan, vis] = await Promise.all([stepPlan(report), stepVisual(report)]);
-              report(t('分镜编排…'));
+              report(t('workbench.cuttingShots'));
               const draft = await restoreDraftContext(
                 layoutFromPlan(plan, { video: v, sentences: segs, ...(vis ? { cuts: vis.cuts, visual: vis } : {}) }),
                 vis,
@@ -4097,8 +4304,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               return {
                 ok: true,
                 summary: slots
-                  ? t('分镜完成 · {shots} 镜、{slots} 处待配图(说「配图」我来填)', { shots: draft.shots?.length ?? 0, slots })
-                  : t('分镜完成 · {shots} 镜,但没有待配图占位(场景太短或全是录屏)', { shots: draft.shots?.length ?? 0 }),
+                  ? t('workbench.shotsDoneWithSlots', { shots: draft.shots?.length ?? 0, slots })
+                  : t('workbench.shotsDoneNoSlots', { shots: draft.shots?.length ?? 0 }),
                 data: {
                   shots: (draft.shots ?? []).map((s, i) => ({ id: s.id, index: i + 1, srcStart: s.srcStart, srcEnd: s.srcEnd, treatment: s.treatment })),
                   placeholderBlocks: draft.blocks.filter(isPlaceholder).map((b) => ({ id: b.id, label: b.label })),
@@ -4109,16 +4316,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             }
           }
           case 'add_graphics': {
-            if (!videoFileRef.current) return { ok: false, error: t('先上传口播视频') };
-            if (genIdsRef.current.size) return { ok: false, error: t('已有配图/重写在进行中,等它完成再发起') };
+            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
+            if (genIdsRef.current.size) return { ok: false, error: t('workbench.graphicsRewriteAlreadyProgress') };
             const lockedIds: string[] = []; // placeholders locked by this run; finally unlocks as a fallback (an exception break leaves no deadlock)
             try {
               // Do the shot layout first if there are none (placeholders not yet placed). The setComp wrapper writes compRef synchronously, so reading here gets the new draft (no more empty-handed old blocks)
               if (!compRef.current.blocks.some(isPlaceholder)) {
-                report(t('先分镜…'));
+                report(t('workbench.cuttingShotsFirst'));
                 const v = currentVideo();
                 const segs = await stepAsr(report);
-                if (!v || !segs.length) return { ok: false, error: t('没有识别到人声,换条带口播的视频试试') };
+                if (!v || !segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
                 const [plan, vis] = await Promise.all([stepPlan(report), stepVisual(report)]);
                 // Same backfill as lay_out: preserve design state + reinsert inserted clips (this path was a simplified duplicate before,
                 // so saying "add graphics" right after inserting a clip would drop the whole inserted clip)
@@ -4133,14 +4340,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               const wantIds = Array.isArray(input.blockIds) ? new Set((input.blockIds as unknown[]).map(String)) : null;
               if (wantIds) allSlots = allSlots.filter((b) => wantIds.has(b.id));
               if (!allSlots.length) {
-                if (wantIds) return { ok: false, error: t('指定的块不是待配图占位') };
+                if (wantIds) return { ok: false, error: t('workbench.specifiedBlocksNotGraphic') };
                 // Shots ran but not a single placeholder landed → be honest: the plan didn't produce fillable graphics, it's not a "do the layout first" case
                 const p = planRef.current;
                 return {
                   ok: false,
                   error: p
-                    ? t('分镜完成,但没有可配图的占位:{n} 个场景全被跳过(录屏场景不盖图/被开场标题挤得太短)。可以说「重新分析口播稿」再试', { n: p.scenes.length })
-                    : t('没有待配图的占位(先分镜)'),
+                    ? t('workbench.shotsDoneButNo', { n: p.scenes.length })
+                    : t('workbench.noGraphicPlaceholdersCut'),
                 };
               }
               const slots = allSlots; // fill all placeholders at once (the original test-phase 10-item cap was removed)
@@ -4157,7 +4364,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               const roster = graphicsRoster();
               // Warm up insert-source transcripts: an insert-window placeholder's beats need its own source's sentences (a cold cache = missing beats)
               if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
-              report(t('配图 0/{total}…', { total: slots.length }), 0);
+              report(t('workbench.graphics0Total', { total: slots.length }), 0);
               const fillOne = async (slot: Block) => {
                 const boxPx = slot.box
                   ? { w: Math.round(slot.box.w * compRef.current.width), h: Math.round(slot.box.h * compRef.current.height) }
@@ -4165,7 +4372,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 // Narration sentences within this placeholder's time window → local-time beats (logic in beatsForWindow, shared with BYO compose_context)
                 const beats = beatsForWindow(slot.startSec, slot.durationSec);
                 const neighbors = neighborsFrom(roster, slot.id);
-                const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? '图形', durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
+                const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
                 const parsed = await composeBlockChecked(seed, placeholderSpec(slot));
                 setComp((cc) => ({
                   ...cc,
@@ -4186,7 +4393,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   }
                   markGenerating([slot.id], false); // unlock on result, don't wait for the whole batch
                   done += 1;
-                  report(t('配图 {done}/{total} · {label}', { done, total: slots.length, label: (slot.label ?? '').slice(0, 12) }), done / slots.length);
+                  report(t('workbench.graphicsDoneTotalLabel', { done, total: slots.length, label: (slot.label ?? '').slice(0, 12) }), done / slots.length);
                 }
               };
               await Promise.all(Array.from({ length: Math.min(CONCURRENCY, slots.length) }, worker));
@@ -4194,9 +4401,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               return {
                 ok: okCount > 0,
                 summary:
-                  t('已配 {n} 张设计图形', { n: okCount }) +
-                  (failed ? t(',{n} 张失败(占位还在,可以再说「重新配图」)', { n: failed }) : ''),
-                ...(okCount === 0 ? { error: t('配图全部失败,稍后重试') } : {}),
+                  t('workbench.filledNDesignGraphics', { n: okCount }) +
+                  (failed ? t('workbench.nFailedPlaceholdersRemain', { n: failed }) : ''),
+                ...(okCount === 0 ? { error: t('workbench.allGraphicsFailedTry') } : {}),
               };
             } finally {
               markGenerating(lockedIds, false);
@@ -4205,39 +4412,39 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           }
           case 'move_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('找不到这个组件') };
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             moveBlock(b.id, Number(input.startSec));
-            return { ok: true, summary: t('已把「{name}」移到 {sec}s', { name: bname(b), sec: r1(input.startSec) }) };
+            return { ok: true, summary: t('workbench.movedNameSecS', { name: bname(b), sec: r1(input.startSec) }) };
           }
           case 'resize_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('找不到这个组件') };
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             const s = Number(input.startSec);
             const d = Number(input.durationSec);
             resizeBlock(b.id, s, d);
-            return { ok: true, summary: t('已把「{name}」改到 {from}–{to}s', { name: bname(b), from: r1(s), to: r1(s + d) }) };
+            return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(s), to: r1(s + d) }) };
           }
           case 'delete_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('找不到这个组件') };
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             postPreview({ type: 'hf:remove', id: b.id });
             setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((x) => x.id !== b.id) }));
             if (selectedIdRef.current === b.id) setSelectedId(null);
-            return { ok: true, summary: t('已删除「{name}」', { name: bname(b) }) };
+            return { ok: true, summary: t('workbench.deletedName', { name: bname(b) }) };
           }
           case 'delete_blocks': {
             const ids = Array.isArray(input.blockIds) ? new Set((input.blockIds as unknown[]).map(String)) : null;
-            if (!ids?.size) return { ok: false, error: t('缺少 blockIds:要删哪些组件?') };
+            if (!ids?.size) return { ok: false, error: t('workbench.missingBlockidsWhichElements') };
             const hit = c.blocks.filter((b) => ids.has(b.id));
-            if (!hit.length) return { ok: false, error: t('找不到这些组件') };
+            if (!hit.length) return { ok: false, error: t('workbench.elementsNotFound') };
             hit.forEach((b) => postPreview({ type: 'hf:remove', id: b.id }));
             setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => !ids.has(b.id)) }));
             if (selectedIdRef.current && ids.has(selectedIdRef.current)) setSelectedId(null);
-            return { ok: true, summary: t('已删除 {n} 个组件', { n: hit.length }) };
+            return { ok: true, summary: t('workbench.deletedNElements', { n: hit.length }) };
           }
           case 'duplicate_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('找不到这个组件') };
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             const at = typeof input.atSec === 'number' ? Math.max(0, input.atSec) : b.startSec + b.durationSec;
             const dupStart = Math.round(at * 100) / 100;
             const nb: Block = {
@@ -4250,15 +4457,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             setComp((cc) => ({ ...cc, blocks: [...cc.blocks, nb] }));
             setSelectedShotId(null);
             setSelectedId(nb.id);
-            return { ok: true, summary: t('已复制「{name}」到 {sec}s', { name: bname(b), sec: r1(nb.startSec) }), data: { newBlockId: nb.id } };
+            return { ok: true, summary: t('workbench.duplicatedNameSecS', { name: bname(b), sec: r1(nb.startSec) }), data: { newBlockId: nb.id } };
           }
           case 'add_transition': {
             const at = Number(input.atSec);
-            if (!Number.isFinite(at) || at < 0) return { ok: false, error: t('atSec 不合法') };
+            if (!Number.isFinite(at) || at < 0) return { ok: false, error: t('workbench.invalidAtSec') };
             const sp = clipSpans(ensureShots(compRef.current));
             const bounds = sp.slice(1).map((s) => s.editedStart);
             const cut = bounds.find((b) => Math.abs(b - at) < 0.3);
-            if (cut == null) return { ok: false, error: t('atSec 必须是分镜切点(边界:{bounds}s)——转场是两镜内容的交接', { bounds: bounds.map(r1).join(', ') }) };
+            if (cut == null) return { ok: false, error: t('workbench.atSecMustBeCut', { bounds: bounds.map(r1).join(', ') }) };
             const remove = input.effect === 'none' || input.remove === true;
             const effect: CutTransitionEffect = typeof input.effect === 'string' && ['fade', 'fadeblack', 'directional', 'directionalwipe', 'circleopen', 'windowslice', 'crosszoom', 'rotatescale', 'glitch', 'dreamy'].includes(input.effect) ? (input.effect as CutTransitionEffect) : 'fade';
             const dir = typeof input.direction === 'string' && ['up', 'down', 'left', 'right'].includes(input.direction) ? (input.direction as TransitionDirection) : undefined;
@@ -4267,11 +4474,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               const selfId = sp[bounds.indexOf(cut) + 1]!.clip.id;
               resizeCutTransition(selfId, input.durationSec);
             }
-            return { ok: true, summary: remove ? t('已移除 {sec}s 处的转场', { sec: r1(cut) }) : t('已在 {sec}s 的切点设转场({effect})', { sec: r1(cut), effect }) };
+            return { ok: true, summary: remove ? t('workbench.removedTransitionSecS', { sec: r1(cut) }) : t('workbench.setTransitionEffectSec', { sec: r1(cut), effect }) };
           }
           case 'get_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('找不到这个组件') };
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             const s = b.slots as { innerHtml?: unknown; timelineBody?: unknown };
             const rendered =
               b.templateId === 'custom'
@@ -4280,7 +4487,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             const cap = (x: string, n: number) => (x.length > n ? `${x.slice(0, n)}\n…(truncated, ${x.length} chars total)` : x);
             return {
               ok: true,
-              summary: t('「{name}」 {from}–{to}s · 轨{track}', { name: bname(b), from: r1(b.startSec), to: r1(b.startSec + b.durationSec), track: b.trackIndex }),
+              summary: t('workbench.nameFromSTrack', { name: bname(b), from: r1(b.startSec), to: r1(b.startSec + b.durationSec), track: b.trackIndex }),
               data: {
                 id: b.id,
                 templateId: b.templateId,
@@ -4306,50 +4513,81 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               // Seek past the entry animation (seekBlockSettled terms): +0.01 is the 0th entry frame, where the block
               // starts from opacity:0 — after defocusing (click blank/Esc) the timeline's true value is fully transparent, as if the block vanished
               seekBlockSettled(b.id);
-              return { ok: true, summary: t('定位到「{name}」', { name: bname(b) }) };
+              return { ok: true, summary: t('workbench.focusedName', { name: bname(b) }) };
             }
             const sp = clipSpans(ensureShots(c)).find((x) => x.clip.id === id);
             if (sp) {
               setSelectedId(null);
               setSelectedShotId(id);
               applyT(sp.editedStart + 0.01);
-              return { ok: true, summary: t('定位到分镜 #{n}', { n: sp.index + 1 }) };
+              return { ok: true, summary: t('workbench.focusedShotN', { n: sp.index + 1 }) };
             }
-            return { ok: false, error: t('找不到这个组件') };
+            return { ok: false, error: t('workbench.elementNotFound') };
+          }
+          case 'seek': {
+            const to = Number(input.toSec);
+            if (!Number.isFinite(to)) return { ok: false, error: t('workbench.invalidToSec') };
+            const v = Math.max(0, Math.min(totalDuration(c), to));
+            applyT(v);
+            return { ok: true, summary: t('workbench.jumpedTo', { t: r1(v) }) };
+          }
+          case 'play': {
+            const D = totalDuration(c);
+            if (D < 0.1) return { ok: false, error: t('workbench.noVideoYet') };
+            const from = typeof input.fromSec === 'number' ? Math.max(0, Math.min(D, input.fromSec)) : undefined;
+            const to = typeof input.toSec === 'number' ? Math.max(0, Math.min(D, input.toSec)) : undefined;
+            const startAt = from ?? (tRef.current >= D - 0.02 ? 0 : tRef.current); // same replay-from-end rule as the transport button
+            if (to != null && to <= startAt + 0.05) return { ok: false, error: t('workbench.toSecAfterStart') };
+            if (from != null) applyT(from);
+            playStopAtRef.current = to ?? null;
+            setPlaying(true);
+            return {
+              ok: true,
+              summary:
+                to != null
+                  ? t('workbench.playingRange', { from: r1(startAt), to: r1(to) })
+                  : t('workbench.playingFrom', { t: r1(startAt) }),
+            };
+          }
+          case 'pause': {
+            playStopAtRef.current = null;
+            const was = playingRef.current;
+            setPlaying(false);
+            return { ok: true, summary: was ? t('workbench.pausedAt', { t: r1(tRef.current) }) : t('workbench.playbackAlreadyPaused') };
           }
           case 'cut_range': {
-            if (!c.video) return { ok: false, error: t('还没有视频') };
+            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             const from = Number(input.fromSec);
             const to = Number(input.toSec);
-            if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { ok: false, error: t('fromSec/toSec 不合法') };
+            if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { ok: false, error: t('workbench.invalidRange') };
             const shots = ensureShots(c);
             const r = removeEditedRange(shots, from, to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-            if (!r.removed) return { ok: false, error: t('这个区间删不了(可能覆盖了整条视频)') };
+            if (!r.removed) return { ok: false, error: t('workbench.rangeDeletedMayCover') };
             setComp((cur) => ({ ...cur, shots: r.clips, blocks: removeEditedInterval(cur.blocks, r.removed![0], r.removed![1]) }));
             setSelectedShotId(null);
             applyT(r.removed[0]);
-            return { ok: true, summary: t('已删除 {from}–{to}s 的画面', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: r.clips.map((s) => s.id) } };
+            return { ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: r.clips.map((s) => s.id) } };
           }
           case 'set_captions': {
-            if (!c.video) return { ok: false, error: t('先上传视频再设字幕') };
+            if (!c.video) return { ok: false, error: t('workbench.uploadVideoBeforeSetting') };
             const preset = typeof input.preset === 'string' ? input.preset : undefined;
-            if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: t('没有这个字幕预设:{preset}', { preset }) };
+            if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: t('workbench.noSuchCaptionPreset', { preset }) };
             const yPct = Number(input.yPct);
             const scale = Number(input.scale);
             const patch: Parameters<typeof setCaptionStyle>[0] = {};
             if (Number.isFinite(yPct)) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
-            if (!preset && !Object.keys(patch).length) return { ok: false, error: t('没说要设什么:preset / yPct / scale 至少给一个') };
+            if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
             if (preset) await applyCaptionPreset(preset); // enable/switch style: re-lay the whole layer from the narration script (internally runs ASR, pushes an undo snapshot)
             if (Object.keys(patch).length) setCaptionStyle(patch);
-            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('没能生成字幕(口播稿可能是空的)') };
+            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.couldNotGenerateCaptions') };
             const cs = resolveCaptionStyle(compRef.current);
-            return { ok: true, summary: preset ? t('已设字幕:{name}', { name: t(getCaptionPreset(cs.preset).name) }) : t('已调字幕:{name}', { name: t(getCaptionPreset(cs.preset).name) }) };
+            return { ok: true, summary: preset ? t('workbench.captionsSetName', { name: t(getCaptionPreset(cs.preset).name) }) : t('workbench.captionsAdjustedName', { name: t(getCaptionPreset(cs.preset).name) }) };
           }
           case 'remove_captions': {
-            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('现在没有字幕') };
+            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.thereNoCaptionsRight') };
             removeCaptionLayer();
-            return { ok: true, summary: t('已移除字幕') };
+            return { ok: true, summary: t('workbench.removedCaptions') };
           }
           case 'set_caption_translations': {
             // Bilingual captions: translations are written to the transcript sentence's sub (same semantics as the offline executor), the caption re-lay brings them out automatically
@@ -4360,7 +4598,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 return { index: Number(o.index), text: typeof o.text === 'string' ? o.text.trim() : null };
               })
               .filter((it): it is { index: number; text: string } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
-            if (!clear && !items.length) return { ok: false, error: t('items 为空/不合法(要 {index, text}[],index 是 read_script 的行号)') };
+            if (!clear && !items.length) return { ok: false, error: t('workbench.itemsEmptyInvalidNeed') };
             const stripSub = (segs: AsrSegment[]) => segs.map(({ sub: _s, ...rest }) => rest);
             let summary: string;
             if (clear) {
@@ -4372,15 +4610,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               const nextClips = Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, stripSub(v)]));
               setClipAsr(nextClips);
               clipAsrRef.current = nextClips;
-              summary = t('已清除全部字幕译文');
+              summary = t('workbench.clearedAllCaptionTranslations');
             } else {
               const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
               const src = shotIdIn ? ensureShots(compRef.current).find((s) => s.id === shotIdIn)?.src : undefined;
-              if (shotIdIn && !src) return { ok: false, error: t('这个 shotId 不是插入片段(主口播不要传 shotId)') };
+              if (shotIdIn && !src) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
               const segs = src ? clipAsrRef.current[src] : asrRef.current;
-              if (!segs?.length) return { ok: false, error: src ? t('这个插入片段没有转写') : t('还没有口播稿,先 extract_asr') };
+              if (!segs?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
               const bad = items.filter((it) => it.index >= segs.length);
-              if (bad.length) return { ok: false, error: t('index 越界:{list}(该转写共 {n} 句,行号见 read_script)', { list: bad.map((b) => b.index).join(', '), n: segs.length }) };
+              if (bad.length) return { ok: false, error: t('workbench.indexOutOfRange', { list: bad.map((b) => b.index).join(', '), n: segs.length }) };
               const next = segs.map((s, i) => {
                 const hit = items.find((it) => it.index === i);
                 if (!hit) return s;
@@ -4395,16 +4633,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 setAsrSentences(next);
                 asrRef.current = next;
               }
-              summary = t('已配 {n} 句译文', { n: items.filter((it) => it.text).length });
+              summary = t('workbench.setNTranslationLines', { n: items.filter((it) => it.text).length });
             }
             if (compRef.current.blocks.some(isSentenceCaption)) {
               setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
               return { ok: true, summary };
             }
-            return { ok: true, summary: summary + t('(字幕未开启,set_captions 后显示)') };
+            return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }
           case 'cut_narration': {
-            if (!c.video) return { ok: false, error: t('还没有视频') };
+            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             const raw = Array.isArray(input.ranges) ? input.ranges : [];
             const shots0 = ensureShots(c);
             // Narration source seconds → final-cut seconds (loose: if a boundary lands in an already-deleted segment, snap to the nearest surviving point, still deleting the remaining part);
@@ -4418,7 +4656,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               .map((r) => ({ from: srcToEditedLoose(shots0, r.from, inNarrationSource), to: srcToEditedLoose(shots0, r.to, inNarrationSource) }))
               .filter((r) => r.to - r.from > 0.05)
               .sort((a, b) => b.from - a.from);
-            if (!edited.length) return { ok: false, error: t('ranges 为空/不合法,或这些区间在成片里已不存在') };
+            if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
             let shots = shots0;
             let blocks = c.blocks;
             let removedCount = 0;
@@ -4431,33 +4669,33 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               removedCount++;
               firstCut = Math.min(firstCut, rr.removed[0]);
             }
-            if (!removedCount) return { ok: false, error: t('这些区间删不了(可能覆盖了整条视频)') };
+            if (!removedCount) return { ok: false, error: t('workbench.thoseRangesDeletedThey') };
             const relaid = relayCaptionLayer(blocks, shots, asrRef.current); // captions follow the narration: deleted words drop out automatically
             setComp((cur) => ({ ...cur, shots, blocks: relaid }));
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
-            return { ok: true, summary: t('已按口播稿删了 {n} 段', { n: removedCount }) };
+            return { ok: true, summary: t('workbench.deletedNRangesPer', { n: removedCount }) };
           }
           case 'undo': {
             // No rollback while generating: after a snapshot restores the old comp, a running worker still writes its result back, scrambling state
-            if (genIdsRef.current.size) return { ok: false, error: t('有组件正在生成,等完成再撤销') };
+            if (genIdsRef.current.size) return { ok: false, error: t('workbench.elementGeneratingUndoAfter') };
             const stack = undoStackRef.current;
             // A snapshot left by a tool that didn't change anything (returned failure/no-op) shares the current reference → dedup, doesn't count as a step
             while (stack.length && stack[stack.length - 1] === compRef.current) stack.pop();
             const prev = stack.pop();
-            if (!prev) return { ok: false, error: t('没有可撤销的改动') };
+            if (!prev) return { ok: false, error: t('workbench.nothingUndo') };
             redoStackRef.current.push(compRef.current); // agent undo also feeds the redo line (redoable via ⇧⌘Z/button)
             setComp(prev);
             setSelectedId(null);
             setSelectedShotId(null);
-            return { ok: true, summary: t('已撤销上一步') + (stack.length ? t('(还可再撤 {n} 步)', { n: stack.length }) : '') };
+            return { ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') };
           }
           case 'export_video': {
             // Default local export (per user, same path in the OSS shell): the bridge drives this tab to run client-side compositing (WebCodecs),
             // the result goes straight to a browser download on the user's machine — no R2 upload, zero server cost. Poll via track_export.
-            if (!compRef.current.video?.url) return { ok: false, error: t('先上传口播视频再导出') };
+            if (!compRef.current.video?.url) return { ok: false, error: t('common.uploadBeforeExport') };
             const job = agentExportRef.current;
-            if (job.running) return { ok: true, summary: t('已有导出在进行中'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
+            if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
             const opts = {
               res: [2160, 1440, 1080, 720, 540].includes(Number(input.resolution)) ? (Number(input.resolution) as 2160 | 1440 | 1080 | 720 | 540) : (1080 as const),
               fps: [24, 30, 60].includes(Number(input.fps)) ? (Number(input.fps) as 24 | 30 | 60) : (30 as const),
@@ -4466,54 +4704,54 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             agentExportRef.current = { running: true, filename: null, error: null };
             void exportVideo(opts)
               .then((r) => {
-                agentExportRef.current = { running: false, filename: r.ok ? (r.filename ?? null) : null, error: r.ok ? null : (r.error ?? t('导出失败')) };
+                agentExportRef.current = { running: false, filename: r.ok ? (r.filename ?? null) : null, error: r.ok ? null : (r.error ?? t('common.exportFailed')) };
               })
               .catch((e) => {
                 agentExportRef.current = { running: false, filename: null, error: e instanceof Error ? e.message : String(e) };
               });
-            return { ok: true, summary: t('开始导出(本地客户端合成,约 1x 片长)'), data: { status: 'running', options: opts, hint: 'poll track_export every ~15s; keep this studio tab open' } };
+            return { ok: true, summary: t('workbench.exportStartedLocalClient'), data: { status: 'running', options: opts, hint: 'poll track_export every ~15s; keep this studio tab open' } };
           }
           case 'track_export': {
             const j = agentExportRef.current;
-            if (j.running) return { ok: true, summary: t('导出中 {pct}%', { pct: exportPctRef.current }), data: { status: 'running', progress: exportPctRef.current } };
-            if (j.filename) return { ok: true, summary: t('导出完成,已经浏览器下载落盘'), data: { status: 'done', filename: j.filename, saved_via: 'browser download (user Downloads folder by default)' } };
+            if (j.running) return { ok: true, summary: t('workbench.exportingPct', { pct: exportPctRef.current }), data: { status: 'running', progress: exportPctRef.current } };
+            if (j.filename) return { ok: true, summary: t('workbench.exportDoneDownloadedVia'), data: { status: 'done', filename: j.filename, saved_via: 'browser download (user Downloads folder by default)' } };
             if (j.error) return { ok: false, error: j.error };
-            return { ok: true, summary: t('还没有发起过导出'), data: { status: 'idle', hint: 'call export_video first' } };
+            return { ok: true, summary: t('workbench.noExportStarted'), data: { status: 'idle', hint: 'call export_video first' } };
           }
           case 'set_shot_treatment': {
             const s = findShot(input.shotId);
-            if (!s) return { ok: false, error: t('找不到这个分镜') };
+            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             const tr = String(input.treatment) as ShotTreatment;
             setShotTreatment(s.id, tr);
             const name = SHOT_TREATMENTS.find((x) => x.id === tr)?.name ?? tr;
-            return { ok: true, summary: t('已把取景换成「{name}」', { name: t(name) }) };
+            return { ok: true, summary: t('workbench.framingChangedName', { name: t(name) }) };
           }
           case 'split_shot': {
-            if (!c.video) return { ok: false, error: t('还没有视频') };
+            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
             if (splitBlockedByTransition(ensureShots(compRef.current), tRef.current)) {
-              return { ok: false, error: t('这个点在转场覆盖区内,不能分割——先 add_transition {atSec, effect:"none"} 移除转场') };
+              return { ok: false, error: t('workbench.cannotSplitInTransition') };
             }
             splitAtPlayhead();
             // The setComp wrapper writes compRef synchronously, so reading here already gets the post-split segment table
-            return { ok: true, summary: t('已在播放头剪开'), data: { shotIds: (compRef.current.shots ?? []).map((s) => s.id) } };
+            return { ok: true, summary: t('workbench.splitPlayhead'), data: { shotIds: (compRef.current.shots ?? []).map((s) => s.id) } };
           }
           case 'trim_shot': {
-            if (!c.video) return { ok: false, error: t('还没有视频') };
+            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             const side = input.side === 'left' ? 'left' : 'right';
             if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
             trimAtPlayhead(side);
-            return { ok: true, summary: side === 'left' ? t('已裁掉 {sec}s 左侧的画面', { sec: r1(tRef.current) }) : t('已裁掉 {sec}s 右侧的画面', { sec: r1(tRef.current) }) };
+            return { ok: true, summary: side === 'left' ? t('workbench.trimmedFootageLeftSec', { sec: r1(tRef.current) }) : t('workbench.trimmedFootageRightSec', { sec: r1(tRef.current) }) };
           }
           case 'delete_shot': {
             const s = findShot(input.shotId);
-            if (!s) return { ok: false, error: t('找不到这个分镜') };
+            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             deleteShot(s.id);
-            return { ok: true, summary: t('已删除这个场景') };
+            return { ok: true, summary: t('workbench.deletedScene') };
           }
           case 'set_video_filter': {
             const s = findShot(input.shotId);
-            if (!s) return { ok: false, error: t('找不到这个分镜') };
+            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
             const f: ShotFilter = {
               ...(num(input.brightness) != null ? { brightness: num(input.brightness) } : {}),
@@ -4522,19 +4760,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             };
             const css = shotFilterCss(f);
             setShotFilter(s.id, css === 'none' ? null : f);
-            return { ok: true, summary: css === 'none' ? t('已还原这个分镜的调色') : t('已调色:{css}', { css }) };
+            return { ok: true, summary: css === 'none' ? t('workbench.resetColorGradeShot') : t('workbench.filtersAppliedCss', { css }) };
           }
           case 'insert_clip': {
             // Agent inserts B-roll: the bytes must already be in our storage (a helper-uploaded sig / a CDN url of a library / generated video) —
             // the canvas engine needs CORS-clean frames, so always fetch the bytes into a File and go through the full local-insert path
             // (blob src + srcSig + OPFS + cloud backup), fully isomorphic to a manual "+" insert
-            if (!c.video) return { ok: false, error: t('先有主视频再插 B-roll') };
+            if (!c.video) return { ok: false, error: t('workbench.addMainVideoBefore') };
             const sigIn = typeof input.sig === 'string' ? input.sig.trim() : '';
             const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
-            if (!sigIn && !urlIn) return { ok: false, error: t('url 或 sig 至少给一个(sig=asset-import helper 上传返回的指纹;url=用户素材库/生成视频的地址)') };
+            if (!sigIn && !urlIn) return { ok: false, error: t('workbench.needUrlOrSig') };
             const at = typeof input.atSec === 'number' && Number.isFinite(input.atSec) ? Math.max(0, input.atSec) : tRef.current;
             try {
-              report(t('拉取片段字节…'));
+              report(t('workbench.fetchingClipBytes'));
               const proxyFetch = async (u: string): Promise<File | null> => {
                 const pr = await fetch(`/api/media/fetch?url=${encodeURIComponent(u)}`);
                 if (!pr.ok) return null;
@@ -4559,21 +4797,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   const base = imgSourceBase();
                   if (key && base) f = await proxyFetch(`${base}/${key}`);
                 }
-                if (!f) return { ok: false, error: t('按 sig 没取到字节——先跑 asset-import helper 上传(它会返回这个 sig)') };
+                if (!f) return { ok: false, error: t('workbench.noBytesFoundSig') };
               } else {
                 f = await proxyFetch(urlIn);
-                if (!f) return { ok: false, error: t('url 拉取失败——只支持我们存储/CDN 上的视频(外部视频先经 asset-import helper 上传)') };
+                if (!f) return { ok: false, error: t('workbench.urlFetchFailedOnly') };
               }
-              report(t('读取时长…'));
+              report(t('workbench.readingDuration'));
               const blobUrl = URL.createObjectURL(f);
               const dur = await videoDurationOf(blobUrl);
               if (!dur) {
                 URL.revokeObjectURL(blobUrl);
-                return { ok: false, error: t('读取视频时长失败(容器/编码浏览器不认,换 mp4/mov 试试)') };
+                return { ok: false, error: t('workbench.couldNotReadDurationCodec') };
               }
               void saveLocalVideo(f, fileSig(f)).catch(() => {});
               const newShotId = insertClipCore(blobUrl, Math.round(dur * 100) / 100, at, f);
-              return { ok: true, summary: t('已在 {at}s 插入 {dur}s 的片段', { at: r1(at), dur: r1(dur) }), data: { shotId: newShotId } };
+              return { ok: true, summary: t('workbench.insertedDurSClip', { at: r1(at), dur: r1(dur) }), data: { shotId: newShotId } };
             } finally {
               clearToolProgress(toolId);
             }
@@ -4583,17 +4821,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             // then onFrameApplied lands palette+frameId into comp. Next round <frame_attached> prompts it to read_frame.
             const fid = typeof input.frame_id === 'string' ? input.frame_id : '';
             const f = frameCatalogRef.current.find((x) => x.id === fid);
-            if (!f) return { ok: false, error: t('没有这个 frame:{id}(id 见 <frame_catalog>)', { id: fid }) };
+            if (!f) return { ok: false, error: t('workbench.noSuchFrameId', { id: fid }) };
             chatRef.current?.attachFrame({ id: f.id, title: f.title, icon: f.icon, iconKey: f.iconKey ?? null });
-            return { ok: true, summary: t('已应用「{title}」主题,之后生成的内容都走这套设计', { title: f.title }) };
+            return { ok: true, summary: t('workbench.appliedThemeAlt', { title: f.title }) };
           }
           case 'add_block': {
             try {
               const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : r1(tRef.current);
-              const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: '新组件' };
+              const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              const parsed = await composeBlockChecked(seed, `新建一个叠加组件(标题/大数字/列表/花字等,按内容自己定):${String(input.instruction ?? '')}`, (acc) =>
-                report(noteOf(acc) || t('生成中…')),
+              const parsed = await composeBlockChecked(seed, `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${String(input.instruction ?? '')}`, (acc) =>
+                report(noteOf(acc) || t('panels.generating')),
               );
               const nb: Block = {
                 id: seed.id,
@@ -4602,38 +4840,38 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 startSec: at,
                 durationSec: 3,
                 trackIndex: freeTrack(compRef.current.blocks, at, 3),
-                label: String(input.instruction ?? t('新组件')).slice(0, 12),
+                label: String(input.instruction ?? t('workbench.newElement')).slice(0, 12),
               };
               setComp((cc) => ({ ...cc, blocks: [...cc.blocks, nb] }));
               setSelectedShotId(null);
               setSelectedId(seed.id);
               applyT(Math.max(0, at + 0.01)); // on completion, take the user straight to the result
-              return { ok: true, summary: parsed.note || t('已添加组件'), data: { newBlockId: seed.id } };
+              return { ok: true, summary: parsed.note || t('workbench.elementAdded'), data: { newBlockId: seed.id } };
             } finally {
               clearToolProgress(toolId);
             }
           }
           case 'edit_block': {
             const b = findBlock(input.blockId);
-            if (!b) return { ok: false, error: t('找不到这个组件') };
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             try {
               markGenerating([b.id], true); // lock editing during the rewrite too (the result replaces the whole slots)
               const seed = { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label };
-              const parsed = await composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('修改中…')));
+              const parsed = await composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('workbench.editing')));
               setComp((cc) => ({
                 ...cc,
                 blocks: cc.blocks.map((x) =>
                   x.id === b.id ? { ...x, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } : x,
                 ),
               }));
-              return { ok: true, summary: parsed.note || t('已修改这个组件') };
+              return { ok: true, summary: parsed.note || t('workbench.elementUpdated') };
             } finally {
               markGenerating([b.id], false);
               clearToolProgress(toolId);
             }
           }
           default:
-            return { ok: false, error: t('未知操作 {tool}', { tool: toolId }) };
+            return { ok: false, error: t('workbench.unknownOperationTool', { tool: toolId }) };
         }
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -4653,18 +4891,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         if (bid) {
           const b = c2.blocks.find((x) => x.id === bid);
-          if (!b) return { ok: false, error: t('找不到这个组件(id 来自 get_state / 工具回执)') };
-          if (genIdsRef.current.has(b.id)) return { ok: false, error: t('这块正在生成中,等它完成') };
+          if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
+          if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
           if (isPlaceholder(b)) {
             const boxPx = b.box ? { w: Math.round(b.box.w * c2.width), h: Math.round(b.box.h * c2.height) } : undefined;
             const beats = beatsForWindow(b.startSec, b.durationSec);
             const neighbors = neighborsFrom(graphicsRoster(), b.id);
             return {
               ok: true,
-              summary: t('已取占位上下文'),
+              summary: t('workbench.fetchedPlaceholderContext'),
               data: {
                 ...base,
-                block: { id: b.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: b.label ?? '图形', durationSec: b.durationSec, ...(boxPx ? { boxPx } : {}) },
+                block: { id: b.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: b.label ?? t('workbench.graphic'), durationSec: b.durationSec, ...(boxPx ? { boxPx } : {}) },
                 context: { ...(script ? { script } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) },
                 suggested_instruction: placeholderSpec(b),
               },
@@ -4672,24 +4910,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           }
           return {
             ok: true,
-            summary: t('已取块上下文'),
+            summary: t('workbench.fetchedBlockContext'),
             data: { ...base, block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label }, ...(script ? { context: { script } } : {}) },
           };
         }
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
         return {
           ok: true,
-          summary: t('已取新组件上下文'),
-          data: { ...base, atSec: at, block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: '新组件' }, ...(script ? { context: { script } } : {}) },
+          summary: t('workbench.fetchedNewElementContext'),
+          data: { ...base, atSec: at, block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') }, ...(script ? { context: { script } } : {}) },
         };
       }
       case 'apply_block': {
         const raw = typeof input.raw === 'string' ? input.raw : '';
-        if (!raw.trim()) return { ok: false, error: t('raw required(compose_block_brief 简报生成的原文)') };
+        if (!raw.trim()) return { ok: false, error: t('workbench.rawRequired') };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         const target = bid ? c2.blocks.find((x) => x.id === bid) : undefined;
-        if (bid && !target) return { ok: false, error: t('找不到这个组件(用 compose_block_brief 给过的同一个 blockId)') };
-        if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('这块正在生成中,等它完成') };
+        if (bid && !target) return { ok: false, error: t('workbench.elementNotFoundUse') };
+        if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
         const fb = target && !isPlaceholder(target) ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
         const applyId = target?.id ?? blockId('ai');
         const parsed = parseBlockResponse(raw, fb);
@@ -4697,7 +4935,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
-          return { ok: false, error: t('没通过静态检查——只修列出的问题,其余保持原样,再 apply_block 一次'), data: { issues: issues.map((i) => i.message) } };
+          return { ok: false, error: t('workbench.failedStaticChecksFix'), data: { issues: issues.map((i) => i.message) } };
         }
         const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
         pushUndoSnapshot();
@@ -4709,7 +4947,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           setSelectedShotId(null);
           setSelectedId(target.id);
           applyT(Math.max(0, target.startSec + 0.01));
-          return { ok: true, summary: isPlaceholder(target) ? t('已填充「{label}」', { label: target.label ?? t('图形') }) : t('已更新「{label}」', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id, ...warnings } };
+          return { ok: true, summary: isPlaceholder(target) ? t('workbench.filledLabel', { label: target.label ?? t('workbench.graphic') }) : t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id, ...warnings } };
         }
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
         const dur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
@@ -4720,13 +4958,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           startSec: at,
           durationSec: dur,
           trackIndex: freeTrack(c2.blocks, at, dur),
-          label: (typeof input.label === 'string' && input.label ? input.label : t('新组件')).slice(0, 12),
+          label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
         };
         setComp((cc) => ({ ...cc, blocks: [...cc.blocks, nb] }));
         setSelectedShotId(null);
         setSelectedId(nb.id);
         applyT(Math.max(0, at + 0.01));
-        return { ok: true, summary: t('已添加组件'), data: { newBlockId: nb.id, ...warnings } };
+        return { ok: true, summary: t('workbench.elementAdded'), data: { newBlockId: nb.id, ...warnings } };
       }
       case 'capture_frame': {
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
@@ -4734,14 +4972,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         try {
           const shot = await captureCompositionFrame({ comp: c2, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at });
           const b64 = shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1);
-          return { ok: true, summary: t('已截取 {sec}s 处画面', { sec: Math.round(at * 10) / 10 }), image: { data: b64, mimeType: 'image/jpeg' }, data: { atSec: at, width: shot.width, height: shot.height } } as StudioToolResult;
+          return { ok: true, summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }), image: { data: b64, mimeType: 'image/jpeg' }, data: { atSec: at, width: shot.width, height: shot.height } } as StudioToolResult;
         } catch (e) {
-          return { ok: false, error: t('截帧失败:{message}', { message: e instanceof Error ? e.message : String(e) }) };
+          return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
       }
       case 'plan_context': {
         const segs = asrRef.current;
-        if (!segs?.length) return { ok: false, error: t('还没有口播稿,先 extract_asr') };
+        if (!segs?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
         const vis = visualRef.current;
         const visuals = vis?.segments.length
           ? segs.map((s, i) => {
@@ -4753,7 +4991,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const inserts = await insertedClipsForPlanRef.current().catch(() => [] as PlanInsert[]);
         return {
           ok: true,
-          summary: t('已取规划上下文'),
+          summary: t('workbench.fetchedPlanningContext'),
           data: {
             sentences: segs.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
             videoDurationSec: currentVideo()?.durationSec ?? 0,
@@ -4764,7 +5002,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         };
       }
       case 'submit_plan': {
-        if (!asrRef.current?.length) return { ok: false, error: t('先 extract_asr(规划挂在句子索引上)') };
+        if (!asrRef.current?.length) return { ok: false, error: t('workbench.runAsrFirst') };
         const text = typeof input.plan === 'string' ? input.plan : JSON.stringify(input.plan ?? {});
         // Unified narrative stream (same interleaving given to the agent in plan_context): global-line-number scenes are decomposed back into main/insert segments at the assembly layer
         const insCtx = await insertedClipsForPlanRef.current().catch(() => [] as PlanInsert[]);
@@ -4773,13 +5011,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         try {
           p = parsePlan(text, planRows);
         } catch (e) {
-          return { ok: false, error: t('规划解析失败:{message}——按 plan_brief 的契约重新生成', { message: e instanceof Error ? e.message : String(e) }) };
+          return { ok: false, error: t('workbench.planParsingFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
-        if (!p.scenes.length) return { ok: false, error: t('没有有效场景(检查 from/to 是否落在句子索引内)——重新生成再提交') };
+        if (!p.scenes.length) return { ok: false, error: t('workbench.noValidScenesCheck') };
         pushUndoSnapshot();
         planRef.current = p;
         setPlan(p);
-        return { ok: true, summary: t('已接收规划 · {n} 个场景(接着 lay_out 落分镜)', { n: p.scenes.length }), data: { scenes: p.scenes.length } };
+        return { ok: true, summary: t('workbench.planReceivedNScenes', { n: p.scenes.length }), data: { scenes: p.scenes.length } };
       }
       default:
         return runStudioTool(tool, input);
@@ -4793,10 +5031,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     getState: () => `<composition_state>\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`,
     onExternalCall: (tool, result) => {
       if (tool === 'get_state' || tool === 'compose_context' || tool === 'plan_context') return; // pure queries don't interrupt
-      const EXTERNAL_LABELS: Record<string, string> = { apply_block: '外部生成落块', submit_plan: '外部规划' };
+      const EXTERNAL_LABELS: Record<string, string> = { apply_block: 'workbench.externalBlockApply', submit_plan: 'workbench.externalPlan' };
       const label = t(STUDIO_TOOL_MAP[tool]?.label ?? EXTERNAL_LABELS[tool] ?? tool);
-      if (result.ok) toast.info(result.summary ? t('外部 agent · {label}:{summary}', { label, summary: result.summary }) : t('外部 agent · {label}', { label }));
-      else toast.error(t('外部 agent · {label} 失败:{error}', { label, error: result.error ?? t('未知错误') }));
+      if (result.ok) toast.info(result.summary ? t('workbench.externalAgentLabelSummary', { label, summary: result.summary }) : t('workbench.externalAgentLabel', { label }));
+      else toast.error(t('workbench.externalAgentLabelFailed', { label, error: result.error ?? t('workbench.unknownError') }));
     },
   });
 
@@ -4814,7 +5052,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (b) el = { id: b.id, label: b.label?.slice(0, 16) || blockKind(b), kind: blockKind(b), isShot: false };
     } else if (selectedShotId) {
       const i = (c.shots ?? []).findIndex((s) => s.id === selectedShotId);
-      if (i >= 0) el = { id: selectedShotId, label: t('分镜 #{n}', { n: i + 1 }), kind: 'shot', isShot: true };
+      if (i >= 0) el = { id: selectedShotId, label: t('workbench.shotN', { n: i + 1 }), kind: 'shot', isShot: true };
     }
     chatRef.current?.insertElementPill(el);
   }, [selectedId, selectedShotId]);
@@ -4849,7 +5087,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const tr = studioProviders().translate;
     if (!tr) return;
     if (!asrRef.current?.length) {
-      toast.error(t('还没有口播稿——先提取口播稿'));
+      toast.error(t('workbench.noTranscriptShort'));
       return;
     }
     setCapTransBusy(true);
@@ -4867,9 +5105,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }
       // Remember the target language: panel chip selected state + new inserted clips auto-translated to the same language
       setCaptionStyle({ sub: { ...(resolveCaptionStyle(compRef.current).sub ?? {}), lang: target } });
-      toast.success(t('已生成{lang}译文', { lang: target }) + (compRef.current.blocks.some(isSentenceCaption) ? '' : t('——开启字幕后显示')));
+      toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (compRef.current.blocks.some(isSentenceCaption) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('翻译失败,稍后再试'));
+      toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
     } finally {
       setCapTransBusy(false);
     }
@@ -4989,6 +5227,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // OPFS local library hit → the main video auto-reconnects (via the existing pendingRestore check); inserted clips revive by srcSig.
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
+    setMediaMissing(false);
+    // Keep the sig anchor even before (or without) the bytes: autosave reads videoSigRef, and
+    // writing videoSig:null to the cloud row while the media is missing would destroy the
+    // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
+    if (d.videoSig) videoSigRef.current = d.videoSig;
     setComp(() => ({ ...d.comp, video: null }));
     if (d.videoSig) {
       void loadLocalVideo(d.videoSig).then(async (f) => {
@@ -4999,14 +5242,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         if (f) return;
         // Not in OPFS (device switch / cleared cache) → fetch from the cloud byte rendezvous; only a miss falls back to manual re-pick
         if (cloudMediaRef.current.video?.sig === d.videoSig) {
-          toast.info(t('正在从云端取回视频…'));
+          toast.info(t('workbench.retrievingVideoFromCloud'));
           const cf = await studioProviders().vault.fetch(d.videoSig!);
           if (cf && pendingRestoreRef.current === d) {
             void pickVideoFile(cf, { asSig: d.videoSig! });
             return;
           }
         }
-        toast.success(t('项目已加载；重新选择原视频即可接回画面'));
+        // Bytes unavailable on this device (browser switch / cleared storage): enter the persistent
+        // missing-media state — the stage keeps rendering captions/blocks (all cloud-backed), with a
+        // placeholder telling the user the source file is gone and how to reconnect it.
+        setMediaMissing(true);
       });
     }
     void recoverLocalClips(d.comp.shots ?? []);
@@ -5079,7 +5325,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         applyDraft(local); // local is newer / cloud unreachable → use local
       }
       // Both empty and it was a "timeout" (≠ definitely absent): the data is probably in the cloud, don't pretend it's a new empty project
-      else if (remote === undefined) toast.error(t('云端项目加载较慢,正在继续尝试…'));
+      else if (remote === undefined) toast.error(t('workbench.cloudProjectLoadingSlowly'));
       // Losing the race ≠ giving up: after the cloud arrives late, ① backfill the hydrated reference data (prevent empty-state
       // write-back); ② if the canvas is still empty (the user did nothing) reconnect the whole thing — agent/device-switch scenarios auto-recover without a manual refresh
       if (remote === undefined) {
@@ -5090,7 +5336,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           const untouched = !compRef.current.blocks.length && !(compRef.current.shots?.length ?? 0);
           if (!local && untouched) {
             applyRemote(late);
-            toast.success(t('云端项目已接回'));
+            toast.success(t('workbench.cloudProjectReconnected'));
           }
         });
       }
@@ -5127,7 +5373,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         void studioProviders().projects.save(projectId, payload);
         if (!conflictWarnedRef.current) {
           conflictWarnedRef.current = true;
-          toast.info(t('这个项目在别处也编辑过；以你这里的最新改动为准继续保存'));
+          toast.info(t('workbench.projectAlsoEditedElsewhere'));
         }
       });
     }, 1200);
@@ -5193,7 +5439,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               window.addEventListener('pointerup', up);
               window.addEventListener('pointercancel', up);
             }}
-            title={t('拖动调整面板宽度')}
+            title={t('workbench.dragResizePanel')}
             className="hover:bg-accent/40 absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize transition-colors"
           />
           {/* Chat is the only content of this area (hidden entirely when collapsed, session/streaming preserved) */}
@@ -5239,25 +5485,25 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <button
               type="button"
               onClick={openChat}
-              title={t('打开对话')}
-              aria-label={t('打开对话')}
+              title={t('workbench.openChat')}
+              aria-label={t('workbench.openChat')}
               className="bg-ink text-bg absolute left-3 top-2 z-20 flex h-7 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium shadow-sm hover:opacity-90"
             >
-              <MessageSquare size={13} /> {t('对话')}
+              <MessageSquare size={13} /> {t('chatGen.chat')}
             </button>
           )}
           {libCollapsed && (
             <button
               type="button"
               onClick={() => setLibCollapsed(false)}
-              title={t('展开素材栏')}
-              aria-label={t('展开素材栏')}
+              title={t('workbench.expandAssetsBar')}
+              aria-label={t('workbench.expandAssetsBar')}
               className="border-line bg-panel text-ink-3 hover:text-ink absolute right-3 top-2 z-20 flex h-7 items-center gap-1 rounded-md border px-2 text-[11.5px] shadow-sm"
             >
-              <ChevronsLeft size={13} /> {t('素材')}
+              <ChevronsLeft size={13} /> {t('workbench.assets')}
             </button>
           )}
-          {!comp.video ? (
+          {!comp.video && !mediaMissing ? (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -5270,8 +5516,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               className="border-line text-ink-3 hover:border-ink-3 hover:text-ink flex h-full max-h-[70vh] w-full max-w-md flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed transition"
             >
               {busyImport ? <Loader2 size={28} className="animate-spin" /> : <Upload size={28} />}
-              <div className="text-[13px] font-medium">{busyImport ? t('读取中…') : t('上传口播视频(或拖进来)')}</div>
-              <div className="text-ink-4 text-[11px]">{t('视频留在本地不上传 · 仅提取音频做转写分镜')}</div>
+              <div className="text-[13px] font-medium">{busyImport ? t('workbench.reading') : t('workbench.uploadTalkingHeadVideo')}</div>
+              <div className="text-ink-4 text-[11px]">{t('workbench.videoStaysLocalOnly')}</div>
             </button>
           ) : (
             <div ref={stageBoxRef} className="relative" style={{ width: boxW, height: boxH }}>
@@ -5313,6 +5559,27 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     }}
                   />
                 ))}
+                {/* Missing-media placeholder (mainstream-editor-style): the source bytes aren't on this device, but
+                    everything cloud-backed (captions/blocks/timeline) keeps rendering underneath and stays
+                    editable — this only explains the black video layer and offers the reconnect. */}
+                {mediaMissing && !comp.video && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
+                    <div className="flex max-w-xs flex-col items-center gap-2 px-6 text-center">
+                      <VideoOff size={26} className="text-white/75" />
+                      <div className="text-[13px] font-medium text-white">{t('workbench.originalVideoFileMissing')}</div>
+                      <div className="text-[11.5px] leading-relaxed text-white/70">
+                        {t('workbench.storageMissingHint')}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="mt-1 rounded-md bg-white px-3 py-1.5 text-[12px] font-medium text-black hover:bg-white/90"
+                      >
+                        {t('workbench.reSelectOriginalVideo')}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               {/* Insert landing skeleton: draw a dashed box + spinner where the component will appear, dissolves when the rebuild settles (more prominent than the top pill) */}
               {pendingInsert && rebuilding && (
@@ -5322,7 +5589,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 >
                   <div className="border-accent/70 flex h-full w-full items-center justify-center rounded-md border-2 border-dashed bg-black/20">
                     <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] text-white">
-                      <Loader2 size={12} className="animate-spin" /> {t('插入中…')}
+                      <Loader2 size={12} className="animate-spin" /> {t('common.inserting')}
                     </span>
                   </div>
                 </div>
@@ -5331,7 +5598,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               {rebuilding && (
                 <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2">
                   <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-[11px] text-white shadow">
-                    <Loader2 size={12} className="animate-spin" /> {t('画面更新中…')}
+                    <Loader2 size={12} className="animate-spin" /> {t('workbench.updatingCanvas')}
                   </span>
                 </div>
               )}
@@ -5355,7 +5622,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         stageW={boxW}
                         stageH={boxH}
                         measured={capSubMeasure}
-                        label={t('译文 · 全局')}
+                        label={t('workbench.translationGlobal')}
                         onChange={(patch) => {
                           const keep = resolveCaptionStyle(compRef.current).sub ?? {};
                           setCaptionStyle({ sub: { ...keep, ...patch } });
@@ -5392,7 +5659,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       style={{ left: sb.box.x * boxW, top: sb.box.y * boxH, width: sb.box.w * boxW, height: sb.box.h * boxH }}
                     >
                       <span className="inline-flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/90">
-                        <Loader2 size={10} className="animate-spin" /> {t('生成中')}
+                        <Loader2 size={10} className="animate-spin" /> {t('workbench.generating')}
                       </span>
                     </div>
                   );
@@ -5429,14 +5696,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       onClick={() => aiFillBlock(eb.id)}
                       className="bg-ink text-bg pointer-events-auto rounded-full px-3 py-1 text-[12px] font-medium shadow-lg"
                     >
-                      {t('AI 生成')}
+                      {t('workbench.aiGenerate')}
                     </button>
                     <button
                       type="button"
                       onClick={() => void uploadIntoBlock(eb.id)}
                       className="bg-panel text-ink border-line pointer-events-auto rounded-full border px-3 py-1 text-[12px] font-medium shadow-lg"
                     >
-                      {t('上传')}
+                      {t('panels.upload')}
                     </button>
                   </div>
                 );
@@ -5485,13 +5752,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                               <button
                                 type="button"
                                 onPointerDown={(e) => gripDrag(e, mb.id)}
-                                aria-label={t('拖动移动')}
+                                aria-label={t('workbench.dragMove')}
                                 className="text-ink-3 hover:text-ink cursor-move rounded p-1"
                               >
                                 <GripVertical size={13} />
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{t('拖动移动')}</TooltipContent>
+                            <TooltipContent>{t('workbench.dragMove')}</TooltipContent>
                           </Tooltip>
                         )}
                         {m?.url && (
@@ -5504,10 +5771,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                 className="text-ink-3 hover:text-ink inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap disabled:opacity-40"
                               >
                                 {mediaBusy[mb.id] ? <Loader2 size={13} className="animate-spin" /> : m.type === 'video' ? <FileVideo size={13} /> : <ImageIcon size={13} />}{' '}
-                                {m.type === 'video' ? t('换视频') : t('换图')}
+                                {m.type === 'video' ? t('workbench.replaceVideo') : t('workbench.replaceImage')}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{m.type === 'video' ? t('替换视频') : t('替换图片')}</TooltipContent>
+                            <TooltipContent>{m.type === 'video' ? t('workbench.replaceVideoLabel') : t('workbench.replaceImageLabel')}</TooltipContent>
                           </Tooltip>
                         )}
                         {m?.url && (
@@ -5518,10 +5785,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                 onClick={(e) => (floatWin === 'anim' ? setFloatWin(null) : openFloatAt('anim', e.currentTarget.getBoundingClientRect()))}
                                 className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === 'anim' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
                               >
-                                <Wand2 size={13} /> {t('动效')}
+                                <Wand2 size={13} /> {t('workbench.motion')}
                               </button>
                             </TooltipTrigger>
-                            <TooltipContent>{t('入场 / 出场动效')}</TooltipContent>
+                            <TooltipContent>{t('workbench.enterExitMotion')}</TooltipContent>
                           </Tooltip>
                         )}
                         {mb.box && (
@@ -5536,11 +5803,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         <div className="bg-line mx-0.5 h-4 w-px" />
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <button type="button" onClick={() => removeBlock(mb.id)} aria-label={t('删除')} className="text-ink-3 rounded p-1 hover:text-destructive">
+                            <button type="button" onClick={() => removeBlock(mb.id)} aria-label={t('tools.delete_block.label')} className="text-ink-3 rounded p-1 hover:text-destructive">
                               <Trash2 size={13} />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t('删除')}</TooltipContent>
+                          <TooltipContent>{t('tools.delete_block.label')}</TooltipContent>
                         </Tooltip>
                       </div>
                     </TooltipProvider>
@@ -5559,13 +5826,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                           <button
                             type="button"
                             onPointerDown={(e) => gripDrag(e, mb.id)}
-                            aria-label={t('拖动移动')}
+                            aria-label={t('workbench.dragMove')}
                             className="text-ink-3 hover:text-ink cursor-move rounded p-1"
                           >
                             <GripVertical size={13} />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent>{t('拖动移动')}</TooltipContent>
+                        <TooltipContent>{t('workbench.dragMove')}</TooltipContent>
                       </Tooltip>
                     )}
                     {/* AI edit: switch to chat (the selection pill is already attached in the input via the selection state) and focus the input to type directly.
@@ -5581,8 +5848,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                               const label = mb.label?.slice(0, 30) || blockKind(mb);
                               const cmd = `Pireel block ${mb.id} ("${label}"): `;
                               void navigator.clipboard.writeText(cmd).then(
-                                () => toast.success(t('已复制组件引用,粘到 agent 对话里说怎么改')),
-                                () => toast.error(t('复制失败')),
+                                () => toast.success(t('workbench.copiedPasteIntoAgent')),
+                                () => toast.error(t('workbench.copyFailed')),
                               );
                               return;
                             }
@@ -5591,10 +5858,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                           }}
                           className="text-ink-3 hover:text-ink inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap"
                         >
-                          <Sparkles size={13} /> {t('AI 改')}
+                          <Sparkles size={13} /> {t('chatGen.aiEdit')}
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{agentView ? t('复制组件引用,发给你的 agent') : t('在对话里说怎么改这个组件')}</TooltipContent>
+                      <TooltipContent>{agentView ? t('workbench.copyBlockReferenceAgent') : t('workbench.tellChatHowChange')}</TooltipContent>
                     </Tooltip>
                     {/* Sync content: one-click fill the data-edit text slots from the narration script in the block's time window (preset component = generic
                         placeholder, this step matches it to real content after dropping; hidden when the OSS shell has no syncFill capability) */}
@@ -5610,10 +5877,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                               disabled={syncBusyId === mb.id}
                               className="text-ink-3 hover:text-ink inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap disabled:opacity-50"
                             >
-                              {syncBusyId === mb.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t('同步内容')}
+                              {syncBusyId === mb.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t('workbench.syncContent')}
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t('按这段口播稿自动填充组件文字')}</TooltipContent>
+                          <TooltipContent>{t('workbench.autoFillElementText')}</TooltipContent>
                         </Tooltip>
                       )}
                     {/* Save as component: a custom block edited on the canvas flows back to the asset library (the reverse channel of copy semantics —
@@ -5624,13 +5891,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                           <button
                             type="button"
                             onClick={() => saveBlockAsElement(mb)}
-                            aria-label={t('存为组件')}
+                            aria-label={t('workbench.saveAsElement')}
                             className="text-ink-3 hover:text-ink inline-flex items-center rounded p-1"
                           >
                             <Save size={13} />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent>{t('存为组件:把当前样子存进素材库(之后可反复插入)')}</TooltipContent>
+                        <TooltipContent>{t('workbench.saveAsElementKeep')}</TooltipContent>
                       </Tooltip>
                     )}
                     {/* Layer: move a block up/down one layer; when matte is on, also give a block-level "in front of / behind the person" override */}
@@ -5638,19 +5905,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       <>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <button type="button" onClick={() => bumpBlockLayer(mb, 1)} aria-label={t('上移一层')} className="text-ink-3 hover:text-ink rounded p-1">
+                            <button type="button" onClick={() => bumpBlockLayer(mb, 1)} aria-label={t('workbench.bringForward')} className="text-ink-3 hover:text-ink rounded p-1">
                               <ChevronUp size={13} />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t('上移一层(盖过同位置组件)')}</TooltipContent>
+                          <TooltipContent>{t('workbench.bringForwardCoversOverlapping')}</TooltipContent>
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <button type="button" onClick={() => bumpBlockLayer(mb, -1)} aria-label={t('下移一层')} className="text-ink-3 hover:text-ink rounded p-1" disabled={mb.trackIndex <= 1}>
+                            <button type="button" onClick={() => bumpBlockLayer(mb, -1)} aria-label={t('workbench.sendBackward')} className="text-ink-3 hover:text-ink rounded p-1" disabled={mb.trackIndex <= 1}>
                               <ChevronDown size={13} />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t('下移一层')}</TooltipContent>
+                          <TooltipContent>{t('workbench.sendBackward')}</TooltipContent>
                         </Tooltip>
                         {(comp.shots ?? []).some((sh) => sh.personMatte) && (
                           <Tooltip>
@@ -5658,14 +5925,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                               <button
                                 type="button"
                                 onClick={() => togglePersonLayer(mb)}
-                                aria-label={t('人像层级')}
+                                aria-label={t('workbench.portraitLayer')}
                                 className={`rounded p-1 ${(mb.personLayer ? mb.personLayer === 'behind' : !!comp.personFx?.personFront) ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
                               >
                                 <BringToFront size={13} />
                               </button>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {(mb.personLayer ? mb.personLayer === 'behind' : !!comp.personFx?.personFront) ? t('这个组件在人像后面,点击提到人像上层') : t('这个组件在人像上层,点击垫到人像后面')}
+                              {(mb.personLayer ? mb.personLayer === 'behind' : !!comp.personFx?.personFront) ? t('workbench.elementSitsBehindPortrait') : t('workbench.elementSitsAbovePortrait')}
                             </TooltipContent>
                           </Tooltip>
                         )}
@@ -5678,13 +5945,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                             type="button"
                             onClick={(e) => (floatWin === 'person' ? setFloatWin(null) : openFloatAt('person', e.currentTarget.getBoundingClientRect()))}
                             disabled={!selectedShotId}
-                            aria-label={t('智能抠像')}
+                            aria-label={t('panels.smartCutout')}
                             className={`rounded p-1 disabled:opacity-40 ${(comp.shots ?? []).some((s) => s.personMatte) && comp.personFx?.personFront ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
                           >
                             <SendToBack size={13} />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent>{t('人物置顶(智能抠像)')}</TooltipContent>
+                        <TooltipContent>{t('workbench.personTopSmartCutout')}</TooltipContent>
                       </Tooltip>
                     )}
                     {!isSentenceCaption(mb) && (
@@ -5694,24 +5961,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                             <button
                               type="button"
                               onClick={() => setBgOpen((o) => !o)}
-                              aria-label={t('组件背景色')}
+                              aria-label={t('workbench.elementBackground')}
                               className={`rounded p-1 ${bgOpen ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
                             >
                               <Palette size={13} />
                             </button>
                           </TooltipTrigger>
-                          <TooltipContent>{t('背景与边框')}</TooltipContent>
+                          <TooltipContent>{t('workbench.backgroundBorder')}</TooltipContent>
                         </Tooltip>
                         {bgOpen && (
                           <div className="border-line bg-panel absolute left-1/2 top-full z-50 mt-1.5 flex -translate-x-1/2 flex-col gap-2 rounded-lg border px-2.5 py-2 shadow-xl">
                             {/* Background */}
                             <div className="flex items-center gap-1.5">
-                              <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('背景')}</span>
+                              <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('workbench.background')}</span>
                               <button
                                 type="button"
                                 onClick={() => setBlockBg(mb.id, undefined)}
-                                title={t('无背景(透明叠在画面上)')}
-                                aria-label={t('无背景')}
+                                title={t('workbench.noBackgroundTransparentOver')}
+                                aria-label={t('workbench.noBackground')}
                                 className={`h-5 w-5 shrink-0 rounded-full border bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!mb.bg ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                               />
                               {bgSwatches.map(([name, colorVal]) => (
@@ -5719,14 +5986,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                   key={name}
                                   type="button"
                                   onClick={() => setBlockBg(mb.id, colorVal)}
-                                  title={t('背景:{name}', { name: t(name) })}
-                                  aria-label={t('背景:{name}', { name: t(name) })}
+                                  title={t('panels.backgroundName', { name: t(name) })}
+                                  aria-label={t('panels.backgroundName', { name: t(name) })}
                                   className={`h-5 w-5 shrink-0 rounded-full border ${mb.bg === colorVal ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                                   style={{ background: colorVal }}
                                 />
                               ))}
                               <label
-                                title={t('自定义背景色')}
+                                title={t('panels.customBackgroundColor')}
                                 className="border-line relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border"
                                 style={{ background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)' }}
                               >
@@ -5735,18 +6002,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                   value={/^#[0-9a-fA-F]{6}/.test(mb.bg ?? '') ? mb.bg!.slice(0, 7) : '#ffffff'}
                                   onChange={(e) => setBlockBg(mb.id, e.target.value)}
                                   className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                                  aria-label={t('自定义背景色')}
+                                  aria-label={t('panels.customBackgroundColor')}
                                 />
                               </label>
                             </div>
                             {/* Border */}
                             <div className="flex items-center gap-1.5">
-                              <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('边框')}</span>
+                              <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('workbench.border')}</span>
                               <button
                                 type="button"
                                 onClick={() => setBlockBorder(mb.id, undefined)}
-                                title={t('无边框')}
-                                aria-label={t('无边框')}
+                                title={t('workbench.noBorder')}
+                                aria-label={t('workbench.noBorder')}
                                 className={`h-5 w-5 shrink-0 rounded-full border bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!mb.border ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                               />
                               {borderSwatches.map(([name, colorVal]) => (
@@ -5754,15 +6021,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                   key={name}
                                   type="button"
                                   onClick={() => setBlockBorder(mb.id, colorVal)}
-                                  title={t('边框:{name}', { name: t(name) })}
-                                  aria-label={t('边框:{name}', { name: t(name) })}
+                                  title={t('workbench.borderName', { name: t(name) })}
+                                  aria-label={t('workbench.borderName', { name: t(name) })}
                                   className={`relative h-5 w-5 shrink-0 rounded-full border ${mb.border === colorVal ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                                 >
                                   <span className="absolute inset-[3px] rounded-full border-2" style={{ borderColor: colorVal }} />
                                 </button>
                               ))}
                               <label
-                                title={t('自定义边框色')}
+                                title={t('workbench.customBorderColor')}
                                 className="border-line relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border"
                                 style={{ background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)' }}
                               >
@@ -5771,13 +6038,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                   value={/^#[0-9a-fA-F]{6}$/.test(mb.border ?? '') ? mb.border! : '#ffffff'}
                                   onChange={(e) => setBlockBorder(mb.id, e.target.value)}
                                   className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                                  aria-label={t('自定义边框色')}
+                                  aria-label={t('workbench.customBorderColor')}
                                 />
                               </label>
                             </div>
                             {/* Opacity */}
                             <div className="flex items-center gap-1.5">
-                              <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('透明度')}</span>
+                              <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('panels.opacity')}</span>
                               <input
                                 type="range"
                                 min={10}
@@ -5786,7 +6053,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                                 value={Math.round((mb.opacity ?? 1) * 100)}
                                 onChange={(e) => setBlockOpacity(mb.id, Number(e.target.value) / 100)}
                                 className="zoom-range w-28"
-                                aria-label={t('组件透明度')}
+                                aria-label={t('workbench.elementOpacity')}
                               />
                               <span className="text-ink-3 w-8 shrink-0 text-right font-mono text-[10px] tabular-nums">{Math.round((mb.opacity ?? 1) * 100)}%</span>
                             </div>
@@ -5806,11 +6073,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     <div className="bg-line mx-0.5 h-4 w-px" />
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <button type="button" onClick={() => removeBlock(mb.id)} aria-label={t('删除组件')} className="text-ink-3 rounded p-1 hover:text-destructive">
+                        <button type="button" onClick={() => removeBlock(mb.id)} aria-label={t('workbench.deleteElement')} className="text-ink-3 rounded p-1 hover:text-destructive">
                           <Trash2 size={13} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent>{t('删除组件')}</TooltipContent>
+                      <TooltipContent>{t('workbench.deleteElement')}</TooltipContent>
                     </Tooltip>
                   </div>
                   </TooltipProvider>
@@ -5839,10 +6106,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                             disabled={!!mediaBusy[imgSel.blockId]}
                             className="text-ink-3 hover:text-ink inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap disabled:opacity-40"
                           >
-                            {mediaBusy[imgSel.blockId] ? <Loader2 size={13} className="animate-spin" /> : <ImageIcon size={13} />} {t('换图')}
+                            {mediaBusy[imgSel.blockId] ? <Loader2 size={13} className="animate-spin" /> : <ImageIcon size={13} />} {t('workbench.replaceImage')}
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent>{t('替换这张图')}</TooltipContent>
+                        <TooltipContent>{t('workbench.replaceThisImage')}</TooltipContent>
                       </Tooltip>
                       <div className="bg-line mx-0.5 h-4 w-px" />
                       <Tooltip>
@@ -5853,13 +6120,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                               patchCustomImg(imgSel.blockId, imgSel.index, () => 'remove');
                               setImgSel(null);
                             }}
-                            aria-label={t('删除图片')}
+                            aria-label={t('workbench.deleteImage')}
                             className="text-ink-3 rounded p-1 hover:text-destructive"
                           >
                             <Trash2 size={13} />
                           </button>
                         </TooltipTrigger>
-                        <TooltipContent>{t('删除这张图')}</TooltipContent>
+                        <TooltipContent>{t('workbench.deleteThisImage')}</TooltipContent>
                       </Tooltip>
                     </div>
                   </TooltipProvider>
@@ -5882,7 +6149,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         }
                       >
                         <span className="inline-flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/90">
-                          <Loader2 size={10} className="animate-spin" /> {mediaBusy[b.id] === 'upload' ? t('上传中') : t('加载中')}
+                          <Loader2 size={10} className="animate-spin" /> {mediaBusy[b.id] === 'upload' ? t('workbench.uploading') : t('workbench.loading')}
                         </span>
                       </div>
                     ))}
@@ -5904,29 +6171,29 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               {/* Debug overlay: face (red) / subject (blue dashed) / safe zone (green). Normalized coords → % align directly with the canvas */}
               {dbgGeom && (
                 <div className="pointer-events-none absolute inset-0 z-20">
-                  <div className="absolute left-1 top-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] leading-tight text-emerald-600">{t('几何遍:')}{geomNote()}</div>
+                  <div className="absolute left-1 top-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] leading-tight text-emerald-600">{t('workbench.geometryPass')}{geomNote()}</div>
                   {dbgGeom.rects.map((r, i) => (
                     <div key={`safe${i}`} className="absolute border-2 border-emerald-400" style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }}>
-                      <span className="absolute left-0 top-0 bg-emerald-400 px-1 text-[9px] font-bold leading-tight text-black">{t('安全')}{i + 1}</span>
+                      <span className="absolute left-0 top-0 bg-emerald-400 px-1 text-[9px] font-bold leading-tight text-black">{t('workbench.safe')}{i + 1}</span>
                     </div>
                   ))}
                   {dbgGeom.subject && (
                     <div className="absolute border border-dashed border-sky-400" style={{ left: `${dbgGeom.subject.x * 100}%`, top: `${dbgGeom.subject.y * 100}%`, width: `${dbgGeom.subject.w * 100}%`, height: `${dbgGeom.subject.h * 100}%` }}>
-                      <span className="absolute right-0 top-0 bg-sky-400 px-1 text-[9px] font-bold leading-tight text-black">{t('主体')}</span>
+                      <span className="absolute right-0 top-0 bg-sky-400 px-1 text-[9px] font-bold leading-tight text-black">{t('workbench.subject')}</span>
                     </div>
                   )}
                   {dbgGeom.face && (
                     <div className="absolute border-2 border-red-500" style={{ left: `${dbgGeom.face.x * 100}%`, top: `${dbgGeom.face.y * 100}%`, width: `${dbgGeom.face.w * 100}%`, height: `${dbgGeom.face.h * 100}%` }}>
-                      <span className="absolute bottom-0 left-0 bg-red-500 px-1 text-[9px] font-bold leading-tight text-white">{t('脸')}</span>
+                      <span className="absolute bottom-0 left-0 bg-red-500 px-1 text-[9px] font-bold leading-tight text-white">{t('workbench.face')}</span>
                     </div>
                   )}
                   {visual?.textBands?.map((r, i) => (
                     <div key={`text${i}`} className="absolute border-2 border-orange-400 bg-orange-400/15" style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.w * 100}%`, height: `${r.h * 100}%` }}>
-                      <span className="absolute right-0 top-0 bg-orange-400 px-1 text-[9px] font-bold leading-tight text-black">{t('字幕区(预留)')}</span>
+                      <span className="absolute right-0 top-0 bg-orange-400 px-1 text-[9px] font-bold leading-tight text-black">{t('workbench.captionBandReserved')}</span>
                     </div>
                   ))}
                   <div className="absolute bottom-1 left-1 rounded bg-black/75 px-1.5 py-0.5 text-[9px] leading-tight text-white">
-                    {liveGeom ? '实时帧' : '段聚合'} · t={tSec.toFixed(1)}s{geomSeg ? ` · ${geomSeg.label.content}·人${geomSeg.label.person}·粗安全${geomSeg.label.safe}` : ''}{dbgGeom.face ? '' : ' · 无脸'}
+                    {liveGeom ? 'live frame' : 'segment agg'} · t={tSec.toFixed(1)}s{geomSeg ? ` · ${geomSeg.label.content}·person ${geomSeg.label.person}·safe ${geomSeg.label.safe}` : ''}{dbgGeom.face ? '' : ' · no face'}
                   </div>
                 </div>
               )}
@@ -5945,9 +6212,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               {floatWin === 'gen' ? (
                 (
                   [
-                    { v: 'image', label: '图片' },
-                    { v: 'video', label: '视频' },
-                    { v: 'element', label: '组件' },
+                    { v: 'image', label: 'panels.image' },
+                    { v: 'video', label: 'panels.video' },
+                    { v: 'element', label: 'panels.element' },
                   ] as { v: GenType; label: string }[]
                 ).map((gt) => (
                   <button
@@ -5964,34 +6231,34 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               ) : (
                 <span className="text-ink truncate px-1 text-[12px] font-medium">
                   {floatWin === 'script'
-                    ? t('智能剪口播')
+                    ? t('workbench.smartScriptCut')
                     : floatWin === 'person'
-                      ? t('人像')
+                      ? t('workbench.portrait')
                       : floatWin === 'anim'
-                        ? t('素材动效')
+                        ? t('workbench.assetMotion')
                         : floatWin === 'captions'
-                          ? t('字幕')
+                          ? t('panels.captions')
                           : floatWin === 'shot'
                             ? (() => {
                                 const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);
-                                return t('镜头取景') + (i >= 0 ? t(' · 场景 {n}', { n: i + 1 }) : '');
+                                return t('workbench.cameraFraming') + (i >= 0 ? t('workbench.sceneN', { n: i + 1 }) : '');
                               })()
                             : floatWin === 'transition'
                               ? (() => {
                                   const i = transitionCut == null ? -1 : clipSpans(comp.shots ?? []).findIndex((sp) => Math.abs(sp.editedEnd - transitionCut) < 0.05);
-                                  return t('转场') + (i >= 0 ? t(' · 场景 {a}/{b} 之间', { a: i + 1, b: i + 2 }) : '');
+                                  return t('tools.add_transition.label') + (i >= 0 ? t('workbench.betweenScenes', { a: i + 1, b: i + 2 }) : '');
                                 })()
                               : (() => {
                                   const cb = codeBlockId ? comp.blocks.find((x) => x.id === codeBlockId) : null;
-                                  return t('源码 · {label}', { label: cb?.label || codeBlockId || '' });
+                                  return t('workbench.sourceLabel', { label: cb?.label || codeBlockId || '' });
                                 })()}
                 </span>
               )}
               <button
                 type="button"
                 onClick={() => setFloatWin(null)}
-                title={t('关闭')}
-                aria-label={t('关闭面板')}
+                title={t('workbench.close')}
+                aria-label={t('workbench.closePanel')}
                 className="text-ink-4 hover:text-ink ml-auto rounded p-1"
               >
                 <X size={14} />
@@ -6001,9 +6268,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
               {(
                 [
-                  { v: 'assets', label: '素材' },
-                  { v: 'script', label: '剪口播' },
-                  { v: 'captions', label: '字幕' },
+                  { v: 'assets', label: 'workbench.assets' },
+                  { v: 'script', label: 'workbench.scriptCut' },
+                  { v: 'captions', label: 'panels.captions' },
                   // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
                 ] as { v: 'assets' | 'frames' | 'script' | 'captions'; label: string }[]
               ).map((tab) => (
@@ -6021,8 +6288,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={() => setLibCollapsed(true)}
-                title={t('收起素材栏')}
-                aria-label={t('收起素材栏')}
+                title={t('workbench.collapseAssetsBar')}
+                aria-label={t('workbench.collapseAssetsBar')}
                 className="text-ink-4 hover:text-ink ml-auto rounded p-1"
               >
                 <ChevronsRight size={14} />
@@ -6069,24 +6336,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           )}
           {!floatWin && libTab === 'captions' && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <CaptionsPanel
-                comp={comp}
-                generating={capGenBusy}
-                onPickPreset={applyCaptionPreset}
-                onRemove={removeCaptionLayer}
-                translation={
-                  studioProviders().translate
-                    ? {
-                        done: (asrSentences ?? []).filter((x) => x.sub).length + Object.values(clipAsr).flat().filter((x) => x.sub).length,
-                        total: (asrSentences ?? []).length + Object.values(clipAsr).flat().length,
-                        busy: capTransBusy,
-                        lang: resolveCaptionStyle(comp).sub?.lang,
-                        onTranslate: (lang) => void translateCaptionsTo(lang),
-                        onClear: () => void runStudioTool('set_caption_translations', { clear: true }),
-                      }
-                    : undefined
-                }
-              />
+              <CaptionsPanel {...captionsPanelProps()} />
             </div>
           )}
           {floatWin && (
@@ -6134,9 +6384,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     />
                   ) : (
                     <div className="text-ink-4 flex flex-1 items-center justify-center gap-2 text-[12px]">
-                      {t('组件已删除')}
+                      {t('workbench.elementDeleted')}
                       <button type="button" onClick={() => setFloatWin(null)} className="text-ink underline">
-                        {t('关闭')}
+                        {t('workbench.close')}
                       </button>
                     </div>
                   );
@@ -6145,13 +6395,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                   {selectedShot.src?.startsWith('blob:') && !clipFilesRef.current.has(selectedShot.src) && (
                     <div className="border-line flex items-center gap-2 border-b px-3 py-2">
-                      <span className="text-ink-2 min-w-0 flex-1 text-[11px]">{t('这段插入片段的源文件丢失,预览是黑段')}</span>
+                      <span className="text-ink-2 min-w-0 flex-1 text-[11px]">{t('workbench.insertSourceMissing')}</span>
                       <button
                         type="button"
                         onClick={() => void reconnectClip(selectedShot.id)}
                         className="bg-accent shrink-0 rounded px-2.5 py-1 text-[11px] font-medium text-white transition hover:brightness-110"
                       >
-                        {t('重新选择文件')}
+                        {t('workbench.rePickFile')}
                       </button>
                     </div>
                   )}
@@ -6173,24 +6423,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 />
               )}
               {floatWin === 'captions' && (
-                <CaptionsPanel
-                  comp={comp}
-                  generating={capGenBusy}
-                  onPickPreset={applyCaptionPreset}
-                  onRemove={removeCaptionLayer}
-                  translation={
-                    studioProviders().translate
-                      ? {
-                          done: (asrSentences ?? []).filter((x) => x.sub).length + Object.values(clipAsr).flat().filter((x) => x.sub).length,
-                          total: (asrSentences ?? []).length + Object.values(clipAsr).flat().length,
-                          busy: capTransBusy,
-                          lang: resolveCaptionStyle(comp).sub?.lang,
-                          onTranslate: (lang) => void translateCaptionsTo(lang),
-                          onClear: () => void runStudioTool('set_caption_translations', { clear: true }),
-                        }
-                      : undefined
-                  }
-                />
+                <CaptionsPanel {...captionsPanelProps()} />
               )}
               {floatWin === 'person' && (
                 <PersonFxPanel
@@ -6243,12 +6476,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 onClick={() => setPlaying((p) => !p)}
                 disabled={!hasContent}
                 className="bg-ink text-bg inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
-                aria-label={playing ? t('暂停') : t('播放')}
+                aria-label={playing ? t('tools.pause.label') : t('tools.play.label')}
               >
                 {playing ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{playing ? t('暂停(空格)') : t('播放(空格)')}</TooltipContent>
+            <TooltipContent>{playing ? t('workbench.pauseSpace') : t('workbench.playSpace')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -6257,55 +6490,55 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 onClick={() => setLocateSignal((n) => n + 1)}
                 disabled={!hasContent}
                 className="hover:bg-panel-2 shrink-0 rounded px-1 disabled:pointer-events-none"
-                aria-label={t('定位到播放头')}
+                aria-label={t('workbench.scrollPlayhead')}
               >
                 <TimeReadout duration={hasContent ? duration : 0} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('定位到播放头')}</TooltipContent>
+            <TooltipContent>{t('workbench.scrollPlayhead')}</TooltipContent>
           </Tooltip>
           {/* Undo/redo + editing (on the shot at the playhead, icons only): split / trim left / trim right — ][ glyph, dashed side = the side being trimmed */}
             <div className="text-ink-3 ml-1 flex shrink-0 items-center gap-0.5">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={undoLast} disabled={!canUndo} aria-label={t('撤销')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={undoLast} disabled={!canUndo} aria-label={t('tools.undo.label')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <Undo2 size={14} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t('撤销(⌘Z)')}</TooltipContent>
+                <TooltipContent>{t('workbench.undoShortcut')}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={redoLast} disabled={!canRedo} aria-label={t('重做')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={redoLast} disabled={!canRedo} aria-label={t('workbench.redo')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <Redo2 size={14} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t('重做(⇧⌘Z)')}</TooltipContent>
+                <TooltipContent>{t('workbench.redoShortcut')}</TooltipContent>
               </Tooltip>
               <div className="bg-line mx-0.5 h-4 w-px shrink-0" />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video} aria-label={t('分割')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t('分割')}</TooltipContent>
+                <TooltipContent>{t('workbench.split')}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video} aria-label={t('向左裁剪')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="left" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t('向左裁剪')}</TooltipContent>
+                <TooltipContent>{t('workbench.trimLeft')}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video} aria-label={t('向右裁剪')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="right" />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{t('向右裁剪')}</TooltipContent>
+                <TooltipContent>{t('workbench.trimRight')}</TooltipContent>
               </Tooltip>
             </div>
           {/* Delete selection: works for shots/components alike (same guard as the Delete key: don't delete while generating / keep at least one shot) */}
@@ -6318,13 +6551,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   else if (selectedShotIds.size) deleteShots(selectedShotIds); // bulk multi-select; single degrades automatically
                 }}
                 disabled={!selectedId && selectedShotIds.size === 0}
-                aria-label={t('删除选中')}
+                aria-label={t('workbench.deleteSelection')}
                 className="text-ink-3 hover:bg-panel-2 ml-1 rounded p-1 hover:text-destructive disabled:opacity-40"
               >
                 <Trash2 size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{selectedShotIds.size > 1 ? t('删除 {n} 个场景', { n: selectedShotIds.size }) : t('删除选中')}</TooltipContent>
+            <TooltipContent>{selectedShotIds.size > 1 ? t('workbench.deleteNScenes', { n: selectedShotIds.size }) : t('workbench.deleteSelection')}</TooltipContent>
           </Tooltip>
           {/* 剪口播 / 字幕 moved to the library rail tabs (siblings of 素材); the caption-selected
               shortcuts + style popover still open them floating. */}
@@ -6335,13 +6568,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 type="button"
                 onClick={(e) => (floatWin === 'person' ? setFloatWin(null) : openFloatAt('person', e.currentTarget.getBoundingClientRect()))}
                 disabled={!comp.video || !selectedShotId}
-                aria-label={t('人像')}
+                aria-label={t('workbench.portrait')}
                 className={`ml-1 rounded p-1 disabled:opacity-40 ${floatWin === 'person' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
                 <UserRound size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('智能抠像(人物置顶/描边/换背景)')}</TooltipContent>
+            <TooltipContent>{t('workbench.smartCutoutPersonTop')}</TooltipContent>
           </Tooltip>
           {/* Framing: framing settings for the selected shot (style-card panel) */}
           <Tooltip>
@@ -6350,24 +6583,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 type="button"
                 onClick={(e) => selectedShotId && (floatWin === 'shot' ? setFloatWin(null) : openFloatAt('shot', e.currentTarget.getBoundingClientRect()))}
                 disabled={!comp.video || !selectedShotId}
-                aria-label={t('镜头取景')}
+                aria-label={t('workbench.cameraFraming')}
                 className={`rounded p-1 disabled:opacity-40 ${floatWin === 'shot' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
                 <Frame size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('镜头取景')}</TooltipContent>
+            <TooltipContent>{t('workbench.cameraFraming')}</TooltipContent>
           </Tooltip>
           <div className="flex-1" />
           {/* Timeline zoom: − thin slider + (borderless, vertically centered) */}
           <div className="text-ink-3 flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
-                <button type="button" onClick={() => setPps((p) => Math.max(MIN_PPS, Math.round(p / 1.4)))} disabled={pps <= MIN_PPS} aria-label={t('时间轴缩小')} className="hover:text-ink flex items-center disabled:opacity-40">
+                <button type="button" onClick={() => setPps((p) => Math.max(MIN_PPS, Math.round(p / 1.4)))} disabled={pps <= MIN_PPS} aria-label={t('workbench.zoomOutTimeline')} className="hover:text-ink flex items-center disabled:opacity-40">
                   <Minus size={14} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t('缩小时间轴')}</TooltipContent>
+              <TooltipContent>{t('workbench.zoomOutTimelineLabel')}</TooltipContent>
             </Tooltip>
             <input
               type="range"
@@ -6377,15 +6610,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               value={pps}
               onChange={(e) => setPps(Number(e.target.value))}
               className="zoom-range w-24"
-              aria-label={t('时间轴缩放')}
+              aria-label={t('workbench.timelineZoom')}
             />
             <Tooltip>
               <TooltipTrigger asChild>
-                <button type="button" onClick={() => setPps((p) => Math.min(MAX_PPS, Math.round(p * 1.4)))} disabled={pps >= MAX_PPS} aria-label={t('时间轴放大')} className="hover:text-ink flex items-center disabled:opacity-40">
+                <button type="button" onClick={() => setPps((p) => Math.min(MAX_PPS, Math.round(p * 1.4)))} disabled={pps >= MAX_PPS} aria-label={t('workbench.zoomInTimeline')} className="hover:text-ink flex items-center disabled:opacity-40">
                   <Plus size={14} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t('放大时间轴')}</TooltipContent>
+              <TooltipContent>{t('workbench.zoomInTimelineLabel')}</TooltipContent>
             </Tooltip>
           </div>
           {/* Debug hook (developer): admin-only, leaving a single "analysis" entry — face/safe-zone and source
@@ -6397,13 +6630,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <button
                   type="button"
                   onClick={() => setShowDebug((s) => !s)}
-                  aria-label={t('调试:口播稿与画面分析')}
+                  aria-label={t('workbench.debugTranscriptVisualAnalysis')}
                   className={`rounded p-1.5 ${showDebug ? 'text-ink bg-panel-2' : 'text-ink-4 hover:text-ink'}`}
                 >
                   <FlaskConical size={14} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t('分析(调试)')}</TooltipContent>
+              <TooltipContent>{t('workbench.analysisDebug')}</TooltipContent>
             </Tooltip>
           </div>
           )}
@@ -6416,15 +6649,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
               >
                 {exporting || publishing ? <Loader2 size={14} className="animate-spin" /> : <FileVideo size={14} />}{' '}
-                {exporting ? t('导出 {pct}%', { pct: exportPct }) : publishing ? t('合成 {pct}%', { pct: exportPct }) : t('导出')}
+                {exporting ? t('workbench.exportingPctShort', { pct: exportPct }) : publishing ? t('workbench.renderingPct', { pct: exportPct }) : t('workbench.export')}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('导出成片')}</TooltipContent>
+            <TooltipContent>{t('tools.export_video.label')}</TooltipContent>
           </Tooltip>
           <Dialog open={exportOpen} onOpenChange={(v) => { if (!v && exporting) return; setExportOpen(v); }}>
             <DialogContent className="max-w-[320px]" showCloseButton={!exporting}>
               <DialogHeader>
-                <DialogTitle>{t('导出成片')}</DialogTitle>
+                <DialogTitle>{t('tools.export_video.label')}</DialogTitle>
               </DialogHeader>
               {exporting ? (
                 // Export dialog stays open: progress lives here, only "cancel export" can close it (overlay/Esc are blocked)
@@ -6432,7 +6665,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   <div className="bg-line h-1.5 overflow-hidden rounded-full">
                     <div className="bg-accent h-full rounded-full transition-[width] duration-300 ease-out" style={{ width: `${exportPct}%` }} />
                   </div>
-                  <p className="text-ink-3 text-[12px]">{t('合成中 {pct}%，完成后自动下载', { pct: exportPct })}</p>
+                  <p className="text-ink-3 text-[12px]">{t('workbench.renderingPctDownloads', { pct: exportPct })}</p>
                   <button
                     type="button"
                     onClick={() => {
@@ -6441,13 +6674,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     }}
                     className="border-line text-ink-2 hover:text-ink inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-[13px]"
                   >
-                    <X size={14} /> {t('取消导出')}
+                    <X size={14} /> {t('workbench.cancelExport')}
                   </button>
                 </div>
               ) : (
               <div className="flex flex-col gap-3">
                 <ExportOptRow
-                  label={t('分辨率')}
+                  label={t('chatGen.resolution')}
                   value={exportOpts.res}
                   options={[
                     [2160, '4K'],
@@ -6459,7 +6692,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   onPick={(res) => setExportOpts((o) => ({ ...o, res }))}
                 />
                 <ExportOptRow
-                  label={t('帧率')}
+                  label={t('workbench.frameRate')}
                   value={exportOpts.fps}
                   options={[
                     [24, '24'],
@@ -6469,7 +6702,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   onPick={(fps) => setExportOpts((o) => ({ ...o, fps }))}
                 />
                 <ExportOptRow
-                  label={t('格式')}
+                  label={t('workbench.format')}
                   value={exportOpts.format}
                   options={[
                     ['mp4', 'MP4'],
@@ -6478,7 +6711,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   ]}
                   onPick={(format) => setExportOpts((o) => ({ ...o, format }))}
                 />
-                <p className="text-ink-4 text-[11px] leading-relaxed">{t('导出完成后自动下载；内容和选项都没变时直接下载上次的成片。')}</p>
+                <p className="text-ink-4 text-[11px] leading-relaxed">{t('workbench.downloadsAutomaticallyWhenExport')}</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -6487,7 +6720,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   }}
                   className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
                 >
-                  <Download size={14} /> {t('开始导出')}
+                  <Download size={14} /> {t('workbench.startExport')}
                 </button>
               </div>
               )}
@@ -6506,7 +6739,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   <X size={14} />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>{t('停止合成')}</TooltipContent>
+              <TooltipContent>{t('workbench.stopRendering')}</TooltipContent>
             </Tooltip>
           )}
         </div>
@@ -6533,7 +6766,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         {showDebug && (
           <div className="border-line flex h-44 flex-col border-t">
             <div className="border-line text-ink-4 flex items-center gap-2 border-b px-3 py-1.5 text-[11px]">
-              <span>{t('口播稿 + 画面分析（只读 · 也在 window.__studio · 已缓存）')}</span>
+              <span>{t('workbench.transcriptVisualAnalysisRead')}</span>
               <div className="ml-auto flex items-center gap-1.5">
                 {/* Face/safe-zone overlay (folded in from the old toolbar button): overlay face (red)/subject (blue)/safe zone (green) on the preview */}
                 <button
@@ -6542,7 +6775,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   disabled={!visual}
                   className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40 ${showGeom ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600' : 'border-line text-ink-3 hover:text-ink hover:bg-panel-2'}`}
                 >
-                  <ScanFace size={11} /> {t('人脸/安全区')}
+                  <ScanFace size={11} /> {t('workbench.facesSafeZones')}
                 </button>
                 {/* assembled HTML (folded in from the old toolbar button) */}
                 <button
@@ -6550,7 +6783,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   onClick={() => setShowCode((s) => !s)}
                   className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${showCode ? 'border-line bg-panel-2 text-ink' : 'border-line text-ink-3 hover:text-ink hover:bg-panel-2'}`}
                 >
-                  <Code2 size={11} /> {t('源码')}
+                  <Code2 size={11} /> {t('workbench.source')}
                 </button>
                 <button
                   type="button"
@@ -6558,7 +6791,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   disabled={!comp.video}
                   className="border-line text-ink-3 hover:text-ink hover:bg-panel-2 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40"
                 >
-                  {t('清缓存重跑画面分析')}
+                  {t('workbench.clearCacheRerunVisual')}
                 </button>
               </div>
             </div>
@@ -6574,7 +6807,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         {/* assembled HTML (read-only, transparent for inspection) */}
         {showCode && (
           <div className="border-line flex h-44 flex-col border-t">
-            <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[11px]">{t('assembled HTML（由块拼出，只读）')}</div>
+            <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[11px]">{t('workbench.assembledHtmlBuiltFrom')}</div>
             <textarea
               value={assembled}
               readOnly
@@ -6793,8 +7026,8 @@ function BoxEditOverlay({
         <button
           type="button"
           onPointerDown={onRotatePointerDown}
-          title={t('拖动旋转（按住 Shift 吸附 15°）')}
-          aria-label={t('旋转')}
+          title={t('workbench.dragRotateHoldShift')}
+          aria-label={t('common.rotate')}
           className="border-accent text-accent pointer-events-auto -mt-px flex h-5 w-5 cursor-grab items-center justify-center rounded-full border-2 bg-white shadow active:cursor-grabbing"
         >
           <RotateCw size={11} />
@@ -6814,15 +7047,15 @@ function BoxEditOverlay({
       <div className={`${edge} -left-1 bottom-0 top-0 w-2.5 cursor-move`} onPointerDown={onMovePointerDown} />
       <div className={`${edge} -right-1 bottom-0 top-0 w-2.5 cursor-move`} onPointerDown={onMovePointerDown} />
       {/* Mid-edge bar handles: stretch only this axis (opposite edge anchored, content reflows to fill; no crop, no locked ratio) */}
-      <div className={`${knob} top-1/2 -right-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('调整宽度')} onPointerDown={(e) => onEdgePointerDown(e, 'r')} />
-      <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('调整宽度')} onPointerDown={(e) => onEdgePointerDown(e, 'l')} />
-      <div className={`${knob} left-1/2 -bottom-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('调整高度')} onPointerDown={(e) => onEdgePointerDown(e, 'b')} />
-      <div className={`${knob} left-1/2 -top-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('调整高度')} onPointerDown={(e) => onEdgePointerDown(e, 't')} />
+      <div className={`${knob} top-1/2 -right-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.resizeWidth')} onPointerDown={(e) => onEdgePointerDown(e, 'r')} />
+      <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.resizeWidth')} onPointerDown={(e) => onEdgePointerDown(e, 'l')} />
+      <div className={`${knob} left-1/2 -bottom-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.resizeHeight')} onPointerDown={(e) => onEdgePointerDown(e, 'b')} />
+      <div className={`${knob} left-1/2 -top-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.resizeHeight')} onPointerDown={(e) => onEdgePointerDown(e, 't')} />
       {/* Corner dots: proportional scale (window/content/font together, diagonal anchored) */}
-      <div className={`${knob} -top-[7px] -left-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('等比缩放')} onPointerDown={(e) => onScalePointerDown(e, -1, -1)} />
-      <div className={`${knob} -top-[7px] -right-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('等比缩放')} onPointerDown={(e) => onScalePointerDown(e, 1, -1)} />
-      <div className={`${knob} -bottom-[7px] -left-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('等比缩放')} onPointerDown={(e) => onScalePointerDown(e, -1, 1)} />
-      <div className={`${knob} -bottom-[7px] -right-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('等比缩放')} onPointerDown={(e) => onScalePointerDown(e, 1, 1)} />
+      <div className={`${knob} -top-[7px] -left-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('workbench.scaleProportionally')} onPointerDown={(e) => onScalePointerDown(e, -1, -1)} />
+      <div className={`${knob} -top-[7px] -right-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('workbench.scaleProportionally')} onPointerDown={(e) => onScalePointerDown(e, 1, -1)} />
+      <div className={`${knob} -bottom-[7px] -left-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('workbench.scaleProportionally')} onPointerDown={(e) => onScalePointerDown(e, -1, 1)} />
+      <div className={`${knob} -bottom-[7px] -right-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('workbench.scaleProportionally')} onPointerDown={(e) => onScalePointerDown(e, 1, 1)} />
     </div>
   );
 }
@@ -6843,7 +7076,7 @@ function CaptionEditOverlay({
   onChange,
   onLive,
   onOpenPanel,
-  label = t('字幕 · 全局'),
+  label = t('workbench.captionsGlobal'),
 }: {
   style: CaptionStyle;
   compH: number;
@@ -6991,20 +7224,20 @@ function CaptionEditOverlay({
         <span className="border-line bg-panel flex items-center gap-0.5 rounded border px-1 py-0.5 shadow">
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label={t('字号调小')} onClick={() => stepScale(-0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">
+              <button type="button" aria-label={t('workbench.smallerText')} onClick={() => stepScale(-0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">
                 A−
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('字号调小')}</TooltipContent>
+            <TooltipContent>{t('workbench.smallerText')}</TooltipContent>
           </Tooltip>
           <span className="text-ink-4 min-w-8 text-center font-mono text-[10px] tabular-nums">{Math.max(10, Math.round(fontPx * eff.scale))}px</span>
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label={t('字号调大')} onClick={() => stepScale(0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">
+              <button type="button" aria-label={t('workbench.largerText')} onClick={() => stepScale(0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">
                 A＋
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('字号调大')}</TooltipContent>
+            <TooltipContent>{t('workbench.largerText')}</TooltipContent>
           </Tooltip>
         </span>
         {/* Shortcut entries to the caption's two editing surfaces: edit/delete words → smart narration; change style → caption style */}
@@ -7012,33 +7245,33 @@ function CaptionEditOverlay({
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={() => onOpenPanel('script')} className="text-ink-3 hover:text-ink px-1 text-[10.5px] leading-none">
-                {t('智能剪口播')}
+                {t('workbench.smartScriptCut')}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('改词/删词')}</TooltipContent>
+            <TooltipContent>{t('workbench.editDeleteWords')}</TooltipContent>
           </Tooltip>
           <span className="bg-line h-3 w-px" />
           <Tooltip>
             <TooltipTrigger asChild>
               <button type="button" onClick={() => onOpenPanel('caption')} className="text-ink-3 hover:text-ink px-1 text-[10.5px] leading-none">
-                {t('字幕样式')}
+                {t('workbench.captionStyles')}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{t('换样式')}</TooltipContent>
+            <TooltipContent>{t('workbench.changeStyle')}</TooltipContent>
           </Tooltip>
         </span>
       </div>
       </TooltipProvider>
       {/* Left/right mid-edge handles = line width (re-segment, ghost: solid line stays, dashed follows, one rebuild on release);
           top/bottom mid-edge handles = box height (pure padding, font size unchanged, follows live directly); corners = line width + box height together (ghost). */}
-      <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('调整行宽')} onPointerDown={(e) => drag(e, edgeWidth(-1), 'ghost')} />
-      <div className={`${knob} top-1/2 -right-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('调整行宽')} onPointerDown={(e) => drag(e, edgeWidth(1), 'ghost')} />
-      <div className={`${knob} left-1/2 -top-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('调整框高')} onPointerDown={(e) => drag(e, edgeTop)} />
-      <div className={`${knob} left-1/2 -bottom-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('调整框高')} onPointerDown={(e) => drag(e, edgeBottom)} />
-      <div className={`${knob} -top-[7px] -left-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('调整大小')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(-1)(s, dx), ...edgeTop(s, dx, dy) }), 'ghost')} />
-      <div className={`${knob} -top-[7px] -right-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('调整大小')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(1)(s, dx), ...edgeTop(s, dx, dy) }), 'ghost')} />
-      <div className={`${knob} -bottom-[7px] -left-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('调整大小')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(-1)(s, dx), ...edgeBottom(s, dx, dy) }), 'ghost')} />
-      <div className={`${knob} -bottom-[7px] -right-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('调整大小')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(1)(s, dx), ...edgeBottom(s, dx, dy) }), 'ghost')} />
+      <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.adjustLineWidth')} onPointerDown={(e) => drag(e, edgeWidth(-1), 'ghost')} />
+      <div className={`${knob} top-1/2 -right-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.adjustLineWidth')} onPointerDown={(e) => drag(e, edgeWidth(1), 'ghost')} />
+      <div className={`${knob} left-1/2 -top-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.adjustBoxHeight')} onPointerDown={(e) => drag(e, edgeTop)} />
+      <div className={`${knob} left-1/2 -bottom-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.adjustBoxHeight')} onPointerDown={(e) => drag(e, edgeBottom)} />
+      <div className={`${knob} -top-[7px] -left-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('workbench.resize')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(-1)(s, dx), ...edgeTop(s, dx, dy) }), 'ghost')} />
+      <div className={`${knob} -top-[7px] -right-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('workbench.resize')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(1)(s, dx), ...edgeTop(s, dx, dy) }), 'ghost')} />
+      <div className={`${knob} -bottom-[7px] -left-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('workbench.resize')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(-1)(s, dx), ...edgeBottom(s, dx, dy) }), 'ghost')} />
+      <div className={`${knob} -bottom-[7px] -right-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('workbench.resize')} onPointerDown={(e) => drag(e, (s, dx, dy) => ({ ...edgeWidth(1)(s, dx), ...edgeBottom(s, dx, dy) }), 'ghost')} />
       {/* Drag shield (rendered last = topmost): stage-sized, blocks the iframe from eating events */}
       {shield && (
         <div

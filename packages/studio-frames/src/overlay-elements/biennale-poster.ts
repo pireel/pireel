@@ -9,10 +9,10 @@ import { mk, txt, type Block } from '../dialects/shared';
 const HARD = '10px 10px 0 var(--fg)';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'bo_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="kick"><span data-edit="kick">${txt('标签', 'LABEL')}</span><i>№01</i></div>
@@ -28,10 +28,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .kick',{x:-90,autoAlpha:0,duration:0.22,ease:'power3.out'},0);\n` +
         `tl.from('#${id} .bar',{x:-140,autoAlpha:0,duration:0.25,ease:'power3.out'},0.08);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'bo_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="v"><b data-edit="num">38</b><i class="u" data-edit="unit">%</i></div>
@@ -49,10 +49,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .v b',{innerText:0,snap:{innerText:1},duration:0.7,ease:'power1.out'},0.15);\n` +
         `tl.from('#${id} .u',{scale:0,duration:0.2,ease:'power3.out'},0.3);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'bo_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="hd" data-edit="title">${txt('列表标题', 'List title')}</div>
@@ -72,10 +72,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r2',{x:-60,autoAlpha:0,duration:0.2,ease:'power3.out'},0.28);\n` +
         `tl.from('#${id} .r3',{x:-60,autoAlpha:0,duration:0.2,ease:'power3.out'},0.4);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'bo_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w"><span class="t" data-edit="word">${txt('关键词', 'Keyword')}</span></div>
 <style>
@@ -84,10 +84,10 @@ export const overlays: Record<string, () => Block> = {
 </style>`,
       (id) => `tl.from('#${id} .t',{scale:1.6,autoAlpha:0,duration:0.2,ease:'power3.in'},0);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'bo_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="note">${txt('标注一', 'Note 1')}</div>
@@ -102,10 +102,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{y:-70,autoAlpha:0,duration:0.22,ease:'power3.out'},0);\n` +
         `tl.from('#${id} .rule',{scaleY:0,transformOrigin:'top',duration:0.2,ease:'power3.out'},0.18);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'bo_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <span class="p" data-edit="cta">${txt('+ 关注', '+ Follow')}</span>
@@ -118,10 +118,10 @@ export const overlays: Record<string, () => Block> = {
 </style>`,
       (id) => `tl.from('#${id} .w',{x:120,autoAlpha:0,duration:0.24,ease:'power3.out'},0);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'bo_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <i class="q">“</i>
@@ -137,10 +137,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .w',{y:110,autoAlpha:0,duration:0.25,ease:'power3.out'},0);\n` +
         `tl.from('#${id} .t b',{autoAlpha:0,duration:0.18},0.3);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'bo_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

@@ -57,10 +57,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'fb_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="fb">
   <div class="top"><span>出发 DEPARTURES</span><b>FLIGHT PR-101</b></div>
@@ -84,10 +84,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ft',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.62);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.85);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'fb_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="fb">
   <div class="top"><span>到达 ARRIVALS</span><b>DATA BOARD</b></div>
@@ -107,10 +107,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ft',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.66);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.88);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'fb_chg',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="fb">
   <div class="top"><span>出发 DEPARTURES</span><b>LIVE COUNT</b></div>
@@ -131,10 +131,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .v',{rotationX:-14,duration:0.07,yoyo:true,repeat:1,ease:'power1.inOut'},0.55);\n` +
         `tl.from('#${id} .ft',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.98);`,
     ),
-  倒计时: () =>
+  'countdown': () =>
     mk(
       'fb_cnt',
-      '倒计时',
+      'countdown',
       (id) => `
 <div class="fb">
   <div class="top"><span>最后登机 FINAL CALL</span><b>GATE 24</b></div>
@@ -158,10 +158,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ft',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.62);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.88);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'fb_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="fb">
   <div class="top"><span>行程 ITINERARY</span><b>3 LEGS</b></div>
@@ -185,10 +185,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .r',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.22,ease:'power2.out',stagger:0.12},0.24);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.85);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'fb_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="fb">
   <div class="top"><span>同一目的地 SAME DEST</span><b>VS</b></div>
@@ -214,10 +214,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .vd',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.65);\n` +
         `tl.to('#${id} .win .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.85);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'fb_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="fb">
   <div class="top"><span>广播 ANNOUNCEMENT</span><b>PA SYSTEM</b></div>
@@ -239,10 +239,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .l2',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.26,ease:'power2.out'},0.42);\n` +
         `tl.from('#${id} .who',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.75);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'fb_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="fb">
   <div class="top"><span>登机广播 BOARDING</span><b>LAST CALL</b></div>

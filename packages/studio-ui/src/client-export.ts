@@ -76,7 +76,7 @@ export interface SourceRig {
 export async function openSource(file: File, from: number, to: number, W: number, H: number): Promise<SourceRig> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   const video = await input.getPrimaryVideoTrack();
-  if (!video) throw new Error(t('源缺视频轨'));
+  if (!video) throw new Error(t('common.sourceNoVideoTrack'));
   const audio = await input.getPrimaryAudioTrack();
   const cover = Math.max(W / video.displayWidth, H / video.displayHeight);
   const sink = new VideoSampleSink(video);
@@ -149,7 +149,7 @@ function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
           doc.head.appendChild(hide);
           await doc.fonts.ready;
           const root = doc.getElementById('root');
-          if (!root || !win.__hfPreview) throw new Error(t('overlay doc 缺 #root 或预览运行时'));
+          if (!root || !win.__hfPreview) throw new Error(t('common.overlayDocumentMissingRoot'));
           const headCss = [...doc.head.querySelectorAll('style')].map((s) => s.textContent ?? '').join('\n');
           resolve({ iframe, win, doc, root, headCss, dispose: () => iframe.remove() });
         } catch (e) {
@@ -367,7 +367,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       if (local) files.set(key, local);
       else {
         const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(s.src)}`);
-        if (!r.ok) throw new Error(t('插入片段拉取失败'));
+        if (!r.ok) throw new Error(t('workbench.failedFetchInsertClip'));
         files.set(key, new File([await r.blob()], 'clip.mp4', { type: 'video/mp4' }));
       }
     }
@@ -653,8 +653,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const wall = (performance.now() - expT0) / 1000;
       const pct = (x: number) => `${Math.round((x / 1000 / wall) * 100)}%`;
       console.info(
-        `[export] ${total}帧/${durationSec.toFixed(1)}s → ${wall.toFixed(1)}s(${(durationSec / wall).toFixed(2)}x)· ` +
-          `光栅化 ${pct(tm.raster)}(热帧 ${tm.rasterN}/${total})· 取帧 ${pct(tm.video)} · 布局 ${pct(tm.prep)} · 合成 ${pct(tm.draw)} · 编码等待 ${pct(tm.enc)}`,
+        `[export] ${total} frames/${durationSec.toFixed(1)}s → ${wall.toFixed(1)}s (${(durationSec / wall).toFixed(2)}x) · ` +
+          `raster ${pct(tm.raster)} (hot frames ${tm.rasterN}/${total}) · fetch ${pct(tm.video)} · layout ${pct(tm.prep)} · draw ${pct(tm.draw)} · encoder wait ${pct(tm.enc)}`,
       );
     }
 

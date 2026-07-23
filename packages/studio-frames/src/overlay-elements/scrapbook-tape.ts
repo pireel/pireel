@@ -19,10 +19,10 @@ const NOTE =
   'background:var(--panel-2);box-shadow:var(--shadow);border-radius:var(--radius);';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'sc_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="card">
@@ -50,10 +50,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.26,ease:'power2.out'},0.5);\n` +
         `tl.from('#${id} .note',{y:60,rotation:-6,autoAlpha:0,duration:0.28,ease:'back.out(1.5)'},0.6);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'sc_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="card">
@@ -81,10 +81,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .v',{autoAlpha:0,y:24,duration:0.24,ease:'power2.out'},0.4);\n` +
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power2.out'},0.62);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'sc_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <i class="tp top"></i>
@@ -110,10 +110,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r3',{x:-50,autoAlpha:0,duration:0.22},0.58);\n` +
         `tl.from('#${id} .bx b',{scale:0,duration:0.2,ease:'back.out(2)',stagger:0.1},0.7);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'sc_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <span class="t" data-edit="word">${txt('关键词', 'Keyword')}</span>
@@ -132,10 +132,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t1',{scale:0,autoAlpha:0,duration:0.2,ease:'back.out(2)'},0.28);\n` +
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.28,ease:'power2.out'},0.42);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'sc_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="note"><i class="tp top"></i><span data-edit="note">${txt('标注一!', 'Note 1!')}</span></div>
@@ -152,10 +152,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .tp.top',{scale:0,autoAlpha:0,duration:0.18,ease:'back.out(2)'},0.24);\n` +
         `tl.to('#${id} .ar path',{strokeDashoffset:0,duration:0.4,ease:'power1.inOut'},0.38);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'sc_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="card">
@@ -183,10 +183,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .cir path',{strokeDashoffset:0,duration:0.34,ease:'power1.inOut'},0.4);\n` +
         `tl.from('#${id} .note',{y:50,rotation:5,autoAlpha:0,duration:0.26,ease:'back.out(1.5)'},0.74);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'sc_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="card">
@@ -218,10 +218,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ul',{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power2.out'},0.6);\n` +
         `tl.from('#${id} .note',{y:40,rotation:6,autoAlpha:0,duration:0.24,ease:'back.out(1.5)'},0.72);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'sc_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i class="tp top"></i><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

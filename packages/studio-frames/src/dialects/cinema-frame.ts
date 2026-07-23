@@ -50,10 +50,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'cn_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -77,10 +77,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cr span',{autoAlpha:0,duration:0.4,stagger:0.08},0.75);\n` +
         `tl.from('#${id} .sl',{autoAlpha:0,duration:0.4},0.85);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'cn_chp',
-      '章节',
+      'chapters',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -111,10 +111,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .gu',{scaleX:0,transformOrigin:'left center',duration:0.45,ease:'power2.inOut'},0.7);\n` +
         `tl.from('#${id} .en,#${id} .sl',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'cn_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -136,10 +136,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .zh',{autoAlpha:0,y:20,duration:0.6,ease:'power1.out'},0.45);\n` +
         `tl.from('#${id} .en',{autoAlpha:0,y:20,duration:0.5,ease:'power1.out'},0.65);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'cn_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -165,10 +165,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .rule',{scaleX:0,duration:0.45,ease:'power2.inOut'},0.6);\n` +
         `tl.from('#${id} .w,#${id} .sl',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'cn_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -193,10 +193,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cr span',{autoAlpha:0,duration:0.4,stagger:0.08},0.75);\n` +
         `tl.from('#${id} .sl',{autoAlpha:0,duration:0.4},0.85);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'cn_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -224,10 +224,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .band',{autoAlpha:0,y:20,duration:0.5,ease:'power1.out',stagger:0.12},0.4);\n` +
         `tl.from('#${id} .gu',{scaleX:0,transformOrigin:'left center',duration:0.45,ease:'power2.inOut'},0.75);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'cn_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>
@@ -256,10 +256,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .row',{autoAlpha:0,y:20,duration:0.45,ease:'power1.out',stagger:0.12},0.5);\n` +
         `tl.from('#${id} .sl',{autoAlpha:0,duration:0.4},0.85);`,
     ),
-  人名条: () =>
+  'lower-third': () =>
     mk(
       'cn_cst',
-      '人名条',
+      'lower-third',
       (id) => `
 <div class="cn">
   <div class="lb t"></div><div class="lb b"></div>

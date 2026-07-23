@@ -21,10 +21,10 @@ const WIPE = `{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power3
 const PULSE = `{scale:1.04,duration:0.1,yoyo:true,repeat:1}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'va_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="kick">ROUND 01</div>
@@ -42,10 +42,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{x:-90,autoAlpha:0,duration:0.18,ease:'power3.out'},0.12);\n` +
         `tl.from('#${id} .hz',${WIPE},0.2);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'va_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="hz"></div>
@@ -64,10 +64,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .n',{innerText:0,snap:{innerText:1},duration:0.7,ease:'power1.out'},0.14);\n` +
         `tl.from('#${id} .chip',{x:-90,autoAlpha:0,duration:0.18,ease:'power3.out'},0.3);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'va_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="title">GAME PLAN</div>
@@ -90,10 +90,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r3',${SLAM_L},0.3);\n` +
         `tl.to('#${id} .win',${PULSE},0.6);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'va_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="t" data-edit="word">${txt('关键词', 'Keyword')}</div>
@@ -109,10 +109,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .hz',${WIPE},0.16);\n` +
         `tl.to('#${id} .t',${PULSE},0.44);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'va_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="note">${txt('标注一 MARK', 'NOTE 1')}</div>
@@ -130,10 +130,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .bar',{scaleY:0,transformOrigin:'top',duration:0.2,ease:'power3.out'},0.16);\n` +
         `tl.from('#${id} .sq',{scale:0,duration:0.18,ease:'back.out(1.8)'},0.3);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'va_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="side">JOIN THE SQUAD</div>
@@ -149,10 +149,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{x:90,autoAlpha:0,duration:0.18,ease:'power3.out'},0.12);\n` +
         `tl.to('#${id} .fol',${PULSE},0.4);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'va_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="hz"></div>
@@ -171,10 +171,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .hz',${WIPE},0.14);\n` +
         `tl.from('#${id} .board b',{x:-60,autoAlpha:0,duration:0.18,ease:'power3.out'},0.3);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'va_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s lose"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

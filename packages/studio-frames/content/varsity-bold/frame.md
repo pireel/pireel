@@ -3,7 +3,7 @@ id: varsity-bold
 title: 竞技 Varsity
 summary: 炭黑橙红:斜切巨号、对角条纹、比分对阵,适合健身/赛事/竞技解说
 icon: 🏁
-showcase: [标题卡, 大数字, 数字变化, 对比, 走势, 时间线, 步骤, 引导]
+showcase: [title-card, big-number, count-up, compare, trend, timeline, steps, cta]
 palette: { paper: "#101418", panel: "#1B222A", panel-2: "#141A21", fg: "#F5F7F8", muted: "#F5F7F899", accent: "#FF4D1F", accent-2: "#C7D3DC", line: "#F5F7F824", grid: "#F5F7F80E", radius: "6px", shadow: "0 18px 44px rgb(0 0 0 / 0.55)", glow: "0 0 36px rgb(255 77 31 / 0.45)" }
 version: 0.1.2
 ---
@@ -47,21 +47,21 @@ By default blocks are LOWER-THIRD GRAPHICS over the broadcast: the block root st
 - Pulse: `tl.to(winner,{scale:1.04,duration:0.1,yoyo:true,repeat:1})` — once per card, winner only.
 
 ## Block recipes
-- 标题卡: ghost number `01` cropped at the top-right; an `--accent` chip (`TRAINING DAY — ROUND 01`) above a skewed `--panel` slab holding the 150px headline; hazard band across the bottom.
+- title-card: ghost number `01` cropped at the top-right; an `--accent` chip (`TRAINING DAY — ROUND 01`) above a skewed `--panel` slab holding the 150px headline; hazard band across the bottom.
   Motion: slab slams from x-220 `power3.out` 0.2s, chip snaps after, hazard band wipes in via `scaleX` from the left, ghost number slides in last from the right.
-- 大数字: hero hollow number `98` (≈620px, orange stroke 8px) center-left, skewed; an `--accent` chip `最大摄氧量 VO₂MAX` riding its lower edge; scoreboard tile bottom-right `+12 / THIS WEEK`; thin hazard sliver along the top.
+- big-number: hero hollow number `98` (≈620px, orange stroke 8px) center-left, skewed; an `--accent` chip `最大摄氧量 VO₂MAX` riding its lower edge; scoreboard tile bottom-right `+12 / THIS WEEK`; thin hazard sliver along the top.
   Motion: sliver wipes, number slams from x+220 0.22s, chip counter-slams from the left, tile pops from scale 0.6 — all inside 0.7s.
-- 数字变化: 记分牌滚分 — thin hazard sliver on top, ghost number `07` cropped top-right; an `--accent` chip `NEW PERSONAL BEST` over a skewed `--accent` flip-board slab: giant mono value (≈320px, paper ink) rolling up to `145` via innerText snap, a paper seam line splitting the digits for the split-flap read, caption `卧推 1RM · KG` beneath (units never inline); a muted `--panel-2` scoreboard tile `138 / OLD PR` bottom-right as the beaten record.
+- count-up: 记分牌滚分 — thin hazard sliver on top, ghost number `07` cropped top-right; an `--accent` chip `NEW PERSONAL BEST` over a skewed `--accent` flip-board slab: giant mono value (≈320px, paper ink) rolling up to `145` via innerText snap, a paper seam line splitting the digits for the split-flap read, caption `卧推 1RM · KG` beneath (units never inline); a muted `--panel-2` scoreboard tile `138 / OLD PR` bottom-right as the beaten record.
   Motion: sliver wipes, slab slams x-260 `power3.out`, value rolls 0→145 (`snap:{innerText:1}`, 0.8s), chip counter-snaps, old-PR tile slams from the right, ghost slides in, and the winner slab fires the card's ONE 1.04 pulse when the roll lands.
-- 对比: VS matchup board — left `--panel-2` slab (`上月 PACE 4'58"`, muted) and right `--accent` winner slab (`本月 PACE 4'32"`, paper text, `--glow`), both skewed, meeting at center; mono `VS` seam box on the joint; hazard band underneath.
+- compare: VS matchup board — left `--panel-2` slab (`上月 PACE 4'58"`, muted) and right `--accent` winner slab (`本月 PACE 4'32"`, paper text, `--glow`), both skewed, meeting at center; mono `VS` seam box on the joint; hazard band underneath.
   Motion: slabs slam from opposite sides 0.2s `power3.out`, seam scales in `back.out(1.8)`, winner slab fires ONE quick 1.04 pulse, hazard band wipes last.
-- 走势: 成绩曲线 — an `--accent` chip (`PACE TREND — 8 WEEKS`) above a big skewed `--panel` chart slab (overflow hidden); inside: a steel `--accent-2` polyline rising left→right, the hazard-stripe band running along the slab's bottom edge under the line, and a hollow jersey data label (mono ≈220px, paper fill + 8px `--accent` stroke) pinned at the line's end, top-right.
+- trend: 成绩曲线 — an `--accent` chip (`PACE TREND — 8 WEEKS`) above a big skewed `--panel` chart slab (overflow hidden); inside: a steel `--accent-2` polyline rising left→right, the hazard-stripe band running along the slab's bottom edge under the line, and a hollow jersey data label (mono ≈220px, paper fill + 8px `--accent` stroke) pinned at the line's end, top-right.
   Motion: slab slams x-220 `power3.out`, chip snaps, hazard band wipes via `scaleX`, the line draws via `stroke-dashoffset` in 0.3s, jersey label slams in from the right last — all inside 0.82s.
-- 时间线: 赛季周程 — chip kicker (`SEASON — WK 1-4`); a 32px hazard spine runs the full width with four skewed week slabs hanging under it, steel square markers pinning each slab to the line; every slab reads mono `WK n` / matchup word / mono `主场 HOME`|`客场 AWAY` tag; WK 3 is the `--accent` current week (paper text, `--glow`); ghost number `03` echoes the week, cropped bottom-right.
+- timeline: 赛季周程 — chip kicker (`SEASON — WK 1-4`); a 32px hazard spine runs the full width with four skewed week slabs hanging under it, steel square markers pinning each slab to the line; every slab reads mono `WK n` / matchup word / mono `主场 HOME`|`客场 AWAY` tag; WK 3 is the `--accent` current week (paper text, `--glow`); ghost number `03` echoes the week, cropped bottom-right.
   Motion: chip snaps, spine wipes via `scaleX` from the left, slabs slam x-220 stagger 0.1 `power3.out`, markers drop y-40 onto the line, ghost slides in, the current week fires the card's ONE 1.04 pulse — done by 1.15s.
-- 步骤: 训练三组 — chip kicker (`TRAINING PLAN — LEG DAY`), then three skewed slabs in a row each `SET n / 动作 / mono REPS`; SET 1 is the `--accent` slab (paper text, `--glow`), SETs 2-3 stay `--panel`; hazard band across the bottom.
+- steps: 训练三组 — chip kicker (`TRAINING PLAN — LEG DAY`), then three skewed slabs in a row each `SET n / 动作 / mono REPS`; SET 1 is the `--accent` slab (paper text, `--glow`), SETs 2-3 stay `--panel`; hazard band across the bottom.
   Motion: chip snaps, slabs slam from x-220 stagger 0.1 `power3.out`, the accent slab fires the card's ONE 1.04 pulse, hazard band wipes last; done by 0.78s.
-- 引导: 号码牌 CTA — ghost jersey number `10` cropped at the bottom-right; an `--accent` chip `JOIN THE SQUAD` over a giant skewed `--accent` plate `+ FOLLOW` (mono 180px, paper text, `--glow`); hazard band underneath.
+- cta: 号码牌 CTA — ghost jersey number `10` cropped at the bottom-right; an `--accent` chip `JOIN THE SQUAD` over a giant skewed `--accent` plate `+ FOLLOW` (mono 180px, paper text, `--glow`); hazard band underneath.
   Motion: plate slams x-260 `power3.out` and pulses once (1.04), chip counter-snaps, hazard band wipes, ghost number slides in from the right last.
 
 ## Compose-instruction crib

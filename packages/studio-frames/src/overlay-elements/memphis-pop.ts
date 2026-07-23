@@ -29,10 +29,10 @@ const ZIG_CSS = (id: string, w = 300) => `
 #${id} .zig polyline{fill:none;stroke:var(--accent-2);stroke-width:12;stroke-dasharray:1400;stroke-dashoffset:1400;}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'me_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="panel">
@@ -60,10 +60,10 @@ ${ZIG_CSS(id, 300)}
         `tl.from('#${id} .circle,#${id} .tri',{scale:0,autoAlpha:0,duration:0.24,stagger:0.09,ease:'back.out(1.8)'},0.28);\n` +
         `tl.to('#${id} .zig polyline',{strokeDashoffset:0,duration:0.36,ease:'power2.out'},0.5);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'me_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <i class="circle"></i>
@@ -86,10 +86,10 @@ ${CONFETTI(id)}
         `tl.from('#${id} .tri',{scale:0,autoAlpha:0,duration:0.24,ease:'back.out(2)'},0.4);\n` +
         `tl.from('#${id} .panel',{x:-120,autoAlpha:0,duration:0.26,ease:'power3.out'},0.5);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'me_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="panel hd" data-edit="title">${txt('列表标题', 'List title')}</div>
@@ -118,10 +118,10 @@ ${CONFETTI(id)}
         `tl.from('#${id} .r3',{x:-160,autoAlpha:0,duration:0.24,ease:'power3.out'},0.38);\n` +
         `tl.from('#${id} .r i',{scale:0,duration:0.22,stagger:0.08,ease:'back.out(2)'},0.5);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'me_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="panel"><span class="t" data-edit="word">${txt('关键词', 'Keyword')}</span></div>
@@ -140,10 +140,10 @@ ${CONFETTI(id)}
         `tl.from('#${id} .panel',{x:-180,autoAlpha:0,duration:0.26,ease:'power3.out'},0);\n` +
         `tl.from('#${id} .tri,#${id} .half',{scale:0,autoAlpha:0,duration:0.24,stagger:0.09,ease:'back.out(1.8)'},0.28);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'me_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <i class="circle"></i>
@@ -159,10 +159,10 @@ ${CONFETTI(id)}
         `tl.from('#${id} .circle',{scale:0,autoAlpha:0,duration:0.28,ease:'back.out(1.8)'},0);\n` +
         `tl.from('#${id} .chip',{scale:0,autoAlpha:0,duration:0.24,ease:'back.out(2)'},0.2);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'me_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="panel">
@@ -190,10 +190,10 @@ ${ZIG_CSS(id, 220)}
         `tl.from('#${id} .circle,#${id} .tri',{scale:0,autoAlpha:0,duration:0.22,stagger:0.09,ease:'back.out(1.8)'},0.4);\n` +
         `tl.to('#${id} .zig polyline',{strokeDashoffset:0,duration:0.34,ease:'power2.out'},0.56);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'me_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="panel">
@@ -219,10 +219,10 @@ ${CONFETTI(id)}
         `tl.from('#${id} .ring',{scale:0,autoAlpha:0,duration:0.26,ease:'back.out(1.8)'},0.36);\n` +
         `tl.from('#${id} .tri',{scale:0,autoAlpha:0,duration:0.22,ease:'back.out(2)'},0.5);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'me_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="panel s a"><i class="b1"></i><em data-edit="lt">${txt('选项一', 'Option A')}</em><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

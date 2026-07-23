@@ -3,7 +3,7 @@ id: sticker-collage
 title: 贴纸 Sticker
 summary: 校园贴纸拼贴:浅灰纸面上白边裁切贴纸、荧光笔高亮、半调星爆,黑色只做小标签,主体人也抠成贴纸
 icon: ✂️
-showcase: [标题卡, 大数字, 列表, 步骤, 对比, 金句, 评论, 引导]
+showcase: [title-card, big-number, list, steps, compare, quote, comments, cta]
 palette: { paper: "#F5F5F7", panel: "#FFFFFF", panel-2: "#0C0C10", fg: "#1D1D1F", muted: "#1D1D1F99", accent: "#1FE0FF", accent-2: "#FF52D9", line: "#1D1D1F1F", grid: "#1D1D1F0D", radius: 28px, shadow: "0 16px 40px rgb(29 29 31 / 0.16)", glow: "0 0 0 rgb(0 0 0 / 0)" }
 personFx: { stroke-style: solid, stroke-width: 46, stroke-color: "#FFFFFF", person-front: true }
 version: 0.1.2
@@ -43,21 +43,21 @@ By default blocks are PEELED STICKERS over the footage: the block root stays tra
 - Slap grammar (the only entrance family): `tl.from(el,{scale:0.6,rotation:'-=8',autoAlpha:0,duration:0.3,ease:'back.out(1.7)'})` for stickers, stagger 0.08-0.12; `.mk` sweeps `scaleX:0→1, transform-origin:left, 0.25s power3.out`; starbursts pop LAST `scale:0, back.out(2), 0.26s`. No fades-only, no infinite loops, everything still by 1.2s.
 
 ## Block recipes
-- 标题卡: a big WHITE die-cut sticker (tilted −2°) carrying the 130px headline and a muted sub line; a black mini label capsule (`开箱 UNBOX`) overlapping its top-left corner; one pink accent sticker (`第一期`) breaking the opposite edge; the signature pair `mk(第一件。)+muted(就把预算打醒。)` on paper below; one pink starburst; paper stays visibly open around everything.
+- title-card: a big WHITE die-cut sticker (tilted −2°) carrying the 130px headline and a muted sub line; a black mini label capsule (`开箱 UNBOX`) overlapping its top-left corner; one pink accent sticker (`第一期`) breaking the opposite edge; the signature pair `mk(第一件。)+muted(就把预算打醒。)` on paper below; one pink starburst; paper stays visibly open around everything.
   Motion: plate slides y-40, label slaps, headline slaps, mk sweeps, starburst pops last by 1.1s.
-- 大数字: one big white sticker (tilt −3°) with a mono-weight 380px price, small unit beside; a black mini sticker (`教育价 EDU PRICE`) pinned to its top-left corner at +4°; the note line below gets the cyan mk on the savings claim; pink starburst tucked behind the sticker's right edge.
+- big-number: one big white sticker (tilt −3°) with a mono-weight 380px price, small unit beside; a black mini sticker (`教育价 EDU PRICE`) pinned to its top-left corner at +4°; the note line below gets the cyan mk on the savings claim; pink starburst tucked behind the sticker's right edge.
   Motion: sticker slaps, digits count up (plain-object innerText tween), label slaps, mk sweeps, burst pops.
-- 列表: three white sticker STRIPS stacked, tilts −2°/+1.5°/−1°, each = index dot + 64px item text; a small black label sticker titles the stack.
+- list: three white sticker STRIPS stacked, tilts −2°/+1.5°/−1°, each = index dot + 64px item text; a small black label sticker titles the stack.
   Motion: strips slap in stagger 0.12 from alternating x offsets; dots land with each strip; nothing blinks.
-- 步骤: three square-ish stickers in a row (STEP 1/2/3 mini caps + a 64px verb phrase), joined by dashed doodle arrows; the ACTIVE step is the black sticker with white type + cyan mk under its phrase, others white with `--muted` caps.
+- steps: three square-ish stickers in a row (STEP 1/2/3 mini caps + a 64px verb phrase), joined by dashed doodle arrows; the ACTIVE step is the black sticker with white type + cyan mk under its phrase, others white with `--muted` caps.
   Motion: stickers slap left→right stagger 0.14, arrows draw via dashoffset between landings, mk sweeps on the active step last.
-- 对比: two big stickers side by side, tilts mirrored: left white with `--muted` tag + plain price; right BLACK with white tag + price and the cyan mk under its verdict word; a pink halftone starburst (`省 750`) pinned across the right sticker's corner.
+- compare: two big stickers side by side, tilts mirrored: left white with `--muted` tag + plain price; right BLACK with white tag + price and the cyan mk under its verdict word; a pink halftone starburst (`省 750`) pinned across the right sticker's corner.
   Motion: left slaps, right slaps harder (scale 0.5), mk sweeps, burst pops last and stays.
-- 金句: the one BLACK die-cut board of the piece — `--panel-2` fill with the white sticker rim, tilted, floating centered on paper with generous margins; 100px two-line quote in white, ONE phrase carried on the cyan mk (fg ink on it); a cyan `"` sticker overlaps its top-left; attribution mini capsule on paper above.
+- quote: the one BLACK die-cut board of the piece — `--panel-2` fill with the white sticker rim, tilted, floating centered on paper with generous margins; 100px two-line quote in white, ONE phrase carried on the cyan mk (fg ink on it); a cyan `"` sticker overlaps its top-left; attribution mini capsule on paper above.
   Motion: plate slides y+40, lines slap in sequence, marks sweep one after another, quote-mark sticker settles with rotation.
-- 评论: chat-bubble stickers on paper — white die-cut bubbles (one corner pinched to 6px radius as the tail), each with a black handle pill (`@开学搭子`) and a 56px message; the reply bubble is BLACK with white text; a small pink starburst acts as the like mark on the loudest bubble.
+- comments: chat-bubble stickers on paper — white die-cut bubbles (one corner pinched to 6px radius as the tail), each with a black handle pill (`@开学搭子`) and a 56px message; the reply bubble is BLACK with white text; a small pink starburst acts as the like mark on the loudest bubble.
   Motion: bubbles slap in conversation order stagger 0.14 from alternating sides, pills land with their bubble, burst pops last.
-- 引导: one huge white PILL sticker (radius 999px, tilt −2°) with `关注,不迷路。` — cyan mk swiped under 关注; a black mini sticker (`每周三更新`) pinned at +4°; a pink starburst (`FOLLOW`) breaking the pill's edge.
+- cta: one huge white PILL sticker (radius 999px, tilt −2°) with `关注,不迷路。` — cyan mk swiped under 关注; a black mini sticker (`每周三更新`) pinned at +4°; a pink starburst (`FOLLOW`) breaking the pill's edge.
   Motion: pill slaps, mk sweeps, mini slaps, burst pops by 1.05s and everything holds.
 
 ## Compose-instruction crib

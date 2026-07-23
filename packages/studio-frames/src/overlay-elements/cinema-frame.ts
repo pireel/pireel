@@ -18,10 +18,10 @@ const base = (id: string) => `
 const barTl = (id: string) => `tl.from('#${id} .bar',{y:140,duration:0.45,ease:'power2.out'},0);`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'cf_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="bar"></div>
@@ -42,10 +42,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,y:20,duration:0.5,ease:'power1.out'},0.4);\n` +
         `tl.from('#${id} .en',{autoAlpha:0,duration:0.4},0.7);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'cf_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="sl l"><b>●</b> <span data-edit="tag">SC.07 · TAKE 01</span></div>
@@ -69,10 +69,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .v',{autoAlpha:0,y:24,duration:0.5,ease:'power1.out'},0.3);\n` +
         `tl.from('#${id} .rule',{scaleX:0,duration:0.4,ease:'power2.inOut'},0.6);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'cf_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="crd">
@@ -96,10 +96,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .rule',{scaleX:0,duration:0.4,ease:'power2.inOut'},0.3);\n` +
         `tl.from('#${id} .row',{autoAlpha:0,y:16,duration:0.35,ease:'power1.out',stagger:0.12},0.4);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'cf_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="tc">
@@ -118,10 +118,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .rule',{scaleX:0,duration:0.4,ease:'power2.inOut'},0.35);\n` +
         `tl.from('#${id} .en',{autoAlpha:0,duration:0.4},0.6);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'cf_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="slate">
@@ -142,10 +142,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.4},0.3);\n` +
         `tl.from('#${id} .tc2',{autoAlpha:0,duration:0.35},0.5);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'cf_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="bar"></div>
@@ -169,10 +169,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .rule',{scaleX:0,duration:0.4,ease:'power2.inOut'},0.55);\n` +
         `tl.from('#${id} .wk',{autoAlpha:0,duration:0.4},0.75);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'cf_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="bar"></div>
@@ -193,10 +193,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .zh b',{autoAlpha:0,duration:0.35},0.6);\n` +
         `tl.from('#${id} .en',{autoAlpha:0,y:16,duration:0.45,ease:'power1.out'},0.7);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'cf_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="cmp">

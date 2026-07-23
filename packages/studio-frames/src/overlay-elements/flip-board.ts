@@ -23,10 +23,10 @@ const base = (id: string) => `
 #${id} .cap{font-size:26px;font-weight:700;letter-spacing:0.28em;color:var(--muted);text-transform:uppercase;}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'fl_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="hd"><span class="cap" data-edit="kick">${txt('出发 DEPARTURES', 'DEPARTURES')}</span><b data-edit="tag">PR-101</b></div>
@@ -49,10 +49,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.34);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.6);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'fl_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="label">${txt('数据说明 DATA', 'DATA LABEL')}</div>
@@ -73,10 +73,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .v',{rotationX:-14,duration:0.07,yoyo:true,repeat:1,ease:'power1.inOut'},0.8);\n` +
         `tl.from('#${id} .note',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.9);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'fl_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="cols"><span data-edit="c1">${txt('航段 LEG', 'LEG')}</span><span data-edit="c2">${txt('目的地 DEST', 'DEST')}</span></div>
@@ -98,10 +98,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r2',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.22,ease:'power2.out'},0.28);\n` +
         `tl.from('#${id} .r3',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.22,ease:'power2.out'},0.42);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'fl_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="kick">${txt('现在呼叫 NOW CALLING', 'NOW CALLING')}</div>
@@ -116,10 +116,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .k',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.24,ease:'power2.out'},0.12);\n` +
         `tl.to('#${id} .k',{rotationX:-14,duration:0.07,yoyo:true,repeat:1,ease:'power1.inOut'},0.4);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'fl_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <span class="cap" data-edit="tag">GATE 24</span>
@@ -134,10 +134,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .n',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.22,ease:'power2.out'},0.12);\n` +
         `tl.to('#${id} .n',{rotationX:-14,duration:0.07,yoyo:true,repeat:1,ease:'power1.inOut'},0.38);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'fl_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="tiles amber"><i class="f1" data-edit="cta">${txt('+ 关注', '+ Follow')}</i><i class="f2" data-edit="cta2">${txt('说明一', 'DETAIL 1')}</i></div>
@@ -155,10 +155,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ft',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.26);\n` +
         `tl.to('#${id} .chip',{autoAlpha:0,duration:0.08,yoyo:true,repeat:3,ease:'steps(1)'},0.55);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'fl_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <span class="cap" data-edit="tag">${txt('广播 ANNOUNCEMENT', 'ANNOUNCEMENT')}</span>
@@ -178,10 +178,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .l2',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.26,ease:'power2.out'},0.36);\n` +
         `tl.from('#${id} .who',{rotationX:-90,${FLIP},autoAlpha:0,duration:0.2,ease:'power2.out'},0.64);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'fl_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="r r1"><span class="no">PLAN A</span><span class="dst dim" data-edit="lt">${txt('选项一', 'Option A')}</span><span class="tm" data-edit="lv">${txt('数值一', 'Value A')}</span><span class="chip amber" data-edit="lchip">${txt('延误 DELAYED', 'DELAYED')}</span></div>

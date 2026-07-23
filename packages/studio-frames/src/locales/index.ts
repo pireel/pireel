@@ -4,7 +4,7 @@
  */
 
 
-import { KIND_LABELS_EN, type FrameLocalePack, type SupportedLocale } from './types';
+import { KIND_LABELS_EN, KIND_LABELS_ZH, type FrameLocalePack, type SupportedLocale } from './types';
 import { pack as biennalePoster } from './en/biennale-poster';
 import { pack as boardroom } from './en/boardroom';
 import { pack as botanicPress } from './en/botanic-press';
@@ -31,7 +31,7 @@ import { pack as flipBoard } from './en/flip-board';
 import { pack as circuitBoard } from './en/circuit-board';
 import { pack as stickerCollage } from './en/sticker-collage';
 
-export { KIND_LABELS_EN } from './types';
+export { KIND_LABELS_EN, KIND_LABELS_ZH } from './types';
 export type { FrameLocalePack, SupportedLocale } from './types';
 export { localizeBlock } from './apply';
 
@@ -63,14 +63,15 @@ const EN: Record<string, FrameLocalePack> = {
   'sticker-collage': stickerCollage,
 };
 
-/** Get the adapted pack for a frame in a language; zh/not-found → undefined (use canonical Chinese). */
-export function framePack(locale: SupportedLocale | undefined, frameId: string): FrameLocalePack | undefined {
-  if (locale !== 'en') return undefined;
+/** Get the adapted pack for a frame in a language. zh/not-found → undefined (use canonical Chinese);
+ *  any other locale gets the English pack — packs exist per SupportedLocale, unknown tags read best in en. */
+export function framePack(locale: string | undefined, frameId: string): FrameLocalePack | undefined {
+  if (locale === 'zh' || locale == null) return undefined;
   return EN[frameId];
 }
 
-/** showcase kind label (canonical Chinese key) → display name per language. */
-export function kindLabel(locale: SupportedLocale | undefined, kind: string): string {
-  if (locale !== 'en') return kind;
-  return KIND_LABELS_EN[kind] ?? kind;
+/** Neutral kind id → display label per language (unknown locale reads en; unknown kind shows its id). */
+export function kindLabel(locale: string | undefined, kind: string): string {
+  const table = locale === 'zh' ? KIND_LABELS_ZH : KIND_LABELS_EN;
+  return table[kind] ?? kind;
 }

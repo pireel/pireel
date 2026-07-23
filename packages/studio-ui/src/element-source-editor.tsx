@@ -58,7 +58,7 @@ function checkDraft(blockId: string, draft: SourceDraft): Issue[] {
     // Same compile as assembleHtml's timelineScript, surfacing syntax errors early in the editor
     new Function('tl', draft.timelineBody);
   } catch (e) {
-    issues.unshift({ hard: true, message: t('动画脚本语法错误:{msg}', { msg: e instanceof Error ? e.message : String(e) }) });
+    issues.unshift({ hard: true, message: t('chatGen.animationScriptSyntaxError', { msg: e instanceof Error ? e.message : String(e) }) });
   }
   return issues;
 }
@@ -127,29 +127,29 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
       <div className="border-line flex items-center gap-2 border-b px-3 py-1.5">
         {locked && (
           <span className="inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600">
-            <Loader2 size={10} className="animate-spin" /> {t('生成中,只读')}
+            <Loader2 size={10} className="animate-spin" /> {t('chatGen.generatingReadOnly')}
           </span>
         )}
         <button
           type="button"
           onClick={() => onLoop(!loop)}
-          title={t('循环播放这个组件的时间段,方便调动画')}
+          title={t('panels.loopElementSTime')}
           className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition ${
             loop ? 'border-accent bg-accent/10 text-accent' : 'border-line text-ink-4 hover:text-ink'
           }`}
         >
-          <Repeat size={11} /> {t('循环预览')}
+          <Repeat size={11} /> {t('chatGen.loopPreview')}
         </button>
       </div>
       {block.templateId !== 'custom' && (
         <div className="border-line border-b bg-amber-500/8 px-3 py-1 text-[10px] text-amber-600">
-          {t('模板块({id}):应用后转为自定义组件,不再跟随模板', { id: block.templateId })}
+          {t('chatGen.templateBlockHint', { id: block.templateId })}
         </div>
       )}
 
       {/* HTML + CSS */}
       <div className="text-ink-4 border-line flex items-center border-b px-3 py-1 text-[10px]">
-        {t('HTML + CSS(选择器以 #{id} 作用域)', { id: block.id })}
+        {t('chatGen.htmlCssSelectorsScoped', { id: block.id })}
       </div>
       <CodeEditor
         value={draft.innerHtml}
@@ -161,7 +161,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
 
       {/* Animation */}
       <div className="text-ink-4 border-line flex items-center border-y px-3 py-1 text-[10px]">
-        {t('动画 · GSAP(局部时间,0 = 组件起点;写 tl.xxx)')}
+        {t('chatGen.animationGsapLocalTime')}
       </div>
       <CodeEditor
         value={draft.timelineBody}
@@ -187,7 +187,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
         {aiBusy && (
           <div className="text-ink-3 mb-1.5 flex items-center gap-1.5 text-[11px]">
             <Loader2 size={11} className="shrink-0 animate-spin" />
-            <span className="truncate">{aiNote || t('AI 修改中…')}</span>
+            <span className="truncate">{aiNote || t('chatGen.aiEditing')}</span>
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -201,7 +201,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
               }
             }}
             disabled={disabled}
-            placeholder={t('让 AI 改这段源码,例如「数字换金色,入场更快」')}
+            placeholder={t('chatGen.askAiEditSource')}
             className="border-line bg-panel text-ink placeholder:text-ink-4 min-w-0 flex-1 rounded-md border px-2 py-1 text-[12px] outline-none focus:border-ink-4 disabled:opacity-50"
           />
           <button
@@ -210,14 +210,14 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
             disabled={disabled || !aiInput.trim()}
             className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-2 py-1 text-[12px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
           >
-            {aiBusy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} {t('AI 改')}
+            {aiBusy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} {t('chatGen.aiEdit')}
           </button>
         </div>
       </div>
 
       {/* Apply / status */}
       <div className="border-line flex items-center gap-2 border-t px-3 py-1.5">
-        <span className="text-ink-4 text-[10px]">{t('改动实时投到舞台;应用才保留,关闭即还原')}</span>
+        <span className="text-ink-4 text-[10px]">{t('chatGen.livePreviewHint')}</span>
         <button
           type="button"
           onClick={() => {
@@ -227,7 +227,7 @@ export function ElementSourceEditor({ block, locked, onDraft, onApply, loop, onL
           disabled={!dirty || hardCount > 0 || disabled}
           className="ml-auto inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
         >
-          <Check size={12} /> {t('应用')}
+          <Check size={12} /> {t('chatGen.apply')}
         </button>
       </div>
     </div>

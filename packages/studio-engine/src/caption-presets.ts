@@ -41,25 +41,25 @@ export interface CaptionPreset {
 
 export const CAPTION_PRESETS: CaptionPreset[] = [
   // —— Word emphasis ——
-  { id: 'em-yellow', name: '白字黄词', mode: 'emphasis', text: '#ffffff', emphasis: '#ffe34f', shadow: true, size: 50, weight: 800 },
-  { id: 'em-green', name: '白字荧绿', mode: 'emphasis', text: '#ffffff', emphasis: '#5affb6', shadow: true, size: 50, weight: 800 },
-  { id: 'em-purple-black', name: '黑底紫词', mode: 'emphasis', text: '#ffffff', emphasis: '#cf96ff', bg: 'rgba(0,0,0,0.72)', size: 47, weight: 700 },
-  { id: 'em-serif-black', name: '黑底青词', mode: 'emphasis', text: '#ffffff', emphasis: '#63ffc7', bg: 'rgba(0,0,0,0.72)', font: 'serif', size: 47, weight: 700 },
-  { id: 'em-underline', name: '黑底划线', mode: 'emphasis', text: '#ffffff', bg: 'rgba(0,0,0,0.8)', deco: 'underline', decoColor: '#ffffff', size: 48, weight: 800 },
-  { id: 'em-blue-line', name: '灰底蓝线', mode: 'emphasis', text: '#111111', emphasis: '#0059ff', bg: 'rgba(255,255,255,0.78)', deco: 'underline', decoColor: '#0059ff', size: 47, weight: 700 },
-  { id: 'em-box-purple', name: '紫底跳块', mode: 'emphasis', text: '#ffffff', bg: 'rgba(118,40,187,0.85)', deco: 'highlight', decoColor: 'rgba(0,0,0,0.4)', size: 45, weight: 800 },
-  { id: 'em-box-blue', name: '蓝底黑块', mode: 'emphasis', text: '#ffffff', bg: 'rgba(0,89,255,0.85)', deco: 'highlight', decoColor: '#000000', size: 45, weight: 800 },
-  { id: 'em-pink', name: '粉底提白', mode: 'emphasis', text: '#fccfcf', emphasis: '#ffffff', bg: 'rgba(236,137,134,0.85)', size: 47, weight: 800 },
-  { id: 'em-gold-serif', name: '米底金字', mode: 'emphasis', text: '#b89d4c', emphasis: '#7f6000', bg: 'rgba(248,233,192,0.85)', font: 'serif', size: 47, weight: 700 },
+  { id: 'em-yellow', name: 'engine.yellowPop', mode: 'emphasis', text: '#ffffff', emphasis: '#ffe34f', shadow: true, size: 50, weight: 800 },
+  { id: 'em-green', name: 'engine.neonGreen', mode: 'emphasis', text: '#ffffff', emphasis: '#5affb6', shadow: true, size: 50, weight: 800 },
+  { id: 'em-purple-black', name: 'engine.purpleBlack', mode: 'emphasis', text: '#ffffff', emphasis: '#cf96ff', bg: 'rgba(0,0,0,0.72)', size: 47, weight: 700 },
+  { id: 'em-serif-black', name: 'engine.mintSerif', mode: 'emphasis', text: '#ffffff', emphasis: '#63ffc7', bg: 'rgba(0,0,0,0.72)', font: 'serif', size: 47, weight: 700 },
+  { id: 'em-underline', name: 'engine.blackUnderline', mode: 'emphasis', text: '#ffffff', bg: 'rgba(0,0,0,0.8)', deco: 'underline', decoColor: '#ffffff', size: 48, weight: 800 },
+  { id: 'em-blue-line', name: 'engine.blueUnderline', mode: 'emphasis', text: '#111111', emphasis: '#0059ff', bg: 'rgba(255,255,255,0.78)', deco: 'underline', decoColor: '#0059ff', size: 47, weight: 700 },
+  { id: 'em-box-purple', name: 'engine.purpleBlocks', mode: 'emphasis', text: '#ffffff', bg: 'rgba(118,40,187,0.85)', deco: 'highlight', decoColor: 'rgba(0,0,0,0.4)', size: 45, weight: 800 },
+  { id: 'em-box-blue', name: 'engine.blueBlocks', mode: 'emphasis', text: '#ffffff', bg: 'rgba(0,89,255,0.85)', deco: 'highlight', decoColor: '#000000', size: 45, weight: 800 },
+  { id: 'em-pink', name: 'engine.pinkPop', mode: 'emphasis', text: '#fccfcf', emphasis: '#ffffff', bg: 'rgba(236,137,134,0.85)', size: 47, weight: 800 },
+  { id: 'em-gold-serif', name: 'engine.goldCream', mode: 'emphasis', text: '#b89d4c', emphasis: '#7f6000', bg: 'rgba(248,233,192,0.85)', font: 'serif', size: 47, weight: 700 },
   // —— Line by line ——
-  { id: 'ln-clean', name: '干净白字', mode: 'line', text: '#ffffff', shadow: true, size: 40, weight: 700 },
-  { id: 'ln-black', name: '黑条白字', mode: 'line', text: '#ffffff', bg: 'rgba(0,0,0,0.85)', size: 36, weight: 600 },
-  { id: 'ln-navy', name: '蓝灰衬线', mode: 'line', text: '#ffffff', bg: 'rgba(70,80,109,0.85)', font: 'serif', size: 39, weight: 700 },
-  { id: 'ln-white', name: '白条蓝字', mode: 'line', text: '#3901ee', bg: 'rgba(255,255,255,0.85)', italic: true, size: 39, weight: 700 },
-  { id: 'ln-orange', name: '橙条白字', mode: 'line', text: '#ffffff', bg: 'rgba(255,140,90,0.85)', size: 40, weight: 800 },
-  { id: 'ln-yellow', name: '黄条黑字', mode: 'line', text: '#000000', bg: 'rgba(255,227,79,0.85)', size: 39, weight: 700 },
-  { id: 'ln-red', name: '红条等宽', mode: 'line', text: '#ffffff', bg: 'rgba(255,0,0,0.85)', font: 'mono', size: 38, weight: 700 },
-  { id: 'ln-mint', name: '青字投影', mode: 'line', text: '#63ffc7', shadow: true, size: 40, weight: 800 },
+  { id: 'ln-clean', name: 'engine.cleanWhite', mode: 'line', text: '#ffffff', shadow: true, size: 40, weight: 700 },
+  { id: 'ln-black', name: 'engine.blackTape', mode: 'line', text: '#ffffff', bg: 'rgba(0,0,0,0.85)', size: 36, weight: 600 },
+  { id: 'ln-navy', name: 'engine.navySerif', mode: 'line', text: '#ffffff', bg: 'rgba(70,80,109,0.85)', font: 'serif', size: 39, weight: 700 },
+  { id: 'ln-white', name: 'engine.whiteTape', mode: 'line', text: '#3901ee', bg: 'rgba(255,255,255,0.85)', italic: true, size: 39, weight: 700 },
+  { id: 'ln-orange', name: 'engine.orangeTape', mode: 'line', text: '#ffffff', bg: 'rgba(255,140,90,0.85)', size: 40, weight: 800 },
+  { id: 'ln-yellow', name: 'engine.yellowTape', mode: 'line', text: '#000000', bg: 'rgba(255,227,79,0.85)', size: 39, weight: 700 },
+  { id: 'ln-red', name: 'engine.redMono', mode: 'line', text: '#ffffff', bg: 'rgba(255,0,0,0.85)', font: 'mono', size: 38, weight: 700 },
+  { id: 'ln-mint', name: 'engine.mintGlow', mode: 'line', text: '#63ffc7', shadow: true, size: 40, weight: 800 },
 ];
 
 export const DEFAULT_CAPTION_PRESET = 'em-yellow';

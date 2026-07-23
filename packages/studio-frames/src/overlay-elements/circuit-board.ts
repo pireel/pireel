@@ -33,10 +33,10 @@ const pulse = (id: string, at: number) =>
   `tl.from('#${id} .led',{autoAlpha:0,duration:0.12,ease:'steps(1)'},${at + 0.33});`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'cc_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="hd silk"><em data-edit="kick">SCH-01</em> · <span data-edit="tag">INTRO</span></div>
@@ -62,10 +62,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{x:40,autoAlpha:0,duration:0.22,ease:'power3.out'},0.3);\n` +
         pulse(id, 0.6),
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'cc_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>MEAS-02</em> · <span data-edit="label">${txt('数据说明', 'DATA LABEL')}</span></div>
@@ -94,10 +94,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cap',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.6);\n` +
         pulse(id, 0.62),
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'cc_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>SEQ-03</em> · PIPELINE</div>
@@ -127,10 +127,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r',{x:36,autoAlpha:0,duration:0.2,stagger:0.12,ease:'power3.out'},0.28);\n` +
         pulse(id, 0.7),
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'cc_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>U1</em> · <span data-edit="kick">KEYWORD</span></div>
@@ -156,10 +156,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .kw span',{y:20,autoAlpha:0,duration:0.2,ease:'power3.out'},0.44);\n` +
         pulse(id, 0.66),
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'cc_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>TP1</em> · PROBE</div>
@@ -183,10 +183,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.4);\n` +
         pulse(id, 0.55),
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'cc_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>SW1</em> · MOMENTARY</div>
@@ -217,10 +217,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ring',{autoAlpha:0,duration:0.1,ease:'steps(1)'},0.6);\n` +
         pulse(id, 0.72),
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'cc_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>NOTE-07</em> · <span data-edit="sig">SILKSCREEN</span></div>
@@ -246,10 +246,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .tr',{strokeDashoffset:0,duration:0.3,ease:'power2.out'},0.4);\n` +
         pulse(id, 0.75),
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'cc_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="hd silk"><em>AB-06</em> · TEST</div>

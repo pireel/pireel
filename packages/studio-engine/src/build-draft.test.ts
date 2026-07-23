@@ -312,7 +312,7 @@ describe('insertedClipPlaceholder(平权:插入段按自己的口播配图)', ()
     expect(b!.durationSec).toBeCloseTo(7.6, 5);
     expect(isPlaceholder(b!)).toBe(true);
     expect(placeholderSpec(b!)).toContain('这款芯片算力提升了三倍。');
-    expect(placeholderSpec(b!)).toContain('插入片段');
+    expect(placeholderSpec(b!)).toContain('inserted clip');
   });
   it('缺省 box=固定兜底框;spec 带 BACKDROP(插入段=实拍活动底)、无脸时不带脸提示', () => {
     const b = insertedClipPlaceholder({ start: 10, end: 18 }, '这款芯片算力提升了三倍。')!;

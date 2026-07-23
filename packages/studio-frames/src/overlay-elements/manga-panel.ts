@@ -18,10 +18,10 @@ const TONES = (id: string) => `
 #${id} .ht{position:absolute;background-image:radial-gradient(var(--fg) 2.4px,transparent 2.4px);background-size:18px 18px;}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'mp_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <i class="spd"></i>
@@ -41,10 +41,10 @@ ${TONES(id)}
         `tl.from('#${id} .k',{x:-40,autoAlpha:0,duration:0.2},0.2);\n` +
         `tl.from('#${id} .h',{y:34,autoAlpha:0,duration:0.24,ease:'power2.out'},0.28);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'mp_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <i class="ht"></i>
@@ -65,10 +65,10 @@ ${TONES(id)}
         `tl.from('#${id} .v',{scale:1.8,autoAlpha:0,rotation:-14,duration:0.28,ease:'power3.in'},0.12);\n` +
         `tl.from('#${id} .k',{x:60,autoAlpha:0,duration:0.22,ease:'power3.out'},0.44);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'mp_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <i class="spd"></i>
@@ -93,10 +93,10 @@ ${TONES(id)}
         `tl.from('#${id} .r2',{x:-60,autoAlpha:0,duration:0.2,ease:'power3.out'},0.32);\n` +
         `tl.from('#${id} .r3',{scale:1.4,autoAlpha:0,duration:0.22,ease:'power3.in'},0.46);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'mp_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <i class="ht"></i>
@@ -115,10 +115,10 @@ ${TONES(id)}
         `tl.from('#${id} .t',{scale:1.8,autoAlpha:0,rotation:-14,duration:0.26,ease:'power3.in'},0.08);\n` +
         `tl.from('#${id} .tag',{scale:1.8,autoAlpha:0,rotation:22,duration:0.24,ease:'power3.in'},0.4);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'mp_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <i class="spd"></i>
@@ -138,10 +138,10 @@ ${TONES(id)}
         `tl.from('#${id} .tail',{scale:0,autoAlpha:0,duration:0.16,ease:'back.out(2)'},0.2);\n` +
         `tl.from('#${id} .spd',{autoAlpha:0,duration:0.2},0.3);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'mp_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="bub"><span data-edit="cta">${txt('+ 关注', '+ Follow')}</span></div>
@@ -160,10 +160,10 @@ ${TONES(id)}
         `tl.from('#${id} .tail',{scale:0,autoAlpha:0,duration:0.16,ease:'back.out(2)'},0.22);\n` +
         `tl.from('#${id} .tsz',{scale:1.6,autoAlpha:0,rotation:14,duration:0.22,ease:'power3.in'},0.4);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'mp_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <i class="ht"></i>
@@ -187,10 +187,10 @@ ${TONES(id)}
         `tl.from('#${id} .t',{y:24,autoAlpha:0,duration:0.24},0.26);\n` +
         `tl.from('#${id} .ht,#${id} .a',{autoAlpha:0,duration:0.22},0.44);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'mp_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

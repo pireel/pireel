@@ -156,7 +156,7 @@ export function layoutFromPlan(
   // opening title → placeholder (compose designs it into an opening card)
   if (plan.title) {
     put(
-      placeholder(titleInstruction(plan.title.text, plan.title.sub, 'opening title card (开场标题卡)'), { x: 0.08, y: 0.3, w: 0.84, h: 0.4 }, 0, plan.title.durationSec, plan.title.text),
+      placeholder(titleInstruction(plan.title.text, plan.title.sub, 'opening title card'), { x: 0.08, y: 0.3, w: 0.84, h: 0.4 }, 0, plan.title.durationSec, plan.title.text),
     );
   }
 
@@ -213,7 +213,7 @@ export function layoutFromPlan(
   // closing CTA → placeholder
   if (plan.outro) {
     put(
-      placeholder(titleInstruction(plan.outro.text, plan.outro.sub, 'closing CTA card (结尾 CTA 卡)'), { x: 0.08, y: 0.32, w: 0.84, h: 0.36 }, Math.max(0, end - plan.outro.durationSec), plan.outro.durationSec, plan.outro.text),
+      placeholder(titleInstruction(plan.outro.text, plan.outro.sub, 'closing CTA card'), { x: 0.08, y: 0.32, w: 0.84, h: 0.36 }, Math.max(0, end - plan.outro.durationSec), plan.outro.durationSec, plan.outro.text),
     );
   }
 
@@ -281,7 +281,7 @@ function framingToTreatment(framing: Framing, vis: VisSeg | null): ShotTreatment
 
 /** Placeholder = media block (shows a placeholder in edit mode) + slots.spec (the instruction for the compose step). Compose turns it into a designed graphic and replaces it. */
 function placeholder(spec: string, box: Box, startSec: number, durationSec: number, gist: string): Block {
-  const b = mediaBlock({ startSec, durationSec: Math.max(0.8, durationSec), box, trackIndex: 2, label: gist.slice(0, 16) || t('待配图') });
+  const b = mediaBlock({ startSec, durationSec: Math.max(0.8, durationSec), box, trackIndex: 2, label: gist.slice(0, 16) || t('engine.graphicPending') });
   b.slots = { spec };
   return b;
 }
@@ -328,7 +328,7 @@ export function insertedClipPlaceholder(
   const backdrop = `BACKDROP: live moving footage behind your box (inserted real-life clip). Default to direct composition on the footage — high-contrast ink, strong type, NO filled background; use a card/scrim only for dense structured content (multi-row data / chart / table).${face}`;
   // Leave 0.2s at each end: the graphic doesn't butt against the clip's in/out cuts
   return placeholder(
-    `按这段插入片段的口播内容配一个设计图形(组件按内容自选:大数字/对比/流程/要点等;数据从原话里逐字抠,别编):「${text.slice(0, 200)}」\n${backdrop}`,
+    `Design ONE graphic for what this inserted clip says (pick the component by content: big number / comparison / flow / bullets; pull data VERBATIM from the words, never invent): "${text.slice(0, 200)}"\n${backdrop}`,
     layout?.box ?? FULL_GRAPHIC_BOX,
     Math.round((win.start + 0.2) * 10) / 10,
     Math.round(Math.max(MIN_GRAPHIC_SEC, dur - 0.4) * 10) / 10,
@@ -419,18 +419,19 @@ export function layoutInsertWindow(args: {
   return { shots, blocks };
 }
 
+// Prompt-side annotation for the compose brief (machine-facing → English, per the prompt-language rule)
 const COMPONENT_LABEL: Record<GraphicComponent, string> = {
-  metric: '大数字卡',
-  comparison: '对比',
-  pipeline: '流程图',
-  structure: '结构图',
-  kpi: 'KPI 网格',
-  chart: '图表',
-  timeline: '时间轴',
-  loop: '循环图',
-  callout: '标语 callout',
-  list: '要点列表',
-  title: '标题卡',
+  metric: 'big-number stat card',
+  comparison: 'side-by-side comparison card',
+  pipeline: 'flow diagram',
+  structure: 'structure diagram',
+  kpi: 'KPI grid',
+  chart: 'chart card',
+  timeline: 'timeline',
+  loop: 'loop diagram',
+  callout: 'callout banner',
+  list: 'bullet list',
+  title: 'title card',
 };
 
 const SIZE_INTENT: Record<GraphicSize, string> = {

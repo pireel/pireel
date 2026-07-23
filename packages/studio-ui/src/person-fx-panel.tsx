@@ -54,9 +54,9 @@ function BustPreview({ style }: { style: StrokeStyle }) {
 }
 
 const STROKE_CARDS: { style: StrokeStyle; name: string }[] = [
-  { style: 'none', name: '无' },
-  { style: 'solid', name: '实线' },
-  { style: 'dashed', name: '虚线' },
+  { style: 'none', name: 'common.none' },
+  { style: 'solid', name: 'panels.solid' },
+  { style: 'dashed', name: 'panels.dashed' },
 ];
 
 export function PersonFxPanel({
@@ -107,7 +107,7 @@ export function PersonFxPanel({
       const url = await uploadImageFile(f);
       commit({ ...fx, bg: { type: 'image', url } });
     } catch {
-      toast.error(t('图片上传失败'));
+      toast.error(t('panels.imageUploadFailedTry'));
     } finally {
       setUploading(false);
     }
@@ -117,19 +117,19 @@ export function PersonFxPanel({
     <TooltipProvider delayDuration={200}>
       <div className="flex h-full min-h-0 w-full flex-col">
         {/* Title/close live in the floating-window header; only a one-line hint here */}
-        <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('开启智能抠像后,人物可以盖在组件上,还能羽化、描边、换背景')}</div>
+        <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.smartCutoutHint')}</div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
-          {!comp.video && <div className="text-ink-4">{t('先上传口播视频,人像效果才有处生效。')}</div>}
+          {!comp.video && <div className="text-ink-4">{t('panels.uploadVideoForPortraitFx')}</div>}
 
           {/* Per-shot toggle + budget progress: only affects the currently selected shot; can't enable with nothing selected */}
           <section className="flex flex-col gap-1.5">
             <label className="flex cursor-pointer items-center justify-between">
-              <span className="text-ink font-medium">{t('智能抠像')}</span>
+              <span className="text-ink font-medium">{t('panels.smartCutout')}</span>
               <button
                 type="button"
                 role="switch"
                 aria-checked={!!selectedShotMatte}
-                aria-label={t('智能抠像开关')}
+                aria-label={t('panels.smartCutoutToggle')}
                 disabled={selectedShotMatte === null}
                 onClick={() => onToggleShotMatte(!selectedShotMatte)}
                 className={`relative h-[18px] w-8 rounded-full transition disabled:opacity-40 ${selectedShotMatte ? 'bg-accent' : 'bg-line-2'}`}
@@ -140,7 +140,7 @@ export function PersonFxPanel({
               </button>
             </label>
             <div className="text-ink-4 text-[10.5px]">
-              {selectedShotMatte === null ? t('先在时间轴选中一个分镜,开关只对选中段生效') : t('只对当前选中的分镜段生效,开启后处理这一段')}
+              {selectedShotMatte === null ? t('panels.selectShotTimelineFirst') : t('panels.appliesOnlySelectedShot')}
             </div>
             {matte.status === 'running' && (
               <div className="flex flex-col gap-1 pt-0.5">
@@ -154,16 +154,16 @@ export function PersonFxPanel({
                 </div>
                 <div className="text-ink-4 flex items-center gap-1 text-[10.5px]">
                   <Loader2 size={10} className="animate-spin" />
-                  {t('处理中 {done}/{total}({pct}%)', { done: matte.done, total: matte.total, pct: matte.total ? Math.round((matte.done / matte.total) * 100) : 0 })}
+                  {t('panels.processingDoneTotalPct', { done: matte.done, total: matte.total, pct: matte.total ? Math.round((matte.done / matte.total) * 100) : 0 })}
                 </div>
               </div>
             )}
-            {anyMatte && matte.status === 'ready' && <div className="text-ink-4 text-[10.5px]">{t('✓ 已就绪(累计 {n} 帧)', { n: matte.done })}</div>}
+            {anyMatte && matte.status === 'ready' && <div className="text-ink-4 text-[10.5px]">{t('panels.readyFrames', { n: matte.done })}</div>}
             {anyMatte && matte.status === 'error' && (
               <div className="text-destructive flex items-center gap-2 text-[10.5px]">
-                {t('处理失败')}
+                {t('panels.processingFailed')}
                 <button type="button" onClick={onRetry} className="text-ink underline">
-                  {t('重试')}
+                  {t('common.retry')}
                 </button>
               </div>
             )}
@@ -177,12 +177,12 @@ export function PersonFxPanel({
                   {/* Person on top */}
                   <section className="flex flex-col gap-1.5">
                     <label className="flex cursor-pointer items-center justify-between">
-                      <span className="text-ink font-medium">{t('人物置顶')}</span>
+                      <span className="text-ink font-medium">{t('panels.personTop')}</span>
                       <button
                         type="button"
                         role="switch"
                         aria-checked={!!fx.personFront}
-                        aria-label={t('人物置顶开关')}
+                        aria-label={t('panels.personTopToggle')}
                         disabled={!anyMatte}
                         onClick={() => commit({ ...fx, personFront: !fx.personFront || undefined })}
                         className={`relative h-[18px] w-8 rounded-full transition ${fx.personFront ? 'bg-accent' : 'bg-line-2'}`}
@@ -192,12 +192,12 @@ export function PersonFxPanel({
                         />
                       </button>
                     </label>
-                    <div className="text-ink-4 text-[10.5px]">{t('人像盖在所有组件上——文字、贴纸从人身后穿过')}</div>
+                    <div className="text-ink-4 text-[10.5px]">{t('panels.personSitsAboveAll')}</div>
                   </section>
                   {/* Feather */}
                   <section className="flex flex-col gap-1.5">
                     <div className="text-ink flex items-center justify-between font-medium">
-                      <span>{t('边缘羽化')}</span>
+                      <span>{t('panels.edgeFeather')}</span>
                       <span className="text-ink-4 tabular-nums">{Math.round(fx.feather ?? 0)}</span>
                     </div>
                     <input
@@ -208,13 +208,13 @@ export function PersonFxPanel({
                       value={fx.feather ?? 0}
                       onChange={(e) => commit({ ...fx, feather: Number(e.target.value) })}
                       className="zoom-range w-full"
-                      aria-label={t('边缘羽化')}
+                      aria-label={t('panels.edgeFeather')}
                     />
                   </section>
 
                   {/* Stroke: style cards + config */}
                   <section className="flex flex-col gap-2">
-                    <div className="text-ink font-medium">{t('人像描边')}</div>
+                    <div className="text-ink font-medium">{t('panels.portraitStroke')}</div>
                     <div className="grid grid-cols-3 gap-2">
                       {STROKE_CARDS.map((card) => {
                         const active = card.style === 'none' ? !stroke : stroke?.style === card.style;
@@ -223,7 +223,7 @@ export function PersonFxPanel({
                             key={card.style}
                             type="button"
                             onClick={() => setStrokeStyle(card.style)}
-                            aria-label={t('描边样式:{name}', { name: t(card.name) })}
+                            aria-label={t('panels.strokeStyleName', { name: t(card.name) })}
                             className={`bg-panel-2 flex flex-col items-center gap-1 rounded-lg border p-1.5 pb-1 transition ${
                               active ? 'border-accent ring-accent/40 ring-1' : 'border-line hover:border-ink-4'
                             }`}
@@ -237,11 +237,11 @@ export function PersonFxPanel({
                     {stroke && (
                       <div className="flex flex-col gap-2 pt-0.5">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('颜色')}</span>
+                          <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('panels.color')}</span>
                           {[
-                            ...(accent ? ([['主题强调色', accent]] as [string, string][]) : []),
-                            ['白', '#ffffff'] as [string, string],
-                            ['黑', '#101114'] as [string, string],
+                            ...(accent ? ([['panels.themeAccent', accent]] as [string, string][]) : []),
+                            ['panels.white', '#ffffff'] as [string, string],
+                            ['panels.black', '#101114'] as [string, string],
                           ].map(([name, colorVal]) => (
                             <button
                               key={name}
@@ -252,14 +252,14 @@ export function PersonFxPanel({
                                   stroke: { ...stroke, color: colorVal },
                                 })
                               }
-                              title={t('描边:{name}', { name: t(name) })}
-                              aria-label={t('描边:{name}', { name: t(name) })}
+                              title={t('panels.strokeName', { name: t(name) })}
+                              aria-label={t('panels.strokeName', { name: t(name) })}
                               className={`h-5 w-5 shrink-0 rounded-full border ${stroke.color.toLowerCase() === colorVal.toLowerCase() ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                               style={{ background: colorVal }}
                             />
                           ))}
                           <label
-                            title={t('自定义描边色')}
+                            title={t('panels.customStrokeColor')}
                             className="border-line relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border"
                             style={{
                               background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)',
@@ -275,12 +275,12 @@ export function PersonFxPanel({
                                 })
                               }
                               className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                              aria-label={t('自定义描边色')}
+                              aria-label={t('panels.customStrokeColor')}
                             />
                           </label>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('粗细')}</span>
+                          <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('panels.width')}</span>
                           <input
                             type="range"
                             min={1}
@@ -294,12 +294,12 @@ export function PersonFxPanel({
                               })
                             }
                             className="zoom-range min-w-0 flex-1"
-                            aria-label={t('描边粗细')}
+                            aria-label={t('panels.strokeWidth')}
                           />
                           <span className="text-ink-4 w-6 shrink-0 text-right tabular-nums text-[10px]">{stroke.width}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('透明度')}</span>
+                          <span className="text-ink-4 w-9 shrink-0 text-[10px]">{t('panels.opacity')}</span>
                           <input
                             type="range"
                             min={5}
@@ -316,7 +316,7 @@ export function PersonFxPanel({
                               })
                             }
                             className="zoom-range min-w-0 flex-1"
-                            aria-label={t('描边透明度')}
+                            aria-label={t('panels.strokeOpacity')}
                           />
                           <span className="text-ink-4 w-6 shrink-0 text-right tabular-nums text-[10px]">{Math.round((stroke.opacity ?? 1) * 100)}%</span>
                         </div>
@@ -326,32 +326,32 @@ export function PersonFxPanel({
 
                   {/* Replace background */}
                   <section className="flex flex-col gap-1.5">
-                    <div className="text-ink font-medium">{t('替换背景')}</div>
+                    <div className="text-ink font-medium">{t('panels.replaceBackground')}</div>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => commit({ ...fx, bg: undefined })}
-                        title={t('不换背景')}
-                        aria-label={t('不换背景')}
+                        title={t('panels.keepBackground')}
+                        aria-label={t('panels.keepBackground')}
                         className={`h-5 w-5 shrink-0 rounded-full border bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!fx.bg ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                       />
                       {[
-                        ...(comp.palette?.paper ? ([['主题纸底', comp.palette.paper]] as [string, string][]) : []),
-                        ['白', '#ffffff'] as [string, string],
-                        ['黑', '#101114'] as [string, string],
+                        ...(comp.palette?.paper ? ([['panels.themePaper', comp.palette.paper]] as [string, string][]) : []),
+                        ['panels.white', '#ffffff'] as [string, string],
+                        ['panels.black', '#101114'] as [string, string],
                       ].map(([name, colorVal]) => (
                         <button
                           key={name}
                           type="button"
                           onClick={() => commit({ ...fx, bg: { type: 'color', color: colorVal } })}
-                          title={t('背景:{name}', { name: t(name) })}
-                          aria-label={t('背景:{name}', { name: t(name) })}
+                          title={t('panels.backgroundName', { name: t(name) })}
+                          aria-label={t('panels.backgroundName', { name: t(name) })}
                           className={`h-5 w-5 shrink-0 rounded-full border ${fx.bg?.type === 'color' && fx.bg.color.toLowerCase() === colorVal.toLowerCase() ? 'border-accent ring-1 ring-accent' : 'border-line'}`}
                           style={{ background: colorVal }}
                         />
                       ))}
                       <label
-                        title={t('自定义背景色')}
+                        title={t('panels.customBackgroundColor')}
                         className="border-line relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border"
                         style={{
                           background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)',
@@ -367,7 +367,7 @@ export function PersonFxPanel({
                             })
                           }
                           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                          aria-label={t('自定义背景色')}
+                          aria-label={t('panels.customBackgroundColor')}
                         />
                       </label>
                       <button
@@ -376,29 +376,29 @@ export function PersonFxPanel({
                         disabled={uploading}
                         className={`inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[10px] ${fx.bg?.type === 'image' ? 'border-accent text-accent' : 'border-line text-ink-3 hover:text-ink'}`}
                       >
-                        {uploading ? <Loader2 size={10} className="animate-spin" /> : <ImagePlus size={10} />} {t('图片')}
+                        {uploading ? <Loader2 size={10} className="animate-spin" /> : <ImagePlus size={10} />} {t('panels.image')}
                       </button>
                       <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void pickBgImage(e.target.files?.[0] ?? null)} />
                     </div>
                     {fx.bg?.type === 'image' && (
                       <div className="border-line relative mt-1 w-fit overflow-hidden rounded-md border">
-                        <img src={imageThumb(fx.bg.url, 'thumb')} alt={t('背景图')} className="h-20 w-auto object-cover" />
+                        <img src={imageThumb(fx.bg.url, 'thumb')} alt={t('panels.backgroundImage')} className="h-20 w-auto object-cover" />
                         <button
                           type="button"
                           onClick={() => commit({ ...fx, bg: undefined })}
-                          aria-label={t('移除背景图')}
+                          aria-label={t('panels.removeBackgroundImage')}
                           className="absolute right-1 top-1 rounded bg-black/60 p-0.5 text-white hover:bg-black/80"
                         >
                           <X size={10} />
                         </button>
                       </div>
                     )}
-                    <div className="text-ink-4 text-[10.5px]">{t('换背景后,人物由抠像补回;有取景缩放时背景保持静止')}</div>
+                    <div className="text-ink-4 text-[10.5px]">{t('panels.afterSwappingCutoutFills')}</div>
                   </section>
                 </div>
               </div>
             </TooltipTrigger>
-            {!anyMatte && <TooltipContent>{t('先开启智能抠像')}</TooltipContent>}
+            {!anyMatte && <TooltipContent>{t('panels.turnSmartCutoutFirst')}</TooltipContent>}
           </Tooltip>
         </div>
       </div>

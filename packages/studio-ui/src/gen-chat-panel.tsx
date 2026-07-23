@@ -177,9 +177,9 @@ const SHIMMER: React.CSSProperties = {
 /* ---------------- Panel ---------------- */
 
 const TYPE_META: Record<AssetType, { title: string; ph: string; empty: string }> = {
-  image: { title: '图片', ph: '描述要生成的画面…', empty: '' },
-  video: { title: '视频', ph: '描述要生成的镜头…', empty: '' },
-  element: { title: '组件', ph: '描述叠加组件…', empty: '生成的组件会留在这里\n点「插入」才进片子,同一个可插多次' },
+  image: { title: 'panels.image', ph: 'chatGen.describeImageGenerate', empty: '' },
+  video: { title: 'panels.video', ph: 'chatGen.describeShotGenerate', empty: '' },
+  element: { title: 'panels.element', ph: 'chatGen.describeOverlayElement', empty: 'chatGen.generatedComponentsStayHere' },
 };
 
 export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, onInsertTemplate }: GenChatPanelProps) {
@@ -393,7 +393,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
             return next;
           });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : t('生成失败');
+          const msg = err instanceof Error ? err.message : t('common.generationFailed');
           setEntries((cur) => cur.map((e) => (e.id === id ? { ...e, status: 'failed' as const, error: msg } : e)));
         }
         return;
@@ -435,7 +435,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                   tab === tb ? 'bg-ink text-bg font-medium' : 'text-ink-3 hover:bg-panel-2'
                 }`}
               >
-                {tb === 'mine' ? t('我的') : t('模板')}
+                {tb === 'mine' ? t('common.mine') : t('chatGen.templates')}
               </button>
             ))}
           </div>
@@ -503,8 +503,8 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
           {baseEl && (
             <div className="flex items-center gap-1.5 px-3 pt-2.5">
               <span className="border-accent/50 bg-accent/10 text-ink inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10.5px]">
-                {t('基于:{name}', { name: baseEl.prompt.slice(0, 16) || baseEl.el.label })}
-                <button type="button" aria-label={t('移除底稿')} onClick={() => setBaseEl(null)} className="text-ink-3 hover:text-ink">
+                {t('chatGen.basedOn', { name: baseEl.prompt.slice(0, 16) || baseEl.el.label })}
+                <button type="button" aria-label={t('chatGen.removeBase')} onClick={() => setBaseEl(null)} className="text-ink-3 hover:text-ink">
                   <X size={11} />
                 </button>
               </span>
@@ -523,7 +523,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                   {/* delete: appears top-right on hover (no longer occupies the "reference image" label slot) */}
                   <button
                     type="button"
-                    aria-label={type === 'video' ? t('移除参考片') : t('移除参考图')}
+                    aria-label={type === 'video' ? t('chatGen.removeReferenceVideo') : t('chatGen.removeReferenceImage')}
                     onClick={() => setRefs((cur) => cur.filter((x) => x.key !== r.key))}
                     className="absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-bl-md bg-black/60 text-white opacity-0 transition group-hover:opacity-100"
                   >
@@ -545,7 +545,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
             }}
             rows={2}
             placeholder={t(meta.ph)}
-            aria-label={t('生成素材描述')}
+            aria-label={t('chatGen.describeWhatGenerate')}
             className="text-ink placeholder:text-ink-4 max-h-[200px] min-h-[64px] w-full resize-none bg-transparent px-3 pb-1.5 pt-2.5 text-[13px] leading-relaxed outline-none"
           />
           <div className="flex items-center gap-1 px-2 pb-2 pt-1">
@@ -555,8 +555,8 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                   <select
                     value={modelId}
                     onChange={(e) => setModelId(e.target.value)}
-                    aria-label={t('选择模型')}
-                    title={t('模型')}
+                    aria-label={t('chatGen.chooseModel')}
+                    title={t('chatGen.model')}
                     className="border-line bg-panel-2 text-ink-2 focus:border-ink-4 max-w-[140px] shrink truncate rounded-md border py-1 pl-2 pr-1 text-[11px] outline-none"
                   >
                     {models.map((m) => (
@@ -566,10 +566,10 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                     ))}
                   </select>
                 )}
-                <PopButton icon={<Sliders size={15} strokeWidth={2.2} />} title={t('生成参数')}>
+                <PopButton icon={<Sliders size={15} strokeWidth={2.2} />} title={t('chatGen.generationSettings')}>
                   {/* quality/resolution: varies by model (some have multiple tiers, single tier hidden) — see the /image studio */}
                   {type === 'image' && qualityCfg && qualityCfg.options.length > 1 && (
-                    <Row label={t('质量')}>
+                    <Row label={t('chatGen.quality')}>
                       {qualityCfg.options.map((o) => (
                         <Pill key={o.value} selected={quality === o.value} onClick={() => setQuality(o.value)}>
                           {o.label}
@@ -578,7 +578,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                     </Row>
                   )}
                   {type === 'video' && vidResOpts.length > 1 && (
-                    <Row label={t('分辨率')}>
+                    <Row label={t('chatGen.resolution')}>
                       {vidResOpts.map((r) => (
                         <Pill key={r} selected={vidRes === r} onClick={() => setVidRes(r)}>
                           {r}
@@ -586,7 +586,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                       ))}
                     </Row>
                   )}
-                  <Row label={t('比例')}>
+                  <Row label={t('chatGen.aspectRatio')}>
                     {(type === 'image' ? (['9:16', '16:9', '1:1'] as const) : (['9:16', '16:9'] as const)).map((r) => (
                       <Pill key={r} selected={ratio === r} onClick={() => setRatio(r)}>
                         {r}
@@ -594,7 +594,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                     ))}
                   </Row>
                   {type === 'image' ? (
-                    <Row label={t('数量')}>
+                    <Row label={t('chatGen.count')}>
                       {[1, 2, 3, 4].map((n) => (
                         <Pill key={n} selected={count === n} onClick={() => setCount(n)}>
                           {n}
@@ -602,7 +602,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                       ))}
                     </Row>
                   ) : (
-                    <Row label={t('时长')}>
+                    <Row label={t('common.duration')}>
                       {vidDurOpts.map((d) => (
                         <Pill key={d} selected={vidDur === d} onClick={() => setVidDur(d)}>
                           {d}s
@@ -613,21 +613,21 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                 </PopButton>
                 <span className="text-ink-4 truncate text-[10.5px]">
                   {ratio}
-                  {type === 'image' ? (count > 1 ? ` · ${t('{count}张', { count })}` : '') : ` · ${vidDur}s · ${vidRes}`}
+                  {type === 'image' ? (count > 1 ? ` · ${t('chatGen.countImages', { count })}` : '') : ` · ${vidDur}s · ${vidRes}`}
                 </span>
               </>
             )}
             <div className="ml-auto flex items-center gap-2">
               {type !== 'element' && quoteCredits != null && (
-                <span className="text-ink-4 text-[10.5px] tabular-nums" title={t('本次生成消耗积分')}>
-                  {t('{n} 积分', { n: quoteCredits })}
+                <span className="text-ink-4 text-[10.5px] tabular-nums" title={t('chatGen.creditsGenerationUse')}>
+                  {t('chatGen.nCredits', { n: quoteCredits })}
                 </span>
               )}
               <button
                 type="button"
                 onClick={() => void submit()}
                 disabled={busy || !input.trim()}
-                aria-label={t('生成')}
+                aria-label={t('common.generate')}
                 className="bg-ink text-bg inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
               >
                 <ArrowUp size={14} />
@@ -659,7 +659,7 @@ function PromptLine({ text }: { text: string }) {
       {(overflow || expanded) && (
         <button
           type="button"
-          aria-label={expanded ? t('收起') : t('展开')}
+          aria-label={expanded ? t('chatGen.collapse') : t('chatGen.expand')}
           onClick={() => setExpanded((v) => !v)}
           className="text-ink-4 hover:text-ink absolute bottom-0 right-0"
         >
@@ -696,7 +696,7 @@ function Lightbox({ asset, onClose }: { asset: GenAsset; onClose: () => void }) 
     <div
       role="button"
       tabIndex={-1}
-      aria-label={t('关闭预览')}
+      aria-label={t('common.closePreview')}
       onClick={onClose}
       className="fixed inset-0 z-[100] flex cursor-zoom-out items-center justify-center bg-black/70 p-6"
     >
@@ -756,7 +756,7 @@ function TemplateCard({ t: tpl, onUse }: { t: GenTemplate; onUse: (prompt: strin
         {t(zhCategory(tpl.category))}
       </span>
       <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100">
-        <span className="text-ink rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium">{t('填入并编辑')}</span>
+        <span className="text-ink rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium">{t('chatGen.fillEdit')}</span>
       </span>
     </button>
   );
@@ -798,7 +798,7 @@ function EntryRow({
           }
         />
       )}
-      {e.status === 'failed' && <div className="text-destructive text-[11.5px]">{t('生成失败')}{e.error ? `:${e.error}` : ''}</div>}
+      {e.status === 'failed' && <div className="text-destructive text-[11.5px]">{t('common.generationFailed')}{e.error ? `:${e.error}` : ''}</div>}
 
       {e.status === 'succeeded' && e.type === 'element' && e.element && (
         <ElementResult el={e.element} prompt={e.prompt} comp={comp} onInsertElement={onInsertElement} onUseAsBase={onUseAsBase} />
@@ -812,13 +812,13 @@ function EntryRow({
               <button
                 key={i}
                 type="button"
-                title={t('预览大图（也可拖到画面 / 时间轴插入）')}
-                aria-label={t('预览大图')}
+                title={t('chatGen.previewFullSizeAlso')}
+                aria-label={t('chatGen.previewFullSize')}
                 onClick={() => onPreview(a)}
                 draggable
                 onDragStart={(ev) => {
                   ev.dataTransfer.effectAllowed = 'copy';
-                  onDragAsset?.({ type: 'image', url: a.url, label: e.prompt.slice(0, 12) || t('配图'), dims: ratioDims(e.ratio) });
+                  onDragAsset?.({ type: 'image', url: a.url, label: e.prompt.slice(0, 12) || t('tools.add_graphics.label'), dims: ratioDims(e.ratio) });
                 }}
                 onDragEnd={() => onDragAsset?.(null)}
                 className="border-line group relative block shrink-0 overflow-hidden rounded-lg border"
@@ -835,8 +835,8 @@ function EntryRow({
             ))}
           </div>
           <div className="flex flex-wrap gap-1">
-            <ActionChip icon={Plus} label={t('插入画面')} onClick={() => onInsertMedia({ type: 'image', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('配图'), ratioDims(e.ratio))} />
-            {onAddRef && <ActionChip icon={ImagePlus} label={t('参考')} onClick={() => onAddRef(e.assets![0]!)} />}
+            <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertMedia({ type: 'image', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('tools.add_graphics.label'), ratioDims(e.ratio))} />
+            {onAddRef && <ActionChip icon={ImagePlus} label={t('chatGen.reference')} onClick={() => onAddRef(e.assets![0]!)} />}
           </div>
         </div>
       )}
@@ -849,18 +849,18 @@ function EntryRow({
             muted
             playsInline
             preload="metadata"
-            title={t('也可拖到画面 / 时间轴插入')}
+            title={t('chatGen.alsoDragOntoCanvas')}
             draggable
             onDragStart={(ev) => {
               ev.dataTransfer.effectAllowed = 'copy';
-              onDragAsset?.({ type: 'video', url: e.assets![0]!.url, label: e.prompt.slice(0, 12) || t('视频素材'), dims: ratioDims(e.ratio) });
+              onDragAsset?.({ type: 'video', url: e.assets![0]!.url, label: e.prompt.slice(0, 12) || t('chatGen.videoClip'), dims: ratioDims(e.ratio) });
             }}
             onDragEnd={() => onDragAsset?.(null)}
             className="border-line max-h-44 w-fit max-w-full rounded-lg border bg-black"
           />
           <div className="flex flex-wrap gap-1">
-            <ActionChip icon={Plus} label={t('插入画面')} onClick={() => onInsertMedia({ type: 'video', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('视频素材'), ratioDims(e.ratio))} />
-            {onAddRef && <ActionChip icon={ImagePlus} label={t('参考')} onClick={() => onAddRef(e.assets![0]!)} />}
+            <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertMedia({ type: 'video', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('chatGen.videoClip'), ratioDims(e.ratio))} />
+            {onAddRef && <ActionChip icon={ImagePlus} label={t('chatGen.reference')} onClick={() => onAddRef(e.assets![0]!)} />}
           </div>
         </div>
       )}
@@ -884,8 +884,8 @@ function ElementResult({ el, prompt, comp, onInsertElement, onUseAsBase }: { el:
         <BlockPreviewFrame comp={comp} block={previewBlock} width={180} />
       </div>
       <div className="flex items-center gap-1.5">
-        <ActionChip icon={Plus} label={t('插入画面')} onClick={() => onInsertElement(el, prompt)} />
-        {onUseAsBase && <ActionChip icon={ImagePlus} label={t('参考')} onClick={() => onUseAsBase(el, prompt)} />}
+        <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertElement(el, prompt)} />
+        {onUseAsBase && <ActionChip icon={ImagePlus} label={t('chatGen.reference')} onClick={() => onUseAsBase(el, prompt)} />}
       </div>
     </div>
   );

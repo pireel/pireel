@@ -3,7 +3,7 @@ id: circuit-board
 title: 电路 Circuit
 summary: 通电电路板:铜金走线、丝印标注、电流沿线奔跑,适合科技/教程/拆解
 icon: ⚡
-showcase: [标题卡, 大数字, 步骤, 走势, 代码, 对比, 金句, 引导]
+showcase: [title-card, big-number, steps, trend, code, compare, quote, cta]
 palette: { paper: "#081611", panel: "#0F241B", panel-2: "#0B1D15", fg: "#E9F6EE", muted: "#E9F6EE99", accent: "#F0B84C", accent-2: "#53E6FF", line: "#E9F6EE21", grid: "#E9F6EE0B", radius: "6px", shadow: "0 18px 46px rgb(0 0 0 / 0.55)", glow: "0 0 26px rgb(83 230 255 / 0.55)", font-num: "'IBM Plex Mono', ui-monospace, monospace" }
 version: 0.1.2
 ---
@@ -49,21 +49,21 @@ By default blocks are BREAKOUT MODULES soldered over the live feed: the block ro
 - Header strip: top row `left/right 90px`, designator+mode left / rail facts right (`VCC 3V3 · GND`), mono muted, `2px solid var(--line)` rule underneath.
 
 ## Block recipes
-- 标题卡: header strip (`SCH-01 · INTRO` / `VCC 3V3 · GND`) → a wide U1 chip plate holding silk cap `U1 · MAIN` and the 96px headline → inbound trace from the left edge into the chip's pins, outbound stub exiting right → silk test-point footer (`TP1 ● SELF-TEST OK` / `GND`).
+- title-card: header strip (`SCH-01 · INTRO` / `VCC 3V3 · GND`) → a wide U1 chip plate holding silk cap `U1 · MAIN` and the 96px headline → inbound trace from the left edge into the chip's pins, outbound stub exiting right → silk test-point footer (`TP1 ● SELF-TEST OK` / `GND`).
   Motion: strip fades, traces draw 0.4s power2.out, chip snaps y−20, pulse runs the inbound trace, corner LED lights by 0.9s and stays.
-- 大数字: a U7 sensor chip (word = the metric) left; a trace runs from its pins to a giant gold mono readout (`16` at 420px + muted `ms`); the pulse DELIVERS the number — digits snap up only when it arrives; LED at the junction via; `font-head` claim line below the readout.
+- big-number: a U7 sensor chip (word = the metric) left; a trace runs from its pins to a giant gold mono readout (`16` at 420px + muted `ms`); the pulse DELIVERS the number — digits snap up only when it arrives; LED at the junction via; `font-head` claim line below the readout.
   Motion: chip snaps, trace draws, pulse 0.35s arrives ≈0.8s, LED steps on, digits rise y+30 power3.out, claim last.
-- 步骤: three chips in series on one straight bus (`M0 550 H1920` running under all three) — `S1 · DONE 拆解` (dim), `S2 · ACTIVE 换硅脂` (cyan outline + glow + LED), `S3 · QUEUED 装回` (muted). The pulse crosses the full bus, passing under each package.
+- steps: three chips in series on one straight bus (`M0 550 H1920` running under all three) — `S1 · DONE 拆解` (dim), `S2 · ACTIVE 换硅脂` (cyan outline + glow + LED), `S3 · QUEUED 装回` (muted). The pulse crosses the full bus, passing under each package.
   Motion: bus draws, chips snap in stagger 0.12, pulse traverses 0.45s, LED on the active chip lights at 0.95s.
-- 走势: an oscilloscope — a `--panel-2` screen with its own finer grid, silk header `CH1 · 帧率曲线` left and gold `PEAK 144 FPS` right; the waveform is a stepped trace (H runs + 45° edges) drawing left→right; the pulse rides the drawn beam and the beam-end LED lights; `font-head` verdict + silk `DIP < 5%` below the screen.
+- trend: an oscilloscope — a `--panel-2` screen with its own finer grid, silk header `CH1 · 帧率曲线` left and gold `PEAK 144 FPS` right; the waveform is a stepped trace (H runs + 45° edges) drawing left→right; the pulse rides the drawn beam and the beam-end LED lights; `font-head` verdict + silk `DIP < 5%` below the screen.
   Motion: screen snaps, header ticks steps(1), waveform draws 0.5s, pulse 0.4s, LED at 0.98s, caption rises.
-- 代码: a serial console — inbound trace powers the panel first; silk header `TX ▸ RX · CONNECTED` with a header LED; mono 46px log lines (`>` cyan, values gold): `> POWER RAIL 3.30V · OK`, `> 风扇转速 1800 RPM`, `> 温度墙 83°C`, `> 系统就绪` closed by a cyan block cursor `▌`.
+- code: a serial console — inbound trace powers the panel first; silk header `TX ▸ RX · CONNECTED` with a header LED; mono 46px log lines (`>` cyan, values gold): `> POWER RAIL 3.30V · OK`, `> 风扇转速 1800 RPM`, `> 温度墙 83°C`, `> 系统就绪` closed by a cyan block cursor `▌`.
   Motion: trace draws, pulse arrives 0.55s, header LED lights, lines tick on steps(1) stagger 0.09, cursor blinks finite (`yoyo repeat 3`) ending visible by 1.18s — the card's only blinker.
-- 对比: one PSU source chip left, two parallel branches to two chips right — loser branch `tr dim` + muted via + dim chip (`U2 · 94°C 原装散热`), winner branch gold with the pulse + active cyan chip (`U3 · 62°C 加装风扇`) + LED. Current only flows where the argument goes. `font-head` verdict bottom.
+- compare: one PSU source chip left, two parallel branches to two chips right — loser branch `tr dim` + muted via + dim chip (`U2 · 94°C 原装散热`), winner branch gold with the pulse + active cyan chip (`U3 · 62°C 加装风扇`) + LED. Current only flows where the argument goes. `font-head` verdict bottom.
   Motion: source snaps, both branches draw, chips snap top-then-bottom, pulse runs ONLY the winner branch, LED at 0.98s, verdict rises.
-- 金句: the quote as silkscreen print — silk speaker tag (`TP1 · 装机十年的老师傅`), two 96px `font-head` quote lines, then an underline trace routes beneath them with a 45° drop; the pulse underlines the quote and the end LED lights like a period. A dead gold stub decorates the top-right corner.
+- quote: the quote as silkscreen print — silk speaker tag (`TP1 · 装机十年的老师傅`), two 96px `font-head` quote lines, then an underline trace routes beneath them with a 45° drop; the pulse underlines the quote and the end LED lights like a period. A dead gold stub decorates the top-right corner.
   Motion: tag ticks steps(1), lines rise y+24 stagger 0.14, trace draws under them, pulse 0.35s, LED at 0.98s.
-- 引导: a momentary switch closing the circuit — inbound trace ends at an OPEN lever (an SVG line rotated −30° at a via gap); the SW1 chip button holds 900-weight `关注`; pulse #1 arrives at the switch, the lever SNAPS closed (rotation→0), a cyan glow ring steps onto the button, pulse #2 runs the outbound trace and lights the far LED; `font-head` caption below.
+- cta: a momentary switch closing the circuit — inbound trace ends at an OPEN lever (an SVG line rotated −30° at a via gap); the SW1 chip button holds 900-weight `关注`; pulse #1 arrives at the switch, the lever SNAPS closed (rotation→0), a cyan glow ring steps onto the button, pulse #2 runs the outbound trace and lights the far LED; `font-head` caption below.
   Motion: traces draw, button snaps, pulse1 0.25s → lever closes 0.15s power3.out at 0.6s → ring steps(1) → pulse2 0.28s → LED at 1.02s. Two pulses — the only screen allowed two.
 
 ## Compose-instruction crib

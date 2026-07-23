@@ -3,7 +3,7 @@ id: manga-panel
 title: 漫画 Manga
 summary: 白纸墨线:分镜格、速度线、对话泡、网点,适合吐槽/剧情/反转叙事
 icon: 💥
-showcase: [标题卡, 金句, 评论, 对比, 问答, 步骤, 大数字, 引导]
+showcase: [title-card, quote, comments, compare, qa, steps, big-number, cta]
 palette: { paper: "#FFFFFF", panel: "#FFFFFF", panel-2: "#F0F0F0", fg: "#101010", muted: "#10101099", accent: "#FF3355", accent-2: "#101010", line: "#10101040", grid: "#10101014", radius: "4px", shadow: "6px 6px 0 rgb(16 16 16 / 0.18)", glow: "0 0 0 rgb(0 0 0 / 0)" }
 version: 0.1.2
 ---
@@ -49,21 +49,21 @@ By default blocks are FLOATING PANELS AND BUBBLES inked over the footage: the bl
 - Inverted panel: `background:var(--fg);color:var(--paper);` same 6px border — the loudest non-red emphasis available.
 
 ## Block recipes
-- 标题卡: one dominant ink panel rotated −0.8° holding an ink-box kicker (`第 1 格 · 开场`) and the ~142px title; a speed-line patch cuts the panel's top-right corner; a halftone patch leans out from the lower-left; a `!?` SFX in paper-fill/ink-stroke overlaps the panel border; the single red stamp (`吐槽注意`) tilts over the top edge.
+- title-card: one dominant ink panel rotated −0.8° holding an ink-box kicker (`第 1 格 · 开场`) and the ~142px title; a speed-line patch cuts the panel's top-right corner; a halftone patch leans out from the lower-left; a `!?` SFX in paper-fill/ink-stroke overlaps the panel border; the single red stamp (`吐槽注意`) tilts over the top edge.
   Motion: panel snaps in (power3), speed lines wipe, title rises, SFX slams with power3.in scale, stamp punches last.
-- 金句: a giant speech bubble (~1420×600 ellipse) centered-high with its tail pointing lower-left, quote at 96px weight 900 inside; halftone patch bottom-left, speed lines top-right, a small `!!` stroke-SFX upper-right; muted attribution (`—— 内心 OS`) under the tail. No red on this card.
+- quote: a giant speech bubble (~1420×600 ellipse) centered-high with its tail pointing lower-left, quote at 96px weight 900 inside; halftone patch bottom-left, speed lines top-right, a small `!!` stroke-SFX upper-right; muted attribution (`—— 内心 OS`) under the tail. No red on this card.
   Motion: bubble pops `back.out(1.5)`, tail after, quote fades, tones fade, SFX slams.
-- 评论: a danmaku panel — one dominant ink panel (ink-box kicker `第 8 格 · 弹幕来袭`) with a speed-line patch cutting its top-right corner; THREE comment speech bubbles (5px ink ellipses with rotated-square tails, each tilted 1-2°) crash into the panel one after another, the third INVERTED (ink plate, paper text) as the impact bubble; a halftone patch leans out from the lower-left. No red on this card.
+- comments: a danmaku panel — one dominant ink panel (ink-box kicker `第 8 格 · 弹幕来袭`) with a speed-line patch cutting its top-right corner; THREE comment speech bubbles (5px ink ellipses with rotated-square tails, each tilted 1-2°) crash into the panel one after another, the third INVERTED (ink plate, paper text) as the impact bubble; a halftone patch leans out from the lower-left. No red on this card.
   Motion: panel snaps in, speed lines wipe, kicker snaps, bubbles slam `power3.in` from scale 1.7 with stagger like thrown rocks, halftone fades last.
-- 对比: two clashing panels — left white panel rotated −1.2° (`改造前` + 150px verdict) vs right INVERTED panel rotated +1.2° (`改造后`, paper text, paper speed lines) — split by the lightning divider drawn down the seam; the single red stamp `反转` sits on the bolt.
+- compare: two clashing panels — left white panel rotated −1.2° (`改造前` + 150px verdict) vs right INVERTED panel rotated +1.2° (`改造后`, paper text, paper speed lines) — split by the lightning divider drawn down the seam; the single red stamp `反转` sits on the bolt.
   Motion: panels shove in from opposite sides, bolt strokes draw in 0.4s, tone patches fade, stamp punches in last.
-- 问答: a Q&A spread — left white Q panel rotated −1.2° (ink-box kicker `Q · 读者提问`, ~104px question, a `ざわ…ざわ…` murmur caption pinned low) with a giant ？ SFX (paper fill, 13px ink stroke) overlapping its right edge; the right INVERTED A panel page-flips in on a left hinge (`rotationY` from −92 with perspective) revealing the answer in paper text under an inverted kicker; the single red stamp `真相!` punches on the seam last.
+- qa: a Q&A spread — left white Q panel rotated −1.2° (ink-box kicker `Q · 读者提问`, ~104px question, a `ざわ…ざわ…` murmur caption pinned low) with a giant ？ SFX (paper fill, 13px ink stroke) overlapping its right edge; the right INVERTED A panel page-flips in on a left hinge (`rotationY` from −92 with perspective) revealing the answer in paper text under an inverted kicker; the single red stamp `真相!` punches on the seam last.
   Motion: Q panel shoves in, question rises, the ？ slams `power3.in`, murmur fades, the A panel flips open like a turned page, stamp punches last.
-- 步骤: a 四格漫画 spread — four unequal ink panels each tilted ±1-1.6°: panels 1-3 carry ink-box numbers ①②③ plus an 84px step line, with a speed-line patch cutting panel 1's corner and a halftone patch leaning on panel 3; the LAST panel holds only speed lines and a giant `完!` SFX (paper fill, 13px ink stroke) overlapping its border. No red on this card.
+- steps: a 四格漫画 spread — four unequal ink panels each tilted ±1-1.6°: panels 1-3 carry ink-box numbers ①②③ plus an 84px step line, with a speed-line patch cutting panel 1's corner and a halftone patch leaning on panel 3; the LAST panel holds only speed lines and a giant `完!` SFX (paper fill, 13px ink stroke) overlapping its border. No red on this card.
   Motion: panels shove in from alternating sides/bottom like cuts, number boxes snap, tone patches fade, the SFX slams `power3.in` last.
-- 大数字: the number itself is the SFX — ~420px, paper fill with a 16px ink text-stroke, rotated −4°, slamming over a large halftone patch; ink-box kicker top-left, muted caption bottom-left, speed lines cutting the top-right corner; the single red stamp punches beside the number.
+- big-number: the number itself is the SFX — ~420px, paper fill with a 16px ink text-stroke, rotated −4°, slamming over a large halftone patch; ink-box kicker top-left, muted caption bottom-left, speed lines cutting the top-right corner; the single red stamp punches beside the number.
   Motion: tones fade first, kicker snaps, the number slams `power3.in` from scale 1.8, caption fades, red stamp punches last.
-- 引导: a speech-bubble CTA — white ellipse (5px ink border) holding `关注看下回` at 132px with its rotated-square tail pointing lower-left; a `つづく` corner tag in INVERTED ink (fg plate, paper text, 0.2em tracking) bottom-right as the next-issue teaser; speed lines top-right, halftone bottom-left. No red.
+- cta: a speech-bubble CTA — white ellipse (5px ink border) holding `关注看下回` at 132px with its rotated-square tail pointing lower-left; a `つづく` corner tag in INVERTED ink (fg plate, paper text, 0.2em tracking) bottom-right as the next-issue teaser; speed lines top-right, halftone bottom-left. No red.
   Motion: bubble pops `back.out(1.5)`, tail snaps after, text fades up, tones fade, the つづく tag slams `power3.in` last.
 
 ## Compose-instruction crib

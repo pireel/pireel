@@ -22,10 +22,12 @@ export function newBlock(templateId: string, opts: { startSec: number; durationS
   const tpl = getTemplate(templateId);
   const slots: Slots = {};
   for (const [key, spec] of Object.entries(tpl.slots)) {
-    if (spec.type === 'text') slots[key] = spec.label;
-    else if (spec.type === 'text[]') slots[key] = ['要点一', '要点二', '要点三'];
+    // Slot placeholder text is CONTENT baked into the block at creation time — resolve
+    // the catalog keys through t() here so the copy lands in the creator's locale.
+    if (spec.type === 'text') slots[key] = t(spec.label);
+    else if (spec.type === 'text[]') slots[key] = [t('presets.point1'), t('presets.point2'), t('presets.point3')];
     else if (spec.type === 'enum') slots[key] = spec.options?.[0] ?? '';
-    else if (spec.type === 'words') slots[key] = [{ text: '示例文字', start: opts.startSec, end: opts.startSec + 1.2 }];
+    else if (spec.type === 'words') slots[key] = [{ text: t('presets.sampleText'), start: opts.startSec, end: opts.startSec + 1.2 }];
     // image / others: leave empty
   }
   return {
@@ -55,7 +57,7 @@ export function mediaBlock(opts: {
     durationSec: opts.durationSec,
     trackIndex: opts.trackIndex ?? 2,
     ...(opts.box ? { box: opts.box } : {}),
-    label: opts.label ?? t('素材位'),
+    label: opts.label ?? t('common.media'),
   };
 }
 
@@ -157,6 +159,6 @@ export function transitionBlock(opts: { startSec: number; durationSec?: number; 
     startSec: opts.startSec,
     durationSec: opts.durationSec ?? 0.5,
     trackIndex: opts.trackIndex ?? 3,
-    label: t('转场'),
+    label: t('tools.add_transition.label'),
   };
 }

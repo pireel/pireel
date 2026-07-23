@@ -204,10 +204,10 @@ export function ScriptPanel({
   if (!items.length) {
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
-        <PanelHeader hint={t('删词 = 删对应画面')} />
+        <PanelHeader hint={t('panels.deleteWordDeleteFootage')} />
         <div className="text-ink-4 flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-[11.5px]">
           <ScrollText size={22} />
-          {t('还没有口播稿——提取后就能用稿子剪视频:点词删词、划词批量删、一键清空白')}
+          {t('panels.noTranscriptYetTranscribe')}
           <button
             type="button"
             onClick={onExtract}
@@ -215,7 +215,7 @@ export function ScriptPanel({
             className="bg-ink text-bg inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium disabled:opacity-50"
           >
             {extracting ? <Loader2 size={12} className="animate-spin" /> : <ScrollText size={12} />}
-            {extracting ? t('提取中…') : t('提取口播稿')}
+            {extracting ? t('panels.transcribing') : t('tools.extract_asr.label')}
           </button>
         </div>
       </div>
@@ -224,26 +224,26 @@ export function ScriptPanel({
 
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col" ref={rootRef}>
-      <PanelHeader hint={hasTrueWords ? t('点词删/换 · 划词批量删 · (…s)=空白') : t('点词删/换(词级时间为句内估算)· 划词批量删')} />
+      <PanelHeader hint={hasTrueWords ? t('panels.clickWordHint') : t('panels.clickWordHintEstimated')} />
       {/* Batch actions */}
       <div className="border-line flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
         <button
           type="button"
           disabled={!silences.length}
-          onClick={() => onCut(silences.map((g) => ({ src: null, range: g.range })), t('已删除 {n} 处空白(共 {sec}s)', { n: silences.length, sec: silenceTotal.toFixed(1) }))}
-          title={silences.length ? t('删除句间 ≥{sec}s 的无语音段', { sec: MIN_SILENCE_SEC }) : t('没有可删的空白段')}
+          onClick={() => onCut(silences.map((g) => ({ src: null, range: g.range })), t('panels.deletedNSilencesSec', { n: silences.length, sec: silenceTotal.toFixed(1) }))}
+          title={silences.length ? t('panels.deleteSpeechFreeGaps', { sec: MIN_SILENCE_SEC }) : t('panels.noSilencesDelete')}
           className="border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40"
         >
-          <Scissors size={11} /> {silences.length ? t('删空白({n} 处 · {sec}s)', { n: silences.length, sec: silenceTotal.toFixed(1) }) : t('删空白')}
+          <Scissors size={11} /> {silences.length ? t('panels.cutSilencesNSec', { n: silences.length, sec: silenceTotal.toFixed(1) }) : t('panels.cutSilences')}
         </button>
         <button
           type="button"
           disabled={!fillers.length}
-          onClick={() => onCut(fillers.map((f) => ({ src: f.src, range: f.range })), t('已删除 {n} 个语气词', { n: fillers.length }))}
-          title={hasTrueWords ? (fillers.length ? fillers.map((f) => f.text).join(' ') : t('没检测到语气词')) : t('转写缺少词级时间戳,无法批量删')}
+          onClick={() => onCut(fillers.map((f) => ({ src: f.src, range: f.range })), t('panels.deletedNFillerWords', { n: fillers.length }))}
+          title={hasTrueWords ? (fillers.length ? fillers.map((f) => f.text).join(' ') : t('panels.noFillerWordsDetected')) : t('panels.transcriptLacksWordLevel')}
           className="border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40"
         >
-          <Scissors size={11} /> {fillers.length ? t('删语气词({n})', { n: fillers.length }) : t('删语气词')}
+          <Scissors size={11} /> {fillers.length ? t('panels.cutFillersN', { n: fillers.length }) : t('panels.cutFillers')}
         </button>
       </div>
       {/* Word-level plain-text stream: click a word to pop delete/replace, drag to multi-select, silence inlined as (…9.4s);
@@ -280,7 +280,7 @@ export function ScriptPanel({
                       setPop({ kind: 'deadword', src: it.src, word: w, ...localXY(e.clientX, e.clientY + 14) });
                     }
                   }}
-                  title={alive ? undefined : t('已删,点击可恢复')}
+                  title={alive ? undefined : t('panels.deletedClickRestore')}
                   className={
                     alive
                       ? `text-ink cursor-pointer rounded-sm px-[1px] ${picked ? 'bg-accent/25 ring-accent/60 ring-1' : 'hover:bg-accent/15'}`
@@ -318,16 +318,16 @@ export function ScriptPanel({
               <button
                 type="button"
                 onClick={() => {
-                  onCut([{ src: pop.src, range: [Math.max(0, pop.word.start - 0.02), pop.word.end + 0.02] }], t('已删「{word}」', { word: pop.word.text }));
+                  onCut([{ src: pop.src, range: [Math.max(0, pop.word.start - 0.02), pop.word.end + 0.02] }], t('panels.deletedWord', { word: pop.word.text }));
                   setPop(null);
                 }}
                 className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]"
               >
-                {t('删除')}
+                {t('tools.delete_block.label')}
               </button>
               <div className="bg-line h-3.5 w-px" />
               <button type="button" onClick={() => setReplaceMode(true)} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">
-                {t('替换')}
+                {t('panels.replace')}
               </button>
             </>
           )}
@@ -349,7 +349,7 @@ export function ScriptPanel({
                   }
                 }}
                 className="border-line bg-panel-2 text-ink w-24 rounded border px-1.5 py-0.5 text-[11.5px] outline-none"
-                aria-label={t('替换词')}
+                aria-label={t('panels.replacementWord')}
               />
               <button
                 type="button"
@@ -361,7 +361,7 @@ export function ScriptPanel({
                 }}
                 className="text-accent px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40"
               >
-                {t('确定')}
+                {t('panels.ok')}
               </button>
             </>
           )}
@@ -369,36 +369,36 @@ export function ScriptPanel({
             <button
               type="button"
               onClick={() => {
-                onRestore([{ src: pop.src, range: [Math.max(0, pop.word.start - 0.02), pop.word.end + 0.02] }], t('已恢复「{word}」', { word: pop.word.text }));
+                onRestore([{ src: pop.src, range: [Math.max(0, pop.word.start - 0.02), pop.word.end + 0.02] }], t('panels.restoredWord', { word: pop.word.text }));
                 setPop(null);
               }}
               className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
             >
-              {t('恢复「{word}」', { word: pop.word.text })}
+              {t('panels.restoreWord', { word: pop.word.text })}
             </button>
           )}
           {pop.kind === 'gap' && (
             <button
               type="button"
               onClick={() => {
-                onCut([{ src: null, range: pop.range }], t('已删除 {sec}s 空白', { sec: (pop.range[1] - pop.range[0]).toFixed(1) }));
+                onCut([{ src: null, range: pop.range }], t('panels.deletedSecSSilence', { sec: (pop.range[1] - pop.range[0]).toFixed(1) }));
                 setPop(null);
               }}
               className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]"
             >
-              {t('删除这段空白({sec}s)', { sec: (pop.range[1] - pop.range[0]).toFixed(1) })}
+              {t('panels.deleteSilenceSecS', { sec: (pop.range[1] - pop.range[0]).toFixed(1) })}
             </button>
           )}
           {pop.kind === 'deadgap' && (
             <button
               type="button"
               onClick={() => {
-                onRestore([{ src: null, range: pop.range }], t('已恢复 {sec}s 空白', { sec: (pop.range[1] - pop.range[0]).toFixed(1) }));
+                onRestore([{ src: null, range: pop.range }], t('panels.restoredSecSSilence', { sec: (pop.range[1] - pop.range[0]).toFixed(1) }));
                 setPop(null);
               }}
               className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
             >
-              {t('恢复这段空白({sec}s)', { sec: (pop.range[1] - pop.range[0]).toFixed(1) })}
+              {t('panels.restoreSilenceSecS', { sec: (pop.range[1] - pop.range[0]).toFixed(1) })}
             </button>
           )}
           {pop.kind === 'sel' && (
@@ -407,13 +407,13 @@ export function ScriptPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    onCut(pop.cut!.items, t('已删除所选 {n} 个词', { n: pop.cut!.count }));
+                    onCut(pop.cut!.items, t('panels.deletedNSelectedWords', { n: pop.cut!.count }));
                     setPop(null);
                     window.getSelection()?.removeAllRanges();
                   }}
                   className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]"
                 >
-                  {t('删除所选({n} 词)', { n: pop.cut.count })}
+                  {t('panels.deleteSelectedNWords', { n: pop.cut.count })}
                 </button>
               )}
               {pop.cut && pop.restore && <div className="bg-line h-3.5 w-px" />}
@@ -421,13 +421,13 @@ export function ScriptPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    onRestore(pop.restore!.items, t('已恢复所选 {n} 个词', { n: pop.restore!.count }));
+                    onRestore(pop.restore!.items, t('panels.restoredNSelectedWords', { n: pop.restore!.count }));
                     setPop(null);
                     window.getSelection()?.removeAllRanges();
                   }}
                   className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
                 >
-                  {t('恢复所选({n} 词)', { n: pop.restore.count })}
+                  {t('panels.restoreSelectedNWords', { n: pop.restore.count })}
                 </button>
               )}
             </>
@@ -453,7 +453,7 @@ function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean }; 
         e.stopPropagation();
         onClick(e);
       }}
-      title={gap.alive ? t('无语音空白,点击可删') : t('已删的空白,点击可恢复')}
+      title={gap.alive ? t('panels.silenceClickDelete') : t('panels.deletedSilenceClickRestore')}
       className={
         gap.alive
           ? 'text-ink-4 hover:text-ink hover:bg-panel-2 mx-0.5 cursor-pointer rounded px-1 font-mono text-[11px]'

@@ -125,11 +125,11 @@ export async function assessClip(
 /** Verdict from thresholds. duration comes from probe. Shorter than minDuration = too short (default 5s). */
 export function judgeQuality(q: ClipQuality, duration: number, minDuration = 5): QualityVerdict {
   if (duration < minDuration) {
-    return { usable: false, reason: 'too_short', label: `过短(<${minDuration}s)` };
+    return { usable: false, reason: 'too_short', label: `too short (<${minDuration}s)` };
   }
-  if (q.blackRatio >= 0.6) return { usable: false, reason: 'black', label: '黑屏/纯色' };
-  if (q.motionScore < MOTION_MIN) return { usable: false, reason: 'frozen', label: '静帧/卡死' };
-  if (q.blurScore < BLUR_MIN) return { usable: false, reason: 'blurry', label: '画面模糊' };
+  if (q.blackRatio >= 0.6) return { usable: false, reason: 'black', label: 'black/solid frame' };
+  if (q.motionScore < MOTION_MIN) return { usable: false, reason: 'frozen', label: 'frozen frame' };
+  if (q.blurScore < BLUR_MIN) return { usable: false, reason: 'blurry', label: 'blurry' };
   return { usable: true };
 }
 

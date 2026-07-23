@@ -53,10 +53,10 @@ ${confetti(id)}
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'mp_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="dots d1"></div>
@@ -89,10 +89,10 @@ ${confetti(id)}
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.44);\n` +
         `tl.to('#${id} .zig polyline',{strokeDashoffset:0,duration:0.4,ease:'power2.out'},0.54);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'mp_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="dots d1"></div>
@@ -121,10 +121,10 @@ ${confetti(id)}
         `tl.from('#${id} .panel',{x:-140,autoAlpha:0,duration:0.3,ease:'power3.out'},0.42);\n` +
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.6);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'mp_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="rt">
   <div class="dots d1"></div>
@@ -160,10 +160,10 @@ ${confetti(id)}
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.66);\n` +
         `tl.to('#${id} .zig polyline',{strokeDashoffset:0,duration:0.4,ease:'power2.out'},0.74);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'mp_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="rt">
   <div class="head">今日清单${zigzag('zig')}</div>
@@ -195,10 +195,10 @@ ${confetti(id)}
         `tl.to('#${id} .zig polyline',{strokeDashoffset:0,duration:0.4,ease:'power2.out'},0.5);\n` +
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.6);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'mp_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="dots d1"></div>
@@ -231,10 +231,10 @@ ${confetti(id)}
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.22},0.6);\n` +
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.68);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'mp_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="rt">
   <div class="head">评论区精选</div>
@@ -271,10 +271,10 @@ ${confetti(id)}
         `tl.from('#${id} .circle,#${id} .half',{scale:0,autoAlpha:0,duration:0.26,stagger:0.1,ease:'back.out(1.8)'},0.62);\n` +
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.8);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'mp_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="rt">
   <div class="head">三步开箱法</div>
@@ -311,10 +311,10 @@ ${confetti(id)}
         `tl.from('#${id} .dots',{autoAlpha:0,duration:0.24},0.56);\n` +
         `tl.to('#${id} .sq path',{strokeDashoffset:0,duration:0.5,ease:'power2.out'},0.62);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'mp_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="dots d1"></div>

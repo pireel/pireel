@@ -84,10 +84,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'pd_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -122,10 +122,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .cl',{strokeDashoffset:0,duration:0.5,ease:'power2.inOut'},0.55);\n` +
         `tl.from('#${id} .cn circle',{scale:0,transformOrigin:'center',duration:0.2,stagger:0.06},0.72);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'pd_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -152,10 +152,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .v',{autoAlpha:0,scale:0.9,duration:0.5,ease:'power2.out'},0.25);\n` +
         `tl.from('#${id} .s',{autoAlpha:0,duration:0.35},0.6);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'pd_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -185,10 +185,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.6);\n` +
         `tl.from('#${id} .u',{scale:0,transformOrigin:'center',autoAlpha:0,duration:0.25,ease:'back.out(2)'},0.9);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'pd_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -221,10 +221,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cn circle',{scale:0,transformOrigin:'center',duration:0.18,stagger:0.06},0.75);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.3},0.85);`,
     ),
-  走势: () =>
+  'trend': () =>
     mk(
       'pd_trd',
-      '走势',
+      'trend',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -262,10 +262,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .star',{scale:0,transformOrigin:'center',autoAlpha:0,duration:0.25,ease:'power2.out'},0.9);\n` +
         `tl.from('#${id} .lab',{autoAlpha:0,duration:0.25},0.95);`,
     ),
-  时间线: () =>
+  'timeline': () =>
     mk(
       'pd_tml',
-      '时间线',
+      'timeline',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -315,10 +315,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cur',{scale:0,transformOrigin:'center',autoAlpha:0,duration:0.25,ease:'back.out(2)'},0.9);\n` +
         `tl.from('#${id} .lbc',{autoAlpha:0,y:18,duration:0.25},0.95);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'pd_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>
@@ -356,10 +356,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .st',{scale:0,transformOrigin:'center',autoAlpha:0,duration:0.25,stagger:0.14,ease:'power2.out'},0.3);\n` +
         `tl.to('#${id} .sl',{strokeDashoffset:0,duration:0.5,ease:'power2.inOut',stagger:0.12},0.5);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'pd_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="sp">
   <div class="halo hz"></div>

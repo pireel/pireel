@@ -3,7 +3,7 @@ id: memphis-pop
 title: 孟菲斯 Memphis
 summary: 奶白底几何纸屑:粗描边圆三角波浪、彩色硬影,适合创意/开箱/泛娱乐
 icon: 🔷
-showcase: [标题卡, 大数字, 数字变化, 列表, 金句, 评论, 步骤, 引导]
+showcase: [title-card, big-number, count-up, list, quote, comments, steps, cta]
 palette: { paper: "#FDF6EC", panel: "#FFFFFF", panel-2: "#B8E0D2", fg: "#1E1B4B", muted: "#1E1B4B99", accent: "#FF5D73", accent-2: "#FFC53D", line: "#1E1B4B33", grid: "#1E1B4B10", radius: "18px", shadow: "12px 12px 0 rgb(255 197 61 / 1)", glow: "0 0 0 rgb(0 0 0 / 0)" }
 version: 0.1.2
 ---
@@ -48,21 +48,21 @@ By default blocks are CONFETTI PIECES scattered over the footage: the block root
 - Scatter rule: 3-5 confetti pieces per card, mixed hollow/solid/patch, clustered opposite the message — never sprinkled evenly.
 
 ## Block recipes
-- 标题卡: headline panel pushed to the upper-left with a chip kicker above the 150px title; confetti cluster lower-right — outlined circle, pink triangle, mint half-circle; a polka patch slides behind the panel corner; the yellow zigzag underlines the composition at bottom-left.
+- title-card: headline panel pushed to the upper-left with a chip kicker above the 150px title; confetti cluster lower-right — outlined circle, pink triangle, mint half-circle; a polka patch slides behind the panel corner; the yellow zigzag underlines the composition at bottom-left.
   Motion: panel slams in from the left (power3), chip pops, shapes stagger in with `back.out(1.8)`, zigzag draws last.
-- 大数字: the numeral (~500px, `--font-num`) sits raw on paper right-of-center with a huge outlined circle behind it and a triangle wedged near its baseline; the claim rides a small hard-shadow panel bottom-left; polka patch fills the top-left corner.
+- big-number: the numeral (~500px, `--font-num`) sits raw on paper right-of-center with a huge outlined circle behind it and a triangle wedged near its baseline; the claim rides a small hard-shadow panel bottom-left; polka patch fills the top-left corner.
   Motion: number lands with scale overshoot, circle scales in behind, shapes pop, panel snaps in from the left, patch fades last.
-- 数字变化: the count-up — a ~430px `--font-num` numeral (pure digits, final value in markup) sits raw on paper left-of-center with a huge outlined circle behind its top corner and a sibling `+` sign at its shoulder; a pink triangle wedges the baseline, mint half-circle up right, polka patch slides behind the claim panel's top corner bottom-right; yellow zigzag closes bottom-left.
+- count-up: the count-up — a ~430px `--font-num` numeral (pure digits, final value in markup) sits raw on paper left-of-center with a huge outlined circle behind its top corner and a sibling `+` sign at its shoulder; a pink triangle wedges the baseline, mint half-circle up right, polka patch slides behind the claim panel's top corner bottom-right; yellow zigzag closes bottom-left.
   Motion: numeral drops with `back.out`, digits roll 0→final via `innerText` tween with `snap:{innerText:1}` over 0.8s, shapes pop `back.out(2.2)` with stagger, panel snaps in from the right, zigzag draws last.
-- 列表: an 84px title top-left with the squiggle drawn beneath it; three hard-shadow row panels at STAGGERED left offsets (each row indented differently, alternating ±0.5° rotations), each led by a geometric bullet — solid pink circle, yellow triangle, outlined mint square; dot patch balances the freed top-right corner.
+- list: an 84px title top-left with the squiggle drawn beneath it; three hard-shadow row panels at STAGGERED left offsets (each row indented differently, alternating ±0.5° rotations), each led by a geometric bullet — solid pink circle, yellow triangle, outlined mint square; dot patch balances the freed top-right corner.
   Motion: title drops, rows punch in from the left with stagger, bullets pop `back.out(2)`, squiggle draws.
-- 金句: the quote (~104px, two lines) rides a hard-shadow panel pushed left; ONE key word is hand-circled by a 6px `--fg` outlined perfect circle overlapping its lines; muted attribution below; confetti cluster (outlined circle, pink triangle, mint half-circle) balances the right; polka patch top-left behind the panel corner. No zigzag on this card.
+- quote: the quote (~104px, two lines) rides a hard-shadow panel pushed left; ONE key word is hand-circled by a 6px `--fg` outlined perfect circle overlapping its lines; muted attribution below; confetti cluster (outlined circle, pink triangle, mint half-circle) balances the right; polka patch top-left behind the panel corner. No zigzag on this card.
   Motion: panel slams from the left, quote fades up, the word-circle pops `back.out(1.8)`, confetti staggers in, patch fades last.
-- 评论: comment stickers — an 88px title top-left; three hard-shadow comment panels at staggered left offsets with alternating micro-rotations (±0.5-0.8°), each led by a geometric avatar bullet — solid pink circle, yellow triangle, outlined mint square — beside a 34px muted @handle stacked over a 54px one-liner; outlined circle, mint half-circle and polka patch balance the right edge. No zigzag on this card.
+- comments: comment stickers — an 88px title top-left; three hard-shadow comment panels at staggered left offsets with alternating micro-rotations (±0.5-0.8°), each led by a geometric avatar bullet — solid pink circle, yellow triangle, outlined mint square — beside a 34px muted @handle stacked over a 54px one-liner; outlined circle, mint half-circle and polka patch balance the right edge. No zigzag on this card.
   Motion: title drops, cards slam down oversized (scale 1.5→1, power3) with 0.16 stagger like stickers stamped on, avatars pop `back.out(2)`, confetti staggers in, patch fades last.
-- 步骤: an 88px title top-left; three geometric STATIONS at staggered heights marching left→right — an outlined circle, a solid pink triangle, a mint half-circle — each numbered in `--font-num` (paper-colored digit on the pink triangle) with a small hard-shadow label panel beneath; one `--accent-2` squiggle path snakes behind connecting all three; polka patch top-right.
+- steps: an 88px title top-left; three geometric STATIONS at staggered heights marching left→right — an outlined circle, a solid pink triangle, a mint half-circle — each numbered in `--font-num` (paper-colored digit on the pink triangle) with a small hard-shadow label panel beneath; one `--accent-2` squiggle path snakes behind connecting all three; polka patch top-right.
   Motion: title drops, figures pop `back.out(1.8)` with stagger, label panels punch from the left, the connecting squiggle draws LAST as the flourish.
-- 引导: a hard-shadow CTA panel left-of-frame holding a 136px two-line hook and the signature pill — `--accent` fill, `--paper` text, 4px `--fg` outline, `＋ 关注`; confetti burst (circle/triangle/half-circle) lands on the right AFTER the pill pops; zigzag underlines bottom-left; polka patch behind the panel.
+- cta: a hard-shadow CTA panel left-of-frame holding a 136px two-line hook and the signature pill — `--accent` fill, `--paper` text, 4px `--fg` outline, `＋ 关注`; confetti burst (circle/triangle/half-circle) lands on the right AFTER the pill pops; zigzag underlines bottom-left; polka patch behind the panel.
   Motion: panel slams in, hook fades, pill pops `back.out(2)`, confetti bursts with stagger like thrown streamers, zigzag draws last.
 
 ## Compose-instruction crib

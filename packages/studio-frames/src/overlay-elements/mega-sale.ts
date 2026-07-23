@@ -17,10 +17,10 @@ const BURST = `clip-path:${BURST_CLIP};background:var(--panel);color:var(--accen
 const RED = 'background:var(--paper);box-shadow:var(--shadow);border-radius:var(--radius);';
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'mx_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="rib" data-edit="kick">${txt('标签', 'Label')}</div>
@@ -36,10 +36,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .bar',{scale:2.0,autoAlpha:0,duration:0.24,ease:'power4.in'},0);\n` +
         `tl.from('#${id} .rib',{x:-320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.26);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'mx_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="card">
@@ -62,10 +62,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.to('#${id} .price',{scale:1.06,duration:0.12,yoyo:true,repeat:1},0.4);\n` +
         `tl.from('#${id} .burst',{scale:0,rotation:80,duration:0.28,ease:'back.out(2)'},0.56);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'mx_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="hd" data-edit="title">${txt('列表标题', 'List title')}</div>
@@ -88,10 +88,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r2',{x:320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.34);\n` +
         `tl.from('#${id} .r3',{x:-320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.46);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'mx_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w"><div class="burst"><span data-edit="word">${txt('关键词', 'KEYWORD')}</span></div></div>
 <style>
@@ -102,10 +102,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .burst',{scale:0,rotation:-80,autoAlpha:0,duration:0.3,ease:'back.out(2)'},0);\n` +
         `tl.to('#${id} .burst',{scale:1.06,duration:0.12,yoyo:true,repeat:1},0.4);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'mx_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="tag" data-edit="note">${txt('标注一', 'Note 1')}</div>
@@ -120,10 +120,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .tag',{scale:2.0,autoAlpha:0,rotation:-20,duration:0.24,ease:'power4.in'},0);\n` +
         `tl.from('#${id} .wedge',{scaleY:0,autoAlpha:0,transformOrigin:'top',duration:0.2,ease:'power3.out'},0.24);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'mx_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="k" data-edit="kick">${txt('距 结 束 仅 剩', 'ENDS IN')}</div>
@@ -147,10 +147,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cta',{scale:2.0,autoAlpha:0,duration:0.22,ease:'power4.in'},0.5);\n` +
         `tl.to('#${id} .cta',{scale:1.05,duration:0.12,yoyo:true,repeat:1},0.76);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'mx_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="t"><span data-edit="l1">${txt('金句上半句,', 'Quote line one,')}</span><b data-edit="l2">${txt('下半句。', 'and line two.')}</b></div>
@@ -167,10 +167,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t b',{autoAlpha:0,duration:0.18},0.3);\n` +
         `tl.from('#${id} .fine',{autoAlpha:0,duration:0.22},0.44);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'mx_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b class="dead" data-edit="lv">¥399</b></div>

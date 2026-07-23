@@ -154,16 +154,16 @@ export interface CutTransition {
 }
 export const MAX_TRANSITION_SEC = 4;
 export const CUT_TRANSITION_EFFECTS: { id: CutTransitionEffect; name: string }[] = [
-  { id: 'fade', name: '叠化' },
-  { id: 'fadeblack', name: '渐黑' },
-  { id: 'directional', name: '推移' },
-  { id: 'directionalwipe', name: '划开' },
-  { id: 'circleopen', name: '圆形' },
-  { id: 'windowslice', name: '百叶窗' },
-  { id: 'crosszoom', name: '变焦' },
-  { id: 'rotatescale', name: '旋转' },
-  { id: 'glitch', name: '故障' },
-  { id: 'dreamy', name: '波浪' },
+  { id: 'fade', name: 'common.dissolve' },
+  { id: 'fadeblack', name: 'common.dipBlack' },
+  { id: 'directional', name: 'common.push' },
+  { id: 'directionalwipe', name: 'common.wipe' },
+  { id: 'circleopen', name: 'common.circle' },
+  { id: 'windowslice', name: 'common.blinds' },
+  { id: 'crosszoom', name: 'common.crossZoom' },
+  { id: 'rotatescale', name: 'common.rotate' },
+  { id: 'glitch', name: 'common.glitch' },
+  { id: 'dreamy', name: 'common.wave' },
 ];
 /** Direction-bearing effects (panel shows direction buttons for these). */
 export const DIRECTIONAL_TRANSITIONS: ReadonlySet<CutTransitionEffect> = new Set(['directional', 'directionalwipe']);
@@ -213,12 +213,12 @@ export function shotFilterCss(f?: ShotFilter): string {
 }
 
 export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
-  { id: 'full', name: '无' },
-  { id: 'punch-in', name: '放大' },
-  { id: 'corner-br', name: '缩右下' },
-  { id: 'corner-tl', name: '缩左上' },
-  { id: 'split-l', name: '左半' },
-  { id: 'split-r', name: '右半' },
+  { id: 'full', name: 'common.none' },
+  { id: 'punch-in', name: 'common.zoomIn' },
+  { id: 'corner-br', name: 'common.cornerBottomRight' },
+  { id: 'corner-tl', name: 'common.cornerTopLeft' },
+  { id: 'split-l', name: 'common.leftHalf' },
+  { id: 'split-r', name: 'common.rightHalf' },
 ];
 
 /** Global caption style (Vids Captions style): preset/position/scale tuned in one place, applied uniformly to all sentence-level captions.

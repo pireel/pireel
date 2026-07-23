@@ -3,7 +3,7 @@ id: kawaii-bubble
 title: 泡泡 Kawaii
 summary: 糖果粉泡泡:粗描边贴片、对话气泡、星星腮红,适合萌系/日常 vlog
 icon: 🎀
-showcase: [标题卡, 金句, 问答, 评论, 步骤, 大数字, 列表, 引导]
+showcase: [title-card, quote, qa, comments, steps, big-number, list, cta]
 palette: { paper: "#FFEFF6", panel: "#FFFFFF", panel-2: "#FFD9EA", fg: "#4A2B3A", muted: "#4A2B3A99", accent: "#FF7DB0", accent-2: "#8E7DFF", line: "#4A2B3A22", grid: "#4A2B3A0F", radius: "40px", shadow: "0 14px 34px rgb(255 125 176 / 0.28)", glow: "0 10px 30px rgb(255 125 176 / 0.45)" }
 version: 0.1.2
 ---
@@ -49,21 +49,21 @@ On footage these are PEELED STICKERS, not the sheet: the block root stays transp
   `tl.from(el,{scale:0,autoAlpha:0,duration:0.3,ease:'back.out(2)'})` for pops; `back.out(1.6-1.7)` for big plates; never `power*` slides, never plain fades on plates.
 
 ## Block recipes
-- 标题卡: one big tilted outlined bubble (≈76% width, radius `var(--radius)`) holding the 130px headline + blush pair; an `--accent` pill tag rotated 6° pinned near its top-right corner; 3 sparkles on the exposed paper.
+- title-card: one big tilted outlined bubble (≈76% width, radius `var(--radius)`) holding the 130px headline + blush pair; an `--accent` pill tag rotated 6° pinned near its top-right corner; 3 sparkles on the exposed paper.
   Motion: bubble scales in from 0.55 with `back.out(1.7)` (≤0.4s), pill pops `back.out(2)` at 0.28s, sparkles stagger-pop last; everything settles by 0.9s.
-- 金句: a centered speech balloon (outlined plate + tail in the same element tree) with the 100px quote and a 36px muted attribution; blush pair tucked in the balloon's top-right; sparkles orbiting outside.
+- quote: a centered speech balloon (outlined plate + tail in the same element tree) with the 100px quote and a 36px muted attribution; blush pair tucked in the balloon's top-right; sparkles orbiting outside.
   Motion: balloon bounces up from y+80 `back.out(1.6)`, attribution fades at 0.34s, sparkles pop after 0.44s.
-- 问答: fan ask-box — a white outlined title pill `粉丝问箱` up top; a small `--accent`-filled Q pill (paper text, `--glow`, its own tail, tilted -3°) floats upper-left carrying the fan's question; the answer is the big white outlined speech balloon (tail + blush pair) with an 84px `--accent` "A" mark, the 92px answer line and a 34px muted attribution.
+- qa: fan ask-box — a white outlined title pill `粉丝问箱` up top; a small `--accent`-filled Q pill (paper text, `--glow`, its own tail, tilted -3°) floats upper-left carrying the fan's question; the answer is the big white outlined speech balloon (tail + blush pair) with an 84px `--accent` "A" mark, the 92px answer line and a 34px muted attribution.
   Motion: title pill pops `back.out(2)`, Q pill pops next, the answer balloon bounces up from y+80 `back.out(1.6)` as the reveal, attribution fades, sparkles close.
-- 评论: comment shower — the white outlined title pill up top, then three outlined comment balloons (small tail each) stacked at staggered lefts and alternating tilts; each carries a 34px `--accent` nickname, a 54px message and a ♥ count riding the right edge; exactly one balloon inverts to the `--accent` fill as the pinned favorite.
+- comments: comment shower — the white outlined title pill up top, then three outlined comment balloons (small tail each) stacked at staggered lefts and alternating tilts; each carries a 34px `--accent` nickname, a 54px message and a ♥ count riding the right edge; exactly one balloon inverts to the `--accent` fill as the pinned favorite.
   Motion: title pill pops `back.out(2)`, balloons pop in one by one from scale 0 with `back.out(2)` stagger 0.14, ♥ counts pop after, sparkles close.
-- 步骤: a left-to-right trail of 3 numbered circle bubbles at bouncing heights (mid → high → mid), connected by the dotted SVG trail; 52px step word under each numeral; bubble 1 is the `--accent`-filled one; each circle tilts a different 3-4°.
+- steps: a left-to-right trail of 3 numbered circle bubbles at bouncing heights (mid → high → mid), connected by the dotted SVG trail; 52px step word under each numeral; bubble 1 is the `--accent`-filled one; each circle tilts a different 3-4°.
   Motion: dotted trail fades in first, bubbles scale from 0 with `back.out(2)` stagger 0.14, sparkles close the card.
-- 大数字: one huge round bubble (≈780px circle, white + 5px outline, tilted -3°) holding a 340px numeral with a 38px muted word line and the blush pair below; the unit character rides a small `--accent`-filled mini bubble (≈190px, `var(--paper)` text, `--glow`) overlapping the big bubble's top-right rim; 3 sparkles on the paper.
+- big-number: one huge round bubble (≈780px circle, white + 5px outline, tilted -3°) holding a 340px numeral with a 38px muted word line and the blush pair below; the unit character rides a small `--accent`-filled mini bubble (≈190px, `var(--paper)` text, `--glow`) overlapping the big bubble's top-right rim; 3 sparkles on the paper.
   Motion: big bubble scales in `back.out(1.6)`, numeral pops inside at 0.2s, mini bubble pops `back.out(2)` at 0.4s, sparkles stagger last; settled by 1s.
-- 列表: a small white outlined title pill up top, then three outlined pill-bubble rows stacked at staggered lefts and alternating tilts, each led by a ♥ bullet in `--accent`; exactly one row inverts to the `--accent` fill (paper text, `--glow`, ✦ bullet) as the highlight; two sparkles on the right.
+- list: a small white outlined title pill up top, then three outlined pill-bubble rows stacked at staggered lefts and alternating tilts, each led by a ♥ bullet in `--accent`; exactly one row inverts to the `--accent` fill (paper text, `--glow`, ✦ bullet) as the highlight; two sparkles on the right.
   Motion: title pill pops `back.out(2)`, rows bounce up from y+60 `back.out(1.7)` stagger 0.12, bullets pop after, sparkles close.
-- 引导: a speech balloon (outlined plate + tail) asking to stick around, blush pair in its corner; below it the CTA pill `＋ 关注` on `--accent` with paper text and `--glow`, tilted -4°; 3 sparkles.
+- cta: a speech balloon (outlined plate + tail) asking to stick around, blush pair in its corner; below it the CTA pill `＋ 关注` on `--accent` with paper text and `--glow`, tilted -4°; 3 sparkles.
   Motion: balloon bounces up `back.out(1.6)`, pill pops `back.out(2)` then does ONE tiny y-bounce (yoyo repeat 1) and settles — no loops; sparkles pop last.
 
 ## Compose-instruction crib

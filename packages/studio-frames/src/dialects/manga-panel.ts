@@ -44,10 +44,10 @@ ${tones(id)}
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'mg_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="rt">
   <div class="ht"></div>
@@ -80,10 +80,10 @@ ${tones(id)}
         `tl.from('#${id} .sfx',{scale:1.7,autoAlpha:0,rotation:-16,duration:0.26,ease:'power3.in'},0.5);\n` +
         `tl.from('#${id} .tag',{scale:1.8,autoAlpha:0,rotation:-20,duration:0.24,ease:'power3.in'},0.72);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'mg_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="rt">
   <div class="spd"></div>
@@ -114,10 +114,10 @@ ${tones(id)}
         `tl.from('#${id} .sfx',{scale:1.7,autoAlpha:0,rotation:20,duration:0.24,ease:'power3.in'},0.5);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.2},0.7);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'mg_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="rt">
   <div class="pn main">
@@ -155,10 +155,10 @@ ${tones(id)}
         `tl.from('#${id} .cm',{scale:1.7,autoAlpha:0,rotation:-12,duration:0.22,ease:'power3.in',stagger:0.18},0.3);\n` +
         `tl.from('#${id} .ht',{autoAlpha:0,duration:0.22},0.62);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'mg_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="rt">
   <div class="pn L"><div class="ht"></div><span class="lab">改造前</span><b>乱到离谱</b></div>
@@ -191,10 +191,10 @@ ${tones(id)}
         `tl.from('#${id} .ht,#${id} .spd',{autoAlpha:0,duration:0.22},0.5);\n` +
         `tl.from('#${id} .tag',{scale:1.9,autoAlpha:0,rotation:-24,duration:0.24,ease:'power3.in'},0.72);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'mg_qa',
-      '问答',
+      'qa',
       (id) => `
 <div class="rt">
   <div class="pn q">
@@ -238,10 +238,10 @@ ${tones(id)}
         `tl.from('#${id} .ht',{autoAlpha:0,duration:0.2},0.7);\n` +
         `tl.from('#${id} .tag',{scale:1.9,autoAlpha:0,rotation:-24,duration:0.22,ease:'power3.in'},0.94);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'mg_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="rt">
   <div class="pn p1"><div class="spd"></div><span class="k">①</span><b>先囤一筐素材</b></div>
@@ -274,10 +274,10 @@ ${tones(id)}
         `tl.from('#${id} .spd,#${id} .ht',{autoAlpha:0,duration:0.2},0.48);\n` +
         `tl.from('#${id} .sfx',{scale:1.7,autoAlpha:0,rotation:-18,duration:0.26,ease:'power3.in'},0.6);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'mg_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="rt">
   <div class="ht"></div>
@@ -304,10 +304,10 @@ ${tones(id)}
         `tl.from('#${id} .s',{autoAlpha:0,duration:0.2},0.6);\n` +
         `tl.from('#${id} .tag',{scale:1.9,autoAlpha:0,rotation:24,duration:0.24,ease:'power3.in'},0.72);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'mg_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="rt">
   <div class="spd"></div>

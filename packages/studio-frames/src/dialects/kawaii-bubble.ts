@@ -44,10 +44,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'kw_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="kw">
   <div class="bub">
@@ -69,10 +69,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .pill',{scale:0,duration:0.28,ease:'back.out(2)'},0.28);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.09,ease:'back.out(2)'},0.42);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'kw_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="kw">
   <div class="bal">
@@ -97,10 +97,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .who',{autoAlpha:0,duration:0.24},0.34);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.1,ease:'back.out(2)'},0.44);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'kw_qa',
-      '问答',
+      'qa',
       (id) => `
 <div class="kw">
   <div class="t">粉丝问箱</div>
@@ -136,10 +136,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .who',{autoAlpha:0,duration:0.24},0.7);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.09,ease:'back.out(2)'},0.76);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'kw_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="kw">
   <div class="t">评论区可爱发言</div>
@@ -169,10 +169,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cm em',{scale:0,duration:0.22,stagger:0.14,ease:'back.out(2)'},0.5);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.1,ease:'back.out(2)'},0.8);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'kw_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="kw">
   <svg class="trail" viewBox="0 0 1920 1080"><path d="M430 600 Q695 400 960 450 Q1225 500 1490 600"/></svg>
@@ -200,10 +200,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .st',{scale:0,autoAlpha:0,duration:0.32,stagger:0.14,ease:'back.out(2)'},0.12);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.1,ease:'back.out(2)'},0.62);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'kw_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="kw">
   <div class="bub">
@@ -228,10 +228,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .mini',{scale:0,duration:0.28,ease:'back.out(2)'},0.4);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.09,ease:'back.out(2)'},0.56);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'kw_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="kw">
   <div class="t">今日小事清单</div>
@@ -257,10 +257,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .row i',{scale:0,duration:0.22,stagger:0.12,ease:'back.out(2)'},0.34);\n` +
         `tl.from('#${id} .star',{scale:0,autoAlpha:0,duration:0.24,stagger:0.1,ease:'back.out(2)'},0.72);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'kw_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="kw">
   <div class="bal">

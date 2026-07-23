@@ -3,7 +3,7 @@ id: y2k-chrome
 title: 千禧 Y2K
 summary: 银蓝气泡:椭圆环绕、星芒闪点、胶囊按钮,适合潮流/穿搭/音乐
 icon: 💿
-showcase: [标题卡, 金句, 引导, 大数字, 倒计时, 列表, 评论, 代码, 步骤]
+showcase: [title-card, quote, cta, big-number, countdown, list, comments, code, steps]
 palette: { paper: "#DCE9F5", panel: "#FFFFFF", panel-2: "#C3D9EE", fg: "#17244A", muted: "#17244A99", accent: "#2E63FF", accent-2: "#FF5EC4", line: "#17244A26", grid: "#17244A10", radius: "36px", shadow: "0 14px 34px rgb(23 36 74 / 0.22)", glow: "0 0 34px rgb(46 99 255 / 0.35)" }
 version: 0.1.2
 ---
@@ -49,23 +49,23 @@ By default blocks are SKINNED WIDGETS floating over the footage: the block root 
 - Blink rule: sparkles may blink ONCE per card via a finite yoyo tween (`repeat:3`), settling fully visible.
 
 ## Block recipes
-- 标题卡: kicker chip top-left; the ~158px stretched-italic headline center-left with the glowing orbit ellipse wrapped around it and the pink secondary ring behind at the opposite rotation; two `--panel-2` bubbles (with highlight dots) drifting on the right; 3 sparkles; a muted support line at bottom-left.
+- title-card: kicker chip top-left; the ~158px stretched-italic headline center-left with the glowing orbit ellipse wrapped around it and the pink secondary ring behind at the opposite rotation; two `--panel-2` bubbles (with highlight dots) drifting on the right; 3 sparkles; a muted support line at bottom-left.
   Motion: chip drops, headline slides in wide (power3), rings scale-settle from 1.15, bubbles and sparkles pop with stagger, one sparkle blinks finitely.
-- 金句: one huge white ellipse bubble (~1380×620, `--shadow`, elongated highlight) holding the quote; the pink ring peeks from behind its rim; attribution in a white capsule chip pinned below; sparkles at two opposite corners.
+- quote: one huge white ellipse bubble (~1380×620, `--shadow`, elongated highlight) holding the quote; the pink ring peeks from behind its rim; attribution in a white capsule chip pinned below; sparkles at two opposite corners.
   Motion: bubble inflates with `back.out(1.4)`, ring settles, quote fades up, chip pops last, one sparkle blinks.
-- 引导: the double-outline capsule CTA `＋ 关注` (~92px) pushed left-of-center, wrapped by the glowing orbit ellipse; four sparkles orbiting at staggered distances; a schedule line beneath in `--muted`; one bubble floating far right.
+- cta: the double-outline capsule CTA `＋ 关注` (~92px) pushed left-of-center, wrapped by the glowing orbit ellipse; four sparkles orbiting at staggered distances; a schedule line beneath in `--muted`; one bubble floating far right.
   Motion: capsule bounces in `back.out(1.7)`, ring settles around it, sparkles pop then two blink finitely.
-- 大数字: a kicker chip top-center; the giant number (~290px, stretched-italic `scaleX(1.15)`) dead-center wrapped by the glowing orbit ellipse with the pink secondary ring behind at the opposite rotation; one bubble upper-right; a muted Latin+Chinese support line at bottom-center; 3 sparkles, one blue.
+- big-number: a kicker chip top-center; the giant number (~290px, stretched-italic `scaleX(1.15)`) dead-center wrapped by the glowing orbit ellipse with the pink secondary ring behind at the opposite rotation; one bubble upper-right; a muted Latin+Chinese support line at bottom-center; 3 sparkles, one blue.
   Motion: chip drops, the number inflates `back.out(1.5)` from 0.5, rings settle from 1.15, bubble and sparkles pop, one sparkle blinks finitely.
-- 倒计时: the millennium-bug clock — kicker chip top-center; `00:00:59` dead-center in stretched-italic `scaleX(1.15)` (~240px, colons in accent) wrapped by the glowing orbit ellipse with the pink secondary ring behind at the opposite rotation; one bubble upper-right; a muted Latin+Chinese support line bottom-center; 3 sparkles, one blue.
+- countdown: the millennium-bug clock — kicker chip top-center; `00:00:59` dead-center in stretched-italic `scaleX(1.15)` (~240px, colons in accent) wrapped by the glowing orbit ellipse with the pink secondary ring behind at the opposite rotation; one bubble upper-right; a muted Latin+Chinese support line bottom-center; 3 sparkles, one blue.
   Motion: chip drops, the clock inflates `back.out(1.5)` from 0.5, the seconds roll up via an innerText snap tween (0→59), rings settle from 1.15, then the whole clock glitch-jitters ONCE (x/skew finite yoyo, `repeat:3`) and lands clean by 1.2s; one sparkle blinks finitely.
-- 评论: a Y2K instant-messenger window — one big rounded white pane (3px accent outline, `--radius` corners) with a title bar (`MSN · 千禧留言板`, two bubble buttons and a circled ✕) and three capsule messages alternating left/right like a chat log; the LAST message is set as the double-outline accent capsule with the gloss dot; a `+3 条新消息` toast chip bottom-right inside the pane; one bubble and 3 sparkles floating outside.
+- comments: a Y2K instant-messenger window — one big rounded white pane (3px accent outline, `--radius` corners) with a title bar (`MSN · 千禧留言板`, two bubble buttons and a circled ✕) and three capsule messages alternating left/right like a chat log; the LAST message is set as the double-outline accent capsule with the gloss dot; a `+3 条新消息` toast chip bottom-right inside the pane; one bubble and 3 sparkles floating outside.
   Motion: the window inflates `back.out(1.4)`, messages pop in sequence with stagger, the gloss dot pops, the toast pops then blinks finitely like a new-message alert.
-- 代码: a notepad source window — the same rounded white pane with a title bar (`记事本 · y2k_style.js`) holding four line-numbered code rows in `--font-num` (keywords in accent, comments in `--muted`); exactly ONE row is set as the double-outline accent capsule — the highlighted line — ending in a paper cursor block; kicker chip above the pane; one bubble and 3 sparkles outside.
+- code: a notepad source window — the same rounded white pane with a title bar (`记事本 · y2k_style.js`) holding four line-numbered code rows in `--font-num` (keywords in accent, comments in `--muted`); exactly ONE row is set as the double-outline accent capsule — the highlighted line — ending in a paper cursor block; kicker chip above the pane; one bubble and 3 sparkles outside.
   Motion: chip drops, window inflates, rows slide in with stagger, bubbles and sparkles pop, the cursor blinks finitely (yoyo `repeat:3`) and settles visible.
-- 列表: a kicker chip top-left; three capsule ROWS at staggered left offsets — each a white capsule chip (3px accent outline, 56px fg text), except ONE hot row set as the double-outline capsule (accent fill, paper text, white gap + outer blue line + glow) carrying a small white highlight dot near its left like bubble gloss; one bubble upper-right; sparkles scattered.
+- list: a kicker chip top-left; three capsule ROWS at staggered left offsets — each a white capsule chip (3px accent outline, 56px fg text), except ONE hot row set as the double-outline capsule (accent fill, paper text, white gap + outer blue line + glow) carrying a small white highlight dot near its left like bubble gloss; one bubble upper-right; sparkles scattered.
   Motion: chip drops, rows inflate `back.out(1.6)` with stagger, the hot row's highlight dot pops, sparkles pop and one blinks.
-- 步骤: three glossy `--panel-2` bubbles (each with the upper-left highlight dot) placed low-left → high-center → mid-right along a dotted accent arc (round-cap dashed SVG path), numbered 1/2/3 in stretched-italic inside; a white capsule chip label beneath each bubble; kicker chip top-left; sparkles fill the leftover corners.
+- steps: three glossy `--panel-2` bubbles (each with the upper-left highlight dot) placed low-left → high-center → mid-right along a dotted accent arc (round-cap dashed SVG path), numbered 1/2/3 in stretched-italic inside; a white capsule chip label beneath each bubble; kicker chip top-left; sparkles fill the leftover corners.
   Motion: chip drops, the dotted arc fades in, bubbles inflate in path order with stagger, numbers pop, labels rise, one sparkle blinks finitely.
 
 ## Compose-instruction crib

@@ -94,7 +94,7 @@ export function listProjects(): ProjectMeta[] {
       if (!d) continue;
       out.push({
         id: d.id,
-        title: d.title || t('未命名项目'),
+        title: d.title || t('common.untitledProject'),
         savedAt: d.savedAt,
         durationSec: d.videoDurationSec,
         blocks: d.comp.blocks?.length ?? 0,
@@ -109,7 +109,7 @@ export function listProjects(): ProjectMeta[] {
 }
 
 /** New project: write an empty-shell draft first (otherwise an unsaved new project vanishes from the list). */
-export function createProject(comp: Composition, title = t('未命名项目')): string {
+export function createProject(comp: Composition, title = t('common.untitledProject')): string {
   const id = newProjectId();
   const draft: StudioDraft = { id, title, comp: { ...comp, video: null }, videoSig: null, videoDurationSec: null, savedAt: Date.now() };
   try {
@@ -158,7 +158,7 @@ export function migrateLegacyDraft() {
     if (!raw) return;
     const d = JSON.parse(raw) as StudioDraft;
     if (d?.comp && d.id && (d.comp.blocks?.length || d.comp.shots?.length)) {
-      window.localStorage.setItem(keyFor(d.id), JSON.stringify({ ...d, title: d.title || t('未命名项目') }));
+      window.localStorage.setItem(keyFor(d.id), JSON.stringify({ ...d, title: d.title || t('common.untitledProject') }));
       const chat = window.localStorage.getItem(LEGACY_CHAT_KEY);
       if (chat && !window.localStorage.getItem(chatKeyFor(d.id))) {
         window.localStorage.setItem(chatKeyFor(d.id), chat);

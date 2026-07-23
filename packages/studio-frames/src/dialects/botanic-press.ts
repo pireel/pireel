@@ -105,10 +105,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'bt_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="bt">
   ${SPRIG}
@@ -148,10 +148,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .card',{y:30,autoAlpha:0,duration:0.3,ease:'power1.out'},0.68);\n` +
         `tl.from('#${id} .wx',{scale:0,duration:0.22,ease:'power2.out'},0.94);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'bt_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="bt">
   <div class="hdr"><span class="lat">采收清单 · JULY 2026</span><div class="hr f"></div><span class="lat">3 SPECIMENS</span></div>
@@ -182,10 +182,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .rw .wax',{scale:0,duration:0.24,ease:'power2.out'},0.8);\n` +
         `tl.from('#${id} .fnote',{autoAlpha:0,duration:0.26},0.9);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'bt_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="bt">
   ${SPRIG}
@@ -211,10 +211,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .sig .sh,#${id} .sig .a',{autoAlpha:0,duration:0.28},0.72);\n` +
         `tl.from('#${id} .sig .wax',{scale:0,duration:0.24,ease:'power2.out'},0.92);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'bt_qa',
-      '问答',
+      'qa',
       (id) => `
 <div class="bt">
   ${SPRIG}
@@ -252,10 +252,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .sig .lat',{autoAlpha:0,duration:0.26},0.9);\n` +
         `tl.from('#${id} .sig .wax',{scale:0,duration:0.22,ease:'power2.out'},0.96);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'bt_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="bt">
   <div class="hdr"><span class="lat">栽培手记 · MENTHA</span><div class="hr f"></div><span class="lat">3 STAGES</span></div>
@@ -285,10 +285,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .stage .bl',{strokeDashoffset:0,duration:0.3},0.8);\n` +
         `tl.from('#${id} .sw .wax',{scale:0,duration:0.24,ease:'power2.out'},0.94);`,
     ),
-  时间线: () =>
+  'timeline': () =>
     mk(
       'bt_tml',
-      '时间线',
+      'timeline',
       (id) => `
 <div class="bt">
   <div class="hdr"><span class="lat">生长记录 · OCIMUM</span><div class="hr f"></div><span class="lat">21 DAYS</span></div>
@@ -340,10 +340,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .fnote',{autoAlpha:0,duration:0.26},0.9);\n` +
         `tl.from('#${id} .tw .wax',{scale:0,duration:0.22,ease:'power2.out'},0.96);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'bt_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="bt">
   ${SPRIG}
@@ -374,10 +374,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .main > *',{y:24,autoAlpha:0,duration:0.3,stagger:0.1,ease:'power1.out'},0.26);\n` +
         `tl.from('#${id} .sig .wax',{scale:0,duration:0.22,ease:'power2.out'},0.94);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'bt_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="bt">
   ${SPRIG}

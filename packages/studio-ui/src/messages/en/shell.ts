@@ -1,0 +1,15 @@
+export const SHELL_EN: Record<string, string> = {
+  'shell.createFirstProject': 'Create your first project',
+  'shell.deleteProject': 'Delete project',
+  'shell.deleteTitleProjectChat': 'Delete "{title}"? The project and its chat history will be permanently removed.',
+  'shell.myProjects': 'My projects',
+  'shell.nElements': '{n} elements',
+  'shell.newProject': 'New project',
+  'shell.nShots': '{n} shots',
+  'shell.oneProjectPerVideo': 'One project per video: shots, framing, elements, captions, export.',
+  'shell.planningFailed': 'Planning failed',
+  'shell.rename': 'Rename',
+  'shell.syncFailed': 'Sync failed',
+  'shell.translationFailed': 'Translation failed',
+  'shell.uploadVideoAiCuts': 'Upload a video — AI cuts shots, adds visuals and captions, then export right in the browser',
+};

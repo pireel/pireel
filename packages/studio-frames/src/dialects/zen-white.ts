@@ -36,10 +36,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'zn_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="zn">
   <div class="h">慢一点,也没关系</div>
@@ -62,10 +62,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .side,#${id} .cap',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'zn_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="zn">
   <div class="q">心里有一亩田,<br/>种什么都来得及</div>
@@ -83,10 +83,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  问答: () =>
+  'qa': () =>
     mk(
       'zn_qna',
-      '问答',
+      'qa',
       (id) => `
 <div class="zn">
   <div class="q">问 · 一天里,哪一刻属于自己</div>
@@ -110,10 +110,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cap',{autoAlpha:0,duration:0.6},0.6);\n` +
         `tl.from('#${id} .dot',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'zn_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="zn">
   <div class="v">100</div>
@@ -136,10 +136,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .lab,#${id} .cap',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .dot',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  时间线: () =>
+  'timeline': () =>
     mk(
       'zn_tml',
-      '时间线',
+      'timeline',
       (id) => `
 <div class="zn">
   <div class="hr"></div>
@@ -167,10 +167,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cap',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .n3 .dot',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'zn_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="zn">
   <div class="vr"></div>
@@ -197,10 +197,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cap',{autoAlpha:0,duration:0.6},0.5);\n` +
         `tl.from('#${id} .it .dot',{autoAlpha:0,duration:0.4},0.8);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'zn_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="zn">
   <div class="hr"></div>

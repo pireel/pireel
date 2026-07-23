@@ -93,9 +93,9 @@ function TreatmentPreview({ t }: { t: ShotTreatment }) {
 }
 
 const FILTER_FIELDS: { key: keyof ShotFilter; name: string }[] = [
-  { key: 'brightness', name: '亮度' },
-  { key: 'contrast', name: '对比' },
-  { key: 'saturate', name: '饱和' },
+  { key: 'brightness', name: 'panels.brightness' },
+  { key: 'contrast', name: 'panels.contrast' },
+  { key: 'saturate', name: 'panels.saturation' },
 ];
 
 export function ShotTreatmentPanel({
@@ -136,7 +136,7 @@ export function ShotTreatmentPanel({
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Title (framing · scene N)/close live in the floating-window header; only a one-line hint here */}
-      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('取景作用整段分镜;想只放大前几秒,先用工具栏分割剪开')}</div>
+      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.framingAppliesWholeShot')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
         <div className="grid grid-cols-3 gap-2">
           {SHOT_TREATMENTS.map((tr) => {
@@ -146,7 +146,7 @@ export function ShotTreatmentPanel({
                 key={tr.id}
                 type="button"
                 onClick={() => onSetTreatment(shot.id, tr.id)}
-                aria-label={t('取景:{name}', { name: t(tr.name) })}
+                aria-label={t('panels.framingName', { name: t(tr.name) })}
                 className="group flex flex-col items-center gap-1"
               >
                 <div className={`w-full rounded-lg border-2 transition ${active ? 'border-accent' : 'border-transparent group-hover:border-line-2'}`}>
@@ -162,7 +162,7 @@ export function ShotTreatmentPanel({
         {shot.treatment !== 'full' && (
           <section className="flex flex-col gap-1.5">
             <div className="text-ink flex items-center justify-between font-medium">
-              <span>{t('大小')}</span>
+              <span>{t('panels.size')}</span>
               <span className="text-ink-4 tabular-nums">{Math.round(sizeValue)}</span>
             </div>
             <input
@@ -180,7 +180,7 @@ export function ShotTreatmentPanel({
               onKeyUp={commitSize}
               onBlur={commitSize}
               className="zoom-range w-full"
-              aria-label={t('取景大小')}
+              aria-label={t('panels.framingSize')}
             />
           </section>
         )}
@@ -188,10 +188,10 @@ export function ShotTreatmentPanel({
         {/* Color grading (whole shot, switches at the cut): percent scale, 100 = original */}
         <section className="flex flex-col gap-1.5">
           <div className="text-ink flex items-center justify-between font-medium">
-            <span>{t('画面调色')}</span>
+            <span>{t('panels.filters')}</span>
             {!filterNeutral && (
               <button type="button" className="text-ink-4 hover:text-ink text-[10.5px]" onClick={() => { setDragFilter(null); onSetFilter(shot.id, null); }}>
-                {t('还原')}
+                {t('panels.reset')}
               </button>
             )}
           </div>
@@ -215,7 +215,7 @@ export function ShotTreatmentPanel({
                   onKeyUp={commitFilter}
                   onBlur={commitFilter}
                   className="zoom-range w-full"
-                  aria-label={t('{name}(100=原片)', { name: t(name) })}
+                  aria-label={t('panels.percentOfOriginal', { name: t(name) })}
                 />
                 <span className="text-ink-4 w-8 shrink-0 text-right tabular-nums">{v}</span>
               </div>

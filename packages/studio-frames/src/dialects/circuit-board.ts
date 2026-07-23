@@ -72,10 +72,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'cb_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>SCH-01</em> · INTRO</span><span>VCC 3V3 · GND</span></div>
@@ -106,10 +106,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .pu',{strokeDashoffset:-114,duration:0.3,ease:'power1.inOut'},0.5);\n` +
         `tl.from('#${id} .led',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.78);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'cb_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>MEAS-02</em> · LAB</span><span>AVG OF 100 RUNS</span></div>
@@ -141,10 +141,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .v',{y:30,autoAlpha:0,duration:0.22,ease:'power3.out'},0.8);\n` +
         `tl.from('#${id} .cap2',{autoAlpha:0,duration:0.18},0.95);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'cb_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>SEQ-03</em> · PIPELINE</span><span>STEP 2 / 3</span></div>
@@ -172,10 +172,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .pu',{strokeDashoffset:-114,duration:0.45,ease:'power1.inOut'},0.55);\n` +
         `tl.from('#${id} .led',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.95);`,
     ),
-  走势: () =>
+  'trend': () =>
     mk(
       'cb_trd',
-      '走势',
+      'trend',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>SCOPE-04</em> · CH1</span><span>20MS / DIV</span></div>
@@ -205,10 +205,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .led',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.98);\n` +
         `tl.from('#${id} .cap2',{y:16,autoAlpha:0,duration:0.2},0.75);`,
     ),
-  代码: () =>
+  'code': () =>
     mk(
       'cb_cod',
-      '代码',
+      'code',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>UART-05</em> · 115200</span><span>FIRMWARE.LOG</span></div>
@@ -243,10 +243,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ln',{autoAlpha:0,duration:0.1,stagger:0.09,ease:'steps(1)'},0.55);\n` +
         `tl.to('#${id} .cur',{autoAlpha:0,duration:0.07,yoyo:true,repeat:3,ease:'steps(1)'},0.9);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'cb_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>AB-06</em> · THERMAL TEST</span><span>ΔT 32°C</span></div>
@@ -284,10 +284,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .led',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.98);\n` +
         `tl.from('#${id} .verdict',{y:16,autoAlpha:0,duration:0.2},0.75);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'cb_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>NOTE-07</em> · SILKSCREEN</span><span>TP1</span></div>
@@ -317,10 +317,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .pu',{strokeDashoffset:-114,duration:0.35,ease:'power1.inOut'},0.65);\n` +
         `tl.from('#${id} .led',{autoAlpha:0,duration:0.12,ease:'steps(1)'},0.98);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'cb_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="cb">
   <div class="strip"><span><em>SW-08</em> · OUTPUT</span><span>CLOSE THE LOOP</span></div>

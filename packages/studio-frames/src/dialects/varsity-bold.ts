@@ -36,10 +36,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'vb_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="vb">
   <div class="ghost" style="right:-70px;top:-60px;font-size:640px;">01</div>
@@ -58,10 +58,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .hz',{scaleX:0,transformOrigin:'left center',duration:0.26,ease:'power3.out'},0.22);\n` +
         `tl.from('#${id} .ghost',{autoAlpha:0,x:140,duration:0.26,ease:'power3.out'},0.34);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'vb_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="vb">
   <div class="hz" style="top:110px;height:32px;"></div>
@@ -82,10 +82,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{x:-90,autoAlpha:0,duration:0.2,ease:'power3.out'},0.28);\n` +
         `tl.from('#${id} .tile',{scale:0.6,autoAlpha:0,duration:0.22,ease:'power3.out'},0.4);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'vb_scr',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="vb">
   <div class="hz" style="top:110px;height:32px;"></div>
@@ -113,10 +113,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ghost',{autoAlpha:0,x:140,duration:0.26,ease:'power3.out'},0.44);\n` +
         `tl.to('#${id} .fl',{scale:1.04,duration:0.1,yoyo:true,repeat:1},0.98);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'vb_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="vb">
   <div class="board">
@@ -143,10 +143,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .win',{scale:1.04,duration:0.1,yoyo:true,repeat:1},0.6);\n` +
         `tl.from('#${id} .hz',{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power3.out'},0.4);`,
     ),
-  走势: () =>
+  'trend': () =>
     mk(
       'vb_trd',
-      '走势',
+      'trend',
       (id) => `
 <div class="vb">
   <div class="chip" style="left:160px;top:180px;">PACE TREND — 8 WEEKS</div>
@@ -171,10 +171,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .tr polyline',{strokeDashoffset:0,duration:0.3,ease:'power3.out'},0.34);\n` +
         `tl.from('#${id} .jn',{x:120,autoAlpha:0,duration:0.22,ease:'power3.out'},0.6);`,
     ),
-  时间线: () =>
+  'timeline': () =>
     mk(
       'vb_tml',
-      '时间线',
+      'timeline',
       (id) => `
 <div class="vb">
   <div class="chip" style="left:160px;top:190px;">SEASON — WK 1-4</div>
@@ -211,10 +211,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .ghost',{autoAlpha:0,x:140,duration:0.26,ease:'power3.out'},0.7);\n` +
         `tl.to('#${id} .now',{scale:1.04,duration:0.1,yoyo:true,repeat:1},0.95);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'vb_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="vb">
   <div class="chip" style="left:160px;top:200px;">TRAINING PLAN — LEG DAY</div>
@@ -241,10 +241,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .win',{scale:1.04,duration:0.1,yoyo:true,repeat:1},0.56);\n` +
         `tl.from('#${id} .hz',{scaleX:0,transformOrigin:'left center',duration:0.24,ease:'power3.out'},0.5);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'vb_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="vb">
   <div class="ghost" style="right:-90px;bottom:-90px;font-size:640px;">10</div>

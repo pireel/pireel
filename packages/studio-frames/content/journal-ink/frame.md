@@ -3,7 +3,7 @@ id: journal-ink
 title: 报刊 Journal
 summary: 报纸头版:报头双线、多栏假文、红章批注,适合深度/盘点/评论
 icon: 📰
-showcase: [标题卡, 章节, 列表, 对比, 问答, 金句, 图表, 人名条, 引导]
+showcase: [title-card, chapters, list, compare, qa, quote, chart, lower-third, cta]
 palette: { paper: "#F6F1E7", panel: "#FFFDF7", panel-2: "#ECE4D3", fg: "#1D1A14", muted: "#1D1A1499", accent: "#C8321E", accent-2: "#24519E", line: "#1D1A1433", grid: "#1D1A1412", radius: "2px", shadow: "0 12px 28px rgb(60 50 30 / 0.14)", glow: "0 0 0 rgb(0 0 0 / 0)", font-head: "'Noto Serif SC', 'Songti SC', serif" }
 version: 0.4.2
 ---
@@ -31,15 +31,15 @@ By default blocks are CLIPPINGS laid over the footage: the block root stays tran
 - Double-rule sandwich: `border-top:4px solid + border-bottom:2px solid` closing pull-quotes and tables.
 
 ## Block recipes
-- 标题卡: masthead → banner headline (150px serif) → deck line → 3 columns of fake text bars → red stamp `头条` overlapping top-right. Masthead drops, headline fades, stamp lands last.
-- 章节: section navigation strip in the masthead register — three desk tabs `要闻 P.01 / 深度 P.04 / 专栏 P.08` split by hairlines between a 6px double rule and a 2px rule; the current desk keeps ink, its page index turns seal red and a thick red underline sweeps in beneath it; below, that desk's 120px banner headline over three columns of fake text bars. Tabs drop in, underline sweeps, headline fades, columns settle.
-- 列表: `本 期 要 目` boxed between double rules; rows `一 | 要点 | P.02` with red hanzi indexes and hairline separators; rows slide in from left.
-- 对比: `本报评测` table between double rules — header row muted caps, winner row bold with a red-circled `推荐` cell; rows fade in sequence, circle stamps last.
-- 问答: letters-to-the-editor column — `读 者 来 信` capped between double rules; the reader's question set in serif corner quotes, led by a red-circled `问` medallion tilted like a red-pen mark; a hairline, then the editors' reply led by an ink-circled `答`: one reply line, fake-text bars continuing the copy, right-aligned mono sign-off `—— 本报编辑部`. Question slides in, the red 问 stamps on (scale 1.7→1, power3.in), reply fades after.
-- 金句: pull-quote sandwiched by double rules — red em-dash `——` lead-in, 128px serif line, mono attribution `摘自本期口播 · 02'14"`; rules draw first (scaleX), text after.
-- 图表: thin-bar newsprint chart headed `数 据 版` between double rules — hairline left axis + 4px ink baseline, narrow (44px) solid-ink bars with mono values above, ONLY the key bar (and its bold value) in seal red; serif weekday labels under the baseline; mono caption `单位:万次播放 · 本报资料室制图` under a closing 6px double rule. Bars rise flat (power2, no bounce), caption last.
-- 人名条: reporter byline lower third — page header `人物专访 | A04` over a hairline top-left (the page index is the card's only red), a short column of fake text bars below it, the middle of the page left open for the person on camera; bottom byline bar in the double-rule sandwich (4px over 2px): 76px serif name + spaced `本报记者` + a hairline leader + mono desk tag. Header drops, bars set, the bar rises gently — restrained, no stamps.
-- 引导: footer classified ad — double-boxed notice (4px ink outer + hairline inner) with `订阅本刊` as a 150px serif banner, deck line between hairlines, mono sign-off `广告部敬启 · 第 24 版`; red stamp `免费` overlapping the top-right corner, stamping in last (scale 1.7→1, power3.in).
+- title-card: masthead → banner headline (150px serif) → deck line → 3 columns of fake text bars → red stamp `头条` overlapping top-right. Masthead drops, headline fades, stamp lands last.
+- chapters: section navigation strip in the masthead register — three desk tabs `要闻 P.01 / 深度 P.04 / 专栏 P.08` split by hairlines between a 6px double rule and a 2px rule; the current desk keeps ink, its page index turns seal red and a thick red underline sweeps in beneath it; below, that desk's 120px banner headline over three columns of fake text bars. Tabs drop in, underline sweeps, headline fades, columns settle.
+- list: `本 期 要 目` boxed between double rules; rows `一 | 要点 | P.02` with red hanzi indexes and hairline separators; rows slide in from left.
+- compare: `本报评测` table between double rules — header row muted caps, winner row bold with a red-circled `推荐` cell; rows fade in sequence, circle stamps last.
+- qa: letters-to-the-editor column — `读 者 来 信` capped between double rules; the reader's question set in serif corner quotes, led by a red-circled `问` medallion tilted like a red-pen mark; a hairline, then the editors' reply led by an ink-circled `答`: one reply line, fake-text bars continuing the copy, right-aligned mono sign-off `—— 本报编辑部`. Question slides in, the red 问 stamps on (scale 1.7→1, power3.in), reply fades after.
+- quote: pull-quote sandwiched by double rules — red em-dash `——` lead-in, 128px serif line, mono attribution `摘自本期口播 · 02'14"`; rules draw first (scaleX), text after.
+- chart: thin-bar newsprint chart headed `数 据 版` between double rules — hairline left axis + 4px ink baseline, narrow (44px) solid-ink bars with mono values above, ONLY the key bar (and its bold value) in seal red; serif weekday labels under the baseline; mono caption `单位:万次播放 · 本报资料室制图` under a closing 6px double rule. Bars rise flat (power2, no bounce), caption last.
+- lower-third: reporter byline lower third — page header `人物专访 | A04` over a hairline top-left (the page index is the card's only red), a short column of fake text bars below it, the middle of the page left open for the person on camera; bottom byline bar in the double-rule sandwich (4px over 2px): 76px serif name + spaced `本报记者` + a hairline leader + mono desk tag. Header drops, bars set, the bar rises gently — restrained, no stamps.
+- cta: footer classified ad — double-boxed notice (4px ink outer + hairline inner) with `订阅本刊` as a 150px serif banner, deck line between hairlines, mono sign-off `广告部敬启 · 第 24 版`; red stamp `免费` overlapping the top-right corner, stamping in last (scale 1.7→1, power3.in).
 
 ## Compose-instruction crib
 Embed directives like:

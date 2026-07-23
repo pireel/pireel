@@ -35,7 +35,7 @@ export interface FrameRegistry {
 
 export function parseFrame(raw: string, ctx: string): Frame {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw.trim());
-  if (!m) throw new Error(`frame.md (${ctx}) 缺 frontmatter`);
+  if (!m) throw new Error(`frame.md (${ctx}) is missing frontmatter`);
   const fm: Record<string, string> = {};
   for (const line of m[1]!.split(/\r?\n/)) {
     const kv = /^([\w-]+):\s*(.*)$/.exec(line);
@@ -43,7 +43,7 @@ export function parseFrame(raw: string, ctx: string): Frame {
   }
   const need = (k: string): string => {
     const v = fm[k];
-    if (!v) throw new Error(`frame.md (${ctx}) 缺 ${k}`);
+    if (!v) throw new Error(`frame.md (${ctx}) is missing ${k}`);
     return v;
   };
   const arr = (k: string): string[] => {
@@ -91,7 +91,7 @@ export function parseFrame(raw: string, ctx: string): Frame {
     return Object.keys(out).length ? out : undefined;
   };
   const body = m[2]!.trim();
-  if (!body) throw new Error(`frame.md (${ctx}) 正文为空`);
+  if (!body) throw new Error(`frame.md (${ctx}) has an empty body`);
   return {
     id: need('id'),
     title: need('title'),
@@ -114,7 +114,7 @@ export function createFrameRegistry(files: Record<string, string>): FrameRegistr
     for (const [path, raw] of Object.entries(files)) {
       const dir = /([^/]+)\/frame\.md$/.exec(path)?.[1] ?? path;
       const f = parseFrame(raw, path);
-      if (f.id !== dir) throw new Error(`frame ${path}: frontmatter id "${f.id}" 与目录名 "${dir}" 不一致`);
+      if (f.id !== dir) throw new Error(`frame ${path}: frontmatter id "${f.id}" does not match directory name "${dir}"`);
       out.push(f);
     }
     return out.sort((a, b) => a.id.localeCompare(b.id));

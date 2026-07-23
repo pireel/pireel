@@ -3,7 +3,7 @@ id: neon-runner
 title: 霓虹 Neon
 summary: HUD 终端:扫描网格、状态栏、mono 读数、光标,适合科技/健身/游戏口播
 icon: 🌃
-showcase: [标题卡, 大数字, 数字变化, 倒计时, 走势, 步骤, 代码, 图表, 引导]
+showcase: [title-card, big-number, count-up, countdown, trend, steps, code, chart, cta]
 palette: { paper: "#07100C", panel: "#0E1A13", panel-2: "#0A140E", fg: "#EAFFF3", muted: "#EAFFF399", accent: "#39FF88", accent-2: "#FF3D8A", line: "#39FF8830", grid: "#EAFFF30D", radius: "12px", shadow: "0 16px 44px rgb(0 0 0 / 0.6)", glow: "0 0 36px rgb(57 255 136 / 0.5)", font-num: "'IBM Plex Mono', ui-monospace, monospace" }
 version: 0.4.2
 ---
@@ -31,15 +31,15 @@ HUD blocks are OVERLAYS on the live feed, not pages: the block root stays transp
 - Checklist row: `[✓] task …… DONE` bordered rows; the active row `[▸]` gets accent border + glow + a magenta RUNNING cursor.
 
 ## Block recipes
-- 标题卡: status bar + brackets → prompt line → 158px glowing headline with blinking cursor → loading bar text `▓▓▓▓░░ 82%`. Chrome first, prompt types in, cursor blinks.
-- 大数字: giant mono readout (~440px, accent, glow) left-anchored + unit; magenta `PB −0'11"` tag top-right blinking twice; slides up 60px.
-- 数字变化: benchmark readout climbing — prompt line `> bench --final --gpu`, 96px headline `新装备跑分`, then a ~330px mono score rolling 0→18450 via innerText snap (accent, glow) with spaced `PTS` unit; muted sub-line `PREV 16140 · GPU 97% · 60FPS STABLE`; magenta `NEW BEST` tag top-right blinks twice. Status bar reads `BENCH_SCORE | RUN 03/03`.
-- 倒计时: HUD countdown — `00:59` in giant mono (400px digits, accent, glow), colon as its own glyph; only the seconds pair ticks down via innerText snap and settles; 72px label `起跑窗口关闭前` above, magenta `最后召集 · LANE 04` tag top-right blinking twice; status bar reads `T_MINUS | GATE B · ARMED`.
-- 走势: jagged heart-rate polyline (6px accent + drop-shadow glow) drawing left→right with `ease:'none'`; bottom-right readout `162 BPM` in magenta+muted.
-- 步骤: bordered checklist rows sliding in from left, done rows dimmed to 0.62 opacity, active row glowing with blinking cursor.
-- 代码: terminal pane — hairline-bordered window of five mono lines: `$` prompts and keywords in accent, strings/values in magenta, one `#` comment muted, a `✓ SESSION ARMED` result closing; exactly ONE `> exec` line gets an accent outline + glow with a blinking magenta cursor block. Window rises, rows type in from the left with stagger, cursor blinks finite (steps(1), ends visible); status bar reads `NIGHT_RUN.SH | TTY 04 · BASH`.
-- 图表: equalizer — six thin segmented neon columns (30px cells via `repeating-linear-gradient(to top, var(--accent) 0 30px, transparent 30px 44px)`) rising from a hairline baseline; the peak cell of the tallest column is magenta (`box-shadow` glow) and blinks twice; mono scale `100…00` down the right edge behind a hairline. Columns scaleY up in stagger, status bar reads `AUDIO_LEVELS`.
-- 引导: CTA module — prompt line `> exec follow --confirm`, neon-outlined button `+ FOLLOW` (4px accent border + `--glow`) that pulses twice (scale 1↔1.04), mono sub-line with a blinking magenta cursor; status bar reads `CTA_MODULE | LOADED`, corner brackets as always.
+- title-card: status bar + brackets → prompt line → 158px glowing headline with blinking cursor → loading bar text `▓▓▓▓░░ 82%`. Chrome first, prompt types in, cursor blinks.
+- big-number: giant mono readout (~440px, accent, glow) left-anchored + unit; magenta `PB −0'11"` tag top-right blinking twice; slides up 60px.
+- count-up: benchmark readout climbing — prompt line `> bench --final --gpu`, 96px headline `新装备跑分`, then a ~330px mono score rolling 0→18450 via innerText snap (accent, glow) with spaced `PTS` unit; muted sub-line `PREV 16140 · GPU 97% · 60FPS STABLE`; magenta `NEW BEST` tag top-right blinks twice. Status bar reads `BENCH_SCORE | RUN 03/03`.
+- countdown: HUD countdown — `00:59` in giant mono (400px digits, accent, glow), colon as its own glyph; only the seconds pair ticks down via innerText snap and settles; 72px label `起跑窗口关闭前` above, magenta `最后召集 · LANE 04` tag top-right blinking twice; status bar reads `T_MINUS | GATE B · ARMED`.
+- trend: jagged heart-rate polyline (6px accent + drop-shadow glow) drawing left→right with `ease:'none'`; bottom-right readout `162 BPM` in magenta+muted.
+- steps: bordered checklist rows sliding in from left, done rows dimmed to 0.62 opacity, active row glowing with blinking cursor.
+- code: terminal pane — hairline-bordered window of five mono lines: `$` prompts and keywords in accent, strings/values in magenta, one `#` comment muted, a `✓ SESSION ARMED` result closing; exactly ONE `> exec` line gets an accent outline + glow with a blinking magenta cursor block. Window rises, rows type in from the left with stagger, cursor blinks finite (steps(1), ends visible); status bar reads `NIGHT_RUN.SH | TTY 04 · BASH`.
+- chart: equalizer — six thin segmented neon columns (30px cells via `repeating-linear-gradient(to top, var(--accent) 0 30px, transparent 30px 44px)`) rising from a hairline baseline; the peak cell of the tallest column is magenta (`box-shadow` glow) and blinks twice; mono scale `100…00` down the right edge behind a hairline. Columns scaleY up in stagger, status bar reads `AUDIO_LEVELS`.
+- cta: CTA module — prompt line `> exec follow --confirm`, neon-outlined button `+ FOLLOW` (4px accent border + `--glow`) that pulses twice (scale 1↔1.04), mono sub-line with a blinking magenta cursor; status bar reads `CTA_MODULE | LOADED`, corner brackets as always.
 
 ## Compose-instruction crib
 Embed directives like:

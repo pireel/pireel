@@ -23,7 +23,7 @@ import { confirm } from '@pireel/ui/confirm';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { type GenJob, listStudioGens, pollCreation } from './gen-api';
 import { type ElementEntry, type GenElementResult, loadElementEntries, removeElementEntry, syncElementEntries } from './element-history';
-import { framePack } from '@pireel/studio-frames/locales';
+import { framePack, kindLabel } from '@pireel/studio-frames/locales';
 import { overlayElements } from '@pireel/studio-frames/overlay-elements';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { presetElements } from './preset-elements';
@@ -115,7 +115,7 @@ function materialToItem(it: MaterialItem): LibraryItem | null {
     origin: 'upload',
     insertUrl: imageThumb(it.url, 'original'),
     thumbSrc: it.thumb_url ?? (it.kind === 'image' ? it.url : null),
-    label: it.label ?? (it.kind === 'video' ? t('未命名视频') : t('未命名图片')),
+    label: it.label ?? (it.kind === 'video' ? t('panels.untitledVideo') : t('panels.untitledImage')),
     createdAt: it.created_at ?? 0,
     width: it.width,
     height: it.height,
@@ -132,7 +132,7 @@ function genToItems(job: GenJob, kind: 'image' | 'video'): LibraryItem[] {
     origin: 'gen' as const,
     insertUrl: a.url, // gen-api already returns a full-res direct URL
     thumbSrc: kind === 'image' ? a.key : null, // generated video has no extracted frame; thumbnail uses <video> first frame
-    label: job.prompt.slice(0, 60) || (kind === 'video' ? t('生成视频') : t('生成图片')),
+    label: job.prompt.slice(0, 60) || (kind === 'video' ? t('common.videoGeneration') : t('common.imageGeneration')),
     createdAt: job.createdAt,
     deletable: false,
   }));
@@ -143,7 +143,7 @@ function elementToItem(e: ElementEntry): LibraryItem {
     id: `el:${e.id}`,
     kind: 'element',
     origin: 'gen',
-    label: e.element.label || e.prompt.slice(0, 60) || t('组件'),
+    label: e.element.label || e.prompt.slice(0, 60) || t('panels.element'),
     createdAt: e.createdAt,
     deletable: true,
     element: e.element,
@@ -310,16 +310,18 @@ export function AssetsPanel({
           return own.map(({ kind: kd, make }): LibraryItem => {
             const b = make();
             const slots = b.slots as { innerHtml: string; timelineBody: string };
+            // kd is a frames-canonical Chinese kind — localized by the frames package (kindLabel), NOT the UI catalogs
+            const kdLabel = kindLabel(loc, kd);
             return {
               id: `th:${fr.id}:${kd}`,
               kind: 'element' as const,
               origin: 'preset' as const,
               category: fr.id,
-              label: t(kd),
-              prompt: t(kd),
+              label: kdLabel,
+              prompt: kdLabel,
               createdAt: 0,
               deletable: false,
-              element: { seedId: b.id, innerHtml: `${slots.innerHtml}\n<style data-hf-baked>#${b.id}{${vars}}</style>`, timelineBody: slots.timelineBody, label: t(kd), designW: 1920, designH: 1080 },
+              element: { seedId: b.id, innerHtml: `${slots.innerHtml}\n<style data-hf-baked>#${b.id}{${vars}}</style>`, timelineBody: slots.timelineBody, label: kdLabel, designW: 1920, designH: 1080 },
             };
           });
         }
@@ -368,7 +370,7 @@ export function AssetsPanel({
     <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 inline-block w-full break-inside-avoid overflow-hidden rounded-md border align-top transition">
       <button
         type="button"
-        title={t('预览：{label}（拖到画面上可插入）', { label: it.label })}
+        title={t('panels.previewLabelDragOnto', { label: it.label })}
         onClick={() => setPreview(it)}
         {...dragProps(it)}
         className="block w-full cursor-zoom-in text-left"
@@ -379,13 +381,13 @@ export function AssetsPanel({
       </button>
       <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
         {it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : <ImageIcon size={9} />}
-        {it.origin === 'preset' ? (studioLocale() === 'en' ? 'Theme' : '主题') : it.kind === 'element' ? t('组件') : it.origin === 'gen' ? t('生成') : t('上传')}
+        {it.origin === 'preset' ? (t('common.theme')) : it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
       </span>
       {it.deletable && (
         <button
           type="button"
-          title={t('删除素材')}
-          aria-label={t('删除素材')}
+          title={t('panels.deleteAsset')}
+          aria-label={t('panels.deleteAsset')}
           onClick={() => void doDelete(it)}
           className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
         >
@@ -394,11 +396,11 @@ export function AssetsPanel({
       )}
       <button
         type="button"
-        title={t('插入到画面')}
+        title={t('panels.insertOntoCanvas')}
         onClick={() => insertOf(it)}
         className="bg-accent absolute bottom-1 right-1 hidden items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
       >
-        <Plus size={9} /> {t('插入')}
+        <Plus size={9} /> {t('panels.insert')}
       </button>
     </div>
   );
@@ -423,9 +425,9 @@ export function AssetsPanel({
         });
         setReloadTick((n) => n + 1);
         setQ('');
-        toast.success(t('已上传到素材库'));
+        toast.success(t('panels.uploadedAssets'));
       } catch {
-        toast.error(t('上传失败'));
+        toast.error(t('panels.uploadFailedTryAgain'));
       } finally {
         setUploading(false);
       }
@@ -437,23 +439,23 @@ export function AssetsPanel({
   const doDelete = async (it: LibraryItem) => {
     if (it.kind === 'element') {
       const ok = await confirm({
-        title: t('删除这个组件?'),
-        description: t('组件历史里会移除它,已经插进片子的不受影响。'),
+        title: t('panels.deleteElement'),
+        description: t('panels.removedFromElementHistory'),
         tone: 'danger',
-        confirmLabel: t('删除'),
+        confirmLabel: t('tools.delete_block.label'),
       });
       if (!ok) return;
       removeElementEntry(it.id.slice(3)); // strip 'el:' prefix
       setElements(loadElementEntries());
-      toast.success(t('已删除'));
+      toast.success(t('panels.deleted'));
       return;
     }
     if (!it.uploadId) return;
     const ok = await confirm({
-      title: t('删除这个素材?'),
-      description: t('素材库里会移除它,已经用进片子的不受影响。'),
+      title: t('panels.deleteAssetConfirm'),
+      description: t('panels.removedFromAssetsCopies'),
       tone: 'danger',
-      confirmLabel: t('删除'),
+      confirmLabel: t('tools.delete_block.label'),
     });
     if (!ok) return;
     const prev = uploads;
@@ -462,10 +464,10 @@ export function AssetsPanel({
     try {
       const r = await fetch(`/api/me/uploads/${encodeURIComponent(it.uploadId)}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(String(r.status));
-      toast.success(t('已删除'));
+      toast.success(t('panels.deleted'));
     } catch {
       setUploads(prev); // roll back on failure so the asset doesn't vanish
-      toast.error(t('删除失败,稍后再试'));
+      toast.error(t('panels.deleteFailedTryAgain'));
     }
   };
 
@@ -512,8 +514,8 @@ export function AssetsPanel({
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder={t('搜素材…')}
-              aria-label={t('搜索素材')}
+              placeholder={t('panels.searchAssets')}
+              aria-label={t('panels.searchAssetsLabel')}
               className="text-ink placeholder:text-ink-4 min-w-0 flex-1 bg-transparent text-[12px] outline-none"
             />
           </div>
@@ -521,8 +523,8 @@ export function AssetsPanel({
             type="button"
             onClick={() => void doUpload()}
             disabled={uploading}
-            title={t('上传素材')}
-            aria-label={t('上传素材')}
+            title={t('panels.uploadAsset')}
+            aria-label={t('panels.uploadAsset')}
             className="border-line text-ink-2 hover:text-ink inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border disabled:opacity-40"
           >
             {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
@@ -530,20 +532,20 @@ export function AssetsPanel({
           <button
             type="button"
             onClick={openGen}
-            title={t('生成素材(图片/视频/组件)')}
+            title={t('panels.generateAssetsImageVideo')}
             className="bg-ink text-bg inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium hover:opacity-90"
           >
-            <Sparkles size={11} /> {t('生成')}
+            <Sparkles size={11} /> {t('common.generate')}
           </button>
         </div>
         <div className="mt-1.5 flex items-center justify-between">
           <div className="flex gap-1">
             {(
               [
-                { v: 'all', label: '全部' },
-                { v: 'image', label: '图片' },
-                { v: 'video', label: '视频' },
-                { v: 'element', label: '组件' },
+                { v: 'all', label: 'panels.all' },
+                { v: 'image', label: 'panels.image' },
+                { v: 'video', label: 'panels.video' },
+                { v: 'element', label: 'panels.element' },
               ] as { v: KindFilter; label: string }[]
             ).map((k) => (
               <button
@@ -564,8 +566,8 @@ export function AssetsPanel({
           <div className="flex gap-0.5">
             {(
               [
-                { v: 'grid', icon: LayoutGrid, title: '卡片式' },
-                { v: 'list', icon: List, title: '列表式' },
+                { v: 'grid', icon: LayoutGrid, title: 'panels.cardView' },
+                { v: 'list', icon: List, title: 'panels.listView' },
               ] as { v: ViewMode; icon: typeof LayoutGrid; title: string }[]
             ).map((m) => (
               <button
@@ -592,8 +594,8 @@ export function AssetsPanel({
               <div key={g.id} className={`border-line flex items-center gap-2 border ${view === 'grid' ? 'rounded-md p-2' : 'border-x-0 border-t-0 px-3 py-2'}`}>
                 <Loader2 size={13} className="text-ink-4 shrink-0 animate-spin" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-ink-3 truncate text-[11px]">{g.prompt || t('生成中…')}</div>
-                  <div className="text-ink-4 text-[10px]">{(genKindRef.current.get(g.id) ?? 'image') === 'video' ? t('生成视频中') : t('生成图片中')}</div>
+                  <div className="text-ink-3 truncate text-[11px]">{g.prompt || t('panels.generating')}</div>
+                  <div className="text-ink-4 text-[10px]">{(genKindRef.current.get(g.id) ?? 'image') === 'video' ? t('panels.generatingVideo') : t('panels.generatingImage')}</div>
                 </div>
               </div>
             ))}
@@ -601,18 +603,18 @@ export function AssetsPanel({
         )}
         {loading && items.length === 0 ? (
           <div className="text-ink-4 flex items-center justify-center gap-2 pt-10 text-[11.5px]">
-            <Loader2 size={13} className="animate-spin" /> {t('加载素材…')}
+            <Loader2 size={13} className="animate-spin" /> {t('panels.loadingAssets')}
           </div>
         ) : shown.length === 0 && pendingJobs.length === 0 ? (
           <div className="text-ink-4 pt-10 text-center text-[11.5px]">
             {items.length === 0 ? (
               <>
-                {t('素材库还是空的')}
+                {t('panels.noAssetsYet')}
                 <br />
-                {t('上传图片/视频,或点「生成」造一个')}
+                {t('panels.uploadImageVideoClick')}
               </>
             ) : (
-              t('没有匹配的素材，换个词试试')
+              t('panels.noMatchingAssetsTry')
             )}
           </div>
         ) : kind === 'element' && !q.trim() ? (
@@ -624,26 +626,26 @@ export function AssetsPanel({
                 onClick={() => setElCat(null)}
                 className="text-ink-2 hover:text-ink mb-2 flex items-center gap-1 text-[12px] font-medium"
               >
-                <ChevronLeft size={13} /> {elCat === '我的' ? t('我的') : (themeGroups.find((g) => g.id === elCat)?.title ?? elCat)}
+                <ChevronLeft size={13} /> {elCat === 'mine' ? t('common.mine') : (themeGroups.find((g) => g.id === elCat)?.title ?? elCat)}
                 <span className="text-ink-4 font-normal">
-                  · {(elCat === '我的' ? mineItems : (themeGroups.find((g) => g.id === elCat)?.items ?? [])).length}
+                  · {(elCat === 'mine' ? mineItems : (themeGroups.find((g) => g.id === elCat)?.items ?? [])).length}
                 </span>
               </button>
-              {elCat === '我的' && mineItems.length === 0 ? (
+              {elCat === 'mine' && mineItems.length === 0 ? (
                 <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-6 text-center text-[10.5px]">
-                  {t('还没有自己的组件')}
+                  {t('panels.noElementsOwnYet')}
                   <br />
-                  {t('画布选中组件「存为组件」,或点「生成」做一个')}
+                  {t('panels.selectElementCanvasSave')}
                 </div>
               ) : (
                 <div className="columns-2 gap-1.5">
-                  {(elCat === '我的' ? mineItems : (themeGroups.find((g) => g.id === elCat)?.items ?? [])).map(gridCard)}
+                  {(elCat === 'mine' ? mineItems : (themeGroups.find((g) => g.id === elCat)?.items ?? [])).map(gridCard)}
                 </div>
               )}
             </div>
           ) : (
             <div className="space-y-3.5">
-              {[{ id: '我的', title: t('我的'), items: mineItems }, ...themeGroups].map((g) => (
+              {[{ id: 'mine', title: t('common.mine'), items: mineItems }, ...themeGroups].map((g) => (
                 <section key={g.id}>
                   <button
                     type="button"
@@ -658,7 +660,7 @@ export function AssetsPanel({
                   </button>
                   {g.items.length === 0 ? (
                     <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-4 text-center text-[10.5px]">
-                      {t('画布选中组件「存为组件」,或点「生成」做一个')}
+                      {t('panels.selectElementCanvasSave')}
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 items-start gap-1.5">{g.items.slice(0, 2).map(gridCard)}</div>
@@ -676,7 +678,7 @@ export function AssetsPanel({
               <div key={it.id} className="hover:bg-panel-2 group flex w-full items-center gap-2 px-3 py-1.5 transition">
                 <button
                   type="button"
-                  title={t('预览：{label}（拖到画面上可插入）', { label: it.label })}
+                  title={t('panels.previewLabelDragOnto', { label: it.label })}
                   onClick={() => setPreview(it)}
                   {...dragProps(it)}
                   className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-2 text-left"
@@ -686,24 +688,24 @@ export function AssetsPanel({
                     <div className="text-ink truncate text-[11px]">{it.label}</div>
                     <div className="text-ink-4 flex items-center gap-1 text-[10px]">
                       {it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : <ImageIcon size={9} />}
-                      {it.origin === 'preset' ? (studioLocale() === 'en' ? 'Theme' : '主题') : it.kind === 'element' ? t('组件') : it.origin === 'gen' ? t('生成') : t('上传')}
+                      {it.origin === 'preset' ? (t('common.theme')) : it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
                       {it.createdAt ? ` · ${new Date(it.createdAt).toLocaleDateString()}` : ''}
                     </div>
                   </div>
                 </button>
                 <button
                   type="button"
-                  title={t('插入到画面')}
+                  title={t('panels.insertOntoCanvas')}
                   onClick={() => insertOf(it)}
                   className="bg-accent hidden shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
                 >
-                  <Plus size={9} /> {t('插入')}
+                  <Plus size={9} /> {t('panels.insert')}
                 </button>
                 {it.deletable && (
                   <button
                     type="button"
-                    title={t('删除素材')}
-                    aria-label={t('删除素材')}
+                    title={t('panels.deleteAsset')}
+                    aria-label={t('panels.deleteAsset')}
                     onClick={() => void doDelete(it)}
                     className="text-ink-4 hidden shrink-0 items-center rounded p-1 hover:bg-red-600 hover:text-white group-hover:inline-flex"
                   >
@@ -750,7 +752,7 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
     <div
       role="button"
       tabIndex={-1}
-      aria-label={t('关闭预览')}
+      aria-label={t('common.closePreview')}
       onClick={onClose}
       className="fixed inset-0 z-[100] flex cursor-zoom-out flex-col items-center justify-center gap-3 bg-black/70 p-6"
     >
@@ -764,7 +766,7 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
             <Loader2 size={26} className="animate-spin" />
-            <span className="text-[12px]">{t('加载中…')}</span>
+            <span className="text-[12px]">{t('panels.loading')}</span>
           </div>
         )}
         {item.kind === 'element' && item.element ? (
@@ -797,7 +799,7 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
         }}
         className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
       >
-        <Plus size={13} /> {t('插入到画面')}
+        <Plus size={13} /> {t('panels.insertOntoCanvas')}
       </button>
     </div>
   );

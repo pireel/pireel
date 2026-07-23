@@ -3,7 +3,7 @@ id: scrapbook-tape
 title: 手帐 Scrapbook
 summary: 牛皮纸拼贴:胶带、白框照片卡、便签手写线,适合日常记录/旅行/好物
 icon: 📎
-showcase: [标题卡, 列表, 金句, 评论, 步骤, 时间线, 大数字, 引导]
+showcase: [title-card, list, quote, comments, steps, timeline, big-number, cta]
 palette: { paper: "#F3EBDD", panel: "#FFFFFF", panel-2: "#F6E7A9", fg: "#37302A", muted: "#37302A99", accent: "#E4572E", accent-2: "#4C9F70", line: "#37302A2E", grid: "#37302A12", radius: "4px", shadow: "0 10px 24px rgb(55 48 42 / 0.28)", glow: "0 0 0 rgb(0 0 0 / 0)" }
 version: 0.1.2
 ---
@@ -49,21 +49,21 @@ On footage the collage is TAPED OBJECTS, not the page: the block root stays tran
 - Overlap rule: at least one pair of elements must physically overlap per card (card over card, note over card corner, tape over both).
 
 ## Block recipes
-- 标题卡: sticky-note kicker (series + day) top area rotated +3-5°; the main polaroid rotated −2° holds the 126px headline with a crooked accent underline on one phrase and a muted caption in its bottom margin; a smaller empty polaroid peeks from behind at +4°; two tape strips pin the main card's top corners.
+- title-card: sticky-note kicker (series + day) top area rotated +3-5°; the main polaroid rotated −2° holds the 126px headline with a crooked accent underline on one phrase and a muted caption in its bottom margin; a smaller empty polaroid peeks from behind at +4°; two tape strips pin the main card's top corners.
   Motion: cards settle with `back.out` drop plus rotation overshoot, tapes scale in, underline draws last.
-- 列表: one big sticky note (`--panel-2`, rotated −1.5°) with a horizontal tape strip at top center; 78px title, then 3 checkbox rows at 58px. Done rows get the accent ✓ and a muted line-through; the open row stays full ink. A small captioned polaroid leans on the note's right edge for texture.
+- list: one big sticky note (`--panel-2`, rotated −1.5°) with a horizontal tape strip at top center; 78px title, then 3 checkbox rows at 58px. Done rows get the accent ✓ and a muted line-through; the open row stays full ink. A small captioned polaroid leans on the note's right edge for texture.
   Motion: note drops in, rows slide from the left with stagger, checks pop with `back.out(2)`.
-- 金句: a single large polaroid rotated +1.5° holding the quote at ~106px (weight 800, 1.4 line-height) with an oversized accent “ mark and the crooked underline under the key phrase; page-number attribution centered in the bottom margin; tape strips across BOTH top corners at ±40°; a tiny sticky note (收藏这句) tucked at a lower corner.
+- quote: a single large polaroid rotated +1.5° holding the quote at ~106px (weight 800, 1.4 line-height) with an oversized accent “ mark and the crooked underline under the key phrase; page-number attribution centered in the bottom margin; tape strips across BOTH top corners at ±40°; a tiny sticky note (收藏这句) tucked at a lower corner.
   Motion: card drops with rotation overshoot, tapes stamp on, quote fades up, underline draws.
-- 评论: a reader message wall — a taped white tag (读者留言墙, 60px weight 900, rotated −2°) leans top-left; three sticky notes (`--panel-2`, ~600px wide) pinned at alternating tilts (−3°, +2.5°, −1.5°), each with a tape strip across its top, a 36px muted @nickname and a 48px handwritten-tone comment (line-height 1.5); the lowest note overlaps its neighbor's corner, and exactly ONE note carries the crooked accent underline under its key phrase.
+- comments: a reader message wall — a taped white tag (读者留言墙, 60px weight 900, rotated −2°) leans top-left; three sticky notes (`--panel-2`, ~600px wide) pinned at alternating tilts (−3°, +2.5°, −1.5°), each with a tape strip across its top, a 36px muted @nickname and a 48px handwritten-tone comment (line-height 1.5); the lowest note overlaps its neighbor's corner, and exactly ONE note carries the crooked accent underline under its key phrase.
   Motion: tag lands first, notes drop in gluing order with `back.out(1.5)` rotation overshoot stagger 0.14, tapes stamp on, underline draws `scaleX` last.
-- 步骤: 手帐 to-do trail — three sticky notes (`--panel-2`, ≈390px squares) taped in a loose row at alternating tilts (−3°, +2.5°, −2°), each with a tape strip across its top edge, a 38px muted `STEP n` label and a 68px verb phrase; two hand-drawn SVG arrows (curved `--accent` stroke, round caps, small open heads) hop between the notes.
+- steps: 手帐 to-do trail — three sticky notes (`--panel-2`, ≈390px squares) taped in a loose row at alternating tilts (−3°, +2.5°, −2°), each with a tape strip across its top edge, a 38px muted `STEP n` label and a 68px verb phrase; two hand-drawn SVG arrows (curved `--accent` stroke, round caps, small open heads) hop between the notes.
   Motion: notes drop in gluing order with `back.out(1.5)` rotation overshoot stagger 0.12, tapes stamp on, arrows draw last via `stroke-dashoffset`.
-- 时间线: a journey route — a dashed `--accent` path (10px round-cap ink, `stroke-dasharray` dashes) meanders across raw kraft through three pushpin stops: 52px ink `--fg` pin heads with thick white rims and real shadows; each stop hangs a small taped sticky label (`--panel-2`, 34px muted `DAY n` over a 46px place name) at alternating tilts below its pin; a taped white tag names the trip top-left. The route is the card's single accent touch.
+- timeline: a journey route — a dashed `--accent` path (10px round-cap ink, `stroke-dasharray` dashes) meanders across raw kraft through three pushpin stops: 52px ink `--fg` pin heads with thick white rims and real shadows; each stop hangs a small taped sticky label (`--panel-2`, 34px muted `DAY n` over a 46px place name) at alternating tilts below its pin; a taped white tag names the trip top-left. The route is the card's single accent touch.
   Motion: tag drops, the dashed route reveals left→right via a clip-path wipe, pins drop from above with `back.out(2.2)` stagger, labels settle under their pins, tapes stamp last.
-- 大数字: a date-stamp polaroid — one big white polaroid rotated −2° holding `DAY` (80px muted) beside a 360px `07`, with a crooked `--accent` underline drawn beneath the number and a muted caption in the thick bottom margin; tape strips pin BOTH top corners (±40°); a small sticky note (`七月周记`) leans at a lower corner.
+- big-number: a date-stamp polaroid — one big white polaroid rotated −2° holding `DAY` (80px muted) beside a 360px `07`, with a crooked `--accent` underline drawn beneath the number and a muted caption in the thick bottom margin; tape strips pin BOTH top corners (±40°); a small sticky note (`七月周记`) leans at a lower corner.
   Motion: card drops `back.out(1.4)`, tapes stamp, the number fades up, underline draws `scaleX` last, note lands beside it.
-- 引导: a taped white card `关注不迷路` — the 130px headline sits on a big polaroid rotated +1.5° and a hand-drawn `--accent` ellipse is scribbled around the 关注 characters (SVG stroke, drawn on); muted schedule caption in the bottom margin; tapes on both top corners; a sticky note with an accent ✓ (`记得回来`) tucked at the lower-right — the CTA stays a margin scribble, never a button.
+- cta: a taped white card `关注不迷路` — the 130px headline sits on a big polaroid rotated +1.5° and a hand-drawn `--accent` ellipse is scribbled around the 关注 characters (SVG stroke, drawn on); muted schedule caption in the bottom margin; tapes on both top corners; a sticky note with an accent ✓ (`记得回来`) tucked at the lower-right — the CTA stays a margin scribble, never a button.
   Motion: card drops with overshoot, tapes stamp, the circle draws around 关注 via `stroke-dashoffset` (0.34s), sticky note lands last; settled by 1s.
 
 ## Compose-instruction crib

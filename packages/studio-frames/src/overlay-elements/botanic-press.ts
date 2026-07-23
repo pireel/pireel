@@ -27,10 +27,10 @@ const leafDraw = (id: string, at = 0.3) =>
   `tl.to('#${id} .glyph .lf',{strokeDashoffset:0,duration:0.4,stagger:0.08,ease:'power1.inOut'},${at});`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'bp_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <i class="tape ta"></i><i class="tape tb"></i>
@@ -55,10 +55,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .meta',{autoAlpha:0,duration:0.26},0.52);\n` +
         `tl.from('#${id} .wx',{scale:0,duration:0.24,ease:'power2.out'},0.7);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'bp_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <i class="tape ta"></i>
@@ -84,10 +84,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .mh',{scaleX:0,transformOrigin:'left center',duration:0.28,ease:'power1.out'},0.5);\n` +
         `tl.from('#${id} .wx',{scale:0,duration:0.22,ease:'power2.out'},0.72);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'bp_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <i class="tape ta"></i>
@@ -115,10 +115,10 @@ export const overlays: Record<string, () => Block> = {
         `\ntl.from('#${id} .r span,#${id} .r .lat',{y:14,autoAlpha:0,duration:0.26,stagger:0.06,ease:'power1.out'},0.3);\n` +
         `tl.from('#${id} .wx',{scale:0,duration:0.22,ease:'power2.out'},0.86);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'bp_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <i class="tape ta"></i>
@@ -141,10 +141,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .cl',{autoAlpha:0,duration:0.24},0.5);\n` +
         `tl.from('#${id} .wx',{scale:0,duration:0.22,ease:'power2.out'},0.68);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'bp_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <i class="tape ta"></i>
@@ -168,10 +168,10 @@ export const overlays: Record<string, () => Block> = {
         leafDraw(id, 0.2) +
         `\ntl.from('#${id} .wx',{scale:0,duration:0.22,ease:'power2.out'},0.66);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'bp_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <i class="tape ta"></i><i class="tape tb"></i>
@@ -193,10 +193,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .ch',{scaleX:0,transformOrigin:'left center',duration:0.26,ease:'power1.out'},0.34);\n` +
         `tl.from('#${id} .wx',{scale:0,duration:0.24,ease:'power2.out'},0.56);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'bp_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <i class="tape ta"></i><i class="tape tb"></i>
@@ -219,10 +219,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .sig .hr,#${id} .sig .lat',{autoAlpha:0,duration:0.26},0.52);\n` +
         `tl.from('#${id} .sig .wax',{scale:0,duration:0.22,ease:'power2.out'},0.72);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'bp_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i class="tape tp"></i><span class="lat" data-edit="lt">${txt('选项一', 'Option A')}</span><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

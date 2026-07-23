@@ -15,10 +15,10 @@ const INNER = (id: string, cls: string) =>
   `#${id} .${cls}::before{content:'';position:absolute;inset:10px;border:1px solid var(--line);pointer-events:none;}`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'ng_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="k" data-edit="kick">COLLECTION · 2026</div>
@@ -41,10 +41,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .orn i',{scaleX:0,duration:0.4,ease:'power2.out'},0.55);\n` +
         `tl.from('#${id} .orn b',{autoAlpha:0,duration:0.3},0.75);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'ng_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="k" data-edit="label">LIMITED TO</div>
@@ -65,10 +65,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .v',{autoAlpha:0,letterSpacing:'0.3em',duration:0.6,ease:'power2.out'},0.25);\n` +
         `tl.from('#${id} .u',{autoAlpha:0,duration:0.4},0.65);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'ng_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="k" data-edit="title">LA CARTE</div>
@@ -90,10 +90,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .r2',{autoAlpha:0,duration:0.35},0.42);\n` +
         `tl.from('#${id} .r3',{autoAlpha:0,duration:0.35},0.59);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'ng_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <div class="orn t"><i></i><b>◆</b><i></i></div>
@@ -112,10 +112,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .orn i',{scaleX:0,duration:0.4,ease:'power2.out'},0.4);\n` +
         `tl.from('#${id} .orn b',{autoAlpha:0,duration:0.3},0.7);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'ng_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip"><b>◆</b><span data-edit="note">${txt('标注一', 'Note 1')}</span></div>
@@ -131,10 +131,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .chip',{autoAlpha:0,y:-20,duration:0.45},0);\n` +
         `tl.from('#${id} .ln',{scaleY:0,transformOrigin:'top',duration:0.4,ease:'power2.out'},0.35);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'ng_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="k" data-edit="kick">JOIN THE HOUSE</div>
@@ -152,10 +152,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .pill',{autoAlpha:0,scale:0.96,duration:0.5,ease:'power2.out'},0.2);\n` +
         `tl.from('#${id} .f',{autoAlpha:0,duration:0.4},0.55);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'ng_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <div class="q">“</div>
@@ -175,10 +175,10 @@ ${INNER(id, 'w')}
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.5},0.35);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.35},0.7);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'ng_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s"><i data-edit="lt">${txt('选项一', 'Option A')}</i><b class="lv" data-edit="lv">${txt('数值一', 'Value A')}</b></div>

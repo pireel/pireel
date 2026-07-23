@@ -105,7 +105,7 @@ export function parseBlockResponse(
   // note = the text left after removing both fenced blocks
   let note = text;
   for (const m of [html, js]) if (m) note = note.replace(m[0], '');
-  note = note.trim() || '已更新该块';
+  note = note.trim() || 'Updated the block';
   return {
     innerHtml: html?.[1]?.trim() || fb.innerHtml,
     timelineBody: js?.[1]?.trim() || fb.timelineBody,

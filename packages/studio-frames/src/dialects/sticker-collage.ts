@@ -65,10 +65,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'st_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="st">
   <div class="stk hero" style="transform:rotate(-2deg);">
@@ -95,10 +95,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .deco',${POP},0.7);\n` +
         `tl.from('#${id} .burst',${POP},0.84);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'st_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="st">
   <div class="stk big" style="transform:rotate(-2.5deg);">
@@ -124,10 +124,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .deco',${POP},0.78);\n` +
         `tl.from('#${id} .burst',${POP},0.9);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'st_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="st">
   <div class="cap" style="left:170px;top:100px;transform:rotate(-3deg);">开学清单 LIST</div>
@@ -153,10 +153,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .mk',${MK_SWEEP},0.66);\n` +
         `tl.from('#${id} .deco',${POP},0.8);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'st_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="st">
   <div class="cap" style="left:50%;top:110px;transform:translateX(-50%) rotate(-2deg);">领取路线 HOW-TO</div>
@@ -189,10 +189,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .s3',${SLAP},0.8);\n` +
         `tl.from('#${id} .um',${MK_SWEEP},1.04);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'st_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="st">
   <div class="stk side sl"><em>普通价</em><b>¥ 9999</b><span class="no">原价入手</span></div>
@@ -217,10 +217,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .deco',${POP},0.72);\n` +
         `tl.from('#${id} .burst',${POP},0.86);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'st_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="st">
   <div class="cap" style="left:190px;top:130px;transform:rotate(-3deg);">学姐的忠告</div>
@@ -246,10 +246,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .deco',${POP},0.9);\n` +
         `tl.from('#${id} .burst',${POP},1.0);`,
     ),
-  评论: () =>
+  'comments': () =>
     mk(
       'st_cmt',
-      '评论',
+      'comments',
       (id) => `
 <div class="st">
   <div class="stk bub b1"><span class="hd cap" style="position:static;">@开学搭子</span><b>蹲一个链接!</b></div>
@@ -270,10 +270,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .burst',${POP.replace('0.26', '0.24')},0.44);\n` +
         `tl.from('#${id} .b3',{y:70,scale:0.85,autoAlpha:0,duration:0.3,ease:'back.out(1.6)'},0.56);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'st_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="st">
   <div class="stk pill" style="transform:translate(-50%,-50%) rotate(-2deg);"><b class="mk">关注</b><span>,不迷路。</span></div>

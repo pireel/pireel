@@ -21,10 +21,10 @@ const base = (id: string) => `
 const orbIn = (id: string) => `tl.from('#${id} .orb',{autoAlpha:0,scale:0.6,duration:0.4,stagger:0.08},0);`;
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'gt_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <i class="orb oa o1"></i><i class="orb ob o2"></i>
@@ -43,10 +43,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,y:22,duration:0.3},0.4);\n` +
         `tl.from('#${id} .chip i',{scale:0,duration:0.24,ease:'back.out(2)'},0.55);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'gt_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <i class="orb oa o1"></i>
@@ -68,10 +68,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .n',{innerText:0,snap:{innerText:1},duration:0.6,ease:'power1.out'},0.3);\n` +
         `tl.from('#${id} .chip i',{scale:0,duration:0.24,ease:'back.out(2)'},0.7);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'gt_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <i class="orb ob o1"></i>
@@ -94,10 +94,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r',{y:30,autoAlpha:0,duration:0.28,stagger:0.12,ease:'power2.out'},0.34);\n` +
         `tl.from('#${id} .n.a',{scale:0.6,duration:0.24,ease:'back.out(2)'},0.8);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'gt_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <i class="orb oa o1"></i><i class="orb ob o2"></i>
@@ -116,10 +116,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,y:24,duration:0.3,ease:'power2.out'},0.36);\n` +
         `tl.from('#${id} .chip i',{scale:0,duration:0.24,ease:'back.out(2)'},0.55);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'gt_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <i class="orb oa o1"></i>
@@ -137,10 +137,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip i',{scale:0,duration:0.24,ease:'back.out(2)'},0.4);\n` +
         `tl.from('#${id} .w b',{autoAlpha:0,duration:0.24},0.44);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'gt_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <i class="orb ob o1"></i>
@@ -158,10 +158,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .pill',{scale:0.6,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.42);\n` +
         `tl.from('#${id} .chip i',{scale:0,duration:0.24,ease:'back.out(2)'},0.55);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'gt_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <i class="orb oa o1"></i><i class="orb ob o2"></i>
@@ -182,10 +182,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t b',{autoAlpha:0,duration:0.28},0.46);\n` +
         `tl.from('#${id} .sig',{autoAlpha:0,duration:0.26},0.6);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'gt_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="s a"><i class="orb ob o1"></i><span data-edit="lt">${txt('选项一', 'Option A')}</span><b data-edit="lv">${txt('数值一', 'Value A')}</b></div>

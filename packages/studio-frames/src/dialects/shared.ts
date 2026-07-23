@@ -32,5 +32,5 @@ export function mk(prefix: string, label: string, html: Html, tl: Html): Block {
  *  once inserted it's block data and won't follow later language switches; zh/en are each written
  *  natively as generic placeholders, not required to be translations of each other). */
 export function txt(zh: string, en: string): string {
-  return studioLocale() === 'en' ? en : zh;
+  return studioLocale() === 'zh' ? zh : en; // any non-zh locale reads the en placeholder
 }

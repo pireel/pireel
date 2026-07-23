@@ -19,10 +19,10 @@ const fake = (n: number): string =>
   Array.from({ length: n }, (_, i) => `<i style="width:${i === n - 1 ? 62 : 100}%"></i>`).join('');
 
 export const overlays: Record<string, () => Block> = {
-  标题条: () =>
+  'title-bar': () =>
     mk(
       'jo_ttl',
-      '标题条',
+      'title-bar',
       (id) => `
 <div class="w">
   <div class="mast"><span class="m" data-edit="kick">${txt('视 频 日 报', 'THE DAILY REEL')}</span><span class="d" data-edit="vol">VOL.24 · 2026</span></div>
@@ -40,10 +40,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .mast',{autoAlpha:0,y:-16,duration:0.22},0.12);\n` +
         `tl.from('#${id} .h',{autoAlpha:0,duration:0.3},0.24);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'jo_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="cap">${txt('数 据 版', 'DATA DESK')}</div>
@@ -63,10 +63,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .v b',{innerText:0,snap:{innerText:1},duration:0.7,ease:'power1.out'},0.16);\n` +
         `tl.from('#${id} .src',{autoAlpha:0,duration:0.24},0.4);`,
     ),
-  要点列表: () =>
+  'bullet-list': () =>
     mk(
       'jo_list',
-      '要点列表',
+      'bullet-list',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="title">${txt('本 期 要 目', 'IN THIS ISSUE')}</div>
@@ -89,10 +89,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .r2',{autoAlpha:0,x:-40,duration:0.24},0.27);\n` +
         `tl.from('#${id} .r3',{autoAlpha:0,x:-40,duration:0.24},0.38);`,
     ),
-  关键词重击: () =>
+  'keyword-slam': () =>
     mk(
       'jo_kw',
-      '关键词重击',
+      'keyword-slam',
       (id) => `
 <div class="w">
   <span class="t" data-edit="word">${txt('关键词', 'Keyword')}</span>
@@ -108,10 +108,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,y:20,duration:0.24,ease:'power2.out'},0.06);\n` +
         `tl.from('#${id} .stamp',{scale:1.7,autoAlpha:0,rotation:24,duration:0.28,ease:'power3.in'},0.3);`,
     ),
-  标注: () =>
+  'callout': () =>
     mk(
       'jo_call',
-      '标注',
+      'callout',
       (id) => `
 <div class="w">
   <div class="chip" data-edit="note">${txt('标注一', 'Note 1')}</div>
@@ -126,10 +126,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .chip',{scale:1.7,autoAlpha:0,rotation:-24,duration:0.28,ease:'power3.in'},0);\n` +
         `tl.from('#${id} .rule',{scaleY:0,transformOrigin:'top',duration:0.24,ease:'power2.out'},0.26);`,
     ),
-  关注引导: () =>
+  'follow-cta': () =>
     mk(
       'jo_cta',
-      '关注引导',
+      'follow-cta',
       (id) => `
 <div class="w">
   <div class="inner">
@@ -149,10 +149,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .w',{autoAlpha:0,x:60,duration:0.26,ease:'power2.out'},0);\n` +
         `tl.from('#${id} .stamp',{scale:1.7,autoAlpha:0,rotation:24,duration:0.28,ease:'power3.in'},0.3);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'jo_quote',
-      '金句',
+      'quote',
       (id) => `
 <div class="w">
   <i class="dash">——</i>
@@ -172,10 +172,10 @@ export const overlays: Record<string, () => Block> = {
         `tl.from('#${id} .t',{autoAlpha:0,duration:0.28},0.22);\n` +
         `tl.from('#${id} .a',{autoAlpha:0,duration:0.22},0.42);`,
     ),
-  左右对比: () =>
+  'comparison': () =>
     mk(
       'jo_cmp',
-      '左右对比',
+      'comparison',
       (id) => `
 <div class="w">
   <div class="cap" data-edit="cap">${txt('本 报 评 测', 'THE VERDICT')}</div>

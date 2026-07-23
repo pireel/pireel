@@ -54,10 +54,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'pc_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -86,10 +86,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cloud i',{autoAlpha:0,y:20,duration:0.22,stagger:0.06},0.52);\n` +
         `tl.from('#${id} .ss',{scale:1.6,autoAlpha:0,rotation:28,duration:0.26,ease:'power3.in'},0.72);`,
     ),
-  章节: () =>
+  'chapters': () =>
     mk(
       'pc_chp',
-      '章节',
+      'chapters',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -122,10 +122,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .hc i',{autoAlpha:0,y:18,duration:0.2,stagger:0.06},0.76);\n` +
         `tl.from('#${id} .ss',{scale:1.6,autoAlpha:0,rotation:28,duration:0.26,ease:'power3.in'},0.9);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'pc_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -150,10 +150,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cpl.r',{x:50,autoAlpha:0,duration:0.28,ease:'power2.out'},0.4);\n` +
         `tl.from('#${id} .ss',{scale:1.6,autoAlpha:0,rotation:-24,duration:0.26,ease:'power3.in'},0.72);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'pc_cnt',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -180,10 +180,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .cpl.r',{x:50,autoAlpha:0,duration:0.28,ease:'power2.out'},0.44);\n` +
         `tl.from('#${id} .mc i',{autoAlpha:0,y:18,duration:0.2,stagger:0.06},0.62);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'pc_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -205,10 +205,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .big',{scale:1.6,autoAlpha:0,rotation:-22,duration:0.3,ease:'power3.in'},0.48);\n` +
         `tl.from('#${id} .f',{autoAlpha:0,duration:0.26},0.86);`,
     ),
-  金句: () =>
+  'quote': () =>
     mk(
       'pc_qte',
-      '金句',
+      'quote',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -233,10 +233,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .k',{autoAlpha:0,duration:0.26},0.56);\n` +
         `tl.from('#${id} .ss',{scale:1.6,autoAlpha:0,rotation:-24,duration:0.26,ease:'power3.in'},0.72);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'pc_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
@@ -266,10 +266,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .r',{x:-50,autoAlpha:0,duration:0.28,stagger:0.12,ease:'power2.out'},0.32);\n` +
         `tl.from('#${id} .ss',{scale:1.6,autoAlpha:0,rotation:28,duration:0.26,ease:'power3.in'},0.76);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'pc_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="pc"><div class="plate2"></div><div class="plate"></div>
   <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>

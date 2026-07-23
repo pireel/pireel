@@ -37,10 +37,10 @@ export const cover: () => Block = () =>
   );
 
 export const blocks: Record<string, () => Block> = {
-  标题卡: () =>
+  'title-card': () =>
     mk(
       'ms_ttl',
-      '标题卡',
+      'title-card',
       (id) => `
 <div class="ms">
   <div class="strip" style="top:130px;transform:rotate(-4deg);">今日爆款 — 全场直降 — 今日爆款 — 全场直降</div>
@@ -59,10 +59,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .burst',{scale:0,rotation:-70,duration:0.3,ease:'back.out(2)'},0.38);\n` +
         `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.6);`,
     ),
-  大数字: () =>
+  'big-number': () =>
     mk(
       'ms_num',
-      '大数字',
+      'big-number',
       (id) => `
 <div class="ms">
   <div class="old">日常价 ¥399</div>
@@ -83,10 +83,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .burst',{scale:0,rotation:80,duration:0.28,ease:'back.out(2)'},0.6);\n` +
         `tl.from('#${id} .strip',{x:320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.72);`,
     ),
-  数字变化: () =>
+  'count-up': () =>
     mk(
       'ms_prc',
-      '数字变化',
+      'count-up',
       (id) => `
 <div class="ms">
   <div class="k">价 格 崩 了</div>
@@ -114,10 +114,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.9);\n` +
         `tl.to('#${id} .price',{scale:1.06,duration:0.1,yoyo:true,repeat:1},0.96);`,
     ),
-  引导: () =>
+  'cta': () =>
     mk(
       'ms_cta',
-      '引导',
+      'cta',
       (id) => `
 <div class="ms">
   <div class="k">距 结 束 仅 剩</div>
@@ -141,10 +141,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .cta',{scale:1.05,duration:0.12,yoyo:true,repeat:1},0.8);\n` +
         `tl.from('#${id} .burst',{scale:0,rotation:70,duration:0.26,ease:'back.out(2)'},0.7);`,
     ),
-  倒计时: () =>
+  'countdown': () =>
     mk(
       'ms_cdt',
-      '倒计时',
+      'countdown',
       (id) => `
 <div class="ms">
   <div class="k">距 开 抢 仅 剩</div>
@@ -175,10 +175,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .burst',{scale:0,rotation:70,duration:0.26,ease:'back.out(2)'},0.62);\n` +
         `tl.from('#${id} .strip',{x:-320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.78);`,
     ),
-  对比: () =>
+  'compare': () =>
     mk(
       'ms_cmp',
-      '对比',
+      'compare',
       (id) => `
 <div class="ms">
   <div class="k">别 再 花 冤 枉 钱</div>
@@ -201,10 +201,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.to('#${id} .burst',{scale:1.06,duration:0.12,yoyo:true,repeat:1},0.76);\n` +
         `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.9);`,
     ),
-  列表: () =>
+  'list': () =>
     mk(
       'ms_lst',
-      '列表',
+      'list',
       (id) => `
 <div class="ms">
   <div class="h">今日爆款清单</div>
@@ -232,10 +232,10 @@ export const blocks: Record<string, () => Block> = {
         `tl.from('#${id} .r3',{x:-320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.52);\n` +
         `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.8);`,
     ),
-  步骤: () =>
+  'steps': () =>
     mk(
       'ms_stp',
-      '步骤',
+      'steps',
       (id) => `
 <div class="ms">
   <div class="k">三 步 抢 到 手</div>

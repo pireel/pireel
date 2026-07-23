@@ -55,8 +55,8 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     if (asrRef.current?.length) return Promise.resolve(asrRef.current);
     return dedup('asr', async () => {
       const vf = videoFileRef.current;
-      if (!vf) throw new Error(t('先上传口播视频'));
-      report?.(t('提取口播稿…'));
+      if (!vf) throw new Error(t('common.uploadVideoFirst'));
+      report?.(t('common.transcribing'));
       const segs = await studioProviders().transcriber.transcribe(vf);
       asrRef.current = segs;
       setAsrSentences(segs);
@@ -83,7 +83,7 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
       : null;
     // Inserted-clip context: transcribe on demand then fetch (failure doesn't block planning — better less context than a broken chain)
     const inserts = await (deps.getInsertedClips?.().catch(() => [] as PlanInsert[]) ?? Promise.resolve([] as PlanInsert[]));
-    report?.(t('分析口播稿…'));
+    report?.(t('common.analyzingTranscript'));
     const planResp = await studioProviders().planner.plan({
       sentences: segs.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
       videoDurationSec: v?.durationSec ?? 0,
@@ -92,7 +92,7 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
       ...(inserts.length ? { inserts } : {}),
     });
     // Never cache an empty plan (model output parsed no scenes) — caching it would leave shots stuck without placeholders and b-roll forever complaining "cut shots first"
-    if (!planResp.scenes?.length) throw new Error(t('规划没有产出场景,请再说一次「分析口播稿」重试'));
+    if (!planResp.scenes?.length) throw new Error(t('common.planningProducedNoScenes'));
     planRef.current = planResp;
     setPlan(planResp);
     return planResp;
@@ -110,20 +110,20 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     // Total frames = min(180, duration×2fps); seed the initial estimate at a calibrated ~0.13s/frame, then refresh with measured rate
     const total = Math.min(180, Math.max(1, Math.floor(v.durationSec * 2)));
     const start = performance.now();
-    report?.(t('分析画面… 预计约 {sec}s', { sec: Math.max(2, Math.ceil(total * 0.13)) }), 0);
+    report?.(t('common.analyzingVisualsAboutSec', { sec: Math.max(2, Math.ceil(total * 0.13)) }), 0);
     // The progress fraction comes only from the MediaPipe geometry pass; VLM semantics/palette run in parallel
     // with no per-frame progress → scale geometry to 85%, and when geometry finishes switch to "semantic analysis"
     // copy pinned at 90%, so we never report 100% while still running (the card shows "finishing up" for the tail).
     const vis = await analyzeVisual(vf, v.durationSec, (done, tot) => {
       const g = tot > 0 ? done / tot : 0;
       if (g >= 1) {
-        report?.(t('画面语义/调色分析…'), 0.9);
+        report?.(t('common.analyzingVisualSemanticsColor'), 0.9);
         return;
       }
       const frac = g * 0.85;
       const elapsed = (performance.now() - start) / 1000;
       const eta = (g > 0.06 ? elapsed / g - elapsed : total * 0.13 - elapsed) + 2; // +2s headroom for the semantic pass
-      report?.(t('分析画面 {pct}% · 约剩 {sec}s', { pct: Math.round(frac * 100), sec: Math.max(1, Math.ceil(eta)) }), frac);
+      report?.(t('common.analyzingVisualsPctSec', { pct: Math.round(frac * 100), sec: Math.max(1, Math.ceil(eta)) }), frac);
     }).catch(() => null);
     if (vis) {
       visualRef.current = vis;

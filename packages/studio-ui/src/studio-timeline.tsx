@@ -434,8 +434,11 @@ function StudioTimelineImpl({
     if (!assetDragging) setDropHint(null);
   }, [assetDragging]);
 
-  // Generic pointer drag (returns whether it actually dragged -> distinguishes click vs drag). pointermove is coalesced to once per frame via rAF,
-  // to avoid seeking the video on every event (decoding is expensive) which causes jank; draggingRef makes hover-seek yield during the drag.
+  // Generic pointer drag (returns whether it actually dragged -> distinguishes click vs drag). Runs a continuous rAF loop:
+  // onMove fires at most once per frame (seeking the video on every pointermove is expensive decoding-wise and causes jank),
+  // and at the viewport's left/right edge it keeps auto horizontal-scrolling (same rAF pattern as shot reorder / marquee) —
+  // the scroll shifts the content coordinate base, so scrolled frames replay onMove even with the pointer sitting still,
+  // which is what lets a playhead/trim drag keep advancing past the visible window. draggingRef makes hover-seek yield.
   const drag = (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
     e.preventDefault();
     try {
@@ -448,18 +451,38 @@ function StudioTimelineImpl({
     let moved = false;
     let lastX = e.clientX;
     let lastY = e.clientY;
+    let dirty = false; // pointer moved since last flushed frame
     let raf = 0;
     draggingRef.current = true;
-    const flush = () => {
-      raf = 0;
-      if (moved) onMove(lastX, lastY);
+    const EDGE = 44; // viewport-edge band width that triggers auto-scroll (same as marquee/shot reorder)
+    const frame = () => {
+      const sc = scrollRef.current;
+      let scrolled = false;
+      if (sc && moved) {
+        const sr = sc.getBoundingClientRect();
+        const leftEdge = sr.left + GUTTER + EDGE; // left is covered by the sticky gutter; visible content starts at +GUTTER
+        let d = 0;
+        if (lastX < leftEdge) d = -Math.ceil(((leftEdge - lastX) / EDGE) * 44);
+        else if (lastX > sr.right - EDGE) d = Math.ceil(((lastX - (sr.right - EDGE)) / EDGE) * 44);
+        if (d) {
+          const before = sc.scrollLeft;
+          sc.scrollLeft += d;
+          scrolled = sc.scrollLeft !== before; // at scroll bounds nothing changed -> don't replay onMove every frame
+        }
+      }
+      if (moved && (dirty || scrolled)) {
+        dirty = false;
+        onMove(lastX, lastY);
+      }
+      raf = requestAnimationFrame(frame);
     };
+    raf = requestAnimationFrame(frame);
     const mv = (ev: PointerEvent) => {
       if (ev.buttons === 0) { up(); return; } // missed pointerup: finish immediately, don't track bare movement
       if (Math.abs(ev.clientX - sx) > 3 || Math.abs(ev.clientY - sy) > 3) moved = true; // pure vertical (cross-track) also counts as a drag
       lastX = ev.clientX;
       lastY = ev.clientY;
-      if (moved && !raf) raf = requestAnimationFrame(flush);
+      dirty = true;
     };
     const up = () => {
       window.removeEventListener('pointermove', mv);
@@ -788,7 +811,7 @@ function StudioTimelineImpl({
                   track === CAP_LANE
                     ? KIND_META.caption
                     : k === 'video'
-                      ? { label: sceneRail ? t('场景') : t('视频'), icon: Film, dot: 'text-accent' }
+                      ? { label: sceneRail ? t('panels.scene') : t('panels.video'), icon: Film, dot: 'text-accent' }
                       : KIND_META[k];
                 const Icon = meta.icon;
                 const dragging = trackDrag?.track === track;
@@ -796,7 +819,7 @@ function StudioTimelineImpl({
                   <div
                     key={track}
                     onPointerDown={track > 0 ? (e) => startTrackDrag(e, track) : undefined}
-                    title={track > 0 ? t('拖动调整轨道层级(上面的盖住下面的)') : undefined}
+                    title={track > 0 ? t('panels.dragReorderTrackStacking') : undefined}
                     className={`flex items-center gap-1.5 px-2.5 text-[11px] ${track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
                     style={{ height: rowH(track), marginTop: track === 0 ? 0 : ROW_GAP, transform: dragging ? `translateY(${trackDrag!.dy}px)` : undefined }}
                   >
@@ -976,7 +999,7 @@ function StudioTimelineImpl({
                             if (draggingRef.current) return; // a reorder/trim drag sweeping over other cards: don't pop the boundary "+"
                             setHoverBounds({ l: start, r: end });
                           }}
-                          title={t('场景 {n} · 镜头:{name}', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
+                          title={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                           className={`bg-ink/10 absolute top-3 bottom-2 overflow-hidden rounded text-left ${
                             dragged ? 'shadow-xl ring-2 ring-accent brightness-110' : sel ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'
                           }`}
@@ -1018,12 +1041,12 @@ function StudioTimelineImpl({
                               e.stopPropagation();
                               onOpenShotSettings(shot.id);
                             }}
-                            title={t('取景:{name}', { name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
+                            title={t('panels.framingName', { name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                             className={`cursor-pointer rounded px-1.5 py-0.5 text-[9px] font-medium leading-[14px] shadow ${
                               hasTreatment ? 'bg-accent/90 text-white' : 'bg-black/55 text-white/80 hover:text-white'
                             }`}
                           >
-                            {hasTreatment ? t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) : t('取景')}
+                            {hasTreatment ? t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) : t('tools.set_shot_treatment.label')}
                           </button>
                         </div>
                       </div>
@@ -1042,8 +1065,8 @@ function StudioTimelineImpl({
                             <button
                               key={`tr-${i}`}
                               type="button"
-                              title={t('添加转场')}
-                              aria-label={t('添加转场')}
+                              title={t('panels.addTransition')}
+                              aria-label={t('panels.addTransition')}
                               onMouseEnter={() => {
                                 if (draggingRef.current) return; // don't grab hover-scrub while dragging
                                 // Hovering the transition spot = clear intent: arm hover-scrub immediately, center preview jumps straight to the cut frame
@@ -1071,7 +1094,7 @@ function StudioTimelineImpl({
                         const handle = (side: -1 | 1) => (
                           <div
                             role="none"
-                            title={t('拖动调时长(左右对称)')}
+                            title={t('panels.dragAdjustDurationSymmetric')}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               drag(
@@ -1105,8 +1128,8 @@ function StudioTimelineImpl({
                           >
                             <button
                               type="button"
-                              title={t('转场 · {sec}s(点击修改)', { sec: (half * 2).toFixed(1) })}
-                              aria-label={t('修改转场')}
+                              title={t('panels.transitionSecSClick', { sec: (half * 2).toFixed(1) })}
+                              aria-label={t('panels.editTransition')}
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1130,8 +1153,8 @@ function StudioTimelineImpl({
                       <button
                         key={bi}
                         type="button"
-                        title={t('在此插入本地视频')}
-                        aria-label={t('在此插入本地视频')}
+                        title={t('panels.insertLocalVideoHere')}
+                        aria-label={t('panels.insertLocalVideoHere')}
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1279,7 +1302,7 @@ function StudioTimelineImpl({
                 captionBlocks.map((b) => (
                   <div
                     key={b.id}
-                    title={b.label || t('字幕')}
+                    title={b.label || t('panels.captions')}
                     className="absolute overflow-hidden rounded-md bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20"
                     style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
                     onClick={(e) => {
@@ -1288,7 +1311,7 @@ function StudioTimelineImpl({
                     }}
                   >
                     <div className="pointer-events-none flex h-full items-center px-2">
-                      <span className="text-ink-2 truncate text-[10px]">{b.label || t('字幕')}</span>
+                      <span className="text-ink-2 truncate text-[10px]">{b.label || t('panels.captions')}</span>
                     </div>
                   </div>
                 ))}
@@ -1306,7 +1329,7 @@ function StudioTimelineImpl({
                 <div className="pointer-events-none absolute top-0 bottom-0 z-40" style={{ left: x(dropHint.t) }}>
                   <div className="bg-accent absolute top-0 bottom-0 w-0.5 -translate-x-1/2" style={{ boxShadow: '0 0 8px rgba(63,75,232,0.7)' }} />
                   <div className="bg-accent absolute -top-0.5 left-1.5 rounded px-1 text-[9px] leading-[13px] whitespace-nowrap text-white">
-                    {dropHint.clip ? t('插入片段({mode})· {sec}s', { mode: assetDragKind === 'image' ? t('5s 静帧') : t('整段'), sec: dropHint.t.toFixed(1) }) : t('插入到 {sec}s', { sec: dropHint.t.toFixed(1) })}
+                    {dropHint.clip ? t('panels.bRollModeSec', { mode: assetDragKind === 'image' ? t('panels.still5s') : t('panels.fullClip'), sec: dropHint.t.toFixed(1) }) : t('panels.insertSecS', { sec: dropHint.t.toFixed(1) })}
                   </div>
                 </div>
               )}
@@ -1315,7 +1338,7 @@ function StudioTimelineImpl({
               {clipPendingAt != null && (
                 <div className="pointer-events-none absolute z-40 -translate-x-1/2" style={{ left: x(clipPendingAt), top: 8 }}>
                   <span className="inline-flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] whitespace-nowrap text-white">
-                    <Loader2 size={10} className="animate-spin" /> {t('插入中…')}
+                    <Loader2 size={10} className="animate-spin" /> {t('common.inserting')}
                   </span>
                 </div>
               )}
