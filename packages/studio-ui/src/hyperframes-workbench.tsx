@@ -4926,16 +4926,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         if (!raw.trim()) return { ok: false, error: t('workbench.rawRequired') };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         const target = bid ? c2.blocks.find((x) => x.id === bid) : undefined;
-        if (bid && !target) return { ok: false, error: t('workbench.elementNotFoundUse') };
         if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
         const fb = target && !isPlaceholder(target) ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
-        const applyId = target?.id ?? blockId('ai');
+        // Stable applyId (same fix as the offline executor in server-tools): an unknown bid IS the
+        // new-block id — compose_context minted it for the brief, or a lint receipt handed it back.
+        // Reuse it so the generated CSS's #id scope survives the retry instead of chasing a fresh
+        // mint each round (the loop that drove external agents off the BYO path).
+        const applyId = target?.id ?? bid ?? blockId('ai');
         const parsed = parseBlockResponse(raw, fb);
         const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length) {
-          return { ok: false, error: t('workbench.failedStaticChecksFix'), data: { issues: issues.map((i) => i.message) } };
+          return { ok: false, error: t('workbench.failedStaticChecksFix', { blockId: applyId }), data: { blockId: applyId, issues: issues.map((i) => i.message) } };
         }
         const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
         pushUndoSnapshot();
