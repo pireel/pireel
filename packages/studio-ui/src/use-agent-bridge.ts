@@ -22,11 +22,26 @@ export interface AgentBridgeOpts {
   getState: () => string;
   /** Callback when an external call completes (for UI feedback, e.g. toast). */
   onExternalCall?: (tool: string, result: StudioToolResult) => void;
+  /** This tab's project — sent on connect; the DO hands it to whoever we evict (close reason)
+   *  so displacement stays PER-PROJECT: an unrelated-project tab taking the bridge must not
+   *  stop this tab's autosave. */
+  projectId?: string;
+  /** Called when the DO kicks this tab because a newer tab connected (close 4000) ON THE SAME
+   *  project — the single-writer demotion signal: the workbench stops cloud autosave on it.
+   *  (An empty/unknown evictor project counts as same-project: demote conservatively.) */
+  onDisplaced?: () => void;
 }
 
-export function useAgentBridge(opts: AgentBridgeOpts): void {
+export interface AgentBridgeHandle {
+  /** Rejoin the bridge, evicting whoever holds it now (the write-claim half of the
+   *  single-writer handover). No-op while this tab is already connected/connecting. */
+  reclaim: () => void;
+}
+
+export function useAgentBridge(opts: AgentBridgeOpts): AgentBridgeHandle {
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  const handleRef = useRef<AgentBridgeHandle>({ reclaim: () => {} });
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -39,6 +54,7 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
       if (!alive) return;
       const url = new URL('/api/studio/bridge', location.href);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      if (optsRef.current.projectId) url.searchParams.set('project', optsRef.current.projectId);
       let sock: WebSocket;
       try {
         sock = new WebSocket(url);
@@ -78,12 +94,31 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
       sock.onclose = (ev) => {
         if (ws === sock) ws = null;
         if (!alive) return;
-        if (ev.code === 4000) return; // kicked by a new tab: this page exits the bridge, don't fight for it
+        if (ev.code === 4000) {
+          // Kicked by a new tab: this page exits the bridge, don't fight for it. reclaim() is the
+          // only way back in (user edit intent), so two live tabs never ping-pong evict each other.
+          // Demote autosave ONLY on a same-project takeover (close reason = evictor's projectId);
+          // an unrelated project taking the tool surface must not stop this project's writes.
+          // The cross-project exemption requires a reason that actually LOOKS like a project id —
+          // anything else (empty, or an older server's human-readable close message) is unknown
+          // and demotes conservatively: over-locking beats a stale tab clobbering the writer.
+          const evictorProject = ev.reason;
+          const mine = optsRef.current.projectId;
+          const crossProject = !!mine && /^p[a-z0-9]{6,}$/.test(evictorProject) && evictorProject !== mine;
+          if (!crossProject) optsRef.current.onDisplaced?.();
+          return;
+        }
         if (!everConnected && retries >= 6) return; // never connected (not logged in, etc.): don't spin
         setTimeout(connect, Math.min(30_000, 1_000 * 2 ** retries++));
       };
     };
     connect();
+
+    handleRef.current.reclaim = () => {
+      if (!alive || (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING))) return;
+      retries = 0;
+      connect();
+    };
 
     const ping = setInterval(() => {
       if (ws?.readyState === WebSocket.OPEN) {
@@ -99,10 +134,17 @@ export function useAgentBridge(opts: AgentBridgeOpts): void {
       alive = false;
       clearInterval(ping);
       try {
-        ws?.close();
+        // Closing a CONNECTING socket logs a scary "closed before established" warning (hit on every
+        // dev StrictMode double-mount): let the handshake finish, then close.
+        if (ws?.readyState === WebSocket.CONNECTING) {
+          const s = ws;
+          s.onopen = () => s.close();
+        } else ws?.close();
       } catch {
         /* already closed */
       }
     };
   }, []);
+
+  return handleRef.current;
 }

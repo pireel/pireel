@@ -77,13 +77,18 @@ describe('StudioBridge DO', () => {
     }
   });
 
-  it('单活跃 socket:新标签页顶旧(旧的 close 4000)', async () => {
+  it('单活跃 socket:新标签页顶旧(旧的 close 4000,reason 带新 tab 的 projectId 供同项目判定)', async () => {
     const { state, sockets } = makeState();
     const bridge = new StudioBridge(state);
     bridge.acceptBrowserSocket(new FakeSocket());
-    bridge.acceptBrowserSocket(new FakeSocket());
+    bridge.acceptBrowserSocket(new FakeSocket(), 'p123abc');
     expect(sockets[0]!.closed?.code).toBe(4000);
+    expect(sockets[0]!.closed?.reason).toBe('p123abc');
     expect(sockets[1]!.closed).toBeNull();
+    // 不带 projectId(旧客户端/未知)→ reason 空串,被顶方保守降级
+    bridge.acceptBrowserSocket(new FakeSocket());
+    expect(sockets[1]!.closed?.code).toBe(4000);
+    expect(sockets[1]!.closed?.reason).toBe('');
   });
 
   it('标签页关闭:挂起调用立即失败(不等超时)', async () => {

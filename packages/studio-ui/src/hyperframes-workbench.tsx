@@ -418,6 +418,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [chatRev, setChatRev] = useState(0); // chat thread persist counter: triggers cloud sync
   const bumpChatRev = useCallback(() => setChatRev((v) => v + 1), []); // stable reference (StudioChat is memoized)
   const conflictWarnedRef = useRef(false);
+  // Single-writer demotion: set when the bridge kicks this tab (close 4000 = another window took
+  // over as the active surface). A displaced tab stops cloud autosave (its 409 rebase-retry is
+  // forbidden — a stale tab must never clobber the writer), refreshes itself on focus, and
+  // reclaims writership on the next local edit intent (undo snapshot = the edit-intent signal).
+  const [displaced, setDisplaced] = useState(false);
+  const displacedRef = useRef(false);
+  const cloudSaveChainRef = useRef<Promise<void>>(Promise.resolve()); // serializes cloud PUTs (flush-on-evict must not race an in-flight save)
+  const bridgeReclaimRef = useRef<() => void>(() => {});
+  const reclaimWritership = () => {
+    if (!displacedRef.current) return;
+    displacedRef.current = false;
+    setDisplaced(false);
+    bridgeReclaimRef.current(); // evicts the other tab; conflicts with anything it wrote resolve via the 409 rebase-retry
+    toast.info(t('workbench.reclaimedWritership'));
+  };
   const [busyImport, setBusyImport] = useState(false);
   const [asrSentences, setAsrSentences] = useState<AsrSegment[] | null>(null);
   /** Insert-source transcripts (key = shot.src, sentence times = that source file's own timeline). All sources transcribed when opening the captions / smart-cut panels. */
@@ -2104,6 +2119,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /* ---------------- Insert actions for the asset library / component / frame panels ---------------- */
 
   const pushUndoSnapshot = () => {
+    if (displacedRef.current) reclaimWritership(); // every mutation passes here → the edit-intent hook of the single-writer handover
     undoStackRef.current.push(compRef.current);
     if (undoStackRef.current.length > UNDO_CAP) undoStackRef.current.shift();
     redoStackRef.current = []; // a new edit after undo → the old redo line no longer holds
@@ -5067,9 +5083,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // External agent bridge (Codex/Claude Code/any MCP client via /api/studio/mcp → StudioBridge DO → this tab):
   // the exact same execution surface as the internal chat + BYO-only operations; get_state returns the same situation snapshot as chat.
-  useAgentBridge({
+  const agentBridge = useAgentBridge({
     runTool: runExternalTool,
+    projectId,
     getState: () => `<composition_state>\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`,
+    onDisplaced: () => {
+      if (displacedRef.current) return;
+      displacedRef.current = true;
+      setDisplaced(true);
+      // flush-on-evict: push the debounce tail with our still-valid baseVersion BEFORE going
+      // read-only — serialized behind any in-flight save. A conflict here means the taker
+      // already wrote; ours is the stale one, drop it (no rebase-retry for non-writers).
+      const payload = buildCloudPayload();
+      if (payload) {
+        cloudSaveChainRef.current = cloudSaveChainRef.current.then(() => studioProviders().projects.save(projectId, payload).then(() => undefined, () => undefined));
+      }
+      toast.info(t('workbench.displacedByAnotherWindow'));
+    },
     onExternalCall: (tool, result) => {
       if (tool === 'get_state' || tool === 'compose_context' || tool === 'plan_context') return; // pure queries don't interrupt
       const EXTERNAL_LABELS: Record<string, string> = { apply_block: 'workbench.externalBlockApply', submit_plan: 'workbench.externalPlan' };
@@ -5078,6 +5108,27 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       else toast.error(t('workbench.externalAgentLabelFailed', { label, error: result.error ?? t('workbench.unknownError') }));
     },
   });
+  bridgeReclaimRef.current = agentBridge.reclaim;
+
+  /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict).
+   *  Null on an empty canvas (a just-opened tab must not blank the cloud) — same rule as the effect. */
+  function buildCloudPayload() {
+    const c = compRef.current;
+    if (!(c.blocks.length > 0 || (c.shots?.length ?? 0) > 0) || !projectId) return null;
+    return {
+      comp: { ...c, video: null },
+      chat: readChatThreads(projectId),
+      context: {
+        ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
+        ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+        ...(planRef.current ? { plan: planRef.current } : {}),
+        ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
+      },
+      videoSig: videoFileRef.current ? (videoSigRef.current ?? fileSig(videoFileRef.current)) : null,
+      videoDurationSec: c.video?.durationSec ?? null,
+      coverThumb: coverThumbRef.current,
+    };
+  }
 
   // Selection change → close the background-color popover
   useEffect(() => {
@@ -5387,28 +5438,22 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Cloud sync (debounced): coalesce one PUT 1.2s after comp or the session changes. The cloud-authoritative write-back —
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).
+  // The payload mirrors the edit context to the cloud: the offline MCP executor (when the tab is closed) relies on it for
+  // read_script / cut_narration caption re-lay / set_captions / plan; only keys that exist in memory are reported —
+  // missing keys are merged and kept by the server per key, not wiped (projects.$id). See buildCloudPayload.
+  // Single-writer: a displaced tab (bridge close 4000) does not autosave at all, and never rebase-retries a 409 —
+  // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
   useEffect(() => {
     const hasContent = comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0;
-    if (!hasContent || !projectId) return;
+    if (!hasContent || !projectId || displaced) return;
     const timer = window.setTimeout(() => {
-      const payload = {
-        comp: { ...comp, video: null },
-        chat: readChatThreads(projectId),
-        // Mirror the edit context to the cloud: the offline MCP executor (when the tab is closed) relies on it for read_script /
-        // cut_narration caption re-lay / set_captions / plan — without it only pure comp operations remain.
-        // Only report keys that exist in memory; missing keys are merged and kept by the server per key, not wiped (projects.$id)
-        context: {
-          ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-          ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
-          ...(planRef.current ? { plan: planRef.current } : {}),
-          ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
-        },
-        videoSig: videoFile ? (videoSigRef.current ?? fileSig(videoFile)) : null,
-        videoDurationSec: comp.video?.durationSec ?? null,
-        coverThumb: coverThumbRef.current,
-      };
-      void studioProviders().projects.save(projectId, payload).then((r) => {
+      if (displacedRef.current) return; // demoted while this timer was armed (flush-on-evict already carried this batch)
+      const payload = buildCloudPayload();
+      if (!payload) return;
+      cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
+        const r = await studioProviders().projects.save(projectId, payload);
         if (r !== 'conflict') return;
+        if (displacedRef.current) return; // read-only tabs drop conflicted batches instead of fighting
         // The 409 already refreshed baseVersion to the store's latest: resend this batch immediately to truly enforce "last write wins".
         // If we waited for the next edit to retry and the user wraps up now, this batch would be lost locally forever.
         void studioProviders().projects.save(projectId, payload);
@@ -5420,7 +5465,26 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }, 1200);
     return () => window.clearTimeout(timer);
     // asrSentences/clipAsr are also deps: changes that touch only the transcript, not comp (like translations (sub)), must sync too
-  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, asrSentences, clipAsr]);
+  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, asrSentences, clipAsr, displaced]);
+
+  // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
+  // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
+  // layer already makes this zero requests when nothing changed.
+  useEffect(() => {
+    if (!projectId) return;
+    const onHide = () => {
+      if (document.visibilityState !== 'hidden' || displacedRef.current) return;
+      const payload = buildCloudPayload();
+      if (!payload) return;
+      cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
+        const r = await studioProviders().projects.save(projectId, payload).catch(() => 'skip' as const);
+        if (r === 'conflict' && !displacedRef.current) void studioProviders().projects.save(projectId, payload);
+      });
+    };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   return (
     <div className="studio-scope relative flex h-full min-h-0 w-full gap-2">

@@ -66,11 +66,14 @@ export class StudioBridge {
     if (Pair && state.setWebSocketAutoResponse) state.setWebSocketAutoResponse(new Pair('ping', 'pong'));
   }
 
-  /** Accept a new browser socket. Single active: a new tab evicts the old — two sockets would make "which one executes" a race. */
-  acceptBrowserSocket(server: unknown): void {
+  /** Accept a new browser socket. Single active: a new tab evicts the old — two sockets would make
+   *  "which one executes" a race. The close REASON carries the new tab's projectId so the evicted
+   *  side can tell a same-project takeover (demote autosave) from an unrelated-project tab merely
+   *  taking the tool-routing surface (keep autosaving its own project). */
+  acceptBrowserSocket(server: unknown, projectId?: string): void {
     for (const ws of this.state.getWebSockets()) {
       try {
-        ws.close(4000, 'replaced by a newer studio tab');
+        ws.close(4000, (projectId ?? '').slice(0, 100));
       } catch {
         /* dead socket, ignore */
       }
@@ -86,7 +89,7 @@ export class StudioBridge {
         return new Response('expected websocket', { status: 426 });
       }
       const pair = new ((globalThis as Record<string, unknown>).WebSocketPair as new () => Record<0 | 1, unknown>)();
-      this.acceptBrowserSocket(pair[1]);
+      this.acceptBrowserSocket(pair[1], url.searchParams.get('project') ?? undefined);
       // Only workerd can build a 101 upgrade response (Node Response rejects <200); unit tests cover acceptBrowserSocket
       return new Response(null, { status: 101, webSocket: pair[0] } as ResponseInit);
     }
