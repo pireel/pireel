@@ -158,6 +158,24 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(true);
     expect((r2.result.data as { block: { id: string } }).block.id).toBe('b1');
   });
+  it('apply_block:新块 id 一轮收敛(未知 blockId 原样采用;lint 回执还稳定 id)', () => {
+    // compose_context 给新元素铸的 id 不在 comp 里——apply 带这个"未知" id 必须原样采用,不许报找不到
+    const rc = runServerTool('compose_context', {}, proj());
+    const minted = (rc.result.data as { block: { id: string } }).block.id;
+    const rawOk = `note\n\`\`\`html\n<div><style>#${minted} .t{color:red}</style><div class="t">x</div></div>\n\`\`\`\n\`\`\`js\ntl.to("#${minted} .t",{opacity:1,duration:.3});\n\`\`\``;
+    const r1 = runServerTool('apply_block', { raw: rawOk, blockId: minted, atSec: 1 }, proj());
+    expect(r1.result.ok).toBe(true);
+    expect((r1.result.data as { newBlockId: string }).newBlockId).toBe(minted);
+    // scope 错 id 且不带 blockId → lint 拦下,回执必须还一个稳定 id;按回执改一轮就收敛,新块用同一 id
+    const rawBad = 'note\n```html\n<div><style>#stale9 .t{color:red}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
+    const r2 = runServerTool('apply_block', { raw: rawBad, atSec: 1 }, proj());
+    expect(r2.result.ok).toBe(false);
+    const handed = (r2.result.data as { blockId: string }).blockId;
+    expect(handed).toBeTruthy();
+    const r3 = runServerTool('apply_block', { raw: rawBad.replaceAll('#stale9', `#${handed}`), blockId: handed, atSec: 1 }, proj());
+    expect(r3.result.ok).toBe(true);
+    expect((r3.result.data as { newBlockId: string }).newBlockId).toBe(handed);
+  });
   it('不支持的工具明确拒绝(路由据 SERVER_EXECUTABLE_TOOLS 预筛,这里兜底)', () => {
     expect(SERVER_EXECUTABLE_TOOLS.has('extract_asr')).toBe(false);
     expect(SERVER_EXECUTABLE_TOOLS.has('capture_frame')).toBe(false);
