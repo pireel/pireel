@@ -33,17 +33,22 @@ export async function createImportToken(userId: string, ttlSec = IMPORT_TOKEN_TT
   return { token: `${VERSION}.${b64url(new TextEncoder().encode(userId))}.${exp}.${sig}`, expiresAt: exp };
 }
 
-/** Verify the token; returns userId if valid, null if invalid/expired. */
-export async function verifyImportToken(token: string): Promise<string | null> {
+export type ImportTokenVerdict = { ok: true; userId: string } | { ok: false; reason: 'expired' | 'invalid' };
+
+/** Verify the token. Expiry is only reported for tokens whose signature checks out —
+ *  a forged token must read as `invalid`, never leak whether its timestamp was plausible. */
+export async function verifyImportToken(token: string): Promise<ImportTokenVerdict> {
   const parts = token.split('.');
-  if (parts.length !== 4 || parts[0] !== VERSION) return null;
+  if (parts.length !== 4 || parts[0] !== VERSION) return { ok: false, reason: 'invalid' };
   try {
     const userId = b64urlDecode(parts[1]!);
     const exp = Number(parts[2]);
-    if (!userId || !Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+    if (!userId || !Number.isFinite(exp)) return { ok: false, reason: 'invalid' };
     const expect = await hmac(`${userId}.${exp}`);
-    return expect === parts[3] ? userId : null;
+    if (expect !== parts[3]) return { ok: false, reason: 'invalid' };
+    if (exp < Math.floor(Date.now() / 1000)) return { ok: false, reason: 'expired' };
+    return { ok: true, userId };
   } catch {
-    return null;
+    return { ok: false, reason: 'invalid' };
   }
 }
