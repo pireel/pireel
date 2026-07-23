@@ -72,7 +72,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.read_editing_guide.label',
     description:
-      "Load the A-roll speech-cleanup playbook (complete-semantic-unit editing, retakes, false starts, two-tier fillers, boundary discipline). Call this ONCE — BEFORE any transcript-based speech cut (cleanup / de-filler / tighten / cut_narration / a highlight or short version) — then follow it. Its result persists in the conversation: if a read_editing_guide result is already in the history, do NOT call it again. No input needed.",
+      'Load the A-roll speech-cleanup playbook. Call ONCE — BEFORE any transcript-based speech cut (cleanup / de-filler / tighten / highlight) — then follow it. If its result is already in the conversation history, do NOT call it again.',
     inputSchema: obj({}, []),
   },
   /* ---------- production pipeline (from talking-head video to first draft, card · slow) ---------- */
@@ -93,7 +93,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Read the full spoken transcript: main narration sentences (source-video seconds — the same clock as shot src in→out, never shifted by cutting) PLUS what each clip inserted from another source file says (in that file's own seconds). Call it for content-level requests — locating a sentence for cut_range / turning a claim into a graphic / answering what a segment says — when no transcript is in the conversation yet (an extract_asr result also carries it; don't call both). Transcribes inserted clips on demand; main narration requires extract_asr first. No input.",
+      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Call for content-level requests (locate a sentence, turn a claim into a graphic) when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
     inputSchema: obj({}, []),
   },
   {
@@ -123,7 +123,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✦',
     label: 'tools.lay_out.label',
     description:
-      'STORYBOARD the video: slice shots (by sentence ∪ scene cuts), apply framing (punch-in / corner / split) per the plan, and drop PLACEHOLDER slots where graphics should go (no graphics drawn yet — that is the next step). Auto-runs any missing prerequisite (ASR → narration plan ‖ visual analysis). Overwrites the composition structure, EXCEPT segments inserted from other source files — those are preserved at their timeline positions. No input. Captions/keyword overlays are added only if the theme enables them (general theme: off). Follow with add_graphics.',
+      'STORYBOARD the video: slice shots (by sentence ∪ scene cuts), apply framing (punch-in / corner / split) per the plan, and drop PLACEHOLDER slots where graphics should go (drawn in the next step). Auto-runs any missing prerequisite (ASR → narration plan ‖ visual analysis). Overwrites the composition structure EXCEPT inserted other-source segments (preserved in place). Follow by filling the placeholders.',
     inputSchema: obj({}, []),
   },
   {
@@ -258,7 +258,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '⏱️',
     label: 'tools.seek.label',
     description:
-      'Move the playhead (and the preview) to a time on the EDITED timeline — the transport jump. `toSec` = target in edited seconds: 0 = back to the start; values past the end clamp to the last frame. Use for jump-to-a-moment asks ("back to the beginning", "go to 12s", "show me the ending"), or to park the playhead where tools that default to it (add_block / split_shot / trim_shot) should act. To show a specific element or shot, prefer focus_element.',
+      'Move the playhead (and the preview) to `toSec` on the EDITED timeline. Use for jump-to-a-moment asks, or to park the playhead where playhead-defaulting tools (add_block / split_shot / trim_shot) should act. To show a specific element or shot, prefer focus_element.',
     inputSchema: obj({ toSec: { type: 'number', description: 'Target time in edited seconds (0 = start; clamped to the video length).' } }, ['toSec']),
   },
   {
@@ -267,7 +267,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '▶️',
     label: 'tools.play.label',
     description:
-      "Start playback in the preview. Optional `fromSec` = jump there first (edited seconds; omit to play from the current playhead — at the end it restarts from 0 like the transport button). Optional `toSec` = auto-pause when playback reaches it. Use a from+to RANGE to SHOW the user a moment you just changed (a couple seconds around a cut seam, a transition window, a new element's entry) so they can judge the result without hunting for it.",
+      "Start playback in the preview. Optional `fromSec` = jump there first; optional `toSec` = auto-pause there. Use a from+to RANGE to SHOW the user a moment you just changed (a couple seconds around a cut seam, a transition, a new element's entry).",
     inputSchema: obj(
       {
         fromSec: { type: 'number', description: 'Start playing from here (edited seconds). Omit = current playhead.' },
@@ -293,7 +293,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '💬',
     label: 'tools.set_captions.label',
     description:
-      "Turn sentence captions ON and/or restyle them — the global subtitle layer laid from the transcript (ONE setting styles the WHOLE video; this is NOT a per-block edit). `preset` = a style id from <caption_catalog> (enabling captions if off, rebuilding the layer from the transcript — runs ASR first if needed). `yPct` = caption baseline's distance from the top as a % (smaller = higher). `scale` = size multiplier (1 = preset default). Use for turning captions on, switching their style, or nudging position/size. Pick the preset whose name+mode fits the ask; default to a clean full-line style (a `line` preset) when no style is named. Turn captions OFF with remove_captions. The keyword-slam overlay is a different thing — that is a block (add_block/edit_block).",
+      "Turn sentence captions ON and/or restyle/reposition them — the GLOBAL subtitle layer laid from the transcript (ONE setting styles the WHOLE video; NOT a per-block edit). `preset` = a style id from <caption_catalog> (enables captions if off; runs ASR first if needed). Default to a clean full-line `line` preset when no style is named. Turn captions OFF with remove_captions. The keyword-slam overlay is a block (add_block/edit_block), not captions.",
     inputSchema: obj(
       {
         preset: { type: 'string', enum: CAPTION_PRESETS.map((p) => p.id), description: 'Caption style id from <caption_catalog>. Omit to only reposition/resize the current captions.' },
@@ -318,7 +318,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🌐',
     label: 'tools.set_caption_translations.label',
     description:
-      'Add a translation line under the sentence captions (bilingual subtitles) — YOU do the translating, this tool only stores it. Workflow: read_script → translate each numbered sentence yourself → pass `items` as {index (the row number from read_script), text (your translation)}. Translations attach to the transcript, so they survive cuts, restyles and re-lays; a re-transcription (extract_asr on a new file) drops them. Main narration by default; pass `shotId` (an inserted-clip shot) to translate that clip\'s own transcript instead. `text: ""` removes one line; `clear: true` removes ALL translations. If captions are off, translations are stored and appear once set_captions turns them on. Use for bilingual / translated subtitles.',
+      'Add a translation line under the sentence captions (bilingual subtitles) — YOU do the translating, this tool only stores it. Workflow: read_script → translate each numbered sentence yourself → pass `items` as {index (the row number from read_script), text}. Translations attach to the transcript and survive cuts/restyles. Main narration by default; pass `shotId` to translate an inserted clip\'s own transcript instead. `text: ""` removes one line; `clear: true` removes all.',
     inputSchema: obj(
       {
         items: {
@@ -355,7 +355,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.set_video_filter.label',
     description:
-      "Color-grade ONE shot's footage: brightness / contrast / saturate as coefficients (1 = untouched; e.g. 1.15 = +15%). The values you pass REPLACE that shot's whole grade — omit a field to reset it to neutral, pass no fields at all to remove the grade. Applies to the WHOLE shot and snaps at the cut (no cross-shot blend) — split_shot first to grade only part. Typical asks: brighter → brightness 1.1–1.2; more vivid → saturate 1.2–1.4 (+ contrast 1.05); black & white → saturate 0; muted/cinematic gray → saturate 0.7–0.85. Preview and export share the same filter pipeline.",
+      "Color-grade ONE shot's footage: brightness / contrast / saturate coefficients (1 = untouched). The values you pass REPLACE that shot's whole grade — omit a field to reset it, pass no fields to remove the grade. Whole shot, snaps at the cut — split_shot first to grade only part. Recipes: brighter → brightness 1.1–1.2; vivid → saturate 1.2–1.4; black & white → saturate 0; muted gray → saturate 0.7–0.85.",
     inputSchema: obj(
       {
         shotId: { type: 'string' },
@@ -404,7 +404,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.cut_range.label',
     description:
-      'Remove a TIME RANGE of footage by EDITED-timeline seconds: everything between fromSec and toSec is cut (can span shots), later content shifts left, overlay blocks compress. To cut BY THE SCRIPT (remove the passage that says X) use cut_narration instead — it takes the transcript timestamps directly. Use cut_range for a raw edited-timeline range, or for footage inside an inserted [clip X] segment (its own clock — read that shot\'s edited a→b from <composition_state>). Preferred over split+split+delete.',
+      'Remove a TIME RANGE of footage by EDITED-timeline seconds (can span shots; later content shifts left, overlay blocks compress). To cut BY THE SCRIPT (remove the passage that says X) use cut_narration instead. cut_range is also the way to cut inside an inserted [clip X] segment (it runs on its own clock). Preferred over split+split+delete.',
     inputSchema: obj(
       {
         fromSec: { type: 'number', description: 'Edited-timeline start of the cut (seconds).' },
@@ -419,7 +419,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.cut_narration.label',
     description:
-      'Delete spoken passages BY THE TRANSCRIPT — the script-editing cut. Pass MAIN NARRATION timestamps straight from read_script / the transcript (the [x–y s], which are SOURCE seconds): this tool converts them to the edited timeline itself, cuts the footage, compresses overlays, and re-lays captions so the deleted words drop out. Use for any remove-what-was-said request (a passage, one sentence, several sentences). `ranges` = one or more {fromSec,toSec} removed in ONE call; already-partly-cut spans just remove whatever survives. MAIN narration only — inserted [clip X] segments have their own clock: cut those with cut_range (edited seconds) or delete_shot.',
+      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
     inputSchema: obj(
       {
         ranges: {
@@ -438,7 +438,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.insert_clip.label',
     description:
-      "Insert a B-roll video segment into the main track. The bytes must already be on Pireel storage — pass `sig` (the fingerprint the asset-import helper returns after uploading a local file) OR `url` (a video from the user's asset library / a generated video; external URLs are rejected — upload them first). `atSec` = where on the EDITED timeline (defaults to the playhead); it snaps to the nearest shot boundary and shifts later overlays right. The inserted segment is a full peer: framing, captions, matting and its own audio all apply, and its speech gets transcribed on demand. Needs the studio tab open (video bytes live in the browser). Then verify with get_state.",
+      "Insert a B-roll video segment into the main track. Bytes must already be on Pireel storage — pass `sig` (from the asset-import helper) OR `url` (asset library / generated video; external URLs are rejected — upload first). Inserts at `atSec` (snaps to the nearest shot boundary, shifts later overlays right). The segment is a full peer: framing, captions, its own audio and on-demand transcript. Needs the studio tab open.",
     inputSchema: obj(
       {
         sig: { type: 'string', description: 'Media fingerprint from the asset-import helper upload (preferred for local files).' },
@@ -454,13 +454,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.add_transition.label',
     description:
-      "Set/replace/remove the CONTENT transition at a cut between two shots (the footage of the two shots hands over — not an overlay). `atSec` must be a shot boundary from <composition_state> (±0.3s snap; anything else is rejected). One transition per cut, symmetric around it. `effect` (gl-transitions set): fade (cross-fade, the default), fadeblack (dip to black), directional (push), directionalwipe (wipe), circleopen (iris), windowslice (blinds), crosszoom (zoom blur punch), rotatescale (rotate+zoom), glitch (glitch memories), dreamy (wavy); 'none' removes. `direction` (directional/directionalwipe only) = the incoming footage's travel direction, default left. `durationSec` = TOTAL length (max 4, clamped by both shots' lengths; default 1). The region shows on the timeline and cannot be split inside; deleting either adjacent shot clears the transition. Use sparingly — hard jump-cuts are the default look.",
+      "Set/replace/remove the CONTENT transition at a cut between two shots (the footage hands over — not an overlay). `atSec` must be a shot boundary (±0.3s snap; anything else is rejected). One transition per cut, symmetric around it. `effect`: fade (cross-fade, the default), fadeblack (dip to black), directional (push), directionalwipe (wipe), circleopen (iris), windowslice (blinds), crosszoom (zoom punch), rotatescale, glitch, dreamy; 'none' removes. Use sparingly — hard jump-cuts are the default look.",
     inputSchema: obj(
       {
         atSec: { type: 'number', description: 'A shot-boundary time (edited seconds).' },
         effect: { type: 'string', enum: ['fade', 'fadeblack', 'directional', 'directionalwipe', 'circleopen', 'windowslice', 'crosszoom', 'rotatescale', 'glitch', 'dreamy', 'none'], description: "Transition style (default dissolve); 'none' removes." },
         direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'directional/directionalwipe only: travel direction of the incoming footage (default left).' },
-        durationSec: { type: 'number', description: 'Total duration in seconds, max 4 (default 1; keeps the current value when re-styling).' },
+        durationSec: { type: 'number', description: 'TOTAL length in seconds, max 4, clamped by both shots (default 1; keeps the current value when re-styling).' },
       },
       ['atSec'],
     ),
@@ -483,7 +483,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.export_video.label',
     description:
-      "Start exporting the final video. Renders LOCALLY in the user's open studio tab (WebCodecs; roughly realtime, so a 3-min video takes ~3 min) and saves it via the browser's download — the file lands on the user's machine (Downloads folder by default), nothing is uploaded. Poll track_export for progress and the final filename. The tab must stay open until done. Options: resolution 2160/1440/1080/720/540 (default 1080), fps 24/30/60 (default 30), format mp4/webm/mov (default mp4).",
+      "Start exporting the final video. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Defaults: 1080p / 30fps / mp4.",
     inputSchema: obj(
       {
         resolution: { type: 'number', description: 'Output height: 2160/1440/1080/720/540 (default 1080).' },

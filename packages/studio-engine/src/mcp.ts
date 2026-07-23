@@ -155,7 +155,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        "Get the FULL generation contract {system, prompt} for one overlay block, assembled from the live composition (theme tokens, frame design language, box size, on-screen beats, neighbor roster). YOU then generate the response with your own model, following the contract exactly (one short note, then ```html fence, then ```js timeline fence), and submit the raw text via apply_block. Targets: `blockId` of a pending placeholder (its design spec becomes the instruction — omit `instruction`); `blockId` of an existing block + `instruction` = rewrite; no blockId + `instruction` = new element at `atSec` (defaults to playhead). This is the default way to create/edit block content — it does NOT charge Pireel credits.",
+        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Targets: `blockId` of a pending placeholder (omit `instruction` — its design spec is the instruction); `blockId` of an existing block + `instruction` = rewrite; no blockId + `instruction` = new element at `atSec`. The default way to create/edit block content — charges no Pireel credits.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -169,7 +169,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'apply_block',
       description:
-        "Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text (note + ```html + ```js fences; fences are parsed out). The block is linted (scoped CSS, no scripts, deterministic animation); on lint failure you get the issues back — fix ONLY those and re-apply. Placeholder blockId → fills it; existing blockId → overwrites its content; neither → inserts a new element (optional durationSec, default 3s; optional label).",
+        'Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text (note + ```html + ```js fences). On lint failure you get the issues back — fix ONLY those and re-apply. Placeholder blockId → fills it; existing blockId → overwrites; neither → inserts a new element.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -203,13 +203,13 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'visual_brief',
       description:
-        "BYO visual analysis, step 1 of 2 (does NOT charge Pireel credits — default over analyze_visual). The tab runs the free passes (scene cuts, face/geometry safe zones, palette; takes roughly the geometry pass a minute or two) and returns sparse sample frames as IMAGES plus their timestamps. YOU look at each frame and label it, then call submit_visual. If analysis is already available it says so — skip submitting.",
+        'BYO visual analysis, step 1 of 2 (charges no Pireel credits — default over analyze_visual). The tab runs the free passes (scene cuts, safe zones, palette; can take a minute or two) and returns sparse sample frames as IMAGES with timestamps. LOOK at each frame and label it, then call submit_visual. If analysis already exists it says so — skip submitting.',
       inputSchema: EMPTY_SCHEMA,
     },
     {
       name: 'submit_visual',
       description:
-        'BYO visual analysis, step 2 of 2: submit per-frame labels for the frames visual_brief returned. labels = [{index, content: talkinghead|screen|broll|slide|other, person: left|center|right|none, safe: left|right|top|bottom|full|none, has_text?: boolean, desc?: short English sentence}] — index matches the frames order. The tab assembles the full visual timeline (your semantics + its own geometry) and lay_out will use it.',
+        'BYO visual analysis, step 2 of 2: submit per-frame labels for the frames visual_brief returned (`index` matches the frames order; `desc` = short English sentence). The tab assembles the full visual timeline and lay_out uses it.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -238,12 +238,12 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'import_media',
       description:
-        "Import LOCAL files into Pireel (no manual API key). TWO STEPS: ① call with NO arguments → returns a short-lived import `token`; ② run the plugin's import helper (skills/pireel/scripts/import-media.mjs) with `--token <token>` and the file paths — it probes metadata, transcribes audio (if ffmpeg is available), and registers everything by itself. You normally never call this tool WITH `sig` — the helper does that registration call. IMPORTANT — the main VIDEO streams straight into the OPEN studio tab over your machine (no cloud upload, fast even for big files), so a studio tab MUST be open first: if none is, the helper exits saying so — open one (create_browser_handoff, then open the url with YOUR browser) and re-run the helper. Images and b-roll (--broll) do NOT need a tab (they go to the cloud). A project with existing footage is never clobbered (a new project is created). After import, transcript tools (read_script/cut_narration/plan/captions) work immediately if a transcript was produced.",
+        "Import LOCAL files into Pireel. TWO STEPS: ① call with NO arguments → returns a short-lived import `token` (30 min); ② run the plugin's import helper (skills/pireel/scripts/import-media.mjs) with `--token <token>` and the file paths — it probes, transcribes and registers everything itself (including the `sig` registration call; you don't). The main VIDEO streams straight into the OPEN studio tab (no cloud upload) — if no tab is open the helper exits saying so: open one via create_browser_handoff and re-run it. Images and b-roll (--broll) need no tab.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          sig: { type: 'string', description: 'Registration mode only (the helper uses this; you rarely do): content signature name:size:mtimeMs of already-uploaded bytes.' },
+          sig: { type: 'string', description: 'Registration mode (normally only the helper passes this): content signature of already-uploaded bytes.' },
           filename: { type: 'string', description: 'Original filename (used for the project title).' },
           duration_sec: { type: 'number' },
           width: { type: 'number' },
@@ -274,7 +274,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'create_browser_handoff',
       description:
-        "Mint a one-time sign-in URL that opens the Pireel studio editor in a browser ALREADY logged in as the connected user. Use it whenever you need a live editor surface: right after connecting, when the user asks to see/open the editor, or when a tool fails with studio_not_open. Open the returned url with YOUR OWN built-in/embedded browser tool — the browser whose pages YOU can see and control. NEVER open it via the OS `open`/`start`/`xdg-open` command or the user's default browser: the ticket is single-use, so burning it on a surface you cannot see wastes it AND leaves you blind. The tab you open becomes the live editing surface (get_state, capture_frame and every visual tool run through it), and the user watches the edit happen there. Optional project_id opens that project; omit it for a fresh empty project. The URL expires in ~60 seconds: open it immediately, never print it to the user, and never share it as a user-facing link (it carries a login ticket — for sharing, give the plain project URL without it).",
+        "Mint a one-time sign-in URL that opens the Pireel studio editor ALREADY logged in as the connected user. Use it whenever you need a live editor surface (first substantial edit, the user asks to see the editor, a tool failed with studio_not_open). Open the url with YOUR OWN built-in/embedded browser tool — NEVER the OS `open` command or the user's default browser (single-use ticket; a surface you cannot see wastes it and leaves you blind). The tab becomes the live editing surface. Expires in ~60s; never show the url to the user (it carries a login ticket).",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -300,7 +300,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'create_project',
       description:
-        "Create a NEW empty Pireel project (no video yet) — no browser needed. Use it when the user wants to start fresh, or when get_state / offline tools report 'no cloud project'. The new project immediately becomes your ACTIVE project (offline tools operate on your most-recently-touched project). To also add footage, follow with import_media; to open it in a live tab, use create_browser_handoff {project_id}.",
+        "Create a NEW empty Pireel project — no browser needed; it immediately becomes your ACTIVE project for offline tools. Use when the user starts fresh or offline tools report 'no cloud project'. Add footage with import_media; open live with create_browser_handoff {project_id}.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -310,13 +310,13 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'list_projects',
       description:
-        "List the connected user's Pireel projects (lightweight: id, title, updated time, whether it has video). Newest first — the top one is your current ACTIVE project for offline tools. Use it to find a project by name before switch_project / rename_project / create_browser_handoff.",
+        "List the connected user's Pireel projects (id, title, updated time, has-video). Newest first — the top one is your current ACTIVE project for offline tools.",
       inputSchema: EMPTY_SCHEMA,
     },
     {
       name: 'switch_project',
       description:
-        "Make PROJECT the ACTIVE project for subsequent OFFLINE edits, and return its current state. Offline tools (get_state, cuts, blocks, captions, plan) operate on your most-recently-touched project; this brings the chosen one to the front so you can edit it without a browser tab. (To open it in a live browser tab instead, use create_browser_handoff {project_id}.)",
+        'Make PROJECT the ACTIVE target for subsequent OFFLINE edits, and return its current state. (To open it in a live browser tab instead, use create_browser_handoff {project_id}.)',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
