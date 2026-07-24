@@ -126,7 +126,19 @@ const PREVIEW_RUNTIME = `
       var tl = tlOf(id);
       var d = num(el, 'data-duration', tl ? tl.duration() : 1e9);
       if (id !== 'root') el.style.visibility = (t >= s && t < s + d) ? 'visible' : 'hidden';
-      if (tl) tl.time(Math.max(0, Math.min(t - s, tl.duration())));
+      if (tl) {
+        var tv = Math.max(0, Math.min(t - s, tl.duration()));
+        // First alignment must force a render: a freshly built paused timeline sits at time 0, and
+        // tl.time(0) is a same-value no-op — position-0 sets (caption segment reveals) never apply,
+        // leaving captions invisible at their own window start until the playhead moves (user-reported:
+        // caption at t=0 blank on boot, appearing only after a timeline hover). Nudge once off 0 so
+        // the real seek below always renders.
+        if (!tl.__hfInit) {
+          tl.__hfInit = 1;
+          if (tv === 0 && tl.duration() > 0) tl.time(Math.min(1e-4, tl.duration()), true);
+        }
+        tl.time(tv);
+      }
     });
     media().forEach(function (m) {
       if (m.tagName === 'VIDEO') {
