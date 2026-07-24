@@ -61,6 +61,8 @@ export interface CaptionTranslationControl {
 }
 
 const TRANSLATION_LANGS = ['中文', 'English', '日本語', '한국어'];
+/** Compact button label for the translate dropdown (full names stay in the menu + the translate prompt). */
+const LANG_ABBR: Record<string, string> = { 中文: 'zh', English: 'en', 日本語: 'ja', 한국어: 'ko' };
 
 function fmtTime(sec: number): string {
   const s = Math.max(0, Math.floor(sec));
@@ -270,7 +272,7 @@ export function CaptionsPanel({
       </div>
       {/* Caption lines: the main body. Click a line = seek the video there + edit in place (background-only
           editing state on the SAME node — no border, no size change, zero jitter) + collapse the styles section. */}
-      <div ref={listRef} className="min-h-0 flex-1 overflow-auto py-1">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-auto">
         {lines.length === 0 && (
           <div className="flex flex-col items-center gap-2.5 px-3 py-8 text-center">
             <div className="text-ink-4 text-[11.5px]">{t('captions.noCaptionsYetExtract')}</div>
@@ -426,7 +428,7 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
   onPreset: (id: string | null) => void;
   onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
 }) {
-  const [pop, setPop] = useState<null | 'preset' | 'color' | 'bg'>(null);
+  const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg'>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!pop) return;
@@ -441,7 +443,11 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
   const effColor = style.color ?? preset.text;
   const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
   const isSub = followsMain !== undefined;
-  const step = (d: number) => onPatch({ scale: Math.round(Math.max(0.4, Math.min(4, style.scale + d)) * 100) / 100 });
+  // Size options in real px (dropdown replaces the A± stepper): mapped back to the preset-relative scale on pick.
+  const sizeOpts = [16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96].filter((px) => {
+    const k = px / preset.size;
+    return k >= 0.4 && k <= 4;
+  });
   return (
     <div ref={rootRef} className="relative mb-1.5 flex items-center gap-1.5">
       <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{label}</span>
@@ -462,11 +468,15 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
         </span>
         <ChevronDown size={11} className="text-ink-4 shrink-0" />
       </button>
-      <span className="border-line flex h-7 shrink-0 items-center gap-0.5 rounded-md border px-1">
-        <button type="button" aria-label={t('workbench.smallerText')} onClick={() => step(-0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">A−</button>
-        <span className="text-ink-4 min-w-6 text-center font-mono text-[10px] tabular-nums">{fs}</span>
-        <button type="button" aria-label={t('workbench.largerText')} onClick={() => step(0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">A＋</button>
-      </span>
+      <button
+        type="button"
+        title={t('captions.fontSize')}
+        onClick={() => setPop(pop === 'size' ? null : 'size')}
+        className={`hover:border-accent flex h-7 shrink-0 items-center gap-0.5 rounded-md border px-1.5 ${pop === 'size' ? 'border-accent' : 'border-line'}`}
+      >
+        <span className="text-ink-3 font-mono text-[10.5px] tabular-nums">{fs}</span>
+        <ChevronDown size={11} className="text-ink-4" />
+      </button>
       <button
         type="button"
         title={t('captions.textColor')}
@@ -489,6 +499,20 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
       </button>
       {pop === 'preset' && (
         <PresetPop current={style.preset} withFollow={isSub} activeIsFollow={!!followsMain} onPick={(id) => { setPop(null); onPreset(id); }} />
+      )}
+      {pop === 'size' && (
+        <div className="border-line bg-panel absolute right-0 top-full z-30 mt-1 max-h-56 w-20 overflow-auto rounded-lg border p-1 shadow-xl">
+          {sizeOpts.map((px) => (
+            <button
+              key={px}
+              type="button"
+              onClick={() => { setPop(null); onPatch({ scale: Math.round((px / preset.size) * 100) / 100 }); }}
+              className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+            >
+              {px === fs && <Check size={10} className="text-accent" />} {px}
+            </button>
+          ))}
+        </div>
       )}
       {pop === 'color' && (
         <SwatchPop
@@ -542,7 +566,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
         className={`hover:border-accent flex h-7 items-center gap-1 rounded-md border px-1.5 text-[11px] disabled:opacity-50 ${open ? 'border-accent' : 'border-line'} ${active ? 'text-ink' : 'text-ink-3'}`}
       >
         {translation.busy ? <Loader2 size={11} className="text-accent animate-spin" /> : <Languages size={11} className="text-ink-4" />}
-        <span className="max-w-16 truncate">{active ?? t('captions.off')}</span>
+        <span className="truncate">{active ? (LANG_ABBR[active] ?? active) : t('captions.off')}</span>
         <ChevronDown size={11} className="text-ink-4" />
       </button>
       {open && (
@@ -562,7 +586,7 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
               onClick={() => { setOpen(false); if (lang !== active) translation.onTranslate(lang); }}
               className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
             >
-              {active === lang && <Check size={11} className="text-accent" />} {lang}
+              {active === lang && <Check size={11} className="text-accent" />} <span className="text-ink-4 w-5 font-mono text-[10.5px]">{LANG_ABBR[lang]}</span> {lang}
             </button>
           ))}
         </div>

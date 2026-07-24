@@ -40,4 +40,5 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.pickStyle': 'Choose a style',
   'captions.translateRow': 'Translate',
   'captions.off': 'Off',
+  'captions.fontSize': 'Font size',
 };

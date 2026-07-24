@@ -40,4 +40,5 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.pickStyle': '选择样式',
   'captions.translateRow': '翻译',
   'captions.off': '关闭',
+  'captions.fontSize': '字号',
 };
