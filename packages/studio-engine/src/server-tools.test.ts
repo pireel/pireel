@@ -77,6 +77,10 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // 删掉了 0-5s:总时长 20 → 15
     const total = r.comp!.shots!.reduce((a, s) => a + (s.srcEnd - s.srcStart), 0);
     expect(total).toBeCloseTo(15, 1);
+    // 诚实回执:涟漪副作用(时长变化、块位移)以 data.delta 返回,b1 从 1s 内被剪短/位移也要报出来
+    const delta = (r.result.data as { delta?: { durationSec?: [number, number] } }).delta;
+    expect(delta).toBeTruthy();
+    expect(delta!.durationSec).toEqual([20, 15]);
   });
   it('split_shot:离线必须给 atSec(没有播放头)', () => {
     const r = runServerTool('split_shot', {}, proj());

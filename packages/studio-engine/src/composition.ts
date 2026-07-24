@@ -14,6 +14,7 @@
 
 export * from './caption-presets';
 export * from './composition-core';
+export * from './receipt-delta';
 export * from './templates';
 export * from './assemble';
 export * from './block-factory';

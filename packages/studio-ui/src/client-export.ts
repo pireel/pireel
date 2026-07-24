@@ -246,6 +246,9 @@ export async function captureCompositionFrame(opts: {
   atSec: number;
   /** Output long-side pixels (default 960). */
   maxDim?: number;
+  /** Burn a small dark chip with this text into the top-left corner — captured frames self-identify
+   *  (the agent may hold several) and the label survives any downstream re-encoding. */
+  burnLabel?: string;
 }): Promise<{ dataUrl: string; width: number; height: number }> {
   const { comp } = opts;
   const W = comp.width;
@@ -317,6 +320,20 @@ export async function captureCompositionFrame(opts: {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
     ctx.drawImage(overlayImg, 0, 0);
+    if (opts.burnLabel) {
+      const fs = Math.max(14, Math.round(Math.max(outW, outH) * 0.028));
+      const pad = Math.round(fs * 0.45);
+      ctx.font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+      const bw = ctx.measureText(opts.burnLabel).width + pad * 2;
+      const bh = fs + pad * 1.2;
+      ctx.fillStyle = 'rgba(0,0,0,0.72)';
+      ctx.beginPath();
+      ctx.roundRect(pad, pad, bw, bh, Math.round(fs * 0.25));
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(opts.burnLabel, pad * 2, pad + bh / 2 + 0.5);
+    }
     return { dataUrl: canvas.toDataURL('image/jpeg', 0.8), width: outW, height: outH };
   } finally {
     if (rig) {

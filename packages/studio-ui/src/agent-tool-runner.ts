@@ -21,6 +21,7 @@ import {
   applyBlockPlacement,
   blockId,
   blockKind,
+  compReceiptDelta,
   freeTrack,
   getCaptionPreset,
   isSentenceCaption,
@@ -157,6 +158,13 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
       const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
       // Pipeline tools: push friendly progress to this tool's card (matched by toolId), cleared on finish
       const report = (text: string, frac?: number) => setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}) });
+      // Footage edits ripple the timeline (blocks shift/trim/drop silently, captions relay) — attach the actual
+      // before/after diff as data.delta so receipts stay honest and the agent doesn't re-read state between its own edits
+      const withDelta = (res: StudioToolResult): StudioToolResult => {
+        if (!res.ok) return res;
+        const delta = compReceiptDelta(c, compRef.current);
+        return delta ? { ...res, data: { ...((res.data as Record<string, unknown> | undefined) ?? {}), delta } } : res;
+      };
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
       const READONLY_TOOLS = new Set(['get_block', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
@@ -589,7 +597,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             setComp((cur) => ({ ...cur, shots: r.clips, blocks: removeEditedInterval(cur.blocks, r.removed![0], r.removed![1]) }));
             setSelectedShotId(null);
             applyT(r.removed[0]);
-            return { ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: r.clips.map((s) => s.id) } };
+            return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: r.clips.map((s) => s.id) } });
           }
           case 'set_captions': {
             if (!c.video) return { ok: false, error: t('workbench.uploadVideoBeforeSetting') };
@@ -697,7 +705,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             setComp((cur) => ({ ...cur, shots, blocks: relaid }));
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
-            return { ok: true, summary: t('workbench.deletedNRangesPer', { n: removedCount }) };
+            return withDelta({ ok: true, summary: t('workbench.deletedNRangesPer', { n: removedCount }) });
           }
           case 'undo': {
             // No rollback while generating: after a snapshot restores the old comp, a running worker still writes its result back, scrambling state
@@ -711,7 +719,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             setComp(prev);
             setSelectedId(null);
             setSelectedShotId(null);
-            return { ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') };
+            return withDelta({ ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') });
           }
           case 'export_video': {
             // Default local export (per user, same path in the OSS shell): the bridge drives this tab to run client-side compositing (WebCodecs),
@@ -791,20 +799,20 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             }
             splitAtPlayhead();
             // The setComp wrapper writes compRef synchronously, so reading here already gets the post-split segment table
-            return { ok: true, summary: t('workbench.splitPlayhead'), data: { shotIds: (compRef.current.shots ?? []).map((s) => s.id) } };
+            return withDelta({ ok: true, summary: t('workbench.splitPlayhead'), data: { shotIds: (compRef.current.shots ?? []).map((s) => s.id) } });
           }
           case 'trim_shot': {
             if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             const side = input.side === 'left' ? 'left' : 'right';
             if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
             trimAtPlayhead(side);
-            return { ok: true, summary: side === 'left' ? t('workbench.trimmedFootageLeftSec', { sec: r1(tRef.current) }) : t('workbench.trimmedFootageRightSec', { sec: r1(tRef.current) }) };
+            return withDelta({ ok: true, summary: side === 'left' ? t('workbench.trimmedFootageLeftSec', { sec: r1(tRef.current) }) : t('workbench.trimmedFootageRightSec', { sec: r1(tRef.current) }) });
           }
           case 'delete_shot': {
             const s = findShot(input.shotId);
             if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             deleteShot(s.id);
-            return { ok: true, summary: t('workbench.deletedScene') };
+            return withDelta({ ok: true, summary: t('workbench.deletedScene') });
           }
           case 'set_video_filter': {
             const s = findShot(input.shotId);
@@ -868,7 +876,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               }
               void saveLocalVideo(f, fileSig(f)).catch(() => {});
               const newShotId = insertClipCore(blobUrl, Math.round(dur * 100) / 100, at, f);
-              return { ok: true, summary: t('workbench.insertedDurSClip', { at: r1(at), dur: r1(dur) }), data: { shotId: newShotId } };
+              return withDelta({ ok: true, summary: t('workbench.insertedDurSClip', { at: r1(at), dur: r1(dur) }), data: { shotId: newShotId } });
             } finally {
               clearToolProgress(toolId);
             }
@@ -1035,9 +1043,26 @@ export async function runExternalTool(ctx: AgentToolCtx, tool: string, input: Re
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : tRef.current;
         try {
-          const shot = await captureCompositionFrame({ comp: c2, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at });
+          const label = `${Math.round(at * 10) / 10}s`;
+          const shot = await captureCompositionFrame({ comp: c2, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at, burnLabel: label });
           const b64 = shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1);
-          return { ok: true, summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }), image: { data: b64, mimeType: 'image/jpeg' }, data: { atSec: at, width: shot.width, height: shot.height } } as StudioToolResult;
+          // What the image SHOWS mapped back to what the agent can EDIT: overlay blocks visible at this
+          // moment (with screen zone), the shot it lands in, and whether the caption layer is on
+          const visBlocks = c2.blocks
+            .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
+            .map((b) => ({ id: b.id, kind: blockKind(b), ...(b.label ? { label: b.label } : {}), ...(b.box ? { zone: zoneOf(b.box) } : {}) }));
+          const span = clipSpans(c2.shots ?? []).find((sp) => at >= sp.editedStart - 1e-6 && at < sp.editedEnd + 1e-6);
+          const visible = {
+            blocks: visBlocks,
+            ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
+            captionsOn: c2.blocks.some(isSentenceCaption),
+          };
+          return {
+            ok: true,
+            summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }),
+            image: { data: b64, mimeType: 'image/jpeg' },
+            data: { atSec: at, width: shot.width, height: shot.height, burnedLabel: label, visible },
+          } as StudioToolResult;
         } catch (e) {
           return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }

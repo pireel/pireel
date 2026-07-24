@@ -264,7 +264,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'capture_frame',
       description:
-        "SEE the composition: capture one rendered frame (background + video with its framing + all overlay graphics) at `atSec` (defaults to playhead) as an image. Use it to VERIFY your work after apply_block / caption / framing changes — check placement, overlap with the speaker, contrast, sizing — and fix what looks wrong. Runs in the user's browser tab.",
+        "SEE the composition: capture one rendered frame (background + video with its framing + all overlay graphics) at `atSec` (defaults to playhead) as an image. The frame carries a burned timecode chip (top-left) so it self-identifies, and `data.visible` maps what the image SHOWS back to what you can EDIT: the overlay block ids on screen (with their zone), the shot it lands in, captions on/off. Use it to VERIFY your work after apply_block / caption / framing changes — check placement, overlap with the speaker, contrast, sizing — and fix what looks wrong. Runs in the user's browser tab.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
