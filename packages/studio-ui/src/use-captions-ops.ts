@@ -198,7 +198,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       subFollows: !resolveCaptionStyle(comp).sub?.preset,
       bilingualOn: !!resolveCaptionStyle(comp).sub?.lang,
       onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => setCaptionStyle(patch),
-      onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined }) =>
+      onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; lang?: string | undefined }) =>
         setCaptionStyle({ sub: { ...(resolveCaptionStyle(compRef.current).sub ?? {}), ...patch } }),
     },
     rows: captionLineRows,

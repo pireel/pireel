@@ -38,4 +38,6 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.presetDefault': 'Preset default',
   'captions.customColor': 'Custom color',
   'captions.pickStyle': 'Choose a style',
+  'captions.translateRow': 'Translate',
+  'captions.off': 'Off',
 };

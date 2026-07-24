@@ -77,7 +77,7 @@ export interface CaptionStyleCtl {
   /** A translation target language is active — only then does the translation-line row show (per user). */
   bilingualOn: boolean;
   onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
-  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
+  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; lang?: string | undefined }) => void;
 }
 
 export function CaptionsPanel({
@@ -257,53 +257,30 @@ export function CaptionsPanel({
               onPreset={(id) => id && onPickPreset(id)}
               onPatch={styleCtl.onMainPatch}
             />
-            {styleCtl.bilingualOn && (
+            {/* Translation row (right under the main line): language dropdown first, then the same
+                style controls once a language is active. Replaces the old bottom "bilingual" strip. */}
+            {(translation || styleCtl.bilingualOn) && (
               <StyleRow
-                label={t('captions.subLine')}
+                label={t('captions.translateRow')}
                 style={styleCtl.sub}
                 active={hasCaptions}
                 followsMain={styleCtl.subFollows}
+                styleHidden={!styleCtl.bilingualOn}
+                leading={
+                  translation ? (
+                    <LangPick
+                      translation={translation}
+                      onOff={() => {
+                        translation.onClear();
+                        styleCtl.onSubPatch({ lang: undefined });
+                      }}
+                    />
+                  ) : undefined
+                }
                 onPreset={(id) => styleCtl.onSubPatch({ preset: id ?? undefined, color: undefined, bg: undefined })}
                 onPatch={styleCtl.onSubPatch}
               />
             )}
-          </div>
-        )}
-        {stylesOpen && translation && (
-          <div className="border-line bg-panel-2/40 shrink-0 border-t px-3 py-2">
-            <div className="flex items-center gap-1.5">
-              <Languages size={12} className="text-accent shrink-0" />
-              <span className="text-ink text-[11.5px] font-medium">{t('captions.bilingualSubtitles')}</span>
-              <span className="text-ink-4 ml-auto text-[10.5px]">
-                {translation.busy ? t('captions.translating') : translation.total === 0 ? t('captions.transcribeFirst') : translation.done > 0 ? t('captions.linesDone', { done: translation.done, total: translation.total }) : t('captions.notAdded')}
-              </span>
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              {TRANSLATION_LANGS.map((lang) => {
-                const active = translation.lang === lang && translation.done > 0;
-                return (
-                  <button
-                    key={lang}
-                    type="button"
-                    disabled={translation.busy || translation.total === 0}
-                    onClick={() => translation.onTranslate(lang)}
-                    title={t('captions.translateTranscriptIntoLang', { lang })}
-                    className={`rounded-md border px-2 py-0.5 text-[10.5px] transition disabled:opacity-50 ${
-                      active ? 'border-accent bg-accent/10 text-ink font-medium' : 'border-line text-ink-3 hover:border-accent/50 hover:text-ink'
-                    }`}
-                  >
-                    {active && <Check size={10} className="text-accent mr-0.5 inline-block align-[-1px]" />}
-                    {lang}
-                  </button>
-                );
-              })}
-              {translation.busy && <Loader2 size={12} className="text-accent animate-spin" />}
-              {!translation.busy && translation.done > 0 && (
-                <button type="button" onClick={translation.onClear} title={t('captions.clearAllTranslationsUndoable')} className="text-ink-4 hover:text-destructive ml-auto text-[10.5px]">
-                  {t('captions.clear')}
-                </button>
-              )}
-            </div>
           </div>
         )}
       </div>
@@ -447,7 +424,7 @@ const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
 
 /** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
  *  All pickers are on-demand popovers — nothing takes permanent panel space. */
-function StyleRow({ label, style, active, followsMain, onPreset, onPatch }: {
+function StyleRow({ label, style, active, followsMain, leading, styleHidden, onPreset, onPatch }: {
   label: string;
   /** Resolved current style for this line. */
   style: CaptionStyle;
@@ -455,6 +432,10 @@ function StyleRow({ label, style, active, followsMain, onPreset, onPatch }: {
   active: boolean;
   /** Translation-line row only: true = no own preset, follows the main line; undefined = this IS the main row. */
   followsMain?: boolean;
+  /** Rendered between the label and the style controls (the translation row's language dropdown). */
+  leading?: React.ReactNode;
+  /** Hide the style controls (translation row before a language is active — only label + leading show). */
+  styleHidden?: boolean;
   /** Preset picked (null = follow main; only offered on the translation row). */
   onPreset: (id: string | null) => void;
   onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
@@ -478,6 +459,9 @@ function StyleRow({ label, style, active, followsMain, onPreset, onPatch }: {
   return (
     <div ref={rootRef} className="relative mb-1.5 flex items-center gap-1.5">
       <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{label}</span>
+      {leading}
+      {!styleHidden && (
+      <>
       <button
         type="button"
         onClick={() => setPop(pop === 'preset' ? null : 'preset')}
@@ -541,7 +525,62 @@ function StyleRow({ label, style, active, followsMain, onPreset, onPatch }: {
           onDefault={() => { setPop(null); onPatch({ bg: undefined }); }}
         />
       )}
+      </>
+      )}
     </div>
+  );
+}
+
+/** Language dropdown for the translation row: pick a target language to translate the transcript
+ *  (same executor as before), or "off" to clear translations and hide the second line. */
+function LangPick({ translation, onOff }: { translation: CaptionTranslationControl; onOff: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  const active = translation.lang && translation.done > 0 ? translation.lang : null;
+  return (
+    <span ref={rootRef} className="relative inline-flex shrink-0">
+      <button
+        type="button"
+        disabled={translation.busy || translation.total === 0}
+        title={translation.total === 0 ? t('captions.transcribeFirst') : translation.done > 0 ? t('captions.linesDone', { done: translation.done, total: translation.total }) : t('captions.notAdded')}
+        onClick={() => setOpen((o) => !o)}
+        className={`hover:border-accent flex h-7 items-center gap-1 rounded-md border px-1.5 text-[11px] disabled:opacity-50 ${open ? 'border-accent' : 'border-line'} ${active ? 'text-ink' : 'text-ink-3'}`}
+      >
+        {translation.busy ? <Loader2 size={11} className="text-accent animate-spin" /> : <Languages size={11} className="text-ink-4" />}
+        <span className="max-w-16 truncate">{active ?? t('captions.off')}</span>
+        <ChevronDown size={11} className="text-ink-4" />
+      </button>
+      {open && (
+        <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-36 rounded-lg border p-1 shadow-xl">
+          <button
+            type="button"
+            onClick={() => { setOpen(false); if (active) onOff(); }}
+            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+          >
+            {!active && <Check size={11} className="text-accent" />} {t('captions.off')}
+          </button>
+          {TRANSLATION_LANGS.map((lang) => (
+            <button
+              key={lang}
+              type="button"
+              title={t('captions.translateTranscriptIntoLang', { lang })}
+              onClick={() => { setOpen(false); if (lang !== active) translation.onTranslate(lang); }}
+              className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+            >
+              {active === lang && <Check size={11} className="text-accent" />} {lang}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 
