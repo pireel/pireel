@@ -217,6 +217,33 @@ describe('全局花字样式 captionStyle', () => {
     expect(assembleHtml(c)).not.toContain('min-height:');
   });
 
+  it('主字幕覆盖项:文字色/底板色改渲染,bg:null 强制无底(预设默认有底)', () => {
+    const c = emptyComposition();
+    c.blocks = [captionBlock({ words })];
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, color: '#12FF34', bg: '#445566' };
+    let html = assembleHtml(c);
+    expect(html).toContain('color:#12FF34'); // 文字色覆盖
+    expect(html).toContain('background:#445566'); // 底板色覆盖
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, bg: null };
+    html = assembleHtml(c);
+    expect(html).toContain('.cap-line { position:absolute'); // 保护:选择器仍在(下一断言才有意义)
+    expect(/#cap_[^{]*\.cap-line[^}]*background:/.test(html)).toBe(false); // 无底:主行不再渲染底板
+    // 老数据(无覆盖字段)完全走预设——向后兼容
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1 };
+    expect(assembleHtml(c)).toContain('background:'); // ln-black 预设自带底板
+  });
+
+  it('副字幕独立样式:subPreset/subColor 只改译文行,主行不动', () => {
+    const c = emptyComposition();
+    c.blocks = [captionBlock({ words, sub: 'Hello there' })];
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, sub: { preset: 'ln-clean', color: '#ABCDEF', lang: 'English' } };
+    const html = assembleHtml(c);
+    const subCss = html.slice(html.indexOf('.cap-sub-line {'));
+    expect(subCss).toContain('color:#ABCDEF'); // 译文行文字色覆盖
+    const mainCss = html.slice(html.indexOf(' .w {'), html.indexOf('.cap-sub'));
+    expect(mainCss).not.toContain('#ABCDEF'); // 主行不受影响
+  });
+
   it('带 box 的花字(关键词重击等独立定位组件)不吃全局样式', () => {
     const c = emptyComposition();
     const kw = captionBlock({ effect: 'kinetic-slam', words, trackIndex: 2 });

@@ -240,11 +240,16 @@ export interface CaptionStyle {
    *  .cap-line's min-height, text vertically centered inside (presets without a backdrop just grow taller as a placeholder).
    *  Default/0 = hugs the actual line height. */
   hPct?: number;
+  /** Text color override (defaults to the preset's color). Optional and additive — existing projects render unchanged. */
+  color?: string;
+  /** Backdrop plate override: a CSS color, or null = force no plate (defaults to the preset's plate). */
+  bg?: string | null;
   /** Independent position/font for the translation line (bilingual second line): independent of the main line, dragged/scaled separately on canvas.
    *  Default = directly below the main line, 0.6× the main font size (moves with the main line). yPct = line-top distance from canvas top %,
    *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
+   *  preset/color/bg = independent visual overrides for the translation line; unset = derived from the main line's (overridden) look.
    *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
-  sub?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
+  sub?: { preset?: string; color?: string; bg?: string | null; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
@@ -537,12 +542,14 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const padY = p.bg ? Math.round(subFs * 0.18) * 2 : 0;
   const derivedY = m.yPct + ((mainFs * 0.2 + subFs * 1.35 + padY) / (comp.height || 1920)) * 100;
   return {
-    preset: m.preset,
+    preset: sub.preset ?? m.preset,
     yPct: Math.min(99, sub.yPct ?? Math.round(derivedY * 10) / 10),
     xPct: sub.xPct ?? m.xPct ?? 50,
     wPct: sub.wPct ?? m.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
     scale,
     ...(sub.hPct ? { hPct: sub.hPct } : {}),
+    ...(sub.color != null ? { color: sub.color } : {}),
+    ...(sub.bg !== undefined ? { bg: sub.bg } : {}),
   };
 }
 

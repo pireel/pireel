@@ -29,4 +29,13 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.translating': 'Translating…',
   'captions.use': 'Use',
   'captions.wordEmphasis': 'Word emphasis',
+  'captions.mainLine': 'Main',
+  'captions.subLine': 'Sub',
+  'captions.followMain': 'Follow main',
+  'captions.textColor': 'Text color',
+  'captions.plate': 'Backdrop',
+  'captions.noPlate': 'None',
+  'captions.presetDefault': 'Preset default',
+  'captions.customColor': 'Custom color',
+  'captions.pickStyle': 'Choose a style',
 };

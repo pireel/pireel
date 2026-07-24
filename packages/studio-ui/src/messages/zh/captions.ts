@@ -29,4 +29,13 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.translating': '翻译中…',
   'captions.use': '使用',
   'captions.wordEmphasis': '逐词强调',
+  'captions.mainLine': '主字幕',
+  'captions.subLine': '副字幕',
+  'captions.followMain': '跟随主字幕',
+  'captions.textColor': '文字色',
+  'captions.plate': '底板',
+  'captions.noPlate': '无底',
+  'captions.presetDefault': '预设默认',
+  'captions.customColor': '自定义颜色',
+  'captions.pickStyle': '选择样式',
 };

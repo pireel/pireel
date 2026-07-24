@@ -18,8 +18,10 @@ import { Ban, Check, ChevronDown, ChevronRight, Languages, Loader2, Type } from 
 import { t } from './i18n';
 import {
   type CaptionPreset,
+  type CaptionStyle,
   type Composition,
   CAPTION_PRESETS,
+  getCaptionPreset,
   isSentenceCaption,
   resolveCaptionStyle,
 } from '@pireel/studio-engine/composition';
@@ -65,10 +67,24 @@ function fmtTime(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/** Per-line style controls (main / translation line): resolved current style + patch callbacks.
+ *  Patches with an explicit `undefined` clear that override (backward compatible — overrides are additive optional fields). */
+export interface CaptionStyleCtl {
+  main: CaptionStyle;
+  sub: CaptionStyle;
+  /** Translation line has no preset of its own → its look follows the (overridden) main line. */
+  subFollows: boolean;
+  /** A translation target language is active — only then does the translation-line row show (per user). */
+  bilingualOn: boolean;
+  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
+  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
+}
+
 export function CaptionsPanel({
   comp,
   onPickPreset,
   onRemove,
+  styleCtl,
   translation,
   generating,
   rows,
@@ -85,6 +101,8 @@ export function CaptionsPanel({
   onPickPreset: (presetId: string) => void;
   /** Remove the whole sentence-level caption layer + clear global style. */
   onRemove: () => void;
+  /** Per-line (main / translation) style state + patch callbacks. */
+  styleCtl: CaptionStyleCtl;
   /** Bilingual translation control (hidden when omitted). */
   translation?: CaptionTranslationControl;
   /** Captions generating (ASR/re-lay): mask the whole panel to prevent double-clicking style cards. */
@@ -202,8 +220,8 @@ export function CaptionsPanel({
           <span className="text-ink-2 text-[12px]">{t('captions.generatingCaptions')}</span>
         </div>
       )}
-      {/* Styles section: collapsible; ~1/2 height while the line list exists, full height without a transcript */}
-      <div className={`border-line flex min-h-0 flex-col border-b ${stylesOpen ? (lines.length ? 'max-h-[50%]' : 'flex-1') : ''}`}>
+      {/* Styles section: collapsible, auto-height (two compact rows) — the line list below is the panel body */}
+      <div className="border-line flex shrink-0 flex-col border-b">
         <div
           onClick={() => setStylesOpen((v) => !v)}
           className="text-ink hover:bg-panel-2/60 flex shrink-0 cursor-pointer items-center gap-1.5 px-3 py-2 text-[11.5px] font-medium"
@@ -229,42 +247,26 @@ export function CaptionsPanel({
           )}
         </div>
         {stylesOpen && (
-          <div className="min-h-0 flex-1 overflow-auto px-2.5 pb-2.5">
-            {/* "None": no captions / remove the whole layer */}
-            <div className="mb-3">
-              <button
-                type="button"
-                title={t('captions.none')}
-                onClick={() => hasCaptions && onRemove()}
-                className={`group relative w-full overflow-hidden rounded-lg border transition ${
-                  !hasCaptions ? 'border-accent ring-accent/40 ring-1' : 'border-line hover:border-accent'
-                }`}
-              >
-                <div className="flex h-[58px] items-center justify-center gap-2 bg-[#2b2b2e] px-3 text-[13px] text-white/55">
-                  <Ban size={14} /> {t('captions.noCaptions')}
-                </div>
-                {!hasCaptions ? (
-                  <span className="bg-accent absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white">
-                    <Check size={10} /> {t('captions.inUse')}
-                  </span>
-                ) : (
-                  <span className="bg-accent absolute right-1.5 top-1.5 hidden rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:block">
-                    {t('captions.use')}
-                  </span>
-                )}
-              </button>
-            </div>
-            {SECTIONS.map((sec) => (
-              <div key={sec.mode} className="mb-3">
-                <div className="text-ink text-[11.5px] font-medium">{t(sec.title)}</div>
-                <div className="text-ink-4 mb-1.5 text-[10px]">{t(sec.desc)}</div>
-                <div className="flex flex-col gap-2">
-                  {CAPTION_PRESETS.filter((p) => p.mode === sec.mode).map((p) => (
-                    <PresetCard key={p.id} preset={p} active={hasCaptions && p.id === current} onPick={onPickPreset} />
-                  ))}
-                </div>
-              </div>
-            ))}
+          <div className="px-2.5 pb-2 pt-0.5">
+            {/* Compact per-line style rows (preset picker + size + text color + backdrop as on-demand popovers)
+                — the 18 preset cards no longer live inline, the line list below gets the panel back. */}
+            <StyleRow
+              label={t('captions.mainLine')}
+              style={styleCtl.main}
+              active={hasCaptions}
+              onPreset={(id) => id && onPickPreset(id)}
+              onPatch={styleCtl.onMainPatch}
+            />
+            {styleCtl.bilingualOn && (
+              <StyleRow
+                label={t('captions.subLine')}
+                style={styleCtl.sub}
+                active={hasCaptions}
+                followsMain={styleCtl.subFollows}
+                onPreset={(id) => styleCtl.onSubPatch({ preset: id ?? undefined, color: undefined, bg: undefined })}
+                onPatch={styleCtl.onSubPatch}
+              />
+            )}
           </div>
         )}
         {stylesOpen && translation && (
@@ -435,6 +437,192 @@ export function CaptionsPanel({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+const TEXT_SWATCHES = ['#FFFFFF', '#101114', '#FFD24D', '#FF4D4D', '#3F6DF6', '#7CF29C'];
+const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
+
+/** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
+ *  All pickers are on-demand popovers — nothing takes permanent panel space. */
+function StyleRow({ label, style, active, followsMain, onPreset, onPatch }: {
+  label: string;
+  /** Resolved current style for this line. */
+  style: CaptionStyle;
+  /** Captions laid on the canvas (main row shows "pick a style" until then). */
+  active: boolean;
+  /** Translation-line row only: true = no own preset, follows the main line; undefined = this IS the main row. */
+  followsMain?: boolean;
+  /** Preset picked (null = follow main; only offered on the translation row). */
+  onPreset: (id: string | null) => void;
+  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
+}) {
+  const [pop, setPop] = useState<null | 'preset' | 'color' | 'bg'>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!pop) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setPop(null);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [pop]);
+  const preset = getCaptionPreset(style.preset);
+  const fs = Math.max(9, Math.round(preset.size * style.scale));
+  const effColor = style.color ?? preset.text;
+  const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
+  const isSub = followsMain !== undefined;
+  const step = (d: number) => onPatch({ scale: Math.round(Math.max(0.4, Math.min(4, style.scale + d)) * 100) / 100 });
+  return (
+    <div ref={rootRef} className="relative mb-1.5 flex items-center gap-1.5">
+      <span className="text-ink-3 w-14 shrink-0 truncate text-[11px]">{label}</span>
+      <button
+        type="button"
+        onClick={() => setPop(pop === 'preset' ? null : 'preset')}
+        title={t('captions.pickStyle')}
+        className={`hover:border-accent flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 text-left ${pop === 'preset' ? 'border-accent' : 'border-line'}`}
+      >
+        <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-sm border border-white/20 text-center" style={{ background: effBg ?? '#2b2b2e' }}>
+          <span className="block text-[9px] font-bold leading-[13px]" style={{ color: effColor }}>A</span>
+        </span>
+        <span className="text-ink-2 min-w-0 flex-1 truncate text-[11px]">
+          {isSub && followsMain ? t('captions.followMain') : active || isSub ? t(preset.name) : t('captions.pickStyle')}
+        </span>
+        <ChevronDown size={11} className="text-ink-4 shrink-0" />
+      </button>
+      <span className="border-line flex h-7 shrink-0 items-center gap-0.5 rounded-md border px-1">
+        <button type="button" aria-label={t('workbench.smallerText')} onClick={() => step(-0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">A−</button>
+        <span className="text-ink-4 min-w-6 text-center font-mono text-[10px] tabular-nums">{fs}</span>
+        <button type="button" aria-label={t('workbench.largerText')} onClick={() => step(0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">A＋</button>
+      </span>
+      <button
+        type="button"
+        title={t('captions.textColor')}
+        onClick={() => setPop(pop === 'color' ? null : 'color')}
+        className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'color' ? 'border-accent' : 'border-line'}`}
+      >
+        <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effColor }} />
+      </button>
+      <button
+        type="button"
+        title={t('captions.plate')}
+        onClick={() => setPop(pop === 'bg' ? null : 'bg')}
+        className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'bg' ? 'border-accent' : 'border-line'}`}
+      >
+        {effBg ? (
+          <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effBg }} />
+        ) : (
+          <span className="text-ink-4 flex h-full w-full items-center justify-center"><Ban size={11} /></span>
+        )}
+      </button>
+      {pop === 'preset' && (
+        <PresetPop current={style.preset} withFollow={isSub} activeIsFollow={!!followsMain} onPick={(id) => { setPop(null); onPreset(id); }} />
+      )}
+      {pop === 'color' && (
+        <SwatchPop
+          title={t('captions.textColor')}
+          swatches={TEXT_SWATCHES}
+          value={style.color}
+          onPick={(c) => { setPop(null); onPatch({ color: c }); }}
+          onDefault={() => { setPop(null); onPatch({ color: undefined }); }}
+        />
+      )}
+      {pop === 'bg' && (
+        <SwatchPop
+          title={t('captions.plate')}
+          swatches={BG_SWATCHES}
+          value={style.bg === null ? undefined : style.bg}
+          allowNone
+          noneActive={style.bg === null}
+          onNone={() => { setPop(null); onPatch({ bg: null }); }}
+          onPick={(c) => { setPop(null); onPatch({ bg: c }); }}
+          onDefault={() => { setPop(null); onPatch({ bg: undefined }); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Preset picker popover: the 18 cards live here on demand (2-column grid), plus "follow main" on the translation row. */
+function PresetPop({ current, withFollow, activeIsFollow, onPick }: { current: string; withFollow: boolean; activeIsFollow: boolean; onPick: (id: string | null) => void }) {
+  return (
+    <div className="border-line bg-panel absolute left-0 right-0 top-full z-30 mt-1 max-h-80 overflow-auto rounded-lg border p-2 shadow-xl">
+      {withFollow && (
+        <button
+          type="button"
+          onClick={() => onPick(null)}
+          className={`mb-2 flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11.5px] ${activeIsFollow ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
+        >
+          {activeIsFollow && <Check size={11} className="text-accent" />} {t('captions.followMain')}
+        </button>
+      )}
+      {SECTIONS.map((sec) => (
+        <div key={sec.mode} className="mb-2">
+          <div className="text-ink-4 mb-1 text-[10px]">{t(sec.title)}</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {CAPTION_PRESETS.filter((p) => p.mode === sec.mode).map((p) => (
+              <PresetCard key={p.id} preset={p} active={!activeIsFollow && p.id === current} onPick={(id) => onPick(id)} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Color picker popover: preset-default chip, optional "no plate", fixed swatches, free custom color. */
+function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPick, onDefault }: {
+  title: string;
+  swatches: string[];
+  /** Current override value (undefined = following the preset). */
+  value?: string | undefined;
+  allowNone?: boolean;
+  noneActive?: boolean;
+  onNone?: () => void;
+  onPick: (color: string) => void;
+  onDefault: () => void;
+}) {
+  return (
+    <div className="border-line bg-panel absolute right-0 top-full z-30 mt-1 w-60 rounded-lg border p-2 shadow-xl">
+      <div className="text-ink-4 mb-1.5 text-[10px]">{title}</div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onDefault}
+          className={`rounded-md border px-1.5 py-1 text-[10px] ${value === undefined && !noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
+        >
+          {t('captions.presetDefault')}
+        </button>
+        {allowNone && (
+          <button
+            type="button"
+            onClick={onNone}
+            className={`flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] ${noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
+          >
+            <Ban size={10} /> {t('captions.noPlate')}
+          </button>
+        )}
+        {swatches.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={c}
+            onClick={() => onPick(c)}
+            className={`h-6 w-6 rounded-md border ${value?.toLowerCase() === c.toLowerCase() ? 'border-accent ring-accent/40 ring-1' : 'border-line hover:border-accent'}`}
+            style={{ background: c }}
+          />
+        ))}
+        <label title={t('captions.customColor')} className="border-line hover:border-accent relative h-6 w-6 cursor-pointer overflow-hidden rounded-md border">
+          <span className="absolute inset-0" style={{ background: 'conic-gradient(#f66,#fd4,#6f6,#4df,#66f,#f6f,#f66)' }} />
+          <input
+            type="color"
+            value={value ?? '#ffffff'}
+            onChange={(e) => onPick(e.target.value)}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          />
+        </label>
       </div>
     </div>
   );
