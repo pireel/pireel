@@ -29,6 +29,7 @@ import {
   applyBlockPlacement,
   blockId,
   blockKind,
+  compReceiptDelta,
   freeTrack,
   getCaptionPreset,
   isSentenceCaption,
@@ -171,8 +172,22 @@ function offlineTranscript(p: ServerToolProject): string {
   return out.length > 4000 ? `${out.slice(0, 4000)}\n…(truncated)` : out;
 }
 
+/** Footage edits whose ripple side-effects (blocks shifted/trimmed/dropped, captions relaid) get diffed into the receipt. */
+const DELTA_TOOLS = new Set(['split_shot', 'trim_shot', 'delete_shot', 'cut_range', 'cut_narration']);
+
 /** Execute one offline tool. Filter through SERVER_EXECUTABLE_TOOLS before calling. */
 export function runServerTool(tool: string, input: Record<string, unknown>, p: ServerToolProject): ServerToolOutcome {
+  const out = runServerToolInner(tool, input, p);
+  // Same honesty mechanism as the browser runner: receipts report what ACTUALLY changed (data.delta),
+  // so the agent doesn't re-read state between its own edits
+  if (out.comp && out.result.ok && DELTA_TOOLS.has(tool)) {
+    const delta = compReceiptDelta(p.comp, out.comp);
+    if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
+  }
+  return out;
+}
+
+function runServerToolInner(tool: string, input: Record<string, unknown>, p: ServerToolProject): ServerToolOutcome {
   const c = p.comp;
   const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
   const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
