@@ -345,3 +345,22 @@ export function removeEditedInterval<B extends Timed>(blocks: B[], a: number, b:
   }
   return out;
 }
+
+/**
+ * Pause-tightening margin math (shared by cut_narration's two executors and the cleanup eval):
+ * the agent passes FULL gap ranges + keepGapSec, and the tool leaves the breathing room — the
+ * model never does boundary arithmetic (mature cut planners keep their 60/150/320ms kept-gap
+ * in code the same way). Each range shrinks symmetrically by keepGapSec/2 per side; ranges that
+ * would drop below minCut seconds are removed entirely (the gap is already tight enough).
+ */
+export function tightenCutRanges(
+  ranges: { from: number; to: number }[],
+  keepGapSec: number,
+  minCut = 0.1,
+): { from: number; to: number }[] {
+  const half = Math.min(Math.max(keepGapSec, 0), 1.5) / 2;
+  if (half <= 0) return ranges.filter((r) => r.to - r.from >= minCut);
+  return ranges
+    .map((r) => ({ from: r.from + half, to: r.to - half }))
+    .filter((r) => r.to - r.from >= minCut);
+}

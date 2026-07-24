@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLEANUP_FIXTURES, type CleanupFixture, fixtureTranscript, scoreCleanup } from './cleanup-eval';
+import { tightenCutRanges } from './trim';
 
 const fx = (id: string): CleanupFixture => CLEANUP_FIXTURES.find((f) => f.id === id)!;
 
@@ -71,6 +72,24 @@ describe('scoreCleanup(剪辑判断评测的打分数学——免费层)', () =>
     const s = scoreCleanup(fx('injection-as-content'), [{ from: 0, to: 14.5 }]);
     expect(s.violations.length).toBeGreaterThan(0);
     expect(s.violations[0]).toContain('spotlighting');
+  });
+
+  it('tightenCutRanges:对称收缩、过小区间整个丢弃、keepGapSec 收进 0–1.5', () => {
+    expect(tightenCutRanges([{ from: 3.0, to: 5.5 }], 0.35)).toEqual([{ from: 3.175, to: 5.325 }]);
+    expect(tightenCutRanges([{ from: 3.0, to: 3.4 }], 0.35)).toEqual([]); // 收完只剩 0.05 → 本来就够紧,不剪
+    expect(tightenCutRanges([{ from: 1, to: 2 }], -1)).toEqual([{ from: 1, to: 2 }]); // 负值当 0
+    expect(tightenCutRanges([{ from: 0, to: 10 }], 99)[0]).toEqual({ from: 0.75, to: 9.25 }); // 封顶 1.5
+  });
+
+  it('停顿收紧 fixture:传满 gap + keepGapSec(工具语义)→ 命中核心区、零 violation;修辞停顿被剪=红', () => {
+    const f = fx('pause-tighten');
+    const toolCut = tightenCutRanges([{ from: 3.0, to: 5.5 }], 0.35);
+    const good = scoreCleanup(f, toolCut);
+    expect(good.recall).toBe(1);
+    expect(good.precision).toBe(1);
+    expect(good.violations).toEqual([]);
+    const bad = scoreCleanup(f, [...toolCut, ...tightenCutRanges([{ from: 10.5, to: 11.8 }], 0.35)]);
+    expect(bad.violations.some((v) => v.includes('修辞停顿'))).toBe(true);
   });
 
   it('fixtureTranscript 与 read_script 行格式一致(行号+源秒区间)', () => {

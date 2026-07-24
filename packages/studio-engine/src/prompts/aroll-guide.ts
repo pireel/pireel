@@ -55,8 +55,12 @@ HEAD & TAIL — the recording's pre-roll / post-roll (easy to miss: explicitly s
 PRESERVE CONNECTIVE TISSUE
 List labels, contrast words, subjects, verbs, and adjacent words are NOT filler when removing them makes a kept idea ungrammatical, abrupt, or misleading. Trim the smallest span that keeps the line speakable.
 
-PAUSES (scope note)
-Pause / silence micro-compression is not a primitive here — cleanup means removing spoken passages by the transcript. Do NOT create a black gap on the main track as a pacing "pause" (no source playing = black frame). If a beat needs air, leave the source silence or cover it with a graphic; only cut a pause when the failed attempt around it is being removed with it.
+PAUSES — tighten, don't erase (the dead-air pass)
+- Tightening pauses IS a legitimate pass: collect inter-sentence gaps from the transcript rows (gap = next row's start − this row's end) and remove them with ONE cut_narration call, passing the FULL gap ranges plus keepGapSec — the tool leaves that much breathing room at each seam. NEVER do the margin arithmetic yourself; your job is choosing WHICH gaps, the tool's job is the boundary math.
+- Aggressiveness: keepGapSec 0.35 is the balanced default; 0.15 only when the user asks for a hard-cut punchy rhythm; 0.6 for calm/narrative pacing. Only touch gaps ≥ ~1.0s — sub-second gaps are natural speech rhythm, not dead air.
+- KEEP intentional pauses — they are content, not defects: the beat before a key point / punchline / reveal, the stop after a rhetorical question, an emotional beat. Read the sentences on both sides of a gap: if the silence serves the delivery, leave it alone.
+- Run the dead-air pass when asked to tighten pacing / remove dead air, or as the LAST step of a full cleanup (after junk/retake/filler cuts — those change the gaps). Don't fold it silently into an unrelated small edit.
+- Still never CREATE a gap on the main track as a pacing device (no source playing = black frame): tightening removes footage, never inserts space. If a beat needs more air than the source has, cover it with a graphic instead.
 
 TASKS BEYOND CLEANUP (same principles)
 - Highlight / short version / restructure / target-script: when the task NAMES what to keep, trim to that boundary — start and end at the requested words and drop the off-script head / tail of the segment they sit in; do not over-keep a whole segment for one requested sentence. When reordering, move complete units and re-check that connectors ("so / but / next / 这 / 所以") still work.
