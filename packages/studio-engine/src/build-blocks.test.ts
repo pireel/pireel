@@ -59,6 +59,17 @@ describe('captionBlocksFromAsr(一句一块;拆段在渲染期,不落数据)', (
     expect(captionBlocksFromAsr([{ start: 0, end: 1, text: '  ' }])).toHaveLength(0);
   });
 
+  it('窗口互斥:上一句尾部与下一句起点交叠时截断到下一句 start(词时间不动)', () => {
+    const blocks = captionBlocksFromAsr([
+      { start: 0.5, end: 2.0, text: '第一句字幕', words: [{ text: '第一句', start: 0.5, end: 1.1 }, { text: '字幕', start: 1.1, end: 2.0 }] },
+      { start: 1.7, end: 3.5, text: '第二句接着说', words: [{ text: '第二句', start: 1.7, end: 2.4 }, { text: '接着说', start: 2.4, end: 3.5 }] },
+    ]);
+    const [a, b] = blocks as [(typeof blocks)[0], (typeof blocks)[0]];
+    expect(a.startSec + a.durationSec).toBeCloseTo(b.startSec, 5); // 不再同屏(span2 的 0.3s 尾巴也被邻句截掉)
+    expect(b.startSec + b.durationSec).toBeCloseTo(3.8, 5); // 末句无邻句,保留 span2 的 0.3s 收尾
+    expect((a.slots.words as { end: number }[]).at(-1)!.end).toBe(2.0); // 词时间保持转写真值
+  });
+
   it('双语副行:sub 随句进块并渲染成 .cap-sub;没配译文的句不渲染副行', () => {
     const blocks = captionBlocksFromAsr([
       { start: 0, end: 3, text: '大家好', sub: 'Hello everyone' },

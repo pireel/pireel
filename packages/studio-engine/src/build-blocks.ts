@@ -23,7 +23,7 @@ export interface AsrSegment {
  *  Long sentences are NOT split here — chunking is computed at render time (chunkWordsByWidth inside the caption template rotates chunks),
  *  not persisted: old blocks/drafts/caches take effect automatically, and block-level data stays one-to-one with the narration. */
 export function captionBlocksFromAsr(segments: AsrSegment[], opts?: { preset?: string; yPct?: number }): Block[] {
-  return segments
+  const blocks = segments
     .filter((s) => s.text && s.text.trim())
     .map((s) => {
       const words = s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end);
@@ -35,4 +35,17 @@ export function captionBlocksFromAsr(segments: AsrSegment[], opts?: { preset?: s
         label: s.text.trim(),
       });
     });
+  // Exclusive windows (standard subtitle behavior): ASR sentence tails often overlap the next
+  // sentence's start — both blocks would render fully opaque at once (double caption at every
+  // alternation). Clamp each block's window to the next block's start; word times stay untouched
+  // (the transcript is the source of truth — this is display-window post-processing only).
+  const byStart = [...blocks].sort((a, b) => a.startSec - b.startSec);
+  for (let i = 0; i < byStart.length - 1; i++) {
+    const a = byStart[i]!;
+    const b = byStart[i + 1]!;
+    if (b.startSec > a.startSec && a.startSec + a.durationSec > b.startSec) {
+      a.durationSec = Math.max(0.1, Math.round((b.startSec - a.startSec) * 100) / 100);
+    }
+  }
+  return blocks;
 }
