@@ -44,8 +44,8 @@ export interface CaptionLineRow {
 }
 
 const SECTIONS: { mode: CaptionPreset['mode']; title: string; desc: string }[] = [
-  { mode: 'emphasis', title: 'captions.wordEmphasis', desc: 'captions.fullLineStaysEach' },
   { mode: 'line', title: 'captions.lineByLine', desc: 'captions.linesAppearOneTime' },
+  { mode: 'emphasis', title: 'captions.wordEmphasis', desc: 'captions.fullLineStaysEach' },
 ];
 
 /** Injection surface for the bilingual translation area (only the hosted shell has translation; the OSS shell passes nothing = whole area hidden, BYO agent translates itself). */
@@ -74,8 +74,6 @@ function fmtTime(sec: number): string {
 export interface CaptionStyleCtl {
   main: CaptionStyle;
   sub: CaptionStyle;
-  /** Translation line has no preset of its own → its look follows the (overridden) main line. */
-  subFollows: boolean;
   /** A translation target language is active — only then does the translation-line row show (per user). */
   bilingualOn: boolean;
   onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
@@ -246,14 +244,14 @@ export function CaptionsPanel({
                 label={t('captions.translateRow')}
                 style={styleCtl.sub}
                 active={hasCaptions}
-                followsMain={styleCtl.subFollows}
+                isSub
                 styleHidden={!styleCtl.bilingualOn}
                 leading={
                   translation ? (
                     <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />
                   ) : undefined
                 }
-                onPreset={(id) => styleCtl.onSubPatch({ preset: id ?? undefined, color: undefined, bg: undefined })}
+                onPreset={(id) => id && styleCtl.onSubPatch({ preset: id, color: undefined, bg: undefined })}
                 onPatch={styleCtl.onSubPatch}
               />
             )}
@@ -399,14 +397,14 @@ const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
 
 /** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
  *  All pickers are on-demand popovers — nothing takes permanent panel space. */
-function StyleRow({ label, style, active, followsMain, leading, styleHidden, onPreset, onPatch }: {
+function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset, onPatch }: {
   label: string;
   /** Resolved current style for this line. */
   style: CaptionStyle;
   /** Captions laid on the canvas (main row shows "pick a style" until then). */
   active: boolean;
-  /** Translation-line row only: true = no own preset, follows the main line; undefined = this IS the main row. */
-  followsMain?: boolean;
+  /** Translation-line row (its preset name always shows; the picker has no follow-main entry). */
+  isSub?: boolean;
   /** Rendered between the label and the style controls (the translation row's language dropdown). */
   leading?: React.ReactNode;
   /** Hide the style controls (translation row before a language is active — only label + leading show). */
@@ -429,7 +427,6 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, onP
   const fs = Math.max(9, Math.round(preset.size * style.scale));
   const effColor = style.color ?? preset.text;
   const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
-  const isSub = followsMain !== undefined;
   // Size options in real px (dropdown replaces the A± stepper): mapped back to the preset-relative scale on pick.
   const sizeOpts = [16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96].filter((px) => {
     const k = px / preset.size;
@@ -451,7 +448,7 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, onP
           <span className="block text-[9px] font-bold leading-[13px]" style={{ color: effColor }}>A</span>
         </span>
         <span className="text-ink-2 min-w-0 flex-1 truncate text-[11px]">
-          {isSub && followsMain ? t('captions.followMain') : active || isSub ? t(preset.name) : t('captions.pickStyle')}
+          {active || isSub ? t(preset.name) : t('captions.pickStyle')}
         </span>
         <ChevronDown size={11} className="text-ink-4 shrink-0" />
       </button>
@@ -485,7 +482,7 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, onP
         )}
       </button>
       {pop === 'preset' && (
-        <PresetPop current={style.preset} withFollow={isSub} activeIsFollow={!!followsMain} onPick={(id) => { setPop(null); onPreset(id); }} />
+        <PresetPop current={style.preset} onPick={(id) => { setPop(null); onPreset(id); }} />
       )}
       {pop === 'size' && (
         <div className="border-line bg-panel absolute right-0 top-full z-30 mt-1 max-h-56 w-20 overflow-auto rounded-lg border p-1 shadow-xl">
@@ -606,26 +603,16 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
   );
 }
 
-/** Preset picker popover: the 18 cards live here on demand (2-column grid), plus "follow main" on the translation row. */
-function PresetPop({ current, withFollow, activeIsFollow, onPick }: { current: string; withFollow: boolean; activeIsFollow: boolean; onPick: (id: string | null) => void }) {
+/** Preset picker popover: the 18 cards live here on demand (2-column grid), line presets first. */
+function PresetPop({ current, onPick }: { current: string; onPick: (id: string | null) => void }) {
   return (
     <div className="border-line bg-panel absolute left-0 right-0 top-full z-30 mt-1 max-h-80 overflow-auto rounded-lg border p-2 shadow-xl">
-      {withFollow && (
-        <button
-          type="button"
-          onClick={() => onPick(null)}
-          className={`mb-2 flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11.5px] ${activeIsFollow ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
-        >
-          {t('captions.followMain')}
-          {activeIsFollow && <Check size={11} className="text-accent" />}
-        </button>
-      )}
       {SECTIONS.map((sec) => (
         <div key={sec.mode} className="mb-2">
           <div className="text-ink-4 mb-1 text-[10px]">{t(sec.title)}</div>
           <div className="grid grid-cols-2 gap-1.5">
             {CAPTION_PRESETS.filter((p) => p.mode === sec.mode).map((p) => (
-              <PresetCard key={p.id} preset={p} active={!activeIsFollow && p.id === current} onPick={(id) => onPick(id)} />
+              <PresetCard key={p.id} preset={p} active={p.id === current} onPick={(id) => onPick(id)} />
             ))}
           </div>
         </div>

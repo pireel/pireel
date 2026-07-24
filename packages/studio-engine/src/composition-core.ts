@@ -18,7 +18,7 @@
 
 import type { ThemeId } from './theme';
 import { type Clip, editedDuration, spans } from './trim';
-import { DEFAULT_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
+import { DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 
 export type BlockKind = 'caption' | 'title' | 'stat' | 'list' | 'transition' | 'custom' | 'media';
 
@@ -542,7 +542,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const padY = p.bg ? Math.round(subFs * 0.18) * 2 : 0;
   const derivedY = m.yPct + ((mainFs * 0.2 + subFs * 1.35 + padY) / (comp.height || 1920)) * 100;
   return {
-    preset: sub.preset ?? m.preset,
+    preset: sub.preset ?? DEFAULT_SUB_CAPTION_PRESET,
     yPct: Math.min(99, sub.yPct ?? Math.round(derivedY * 10) / 10),
     xPct: sub.xPct ?? m.xPct ?? 50,
     wPct: sub.wPct ?? m.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
