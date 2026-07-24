@@ -509,7 +509,7 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
               onClick={() => { setPop(null); onPatch({ scale: Math.round((px / preset.size) * 100) / 100 }); }}
               className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
             >
-              {px === fs && <Check size={10} className="text-accent" />} {px}
+              {px} {px === fs && <Check size={10} className="text-accent" />}
             </button>
           ))}
         </div>
@@ -576,7 +576,8 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
             onClick={() => { setOpen(false); if (active) onOff(); }}
             className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
           >
-            {!active && <Check size={11} className="text-accent" />} {t('captions.off')}
+            {t('captions.off')}
+            {!active && <Check size={11} className="text-accent ml-auto" />}
           </button>
           {TRANSLATION_LANGS.map((lang) => (
             <button
@@ -586,7 +587,8 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
               onClick={() => { setOpen(false); if (lang !== active) translation.onTranslate(lang); }}
               className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${active === lang ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
             >
-              {active === lang && <Check size={11} className="text-accent" />} <span className="text-ink-4 w-5 font-mono text-[10.5px]">{LANG_ABBR[lang]}</span> {lang}
+              <span className="text-ink-4 w-5 font-mono text-[10.5px]">{LANG_ABBR[lang]}</span> {lang}
+              {active === lang && <Check size={11} className="text-accent ml-auto" />}
             </button>
           ))}
         </div>
@@ -605,7 +607,8 @@ function PresetPop({ current, withFollow, activeIsFollow, onPick }: { current: s
           onClick={() => onPick(null)}
           className={`mb-2 flex w-full items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11.5px] ${activeIsFollow ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
         >
-          {activeIsFollow && <Check size={11} className="text-accent" />} {t('captions.followMain')}
+          {t('captions.followMain')}
+          {activeIsFollow && <Check size={11} className="text-accent" />}
         </button>
       )}
       {SECTIONS.map((sec) => (
