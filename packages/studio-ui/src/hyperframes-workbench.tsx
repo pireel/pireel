@@ -2759,7 +2759,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const agentBridge = useAgentBridge({
     runTool: runExternalTool,
     projectId,
-    getState: () => `<composition_state>\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`,
+    // LIVE header names the project this tab edits: an agent that switch_project'd for offline work must not
+    // assume the bridge follows — bridge tools always hit the OPEN tab. The id line lets it detect the mismatch.
+    getState: () => `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`,
     onDisplaced: () => {
       if (displacedRef.current) return;
       displacedRef.current = true;
