@@ -5,6 +5,10 @@
  * for A-roll narration editing (pure judgment, tool-agnostic), mapped onto studio's
  * own tool surface (read_script / cut_narration / cut_range / set_captions).
  * Body is English (everything injected into the LLM is English). Change judgment here, one place.
+ *
+ * After editing: the scoring math + fixtures are pinned free in cleanup-eval.test.ts;
+ * then have the user run the live benchmark (burns credits, ~$0.05/round):
+ *   STUDIO_EVAL=1 pnpm vitest run src/lib/studio/cleanup.live.test.ts
  */
 
 export const AROLL_GUIDE = `A-ROLL SPEECH-CLEANUP PLAYBOOK
