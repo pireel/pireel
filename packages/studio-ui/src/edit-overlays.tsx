@@ -9,7 +9,6 @@
 
 import { useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 import { type CaptionStyle, getCaptionPreset } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 import { startPointerDrag } from './drag-shell';
@@ -114,7 +113,8 @@ export function BoxEditOverlay({
 /**
  * Global position/size handles for sentence-level captions: select any caption — **the whole box body is draggable** (free two-axis move);
  * the left/right mid-edge handles + corners = adjust line width (segmentation is computed from line width, **font size unchanged**, text-box semantics); font size
- * only via the top A−/A+ steppers. **All captions move together** (Vids Captions semantics, no per-caption tweak).
+ * lives in the captions panel's per-line style row (the on-canvas toolbar was removed — handles only here).
+ * **All captions move together** (Vids Captions semantics, no per-caption tweak).
  * The box is just the approximate placement of caption lines under the current style (positioning aligns to renderLine's bottom:yPct% / left:xPct%);
  * the caption-word editing surface is in the smart-narration panel, and the box body covers the preview without blocking any editing path.
  */
@@ -126,8 +126,6 @@ export function CaptionEditOverlay({
   measured,
   onChange,
   onLive,
-  onOpenPanel,
-  label = t('workbench.captionsGlobal'),
 }: {
   style: CaptionStyle;
   compH: number;
@@ -138,10 +136,6 @@ export function CaptionEditOverlay({
   onChange: (patch: Partial<CaptionStyle>) => void;
   /** Live preview during drag (zero setState, same as the component hf:boxSize contract): workbench sends hf:capStyle to edit the iframe directly. */
   onLive: (style: CaptionStyle) => void;
-  /** toolbar shortcut entries: open the right-side script/captions panels (the caption's two editing surfaces). */
-  onOpenPanel: (panel: 'script' | 'caption') => void;
-  /** Handle label (main line "captions · global" / translation line "translation · global" — the same logic, two instances). */
-  label?: string;
 }) {
   // Local live style during drag (re-renders only this overlay): the box follows the pointer, not hidden (per user), the iframe is edited directly by onLive.
   // ghost = line-width drag: the baseline solid line stays put, a dashed line follows, the iframe isn't touched, and on release a single rebuild applies the change
@@ -232,22 +226,6 @@ export function CaptionEditOverlay({
     else l = clamp(l + dx, 0.02, r - 0.16);
     return { wPct: Math.round((r - l) * 1000) / 10, xPct: clamp(((l + r) / 2) * 100, 10, 90) };
   };
-  // A± rapid-click coalescing (a separate mechanism, unrelated to release): the box/readout track the pending value instantly, committing once 200ms after clicks stop.
-  // Don't send onLive to change font size — changing font size without re-segmenting causes a momentary wrap (fixed-width box), so let the rebuild land it in one step.
-  // Font size goes **only** through here: dragging the border adjusts line width, not font size (text-box semantics, per user)
-  const pendingScaleRef = useRef<{ v: number; timer: ReturnType<typeof setTimeout> | null }>({ v: style.scale, timer: null });
-  const stepScale = (d: number) => {
-    const base = pendingScaleRef.current.timer ? pendingScaleRef.current.v : style.scale;
-    const scale = Math.round(clamp(base + d, 0.4, 4) * 100) / 100;
-    pendingScaleRef.current.v = scale;
-    setLiveStyle({ ...style, scale });
-    if (pendingScaleRef.current.timer) clearTimeout(pendingScaleRef.current.timer);
-    pendingScaleRef.current.timer = setTimeout(() => {
-      pendingScaleRef.current.timer = null;
-      setLiveStyle(null);
-      onChange({ scale });
-    }, 200);
-  };
   const knob = 'pointer-events-auto absolute rounded-full border-2 border-accent bg-white shadow';
   return (
     <div className="pointer-events-none absolute z-30" style={{ left: rootR.left, top: rootR.top, width: rootR.w, height: rootR.h }}>
@@ -265,54 +243,6 @@ export function CaptionEditOverlay({
       )}
       {/* The whole box face is draggable = move (the caption-word editing surface is in the script panel, covering doesn't block any editing) */}
       <div className="pointer-events-auto absolute inset-0 cursor-move" onPointerDown={(e) => drag(e, move)} />
-      {/* Small top toolbar: centered, hovering just above the border and following it (flips below the border when near the stage top, staying in bounds) */}
-      <TooltipProvider delayDuration={200}>
-      <div
-        className="pointer-events-auto absolute left-1/2 flex -translate-x-1/2 items-center gap-1 whitespace-nowrap"
-        style={rootR.top < 34 ? { top: rootR.h + 8 } : { top: -28 }}
-      >
-        <span className="bg-accent rounded px-1.5 py-0.5 text-[10px] font-medium text-white">{label}</span>
-        <span className="border-line bg-panel flex items-center gap-0.5 rounded border px-1 py-0.5 shadow">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" aria-label={t('workbench.smallerText')} onClick={() => stepScale(-0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">
-                A−
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.smallerText')}</TooltipContent>
-          </Tooltip>
-          <span className="text-ink-4 min-w-8 text-center font-mono text-[10px] tabular-nums">{Math.max(10, Math.round(fontPx * eff.scale))}px</span>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" aria-label={t('workbench.largerText')} onClick={() => stepScale(0.1)} className="text-ink-3 hover:text-ink px-0.5 text-[11px] leading-none">
-                A＋
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.largerText')}</TooltipContent>
-          </Tooltip>
-        </span>
-        {/* Shortcut entries to the caption's two editing surfaces: edit/delete words → smart narration; change style → caption style */}
-        <span className="border-line bg-panel flex items-center gap-0.5 rounded border px-1 py-0.5 shadow">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={() => onOpenPanel('script')} className="text-ink-3 hover:text-ink px-1 text-[10.5px] leading-none">
-                {t('workbench.smartScriptCut')}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.editDeleteWords')}</TooltipContent>
-          </Tooltip>
-          <span className="bg-line h-3 w-px" />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={() => onOpenPanel('caption')} className="text-ink-3 hover:text-ink px-1 text-[10.5px] leading-none">
-                {t('workbench.captionStyles')}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{t('workbench.changeStyle')}</TooltipContent>
-          </Tooltip>
-        </span>
-      </div>
-      </TooltipProvider>
       {/* Left/right mid-edge handles = line width (re-segment, ghost: solid line stays, dashed follows, one rebuild on release);
           top/bottom mid-edge handles = box height (pure padding, font size unchanged, follows live directly); corners = line width + box height together (ghost). */}
       <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.adjustLineWidth')} onPointerDown={(e) => drag(e, edgeWidth(-1), 'ghost')} />
