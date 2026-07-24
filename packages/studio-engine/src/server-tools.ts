@@ -64,6 +64,9 @@ export interface ServerToolProject {
   comp: Composition;
   context: StudioProjectContext;
   videoDurationSec: number | null;
+  /** Credits guardrail for the snapshot: hosted generation affordable? Boolean by design (never the balance
+   *  number); route fills it for get_state from the billing store. Absent = line omitted. */
+  canGenerate?: boolean;
 }
 
 /** Execution result: result goes back to MCP; comp/context present = a change happened, route persists it (version+1). */
@@ -146,6 +149,7 @@ function offlineState(p: ServerToolProject): string {
       })),
     },
     pipeline: { asr: !!p.context.asr?.length, plan: !!p.context.plan, visual: false },
+    ...(typeof p.canGenerate === 'boolean' ? { canGenerate: p.canGenerate } : {}),
   });
   return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}). Video-dependent tools (extract_asr, analyze_visual, capture_frame, lay_out, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
 }

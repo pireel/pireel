@@ -78,6 +78,9 @@ export interface ChatSituation {
    *  restored from OPFS/cloud, or missing — video tools will fail, but project
    *  data is complete; agent must not misread as "project has no video"). */
   videoBytesReady?: boolean;
+  /** Whether hosted (credits-charging) generation is currently affordable — a boolean by design,
+   *  never the balance number (the account's figures are not the agent's business). Absent = unknown, line omitted. */
+  canGenerate?: boolean;
   /** Frame attached to the conversation (studio theme content pack; client sends only the id, route resolves it and injects the attach notice). */
   frameId?: string;
 }
@@ -147,6 +150,16 @@ export function buildSituation(body: ChatSituation): string {
   if (p) {
     const flag = (b: boolean | undefined) => (b ? 'done' : 'not yet');
     lines.push(`Pipeline: transcript ${flag(p.asr)} · narration plan ${flag(p.plan)} · visual analysis ${flag(p.visual)}.`);
+  }
+
+  // Credits guardrail (visibility only, boolean by design): unattended agents must not burn calls into a wall,
+  // and must route to the BYO flow / tell the user instead of retrying charged tools
+  if (typeof body.canGenerate === 'boolean') {
+    lines.push(
+      body.canGenerate
+        ? 'Hosted generation (charges Pireel credits): available.'
+        : 'Hosted generation (add_block / edit_block / add_graphics / analyze_narration / analyze_visual): credits EXHAUSTED — these will fail; do not call them. BYO agents: use compose_block_brief / plan_brief instead. Otherwise tell the user their Pireel credits are used up.',
+    );
   }
 
   // Bytes-loaded state: when the tab just opened the source video may still be
