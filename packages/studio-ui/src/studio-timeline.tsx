@@ -195,6 +195,25 @@ function StudioTimelineImpl({
   const draggingRef = useRef(false); // while dragging: let hover-seek yield (avoid double seek)
   const hoverRaf = useRef(0); // hover rAF coalescing
   const hoverXRef = useRef(0); // latest hover screen x
+  /** Detach the document-level hover escape guards (installed when hover-scrub arms). */
+  const scrubGuardCleanupRef = useRef<(() => void) | null>(null);
+  /** Idempotent end-of-hover restore: mouseleave AND the escape guards all route here — whoever fires
+   *  first restores the preview to the playhead and disarms; later calls are no-ops. */
+  const endScrubRef = useRef<() => void>(() => {});
+  endScrubRef.current = () => {
+    scrubGuardCleanupRef.current?.();
+    scrubGuardCleanupRef.current = null;
+    if (hoverRaf.current) {
+      cancelAnimationFrame(hoverRaf.current);
+      hoverRaf.current = 0;
+    }
+    const armed = scrubArmedRef.current;
+    scrubEnterRef.current = null;
+    scrubArmedRef.current = false;
+    setHoverT(null);
+    if (armed) onScrub(null); // restore to the playhead (if never armed, the preview never moved, so no restore needed)
+  };
+  useEffect(() => () => scrubGuardCleanupRef.current?.(), []);
   // hover-scrub arming: only start following-seek of the center preview after >=160ms in the timeline and >=6px of real movement.
   // A cursor "passing through" the timeline on its way from an element track to the stage, or a layout shift from the selection control bar appearing, shouldn't make the picture jump.
   const scrubEnterRef = useRef<{ x: number; y: number; ts: number } | null>(null);
@@ -769,7 +788,28 @@ function StudioTimelineImpl({
               if (!scrubArmedRef.current) {
                 const a = scrubEnterRef.current;
                 if (!a) scrubEnterRef.current = { x: e.clientX, y: e.clientY, ts: performance.now() };
-                else if (performance.now() - a.ts >= 160 && Math.hypot(e.clientX - a.x, e.clientY - a.y) >= 6) scrubArmedRef.current = true;
+                else if (performance.now() - a.ts >= 160 && Math.hypot(e.clientX - a.x, e.clientY - a.y) >= 6) {
+                  scrubArmedRef.current = true;
+                  // Armed → arm the escape guards too. A single mouseleave is NOT a reliable end-of-hover signal
+                  // (fast flick out of the window / drag hand-offs can skip it — verified on prod: a missed leave
+                  // leaves the preview frozen at the hover moment, captions from the hovered time lingering over
+                  // the resting playhead). Guards are idempotent with onMouseLeave: whoever fires first restores.
+                  const host = e.currentTarget as HTMLElement;
+                  const guard = (ev: MouseEvent) => {
+                    const r = host.getBoundingClientRect();
+                    if (ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) return;
+                    endScrubRef.current();
+                  };
+                  const end = () => endScrubRef.current();
+                  document.addEventListener('mousemove', guard);
+                  window.addEventListener('blur', end);
+                  document.documentElement.addEventListener('mouseleave', end);
+                  scrubGuardCleanupRef.current = () => {
+                    document.removeEventListener('mousemove', guard);
+                    window.removeEventListener('blur', end);
+                    document.documentElement.removeEventListener('mouseleave', end);
+                  };
+                }
               }
               if (!hoverRaf.current)
                 hoverRaf.current = requestAnimationFrame(() => {
@@ -779,17 +819,7 @@ function StudioTimelineImpl({
                   if (scrubArmedRef.current) onScrub(tt); // only follow after armed: at most once per frame, center preview jumps frames
                 });
             }}
-            onMouseLeave={() => {
-              if (hoverRaf.current) {
-                cancelAnimationFrame(hoverRaf.current);
-                hoverRaf.current = 0;
-              }
-              const armed = scrubArmedRef.current;
-              scrubEnterRef.current = null;
-              scrubArmedRef.current = false;
-              setHoverT(null);
-              if (armed) onScrub(null); // restore to the playhead (if never armed, the preview never moved, so no restore needed)
-            }}
+            onMouseLeave={() => endScrubRef.current()}
           >
             {/* Ruler (click/drag to seek) + major/minor ticks */}
             <div
