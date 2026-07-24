@@ -4,6 +4,8 @@
 
 **An open-source, backend-free AI video editor for talking-head video.**
 
+[English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
 Import a clip and the canvas follows your footage — editing, storyboarding,
 designed graphics, kinetic captions, themes, live preview, timeline and export
 all run **fully in the browser**. No account, no server.
@@ -88,11 +90,11 @@ fail with a hint until you wire them up. Two ways to light them:
 ## Layout
 
 ```
-apps/studio-oss/        minimal Vite shell that mounts the editor
-packages/studio-ui/     editor UI (workbench, panels, timeline, client export)
-packages/studio-engine/ composition core, briefs, prompts, video-edit utilities
-packages/studio-frames/ frame themes (design systems) + content
-packages/ui/            shared primitives, brand mark, theme tokens
+apps/studio-oss/        # minimal Vite shell that mounts the editor
+packages/studio-ui/     # editor UI (workbench, panels, timeline, client export)
+packages/studio-engine/ # composition core, briefs, prompts, video-edit utilities
+packages/studio-frames/ # frame themes (design systems) + content
+packages/ui/            # shared primitives, brand mark, theme tokens
 ```
 
 ## License
