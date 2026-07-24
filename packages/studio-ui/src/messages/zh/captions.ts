@@ -38,4 +38,6 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.presetDefault': '预设默认',
   'captions.customColor': '自定义颜色',
   'captions.pickStyle': '选择样式',
+  'captions.translateRow': '翻译',
+  'captions.off': '关闭',
 };
