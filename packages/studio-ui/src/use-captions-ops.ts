@@ -16,6 +16,7 @@ import {
   type VideoShot,
   isSentenceCaption,
   resolveCaptionStyle,
+  resolveSubCaptionStyle,
 } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { type AsrSegment, captionBlocksFromAsr } from '@pireel/studio-engine/build-blocks';
@@ -189,6 +190,17 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     generating: capGenBusy,
     onPickPreset: applyCaptionPreset,
     onRemove: removeCaptionLayer,
+    // Per-line style controls (main / translation): resolved current styles + patch callbacks.
+    // Patches with an explicit undefined clear that override; sub patches deep-merge into captionStyle.sub.
+    styleCtl: {
+      main: resolveCaptionStyle(comp),
+      sub: resolveSubCaptionStyle(comp),
+      subFollows: !resolveCaptionStyle(comp).sub?.preset,
+      bilingualOn: !!resolveCaptionStyle(comp).sub?.lang,
+      onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => setCaptionStyle(patch),
+      onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined }) =>
+        setCaptionStyle({ sub: { ...(resolveCaptionStyle(compRef.current).sub ?? {}), ...patch } }),
+    },
     rows: captionLineRows,
     activeKey: (() => {
       let hit: string | null = null;
@@ -245,7 +257,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         return;
       }
       pushUndoSnapshot();
-      setComp((c) => ({ ...c, blocks: [...c.blocks.filter((b) => !isSentenceCaption(b)), ...caps], captionStyle: { ...resolveCaptionStyle(c), preset } }));
+      // Preset switch = a complete look: clear the per-line color/bg overrides (kept overrides would tint the new preset)
+      setComp((c) => {
+        const { color: _oc, bg: _ob, ...rest } = resolveCaptionStyle(c);
+        return { ...c, blocks: [...c.blocks.filter((b) => !isSentenceCaption(b)), ...caps], captionStyle: { ...rest, preset } };
+      });
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
       // caption window, move it to the first caption — otherwise nothing on screen moves after laying and it feels like "clicked but no effect" (user reported)
       if (!playingRef.current && caps.length) {

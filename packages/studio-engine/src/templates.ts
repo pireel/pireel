@@ -108,7 +108,18 @@ function renderCaption(slots: Slots, id: string): Rendered {
     ...(typeof slots.subHPct === 'number' && (slots.subHPct as number) > 0 ? { hPct: slots.subHPct as number } : {}),
   };
   const canvasW = typeof slots.canvasW === 'number' && (slots.canvasW as number) > 0 ? (slots.canvasW as number) : 1080;
-  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW);
+  // Per-line visual overrides (global captionStyle baked into slots at assemble time): color = text color,
+  // bg = plate color (null forces no plate); subPreset/subColor/subBg = the translation line's own look.
+  const ov = {
+    ...(typeof slots.color === 'string' ? { color: slots.color as string } : {}),
+    ...(slots.bg === null || typeof slots.bg === 'string' ? { bg: slots.bg as string | null } : {}),
+  };
+  const subOv = {
+    ...(typeof slots.subPreset === 'string' ? { preset: slots.subPreset as string } : {}),
+    ...(typeof slots.subColor === 'string' ? { color: slots.subColor as string } : {}),
+    ...(slots.subBg === null || typeof slots.subBg === 'string' ? { bg: slots.subBg as string | null } : {}),
+  };
+  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv);
 }
 
 /** Preset font → CSS font-family (serif → Noto Serif SC, mono → theme --font-num, default → theme body). */
@@ -169,7 +180,10 @@ export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: num
   return chunkWordsBalanced(words, Math.max(fs * 2, budgetPx + gapPx), (w) => wordPx(w.text) + gapPx + (extra.get(w) ?? 0));
 }
 
-function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080): Rendered {
+function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null } = {}, subOv: { preset?: string; color?: string; bg?: string | null } = {}): Rendered {
+  // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
+  // use (segmentation budget, pill, css, karaoke revert color) consistent with the overridden look.
+  if (ov.color != null || ov.bg !== undefined) p = { ...p, ...(ov.color != null ? { text: ov.color } : {}), ...(ov.bg !== undefined ? { bg: ov.bg ?? undefined } : {}) };
   const { start } = span2(words);
   // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
@@ -197,18 +211,22 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // reflow via the same captionLineSegments budget (box width × font size, live), anchored to the
   // main line (line bottom=yPct, center=xPct, box width wPct, box height hPct → min-height), plate/
   // shadow/font all follow the preset. Default (subStyle.yPct unset) = follow directly under the main line.
+  // Translation line's visual base: its own preset when set, else it follows the main line's
+  // (already override-applied) look; sub color/bg overrides apply on top.
+  let subP = subOv.preset ? getCaptionPreset(subOv.preset) : p;
+  if (subOv.color != null || subOv.bg !== undefined) subP = { ...subP, ...(subOv.color != null ? { text: subOv.color } : {}), ...(subOv.bg !== undefined ? { bg: subOv.bg ?? undefined } : {}) };
   const subScale = subStyle?.scale ?? scale * 0.6;
-  const subFs = Math.max(9, Math.round(p.size * subScale));
+  const subFs = Math.max(9, Math.round(subP.size * subScale));
   const subW = subStyle?.wPct ?? wPct;
-  const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), p, subW, subScale, canvasW) : [];
-  const subPill = p.bg ? `background:${p.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * 0.28)}px;` : '';
+  const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), subP, subW, subScale, canvasW) : [];
+  const subPill = subP.bg ? `background:${subP.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * 0.28)}px;` : '';
   const subHtml = sub
     ? `<div class="cap-sub" id="${id}-sub">${subSegs.map((g) => `<div class="cap-sub-line">${g.map((w, k) => `<span${k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' class="sp"' : ''}>${escapeHtml(w.text)}</span>`).join('')}</div>`).join('')}</div>`
     : '';
   const subAnchor = subStyle?.yPct != null ? `bottom:${n(100 - subStyle.yPct)}%;` : `top:calc(${n(yPct)}% + ${Math.round(fs * 0.2)}px);`;
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; width:100%; text-align:center; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${subFs}px; font-weight:${Math.max(500, p.weight - 200)}; line-height:1.35; ${p.italic ? 'font-style:italic; ' : ''}${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''}${subPill} }`
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow && !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''}${subPill} }`
     : '';
   const decoCss =
     p.deco === 'highlight'

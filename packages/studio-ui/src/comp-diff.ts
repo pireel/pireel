@@ -70,8 +70,14 @@ export function capPosOnlyChange(a: Composition | null, b: Composition): boolean
     ca.preset === cb.preset &&
     Object.is(ca.scale, cb.scale) &&
     Object.is(ca.wPct, cb.wPct) &&
+    // visual overrides (text color / plate) re-bake CSS — never skippable
+    Object.is(ca.color, cb.color) &&
+    Object.is(ca.bg, cb.bg) &&
     Object.is(sa.scale, sb.scale) &&
     Object.is(sa.wPct, sb.wPct) &&
+    Object.is(sa.preset, sb.preset) &&
+    Object.is(sa.color, sb.color) &&
+    Object.is(sa.bg, sb.bg) &&
     // sub going from absent to present / present to absent (first drag-out of an independent position / clearing) also needs a rebuild: the anchoring changes (top↔bottom)
     !!ca.sub === !!cb.sub
   );
