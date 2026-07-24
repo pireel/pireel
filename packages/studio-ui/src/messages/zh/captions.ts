@@ -41,4 +41,5 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.translateRow': '翻译',
   'captions.off': '关闭',
   'captions.fontSize': '字号',
+  'captions.enableCaptions': '开启字幕',
 };

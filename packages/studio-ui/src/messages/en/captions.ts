@@ -41,4 +41,5 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.translateRow': 'Translate',
   'captions.off': 'Off',
   'captions.fontSize': 'Font size',
+  'captions.enableCaptions': 'Turn on captions',
 };
