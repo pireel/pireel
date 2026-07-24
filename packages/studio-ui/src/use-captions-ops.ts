@@ -279,13 +279,15 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCapGenBusy(false);
     }
   };
-  /** Captions panel "remove": drop the entire sentence-level caption layer + clear the global style (with an undo snapshot). */
+  /** Captions panel "remove"/switch-off: drop the sentence-level caption layer. captionStyle is KEPT —
+   *  it is state (preset/positions/translation language) and the on/off toggle must round-trip it intact
+   *  (wiping it here orphaned the transcript translations from their language state). */
   const removeCaptionLayer = () => {
     const ids = compRef.current.blocks.filter(isSentenceCaption).map((b) => b.id);
     if (!ids.length) return;
     pushUndoSnapshot();
     ids.forEach((id) => postPreview({ type: 'hf:remove', id }));
-    setComp((c) => ({ ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)), captionStyle: undefined }));
+    setComp((c) => ({ ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)) }));
     setSelectedIdRaw((s) => (s && ids.includes(s) ? null : s));
     setSelectedBlockIds((cur) => {
       const n = new Set([...cur].filter((x) => !ids.includes(x)));
