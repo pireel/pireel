@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, RotateCw, Squircle } from 'lucide-react';
+  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, RotateCw, Squircle, Pin, PinOff } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -443,6 +443,47 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [capTransBusy, setCapTransBusy] = useState(false); // bilingual translation in progress (captions panel)
   const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
+  // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
+  // space; unpinned = floating overlay above the canvas, the stage keeps full width). Both persist.
+  const [railW, setRailW] = useState(() => {
+    const v = typeof window !== 'undefined' ? Number(window.localStorage.getItem('studio-rail-w')) : 0;
+    return Number.isFinite(v) && v >= 260 && v <= 560 ? v : 320;
+  });
+  const [railPinned, setRailPinned] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem('studio-rail-pin') !== '0' : true));
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('studio-rail-w', String(railW));
+      window.localStorage.setItem('studio-rail-pin', railPinned ? '1' : '0');
+    } catch {
+      /* private mode: geometry just resets next session */
+    }
+  }, [railW, railPinned]);
+  const railAutoCollapsedRef = useRef(false); // our small-screen auto-collapse (vs the user's manual one — only ours auto-reopens)
+  /** Manual collapse/expand: overrides any pending small-screen auto state. */
+  const setLibCollapsedManual = (v: boolean) => {
+    railAutoCollapsedRef.current = false;
+    setLibCollapsed(v);
+  };
+  // Small screens: auto-collapse the rail to give the stage room; growing back reopens it only
+  // if the collapse was ours (a user's deliberate collapse stays collapsed).
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1280px)');
+    const apply = (matches: boolean) => {
+      if (matches) {
+        setLibCollapsed((c) => {
+          if (!c) railAutoCollapsedRef.current = true;
+          return true;
+        });
+      } else if (railAutoCollapsedRef.current) {
+        railAutoCollapsedRef.current = false;
+        setLibCollapsed(false);
+      }
+    };
+    apply(mq.matches);
+    const on = (e: MediaQueryListEvent) => apply(e.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
   // Chat area (left) open/close: chat can be closed to free up the frame; the top-right "chat" button on the preview
   // only appears when chat is hidden. Agent view collapses by default: the main conversation lives in the external
   // agent (Codex), the built-in chat on the right just takes up space
@@ -5600,7 +5641,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           {libCollapsed && (
             <button
               type="button"
-              onClick={() => setLibCollapsed(false)}
+              onClick={() => setLibCollapsedManual(false)}
               title={t('workbench.expandAssetsBar')}
               aria-label={t('workbench.expandAssetsBar')}
               className="border-line bg-panel text-ink-3 hover:text-ink absolute right-3 top-2 z-20 flex h-7 items-center gap-1 rounded-md border px-2 text-[11.5px] shadow-sm"
@@ -6310,7 +6351,44 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             Collapsible to free up the frame: the whole column stays mounted as hidden (preserving filters/scroll/generation polling), the expand button floats top-right on the preview.
             When a tool panel (floatWin) is open it **docks and takes the whole column** (per user: not a new tab): the tabs header is replaced by
             the panel title header, the asset list is hidden but keeps state, closing the panel returns to the tabs */}
-        <div className={`border-line flex shrink-0 flex-col border-l ${libCollapsed ? 'hidden' : 'w-[320px]'}`}>
+        <div
+          className={`border-line flex shrink-0 flex-col border-l ${libCollapsed ? 'hidden' : ''} ${railPinned ? 'relative' : 'bg-bg absolute inset-y-0 right-0 z-40 shadow-2xl'}`}
+          style={libCollapsed ? undefined : { width: railW }}
+        >
+          {/* Drag the left edge to resize (260–560, persisted) */}
+          <div
+            onPointerDown={(e) => {
+              e.preventDefault();
+              const sx = e.clientX;
+              const w0 = railW;
+              let raf = 0;
+              let last: PointerEvent | null = null;
+              const flush = () => {
+                raf = 0;
+                if (last) setRailW(Math.max(260, Math.min(560, w0 + (sx - last.clientX))));
+              };
+              const mv = (ev: PointerEvent) => {
+                if (ev.buttons === 0) {
+                  up();
+                  return;
+                }
+                last = ev;
+                if (!raf) raf = requestAnimationFrame(flush);
+              };
+              const up = () => {
+                if (raf) cancelAnimationFrame(raf);
+                flush();
+                window.removeEventListener('pointermove', mv);
+                window.removeEventListener('pointerup', up);
+                window.removeEventListener('pointercancel', up);
+              };
+              window.addEventListener('pointermove', mv);
+              window.addEventListener('pointerup', up);
+              window.addEventListener('pointercancel', up);
+            }}
+            title={t('workbench.dragResizePanel')}
+            className="hover:bg-accent/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors"
+          />
           <div className="flex min-h-0 flex-1 flex-col">
           {floatWin ? (
             <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
@@ -6392,10 +6470,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               ))}
               <button
                 type="button"
-                onClick={() => setLibCollapsed(true)}
+                onClick={() => setRailPinned((p) => !p)}
+                title={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
+                aria-label={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
+                className="text-ink-4 hover:text-ink ml-auto rounded p-1"
+              >
+                {railPinned ? <PinOff size={13} /> : <Pin size={13} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setLibCollapsedManual(true)}
                 title={t('workbench.collapseAssetsBar')}
                 aria-label={t('workbench.collapseAssetsBar')}
-                className="text-ink-4 hover:text-ink ml-auto rounded p-1"
+                className="text-ink-4 hover:text-ink rounded p-1"
               >
                 <ChevronsRight size={14} />
               </button>
