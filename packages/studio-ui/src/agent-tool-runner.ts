@@ -42,7 +42,7 @@ import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pi
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
-import { imgSourceBase } from '@pireel/ui/image-url';
+import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { fileSig } from './media';
@@ -166,7 +166,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
         return delta ? { ...res, data: { ...((res.data as Record<string, unknown> | undefined) ?? {}), delta } } : res;
       };
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
-      const READONLY_TOOLS = new Set(['get_block', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
+      const READONLY_TOOLS = new Set(['get_block', 'list_assets', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
       if (!READONLY_TOOLS.has(toolId)) {
         const targetIds = [input.blockId, ...(Array.isArray(input.blockIds) ? (input.blockIds as unknown[]) : [])].filter(
@@ -534,6 +534,40 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 timelineBody: cap(rendered.timelineBody, 800),
               },
             };
+          }
+          case 'list_assets': {
+            // Enumerate the user's media library (uploads + agent imports) + this project's video sources —
+            // the agent references real urls instead of guessing or asking the user to describe what they have
+            const kindIn = input.kind === 'image' || input.kind === 'video' ? input.kind : 'all';
+            const limit = Math.min(Math.max(Math.round(Number(input.limit) || 30), 1), 100);
+            const fetchKind = (k: 'image' | 'video') =>
+              fetch(`/api/me/materials?tab=global&kind=${k}&limit=${limit}`)
+                .then((r) => (r.ok ? r.json() : null))
+                .then((j: { items?: { id: string; url: string; label: string | null; kind: string; width: number | null; height: number | null; created_at: number }[] } | null) => j?.items ?? [])
+                .catch(() => []);
+            const kinds: ('image' | 'video')[] = kindIn === 'all' ? ['image', 'video'] : [kindIn];
+            const lists = await Promise.all(kinds.map(fetchKind));
+            const assets = lists
+              .flat()
+              .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+              .slice(0, limit)
+              .map((m) => ({
+                id: m.id,
+                kind: m.kind,
+                ...(m.label ? { label: m.label } : {}),
+                url: imageThumb(m.url, 'original'),
+                ...(m.width && m.height ? { w: m.width, h: m.height } : {}),
+              }));
+            // Project-scoped sources: main video + inserted clips (same letter tags as the state snapshot)
+            const tag = new Map<string, string>();
+            for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
+            const project = {
+              ...(c.video ? { mainVideo: { durationSec: r1(c.video.durationSec) } } : {}),
+              ...(tag.size
+                ? { insertedClips: [...tag.entries()].map(([src, tg]) => ({ clip: tg, transcribed: !!clipAsrRef.current[src]?.length })) }
+                : {}),
+            };
+            return { ok: true, summary: t('workbench.listedNAssets', { n: assets.length }), data: { assets, project } };
           }
           case 'focus_element': {
             const id = String(input.id ?? '');

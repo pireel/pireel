@@ -166,6 +166,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.labelsEmptyAllIndexes': 'labels is empty or all indexes are invalid — label each frame by the frames index returned by visual_brief',
   'workbench.laidNCaptionsFrom': 'Laid {n} captions from the transcript',
   'workbench.largerText': 'Larger text',
+  'workbench.listedNAssets': '{n} assets in the library',
   'workbench.loadedSize': 'Loaded {w}×{h}',
   'workbench.loading': 'Loading',
   'workbench.mediaInsertedDragReposition': 'Media inserted — drag to reposition',

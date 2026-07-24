@@ -78,12 +78,15 @@ export interface McpDeps {
   switchProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   /** Rename a project's title (routing layer = update title where id+userId). */
   renameProject: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Asset library enumeration (routing layer = query user_uploads role=general + the active project's sources).
+   *  Server-direct so it works with the tab closed too. */
+  listAssets: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
 }
 
 /* ============================ Tool surface ============================ */
 
 /** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project']);
+export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets']);
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
  *  get_state=state snapshot; apply_block/submit_plan=the validate-and-place surface for BYO generation output;
@@ -430,6 +433,7 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         if (name === 'list_projects') return toolResponse(raw.id, await deps.listProjects(args));
         if (name === 'switch_project') return toolResponse(raw.id, await deps.switchProject(args));
         if (name === 'rename_project') return toolResponse(raw.id, await deps.renameProject(args));
+        if (name === 'list_assets') return toolResponse(raw.id, await deps.listAssets(args));
         return toolResponse(raw.id, deps.readEditingGuide());
       }
 
