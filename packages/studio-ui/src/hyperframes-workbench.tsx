@@ -3225,16 +3225,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             No overflow-hidden: the floating toolbar must follow a component past the stage edge without being clipped (frame clipping is on the inner stage layer) */}
         <div ref={previewAreaRef} className="bg-panel-2 relative flex min-h-0 min-w-0 flex-1 items-center justify-center p-3">
           {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):
-              top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button), top-right = expand assets */}
+              top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button), top-right = expand assets.
+              Icon-only (per user): no text floating over the frame — the label lives in title/aria. */}
           {!panelOpen && (
             <button
               type="button"
               onClick={openChat}
               title={t('workbench.openChat')}
               aria-label={t('workbench.openChat')}
-              className="bg-ink text-bg absolute left-3 top-2 z-20 flex h-7 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium shadow-sm hover:opacity-90"
+              className="bg-ink text-bg absolute left-3 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md shadow-sm hover:opacity-90"
             >
-              <MessageSquare size={13} /> {t('chatGen.chat')}
+              <MessageSquare size={14} />
             </button>
           )}
           {libCollapsed && (
@@ -3243,9 +3244,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onClick={() => setLibCollapsedManual(false)}
               title={t('workbench.expandAssetsBar')}
               aria-label={t('workbench.expandAssetsBar')}
-              className="border-line bg-panel text-ink-3 hover:text-ink absolute right-3 top-2 z-20 flex h-7 items-center gap-1 rounded-md border px-2 text-[11.5px] shadow-sm"
+              className="border-line bg-panel text-ink-3 hover:text-ink absolute right-3 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md border shadow-sm"
             >
-              <ChevronsLeft size={13} /> {t('workbench.assets')}
+              <ChevronsLeft size={14} />
             </button>
           )}
           {!comp.video && !mediaMissing ? (
