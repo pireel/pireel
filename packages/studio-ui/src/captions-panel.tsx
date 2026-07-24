@@ -247,16 +247,10 @@ export function CaptionsPanel({
                 style={styleCtl.sub}
                 active={hasCaptions}
                 followsMain={styleCtl.subFollows}
-                styleHidden={!styleCtl.bilingualOn && !(translation && translation.done > 0)}
+                styleHidden={!styleCtl.bilingualOn}
                 leading={
                   translation ? (
-                    <LangPick
-                      translation={translation}
-                      onOff={() => {
-                        translation.onClear();
-                        styleCtl.onSubPatch({ lang: undefined });
-                      }}
-                    />
+                    <LangPick translation={translation} onOff={() => styleCtl.onSubPatch({ lang: undefined })} />
                   ) : undefined
                 }
                 onPreset={(id) => styleCtl.onSubPatch({ preset: id ?? undefined, color: undefined, bg: undefined })}
@@ -563,11 +557,9 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
-  // Truth = real translated lines (translation.done). The stored lang can be lost while translations
-  // survive in the transcript (e.g. the captions switch off→on wipes captionStyle, then re-lay brings
-  // the sub lines back): show '—' then, and let "off" actually clear instead of claiming off already.
-  const langOn = translation.done > 0;
-  const active = langOn ? (translation.lang ?? null) : null;
+  // State-first: captionStyle.sub.lang is the single authority — off = the translation line is hidden
+  // (transcript translations stay dormant), on = shown in that language. No content sniffing.
+  const active = translation.lang ?? null;
   return (
     <span ref={rootRef} className="relative inline-flex shrink-0">
       <button
@@ -575,21 +567,26 @@ function LangPick({ translation, onOff }: { translation: CaptionTranslationContr
         disabled={translation.busy || translation.total === 0}
         title={translation.total === 0 ? t('captions.transcribeFirst') : translation.done > 0 ? t('captions.linesDone', { done: translation.done, total: translation.total }) : t('captions.notAdded')}
         onClick={() => setOpen((o) => !o)}
-        className={`hover:border-accent flex h-7 items-center gap-1 rounded-md border px-1.5 text-[11px] disabled:opacity-50 ${open ? 'border-accent' : 'border-line'} ${active ? 'text-ink' : 'text-ink-3'}`}
+        className={`hover:border-accent flex h-7 w-[30px] items-center justify-center gap-0.5 rounded-md border px-0 text-[11px] disabled:opacity-50 ${open ? 'border-accent' : 'border-line'} ${active ? 'text-ink' : 'text-ink-3'}`}
       >
-        {translation.busy ? <Loader2 size={11} className="text-accent animate-spin" /> : <Languages size={11} className="text-ink-4" />}
-        <span className="truncate">{active ? (LANG_ABBR[active] ?? active) : langOn ? '—' : t('captions.off')}</span>
-        <ChevronDown size={11} className="text-ink-4" />
+        {translation.busy ? (
+          <Loader2 size={11} className="text-accent animate-spin" />
+        ) : (
+          <>
+            <span className="truncate font-mono text-[10.5px]">{active ? (LANG_ABBR[active] ?? active) : '—'}</span>
+            <ChevronDown size={10} className="text-ink-4 shrink-0" />
+          </>
+        )}
       </button>
       {open && (
         <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-36 rounded-lg border p-1 shadow-xl">
           <button
             type="button"
-            onClick={() => { setOpen(false); if (langOn || translation.lang) onOff(); }}
-            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!langOn ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+            onClick={() => { setOpen(false); if (active) onOff(); }}
+            className={`flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11.5px] ${!active ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
           >
             {t('captions.off')}
-            {!langOn && <Check size={11} className="text-accent ml-auto" />}
+            {!active && <Check size={11} className="text-accent ml-auto" />}
           </button>
           {TRANSLATION_LANGS.map((lang) => (
             <button

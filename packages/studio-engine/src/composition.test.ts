@@ -233,6 +233,15 @@ describe('全局花字样式 captionStyle', () => {
     expect(assembleHtml(c)).toContain('background:'); // ln-black 预设自带底板
   });
 
+  it('译文行状态门控:sub.lang 未设时 slots.sub 休眠不渲染,设了才出 .cap-sub', () => {
+    const c = emptyComposition();
+    c.blocks = [captionBlock({ words, sub: 'Hidden until lang' })];
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1 }; // 无 sub.lang:状态关
+    expect(assembleHtml(c)).not.toContain('cap-sub');
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, sub: { lang: 'English' } };
+    expect(assembleHtml(c)).toContain('cap-sub'); // 状态开才渲染
+  });
+
   it('副字幕独立样式:subPreset/subColor 只改译文行,主行不动', () => {
     const c = emptyComposition();
     c.blocks = [captionBlock({ words, sub: 'Hello there' })];
