@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Ban, Check, ChevronDown, Languages, Loader2, Trash2 } from 'lucide-react';
+import { Ban, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
 import { t } from './i18n';
 import {
   type CaptionPreset,
@@ -231,17 +231,12 @@ export function CaptionsPanel({
               active={hasCaptions}
               onPreset={(id) => id && onPickPreset(id)}
               onPatch={styleCtl.onMainPatch}
-              trailing={
-                hasCaptions ? (
-                  <button
-                    type="button"
-                    onClick={onRemove}
-                    title={t('captions.removeAllCaptionsUndoable')}
-                    className="border-line text-ink-4 hover:border-destructive hover:text-destructive flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                ) : undefined
+              leading={
+                <MiniSwitch
+                  on={hasCaptions}
+                  title={hasCaptions ? t('captions.removeAllCaptionsUndoable') : t('captions.enableCaptions')}
+                  onChange={(v) => (v ? onPickPreset(styleCtl.main.preset) : onRemove())}
+                />
               }
             />
             {/* Translation row (right under the main line): language dropdown first, then the same
@@ -410,7 +405,7 @@ const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
 
 /** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
  *  All pickers are on-demand popovers — nothing takes permanent panel space. */
-function StyleRow({ label, style, active, followsMain, leading, styleHidden, trailing, onPreset, onPatch }: {
+function StyleRow({ label, style, active, followsMain, leading, styleHidden, onPreset, onPatch }: {
   label: string;
   /** Resolved current style for this line. */
   style: CaptionStyle;
@@ -422,8 +417,6 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
   leading?: React.ReactNode;
   /** Hide the style controls (translation row before a language is active — only label + leading show). */
   styleHidden?: boolean;
-  /** Rendered at the row's end (the main row's remove-captions button). */
-  trailing?: React.ReactNode;
   /** Preset picked (null = follow main; only offered on the translation row). */
   onPreset: (id: string | null) => void;
   onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
@@ -520,7 +513,6 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
           swatches={TEXT_SWATCHES}
           value={style.color}
           onPick={(c) => { setPop(null); onPatch({ color: c }); }}
-          onDefault={() => { setPop(null); onPatch({ color: undefined }); }}
         />
       )}
       {pop === 'bg' && (
@@ -532,13 +524,29 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, tra
           noneActive={style.bg === null}
           onNone={() => { setPop(null); onPatch({ bg: null }); }}
           onPick={(c) => { setPop(null); onPatch({ bg: c }); }}
-          onDefault={() => { setPop(null); onPatch({ bg: undefined }); }}
         />
       )}
       </>
       )}
-      {trailing}
     </div>
+  );
+}
+
+/** Tiny on/off switch (captions layer toggle at the front of the main row — mirrors the translation row's language dropdown slot, keeping the two rows aligned). */
+function MiniSwitch({ on, title, onChange }: { on: boolean; title: string; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      title={title}
+      onClick={() => onChange(!on)}
+      className="flex h-7 shrink-0 items-center"
+    >
+      <span className={`relative h-[18px] w-[30px] rounded-full transition-colors ${on ? 'bg-accent' : 'bg-ink/20'}`}>
+        <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-all ${on ? 'left-[14px]' : 'left-[2px]'}`} />
+      </span>
+    </button>
   );
 }
 
@@ -626,7 +634,7 @@ function PresetPop({ current, withFollow, activeIsFollow, onPick }: { current: s
 }
 
 /** Color picker popover: preset-default chip, optional "no plate", fixed swatches, free custom color. */
-function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPick, onDefault }: {
+function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPick }: {
   title: string;
   swatches: string[];
   /** Current override value (undefined = following the preset). */
@@ -635,19 +643,11 @@ function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPi
   noneActive?: boolean;
   onNone?: () => void;
   onPick: (color: string) => void;
-  onDefault: () => void;
 }) {
   return (
     <div className="border-line bg-panel absolute right-0 top-full z-30 mt-1 w-60 rounded-lg border p-2 shadow-xl">
       <div className="text-ink-4 mb-1.5 text-[10px]">{title}</div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          onClick={onDefault}
-          className={`rounded-md border px-1.5 py-1 text-[10px] ${value === undefined && !noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
-        >
-          {t('captions.presetDefault')}
-        </button>
         {allowNone && (
           <button
             type="button"
