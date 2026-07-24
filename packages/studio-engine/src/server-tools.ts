@@ -46,7 +46,7 @@ import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
-import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from './trim';
+import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, captionBlocksFromAsr } from './build-blocks';
 import { beatsForWindow, inNarrationSource, insertPlanContexts, mappedCaptionSegs, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
@@ -356,12 +356,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       let ranges: { from: number; to: number }[];
       if (tool === 'cut_narration') {
         const raw = Array.isArray(input.ranges) ? input.ranges : [];
-        ranges = raw
+        // Pause tightening: keepGapSec margins shrink on the SOURCE clock, same math as the browser runner
+        const kg = Number(input.keepGapSec);
+        const srcRanges = raw
           .map((r) => {
             const o = (r ?? {}) as Record<string, unknown>;
             return { from: Number(o.fromSec), to: Number(o.toSec) };
           })
-          .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05)
+          .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
+        ranges = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
           .map((r) => ({ from: srcToEditedLoose(shots, r.from, inNarrationSource), to: srcToEditedLoose(shots, r.to, inNarrationSource) }))
           .filter((r) => r.to - r.from > 0.05)
           .sort((a, b) => b.from - a.from);

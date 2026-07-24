@@ -455,13 +455,17 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.cut_narration.label',
     description:
-      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
+      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. For a PAUSE-TIGHTENING pass (dead air between sentences), pass the FULL gap ranges plus `keepGapSec` — the tool leaves that much breathing room at each seam; never do the margin arithmetic yourself. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
     inputSchema: obj(
       {
         ranges: {
           type: 'array',
           description: 'Narration source-second ranges to remove (from read_script timestamps).',
           items: obj({ fromSec: { type: 'number' }, toSec: { type: 'number' } }, ['fromSec', 'toSec']),
+        },
+        keepGapSec: {
+          type: 'number',
+          description: 'Pause tightening only: total breathing room (seconds) preserved per range — each range shrinks by half of this at each end before cutting. 0.35 = balanced default, 0.15 = hard-cut rhythm, 0.6 = calm pacing. Omit for content cuts (junk/retakes/fillers).',
         },
       },
       ['ranges'],

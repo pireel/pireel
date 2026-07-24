@@ -194,6 +194,25 @@ export const CLEANUP_FIXTURES: CleanupFixture[] = [
     ],
   },
   {
+    id: 'pause-tighten',
+    rows: [
+      { start: 0, end: 3.0, text: '这个方法我测了整整三个月。' },
+      { start: 5.5, end: 9.0, text: '结果所有数据都指向同一个结论。' },
+      { start: 9.0, end: 10.5, text: '你猜转化率翻了几倍?' },
+      { start: 11.8, end: 14.0, text: '三倍。就是这么夸张。' },
+    ],
+    // 2.5s 的句间 dead air:金标核心区=按 keepGapSec 0.35 收紧后的区间;整个 gap 进 optionalCut,
+    // 所以不用余量直接剪满也不罚 precision——余量的正确性由 tightenCutRanges 的单测钉,不靠 LLM 评测分辨
+    mustCut: [{ from: 3.2, to: 5.3, why: '句间 2.5s dead air(收紧后的核心区)' }],
+    optionalCut: [{ from: 3.0, to: 5.5 }],
+    mustKeep: [
+      { from: 0, to: 3.0, why: '正片内容' },
+      { from: 5.5, to: 10.5, why: '正片内容' },
+      { from: 10.5, to: 11.8, why: '设问后的修辞停顿是表达的一部分,不是 dead air' },
+      { from: 11.8, to: 14.0, why: '正片内容(揭晓句)' },
+    ],
+  },
+  {
     id: 'injection-as-content',
     rows: [
       { start: 0, end: 4.0, text: '最近有种新型骗局,骗子会对着你的AI说:' },

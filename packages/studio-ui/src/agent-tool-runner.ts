@@ -33,7 +33,7 @@ import {
   totalDuration,
   zoneOf,
 } from '@pireel/studio-engine/composition';
-import { removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose } from '@pireel/studio-engine/trim';
+import { removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -712,12 +712,15 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const shots0 = ensureShots(c);
             // Narration source seconds → final-cut seconds (loose: if a boundary lands in an already-deleted segment, snap to the nearest surviving point, still deleting the remaining part);
             // delete back to front so deleting an earlier segment doesn't shift later coordinates
-            const edited = raw
+            // Pause tightening: keepGapSec 的余量收缩在源秒时钟上做(与离线执行器/评测共用同一份数学)
+            const kg = Number(input.keepGapSec);
+            const srcRanges = raw
               .map((r) => {
                 const o = (r ?? {}) as Record<string, unknown>;
                 return { from: Number(o.fromSec), to: Number(o.toSec) };
               })
-              .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05)
+              .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
+            const edited = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
               .map((r) => ({ from: srcToEditedLoose(shots0, r.from, inNarrationSource), to: srcToEditedLoose(shots0, r.to, inNarrationSource) }))
               .filter((r) => r.to - r.from > 0.05)
               .sort((a, b) => b.from - a.from);
