@@ -4256,7 +4256,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
         {/* Transport bar. On narrow windows (≤1280) button text must not wrap: when space is short the whole bar scrolls horizontally, don't let "safe zone" stack into three lines */}
         <TooltipProvider delayDuration={200}>
-        <div className="border-line flex items-center gap-3 overflow-x-auto border-t px-4 py-2 whitespace-nowrap [&>button]:shrink-0">
+        <div className="border-line flex items-center gap-3 overflow-x-auto border-t py-2 pl-4 whitespace-nowrap [&>button]:shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -4428,6 +4428,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </Tooltip>
           </div>
           )}
+          {/* Export pinned right via sticky (stays put while the bar scrolls on narrow windows).
+              The bar keeps no right padding of its own — this layer's pr-4 provides it, so the sticky
+              edge IS the visible edge and nothing can show through beside the button; bg-panel matches
+              the column surface, masking buttons that pass underneath without a visible block. */}
+          <div className="sticky right-0 z-10 ml-auto flex shrink-0 items-center gap-3 bg-panel pl-2 pr-4">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -4530,6 +4535,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <TooltipContent>{t('workbench.stopRendering')}</TooltipContent>
             </Tooltip>
           )}
+          </div>
         </div>
         </TooltipProvider>
 
