@@ -44,7 +44,7 @@ import {
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
-import { buildSituation } from './prompts';
+import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, captionBlocksFromAsr } from './build-blocks';
@@ -173,7 +173,7 @@ function offlineTranscript(p: ServerToolProject): string {
     parts.push(segs?.length ? `${head}:\n${segs.map(row).join('\n')}` : `${head}: (no transcript stored)`);
   }
   const out = parts.join('\n');
-  return out.length > 4000 ? `${out.slice(0, 4000)}\n…(truncated)` : out;
+  return wrapSpokenTranscript(out.length > 4000 ? `${out.slice(0, 4000)}\n…(truncated)` : out);
 }
 
 /** Footage edits whose ripple side-effects (blocks shifted/trimmed/dropped, captions relaid) get diffed into the receipt. */
