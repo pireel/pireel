@@ -7,7 +7,7 @@
  * graphics roster for anti-monotony. Extracted from hyperframes-workbench.tsx — bodies verbatim.
  */
 
-import { type MutableRefObject, useCallback, useMemo } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
   type Block,
@@ -70,6 +70,28 @@ export function useAgentContext(deps: AgentContextDeps) {
     [chatElemsKey],
   );
 
+  // Credits affordability (boolean only — the snapshot never carries balance numbers): fetched on mount,
+  // refreshed every 5 min while the tab is visible. Fetch failure / no backend (OSS shell) → stays null → line omitted.
+  const canGenerateRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    let gone = false;
+    const refresh = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      fetch('/api/me/balance')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j: { balance?: number } | null) => {
+          if (!gone && j && typeof j.balance === 'number') canGenerateRef.current = j.balance > 0;
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 300_000);
+    return () => {
+      gone = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   /** The situation at the moment a chat message is sent (composition snapshot / selection / playhead / pipeline; attached
    *  as message metadata). The narration script isn't here — it's anchored to source time and doesn't change with editing,
    *  so it enters the feed once via the extract_asr receipt / read_script, no need to resend each round (prompt-cache friendly). */
@@ -127,6 +149,8 @@ export function useAgentContext(deps: AgentContextDeps) {
       // Main-video byte-mount state: the project should have a video (has shots / has sig) but bytes aren't ready → tell the agent explicitly
       // (a handoff-just-opened tab is often in the OPFS miss → cloud fetch window; the data plane is complete)
       ...((videoSigRef.current || (c.shots ?? []).length) && !videoFileRef.current ? { videoBytesReady: false } : {}),
+      // Credits guardrail: boolean visibility only (never the balance number). null = unknown (no backend / fetch failed) → line omitted
+      ...(canGenerateRef.current != null ? { canGenerate: canGenerateRef.current } : {}),
     };
   }, []);
 

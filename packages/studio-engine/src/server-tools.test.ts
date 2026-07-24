@@ -42,6 +42,13 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('@s2');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
   });
+  it('get_state:积分护栏只带布尔行——没钱时明示别调计费工具,未知时整行省略', () => {
+    const broke = runServerTool('get_state', {}, proj({ canGenerate: false }));
+    expect(broke.result.state).toContain('credits EXHAUSTED');
+    expect(broke.result.state).not.toMatch(/balance|\d+ credits/);
+    const unknown = runServerTool('get_state', {}, proj());
+    expect(unknown.result.state).not.toContain('Hosted generation');
+  });
   it('read_script:云端转写按浏览器同格式吐出;没存转写给指路错误', () => {
     const r = runServerTool('read_script', {}, proj());
     expect((r.result.data as { transcript: string }).transcript).toContain('[0–5s] 第一句话');
