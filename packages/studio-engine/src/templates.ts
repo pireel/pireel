@@ -19,7 +19,7 @@ import {
   strArr,
   wordsOf,
 } from './composition-core';
-import { type CaptionPreset, getCaptionPreset } from './caption-presets';
+import { type CaptionPreset, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx, wordsFromText } from './caption-fx';
@@ -211,9 +211,9 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // reflow via the same captionLineSegments budget (box width × font size, live), anchored to the
   // main line (line bottom=yPct, center=xPct, box width wPct, box height hPct → min-height), plate/
   // shadow/font all follow the preset. Default (subStyle.yPct unset) = follow directly under the main line.
-  // Translation line's visual base: its own preset when set, else it follows the main line's
-  // (already override-applied) look; sub color/bg overrides apply on top.
-  let subP = subOv.preset ? getCaptionPreset(subOv.preset) : p;
+  // Translation line's visual base: its OWN preset (independent of the main line; ln-clean by default),
+  // sub color/bg overrides apply on top.
+  let subP = getCaptionPreset(subOv.preset ?? DEFAULT_SUB_CAPTION_PRESET);
   if (subOv.color != null || subOv.bg !== undefined) subP = { ...subP, ...(subOv.color != null ? { text: subOv.color } : {}), ...(subOv.bg !== undefined ? { bg: subOv.bg ?? undefined } : {}) };
   const subScale = subStyle?.scale ?? scale * 0.6;
   const subFs = Math.max(9, Math.round(subP.size * subScale));

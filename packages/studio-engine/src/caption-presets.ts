@@ -63,6 +63,8 @@ export const CAPTION_PRESETS: CaptionPreset[] = [
 ];
 
 export const DEFAULT_CAPTION_PRESET = 'em-yellow';
+/** Translation line's own default (independent of the main line — it no longer follows the main preset). */
+export const DEFAULT_SUB_CAPTION_PRESET = 'ln-clean';
 
 const BY_ID = new Map(CAPTION_PRESETS.map((p) => [p.id, p]));
 
