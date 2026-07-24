@@ -8,3 +8,4 @@ dist
 .env.local
 tsconfig.tsbuildinfo
 apps/*/.local-assets
+.gstack/
