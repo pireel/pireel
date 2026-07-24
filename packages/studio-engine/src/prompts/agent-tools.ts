@@ -13,6 +13,7 @@
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
+import { PLACE_ANCHORS } from '../composition-core';
 
 export type StudioToolKind = 'badge' | 'card';
 
@@ -166,7 +167,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.edit_block.label',
     description:
-      "Edit ONE existing overlay block's content, styling or animation (e.g. make the keyword red and bigger, change the caption effect, add an outline, slow it down). Pass the target `blockId` (from <composition_state>; if the user wrote @id use that) and a concrete `instruction`. Do NOT use this for moving/resizing on the timeline — use move_block/resize_block for that.",
+      "Edit ONE existing overlay block's content, styling or animation (e.g. make the keyword red and bigger, change the caption effect, add an outline, slow it down). Pass the target `blockId` (from <composition_state>; if the user wrote @id use that) and a concrete `instruction`. Do NOT use this for moving/resizing — timeline timing is move_block/resize_block, on-screen position/size is place_block.",
     inputSchema: obj(
       {
         blockId: { type: 'string', description: 'Target block id from <composition_state>.' },
@@ -206,6 +207,26 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         durationSec: { type: 'number', description: 'New duration in seconds (>= 0.3).' },
       },
       ['blockId', 'startSec', 'durationSec'],
+    ),
+  },
+  {
+    id: 'place_block',
+    kind: 'badge',
+    icon: '📐',
+    label: 'tools.place_block.label',
+    description:
+      "Reposition/resize an overlay block ON SCREEN (canvas space) — where it sits in the picture, not when it plays (timing is move_block/resize_block). Position: give ONE of `anchor` (snap into a canvas region, keeps size), `xPct`+`yPct` (absolute top-left, % of canvas), or `dxPct`/`dyPct` (relative nudge, % of canvas — e.g. move it down a bit = dyPct 8). Size: `scale` multiplies the current box around its center (0.4–2, e.g. 0.8 = shrink to 80%), combinable with any position input. The box is clamped fully on-canvas. Each block's current zone shows in the state snapshot. NOT for the sentence-caption layer (that's set_captions yPct/scale).",
+    inputSchema: obj(
+      {
+        blockId: { type: 'string' },
+        anchor: { type: 'string', enum: [...PLACE_ANCHORS], description: 'Canvas region to snap into (3×3 grid, small safe margin).' },
+        xPct: { type: 'number', description: 'Absolute: box top-left X, % of canvas width (0–100).' },
+        yPct: { type: 'number', description: 'Absolute: box top-left Y, % of canvas height (0–100).' },
+        dxPct: { type: 'number', description: 'Relative nudge right (+) / left (−), % of canvas width.' },
+        dyPct: { type: 'number', description: 'Relative nudge down (+) / up (−), % of canvas height.' },
+        scale: { type: 'number', description: 'Multiply current box size (0.4–2). 1 = keep size.' },
+      },
+      ['blockId'],
     ),
   },
   {

@@ -15,6 +15,7 @@
  */
 
 import { CAPTION_PRESETS } from '../caption-presets';
+import { zoneOf, type NormBox } from '../composition-core';
 
 /* ============================ Situation snapshot types ============================ */
 
@@ -26,6 +27,8 @@ export interface BlockSnap {
   durationSec?: number;
   /** Empty slot placed by the storyboard, no designed graphic generated yet. */
   placeholder?: boolean;
+  /** Normalized screen box — rendered as a 3×3 zone tag + width so the agent can reason about overlap/placement without capturing a frame. */
+  box?: NormBox;
 }
 export interface ShotSnap {
   id: string;
@@ -106,7 +109,7 @@ COMPOSITION STATE
 
 HOW YOU WORK
 - To make a change, CALL A TOOL (tool descriptions define each one). Use the block/shot ids from <composition_state>. When the user writes "@<id>" they mean that exact element; a bare request usually means the selected element.
-- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; remove → delete_block (several → delete_blocks). Video framing/zoom → set_shot_treatment; cutting → split_shot / trim_shot / delete_shot; removing a spoken passage BY SCRIPT (remove the passage about X / drop this sentence) → cut_narration with the transcript timestamps (it converts to the timeline for you), or cut_range for a raw edited-timeline range / inserted-clip footage. Subtitles (full-line or word-emphasis, laid from the transcript) → set_captions to turn on or restyle (pick the preset from <caption_catalog>), remove_captions to turn off — the keyword-slam overlay is instead a block (add_block/edit_block). Re-doing ONE graphic → add_graphics with that blockId (placeholders) or edit_block (already illustrated).
+- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; on-screen position/size (move it down / to the corner / smaller, off the speaker's face) → place_block (each block's zone shows in the snapshot); remove → delete_block (several → delete_blocks). Video framing/zoom → set_shot_treatment; cutting → split_shot / trim_shot / delete_shot; removing a spoken passage BY SCRIPT (remove the passage about X / drop this sentence) → cut_narration with the transcript timestamps (it converts to the timeline for you), or cut_range for a raw edited-timeline range / inserted-clip footage. Subtitles (full-line or word-emphasis, laid from the transcript) → set_captions to turn on or restyle (pick the preset from <caption_catalog>), remove_captions to turn off — the keyword-slam overlay is instead a block (add_block/edit_block). Re-doing ONE graphic → add_graphics with that blockId (placeholders) or edit_block (already illustrated).
 - INSPECT before precise edits: get_block returns a block's actual HTML/animation — use it to answer what a block is or why it looks the way it does, or before an edit_block that must preserve specifics. read_script returns the full transcript (main narration + inserted clips). Don't guess at contents you can look up.
 - CLEAN UP SPEECH BY JUDGMENT: any cleanup / tighten / de-filler / highlight / short-version request is a whole flow, not one cut — call read_editing_guide ONCE first (skip if its result is already in the conversation), then run ITS WORKFLOW end to end (read_script → collect every range to drop by the rules → apply them in ONE cut_narration call → review). Confirm scope first only for aggressive shortening / restructuring / a generated hook. A single pointed delete-this-sentence the user indicated doesn't need the guide.
 - SHOW your work: after creating or visibly changing an element, call focus_element on it so the user is looking at the result when you reply. When the change plays out over time (a speech-cut seam, a transition, an element's entry animation), play a short range around it instead — play {fromSec, toSec} a couple of seconds each side — so the user sees/hears the result without hunting for it. When the user rejects a change or asks to roll back → undo (one step per call).
@@ -159,12 +162,14 @@ export function buildSituation(body: ChatSituation): string {
 
   const blocks = c.blocks ?? [];
   const pendingSlots = blocks.filter((b) => b.placeholder).length;
+  // Screen zone tag (3×3 grid by box center + width %) — overlap/placement reasoning without a frame capture; reposition via place_block
+  const zone = (b: BlockSnap): string => (b.box ? ` · ${zoneOf(b.box)} w${Math.round(b.box.w * 100)}%` : '');
   lines.push(
     blocks.length
-      ? `Overlay blocks (id · kind · start→end)${pendingSlots ? ` — ${pendingSlots} still [placeholder] (no graphic yet; add_graphics fills them)` : ''}:\n${blocks
+      ? `Overlay blocks (id · kind · start→end · screen zone)${pendingSlots ? ` — ${pendingSlots} still [placeholder] (no graphic yet; add_graphics fills them)` : ''}:\n${blocks
           .map(
             (b) =>
-              `  @${b.id} · ${b.kind ?? 'custom'}${b.label ? ` · "${b.label}"` : ''} · ${n(b.startSec)}→${n((b.startSec ?? 0) + (b.durationSec ?? 0))}s${b.placeholder ? ' · [placeholder]' : ''}`,
+              `  @${b.id} · ${b.kind ?? 'custom'}${b.label ? ` · "${b.label}"` : ''} · ${n(b.startSec)}→${n((b.startSec ?? 0) + (b.durationSec ?? 0))}s${zone(b)}${b.placeholder ? ' · [placeholder]' : ''}`,
           )
           .join('\n')}`
       : 'Overlay blocks: (none yet).',

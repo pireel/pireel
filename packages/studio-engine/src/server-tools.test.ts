@@ -58,6 +58,18 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r2 = runServerTool('delete_block', { blockId: 'b1' }, p);
     expect(r2.comp!.blocks).toHaveLength(0);
   });
+  it('place_block:画面定位经共享纯函数,回执带 zone 与 box;无 box 组件拒绝', () => {
+    const p = proj();
+    p.comp.blocks[0]!.box = { x: 0.4, y: 0.4, w: 0.3, h: 0.2 };
+    const r = runServerTool('place_block', { blockId: 'b1', anchor: 'top-right' }, p);
+    expect(r.result.ok).toBe(true);
+    expect(r.result.summary).toContain('top-right');
+    expect(r.comp!.blocks[0]!.box).toEqual({ x: 0.67, y: 0.03, w: 0.3, h: 0.2 });
+    expect(p.comp.blocks[0]!.box!.x).toBe(0.4); // 入参不可变
+    const r2 = runServerTool('place_block', { blockId: 'b1', dyPct: 10 }, proj());
+    expect(r2.result.ok).toBe(false);
+    expect(r2.result.error).toContain('no screen box');
+  });
   it('cut_narration:源秒→成片秒换算 + 删除(与浏览器同一批 trim 纯函数)', () => {
     const p = proj();
     const r = runServerTool('cut_narration', { ranges: [{ fromSec: 0, toSec: 5 }] }, p);
