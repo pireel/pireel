@@ -166,6 +166,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.labelsEmptyAllIndexes': 'labels 为空或 index 全不合法——按 visual_brief 回的 frames index 逐帧给标签',
   'workbench.laidNCaptionsFrom': '已按口播稿铺了 {n} 条字幕',
   'workbench.largerText': '字号调大',
+  'workbench.listedNAssets': '素材库共 {n} 条可用素材',
   'workbench.loadedSize': '已读入 {w}×{h}',
   'workbench.loading': '加载中',
   'workbench.mediaInsertedDragReposition': '已插入画面，可拖动调整位置',

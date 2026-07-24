@@ -264,6 +264,21 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({ blockId: { type: 'string' } }, ['blockId']),
   },
   {
+    id: 'list_assets',
+    kind: 'badge',
+    icon: '🗂️',
+    label: 'tools.list_assets.label',
+    description:
+      "List the user's reusable media assets (most recent first): uploaded and agent-imported images and video clips, each with a direct url — images go into block HTML (img src), videos insert via insert_clip {url}. Also returns this project's video sources (main + inserted clips, with transcribed state). Call it BEFORE referencing media you haven't seen in this conversation (use my product shot / add that clip I uploaded) instead of guessing urls or asking the user to describe what they have.",
+    inputSchema: obj(
+      {
+        kind: { type: 'string', enum: ['all', 'image', 'video'], description: 'Filter by asset kind (default all).' },
+        limit: { type: 'number', description: 'Max rows per kind (default 30, max 100).' },
+      },
+      [],
+    ),
+  },
+  {
     id: 'focus_element',
     kind: 'badge',
     icon: '🎯',
