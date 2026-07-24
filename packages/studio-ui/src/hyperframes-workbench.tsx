@@ -371,8 +371,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   };
   // Small screens: auto-collapse the rail to give the stage room; growing back reopens it only
   // if the collapse was ours (a user's deliberate collapse stays collapsed).
+  // Threshold 1152 (not 1280): 14" Windows laptops at the OS-recommended 150% scaling are exactly
+  // 1280 CSS px wide (and 2560×1600 @200% too) — the rail must stay expanded there. ≤1152 is
+  // effectively tablets and half-screen windows only.
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 1280px)');
+    const mq = window.matchMedia('(max-width: 1152px)');
     const apply = (matches: boolean) => {
       if (matches) {
         setLibCollapsed((c) => {
