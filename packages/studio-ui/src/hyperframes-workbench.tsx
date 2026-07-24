@@ -3370,13 +3370,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         stageW={boxW}
                         stageH={boxH}
                         measured={capSubMeasure}
-                        label={t('workbench.translationGlobal')}
                         onChange={(patch) => {
                           const keep = resolveCaptionStyle(compRef.current).sub ?? {};
                           setCaptionStyle({ sub: { ...keep, ...patch } });
                         }}
                         onLive={(v) => postPreview({ type: 'hf:capSubStyle', xPct: v.xPct ?? 50, yPct: v.yPct, ...(v.hPct ? { hPct: v.hPct } : {}) })}
-                        onOpenPanel={(pn) => setFloatWin(pn === 'caption' ? 'captions' : 'script')}
                       />
                     )}
                     {!subSelected && (
@@ -3392,7 +3390,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         // rewrite font-size for every word of every caption block each frame — hundreds of style writes + a full-doc reflow, dragging stutters into a slideshow
                         postPreview({ type: 'hf:capStyle', xPct: s.xPct ?? 50, yPct: s.yPct, ...(s.hPct ? { hPct: s.hPct } : {}) })
                       }
-                      onOpenPanel={(p) => setFloatWin(p === 'caption' ? 'captions' : 'script')}
                     />
                     )}
                     </>
