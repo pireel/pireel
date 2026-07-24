@@ -393,19 +393,25 @@ const PREVIEW_RUNTIME = `
     else if (d.type === 'hf:capEdit') {
       // edit-mode force-show: captions fade in, so the playhead often sits at a very-low-opacity moment — on selecting a caption, force
       // the current segment to opacity 1 (the segment index comes from the parent, computed with the same segmentation); on deselect/play
-      // re-run seekTimelines to restore the timeline's real state (GSAP writes the inline opacity back to the correct value).
+      // re-run seekTimelines to restore the timeline's real state.
+      // Forcing goes through an attribute CSS rule, NEVER inline styles: an inline visibility:visible on the segment
+      // outlives the selection and overrides the hidden block container (CSS visibility inheritance), leaving the
+      // once-selected caption on screen forever — it overlapped every later caption during playback (user-reported).
+      // Dropping the attribute restores the timeline-owned inline values instantly.
       try {
+        if (!document.getElementById('hf-capedit-css')) {
+          var ceCss = document.createElement('style');
+          ceCss.id = 'hf-capedit-css';
+          ceCss.textContent = '.cap-line[data-hf-edit]{opacity:1 !important;visibility:visible !important;}';
+          document.head.appendChild(ceCss);
+        }
         document.querySelectorAll('.cap-line[data-hf-edit]').forEach(function (pe) {
           pe.removeAttribute('data-hf-edit');
         });
         if (d.id != null && typeof d.seg === 'number') {
           var ceEl = document.getElementById(String(d.id));
           var ceSeg = ceEl && ceEl.querySelector('#' + String(d.id) + '-s' + d.seg);
-          if (ceSeg) {
-            ceSeg.setAttribute('data-hf-edit', '1');
-            ceSeg.style.opacity = '1';
-            ceSeg.style.visibility = 'visible';
-          }
+          if (ceSeg) ceSeg.setAttribute('data-hf-edit', '1');
         } else {
           seekTimelines(lastSeekT); // restore: the timeline rewrites each segment's state at the current time
         }
