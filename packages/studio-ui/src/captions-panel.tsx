@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Ban, Check, ChevronDown, ChevronRight, Languages, Loader2, Type } from 'lucide-react';
+import { Ban, Check, ChevronDown, Languages, Loader2, Trash2 } from 'lucide-react';
 import { t } from './i18n';
 import {
   type CaptionPreset,
@@ -126,12 +126,10 @@ export function CaptionsPanel({
   /** No transcript yet: the empty state offers a direct "extract captions" button (runs ASR in place). */
   onExtract?: () => void;
 }) {
-  const current = resolveCaptionStyle(comp).preset;
   const hasCaptions = comp.blocks.some(isSentenceCaption);
   const lines = rows ?? [];
   // No tabs (per user): styles sit on top as a collapsible section (~1/2 when lines exist, full height
   // when there is no transcript yet); the line list below is the main body. Collapse is manual only.
-  const [stylesOpen, setStylesOpen] = useState(true);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingPart, setEditingPart] = useState<'text' | 'sub'>('text');
   const editCancelRef = useRef(false);
@@ -220,34 +218,9 @@ export function CaptionsPanel({
           <span className="text-ink-2 text-[12px]">{t('captions.generatingCaptions')}</span>
         </div>
       )}
-      {/* Styles section: collapsible, auto-height (two compact rows) — the line list below is the panel body */}
+      {/* Style rows laid flat at the top (no section header) — the line list below is the panel body */}
       <div className="border-line flex shrink-0 flex-col border-b">
-        <div
-          onClick={() => setStylesOpen((v) => !v)}
-          className="text-ink hover:bg-panel-2/60 flex shrink-0 cursor-pointer items-center gap-1.5 px-3 py-2 text-[11.5px] font-medium"
-        >
-          {stylesOpen ? <ChevronDown size={12} className="text-ink-4" /> : <ChevronRight size={12} className="text-ink-4" />}
-          <Type size={11} className="text-accent" />
-          {t('captions.styles')}
-          <span className="text-ink-4 truncate text-[10.5px] font-normal">
-            {hasCaptions ? (CAPTION_PRESETS.find((p) => p.id === current)?.name ?? current) : t('captions.noCaptionsYetPick')}
-          </span>
-          {hasCaptions && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemove();
-              }}
-              title={t('captions.removeAllCaptionsUndoable')}
-              className="text-ink-3 hover:text-destructive ml-auto shrink-0 text-[11px] font-normal"
-            >
-              {t('captions.remove')}
-            </button>
-          )}
-        </div>
-        {stylesOpen && (
-          <div className="px-2.5 pb-2 pt-0.5">
+        <div className="px-2.5 pb-2 pt-2.5">
             {/* Compact per-line style rows (preset picker + size + text color + backdrop as on-demand popovers)
                 — the 18 preset cards no longer live inline, the line list below gets the panel back. */}
             <StyleRow
@@ -256,6 +229,18 @@ export function CaptionsPanel({
               active={hasCaptions}
               onPreset={(id) => id && onPickPreset(id)}
               onPatch={styleCtl.onMainPatch}
+              trailing={
+                hasCaptions ? (
+                  <button
+                    type="button"
+                    onClick={onRemove}
+                    title={t('captions.removeAllCaptionsUndoable')}
+                    className="border-line text-ink-4 hover:border-destructive hover:text-destructive flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                ) : undefined
+              }
             />
             {/* Translation row (right under the main line): language dropdown first, then the same
                 style controls once a language is active. Replaces the old bottom "bilingual" strip. */}
@@ -281,8 +266,7 @@ export function CaptionsPanel({
                 onPatch={styleCtl.onSubPatch}
               />
             )}
-          </div>
-        )}
+        </div>
       </div>
       {/* Caption lines: the main body. Click a line = seek the video there + edit in place (background-only
           editing state on the SAME node — no border, no size change, zero jitter) + collapse the styles section. */}
@@ -424,7 +408,7 @@ const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
 
 /** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
  *  All pickers are on-demand popovers — nothing takes permanent panel space. */
-function StyleRow({ label, style, active, followsMain, leading, styleHidden, onPreset, onPatch }: {
+function StyleRow({ label, style, active, followsMain, leading, styleHidden, trailing, onPreset, onPatch }: {
   label: string;
   /** Resolved current style for this line. */
   style: CaptionStyle;
@@ -436,6 +420,8 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, onP
   leading?: React.ReactNode;
   /** Hide the style controls (translation row before a language is active — only label + leading show). */
   styleHidden?: boolean;
+  /** Rendered at the row's end (the main row's remove-captions button). */
+  trailing?: React.ReactNode;
   /** Preset picked (null = follow main; only offered on the translation row). */
   onPreset: (id: string | null) => void;
   onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
@@ -527,6 +513,7 @@ function StyleRow({ label, style, active, followsMain, leading, styleHidden, onP
       )}
       </>
       )}
+      {trailing}
     </div>
   );
 }
