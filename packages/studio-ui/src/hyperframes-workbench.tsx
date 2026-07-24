@@ -1327,15 +1327,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               docs[s.active === idx ? (idx === 0 ? 1 : 0) : s.active] = '';
               return { docs, active: idx };
             });
-            // Re-assembly interrupted playback (e.g. AI edited a block) → the new buffer resumes from the current playhead, don't freeze on a paused frame
-            if (playingRef.current) {
-              const w = iframesRef.current[idx]?.contentWindow;
-              try {
-                w?.postMessage({ type: 'hf:seek', t: tRef.current }, '*');
-                w?.postMessage({ type: 'hf:play', t: tRef.current }, '*');
-              } catch {
-                /* ignore */
-              }
+            // Replay the alignment now that the pong PROVED this doc listens: the load-time hf:seek can hit a
+            // deaf half-loaded doc (the known pit) and vanish — a paused boot then leaves caption timelines at
+            // their initial hidden state (main segments gsap-hidden, sub line visible) until the first
+            // hover/play seek (user-reported: captions missing after refresh until mousing over the timeline).
+            const w = iframesRef.current[idx]?.contentWindow;
+            try {
+              w?.postMessage({ type: 'hf:seek', t: tRef.current }, '*');
+              // Re-assembly interrupted playback (e.g. AI edited a block) → resume from the current playhead
+              if (playingRef.current) w?.postMessage({ type: 'hf:play', t: tRef.current }, '*');
+            } catch {
+              /* ignore */
             }
           }, 120);
         }
