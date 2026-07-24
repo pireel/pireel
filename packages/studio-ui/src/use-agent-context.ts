@@ -101,6 +101,7 @@ export function useAgentContext(deps: AgentContextDeps) {
           startSec: b.startSec,
           durationSec: b.durationSec,
           ...(isPlaceholder(b) ? { placeholder: true } : {}),
+          ...(b.box ? { box: b.box } : {}),
         })),
         // Each shot carries its final-cut span (the addressing clock for cut_range/split/trim/add_block) + an insert-source short tag
         // (same insert source = same letter, so two different external clips are distinguishable; the main source isn't tagged) — fixes "the agent cuts using source seconds as if they were final-cut seconds"

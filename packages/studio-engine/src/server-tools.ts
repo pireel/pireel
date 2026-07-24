@@ -26,6 +26,7 @@ import {
   CAPTION_PRESETS,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
+  applyBlockPlacement,
   blockId,
   blockKind,
   freeTrack,
@@ -33,6 +34,7 @@ import {
   isSentenceCaption,
   renderBlock,
   resolveCaptionStyle,
+  zoneOf,
   shotFilterCss,
   shotId,
   splitBlockedByTransition,
@@ -77,6 +79,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'get_block',
   'move_block',
   'resize_block',
+  'place_block',
   'delete_block',
   'delete_blocks',
   'duplicate_block',
@@ -128,6 +131,7 @@ function offlineState(p: ServerToolProject): string {
         startSec: b.startSec,
         durationSec: b.durationSec,
         ...(isPlaceholder(b) ? { placeholder: true } : {}),
+        ...(b.box ? { box: b.box } : {}),
       })),
       shots: clipSpans(c.shots ?? []).map((sp, i) => ({
         id: sp.clip.id,
@@ -224,6 +228,18 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       return {
         result: { ok: true, summary: `Resized "${bname(b)}" to ${r1(start)}–${r1(start + dur)}s` },
         comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, startSec: start, durationSec: dur } : x)) },
+      };
+    }
+    case 'place_block': {
+      const b = findBlock(input.blockId);
+      if (!b) return { result: { ok: false, error: 'block not found' } };
+      if (isSentenceCaption(b)) return { result: { ok: false, error: 'sentence-caption layer — position it via set_captions yPct/scale' } };
+      if (!b.box) return { result: { ok: false, error: 'this block has no screen box (full-canvas element) — cannot reposition' } };
+      const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
+      if (!next) return { result: { ok: false, error: 'no position (anchor / xPct+yPct / dxPct+dyPct) or scale given' } };
+      return {
+        result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box } },
+        comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? next : x)) },
       };
     }
     case 'delete_block': {

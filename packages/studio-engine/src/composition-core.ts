@@ -515,6 +515,91 @@ export function isSentenceCaption(block: Block): boolean {
   return blockKind(block) === 'caption' && !block.box;
 }
 
+/* ============================ Agent screen placement (place_block) ============================ */
+
+/** Canvas regions the agent can snap a block into (3×3 grid, safe margin). */
+export const PLACE_ANCHORS = ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right'] as const;
+export type PlaceAnchor = (typeof PLACE_ANCHORS)[number];
+
+export interface PlaceBlockInput {
+  /** Snap into a canvas region (keeps size). */
+  anchor?: PlaceAnchor;
+  /** Absolute top-left position, % of canvas (0–100). */
+  xPct?: number;
+  yPct?: number;
+  /** Relative nudge, % of canvas (positive = right / down). */
+  dxPct?: number;
+  dyPct?: number;
+  /** Multiply the box size around its center (clamped 0.4–2). */
+  scale?: number;
+}
+
+/** 3×3 zone label for a normalized box (by center) — the agent-facing vocabulary for "where is this on screen". */
+export function zoneOf(box: NormBox): string {
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const col = cx < 1 / 3 ? 'left' : cx > 2 / 3 ? 'right' : '';
+  const row = cy < 1 / 3 ? 'top' : cy > 2 / 3 ? 'bottom' : '';
+  return row && col ? `${row}-${col}` : row || col || 'center';
+}
+
+const PLACE_MARGIN = 0.03;
+const round4 = (v: number) => Math.round(v * 10000) / 10000;
+
+/** Compute a block's new screen placement (normalized canvas space, shared by the browser runner and the offline executor).
+ *  Position comes from ONE of: anchor / xPct+yPct / dxPct+dyPct; `scale` composes with any of them. The box is clamped fully
+ *  on-canvas. Move shifts box + contentBox together (crop relationship preserved, same as the drag handle); scale mirrors the
+ *  corner handle: box ×k around center, contentBox reset (re-crops nothing). Returns null when no effective directive given;
+ *  caller pre-validates that the block has a box. */
+export function applyBlockPlacement(block: Block, input: PlaceBlockInput): Block | null {
+  const box0 = block.box;
+  if (!box0) return null;
+  let { x, y, w, h } = box0;
+  let scaled = false;
+  if (typeof input.scale === 'number' && Number.isFinite(input.scale) && input.scale !== 1) {
+    const k = Math.min(2, Math.max(0.4, input.scale));
+    const nw = Math.min(1, Math.max(0.04, w * k));
+    const nh = Math.min(1, Math.max(0.03, h * k));
+    x += (w - nw) / 2;
+    y += (h - nh) / 2;
+    w = nw;
+    h = nh;
+    scaled = true;
+  }
+  let placed = false;
+  if (input.anchor && (PLACE_ANCHORS as readonly string[]).includes(input.anchor)) {
+    x = input.anchor.includes('left') ? PLACE_MARGIN : input.anchor.includes('right') ? 1 - w - PLACE_MARGIN : (1 - w) / 2;
+    y = input.anchor.includes('top') ? PLACE_MARGIN : input.anchor.includes('bottom') ? 1 - h - PLACE_MARGIN : (1 - h) / 2;
+    placed = true;
+  } else if (typeof input.xPct === 'number' || typeof input.yPct === 'number') {
+    if (typeof input.xPct === 'number' && Number.isFinite(input.xPct)) {
+      x = input.xPct / 100;
+      placed = true;
+    }
+    if (typeof input.yPct === 'number' && Number.isFinite(input.yPct)) {
+      y = input.yPct / 100;
+      placed = true;
+    }
+  } else if (typeof input.dxPct === 'number' || typeof input.dyPct === 'number') {
+    const ndx = Number(input.dxPct) || 0;
+    const ndy = Number(input.dyPct) || 0;
+    if (ndx || ndy) {
+      x += ndx / 100;
+      y += ndy / 100;
+      placed = true;
+    }
+  }
+  if (!placed && !scaled) return null;
+  x = round4(Math.min(Math.max(x, 0), Math.max(0, 1 - w)));
+  y = round4(Math.min(Math.max(y, 0), Math.max(0, 1 - h)));
+  const dx = x - box0.x;
+  const dy = y - box0.y;
+  const next: Block = { ...block, box: { x, y, w: round4(w), h: round4(h) } };
+  if (scaled) next.contentBox = undefined;
+  else if (block.contentBox) next.contentBox = { ...block.contentBox, x: block.contentBox.x + dx, y: block.contentBox.y + dy };
+  return next;
+}
+
 /** The currently-effective global caption style: explicit setting wins, else derived from the first sentence-level caption's slots (a stable initial value
  *  for the panel selected-state and canvas handles); if there's no caption yet, take the default. */
 /** Default subtitle box width (canvas width %): ≈ 13 CJK chars per line at 40px font. */

@@ -18,6 +18,7 @@ import {
   type VideoShot,
   CAPTION_PRESETS,
   SHOT_TREATMENTS,
+  applyBlockPlacement,
   blockId,
   blockKind,
   freeTrack,
@@ -29,6 +30,7 @@ import {
   shotId,
   splitBlockedByTransition,
   totalDuration,
+  zoneOf,
 } from '@pireel/studio-engine/composition';
 import { removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
@@ -434,6 +436,16 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const d = Number(input.durationSec);
             resizeBlock(b.id, s, d);
             return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(s), to: r1(s + d) }) };
+          }
+          case 'place_block': {
+            const b = findBlock(input.blockId);
+            if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            if (isSentenceCaption(b)) return { ok: false, error: t('workbench.captionLayerPlaceHint') };
+            if (!b.box) return { ok: false, error: t('workbench.blockHasNoBox') };
+            const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
+            if (!next) return { ok: false, error: t('workbench.placeNoDirective') };
+            setComp((cc) => ({ ...cc, blocks: cc.blocks.map((x) => (x.id === b.id ? next : x)) }));
+            return { ok: true, summary: t('workbench.placedNameZone', { name: bname(b), zone: zoneOf(next.box!) }), data: { box: next.box } };
           }
           case 'delete_block': {
             const b = findBlock(input.blockId);
