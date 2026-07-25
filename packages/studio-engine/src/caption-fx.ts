@@ -269,11 +269,10 @@ export function chunkWordsByWidth(words: FxWord[], maxUnits = CAPTION_LINE_UNITS
  *  budget here once cut landscape cues wider than their box and forced chronic wrapping.
  *  Object identity is preserved (chunks are slices), so callers' word metadata rides along. */
 export function cueChunks<W extends { text: string }>(words: W[], opts?: { maxEm?: number }): W[][] {
-  // (56% × 1080 − plate padding ≈ 558px) / 48px base ≈ 11.6em; minus per-word flex-gap overhead
-  // (~0.18em × word count) → 10 keeps every preset's cue reliably on one line at scale 1
-  const maxEm = opts?.maxEm ?? 10;
-  const gapEm = 0.18; // inter-word flex gap in the render, mirrored coarsely
-  return chunkWordsBalanced(words, maxEm + gapEm, (w) => estWordEm(w.text) + gapEm);
+  // (56% × 1080 − plate padding ≈ 558px) / 48px base ≈ 11.6em; words render with no inter-word
+  // gap (subtitle convention) → 11 keeps every preset's cue on one line at scale 1
+  const maxEm = opts?.maxEm ?? 11;
+  return chunkWordsBalanced(words, maxEm, (w) => estWordEm(w.text));
 }
 
 /**
