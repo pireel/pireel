@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { chunkWordsByWidth } from './caption-fx';
-import { captionBlocksFromAsr } from './build-blocks';
+import { type AsrSegment, captionBlocksFromAsr, toCueSegments } from './build-blocks';
 import { renderBlock } from './composition';
 
 const w = (text: string, start: number, end: number) => ({ text, start, end });
@@ -85,5 +85,63 @@ describe('captionBlocksFromAsr(一句一块;拆段在渲染期,不落数据)', (
     expect(r0.innerHtml).toContain('<span>everyone</span>');
     expect(r0.innerHtml).toContain('cap-sub-line');
     expect(renderBlock(blocks[1]!).innerHtml).not.toContain('cap-sub');
+  });
+});
+
+describe('toCueSegments(提取期切 cue:一段 = 一屏一行,定死不再动态)', () => {
+  const longText = '这是一个非常非常长的句子它应该在提取的时候被切成好几条独立的字幕';
+  it('长句切成多条 cue 段:cue 标记/词覆盖完整/文本可拼回/时间贴词', () => {
+    const segs = toCueSegments([{ start: 0, end: 10, text: longText }]);
+    expect(segs.length).toBeGreaterThanOrEqual(2);
+    for (const s of segs) {
+      expect(s.cue).toBe(true);
+      expect(s.words!.length).toBeGreaterThan(0);
+      expect(s.start).toBe(s.words![0]!.start);
+    }
+    expect(segs.map((s) => s.text).join('')).toBe(longText);
+    for (let i = 1; i < segs.length; i++) expect(segs[i]!.start).toBeGreaterThanOrEqual(segs[i - 1]!.words!.at(-1)!.end - 1e-6);
+  });
+  it('短句单条 cue;幂等(再过一遍不变);空文本原样透传', () => {
+    const once = toCueSegments([{ start: 0, end: 2, text: '大家好' }, { start: 2, end: 3, text: ' ' }]);
+    expect(once[0]!.cue).toBe(true);
+    expect(once[0]!.text).toBe('大家好');
+    expect(once[1]!.cue).toBeUndefined();
+    expect(toCueSegments(once)).toEqual(once);
+  });
+  it('有 ASR 词级时间戳时按真实时序切(cue 起止 = 词窗口,不是均摊)', () => {
+    // 18 个字,前 10 个说得快(0–1s),后 8 个慢(3–7s):句窗到 8s,但末词 7.0s 结束
+    const chars = [...'前面十个字说得很快后面十个字说得很慢'];
+    const words = chars.map((ch, i) => (i < 10 ? { text: ch, start: i * 0.1, end: i * 0.1 + 0.1 } : { text: ch, start: 3 + (i - 10) * 0.5, end: 3 + (i - 10) * 0.5 + 0.5 }));
+    const segs = toCueSegments([{ start: 0, end: 8, text: chars.join(''), words }]);
+    expect(segs.length).toBeGreaterThanOrEqual(2);
+    expect(segs[0]!.start).toBe(0);
+    // 贴词:末 cue 止于末词 7.0s;文本均摊会拉到句窗 8.0s
+    expect(segs.at(-1)!.end).toBeCloseTo(7.0, 3);
+  });
+  it('landscape 预算更宽,同句切段更少', () => {
+    const p = toCueSegments([{ start: 0, end: 10, text: longText }]);
+    const l = toCueSegments([{ start: 0, end: 10, text: longText }], { landscape: true });
+    expect(l.length).toBeLessThanOrEqual(p.length);
+  });
+});
+
+describe('cue 块渲染(静态单行,不轮播)', () => {
+  it('cue 段进块带 slots.cue;渲染只有一个 cap-line、flex-wrap:wrap、无第二段轮播', () => {
+    const segs = toCueSegments([{ start: 0, end: 10, text: '这是一个非常非常长的句子它应该在提取的时候被切成好几条独立的字幕' }]);
+    const blocks = captionBlocksFromAsr(segs);
+    expect(blocks.length).toBe(segs.length);
+    for (const b of blocks) expect(b.slots.cue).toBe(true);
+    const r = renderBlock(blocks[0]!);
+    expect(r.innerHtml).toContain('-s0');
+    expect(r.innerHtml).not.toContain('-s1'); // 不再产出第二个轮播段
+    expect(r.innerHtml).toContain('flex-wrap:wrap');
+    expect(r.timelineBody).not.toContain('-s1'); // 时间线上也没有段轮播
+  });
+  it('legacy 整句段(无 cue 标记)保持旧轮播路径:多段 + 时间线切换', () => {
+    const legacy: AsrSegment[] = [{ start: 0, end: 10, text: '这是一个非常非常长的句子它应该在渲染的时候被拆成好几段轮播展示' }];
+    const r = renderBlock(captionBlocksFromAsr(legacy)[0]!);
+    expect(r.innerHtml).toContain('-s1'); // 仍然拆出多段
+    expect(r.innerHtml).toContain('flex-wrap:nowrap');
+    expect(r.timelineBody).toContain('-s1'); // 轮播 set 仍在
   });
 });

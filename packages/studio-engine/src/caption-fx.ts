@@ -60,11 +60,6 @@ export function easeOutBack(x: number): number {
   return 1 + c3 * Math.pow(v - 1, 3) + c1 * Math.pow(v - 1, 2);
 }
 
-/**
- * Cut word-level timing from one caption's text + time window (for turning a static caption into an effect).
- * CJK chunks by cjkChunk chars, Latin splits on whitespace, time is allocated linearly within [start,end] by char length.
- * True word-level timing should come from ASR (DashScope filetrans is natively word-level); this is a decent fallback without ASR.
- */
 /** Two adjacent words both Latin/digit → a real space between them (adjacent CJK doesn't need one). Shared predicate
  *  across three places: render-layer .sp spacing, sentence rebuild (joinWords), transcript panel word stream. */
 export const latinJoin = (a: string, b: string): boolean => /[A-Za-z0-9.,!?;:'")\]%]$/.test(a) && /^[A-Za-z0-9('"[$]/.test(b);
@@ -79,15 +74,48 @@ export function joinWords(texts: string[]): string {
   return out;
 }
 
-export function wordsFromText(text: string, start: number, end: number, cjkChunk = 2): FxWord[] {
-  const toks: string[] = [];
-  for (const piece of text.trim().split(/\s+/).filter(Boolean)) {
-    if (/[一-鿿぀-ヿ가-힯]/.test(piece)) {
-      for (let i = 0; i < piece.length; i += cjkChunk) toks.push(piece.slice(i, i + cjkChunk));
-    } else {
-      toks.push(piece);
+/** ICU dictionary word segmentation (Intl.Segmenter, granularity 'word'): CJK breaks at real word
+ *  boundaries (「科学家」 stays one token — the old fixed 2-char slicing cut through words), Latin splits
+ *  on spaces, and punctuation glues onto the token before it (a subtitle token = word + trailing
+ *  punctuation, never a standalone token). Runtimes without Intl.Segmenter (defensive; all our
+ *  targets ship full ICU) fall back to whitespace + 2-char CJK slicing. */
+let icuSegmenter: Intl.Segmenter | null | undefined;
+export function segmentTokens(text: string): string[] {
+  const t = text.trim();
+  if (!t) return [];
+  if (icuSegmenter === undefined) {
+    try {
+      icuSegmenter = new Intl.Segmenter('zh-Hans', { granularity: 'word' });
+    } catch {
+      icuSegmenter = null;
     }
   }
+  if (!icuSegmenter) {
+    const toks: string[] = [];
+    for (const piece of t.split(/\s+/).filter(Boolean)) {
+      if (/[一-鿿぀-ヿ가-힯]/.test(piece)) {
+        for (let i = 0; i < piece.length; i += 2) toks.push(piece.slice(i, i + 2));
+      } else toks.push(piece);
+    }
+    return toks;
+  }
+  const toks: string[] = [];
+  for (const g of icuSegmenter.segment(t)) {
+    const piece = g.segment.trim();
+    if (!piece) continue;
+    if (g.isWordLike || !toks.length) toks.push(piece);
+    else toks[toks.length - 1] += piece;
+  }
+  return toks;
+}
+
+/**
+ * Cut word-level timing from one caption's text + time window. Tokens come from ICU word
+ * segmentation (segmentTokens); time is allocated linearly within [start,end] by char length.
+ * This is the NO-ASR fallback — real word timing comes from ASR (groupAsrWords).
+ */
+export function wordsFromText(text: string, start: number, end: number): FxWord[] {
+  const toks = segmentTokens(text);
   if (toks.length === 0) return [];
   const totalLen = toks.reduce((n, t) => n + t.length, 0) || 1;
   const span = Math.max(0.0001, end - start);
@@ -99,6 +127,47 @@ export function wordsFromText(text: string, start: number, end: number, cjkChunk
     cur += dur;
   }
   return out;
+}
+
+/** Letters+digits only (any script) — the alignment currency between ASR tokens and ICU words:
+ *  punctuation/space counts are unreliable across tokenizers, letter counts are not. */
+const alnumCount = (s: string): number => {
+  let n = 0;
+  for (const ch of s) if (/[\p{L}\p{N}]/u.test(ch)) n++;
+  return n;
+};
+
+/** ASR word tokens (zh models often emit per-char/per-morpheme pieces) → ICU-word groups with merged
+ *  timings: re-segment the sentence text into real words, then walk the ASR token stream and consume
+ *  tokens by letter/digit count until each word is covered (first token's start / last token's end
+ *  become the word's window). Any mismatch → return the raw ASR tokens unchanged (real timing beats
+ *  pretty grouping). */
+export function groupAsrWords(text: string, asr: { text: string; start: number; end: number }[]): FxWord[] {
+  const flat = asr.filter((w) => w.text.trim() && w.end > w.start);
+  const toks = segmentTokens(text);
+  if (!toks.length || !flat.length) return flat.map((w) => ({ text: w.text.trim(), start: w.start, end: w.end }));
+  const out: FxWord[] = [];
+  let i = 0;
+  for (const tk of toks) {
+    const want = alnumCount(tk);
+    if (want === 0) {
+      // pure-punctuation token (only possible at sentence start — elsewhere punctuation is glued): merge into the previous word
+      if (out.length) out[out.length - 1]!.text += tk;
+      continue;
+    }
+    let got = 0;
+    let first: number | null = null;
+    let last = 0;
+    while (i < flat.length && got < want) {
+      if (first == null) first = flat[i]!.start;
+      last = flat[i]!.end;
+      got += alnumCount(flat[i]!.text);
+      i++;
+    }
+    if (first == null) break;
+    out.push({ text: tk, start: round3(first), end: round3(Math.max(first, last)) });
+  }
+  return out.length === toks.length ? out : flat.map((w) => ({ text: w.text.trim(), start: w.start, end: w.end }));
 }
 
 function round3(x: number): number {

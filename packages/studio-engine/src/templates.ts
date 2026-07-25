@@ -119,7 +119,7 @@ function renderCaption(slots: Slots, id: string): Rendered {
     ...(typeof slots.subColor === 'string' ? { color: slots.subColor as string } : {}),
     ...(slots.subBg === null || typeof slots.subBg === 'string' ? { bg: slots.subBg as string | null } : {}),
   };
-  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv);
+  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv, slots.cue === true);
 }
 
 /** Preset font → CSS font-family (serif → Noto Serif SC, mono → theme --font-num, default → theme body). */
@@ -180,7 +180,7 @@ export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: num
   return chunkWordsBalanced(words, Math.max(fs * 2, budgetPx + gapPx), (w) => wordPx(w.text) + gapPx + (extra.get(w) ?? 0));
 }
 
-function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null } = {}, subOv: { preset?: string; color?: string; bg?: string | null } = {}): Rendered {
+function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null } = {}, subOv: { preset?: string; color?: string; bg?: string | null } = {}, cue = false): Rendered {
   // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
   // use (segmentation budget, pill, css, karaoke revert color) consistent with the overridden look.
   if (ov.color != null || ov.bg !== undefined) p = { ...p, ...(ov.color != null ? { text: ov.color } : {}), ...(ov.bg !== undefined ? { bg: ov.bg ?? undefined } : {}) };
@@ -189,7 +189,10 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
   const fs = Math.max(10, Math.round(p.size * scale));
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
-  const segs = captionLineSegments(words, p, wPct, scale, canvasW);
+  // Cue blocks are pre-split to one line at extraction (toCueSegments) — render the whole block as a
+  // single static segment (no rotation; extreme font scales wrap in CSS instead). Legacy sentence
+  // blocks keep the render-time segmentation + rotation below.
+  const segs = cue ? [words] : captionLineSegments(words, p, wPct, scale, canvasW);
   let wIdx = 0;
   const segHtml = segs
     .map((g, si) => {
@@ -240,7 +243,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // cap-center-probe.mjs; after the fix top/bottom whitespace is level at 15/16px).
   const css = `
 #${id} .cap-root { position:absolute; inset:0; }
-#${id} .cap-line { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; display:flex; flex-wrap:nowrap; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; width:${n(wPct)}%; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }
+#${id} .cap-line { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; display:flex; flex-wrap:${cue ? 'wrap' : 'nowrap'}; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; width:${n(wPct)}%; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }
 #${id} .w { position:relative; top:-0.04em; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
 #${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.12)}px; }${subCss}`.trim();

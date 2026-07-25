@@ -49,7 +49,7 @@ export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (
       else groups[groups.length - 1]!.push(words[i]!);
     }
     // Translation (sub) follows only the first group: when a sentence is split into several, re-laying the whole-sentence translation would stack two copies
-    groups.forEach((g, gi) => out.push({ start: g[0]!.start, end: g[g.length - 1]!.end, text: joinWords(g.map((w) => w.text)), words: g, ...(gi === 0 && s.sub ? { sub: s.sub } : {}) }));
+    groups.forEach((g, gi) => out.push({ start: g[0]!.start, end: g[g.length - 1]!.end, text: joinWords(g.map((w) => w.text)), words: g, ...(s.cue ? { cue: true } : {}), ...(gi === 0 && s.sub ? { sub: s.sub } : {}) }));
   }
   return out;
 }

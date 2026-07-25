@@ -13,7 +13,7 @@
 import { useRef, type MutableRefObject } from 'react';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { DraftPlan, PlanInsert } from '@pireel/studio-engine/plan';
-import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, toCueSegments } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type VisualTimeline, analyzeVisual } from './visual';
 import { t } from './i18n';
@@ -57,7 +57,8 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
       const vf = videoFileRef.current;
       if (!vf) throw new Error(t('common.uploadVideoFirst'));
       report?.(t('common.transcribing'));
-      const segs = await studioProviders().transcriber.transcribe(vf);
+      // Cue the transcript right at extraction (one segment = one caption line, frozen — no render-time re-splitting)
+      const segs = toCueSegments(await studioProviders().transcriber.transcribe(vf), { landscape: compRef.current.width > compRef.current.height });
       asrRef.current = segs;
       setAsrSentences(segs);
       return segs;
