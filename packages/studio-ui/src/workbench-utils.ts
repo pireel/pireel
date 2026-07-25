@@ -33,9 +33,15 @@ export function personFxFromFrame(m: Record<string, string>): PersonFx {
  * (video fills via object-fit:cover), uniform scaling.
  */
 export const REF_WIDTH = 1080;
+/** Canvas follows the SOURCE aspect with the short side normalized to 1080 (per user — the canvas is
+ *  the video, not a width-normalized frame): portrait 1080×H, landscape W×1080, square 1080×1080.
+ *  Caption geometry derives from the real width, so a 16:9 canvas holds a full single-line subtitle
+ *  (~21em ≈ 42 latin chars) while portrait stays at the ~11-char line. */
 export function normalizeDims(w: number, h: number): { width: number; height: number } {
   if (!w || !h) return { width: REF_WIDTH, height: 1920 };
-  return { width: REF_WIDTH, height: Math.round((REF_WIDTH * h) / w) };
+  return w >= h
+    ? { width: Math.round((REF_WIDTH * w) / h), height: REF_WIDTH }
+    : { width: REF_WIDTH, height: Math.round((REF_WIDTH * h) / w) };
 }
 
 /** A shot's span on the final timeline (start + duration). */

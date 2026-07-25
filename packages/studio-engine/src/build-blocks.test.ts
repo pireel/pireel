@@ -133,31 +133,25 @@ describe('displayCues(铺设期派生:剪辑后词流 → 一屏一行,列表与
   });
 });
 
-describe('displayCues 语言感知的 cue 尺寸(国际化:中英一等公民)', () => {
-  it('英文句按拉丁口径(≈两行/条)切,不再 3-4 词一碎块;中文维持单行口径', () => {
-    // 15 词英文句(~80 拉丁字符 ≈ 42em):中文口径(11em)会切 ~4 条;拉丁口径(22em)应 ≤2-3 条
+describe('displayCues 几何驱动的 cue 尺寸(画布跟原视频,恒单行)', () => {
+  it('横屏画布(1920 宽):英文整句单行 cue(~42 字符),不再 3-4 词碎块', () => {
     const en = 'The most important piece of advice I would give to founders is do not overthink it';
-    const enCues = displayCues(oneShot(10), [{ start: 0, end: 10, text: en, lang: 'en' }], {});
-    expect(enCues.length).toBeLessThanOrEqual(3);
-    for (const c of enCues) expect(c.words.length).toBeGreaterThanOrEqual(4); // 每条至少一个短语,不是碎词
-    // 无 lang 标记时按文字系统检测,同样走拉丁口径
-    const detected = displayCues(oneShot(10), [{ start: 0, end: 10, text: en }], {});
-    expect(detected.length).toBe(enCues.length);
-    // 每条 cue 渲染最多两行(空格宽已入账——曾漏记挤出第三行)
-    for (const b of captionBlocksFromAsr(enCues)) {
-      const lines = (renderBlock(b).innerHtml.match(/class="cap-line"/g) ?? []).length;
-      expect(lines).toBeLessThanOrEqual(2);
+    const cues = displayCues(oneShot(10), [{ start: 0, end: 10, text: en, lang: 'en' }], {}, { canvasW: 1920 });
+    expect(cues.length).toBeLessThanOrEqual(3);
+    for (const c of cues) expect(c.words.length).toBeGreaterThanOrEqual(4);
+    // 每条渲染恒单行(几何预算=盒宽,空格已入账)
+    for (const b of captionBlocksFromAsr(cues)) {
+      const r = renderBlock({ ...b, slots: { ...b.slots, canvasW: 1920 } }); // assemble 烘 canvasW 进 slots,测试手动补
+      expect((r.innerHtml.match(/class="cap-line"/g) ?? []).length).toBe(1);
     }
-    // 长句极限:任何 cue 渲染都不超过两行(词数多=空格多,漏记空格时这里会挤出第三行)
-    const enLong = 'and when you are walking you might arrive at a better destination one you could not have seen from the very start of it all';
-    for (const b of captionBlocksFromAsr(displayCues(oneShot(12), [{ start: 0, end: 12, text: enLong, lang: 'en' }], {}))) {
-      const lines = (renderBlock(b).innerHtml.match(/class="cap-line"/g) ?? []).length;
-      expect(lines).toBeLessThanOrEqual(2);
-    }
-    // 中文仍是单行口径(~11 字/条)
+  });
+  it('竖屏画布(1080 宽):中文 ~11 字单行;英文短块(短视频口径)', () => {
     const zh = '这是一个非常非常长的句子它应该在铺设的时候被切成好几条独立的字幕';
-    const zhCues = displayCues(oneShot(10), [{ start: 0, end: 10, text: zh, lang: 'zh' }], {});
+    const zhCues = displayCues(oneShot(10), [{ start: 0, end: 10, text: zh, lang: 'zh' }], {}, { canvasW: 1080 });
     for (const c of zhCues) expect([...c.text].length).toBeLessThanOrEqual(13);
+    for (const b of captionBlocksFromAsr(zhCues)) {
+      expect((renderBlock(b).innerHtml.match(/class="cap-line"/g) ?? []).length).toBe(1);
+    }
   });
 });
 

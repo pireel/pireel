@@ -525,9 +525,9 @@ export function isSentenceCaption(block: Block): boolean {
 
 /** The currently-effective global caption style: explicit setting wins, else derived from the first sentence-level caption's slots (a stable initial value
  *  for the panel selected-state and canvas handles); if there's no caption yet, take the default. */
-/** Default subtitle box width (canvas width %): ≈13 CJK chars per line at the default font. The canvas
- *  is WIDTH-NORMALIZED (normalizeDims: width always 1080, only height varies with aspect), so this one
- *  ratio yields the same comfortable line length on every aspect — no aspect-specific default needed. */
+/** Default subtitle box width (canvas width %). The canvas follows the SOURCE aspect with the short
+ *  side normalized to 1080 (normalizeDims): portrait 1080-wide → ≈11 zh chars per line; landscape
+ *  1920-wide → a full single-line subtitle (~21 zh / ~42 latin chars). One ratio, geometry does the rest. */
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
 export function resolveCaptionStyle(comp: Composition): CaptionStyle {
