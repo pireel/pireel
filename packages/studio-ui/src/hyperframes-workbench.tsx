@@ -3052,7 +3052,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!bootDataReady) return;
     const c = compRef.current;
     const on = isCaptionsOn(c);
-    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { subLang: resolveCaptionStyle(c).sub?.lang }) : [];
+    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { subLang: resolveCaptionStyle(c).sub?.lang, canvasW: c.width }) : [];
     // On with nothing derivable (no transcript, e.g. a legacy comp whose context never mirrored):
     // keep whatever exists — the persisted legacy blocks keep rendering, nothing is destroyed.
     if (on && !cues.length) return;

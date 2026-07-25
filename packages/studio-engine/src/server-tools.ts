@@ -302,7 +302,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       const blocks = removeEditedInterval(c.blocks, r.removed[0], r.removed[1]);
       return {
         result: { ok: true, summary: `Trimmed the ${side === 'left' ? 'left' : 'right'} side at ${r1(at)}s` },
-        comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context)) },
+        comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
       };
     }
     case 'delete_shot': {
@@ -312,7 +312,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       const blocks = removeEditedInterval(c.blocks, r.removed[0], r.removed[1]);
       return {
         result: { ok: true, summary: 'Deleted this scene' },
-        comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context)) },
+        comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
       };
     }
     case 'cut_range':
@@ -350,7 +350,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
         removedCount++;
       }
       if (!removedCount) return { result: { ok: false, error: 'cannot remove these ranges (they may cover the entire video)' } };
-      const relaid = relayCaptionLayer(blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context));
+      const relaid = relayCaptionLayer(blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
       return {
         result: { ok: true, summary: tool === 'cut_narration' ? `Cut ${removedCount} segments by transcript` : 'Removed the specified range' },
         comp: { ...c, shots: curShots, blocks: relaid },
@@ -396,7 +396,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       let base = c;
       if (preset) {
         if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
-        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { subLang: resolveCaptionStyle(c).sub?.lang });
+        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { subLang: resolveCaptionStyle(c).sub?.lang, canvasW: c.width });
         if (!cues.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
         base = stripDerivedCaptions(c, true); // legacy persisted caption blocks retire now that derivation is proven possible
       }

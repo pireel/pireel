@@ -9,7 +9,9 @@
  * tier as build-draft/build-blocks).
  */
 
-import { cueChunks, detectLang, wordsFromText } from './caption-fx';
+import { cueChunks, wordsFromText } from './caption-fx';
+import { BASE_CAPTION_FONT_PX } from './caption-presets';
+import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
 import { spans as clipSpans, srcToEditedLoose } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
@@ -89,8 +91,9 @@ export function displayCues(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
   clipAsr: Record<string, AsrSegment[]>,
-  opts?: { subLang?: string },
+  opts?: { subLang?: string; canvasW?: number },
 ): DisplayCue[] {
+  const budgetEm = Math.max(6, Math.floor(((DEFAULT_CAPTION_WIDTH_PCT / 100) * (opts?.canvasW ?? 1080) - BASE_CAPTION_FONT_PX) / BASE_CAPTION_FONT_PX));
   const out: DisplayCue[] = [];
   for (const g of mappedCaptionSegs(shots, narr, clipAsr)) {
     const words = g.words;
@@ -99,12 +102,11 @@ export function displayCues(
     const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
     const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
-    // Language-aware cue size (international product, zh/en are both first-class): CJK convention is
-    // ONE line per subtitle event (~11 full-width chars); Latin-script convention is up to TWO lines
-    // (Netflix ~42 chars/line — a cue holds a clause, not 3-4 words). 22em ≈ two display lines; the
-    // stack renders them together, so an EN cue reads as one block instead of rapid tiny flips.
-    const latin = (srcSeg?.lang ?? g.lang ?? detectLang(g.text)) === 'en';
-    const chunks = cueChunks(words, { maxEm: latin ? 22 : 11 });
+    // ONE line per cue, sized by the real canvas (the canvas follows the source aspect, short side
+    // 1080): budget = default box width in em minus plate/safety — a 16:9 canvas holds a full
+    // single-line subtitle (~21em ≈ 42 latin chars ≈ 21 zh chars), portrait ≈11 zh chars. Geometry,
+    // not language, decides the cue size.
+    const chunks = cueChunks(words, { maxEm: budgetEm });
     for (const c of chunks) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
@@ -136,7 +138,7 @@ export function relayCaptionLayer(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
   clipAsr: Record<string, AsrSegment[]>,
-  opts?: { subLang?: string },
+  opts?: { subLang?: string; canvasW?: number },
 ): Block[] {
   if (!blocks.some(isSentenceCaption)) return blocks;
   const cues = displayCues(shots, narr, clipAsr, opts);
