@@ -124,6 +124,7 @@ export function CaptionEditOverlay({
   stageW,
   stageH,
   measured,
+  lines,
   onChange,
   onLive,
 }: {
@@ -133,10 +134,13 @@ export function CaptionEditOverlay({
   stageH: number;
   /** iframe-measured caption line rect (w/h normalized + scale at measure time): before a measurement, falls back to an estimated band. */
   measured: { w: number; h: number; scale: number } | null;
+  /** Visual line count (cue blocks stack lines at large font sizes): multiplies the analytic text height so the box tracks size changes instantly. Default 1. */
+  lines?: number;
   onChange: (patch: Partial<CaptionStyle>) => void;
   /** Live preview during drag (zero setState, same as the component hf:boxSize contract): workbench sends hf:capStyle to edit the iframe directly. */
   onLive: (style: CaptionStyle) => void;
 }) {
+  const lineCount = Math.max(1, lines ?? 1);
   // Local live style during drag (re-renders only this overlay): the box follows the pointer, not hidden (per user), the iframe is edited directly by onLive.
   // ghost = line-width drag: the baseline solid line stays put, a dashed line follows, the iframe isn't touched, and on release a single rebuild applies the change
   const [liveStyle, setLiveStyle] = useState<CaptionStyle | null>(null);
@@ -157,7 +161,8 @@ export function CaptionEditOverlay({
   const textHNorm = (s: CaptionStyle) => {
     const fsC = Math.max(10, Math.round(fontPx * s.scale));
     const padC = capPreset.bg ? Math.round(fsC * 0.22) * 2 : 0;
-    return ((fsC * 1.2 + padC) * k) / stageH;
+    // Multi-line stacks (cue blocks at large fonts): N lines, each with its own plate, plus the render's row-gap
+    return (((fsC * 1.2 + padC) * lineCount + Math.round(fsC * 0.12) * (lineCount - 1)) * k) / stageH;
   };
   const rectOf = (s: CaptionStyle) => {
     const w = Math.max(60, ((s.wPct ?? 56) / 100) * stageW);

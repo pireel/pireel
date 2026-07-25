@@ -189,10 +189,11 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
   const fs = Math.max(10, Math.round(p.size * scale));
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
-  // Cue blocks are pre-split to one line at extraction (toCueSegments) — render the whole block as a
-  // single static segment (no rotation; extreme font scales wrap in CSS instead). Legacy sentence
-  // blocks keep the render-time segmentation + rotation below.
-  const segs = cue ? [words] : captionLineSegments(words, p, wPct, scale, canvasW);
+  // Both modes split into visual lines at the CURRENT font size (same px-accurate budget). The
+  // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
+  // line — standard subtitle look; at scale 1 a cue fits one line so the stack is a single line);
+  // legacy sentence blocks keep the old one-line-at-a-time rotation.
+  const segs = captionLineSegments(words, p, wPct, scale, canvasW);
   let wIdx = 0;
   const segHtml = segs
     .map((g, si) => {
@@ -227,6 +228,11 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     ? `<div class="cap-sub" id="${id}-sub">${subSegs.map((g) => `<div class="cap-sub-line">${g.map((w, k) => `<span${k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' class="sp"' : ''}>${escapeHtml(w.text)}</span>`).join('')}</div>`).join('')}</div>`
     : '';
   const subAnchor = subStyle?.yPct != null ? `bottom:${n(100 - subStyle.yPct)}%;` : `top:calc(${n(yPct)}% + ${Math.round(fs * 0.2)}px);`;
+  // Cue mode: lines live in a bottom-anchored column (.cap-stack) — the stack owns the position
+  // anchor/box width/min-height; each line hugs its own text with its own plate.
+  const stackCss = cue
+    ? `\n#${id} .cap-stack { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); width:${n(wPct)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; row-gap:${Math.round(fs * 0.12)}px; pointer-events:none; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}}`
+    : '';
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''} }
 #${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow && !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''}${subPill} }`
@@ -243,22 +249,26 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // cap-center-probe.mjs; after the fix top/bottom whitespace is level at 15/16px).
   const css = `
 #${id} .cap-root { position:absolute; inset:0; }
-#${id} .cap-line { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; display:flex; flex-wrap:${cue ? 'wrap' : 'nowrap'}; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; width:${n(wPct)}%; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }
+${stackCss}
+#${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; pointer-events:auto; ${pill} }
 #${id} .w { position:relative; top:-0.04em; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
 #${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.12)}px; }${subCss}`.trim();
 
-  // Segment cycling: all hidden first; each segment enters at its first word's time, and goes dark
-  // when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
+  // Legacy segment cycling: all hidden first; each segment enters at its first word's time, and goes
+  // dark when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
   // (set): the fade-in + rise version had a 0.22s semi-transparent gap between sentences that felt like flicker in playback (user-reported).
-  const lines: string[] = [`gsap.set('#${id} .cap-line', { autoAlpha: 0 });`];
+  // Cue mode has NO cycling — all stacked lines are simply visible; the block window gates on/off.
+  const lines: string[] = cue ? [] : [`gsap.set('#${id} .cap-line', { autoAlpha: 0 });`];
   if (sub) lines.push(`tl.set('#${id}-sub', { autoAlpha: 1 }, 0);`);
-  segs.forEach((g, si) => {
-    const segStart = si === 0 ? 0 : Math.max(0, g[0]!.start - start);
-    lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 1 }, ${n(segStart)});`);
-    const nxt = segs[si + 1];
-    if (nxt) lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 0 }, ${n(Math.max(0, nxt[0]!.start - start))});`);
-  });
+  if (!cue) {
+    segs.forEach((g, si) => {
+      const segStart = si === 0 ? 0 : Math.max(0, g[0]!.start - start);
+      lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 1 }, ${n(segStart)});`);
+      const nxt = segs[si + 1];
+      if (nxt) lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 0 }, ${n(Math.max(0, nxt[0]!.start - start))});`);
+    });
+  }
   if (p.mode === 'emphasis') {
     words.forEach((w, i) => {
       const ws = w.start - start;
@@ -274,7 +284,8 @@ ${decoCss}
       }
     });
   }
-  return { innerHtml: `<div class="cap-root">${segHtml}${subHtml}</div>\n<style>${css}</style>`, timelineBody: lines.join('\n') };
+  const mainHtml = cue ? `<div class="cap-stack">${segHtml}</div>` : segHtml;
+  return { innerHtml: `<div class="cap-root">${mainHtml}${subHtml}</div>\n<style>${css}</style>`, timelineBody: lines.join('\n') };
 }
 
 function renderSlam(words: FxWord[], id: string, scale = 1): Rendered {

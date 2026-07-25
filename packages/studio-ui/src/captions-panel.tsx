@@ -345,6 +345,8 @@ export function CaptionsPanel({
                     }}
                     onClick={() => {
                       if (editingSub || !onEditSubLine) return;
+                      // Same seek-into-the-cue as the main line: clicking the translation locates the video too
+                      onSeekTo?.(row.editedStart + Math.min(0.3, (row.dur ?? 0.6) / 2));
                       frozenTextRef.current = row.sub ?? '';
                       setEditingPart('sub');
                       setEditingKey(row.key);

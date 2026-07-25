@@ -163,10 +163,16 @@ describe('cue 块渲染(静态单行,不轮播)', () => {
     expect(new Set(blocks.map((b) => b.id)).size).toBe(blocks.length); // 确定性 id 且互不相同
     expect(captionBlocksFromAsr(cues).map((b) => b.id)).toEqual(blocks.map((b) => b.id)); // 再派生一次 id 稳定
     const r = renderBlock(blocks[0]!);
+    expect(r.innerHtml).toContain('cap-stack'); // cue = 堆叠容器(每行独立底板)
     expect(r.innerHtml).toContain('-s0');
-    expect(r.innerHtml).not.toContain('-s1'); // 不再产出第二个轮播段
-    expect(r.innerHtml).toContain('flex-wrap:wrap');
-    expect(r.timelineBody).not.toContain('-s1'); // 时间线上也没有段轮播
+    expect(r.innerHtml).not.toContain('-s1'); // 默认字号下 cue 恰好一行
+    expect(r.timelineBody).not.toContain('autoAlpha: 0'); // 无轮播隐藏,行常显、块窗口门控
+    // 大字号触发多行:行仍全部同时可见(堆叠),时间线依旧无轮播
+    const big = { ...blocks[0]!, slots: { ...blocks[0]!.slots, scale: 2.4 } };
+    const rb = renderBlock(big);
+    expect(rb.innerHtml).toContain('-s1'); // 切出第二行
+    expect(rb.innerHtml).toContain('cap-stack');
+    expect(rb.timelineBody).not.toContain('autoAlpha: 0'); // 多行也不轮播
   });
   it('legacy 整句块(无 cue 标记)保持旧轮播路径:多段 + 时间线切换', () => {
     const legacy: AsrSegment[] = [{ start: 0, end: 10, text: '这是一个非常非常长的句子它应该在渲染的时候被拆成好几段轮播展示' }];
