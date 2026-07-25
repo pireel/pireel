@@ -44,7 +44,9 @@ import {
   emptyComposition,
   freeTrack,
   getCaptionPreset,
+  isCaptionsOn,
   isSentenceCaption,
+  stripDerivedCaptions,
   mediaBlock,
   newBlock,
   renderBlock,
@@ -68,14 +70,14 @@ import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { injectPreviewRuntime } from './sample-composition';
 import { playhead } from './playhead';
-import { type AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, captionBlocksFromAsr, desegmentCues } from '@pireel/studio-engine/build-blocks';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
-import { beatsForWindow as beatsForWindowPure, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
+import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS } from './studio-timeline';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
@@ -1066,7 +1068,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Autosave runs regardless (pure side effect: debounced draft write); the toolbar no longer shows a "project/saved" time
   // videoSigRef first: in the missing-media state (no File on this device) the draft's sig anchor
   // must survive autosave — writing null would wipe the cloud row's reconnect anchor.
-  useDraftAutosave(comp, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef);
+  // Persist-side comp: derived caption blocks are STRIPPED (transcript + captionStyle.on carry the
+  // caption state); only strippable when a transcript exists to re-derive from. The draft also carries
+  // the transcripts so a zero-backend reopen (OSS shell / offline) can re-derive the caption layer.
+  const canDeriveCaptions = (asrSentences?.length ?? 0) > 0 || Object.keys(clipAsr).length > 0;
+  const compForSave = useMemo(() => stripDerivedCaptions(comp, canDeriveCaptions), [comp, canDeriveCaptions]);
+  useDraftAutosave(compForSave, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef, () => ({
+    ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
+    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+  }));
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
   // active buffer to apply live (fitScale isn't in the preview doc, so the write-back doesn't trigger a rebuild — see the assembled comment)
@@ -2640,7 +2650,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // transcribeFile caches by fileSig, the two split halves of the same src share one; failures are blacklisted to avoid re-burning ASR
   const clipAsrBusyRef = useRef<Set<string>>(new Set());
   const clipAsrFailRef = useRef<Set<string>>(new Set());
-  const captionsOn = comp.blocks.some(isSentenceCaption);
+  const captionsOn = isCaptionsOn(comp);
   useEffect(() => {
     if (floatWin !== 'script' && !captionsOn) return;
     for (const shot of (comp.shots ?? []).filter((s) => s.src)) {
@@ -2718,6 +2728,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
   });
+  /** Repair pass for transcripts cue-split at extraction (a short-lived scheme): merge cue segments
+   *  back into sentences on load — display cues are DERIVED at lay time now (displayCues), the
+   *  persisted transcript stays sentence-granular. Idempotent; then re-lay so blocks re-derive. */
+  const migrateTranscriptCues = useCallback(() => {
+    let changed = false;
+    if (asrRef.current?.some((s) => s.cue)) {
+      asrRef.current = desegmentCues(asrRef.current);
+      setAsrSentences(asrRef.current);
+      changed = true;
+    }
+    for (const [src, segs] of Object.entries(clipAsrRef.current)) {
+      if (!segs.some((s) => s.cue)) continue;
+      const m = { ...clipAsrRef.current, [src]: desegmentCues(segs) };
+      clipAsrRef.current = m;
+      setClipAsr(m);
+      changed = true;
+    }
+    if (changed && compRef.current.blocks.some(isSentenceCaption)) {
+      setComp((c) => ({ ...c, blocks: relayCaptionLayer(c.blocks, ensureShots(c), asrRef.current) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Clip insertion (multi-source main track) — see use-clip-insert.ts. Same runTool ref indirection as captions.
   const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectClip, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
     comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, planRef, setPlan, setComp, setSelectedId,
@@ -2789,8 +2821,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   function buildCloudPayload() {
     const c = compRef.current;
     if (!(c.blocks.length > 0 || (c.shots?.length ?? 0) > 0) || !projectId) return null;
+    const canDerive = (asrRef.current?.length ?? 0) > 0 || Object.keys(clipAsrRef.current).length > 0;
     return {
-      comp: { ...c, video: null },
+      comp: { ...stripDerivedCaptions(c, canDerive), video: null },
       chat: readChatThreads(projectId),
       context: {
         ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
@@ -2968,6 +3001,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
     if (d.videoSig) videoSigRef.current = d.videoSig;
     setComp(() => ({ ...d.comp, video: null }));
+    // Local-draft transcript hydration (fill gaps only — in-memory state is fresher): captions are
+    // derived from the transcript, so a zero-backend/offline reopen needs it from the draft.
+    const dc = d.context as { asr?: AsrSegment[]; clipAsr?: Record<string, AsrSegment[]> } | undefined;
+    if (dc?.asr?.length && !asrRef.current?.length) {
+      asrRef.current = dc.asr;
+      setAsrSentences(dc.asr);
+    }
+    if (dc?.clipAsr && Object.keys(dc.clipAsr).length && !Object.keys(clipAsrRef.current).length) {
+      clipAsrRef.current = dc.clipAsr;
+      setClipAsr(dc.clipAsr);
+    }
     if (d.videoSig) {
       void loadLocalVideo(d.videoSig).then(async (f) => {
         if (f && pendingRestoreRef.current === d) {
@@ -2997,6 +3041,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // The boot layer's data gate: released once auto-restore (cloud-first falling back to local) finishes —
   // video-byte reconnection (OPFS/cloud fetch) continues behind the gate, not counted as entry waiting
   const [bootDataReady, setBootDataReady] = useState(false);
+  // CAPTIONS ARE DERIVED STATE: transcript × shots × captionStyle.on → display cues, materialized into
+  // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
+  // strips them; the transcript is the single stored source. This one reactive effect replaces the old
+  // scattered manual re-lays: any transcript/cut/toggle change re-derives, so blocks can't go stale.
+  useEffect(() => {
+    if (!bootDataReady) return;
+    const c = compRef.current;
+    const on = isCaptionsOn(c);
+    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { landscape: c.width > c.height }) : [];
+    // On with nothing derivable (no transcript, e.g. a legacy comp whose context never mirrored):
+    // keep whatever exists — the persisted legacy blocks keep rendering, nothing is destroyed.
+    if (on && !cues.length) return;
+    const derived = captionBlocksFromAsr(cues);
+    const sigOf = (bs: typeof derived) => JSON.stringify(bs.map((b) => [b.id, b.startSec, b.durationSec, b.slots.words, b.slots.sub, b.slots.ref]));
+    if (sigOf(derived) === sigOf(c.blocks.filter(isSentenceCaption))) return;
+    setComp((cur) => ({ ...cur, blocks: [...cur.blocks.filter((b) => !isSentenceCaption(b)), ...derived] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootDataReady, asrSentences, clipAsr, comp.shots, comp.captionStyle, comp.width, comp.height, comp.blocks]);
   useEffect(() => {
     if (autoRestoredRef.current) return;
     autoRestoredRef.current = true;
@@ -3073,9 +3135,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             applyRemote(late);
             toast.success(t('workbench.cloudProjectReconnected'));
           }
+          migrateTranscriptCues(); // late-arriving legacy transcript: migrate after it lands
         });
       }
-    })().finally(() => setBootDataReady(true));
+    })().finally(() => {
+      migrateTranscriptCues(); // comp is applied by now — canvas orientation decides the cue budget
+      setBootDataReady(true);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

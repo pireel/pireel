@@ -16,9 +16,11 @@ export interface TranscriptSegment {
   end: number;
   text: string;
   words?: { text: string; start: number; end: number }[];
-  /** Bilingual caption sub-line (this segment's translation, no word-level time) — carried with the segment when laying/re-laying captions. */
+  /** Bilingual whole-sentence translation (shows only when the sentence maps to a single display cue). */
   sub?: string;
-  /** Cue segment (one on-screen caption line, split at extraction by toCueSegments); absent = legacy sentence segment. */
+  /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
+  cueSubs?: Record<string, string>;
+  /** Short-lived extraction-cueing scheme flag (desegmentCues merges these back into sentences on load). */
   cue?: boolean;
 }
 

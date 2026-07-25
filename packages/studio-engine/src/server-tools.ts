@@ -30,9 +30,11 @@ import {
   blockKind,
   freeTrack,
   getCaptionPreset,
+  isCaptionsOn,
   isSentenceCaption,
   renderBlock,
   resolveCaptionStyle,
+  stripDerivedCaptions,
   shotFilterCss,
   shotId,
   splitBlockedByTransition,
@@ -44,8 +46,8 @@ import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from './trim';
-import { type AsrSegment, captionBlocksFromAsr } from './build-blocks';
-import { beatsForWindow, inNarrationSource, insertPlanContexts, mappedCaptionSegs, relayCaptionLayer } from './captions-relay';
+import type { AsrSegment } from './build-blocks';
+import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
 import { ensureTemplatesRegistered } from './templates';
 
@@ -115,7 +117,7 @@ function offlineState(p: ServerToolProject): string {
   const c = p.comp;
   const tag = new Map<string, string>();
   for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
-  const cs = c.blocks.some(isSentenceCaption) ? resolveCaptionStyle(c) : null;
+  const cs = isCaptionsOn(c) ? resolveCaptionStyle(c) : null;
   const situation = buildSituation({
     composition: {
       durationSec: totalDuration(c),
@@ -389,23 +391,28 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       if (Number.isFinite(yPct)) patch.yPct = yPct;
       if (Number.isFinite(scale)) patch.scale = scale;
       if (!preset && !Object.keys(patch).length) return { result: { ok: false, error: 'nothing to set: provide at least one of preset / yPct / scale' } };
-      let blocks = c.blocks;
+      // Captions are DERIVED state: persist only captionStyle {on, preset, ...} — blocks re-derive from
+      // the transcript on every surface (client materializes; offline state derives for display).
+      let base = c;
       if (preset) {
         if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
-        const caps = captionBlocksFromAsr(mappedCaptionSegs(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context)));
-        if (!caps.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
-        blocks = [...c.blocks.filter((b) => !isSentenceCaption(b)), ...caps];
+        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { landscape: c.width > c.height });
+        if (!cues.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
+        base = stripDerivedCaptions(c, true); // legacy persisted caption blocks retire now that derivation is proven possible
       }
-      const style = { ...resolveCaptionStyle({ ...c, blocks }), ...(preset ? { preset } : {}), ...patch };
+      const style = { ...resolveCaptionStyle(base), ...(preset ? { on: true, preset } : {}), ...patch };
       return {
         result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(style.preset).name}` },
-        comp: { ...c, blocks, captionStyle: style },
+        comp: { ...base, captionStyle: style },
       };
     }
     case 'remove_captions': {
-      if (!c.blocks.some(isSentenceCaption)) return { result: { ok: false, error: 'no captions right now' } };
-      const { captionStyle: _drop, ...rest } = c;
-      return { result: { ok: true, summary: 'Removed captions' }, comp: { ...rest, blocks: c.blocks.filter((b) => !isSentenceCaption(b)) } };
+      if (!isCaptionsOn(c)) return { result: { ok: false, error: 'no captions right now' } };
+      // Switch off, KEEP the style (preset/positions/translation language round-trip through the toggle); drop any legacy persisted caption blocks.
+      return {
+        result: { ok: true, summary: 'Removed captions' },
+        comp: { ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)), captionStyle: { ...resolveCaptionStyle(c), on: false } },
+      };
     }
     case 'set_caption_translations': {
       // Translations are written onto the transcript sentences (the sub field of context.asr/clipAsr) — cut/preset-change re-lay carries them along automatically
@@ -413,11 +420,18 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       const items = (Array.isArray(input.items) ? input.items : [])
         .map((it) => {
           const o = (it ?? {}) as Record<string, unknown>;
-          return { index: Number(o.index), text: typeof o.text === 'string' ? o.text.trim() : null };
+          const w0 = Number(o.w0);
+          const w1 = Number(o.w1);
+          return {
+            index: Number(o.index),
+            text: typeof o.text === 'string' ? o.text.trim() : null,
+            // optional display-cue word range (UI per-cue translations); without it the translation is whole-sentence
+            ...(Number.isInteger(w0) && Number.isInteger(w1) && w0 >= 0 && w1 >= w0 ? { w0, w1 } : {}),
+          };
         })
-        .filter((it): it is { index: number; text: string } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
+        .filter((it): it is { index: number; text: string; w0?: number; w1?: number } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
       if (!clear && !items.length) return { result: { ok: false, error: 'items empty/invalid (expected {index, text}[], where index is the read_script line number)' } };
-      const stripSub = (segs: TranscriptSegment[] | undefined) => segs?.map(({ sub: _s, ...rest }) => rest);
+      const stripSub = (segs: TranscriptSegment[] | undefined) => segs?.map(({ sub: _s, cueSubs: _cs, ...rest }) => rest);
       let ctx: StudioProjectContext;
       let summary: string;
       if (clear) {
@@ -436,19 +450,29 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
         const bad = items.filter((it) => it.index >= segs.length);
         if (bad.length) return { result: { ok: false, error: `index out of range: ${bad.map((b) => b.index).join(', ')} (this transcript has ${segs.length} lines; see read_script for line numbers)` } };
         const next = segs.map((s, i) => {
-          const hit = items.find((it) => it.index === i);
-          if (!hit) return s;
-          const { sub: _s, ...rest } = s;
-          return hit.text ? { ...rest, sub: hit.text } : rest;
+          const hits = items.filter((it) => it.index === i);
+          if (!hits.length) return s;
+          const out: TranscriptSegment = { ...s };
+          for (const hit of hits) {
+            if (hit.w0 != null && hit.w1 != null) {
+              // per-cue translation: keyed by the cue's word range within this sentence
+              const subs = { ...(out.cueSubs ?? {}) };
+              if (hit.text) subs[`${hit.w0}:${hit.w1}`] = hit.text;
+              else delete subs[`${hit.w0}:${hit.w1}`];
+              if (Object.keys(subs).length) out.cueSubs = subs;
+              else delete out.cueSubs;
+            } else if (hit.text) out.sub = hit.text;
+            else delete out.sub;
+          }
+          return out;
         });
         ctx = src ? { ...p.context, clipAsr: { ...p.context.clipAsr, [src]: next } } : { ...p.context, asr: next };
         summary = `Set ${items.filter((it) => it.text).length} translations`;
       }
-      const captionsOn = c.blocks.some(isSentenceCaption);
-      const blocks = captionsOn ? relayCaptionLayer(c.blocks, shotsOf(p), asAsr(ctx.asr), clipAsrOf(ctx)) : c.blocks;
+      // Captions derive from the transcript at render time — the translation shows up without any re-lay.
+      const captionsOn = isCaptionsOn(c);
       return {
         result: { ok: true, summary: captionsOn ? summary : `${summary} (captions are off; will show after set_captions)` },
-        comp: { ...c, blocks },
         context: ctx,
       };
     }

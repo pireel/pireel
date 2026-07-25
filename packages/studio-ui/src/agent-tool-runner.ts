@@ -33,7 +33,7 @@ import {
 import { removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
-import { type AsrSegment, toCueSegments } from '@pireel/studio-engine/build-blocks';
+import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
@@ -209,8 +209,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               await pickVideoFile(file, { asSig: sig });
               // Seed the transcript the helper already produced (pickVideoFile cleared it) so the
               // agent's read_script/cut_narration work without re-running ASR in the browser.
-              const raw = Array.isArray(input.transcript) ? (input.transcript as AsrSegment[]) : [];
-              const segs = raw.length ? toCueSegments(raw, { landscape: compRef.current.width > compRef.current.height }) : [];
+              const segs = Array.isArray(input.transcript) ? (input.transcript as AsrSegment[]) : [];
               if (segs.length) {
                 setAsrSentences(segs);
                 asrRef.current = segs;

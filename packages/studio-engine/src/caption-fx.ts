@@ -22,6 +22,8 @@ export interface FxWord {
   start: number;
   end: number;
   emphasis?: boolean;
+  /** Original index within the source sentence's words (stamped on mapped/derived copies; edit/translation write-back key). */
+  si?: number;
 }
 
 /** Caption-effect render input (RenderOverlay takes the effect branch when it carries these fields). */
@@ -233,6 +235,15 @@ export function chunkWordsBalanced<W extends { text: string }>(words: W[], limit
 /** Coarse visual-unit measure (CJK=1/Latin=0.5): the fallback when there's no font-size context. */
 export function chunkWordsByWidth(words: FxWord[], maxUnits = CAPTION_LINE_UNITS): FxWord[][] {
   return chunkWordsBalanced(words, maxUnits, (w) => visualWidth(w.text));
+}
+
+/** Display-cue width split (one chunk = one on-screen caption line). Budget is in em at the default
+ *  caption font size (box ≈56% of canvas width / ~46px font): portrait ≈13em, landscape ≈22em.
+ *  Object identity is preserved (chunks are slices), so callers' word metadata rides along. */
+export function cueChunks<W extends { text: string }>(words: W[], opts?: { landscape?: boolean; maxEm?: number }): W[][] {
+  const maxEm = opts?.maxEm ?? (opts?.landscape ? 22 : 13);
+  const gapEm = 0.18; // inter-word flex gap in the render, mirrored coarsely
+  return chunkWordsBalanced(words, maxEm + gapEm, (w) => estWordEm(w.text) + gapEm);
 }
 
 /**
