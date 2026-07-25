@@ -77,9 +77,9 @@ vault, cross-device sync, image/video generation) is injected through
 fail with a hint until you wire them up. Two ways to light them:
 
 1. **Inject your own providers** in
-   [`apps/studio-oss/src/providers.ts`](apps/studio-oss/src/providers.ts) — five
-   small contracts (composer / planner / transcriber / vault / projects) you can
-   point at any backend or local model.
+   [`apps/studio-oss/src/providers.ts`](apps/studio-oss/src/providers.ts): six
+   small contracts (composer / planner / transcriber / vault / projects /
+   uploads) you can point at any backend or local model.
 2. **Bring your own agent**: the editor is designed to be driven by an external
    agent over MCP. See the
    [agent plugin](https://github.com/pireel/pireel-agent) and the connect guide
