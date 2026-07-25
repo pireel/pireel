@@ -268,7 +268,9 @@ export interface Composition {
   /** Palette derived from the frame's base colors (overrides #root color vars, layered after theme defaults). From frame analysis. */
   palette?: Record<string, string>;
   /** Global caption style, see CaptionStyle. At assemble time, overrides sentence-level captions' effect/yPct/scale. */
-  captionStyle?: CaptionStyle;
+  /** SPARSE: only fields the user explicitly set are stored — defaults live in resolveCaptionStyle
+   *  (so default evolution reaches existing projects). Always read through the resolvers. */
+  captionStyle?: Partial<CaptionStyle>;
   /** Mounted frame theme-pack id (written to the document alongside palette on mount): the compose request carries it,
    *  the server injects that frame's design language into ACTIVE THEME (overrides generic aesthetics, engineering contract untouched). */
   frameId?: string;
@@ -527,7 +529,7 @@ export function isSentenceCaption(block: Block): boolean {
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
 export function resolveCaptionStyle(comp: Composition): CaptionStyle {
-  if (comp.captionStyle) return { xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, ...comp.captionStyle };
+  if (comp.captionStyle) return { preset: DEFAULT_CAPTION_PRESET, yPct: 88, scale: 1, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, ...comp.captionStyle };
   const first = comp.blocks.find(isSentenceCaption);
   const preset = typeof first?.slots.preset === 'string' ? (first.slots.preset as string) : DEFAULT_CAPTION_PRESET;
   const yPct = typeof first?.slots.yPct === 'number' ? (first.slots.yPct as number) : 88;

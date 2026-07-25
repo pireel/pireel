@@ -62,7 +62,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   } = deps;
   const [capTransBusy, setCapTransBusy] = useState(false); // bilingual translation in progress (captions panel)
   const setCaptionStyle = useCallback((patch: Partial<CaptionStyle>) => {
-    setComp((c) => ({ ...c, captionStyle: { ...resolveCaptionStyle(c), ...patch } }));
+    // SPARSE persistence: merge into the raw stored style, never the resolved one — defaults stay in
+    // the resolver so future default changes reach projects that never explicitly set those fields.
+    setComp((c) => ({ ...c, captionStyle: { ...(c.captionStyle ?? {}), ...patch } }));
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
@@ -225,7 +227,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       bilingualOn: !!resolveCaptionStyle(comp).sub?.lang,
       onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => setCaptionStyle(patch),
       onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; lang?: string | undefined }) =>
-        setCaptionStyle({ sub: { ...(resolveCaptionStyle(compRef.current).sub ?? {}), ...patch } }),
+        setCaptionStyle({ sub: { ...(compRef.current.captionStyle?.sub ?? {}), ...patch } }),
     },
     rows: captionLineRows,
     activeKey: (() => {
@@ -285,7 +287,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       pushUndoSnapshot();
       // Preset switch = a complete look: clear the per-line color/bg overrides (kept overrides would tint the new preset)
       setComp((c) => {
-        const { color: _oc, bg: _ob, ...rest } = resolveCaptionStyle(c);
+        const { color: _oc, bg: _ob, ...rest } = c.captionStyle ?? {};
         return { ...c, captionStyle: { ...rest, on: true, preset } };
       });
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
@@ -316,7 +318,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setComp((c) => ({
       ...c,
       blocks: c.blocks.filter((b) => !isSentenceCaption(b)),
-      captionStyle: { ...resolveCaptionStyle(c), on: false },
+      captionStyle: { ...(c.captionStyle ?? {}), on: false },
     }));
     setSelectedIdRaw((s) => (s && ids.includes(s) ? null : s));
     setSelectedBlockIds((cur) => {
@@ -384,7 +386,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         }
       }
       // Remember the target language: panel chip selected state + new inserted clips auto-translated to the same language
-      setCaptionStyle({ sub: { ...(resolveCaptionStyle(compRef.current).sub ?? {}), lang: target } });
+      setCaptionStyle({ sub: { ...(compRef.current.captionStyle?.sub ?? {}), lang: target } });
       toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));

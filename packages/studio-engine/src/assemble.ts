@@ -14,6 +14,7 @@ import {
   n,
   pct,
   renderBlock,
+  resolveCaptionStyle,
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
@@ -451,8 +452,9 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
     const bgStyle = fx.bg.type === 'color' ? `background:${escapeAttr(fx.bg.color)};` : `background:#000 center/cover no-repeat url('${escapeAttr(fx.bg.url)}');`;
     body.push(`<div id="personBg" style="position:absolute;inset:0;display:none;${bgStyle}"></div>`);
   }
-  // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched (style is global state, not baked into the block)
-  const cs = comp.captionStyle;
+  // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched
+  // (style is global state, not baked into the block). RESOLVED here — storage is sparse, defaults come from the resolver.
+  const cs = comp.captionStyle ? resolveCaptionStyle(comp) : undefined;
   const renderOne = (b: Block) => {
     // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
     // Translations live in the transcript (and get baked into slots.sub by the relay), but without the

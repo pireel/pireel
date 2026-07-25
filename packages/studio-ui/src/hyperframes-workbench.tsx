@@ -3465,7 +3465,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         lines={subLines}
                         metrics={{ line: 1.35, padY: 0.18, rowGap: 0.15 }}
                         onChange={(patch) => {
-                          const keep = resolveCaptionStyle(compRef.current).sub ?? {};
+                          const keep = compRef.current.captionStyle?.sub ?? {};
                           setCaptionStyle({ sub: { ...keep, ...patch } });
                         }}
                         onLive={(v) => postPreview({ type: 'hf:capSubStyle', xPct: v.xPct ?? 50, yPct: v.yPct, ...(v.hPct ? { hPct: v.hPct } : {}) })}

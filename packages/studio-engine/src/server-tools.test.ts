@@ -79,6 +79,10 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.ok).toBe(true);
     expect(r.comp!.captionStyle?.preset).toBe('ln-clean');
     expect(r.comp!.captionStyle?.on).toBe(true); // 派生态:只落开关+样式,不物化块进存储
+    // 稀疏持久化:没显式设置的字段不落库(默认永远留在 resolve 层,默认演进可达存量项目)
+    expect(r.comp!.captionStyle?.wPct).toBeUndefined();
+    expect(r.comp!.captionStyle?.scale).toBeUndefined();
+    expect(r.comp!.captionStyle?.yPct).toBeUndefined();
     const r2 = runServerTool('set_captions', { preset: 'ln-clean' }, proj({ context: {} }));
     expect(r2.result.ok).toBe(false);
     const r3 = runServerTool('submit_plan', { plan: { scenes: [{ from: 0, to: 2, framing: 'full' }] } }, proj());
