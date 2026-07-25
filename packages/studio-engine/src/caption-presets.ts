@@ -16,9 +16,10 @@
  */
 
 /** Global caption font-size base (px on the width-normalized 1080 canvas, scale=1) — every preset
- *  renders at this size; user scaling multiplies it. Layout math (line split budget / size dropdown /
- *  selection box) all anchor here. */
-export const BASE_CAPTION_FONT_PX = 40;
+ *  renders at this size; user scaling multiplies it. 48 matches the short-video industry default
+ *  (CapCut portrait captions land at ~48px on a 1080-wide canvas). Layout math (line split budget /
+ *  size dropdown / selection box) all anchor here. */
+export const BASE_CAPTION_FONT_PX = 48;
 
 export type CaptionMode = 'emphasis' | 'line';
 

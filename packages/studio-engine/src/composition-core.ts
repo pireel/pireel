@@ -246,6 +246,8 @@ export interface CaptionStyle {
   hPct?: number;
   /** Text color override (defaults to the preset's color). Optional and additive — existing projects render unchanged. */
   color?: string;
+  /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
+  bold?: boolean;
   /** Backdrop plate override: a CSS color, or null = force no plate (defaults to the preset's plate). */
   bg?: string | null;
   /** Independent position/font for the translation line (bilingual second line): independent of the main line, dragged/scaled separately on canvas.
@@ -253,7 +255,7 @@ export interface CaptionStyle {
    *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
    *  preset/color/bg = independent visual overrides for the translation line; unset = derived from the main line's (overridden) look.
    *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
-  sub?: { preset?: string; color?: string; bg?: string | null; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
+  sub?: { preset?: string; color?: string; bg?: string | null; bold?: boolean; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
@@ -564,7 +566,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const m = resolveCaptionStyle(comp);
   const p = getCaptionPreset(m.preset);
   const sub = m.sub ?? {};
-  const scale = sub.scale ?? m.scale * 0.6;
+  const scale = sub.scale ?? m.scale * 0.7;
   const mainFs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * m.scale));
   // Sub metrics come from the SUB preset + the effective sub plate (preset bg or the bg override) —
   // gating the padding on the MAIN preset's plate put the derived anchor off whenever they differed.
@@ -582,6 +584,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
     ...(sub.hPct ? { hPct: sub.hPct } : {}),
     ...(sub.color != null ? { color: sub.color } : {}),
     ...(sub.bg !== undefined ? { bg: sub.bg } : {}),
+    ...(sub.bold != null ? { bold: sub.bold } : {}),
   };
 }
 
