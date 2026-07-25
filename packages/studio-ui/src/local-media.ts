@@ -40,8 +40,9 @@ export async function saveLocalVideo(file: File, sig: string): Promise<void> {
     void navigator.storage.persist?.().catch(() => {});
     const key = sigKey(sig);
     try {
-      await dir.getFileHandle(key);
-      return; // Same sig already on disk (content pinned by size+mtime) — skip rewrite
+      const existing = await (await dir.getFileHandle(key)).getFile();
+      if (existing.size === file.size) return; // Same sig fully on disk (content pinned by size+mtime): skip rewrite
+      // Size mismatch = an interrupted earlier write; fall through and rewrite so the entry heals
     } catch {
       /* Not present → write it */
     }
