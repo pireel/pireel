@@ -161,8 +161,9 @@ export function CaptionEditOverlay({
   const textHNorm = (s: CaptionStyle) => {
     const fsC = Math.max(10, Math.round(fontPx * s.scale));
     const padC = capPreset.bg ? Math.round(fsC * 0.22) * 2 : 0;
-    // Multi-line stacks (cue blocks at large fonts): N lines, each with its own plate, plus the render's row-gap
-    return (((fsC * 1.2 + padC) * lineCount + Math.round(fsC * 0.12) * (lineCount - 1)) * k) / stageH;
+    // Multi-line stacks (cue blocks at large fonts): ONE plate around all lines — N text lines +
+    // row-gaps + the plate's vertical padding once.
+    return ((fsC * 1.2 * lineCount + Math.round(fsC * 0.12) * (lineCount - 1) + padC) * k) / stageH;
   };
   const rectOf = (s: CaptionStyle) => {
     const w = Math.max(60, ((s.wPct ?? 56) / 100) * stageW);
