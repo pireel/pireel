@@ -521,23 +521,17 @@ export function isSentenceCaption(block: Block): boolean {
 
 /** The currently-effective global caption style: explicit setting wins, else derived from the first sentence-level caption's slots (a stable initial value
  *  for the panel selected-state and canvas handles); if there's no caption yet, take the default. */
-/** Default subtitle box width (canvas width %) for portrait/square: ≈ 13 CJK chars per line at 40px font.
- *  Kept as the aspect-less fallback for legacy render paths (blocks baked before widths were aspect-aware). */
+/** Default subtitle box width (canvas width %): ≈13 CJK chars per line at the default font. The canvas
+ *  is WIDTH-NORMALIZED (normalizeDims: width always 1080, only height varies with aspect), so this one
+ *  ratio yields the same comfortable line length on every aspect — no aspect-specific default needed. */
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
-/** Aspect-aware default subtitle box width: line LENGTH should stay in the comfortable subtitle band
- *  (~13–17 full-width chars), not scale with canvas width — 56% of a 1920 landscape canvas is ≈23
- *  chars, far past it. Landscape gets 38% (≈17 chars at the default font); portrait/square keep 56%. */
-export function defaultCaptionWidthPct(comp: Pick<Composition, 'width' | 'height'>): number {
-  return comp.width > comp.height ? 38 : DEFAULT_CAPTION_WIDTH_PCT;
-}
-
 export function resolveCaptionStyle(comp: Composition): CaptionStyle {
-  if (comp.captionStyle) return { xPct: 50, wPct: defaultCaptionWidthPct(comp), ...comp.captionStyle };
+  if (comp.captionStyle) return { xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, ...comp.captionStyle };
   const first = comp.blocks.find(isSentenceCaption);
   const preset = typeof first?.slots.preset === 'string' ? (first.slots.preset as string) : DEFAULT_CAPTION_PRESET;
   const yPct = typeof first?.slots.yPct === 'number' ? (first.slots.yPct as number) : 88;
-  return { preset, yPct, xPct: 50, wPct: defaultCaptionWidthPct(comp), scale: 1 };
+  return { preset, yPct, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, scale: 1 };
 }
 
 /** Is the captions layer on? The stored truth is captionStyle.on (captions derive from the transcript
@@ -581,7 +575,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
     preset: sub.preset ?? DEFAULT_SUB_CAPTION_PRESET,
     yPct: Math.min(99, sub.yPct ?? Math.round(derivedY * 10) / 10),
     xPct: sub.xPct ?? m.xPct ?? 50,
-    wPct: sub.wPct ?? m.wPct ?? defaultCaptionWidthPct(comp),
+    wPct: sub.wPct ?? m.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
     scale,
     ...(sub.hPct ? { hPct: sub.hPct } : {}),
     ...(sub.color != null ? { color: sub.color } : {}),

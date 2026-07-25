@@ -65,10 +65,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setComp((c) => ({ ...c, captionStyle: { ...resolveCaptionStyle(c), ...patch } }));
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
-  const isLandscape = () => compRef.current.width > compRef.current.height;
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
   const relayCaptionLayer = (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null): Block[] =>
-    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, { landscape: isLandscape() });
+    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, { subLang: resolveCaptionStyle(compRef.current).sub?.lang });
   /** Edit one caption line's TEXT (captions panel). Single source of truth = the transcript: the fix
    *  reaches caption re-lay, read_script/agents and the script panel at once. Timing untouched; word
    *  timing redistributed proportionally within the sentence (wordsFromText — karaoke presets keep working).
@@ -278,7 +277,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         toast.info(t('workbench.extractingTranscript'));
         segs = await stepAsr();
       }
-      const cues = displayCues(ensureShots(compRef.current), segs ?? [], clipAsrRef.current, { landscape: isLandscape(), subLang: resolveCaptionStyle(compRef.current).sub?.lang });
+      const cues = displayCues(ensureShots(compRef.current), segs ?? [], clipAsrRef.current, { subLang: resolveCaptionStyle(compRef.current).sub?.lang });
       if (!cues.length) {
         toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
@@ -330,7 +329,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     // Rows = the SAME derivation the canvas renders (displayCues): one row = one on-screen line, by
     // construction. NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed —
     // caption editing must keep working in the missing-media state (browser switch / cleared storage).
-    return displayCues(ensureShots(comp), asrSentences, clipAsr, { landscape: comp.width > comp.height, subLang: resolveCaptionStyle(comp).sub?.lang })
+    return displayCues(ensureShots(comp), asrSentences, clipAsr, { subLang: resolveCaptionStyle(comp).sub?.lang })
       .filter((c) => c.ref)
       .map((c) => ({
         key: `${c.ref!.src ?? 'main'}:${c.ref!.seg}:${c.ref!.w0}`,
@@ -359,7 +358,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
       // Translate DISPLAY CUES (what's actually on screen), one translation per cue, all in one
       // context-bearing request; store per-cue on the source sentences (cueSubs via the executor).
-      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { landscape: isLandscape(), subLang: target }).filter((c) => c.ref);
+      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { subLang: target }).filter((c) => c.ref);
       if (!cues.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
