@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /** Vite entry: globs every frame.md under content/ and builds a ready frameRegistry.
  *  Non-Vite consumers use createFrameRegistry from ./registry with their own content map. */
 import { createFrameRegistry } from './registry';
