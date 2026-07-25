@@ -3437,7 +3437,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   const csSel = resolveCaptionStyle(comp);
                   const selWords = (sb.slots.words ?? []) as { text: string; start: number; end: number }[];
                   const mainLines = sb.slots.cue === true && selWords.length ? Math.max(1, captionLineSegments(selWords, getCaptionPreset(csSel.preset), csSel.wPct ?? 56, csSel.scale, comp.width).length) : 1;
-                  const subStyleSel = resolveSubCaptionStyle(comp);
+                  const subStyleSel = (() => {
+                    const base = resolveSubCaptionStyle(comp);
+                    if (csSel.sub?.yPct != null) return base; // explicit anchor: bottom convention already
+                    // Default follow-under-main: the derived bottom accounts for ONE line — push it down for extra lines
+                    const subText0 = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
+                    if (!subText0) return base;
+                    const subP0 = getCaptionPreset(base.preset);
+                    const n0 = Math.max(1, captionLineSegments(wordsFromText(subText0, 0, 1), subP0, base.wPct ?? 56, base.scale, comp.width).length);
+                    if (n0 <= 1) return base;
+                    const subFs0 = Math.max(9, Math.round(subP0.size * base.scale));
+                    const extra = (subFs0 * 1.35 + Math.round(subFs0 * 0.15)) * (n0 - 1);
+                    return { ...base, yPct: Math.min(99, base.yPct + (extra / comp.height) * 100) };
+                  })();
                   const subText = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
                   const subLines = subText ? Math.max(1, captionLineSegments(wordsFromText(subText, 0, 1), getCaptionPreset(subStyleSel.preset), subStyleSel.wPct ?? 56, subStyleSel.scale, comp.width).length) : 1;
                   return (
@@ -3445,12 +3457,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     {/* Selection sub-target: clicking the main line shows the main handles, the translation line shows the translation handles (two instances of the same component, never overlaid) */}
                     {subSelected && (
                       <CaptionEditOverlay
-                        style={resolveSubCaptionStyle(comp)}
+                        style={subStyleSel}
                         compH={comp.height}
                         stageW={boxW}
                         stageH={boxH}
                         measured={capSubMeasure}
                         lines={subLines}
+                        metrics={{ line: 1.35, padY: 0.18, rowGap: 0.15 }}
                         onChange={(patch) => {
                           const keep = resolveCaptionStyle(compRef.current).sub ?? {};
                           setCaptionStyle({ sub: { ...keep, ...patch } });
