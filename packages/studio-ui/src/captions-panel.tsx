@@ -434,8 +434,8 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
   const fs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * style.scale));
   const effColor = style.color ?? preset.text;
   const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
-  // Effective bold: explicit override wins; else the preset's own weight decides (sub row's derived base weight is lighter)
-  const effBold = style.bold ?? (isSub ? Math.max(500, preset.weight - 200) >= 700 : preset.weight >= 700);
+  // Bold is purely the user's toggle — everything is regular by default (presets carry no weight)
+  const effBold = style.bold === true;
   // Size options in real px (dropdown replaces the A± stepper): mapped back to the preset-relative scale on pick.
   const sizeOpts = [16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96].filter((px) => {
     const k = px / BASE_CAPTION_FONT_PX;
@@ -720,7 +720,7 @@ function PresetSample({ p }: { p: CaptionPreset }) {
   const fontFamily = p.font === 'serif' ? "'Noto Serif SC','Songti SC',serif" : p.font === 'mono' ? "'IBM Plex Mono',ui-monospace,monospace" : undefined;
   const base: CSSProperties = {
     color: p.text,
-    fontWeight: p.weight,
+    fontWeight: 600, // card preview: slight bump for legibility at tiny size
     fontFamily,
     fontStyle: p.italic ? 'italic' : undefined,
     fontSize: Math.round(BASE_CAPTION_FONT_PX * 0.24),

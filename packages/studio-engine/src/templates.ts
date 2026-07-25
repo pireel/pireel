@@ -22,7 +22,7 @@ import {
 import { type CaptionPreset, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
-import { BASE_CAPTION_FONT_PX } from './caption-presets';
+import { BASE_CAPTION_FONT_PX, CAPTION_WEIGHT_BOLD, CAPTION_WEIGHT_REGULAR } from './caption-presets';
 import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx, wordsFromText } from './caption-fx';
 
 /* ============================ template render impls ============================ */
@@ -169,7 +169,7 @@ export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: num
   const gapPx = Math.round(fs * 0.18);
   const spPx = Math.round(fs * 0.12); // extra gap at Latin word boundaries (same spec as render .sp)
   const padPx = p.bg ? Math.round(fs * 0.42) * 2 : 0;
-  const canvasFont = `${p.italic ? 'italic ' : ''}${p.weight} ${fs}px ${presetFontFamilies(p)}`;
+  const canvasFont = `${p.italic ? 'italic ' : ''}${CAPTION_WEIGHT_REGULAR} ${fs}px ${presetFontFamilies(p)}`;
   const wordPx = (t: string) => {
     const est = estWordEm(t) * fs;
     const m = measureTextPx(t, canvasFont);
@@ -191,8 +191,8 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
   const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
-  // Bold override: true forces 800, false forces regular 500; unset = the preset's own weight
-  const mainWeight = ov.bold == null ? p.weight : ov.bold ? 800 : 500;
+  // Regular by default — bold ONLY via the user's toggle (presets carry no weight)
+  const mainWeight = ov.bold ? CAPTION_WEIGHT_BOLD : CAPTION_WEIGHT_REGULAR;
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
   // Both modes split into visual lines at the CURRENT font size (same px-accurate budget). The
   // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
@@ -242,7 +242,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     : '';
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:auto; max-width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''}${subPill} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${subOv.bold == null ? Math.max(500, subP.weight - 200) : subOv.bold ? 700 : 400}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${subOv.bold ? 700 : CAPTION_WEIGHT_REGULAR}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
     : '';
   const decoCss =
     p.deco === 'highlight'
