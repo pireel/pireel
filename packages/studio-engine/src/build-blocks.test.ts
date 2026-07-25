@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { chunkWordsByWidth } from './caption-fx';
-import { type AsrSegment, captionBlocksFromAsr, desegmentCues } from './build-blocks';
+import { chunkWordsByWidth, detectLang } from './caption-fx';
+import { type AsrSegment, applyCaptionTranslations, captionBlocksFromAsr, clearCaptionTranslations, desegmentCues, sanitizeTranscriptSegs } from './build-blocks';
 import { displayCues } from './captions-relay';
 import { type VideoShot, renderBlock } from './composition';
 
@@ -174,5 +174,68 @@ describe('cue 块渲染(静态单行,不轮播)', () => {
     expect(r.innerHtml).toContain('-s1'); // 仍然拆出多段
     expect(r.innerHtml).toContain('flex-wrap:nowrap');
     expect(r.timelineBody).toContain('-s1'); // 轮播 set 仍在
+  });
+});
+
+describe('地基:语言/说话人/翻译标记/持久化清洗', () => {
+  it('detectLang:文字系统检测(zh/en/ja/ko;混排取主导;空文本 undefined)', () => {
+    expect(detectLang('今天我们聊聊剪辑的科学')).toBe('zh');
+    expect(detectLang('The quick brown fox jumps over the lazy dog')).toBe('en');
+    expect(detectLang('今日は動画編集の話をします')).toBe('ja');
+    expect(detectLang('오늘은 영상 편집 이야기')).toBe('ko');
+    expect(detectLang('...!!!')).toBeUndefined();
+  });
+  it('applyCaptionTranslations(共享写入器):整句 sub / 按范围 cueSubs / 删除 / subLang 标记随写随清', () => {
+    const segs: AsrSegment[] = [
+      { start: 0, end: 2, text: '第一句' },
+      { start: 2, end: 4, text: '第二句' },
+    ];
+    const w1 = applyCaptionTranslations(segs, [{ index: 0, text: 'First' }], 'English');
+    expect(w1[0]!.sub).toBe('First');
+    expect(w1[0]!.subLang).toBe('English');
+    expect(w1[1]!.subLang).toBeUndefined();
+    const w2 = applyCaptionTranslations(w1, [{ index: 1, w0: 0, w1: 2, text: 'cue tr' }], 'English');
+    expect(w2[1]!.cueSubs).toEqual({ '0:2': 'cue tr' });
+    expect(w2[1]!.subLang).toBe('English');
+    // 删除唯一译文 → subLang 一并摘掉(没有内容就没有语言)
+    const w3 = applyCaptionTranslations(w2, [{ index: 0, text: '' }], 'English');
+    expect(w3[0]!.sub).toBeUndefined();
+    expect(w3[0]!.subLang).toBeUndefined();
+    // clear 清全部
+    const w4 = clearCaptionTranslations(w2);
+    for (const s of w4) {
+      expect(s.sub).toBeUndefined();
+      expect(s.cueSubs).toBeUndefined();
+      expect(s.subLang).toBeUndefined();
+    }
+  });
+  it('sanitizeTranscriptSegs:剥掉派生标记(cue/ref/词 si);干净输入原引用直返', () => {
+    const clean: AsrSegment[] = [{ start: 0, end: 2, text: '干净句子', words: [{ text: '干净', start: 0, end: 1 }], lang: 'zh' }];
+    expect(sanitizeTranscriptSegs(clean)).toBe(clean);
+    const dirty = [
+      { start: 0, end: 2, text: '带派生标记', cue: true, ref: { src: null, seg: 0, w0: 0, w1: 1 }, words: [{ text: '带', start: 0, end: 1, si: 0 }] },
+    ] as unknown as AsrSegment[];
+    const out = sanitizeTranscriptSegs(dirty);
+    expect(out[0]!.cue).toBeUndefined();
+    expect((out[0] as unknown as Record<string, unknown>).ref).toBeUndefined();
+    expect((out[0]!.words![0] as unknown as Record<string, unknown>).si).toBeUndefined();
+    expect(out[0]!.text).toBe('带派生标记');
+  });
+  it('displayCues:换语言后的陈旧译文被隐藏;未标记语言的译文(legacy/BYO)照常显示', () => {
+    const shots = oneShot(3);
+    const seg: AsrSegment = { start: 0, end: 3, text: '大家好', sub: 'Hello', subLang: 'English' };
+    expect(displayCues(shots, [seg], {}, { subLang: 'English' })[0]!.sub).toBe('Hello');
+    expect(displayCues(shots, [seg], {}, { subLang: '日本語' })[0]!.sub).toBeUndefined(); // 目标已切日语,英文旧译不硬顶
+    const unstamped: AsrSegment = { start: 0, end: 3, text: '大家好', sub: 'Hello' };
+    expect(displayCues(shots, [unstamped], {}, { subLang: '日本語' })[0]!.sub).toBe('Hello'); // 未标记 = 不假设过时
+  });
+  it('desegmentCues:合并保留 lang/speaker(取首段)', () => {
+    const out = desegmentCues([
+      { cue: true, start: 0, end: 1, text: '你好', lang: 'zh', speaker: 'A', words: [{ text: '你好', start: 0, end: 1 }] },
+      { cue: true, start: 1, end: 2, text: '世界。', lang: 'zh', speaker: 'A', words: [{ text: '世界。', start: 1, end: 2 }] },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.lang).toBe('zh');
+    expect(out[0]!.speaker).toBe('A');
   });
 });
