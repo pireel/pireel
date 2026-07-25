@@ -24,19 +24,26 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — animation belongs in the timeline body' });
   }
 
-  // <style> scoping: every rule's selector must contain #blockId (strip @keyframes blocks; skip @container/@media condition lines)
+  // <style> scoping: every rule's selector must contain #blockId (strip @keyframes blocks; rules nested
+  // inside @media/@container/@supports are checked like any other rule, only the condition line is skipped)
   for (const styleMatch of innerHtml.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
     const css = styleMatch[1]!;
     const noKf = css.replace(/@keyframes[^{]+\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/gi, '');
-    const ruleRe = /(^|\{|\})([^{}]+)\{/g;
-    let m: RegExpExecArray | null;
     const flagged = new Set<string>();
-    while ((m = ruleRe.exec(noKf)) !== null) {
-      const sel = m[2]!.trim();
-      if (!sel || sel.startsWith('@')) continue; // at-rule condition line (its inner rules are matched separately)
-      if (!sel.includes(`#${blockId}`) && !flagged.has(sel)) {
-        flagged.add(sel);
-        issues.push({ code: 'unscoped-selector', message: `CSS selector "${sel.slice(0, 60)}" is not scoped under #${blockId}` });
+    let buf = '';
+    for (const ch of noKf) {
+      if (ch === '{') {
+        const sel = buf.trim();
+        buf = '';
+        if (!sel || sel.startsWith('@')) continue; // at-rule condition line; its body is walked by the same loop
+        if (!sel.includes(`#${blockId}`) && !flagged.has(sel)) {
+          flagged.add(sel);
+          issues.push({ code: 'unscoped-selector', message: `CSS selector "${sel.slice(0, 60)}" is not scoped under #${blockId}` });
+        }
+      } else if (ch === '}' || ch === ';') {
+        buf = ''; // end of a rule body or declaration: whatever accumulated is not a selector
+      } else {
+        buf += ch;
       }
     }
     if (/\d(vw|vh)\b/i.test(css)) {

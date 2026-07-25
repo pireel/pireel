@@ -27,6 +27,13 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(issues.filter((i) => i.code === 'unscoped-selector')).toEqual([]);
   });
 
+  it('@media/@container 内部的未作用域选择器同样命中(不被条件行掩护)', () => {
+    const media = ok(`<div data-edit="t">文字四个字</div><style>@media (min-width:1px){ .card{position:absolute;inset:0} }</style>`);
+    expect(media.map((i) => i.code)).toContain('unscoped-selector');
+    const container = ok(`<div data-edit="t">文字四个字</div><style>@container (aspect-ratio > 1.1){ .wrap{flex-direction:row} }</style>`);
+    expect(container.map((i) => i.code)).toContain('unscoped-selector');
+  });
+
   it('vw/vh、script、非确定性 API、缺 data-edit 各自命中', () => {
     expect(ok(`<div data-edit="t">文字四个字</div><style>#b7 .x{font-size:5vw}</style>`).map((i) => i.code)).toContain('viewport-units');
     expect(ok(`<div data-edit="t">文</div><script>alert(1)</script>`).map((i) => i.code)).toContain('script-tag');
