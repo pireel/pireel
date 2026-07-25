@@ -143,6 +143,17 @@ describe('displayCues 语言感知的 cue 尺寸(国际化:中英一等公民)',
     // 无 lang 标记时按文字系统检测,同样走拉丁口径
     const detected = displayCues(oneShot(10), [{ start: 0, end: 10, text: en }], {});
     expect(detected.length).toBe(enCues.length);
+    // 每条 cue 渲染最多两行(空格宽已入账——曾漏记挤出第三行)
+    for (const b of captionBlocksFromAsr(enCues)) {
+      const lines = (renderBlock(b).innerHtml.match(/class="cap-line"/g) ?? []).length;
+      expect(lines).toBeLessThanOrEqual(2);
+    }
+    // 长句极限:任何 cue 渲染都不超过两行(词数多=空格多,漏记空格时这里会挤出第三行)
+    const enLong = 'and when you are walking you might arrive at a better destination one you could not have seen from the very start of it all';
+    for (const b of captionBlocksFromAsr(displayCues(oneShot(12), [{ start: 0, end: 12, text: enLong, lang: 'en' }], {}))) {
+      const lines = (renderBlock(b).innerHtml.match(/class="cap-line"/g) ?? []).length;
+      expect(lines).toBeLessThanOrEqual(2);
+    }
     // 中文仍是单行口径(~11 字/条)
     const zh = '这是一个非常非常长的句子它应该在铺设的时候被切成好几条独立的字幕';
     const zhCues = displayCues(oneShot(10), [{ start: 0, end: 10, text: zh, lang: 'zh' }], {});

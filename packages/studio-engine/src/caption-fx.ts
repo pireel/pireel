@@ -270,9 +270,12 @@ export function chunkWordsByWidth(words: FxWord[], maxUnits = CAPTION_LINE_UNITS
  *  Object identity is preserved (chunks are slices), so callers' word metadata rides along. */
 export function cueChunks<W extends { text: string }>(words: W[], opts?: { maxEm?: number }): W[][] {
   // (56% × 1080 − plate padding ≈ 558px) / 48px base ≈ 11.6em; words render with no inter-word
-  // gap (subtitle convention) → 11 keeps every preset's cue on one line at scale 1
+  // gap (subtitle convention) → 11 keeps every preset's cue on one line at scale 1. displayCues
+  // passes the language-aware budget (CJK 11 = one line; Latin 22 ≈ two stacked lines).
+  // Latin words carry their following space (render .sp ≈0.3em) in the accounting — without it a
+  // long EN cue under-counted by the sum of its spaces and spilled onto a THIRD display line.
   const maxEm = opts?.maxEm ?? 11;
-  return chunkWordsBalanced(words, maxEm, (w) => estWordEm(w.text));
+  return chunkWordsBalanced(words, maxEm, (w) => estWordEm(w.text) + (/[A-Za-z0-9]$/.test(w.text) ? 0.3 : 0));
 }
 
 /**
