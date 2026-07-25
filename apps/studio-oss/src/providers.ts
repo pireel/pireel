@@ -49,6 +49,7 @@ setFrameCatalogSource(async () =>
       iconKey: null, // cover art lives on the hosted CDN; the emoji fallback keeps this shell self-contained
       showcase: f.showcase,
       palette: f.palette ?? null,
+      personFx: f.personFx ?? null,
     };
   }),
 );
