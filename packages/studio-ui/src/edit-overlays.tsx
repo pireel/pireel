@@ -9,7 +9,7 @@
 
 import { useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { type CaptionStyle, getCaptionPreset } from '@pireel/studio-engine/composition';
+import { type CaptionStyle, BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 import { startPointerDrag } from './drag-shell';
 
@@ -155,7 +155,7 @@ export function CaptionEditOverlay({
   const eff = liveStyle ?? style;
   const k = stageH / compH; // comp px → stage px
   const capPreset = getCaptionPreset(style.preset);
-  const fontPx = capPreset.size;
+  const fontPx = BASE_CAPTION_FONT_PX;
   // Box geometry (positioning aligns to the render anchor: line center at xPct, bottom edge at yPct; box height measured, estimated when no measurement).
   // Baseline box = committed style, live box = style during drag: moving follows the solid line directly; widening uses ghost — the baseline solid line
   // stays put, a dashed line follows, and on release the solid line lands in one step (no "snap back to initial then jump", a feel the user called out).

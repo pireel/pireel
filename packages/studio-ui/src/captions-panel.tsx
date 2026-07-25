@@ -20,6 +20,7 @@ import {
   type CaptionPreset,
   type CaptionStyle,
   type Composition,
+  BASE_CAPTION_FONT_PX,
   CAPTION_PRESETS,
   getCaptionPreset,
   isCaptionsOn,
@@ -430,12 +431,12 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
     return () => document.removeEventListener('mousedown', onDoc);
   }, [pop]);
   const preset = getCaptionPreset(style.preset);
-  const fs = Math.max(9, Math.round(preset.size * style.scale));
+  const fs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * style.scale));
   const effColor = style.color ?? preset.text;
   const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
   // Size options in real px (dropdown replaces the A± stepper): mapped back to the preset-relative scale on pick.
   const sizeOpts = [16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96].filter((px) => {
-    const k = px / preset.size;
+    const k = px / BASE_CAPTION_FONT_PX;
     return k >= 0.4 && k <= 4;
   });
   return (
@@ -496,7 +497,7 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
             <button
               key={px}
               type="button"
-              onClick={() => { setPop(null); onPatch({ scale: Math.round((px / preset.size) * 100) / 100 }); }}
+              onClick={() => { setPop(null); onPatch({ scale: Math.round((px / BASE_CAPTION_FONT_PX) * 100) / 100 }); }}
               className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
             >
               {px} {px === fs && <Check size={10} className="text-accent" />}
@@ -711,9 +712,9 @@ function PresetSample({ p }: { p: CaptionPreset }) {
     fontWeight: p.weight,
     fontFamily,
     fontStyle: p.italic ? 'italic' : undefined,
-    fontSize: Math.round(p.size * 0.24),
+    fontSize: Math.round(BASE_CAPTION_FONT_PX * 0.24),
     lineHeight: 1.2,
-    textShadow: p.shadow && !p.bg ? '0 1px 6px rgba(0,0,0,0.85)' : undefined,
+    textShadow: !p.bg ? '0 1px 6px rgba(0,0,0,0.85)' : undefined,
     whiteSpace: 'nowrap',
   };
   const pill: CSSProperties | undefined = p.bg
