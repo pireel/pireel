@@ -2179,31 +2179,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // the 300ms rebuild (linear estimation is off when a larger font wraps, hit "box change lags"). The box is a global
     // style handle, it doesn't jump with the playhead / current segment
   }, [selCapId, bufs.active, comp.captionStyle, postPreview]);
-  // Edit-mode force-show: captions fade in, and the playhead often rests at a very low opacity — you can't tune a caption you can't see.
-  // Select a caption (and paused) → force the current segment opaque (segment index computed via the same captionLineSegments as render);
-  // deselect/play → runtime re-runs seekTimelines to restore the true timeline state
+  // Edit-mode force-show RETIRED: it existed for the fade-in era (playhead often rested at a
+  // half-transparent moment). With hard-cut enter/exit and static cue lines, a caption inside its
+  // window is always fully opaque — the only thing forcing still did was paint the SELECTED cue on
+  // top of the one at the playhead (visibility:!important pierces the window gating), i.e. two
+  // captions at once after pausing (user-reported). Keep only the restore/clear message.
   useEffect(() => {
-    if (!selCapId || playing) {
-      postPreview({ type: 'hf:capEdit', id: null });
-      return;
-    }
-    const b = comp.blocks.find((x) => x.id === selCapId);
-    const words = (b?.slots.words ?? []) as { text: string; start: number; end: number }[];
-    if (!b || !words.length) return;
-    const cs = resolveCaptionStyle(comp);
-    // Cue blocks: all stacked lines are on screen together — seg -1 forces every line
-    if (b.slots.cue === true) {
-      postPreview({ type: 'hf:capEdit', id: selCapId, seg: -1 });
-      return;
-    }
-    const segs = captionLineSegments(words, getCaptionPreset(cs.preset), cs.wPct ?? 56, cs.scale, comp.width);
-    let idx = 0;
-    for (let i = 0; i < segs.length; i++) {
-      if (segs[i]![0]!.start <= tSec + 1e-3) idx = i;
-      else break;
-    }
-    postPreview({ type: 'hf:capEdit', id: selCapId, seg: idx });
-  }, [selCapId, playing, tSec, comp, bufs.active, postPreview]);
+    postPreview({ type: 'hf:capEdit', id: null });
+  }, [selCapId, playing, postPreview]);
   /** Media dropped on the stage: hitting a component card (media block) present at the current moment = fill it; a miss = create a new component card centered on the drop point. */
   const handleAssetDrop = async (e: React.DragEvent) => {
     const a = dragAsset;
