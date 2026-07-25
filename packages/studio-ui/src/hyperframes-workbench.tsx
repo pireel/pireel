@@ -2187,6 +2187,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   useEffect(() => {
     postPreview({ type: 'hf:capEdit', id: null });
   }, [selCapId, playing, postPreview]);
+  // Blank-page click clears the caption selection (per user): the stage, the timeline and the captions
+  // panel are keep-zones (data-cap-keep) — a concrete caption chip on the timeline is the one place
+  // that SETS caption selection outside the stage; everywhere else (page chrome, gutters) deselects.
+  useEffect(() => {
+    if (!selCapId) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-cap-keep]')) return;
+      setSelectedIdRaw(null);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selCapId]);
   /** Media dropped on the stage: hitting a component card (media block) present at the current moment = fill it; a miss = create a new component card centered on the drop point. */
   const handleAssetDrop = async (e: React.DragEvent) => {
     const a = dragAsset;
@@ -3324,7 +3338,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div className="text-ink-4 text-[11px]">{t('workbench.videoStaysLocalOnly')}</div>
             </button>
           ) : (
-            <div ref={stageBoxRef} className="relative" style={{ width: boxW, height: boxH }}>
+            <div ref={stageBoxRef} data-cap-keep className="relative" style={{ width: boxW, height: boxH }}>
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
                   so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
               <div className="absolute inset-0 overflow-hidden rounded-xl shadow-xl ring-1 ring-black/20">
@@ -4206,7 +4220,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           )}
           {!floatWin && libTab === 'captions' && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <CaptionsPanel {...captionsPanelProps()} />
+              <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
             </div>
           )}
           {floatWin && (
@@ -4293,7 +4307,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 />
               )}
               {floatWin === 'captions' && (
-                <CaptionsPanel {...captionsPanelProps()} />
+                <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
               )}
               {floatWin === 'person' && (
                 <PersonFxPanel
@@ -4623,6 +4637,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
+        <div data-cap-keep className="contents">
         <StudioTimeline
           comp={comp}
           playing={playing}
@@ -4637,6 +4652,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           clipPendingAt={clipPending}
           {...timelineCbs}
         />
+        </div>
 
         {/* Test hook: narration script + visual analysis (read-only) */}
         {showDebug && (
