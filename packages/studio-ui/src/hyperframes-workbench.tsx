@@ -2190,8 +2190,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const words = (b?.slots.words ?? []) as { text: string; start: number; end: number }[];
     if (!b || !words.length) return;
     const cs = resolveCaptionStyle(comp);
-    // Cue blocks render as a single static segment — the force-show index is always 0
-    const segs = b.slots.cue === true ? [words] : captionLineSegments(words, getCaptionPreset(cs.preset), cs.wPct ?? 56, cs.scale, comp.width);
+    // Cue blocks: all stacked lines are on screen together — seg -1 forces every line
+    if (b.slots.cue === true) {
+      postPreview({ type: 'hf:capEdit', id: selCapId, seg: -1 });
+      return;
+    }
+    const segs = captionLineSegments(words, getCaptionPreset(cs.preset), cs.wPct ?? 56, cs.scale, comp.width);
     let idx = 0;
     for (let i = 0; i < segs.length; i++) {
       if (segs[i]![0]!.start <= tSec + 1e-3) idx = i;
@@ -3428,6 +3432,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 // Sentence-level captions (no box): give global position/scale handles — dragging comp.captionStyle moves all captions at once
                 if (isSentenceCaption(sb)) {
                   const subSelected = capSelPart === 'sub' && typeof sb.slots.sub === 'string' && !!sb.slots.sub;
+                  // Visual line counts (cue blocks stack lines at big font sizes): the selection box height
+                  // is analytic — same splitter as the render, so it tracks font-size changes instantly.
+                  const csSel = resolveCaptionStyle(comp);
+                  const selWords = (sb.slots.words ?? []) as { text: string; start: number; end: number }[];
+                  const mainLines = sb.slots.cue === true && selWords.length ? Math.max(1, captionLineSegments(selWords, getCaptionPreset(csSel.preset), csSel.wPct ?? 56, csSel.scale, comp.width).length) : 1;
+                  const subStyleSel = resolveSubCaptionStyle(comp);
+                  const subText = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
+                  const subLines = subText ? Math.max(1, captionLineSegments(wordsFromText(subText, 0, 1), getCaptionPreset(subStyleSel.preset), subStyleSel.wPct ?? 56, subStyleSel.scale, comp.width).length) : 1;
                   return (
                     <>
                     {/* Selection sub-target: clicking the main line shows the main handles, the translation line shows the translation handles (two instances of the same component, never overlaid) */}
@@ -3438,6 +3450,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         stageW={boxW}
                         stageH={boxH}
                         measured={capSubMeasure}
+                        lines={subLines}
                         onChange={(patch) => {
                           const keep = resolveCaptionStyle(compRef.current).sub ?? {};
                           setCaptionStyle({ sub: { ...keep, ...patch } });
@@ -3452,6 +3465,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       stageW={boxW}
                       stageH={boxH}
                       measured={capMeasure}
+                      lines={mainLines}
                       onChange={setCaptionStyle}
                       onLive={(s) =>
                         // Send only position + box height (the surface min-height follows): the live channel has no font size. Including fontPx would make the iframe
