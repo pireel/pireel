@@ -562,8 +562,12 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const sub = m.sub ?? {};
   const scale = sub.scale ?? m.scale * 0.6;
   const mainFs = Math.max(10, Math.round(p.size * m.scale));
-  const subFs = Math.max(9, Math.round(p.size * scale));
-  const padY = p.bg ? Math.round(subFs * 0.18) * 2 : 0;
+  // Sub metrics come from the SUB preset + the effective sub plate (preset bg or the bg override) —
+  // gating the padding on the MAIN preset's plate put the derived anchor off whenever they differed.
+  const subP = getCaptionPreset(sub.preset ?? DEFAULT_SUB_CAPTION_PRESET);
+  const subFs = Math.max(9, Math.round(subP.size * scale));
+  const subPlate = sub.bg !== undefined ? sub.bg != null : !!subP.bg;
+  const padY = subPlate ? Math.round(subFs * 0.18) * 2 : 0;
   const derivedY = m.yPct + ((mainFs * 0.2 + subFs * 1.35 + padY) / (comp.height || 1920)) * 100;
   return {
     preset: sub.preset ?? DEFAULT_SUB_CAPTION_PRESET,

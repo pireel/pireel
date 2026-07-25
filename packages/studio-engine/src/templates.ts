@@ -237,7 +237,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     : '';
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:auto; max-width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''}${subPill} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow && !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow && !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
     : '';
   const decoCss =
     p.deco === 'highlight'
@@ -253,7 +253,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
 #${id} .cap-root { position:absolute; inset:0; }
 ${stackCss}
 #${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
-#${id} .w { position:relative; top:-0.04em; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
+#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
 #${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.12)}px; }${subCss}`.trim();
 
