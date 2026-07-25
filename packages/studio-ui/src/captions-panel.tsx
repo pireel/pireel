@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Ban, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
+import { Ban, Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
 import { t } from './i18n';
 import {
   type CaptionPreset,
@@ -81,8 +81,8 @@ export interface CaptionStyleCtl {
   sub: CaptionStyle;
   /** A translation target language is active — only then does the translation-line row show (per user). */
   bilingualOn: boolean;
-  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
-  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; lang?: string | undefined }) => void;
+  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => void;
+  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; lang?: string | undefined }) => void;
 }
 
 export function CaptionsPanel({
@@ -418,7 +418,7 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
   styleHidden?: boolean;
   /** Preset picked (null = follow main; only offered on the translation row). */
   onPreset: (id: string | null) => void;
-  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined }) => void;
+  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => void;
 }) {
   const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg'>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -434,6 +434,8 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
   const fs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * style.scale));
   const effColor = style.color ?? preset.text;
   const effBg = style.bg === null ? null : (style.bg ?? preset.bg ?? null);
+  // Effective bold: explicit override wins; else the preset's own weight decides (sub row's derived base weight is lighter)
+  const effBold = style.bold ?? (isSub ? Math.max(500, preset.weight - 200) >= 700 : preset.weight >= 700);
   // Size options in real px (dropdown replaces the A± stepper): mapped back to the preset-relative scale on pick.
   const sizeOpts = [16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 72, 80, 96].filter((px) => {
     const k = px / BASE_CAPTION_FONT_PX;
@@ -467,6 +469,15 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
       >
         <span className="text-ink-3 font-mono text-[10.5px] tabular-nums">{fs}</span>
         <ChevronDown size={11} className="text-ink-4" />
+      </button>
+      <button
+        type="button"
+        title={t('captions.bold')}
+        aria-pressed={effBold}
+        onClick={() => onPatch({ bold: !effBold })}
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${effBold ? 'border-accent text-ink bg-panel-2/60' : 'border-line text-ink-3 hover:border-accent'}`}
+      >
+        <Bold size={12} strokeWidth={2.6} />
       </button>
       <button
         type="button"

@@ -197,8 +197,8 @@ describe('全局花字样式 captionStyle', () => {
     c.captionStyle = { preset: 'em-purple-black', yPct: 60, scale: 1.5 };
     const html = assembleHtml(c);
     expect(html).toContain('bottom:40%'); // 100 - yPct
-    // scale=字号系数(不是区域 transform):全局基准 40px × 1.5 = 60px(字号不随预设——预设只管颜色/动效)
-    expect(html).toContain('font-size:60px');
+    // scale=字号系数(不是区域 transform):全局基准 48px × 1.5 = 72px(字号不随预设——预设只管颜色/动效)
+    expect(html).toContain('font-size:72px');
     expect(html).not.toContain('scale(1.5)');
     expect(html).toContain('#cf96ff'); // 预设的强调色进了逐词变色时间轴
     expect(html).not.toContain('scaleX:1'); // 旧 highlight 的扫光动画没了 → 真走了预设通道
@@ -617,5 +617,19 @@ describe('captionStyle 稀疏持久化', () => {
     expect(r.scale).toBe(1);
     expect(r.xPct).toBe(50);
     expect(r.wPct).toBe(56);
+  });
+});
+
+describe('加粗覆盖(bold:预设起点之上的显式覆盖)', () => {
+  it('captionStyle.bold 烘进 slots 并落到 font-weight:800;译文行 sub.bold 同理(700)', () => {
+    const c = emptyComposition();
+    c.video = { url: 'v.mp4', durationSec: 10 };
+    c.blocks = [captionBlock({ words: [{ text: '你好', start: 0, end: 1 }], sub: 'Hi' })];
+    c.captionStyle = { on: true, preset: 'ln-clean', bold: true, sub: { lang: 'English', bold: true } };
+    const html = assembleHtml(c);
+    expect(html).toContain('font-weight:800');
+    expect(html).toContain('font-weight:700'); // 译文行 bold=700
+    c.captionStyle = { on: true, preset: 'ln-clean', bold: false };
+    expect(assembleHtml(c)).toContain('font-weight:500'); // 显式取消加粗
   });
 });
