@@ -8,7 +8,7 @@
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
-import type { Composition } from './composition';
+import { type Composition, emptyComposition } from './composition';
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {
@@ -64,7 +64,9 @@ export interface StudioProjectMeta {
 /** Save payload from client to server (ProjectStore.save's arg; shared by cloud sync and the provider contract). */
 export interface ProjectSavePayload {
   title?: string;
-  comp: Composition;
+  /** Absent = chat-only save (consultation session on an empty canvas): the comp section is simply not sent,
+   *  the server keeps its current comp (merge) or seeds an empty one (first insert). Chat and canvas sync independently. */
+  comp?: Composition;
   chat: unknown[];
   /** Editing context (asr/clipAsr/plan/media): needed by the offline executor and cross-device retrieval. */
   context?: StudioProjectContext;
@@ -269,11 +271,13 @@ export function buildSaveWire(
   baseVersion: number | null,
   acked: AckedSections | null,
 ): { wire: ProjectSaveWire; acked: AckedSections } | null {
-  const compCanon = canonicalJson({ ...p.comp, video: null });
+  // comp absent = chat-only save: don't emit the comp section at all; carry the baseline forward so a later
+  // comp-ful save diffs correctly (no acked yet → seed the baseline as empty, matching the server's first-insert seed)
+  const compCanon = p.comp ? canonicalJson({ ...p.comp, video: null }) : null;
   const chatCanon = canonicalJson(p.chat ?? []);
   const ctxCanon = canonicalJson(p.context ?? {});
   const hashes: SectionHashes = {
-    comp: hashSection(compCanon),
+    comp: compCanon != null ? hashSection(compCanon) : (acked?.hashes.comp ?? hashSection(canonicalJson(emptyComposition()))),
     chat: hashSection(chatCanon),
     context: hashSection(ctxCanon),
     coverThumb: hashSection(p.coverThumb ?? ''),
@@ -281,7 +285,7 @@ export function buildSaveWire(
   };
   // JSON-clean current values (parsed from the canonical string: incidentally drops undefined, so diff is structurally comparable to the baseline)
   const values: AckedSections['values'] = {
-    comp: JSON.parse(compCanon) as Composition,
+    comp: compCanon != null ? (JSON.parse(compCanon) as Composition) : (acked?.values.comp ?? emptyComposition()),
     chat: JSON.parse(chatCanon) as unknown[],
     context: JSON.parse(ctxCanon) as StudioProjectContext,
   };
@@ -307,7 +311,7 @@ export function buildSaveWire(
     }
     w[key] = values[key];
   };
-  emitBig('comp', compCanon, true);
+  if (compCanon != null) emitBig('comp', compCanon, true);
   emitBig('chat', chatCanon, true);
   emitBig('context', ctxCanon, false);
 

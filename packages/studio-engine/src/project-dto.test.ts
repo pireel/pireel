@@ -62,6 +62,20 @@ describe('buildSaveWire(分段)', () => {
     expect(r.wire.videoSig).toBeUndefined();
   });
 
+  it('chat-only 载荷(纯咨询会话):comp 段完全缺席——空画布永远不可能冲掉云端 comp', () => {
+    const { comp: _omit, ...rest } = payload();
+    const chatOnly: ProjectSavePayload = { ...rest, chat: [{ id: 't1', messages: [1] }] };
+    const r = buildSaveWire(chatOnly, null, null);
+    expect(r).not.toBeNull();
+    expect(r!.wire.comp).toBeUndefined();
+    expect(r!.wire.compPatch).toBeUndefined();
+    expect(r!.wire.chat).toBeDefined();
+    // 之后带 comp 的保存对着携带下来的空基线正常出段(不因缺基线崩)
+    const next = buildSaveWire(payload({ chat: chatOnly.chat }), 1, r!.acked);
+    expect(next).not.toBeNull();
+    expect(next!.wire.comp ?? next!.wire.compPatch).toBeDefined();
+  });
+
   it('meta 段(videoSig/时长/title)独立于 comp', () => {
     const first = buildSaveWire(payload(), 3, null)!;
     const r = buildSaveWire(payload({ videoSig: 'sig2' }), 4, first.acked)!;

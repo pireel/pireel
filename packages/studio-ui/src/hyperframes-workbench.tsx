@@ -2789,7 +2789,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  Null on an empty canvas (a just-opened tab must not blank the cloud) — same rule as the effect. */
   function buildCloudPayload() {
     const c = compRef.current;
-    if (!(c.blocks.length > 0 || (c.shots?.length ?? 0) > 0) || !projectId) return null;
+    if (!projectId) return null;
+    const hasContent = c.blocks.length > 0 || (c.shots?.length ?? 0) > 0;
+    if (!hasContent) {
+      // Chat is independent of canvas content: a consultation-only session still syncs its threads
+      // (chat-only payload — the comp section is NOT sent, so an empty canvas can never clobber a
+      // cloud comp; the server seeds an empty comp on first insert). No threads either → nothing to save.
+      const threads = readChatThreads(projectId);
+      return threads.length ? { chat: threads, videoSig: null, videoDurationSec: null, coverThumb: null } : null;
+    }
     return {
       comp: { ...c, video: null },
       chat: readChatThreads(projectId),
@@ -3088,8 +3096,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Single-writer: a displaced tab (bridge close 4000) does not autosave at all, and never rebase-retries a 409 —
   // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
   useEffect(() => {
-    const hasContent = comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0;
-    if (!hasContent || !projectId || displaced) return;
+    // No content gate here: buildCloudPayload decides (full payload / chat-only / null) — chat syncs independently
+    if (!projectId || displaced) return;
     const timer = window.setTimeout(() => {
       if (displacedRef.current) return; // demoted while this timer was armed (flush-on-evict already carried this batch)
       const payload = buildCloudPayload();
