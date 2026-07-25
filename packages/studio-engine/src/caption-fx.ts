@@ -264,10 +264,11 @@ export function chunkWordsByWidth(words: FxWord[], maxUnits = CAPTION_LINE_UNITS
 }
 
 /** Display-cue width split (one chunk = one on-screen caption line). Budget is in em at the default
- *  caption font size (box ≈56% of canvas width / ~46px font): portrait ≈13em, landscape ≈22em.
+ *  caption font size, mirroring the aspect-aware default box width (portrait 56% ≈13em, landscape
+ *  38% ≈17em — line length stays in the comfortable subtitle band instead of scaling with canvas width).
  *  Object identity is preserved (chunks are slices), so callers' word metadata rides along. */
 export function cueChunks<W extends { text: string }>(words: W[], opts?: { landscape?: boolean; maxEm?: number }): W[][] {
-  const maxEm = opts?.maxEm ?? (opts?.landscape ? 22 : 13);
+  const maxEm = opts?.maxEm ?? (opts?.landscape ? 17 : 13);
   const gapEm = 0.18; // inter-word flex gap in the render, mirrored coarsely
   return chunkWordsBalanced(words, maxEm + gapEm, (w) => estWordEm(w.text) + gapEm);
 }

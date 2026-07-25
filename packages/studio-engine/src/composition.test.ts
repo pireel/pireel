@@ -20,6 +20,7 @@ import {
   videoFrameKeyframes,
   videoFrameTimelineBody,
   treatmentVacancyBox,
+  defaultCaptionWidthPct,
 } from './composition';
 
 function sampleComp(): Composition {
@@ -605,5 +606,13 @@ describe('素材位入/出场动效预设(slots.anim)', () => {
     const b = mediaBlock({ startSec: 0, durationSec: 3 });
     b.slots = { media: { type: 'image', url: 'https://x/a.jpg' } };
     expect(renderBlock(b).timelineBody).toContain('scale: 0.96');
+  });
+});
+
+describe('画幅感知的默认字幕宽度', () => {
+  it('横屏 38%(行长压回字幕舒适带),竖屏/方形 56%', () => {
+    expect(defaultCaptionWidthPct({ width: 1920, height: 1080 })).toBe(38);
+    expect(defaultCaptionWidthPct({ width: 1080, height: 1920 })).toBe(56);
+    expect(defaultCaptionWidthPct({ width: 1080, height: 1080 })).toBe(56);
   });
 });
