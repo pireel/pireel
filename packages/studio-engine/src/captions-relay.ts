@@ -9,7 +9,7 @@
  * tier as build-draft/build-blocks).
  */
 
-import { cueChunks, wordsFromText } from './caption-fx';
+import { cueChunks, detectLang, wordsFromText } from './caption-fx';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
 import { spans as clipSpans, srcToEditedLoose } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
@@ -99,7 +99,13 @@ export function displayCues(
     const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
     const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
-    for (const c of cueChunks(words)) {
+    // Language-aware cue size (international product, zh/en are both first-class): CJK convention is
+    // ONE line per subtitle event (~11 full-width chars); Latin-script convention is up to TWO lines
+    // (Netflix ~42 chars/line — a cue holds a clause, not 3-4 words). 22em ≈ two display lines; the
+    // stack renders them together, so an EN cue reads as one block instead of rapid tiny flips.
+    const latin = (srcSeg?.lang ?? g.lang ?? detectLang(g.text)) === 'en';
+    const chunks = cueChunks(words, { maxEm: latin ? 22 : 11 });
+    for (const c of chunks) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
       const sub = subFresh

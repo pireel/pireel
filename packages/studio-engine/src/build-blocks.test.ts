@@ -133,6 +133,23 @@ describe('displayCues(铺设期派生:剪辑后词流 → 一屏一行,列表与
   });
 });
 
+describe('displayCues 语言感知的 cue 尺寸(国际化:中英一等公民)', () => {
+  it('英文句按拉丁口径(≈两行/条)切,不再 3-4 词一碎块;中文维持单行口径', () => {
+    // 15 词英文句(~80 拉丁字符 ≈ 42em):中文口径(11em)会切 ~4 条;拉丁口径(22em)应 ≤2-3 条
+    const en = 'The most important piece of advice I would give to founders is do not overthink it';
+    const enCues = displayCues(oneShot(10), [{ start: 0, end: 10, text: en, lang: 'en' }], {});
+    expect(enCues.length).toBeLessThanOrEqual(3);
+    for (const c of enCues) expect(c.words.length).toBeGreaterThanOrEqual(4); // 每条至少一个短语,不是碎词
+    // 无 lang 标记时按文字系统检测,同样走拉丁口径
+    const detected = displayCues(oneShot(10), [{ start: 0, end: 10, text: en }], {});
+    expect(detected.length).toBe(enCues.length);
+    // 中文仍是单行口径(~11 字/条)
+    const zh = '这是一个非常非常长的句子它应该在铺设的时候被切成好几条独立的字幕';
+    const zhCues = displayCues(oneShot(10), [{ start: 0, end: 10, text: zh, lang: 'zh' }], {});
+    for (const c of zhCues) expect([...c.text].length).toBeLessThanOrEqual(13);
+  });
+});
+
 describe('desegmentCues(提取期切 cue 短命方案的反向合并)', () => {
   it('连续 cue 段按句末标点合并回句子;非 cue 段原样透传(同引用)', () => {
     const cueSegs: AsrSegment[] = [
