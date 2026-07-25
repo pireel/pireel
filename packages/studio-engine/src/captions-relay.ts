@@ -89,7 +89,7 @@ export function displayCues(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
   clipAsr: Record<string, AsrSegment[]>,
-  opts?: { landscape?: boolean; subLang?: string },
+  opts?: { subLang?: string },
 ): DisplayCue[] {
   const out: DisplayCue[] = [];
   for (const g of mappedCaptionSegs(shots, narr, clipAsr)) {
@@ -99,7 +99,7 @@ export function displayCues(
     const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
     const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
-    for (const c of cueChunks(words, opts)) {
+    for (const c of cueChunks(words)) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
       const sub = subFresh
@@ -130,7 +130,7 @@ export function relayCaptionLayer(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
   clipAsr: Record<string, AsrSegment[]>,
-  opts?: { landscape?: boolean; subLang?: string },
+  opts?: { subLang?: string },
 ): Block[] {
   if (!blocks.some(isSentenceCaption)) return blocks;
   const cues = displayCues(shots, narr, clipAsr, opts);

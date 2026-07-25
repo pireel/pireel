@@ -396,7 +396,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       let base = c;
       if (preset) {
         if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
-        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { landscape: c.width > c.height, subLang: resolveCaptionStyle(c).sub?.lang });
+        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { subLang: resolveCaptionStyle(c).sub?.lang });
         if (!cues.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
         base = stripDerivedCaptions(c, true); // legacy persisted caption blocks retire now that derivation is proven possible
       }
