@@ -41,6 +41,7 @@ import {
   blockId,
   blockKind,
   videoFrameTimelineBody,
+  BASE_CAPTION_FONT_PX,
   emptyComposition,
   freeTrack,
   getCaptionPreset,
@@ -3446,7 +3447,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     const subP0 = getCaptionPreset(base.preset);
                     const n0 = Math.max(1, captionLineSegments(wordsFromText(subText0, 0, 1), subP0, base.wPct ?? 56, base.scale, comp.width).length);
                     if (n0 <= 1) return base;
-                    const subFs0 = Math.max(9, Math.round(subP0.size * base.scale));
+                    const subFs0 = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * base.scale));
                     const extra = (subFs0 * 1.35 + Math.round(subFs0 * 0.15)) * (n0 - 1);
                     return { ...base, yPct: Math.min(99, base.yPct + (extra / comp.height) * 100) };
                   })();

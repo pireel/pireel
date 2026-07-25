@@ -22,6 +22,7 @@ import {
 import { type CaptionPreset, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
+import { BASE_CAPTION_FONT_PX } from './caption-presets';
 import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx, wordsFromText } from './caption-fx';
 
 /* ============================ template render impls ============================ */
@@ -162,7 +163,7 @@ function presetFontFamilies(p: CaptionPreset): string {
  */
 
 export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: number, scale: number, canvasW = 1080): FxWord[][] {
-  const fs = Math.max(10, Math.round(p.size * scale));
+  const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
   const gapPx = Math.round(fs * 0.18);
   const spPx = Math.round(fs * 0.12); // extra gap at Latin word boundaries (same spec as render .sp)
   const padPx = p.bg ? Math.round(fs * 0.42) * 2 : 0;
@@ -187,7 +188,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   const { start } = span2(words);
   // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
-  const fs = Math.max(10, Math.round(p.size * scale));
+  const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
   // Both modes split into visual lines at the CURRENT font size (same px-accurate budget). The
   // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
@@ -220,7 +221,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   let subP = getCaptionPreset(subOv.preset ?? DEFAULT_SUB_CAPTION_PRESET);
   if (subOv.color != null || subOv.bg !== undefined) subP = { ...subP, ...(subOv.color != null ? { text: subOv.color } : {}), ...(subOv.bg !== undefined ? { bg: subOv.bg ?? undefined } : {}) };
   const subScale = subStyle?.scale ?? scale * 0.6;
-  const subFs = Math.max(9, Math.round(subP.size * subScale));
+  const subFs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * subScale));
   const subW = subStyle?.wPct ?? wPct;
   const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), subP, subW, subScale, canvasW) : [];
   const subPill = subP.bg ? `background:${subP.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * 0.28)}px;` : '';
@@ -237,7 +238,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     : '';
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:auto; max-width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''}${subPill} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow && !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
     : '';
   const decoCss =
     p.deco === 'highlight'
@@ -253,7 +254,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
 #${id} .cap-root { position:absolute; inset:0; }
 ${stackCss}
 #${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
-#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
+#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${!p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
 #${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.12)}px; }${subCss}`.trim();
 
