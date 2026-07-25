@@ -46,7 +46,7 @@ import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from './trim';
-import type { AsrSegment } from './build-blocks';
+import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from './build-blocks';
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
 import { ensureTemplatesRegistered } from './templates';
@@ -396,7 +396,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       let base = c;
       if (preset) {
         if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
-        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { landscape: c.width > c.height });
+        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { landscape: c.width > c.height, subLang: resolveCaptionStyle(c).sub?.lang });
         if (!cues.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
         base = stripDerivedCaptions(c, true); // legacy persisted caption blocks retire now that derivation is proven possible
       }
@@ -415,8 +415,10 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       };
     }
     case 'set_caption_translations': {
-      // Translations are written onto the transcript sentences (the sub field of context.asr/clipAsr) — cut/preset-change re-lay carries them along automatically
+      // Translations are written onto the transcript sentences (sub / per-cue cueSubs of context.asr/clipAsr) via the
+      // SHARED writer (applyCaptionTranslations — same semantics as the browser mirror and the panel flows)
       const clear = input.clear === true;
+      const lang = typeof input.lang === 'string' && input.lang.trim() ? input.lang.trim() : undefined;
       const items = (Array.isArray(input.items) ? input.items : [])
         .map((it) => {
           const o = (it ?? {}) as Record<string, unknown>;
@@ -431,14 +433,13 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
         })
         .filter((it): it is { index: number; text: string; w0?: number; w1?: number } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
       if (!clear && !items.length) return { result: { ok: false, error: 'items empty/invalid (expected {index, text}[], where index is the read_script line number)' } };
-      const stripSub = (segs: TranscriptSegment[] | undefined) => segs?.map(({ sub: _s, cueSubs: _cs, ...rest }) => rest);
       let ctx: StudioProjectContext;
       let summary: string;
       if (clear) {
         ctx = {
           ...p.context,
-          ...(p.context.asr ? { asr: stripSub(p.context.asr) } : {}),
-          ...(p.context.clipAsr ? { clipAsr: Object.fromEntries(Object.entries(p.context.clipAsr).map(([k, v]) => [k, stripSub(v)!])) } : {}),
+          ...(p.context.asr ? { asr: clearCaptionTranslations(asAsr(p.context.asr)) } : {}),
+          ...(p.context.clipAsr ? { clipAsr: Object.fromEntries(Object.entries(p.context.clipAsr).map(([k, v]) => [k, clearCaptionTranslations(asAsr(v))])) } : {}),
         };
         summary = 'Cleared all caption translations';
       } else {
@@ -449,23 +450,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
         if (!segs?.length) return { result: { ok: false, error: src ? 'this inserted clip has no transcript' : 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
         const bad = items.filter((it) => it.index >= segs.length);
         if (bad.length) return { result: { ok: false, error: `index out of range: ${bad.map((b) => b.index).join(', ')} (this transcript has ${segs.length} lines; see read_script for line numbers)` } };
-        const next = segs.map((s, i) => {
-          const hits = items.filter((it) => it.index === i);
-          if (!hits.length) return s;
-          const out: TranscriptSegment = { ...s };
-          for (const hit of hits) {
-            if (hit.w0 != null && hit.w1 != null) {
-              // per-cue translation: keyed by the cue's word range within this sentence
-              const subs = { ...(out.cueSubs ?? {}) };
-              if (hit.text) subs[`${hit.w0}:${hit.w1}`] = hit.text;
-              else delete subs[`${hit.w0}:${hit.w1}`];
-              if (Object.keys(subs).length) out.cueSubs = subs;
-              else delete out.cueSubs;
-            } else if (hit.text) out.sub = hit.text;
-            else delete out.sub;
-          }
-          return out;
-        });
+        const next = applyCaptionTranslations(asAsr(segs), items, lang);
         ctx = src ? { ...p.context, clipAsr: { ...p.context.clipAsr, [src]: next } } : { ...p.context, asr: next };
         summary = `Set ${items.filter((it) => it.text).length} translations`;
       }

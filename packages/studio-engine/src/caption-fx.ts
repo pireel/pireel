@@ -131,6 +131,32 @@ export function wordsFromText(text: string, start: number, end: number): FxWord[
   return out;
 }
 
+/** Script-ratio language detection (fallback when the ASR provider doesn't report one): counts
+ *  letters by script over the text. Rough by design — it feeds defaults (translate target, budget
+ *  hints), never correctness-critical paths. Returns undefined when nothing is recognizable. */
+export function detectLang(text: string): string | undefined {
+  let han = 0;
+  let kana = 0;
+  let hangul = 0;
+  let latin = 0;
+  let total = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    if (!/[\p{L}]/u.test(ch)) continue;
+    total++;
+    if (c >= 0x3040 && c <= 0x30ff) kana++;
+    else if (c >= 0xac00 && c <= 0xd7af) hangul++;
+    else if (c >= 0x4e00 && c <= 0x9fff) han++;
+    else if (c <= 0x024f) latin++;
+  }
+  if (!total) return undefined;
+  if (kana / total > 0.05) return 'ja'; // any real kana presence marks Japanese even though it borrows Han
+  if (hangul / total > 0.3) return 'ko';
+  if (han / total > 0.3) return 'zh';
+  if (latin / total > 0.7) return 'en';
+  return undefined;
+}
+
 /** Letters+digits only (any script) — the alignment currency between ASR tokens and ICU words:
  *  punctuation/space counts are unreliable across tokenizers, letter counts are not. */
 const alnumCount = (s: string): number => {

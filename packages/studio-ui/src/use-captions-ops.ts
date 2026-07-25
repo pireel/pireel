@@ -19,7 +19,7 @@ import {
   resolveCaptionStyle,
   resolveSubCaptionStyle,
 } from '@pireel/studio-engine/composition';
-import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, applyCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -98,9 +98,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       const item = { index, w0, w1, text: textOut };
       if (src) {
         const shot = ensureShots(compRef.current).find((s) => s.src === src);
-        if (shot) await runTool('set_caption_translations', { shotId: shot.id, items: [item] });
+        if (shot) await runTool('set_caption_translations', { shotId: shot.id, items: [item], lang });
       } else {
-        await runTool('set_caption_translations', { items: [item] });
+        await runTool('set_caption_translations', { items: [item], lang });
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
@@ -193,19 +193,16 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     const nextSub = text?.trim() || undefined;
     const key = `${row.w0}:${row.w1}`;
     if (nextSub === (old.cueSubs?.[key] ?? old.sub)) return;
-    const nextSeg: AsrSegment = { ...old };
-    const subs = { ...(old.cueSubs ?? {}) };
-    if (nextSub) subs[key] = nextSub;
-    else delete subs[key];
-    if (Object.keys(subs).length) nextSeg.cueSubs = subs;
-    else delete nextSeg.cueSubs;
-    // Full-sentence cue: keep the legacy whole-sentence field coherent (it's the display fallback and the agent-facing value)
+    const lang = resolveCaptionStyle(compRef.current).sub?.lang;
     const base = old.words?.length ? old.words : wordsFromText(old.text, old.start, old.end);
-    if (row.w0 === 0 && row.w1 === base.length - 1) {
-      if (nextSub) nextSeg.sub = nextSub;
-      else delete nextSeg.sub;
-    }
-    const next = segs.map((s, i) => (i === row.index ? nextSeg : s));
+    const fullRange = row.w0 === 0 && row.w1 === base.length - 1;
+    // Shared writer (same semantics as the executor): per-cue entry, plus the whole-sentence field
+    // when the cue covers the full sentence (display fallback + the agent-facing value).
+    const items = [
+      { index: row.index, w0: row.w0, w1: row.w1, text: nextSub ?? '' },
+      ...(fullRange ? [{ index: row.index, text: nextSub ?? '' }] : []),
+    ];
+    const next = applyCaptionTranslations(segs, items, lang);
     if (src) {
       const m = { ...clipAsrRef.current, [src]: next };
       clipAsrRef.current = m;
@@ -281,7 +278,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         toast.info(t('workbench.extractingTranscript'));
         segs = await stepAsr();
       }
-      const cues = displayCues(ensureShots(compRef.current), segs ?? [], clipAsrRef.current, { landscape: isLandscape() });
+      const cues = displayCues(ensureShots(compRef.current), segs ?? [], clipAsrRef.current, { landscape: isLandscape(), subLang: resolveCaptionStyle(compRef.current).sub?.lang });
       if (!cues.length) {
         toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
@@ -333,7 +330,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     // Rows = the SAME derivation the canvas renders (displayCues): one row = one on-screen line, by
     // construction. NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed —
     // caption editing must keep working in the missing-media state (browser switch / cleared storage).
-    return displayCues(ensureShots(comp), asrSentences, clipAsr, { landscape: comp.width > comp.height })
+    return displayCues(ensureShots(comp), asrSentences, clipAsr, { landscape: comp.width > comp.height, subLang: resolveCaptionStyle(comp).sub?.lang })
       .filter((c) => c.ref)
       .map((c) => ({
         key: `${c.ref!.src ?? 'main'}:${c.ref!.seg}:${c.ref!.w0}`,
@@ -362,7 +359,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
       // Translate DISPLAY CUES (what's actually on screen), one translation per cue, all in one
       // context-bearing request; store per-cue on the source sentences (cueSubs via the executor).
-      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { landscape: isLandscape() }).filter((c) => c.ref);
+      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { landscape: isLandscape(), subLang: target }).filter((c) => c.ref);
       if (!cues.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
@@ -382,9 +379,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         if (!items.length) continue;
         if (src) {
           const shot = (compRef.current.shots ?? []).find((sh) => sh.src === src);
-          if (shot) await runTool('set_caption_translations', { shotId: shot.id, items });
+          if (shot) await runTool('set_caption_translations', { shotId: shot.id, items, lang: target });
         } else {
-          await runTool('set_caption_translations', { items });
+          await runTool('set_caption_translations', { items, lang: target });
         }
       }
       // Remember the target language: panel chip selected state + new inserted clips auto-translated to the same language

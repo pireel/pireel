@@ -70,7 +70,7 @@ import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { injectPreviewRuntime } from './sample-composition';
 import { playhead } from './playhead';
-import { type AsrSegment, captionBlocksFromAsr, desegmentCues } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, captionBlocksFromAsr, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
@@ -1074,8 +1074,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const canDeriveCaptions = (asrSentences?.length ?? 0) > 0 || Object.keys(clipAsr).length > 0;
   const compForSave = useMemo(() => stripDerivedCaptions(comp, canDeriveCaptions), [comp, canDeriveCaptions]);
   useDraftAutosave(compForSave, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef, () => ({
-    ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+    ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
   }));
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
@@ -2826,8 +2826,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       comp: { ...stripDerivedCaptions(c, canDerive), video: null },
       chat: readChatThreads(projectId),
       context: {
-        ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-        ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+        // Persistence boundary: runtime derivation markers (cue/ref/si) never land in storage
+        ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+        ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
         ...(planRef.current ? { plan: planRef.current } : {}),
         ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
       },
@@ -3049,7 +3050,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!bootDataReady) return;
     const c = compRef.current;
     const on = isCaptionsOn(c);
-    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { landscape: c.width > c.height }) : [];
+    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { landscape: c.width > c.height, subLang: resolveCaptionStyle(c).sub?.lang }) : [];
     // On with nothing derivable (no transcript, e.g. a legacy comp whose context never mirrored):
     // keep whatever exists — the persisted legacy blocks keep rendering, nothing is destroyed.
     if (on && !cues.length) return;
