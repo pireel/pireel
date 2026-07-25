@@ -305,6 +305,7 @@ function StudioTimelineImpl({
     };
     marqueeRafRef.current = requestAnimationFrame(frame);
     const move = (ev: PointerEvent) => {
+      if (ev.buttons === 0) { up(); return; } // missed pointerup: finish immediately, don't track bare movement (same as drag)
       lastX = ev.clientX;
       lastY = ev.clientY;
     };
@@ -312,6 +313,7 @@ function StudioTimelineImpl({
       cancelAnimationFrame(marqueeRafRef.current);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
       const r = base.getBoundingClientRect();
       const x1 = lastX - r.left;
       const y1 = lastY - r.top;
@@ -321,6 +323,7 @@ function StudioTimelineImpl({
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   };
   /** Scene-track marquee: drag a rectangle from the track's **top/bottom gap** (or the blank right of the last card); matched shots all enter the multi-select set.
    *  Pressing on a card is intercepted by the card itself for reorder (startShotDrag); the two gestures split by start point, like CapCut. */
