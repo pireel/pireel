@@ -225,6 +225,10 @@ export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
  *  Only affects caption blocks **without a box** (the sentence-level subtitle layer); captions with a box (keyword punches, etc.) are independently
  *  positioned emphasis components not governed by the global style. Default (undefined) = each block renders per its own slots (draft-build theming tradeoff). */
 export interface CaptionStyle {
+  /** Captions layer switch. Captions are DERIVED at runtime from the transcript (displayCues) and are
+   *  never persisted as blocks — this flag (plus the transcript) IS the stored state. Legacy comps
+   *  that still carry persisted caption blocks read as "on" via isCaptionsOn's fallback. */
+  on?: boolean;
   /** Visual preset id (caption-presets registry; the per-word-emphasis / full-sentence mode is also set by the preset). */
   preset: string;
   /** Vertical position: caption's bottom edge distance from canvas top, in % (height-based). */
@@ -526,6 +530,26 @@ export function resolveCaptionStyle(comp: Composition): CaptionStyle {
   const preset = typeof first?.slots.preset === 'string' ? (first.slots.preset as string) : DEFAULT_CAPTION_PRESET;
   const yPct = typeof first?.slots.yPct === 'number' ? (first.slots.yPct as number) : 88;
   return { preset, yPct, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, scale: 1 };
+}
+
+/** Is the captions layer on? The stored truth is captionStyle.on (captions derive from the transcript
+ *  at runtime; blocks are a runtime materialization, never persisted). Legacy comps that predate the
+ *  flag carry persisted caption blocks instead — their presence reads as "on". */
+export function isCaptionsOn(comp: Composition): boolean {
+  return comp.captionStyle?.on ?? comp.blocks.some(isSentenceCaption);
+}
+
+/** Persistence strip: derived caption blocks never land in storage — the transcript + captionStyle.on
+ *  carry the caption state. Only strips when the caller confirms a transcript exists to re-derive from:
+ *  a legacy comp holding caption blocks with NO transcript keeps them persisted (stripping would lose
+ *  the captions with nothing to rebuild from). */
+export function stripDerivedCaptions(comp: Composition, canDerive: boolean): Composition {
+  if (!canDerive || !comp.blocks.some(isSentenceCaption)) return comp;
+  return {
+    ...comp,
+    blocks: comp.blocks.filter((b) => !isSentenceCaption(b)),
+    captionStyle: { ...resolveCaptionStyle(comp), on: true },
+  };
 }
 
 /** Full style for the translation line (bilingual second line) — **same shape as CaptionStyle**, reusing the main line's handle/render/measure conventions

@@ -14,14 +14,14 @@ import {
   type CaptionStyle,
   type Composition,
   type VideoShot,
+  isCaptionsOn,
   isSentenceCaption,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
 } from '@pireel/studio-engine/composition';
-import { spans as clipSpans } from '@pireel/studio-engine/trim';
-import { type AsrSegment, captionBlocksFromAsr } from '@pireel/studio-engine/build-blocks';
-import { wordsFromText } from '@pireel/studio-engine/caption-fx';
-import { mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
+import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
+import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { t } from './i18n';
 import type { CaptionLineRow } from './captions-panel';
@@ -65,32 +65,42 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setComp((c) => ({ ...c, captionStyle: { ...resolveCaptionStyle(c), ...patch } }));
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
+  const isLandscape = () => compRef.current.width > compRef.current.height;
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
   const relayCaptionLayer = (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null): Block[] =>
-    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current);
+    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, { landscape: isLandscape() });
   /** Edit one caption line's TEXT (captions panel). Single source of truth = the transcript: the fix
    *  reaches caption re-lay, read_script/agents and the script panel at once. Timing untouched; word
    *  timing redistributed proportionally within the sentence (wordsFromText — karaoke presets keep working).
    *  Bilingual on → the stale translation is dropped and that line auto-retranslates. */
   const [captionLineBusyKey, setCaptionLineBusyKey] = useState<string | null>(null);
-  const retranslateCaptionLine = async (src: string | null, index: number, langIn?: string) => {
+  /** Source-sentence word list a cue range indexes into (materialized deterministically when ASR words are absent). */
+  const baseWordsOf = (seg: AsrSegment) => (seg.words?.length ? seg.words : wordsFromText(seg.text, seg.start, seg.end));
+  /** Re-translate ONE display cue (range within its source sentence) and store it per-cue (cueSubs). */
+  const retranslateCaptionLine = async (src: string | null, index: number, range: { w0: number; w1: number }, langIn?: string) => {
     const tr = studioProviders().translate;
     const lang = langIn ?? resolveCaptionStyle(compRef.current).sub?.lang;
     if (!tr || !lang) return;
     const segs = src ? clipAsrRef.current[src] : asrRef.current;
     const seg = segs?.[index];
     if (!seg) return;
-    const key = `${src ?? 'main'}:${index}`;
+    const base = baseWordsOf(seg);
+    const w0 = Math.max(0, Math.min(range.w0, base.length - 1));
+    const w1 = Math.max(w0, Math.min(range.w1, base.length - 1));
+    const cueText = joinWords(base.slice(w0, w1 + 1).map((w) => w.text));
+    if (!cueText) return;
+    const key = `${src ?? 'main'}:${index}:${w0}`;
     setCaptionLineBusyKey(key);
     try {
-      const out = await tr([{ index, text: seg.text }], lang);
+      const out = await tr([{ index, text: cueText }], lang);
       const textOut = out.find((o) => o.index === index)?.text?.trim();
       if (!textOut) throw new Error(t('workbench.translationFailedTryAgain'));
+      const item = { index, w0, w1, text: textOut };
       if (src) {
         const shot = ensureShots(compRef.current).find((s) => s.src === src);
-        if (shot) await runTool('set_caption_translations', { shotId: shot.id, items: [{ index, text: textOut }] });
+        if (shot) await runTool('set_caption_translations', { shotId: shot.id, items: [item] });
       } else {
-        await runTool('set_caption_translations', { items: [{ index, text: textOut }] });
+        await runTool('set_caption_translations', { items: [item] });
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
@@ -101,21 +111,37 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   /** Live-edited-but-not-committed lines (panel debounces keystrokes through phase 'live'):
    *  commit uses it to know a retranslate is owed even when the final call's text is already current. */
   const captionLiveDirtyRef = useRef<Set<string>>(new Set());
-  const editCaptionLine = (src: string | null, index: number, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
+  /** Edit one display cue's TEXT: splice the cue's word range inside its source sentence (the
+   *  transcript stays the single source of truth; the sentence text is rebuilt from its words).
+   *  Blocks re-derive reactively — no manual re-lay. The edit invalidates this cue's translation and
+   *  any later cue translations of the same sentence (their range keys shift with the word count). */
+  const editCaptionLine = (row: CaptionLineRow, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
+    const src = row.src;
     const segs = src ? clipAsrRef.current[src] : asrRef.current;
-    const old = segs?.[index];
+    const old = segs?.[row.index];
     if (!old || !nextText) return;
-    const key = `${src ?? 'main'}:${index}`;
-    const changed = nextText !== old.text;
+    const base = old.words?.length ? old.words : wordsFromText(old.text, old.start, old.end);
+    const w0 = Math.max(0, Math.min(row.w0, base.length - 1));
+    const w1 = Math.max(w0, Math.min(row.w1, base.length - 1));
+    const oldCueText = joinWords(base.slice(w0, w1 + 1).map((w) => w.text));
+    const changed = nextText !== oldCueText;
+    let newW1 = w1;
     if (changed) {
-      // Keep the existing sub while typing (nicer than flashing 未翻译); the commit-time retranslate replaces it
-      const nextSeg: AsrSegment = {
-        ...old,
-        text: nextText,
-        // Only rebuild word timing if ASR provided it (karaoke presets read words); sentence-level stays sentence-level
-        ...(old.words?.length ? { words: wordsFromText(nextText, old.start, old.end) } : {}),
-      };
-      const next = segs.map((s, i) => (i === index ? nextSeg : s));
+      const replaced = wordsFromText(nextText, base[w0]!.start, base[w1]!.end);
+      if (!replaced.length) return;
+      newW1 = w0 + replaced.length - 1;
+      const nextWords = [...base.slice(0, w0), ...replaced, ...base.slice(w1 + 1)];
+      // Keep only translations of ranges fully BEFORE the edit; the edited range and everything after shift.
+      const keptSubs = Object.fromEntries(
+        Object.entries(old.cueSubs ?? {}).filter(([k]) => {
+          const b = Number(k.split(':')[1]);
+          return Number.isFinite(b) && b < w0;
+        }),
+      );
+      const nextSeg: AsrSegment = { ...old, text: joinWords(nextWords.map((w) => w.text)), words: nextWords };
+      if (Object.keys(keptSubs).length) nextSeg.cueSubs = keptSubs;
+      else delete nextSeg.cueSubs;
+      const next = segs.map((s, i) => (i === row.index ? nextSeg : s));
       if (src) {
         const m = { ...clipAsrRef.current, [src]: next };
         clipAsrRef.current = m;
@@ -124,20 +150,16 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         asrRef.current = next;
         setAsrSentences(next);
       }
-      // Captions on → re-lay so the canvas reflects the text live (double-buffered doc swap, no flash)
-      if (compRef.current.blocks.some(isSentenceCaption)) {
-        setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
-      }
     }
     if (phase === 'live') {
-      if (changed) captionLiveDirtyRef.current.add(key);
+      if (changed) captionLiveDirtyRef.current.add(row.key);
       return;
     }
-    const dirty = captionLiveDirtyRef.current.delete(key);
+    const dirty = captionLiveDirtyRef.current.delete(row.key);
     if (phase === 'revert') return; // Esc: text restored above (if needed), old sub still matches — nothing else to do
-    // Commit + bilingual on → refresh this line's translation (also owed when live edits already landed the text)
+    // Commit + bilingual on → refresh this cue's translation (also owed when live edits already landed the text)
     if ((changed || dirty) && resolveCaptionStyle(compRef.current).sub?.lang && studioProviders().translate) {
-      void retranslateCaptionLine(src, index);
+      void retranslateCaptionLine(src, row.index, { w0, w1: newW1 });
     }
   };
   /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
@@ -160,18 +182,30 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCapGenBusy(false);
     }
   };
-  /** Manually edit one line's TRANSLATION (bilingual second row). Same single-source semantics as the
-   *  text edit (seg.sub), same live re-lay; no auto-retranslate here — the user's wording wins
-   *  (only editing the SOURCE re-triggers translation). null = clear this line's translation. */
-  const editCaptionSubLine = (src: string | null, index: number, text: string | null, _phase: 'live' | 'commit' | 'revert' = 'commit') => {
+  /** Manually edit one display cue's TRANSLATION (bilingual second row): stored per-cue on the source
+   *  sentence (cueSubs["w0:w1"]); no auto-retranslate — the user's wording wins (only editing the
+   *  SOURCE re-triggers translation). null = clear this cue's translation. Blocks re-derive reactively. */
+  const editCaptionSubLine = (row: CaptionLineRow, text: string | null, _phase: 'live' | 'commit' | 'revert' = 'commit') => {
+    const src = row.src;
     const segs = src ? clipAsrRef.current[src] : asrRef.current;
-    const old = segs?.[index];
+    const old = segs?.[row.index];
     if (!old) return;
     const nextSub = text?.trim() || undefined;
-    if (nextSub === old.sub) return;
-    const { sub: _drop, ...rest } = old;
-    const nextSeg: AsrSegment = nextSub ? { ...rest, sub: nextSub } : rest;
-    const next = segs.map((s, i) => (i === index ? nextSeg : s));
+    const key = `${row.w0}:${row.w1}`;
+    if (nextSub === (old.cueSubs?.[key] ?? old.sub)) return;
+    const nextSeg: AsrSegment = { ...old };
+    const subs = { ...(old.cueSubs ?? {}) };
+    if (nextSub) subs[key] = nextSub;
+    else delete subs[key];
+    if (Object.keys(subs).length) nextSeg.cueSubs = subs;
+    else delete nextSeg.cueSubs;
+    // Full-sentence cue: keep the legacy whole-sentence field coherent (it's the display fallback and the agent-facing value)
+    const base = old.words?.length ? old.words : wordsFromText(old.text, old.start, old.end);
+    if (row.w0 === 0 && row.w1 === base.length - 1) {
+      if (nextSub) nextSeg.sub = nextSub;
+      else delete nextSeg.sub;
+    }
+    const next = segs.map((s, i) => (i === row.index ? nextSeg : s));
     if (src) {
       const m = { ...clipAsrRef.current, [src]: next };
       clipAsrRef.current = m;
@@ -179,9 +213,6 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     } else {
       asrRef.current = next;
       setAsrSentences(next);
-    }
-    if (compRef.current.blocks.some(isSentenceCaption)) {
-      setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
     }
   };
   /** Shared props for the two CaptionsPanel mounts (docked rail + float window). */
@@ -212,13 +243,13 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       if (playingRef.current) setPlaying(false);
       applyT(sec);
     },
-    onRetranslateLine: (src: string | null, index: number) => void retranslateCaptionLine(src, index),
+    onRetranslateLine: (row: CaptionLineRow) => void retranslateCaptionLine(row.src, row.index, { w0: row.w0, w1: row.w1 }),
     lineBusyKey: captionLineBusyKey,
     onExtract: () => void extractCaptionsNow(),
     translation: studioProviders().translate
       ? {
-          done: (asrSentences ?? []).filter((x) => x.sub).length + Object.values(clipAsr).flat().filter((x) => x.sub).length,
-          total: (asrSentences ?? []).length + Object.values(clipAsr).flat().length,
+          done: captionLineRows.filter((r) => r.sub).length,
+          total: captionLineRows.length,
           busy: capTransBusy,
           lang: resolveCaptionStyle(comp).sub?.lang,
           onTranslate: (lang: string) => void translateCaptionsTo(lang),
@@ -233,7 +264,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const captionGenBusyRef = useRef(false);
   const [capGenBusy, setCapGenBusy] = useState(false); // used by the panel's "generating captions" overlay (the ref only prevents re-entry, doesn't trigger render)
   const applyCaptionPreset = async (preset: string) => {
-    const has = compRef.current.blocks.some(isSentenceCaption);
+    const has = isCaptionsOn(compRef.current);
     if (!compRef.current.video) {
       toast.error(t('workbench.uploadVideoBeforeApplying'));
       return;
@@ -242,16 +273,16 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     captionGenBusyRef.current = true;
     setCapGenBusy(true);
     try {
-      // Run ASR if there's no transcript (fileSig cache hit = instant) — **never** skip re-laying because "captions already exist":
-      // old blocks may predate a segmentation-algorithm change, and without re-laying, segmentation never takes effect (hit this:
-      // after loading a draft the transcript state was empty, took the "style-only" degrade path, and no matter how the user clicked they saw no segmentation)
+      // Run ASR if there's no transcript (fileSig cache hit = instant). Captions are derived state:
+      // switching the preset only writes captionStyle {on, preset} — the reactive derivation
+      // materializes blocks from the transcript.
       let segs = asrRef.current;
       if (!segs?.length) {
         toast.info(t('workbench.extractingTranscript'));
         segs = await stepAsr();
       }
-      const caps = captionBlocksFromAsr(mappedCaptionSegs(ensureShots(compRef.current), segs ?? []));
-      if (!caps.length) {
+      const cues = displayCues(ensureShots(compRef.current), segs ?? [], clipAsrRef.current, { landscape: isLandscape() });
+      if (!cues.length) {
         toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
       }
@@ -259,16 +290,16 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       // Preset switch = a complete look: clear the per-line color/bg overrides (kept overrides would tint the new preset)
       setComp((c) => {
         const { color: _oc, bg: _ob, ...rest } = resolveCaptionStyle(c);
-        return { ...c, blocks: [...c.blocks.filter((b) => !isSentenceCaption(b)), ...caps], captionStyle: { ...rest, preset } };
+        return { ...c, captionStyle: { ...rest, on: true, preset } };
       });
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
       // caption window, move it to the first caption — otherwise nothing on screen moves after laying and it feels like "clicked but no effect" (user reported)
-      if (!playingRef.current && caps.length) {
+      if (!playingRef.current && cues.length) {
         const t = tRef.current;
-        const within = caps.some((b) => t >= b.startSec && t < b.startSec + b.durationSec);
-        if (!within) applyT(caps[0]!.startSec + Math.min(0.3, caps[0]!.durationSec / 2));
+        const within = cues.some((c) => t >= c.start && t < c.end);
+        if (!within) applyT(cues[0]!.start + Math.min(0.3, (cues[0]!.end - cues[0]!.start) / 2));
       }
-      toast.success(has ? t('workbench.reLaidCaptionsFrom') : t('workbench.laidNCaptionsFrom', { n: caps.length }));
+      toast.success(has ? t('workbench.reLaidCaptionsFrom') : t('workbench.laidNCaptionsFrom', { n: cues.length }));
     } catch (e) {
       console.warn('[studio] apply caption preset failed', e);
       setCaptionStyle({ preset }); // on transcription failure, at least swap the style
@@ -278,15 +309,19 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCapGenBusy(false);
     }
   };
-  /** Captions panel "remove"/switch-off: drop the sentence-level caption layer. captionStyle is KEPT —
-   *  it is state (preset/positions/translation language) and the on/off toggle must round-trip it intact
-   *  (wiping it here orphaned the transcript translations from their language state). */
+  /** Captions panel "remove"/switch-off: captionStyle.on = false. The rest of captionStyle is KEPT —
+   *  it is state (preset/positions/translation language) and the on/off toggle must round-trip it intact.
+   *  The derivation effect clears the materialized blocks. */
   const removeCaptionLayer = () => {
+    if (!isCaptionsOn(compRef.current)) return;
     const ids = compRef.current.blocks.filter(isSentenceCaption).map((b) => b.id);
-    if (!ids.length) return;
     pushUndoSnapshot();
     ids.forEach((id) => postPreview({ type: 'hf:remove', id }));
-    setComp((c) => ({ ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)) }));
+    setComp((c) => ({
+      ...c,
+      blocks: c.blocks.filter((b) => !isSentenceCaption(b)),
+      captionStyle: { ...resolveCaptionStyle(c), on: false },
+    }));
     setSelectedIdRaw((s) => (s && ids.includes(s) ? null : s));
     setSelectedBlockIds((cur) => {
       const n = new Set([...cur].filter((x) => !ids.includes(x)));
@@ -295,29 +330,24 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     toast.success(t('workbench.removedCaptions'));
   };
   const captionLineRows = useMemo<CaptionLineRow[]>(() => {
-    // NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed — caption editing
-    // must keep working in the missing-media state (browser switch / cleared storage).
-    const rows: CaptionLineRow[] = [];
-    const seen = new Set<string>();
-    for (const sp of clipSpans(ensureShots(comp))) {
-      const shot = sp.clip as VideoShot;
-      const src = shot.src ?? null;
-      const segs = src ? (clipAsr[src] ?? []) : (asrSentences ?? []);
-      segs.forEach((seg, i) => {
-        if (seg.end <= shot.srcStart + 0.05 || seg.start >= shot.srcEnd - 0.05) return;
-        const key = `${src ?? 'main'}:${i}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        rows.push({
-          key, src, index: i, text: seg.text, sub: seg.sub,
-          editedStart: sp.editedStart + Math.max(0, seg.start - shot.srcStart),
-          dur: Math.max(0.1, Math.min(seg.end, shot.srcEnd) - Math.max(seg.start, shot.srcStart)),
-        });
-      });
-    }
-    return rows;
+    // Rows = the SAME derivation the canvas renders (displayCues): one row = one on-screen line, by
+    // construction. NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed —
+    // caption editing must keep working in the missing-media state (browser switch / cleared storage).
+    return displayCues(ensureShots(comp), asrSentences, clipAsr, { landscape: comp.width > comp.height })
+      .filter((c) => c.ref)
+      .map((c) => ({
+        key: `${c.ref!.src ?? 'main'}:${c.ref!.seg}:${c.ref!.w0}`,
+        src: c.ref!.src,
+        index: c.ref!.seg,
+        w0: c.ref!.w0,
+        w1: c.ref!.w1,
+        text: c.text,
+        sub: c.sub,
+        editedStart: c.start,
+        dur: Math.max(0.1, c.end - c.start),
+      }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, asrSentences, clipAsr]);
+  }, [comp.shots, comp.width, comp.height, asrSentences, clipAsr]);
   /* ---------- Bilingual translation (the captions panel "bilingual" section): translations come from the in-house LLM
      (providers.translate; the OSS shell's default hides this section), data lands via the same set_caption_translations executor (undo/re-lay shared). ---------- */
   const translateCaptionsTo = async (target: string) => {
@@ -330,19 +360,36 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setCapTransBusy(true);
     try {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
-      const main = asrRef.current ?? [];
-      const out = await tr(main.map((x, i) => ({ index: i, text: x.text })), target);
-      if (out.length) await runTool('set_caption_translations', { items: out });
-      for (const [src, segs] of Object.entries(clipAsrRef.current)) {
-        if (!segs.length) continue;
-        const shot = (compRef.current.shots ?? []).find((sh) => sh.src === src);
-        if (!shot) continue;
-        const co = await tr(segs.map((x, i) => ({ index: i, text: x.text })), target);
-        if (co.length) await runTool('set_caption_translations', { shotId: shot.id, items: co });
+      // Translate DISPLAY CUES (what's actually on screen), one translation per cue, all in one
+      // context-bearing request; store per-cue on the source sentences (cueSubs via the executor).
+      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { landscape: isLandscape() }).filter((c) => c.ref);
+      if (!cues.length) {
+        toast.error(t('workbench.noTranscriptShort'));
+        return;
+      }
+      const out = await tr(cues.map((c, i) => ({ index: i, text: c.text })), target);
+      const byPos = new Map(out.map((o) => [o.index, o.text.trim()]));
+      const groups = new Map<string | null, { index: number; w0: number; w1: number; text: string }[]>();
+      cues.forEach((c, i) => {
+        const textOut = byPos.get(i);
+        if (!textOut) return;
+        const r = c.ref!;
+        const arr = groups.get(r.src) ?? [];
+        arr.push({ index: r.seg, w0: r.w0, w1: r.w1, text: textOut });
+        groups.set(r.src, arr);
+      });
+      for (const [src, items] of groups) {
+        if (!items.length) continue;
+        if (src) {
+          const shot = (compRef.current.shots ?? []).find((sh) => sh.src === src);
+          if (shot) await runTool('set_caption_translations', { shotId: shot.id, items });
+        } else {
+          await runTool('set_caption_translations', { items });
+        }
       }
       // Remember the target language: panel chip selected state + new inserted clips auto-translated to the same language
       setCaptionStyle({ sub: { ...(resolveCaptionStyle(compRef.current).sub ?? {}), lang: target } });
-      toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (compRef.current.blocks.some(isSentenceCaption) ? '' : t('workbench.enableCaptionsShowThem')));
+      toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
     } finally {

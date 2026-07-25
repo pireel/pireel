@@ -22,24 +22,28 @@ import {
   type Composition,
   CAPTION_PRESETS,
   getCaptionPreset,
-  isSentenceCaption,
+  isCaptionsOn,
   resolveCaptionStyle,
 } from '@pireel/studio-engine/composition';
 
-/** One editable caption line (assembled by the workbench in edited-timeline order across all sources). */
+/** One editable caption line = one DISPLAY CUE (derived by displayCues in edited-timeline order across
+ *  all sources — exactly what renders on the video, one row per on-screen line). */
 export interface CaptionLineRow {
-  /** `main:<i>` or `<src>:<i>` — stable identity for editing/busy state. */
+  /** `main:<seg>:<w0>` or `<src>:<seg>:<w0>` — stable identity for editing/busy state. */
   key: string;
   /** null = main narration; otherwise the inserted clip's src. */
   src: string | null;
   /** Sentence index within its source's transcript. */
   index: number;
+  /** Word range within the source sentence this cue covers (edit/translation write-back key). */
+  w0: number;
+  w1: number;
   text: string;
-  /** Bilingual second line (translation), when present. */
+  /** Bilingual second line (this cue's translation), when present. */
   sub?: string;
   /** Edited-timeline seconds (for the timecode + seek). */
   editedStart: number;
-  /** Visible duration of this sentence within its shot (seek nudges inside by min(0.3, dur/2)). */
+  /** Cue duration (seek nudges inside by min(0.3, dur/2)). */
   dur?: number;
 }
 
@@ -114,19 +118,19 @@ export function CaptionsPanel({
   /** Write an edited line back to the transcript (timing untouched). phase: 'live' = debounced
    *  keystroke (canvas updates in real time, no retranslate yet) · 'commit' = blur/Enter ·
    *  'revert' = Esc restored the original text. */
-  onEditLine?: (src: string | null, index: number, text: string, phase?: 'live' | 'commit' | 'revert') => void;
-  /** Manually edit a line's translation (bilingual second row); null clears it. Same phases as onEditLine. */
-  onEditSubLine?: (src: string | null, index: number, text: string | null, phase?: 'live' | 'commit' | 'revert') => void;
+  onEditLine?: (row: CaptionLineRow, text: string, phase?: 'live' | 'commit' | 'revert') => void;
+  /** Manually edit a cue's translation (bilingual second row); null clears it. Same phases as onEditLine. */
+  onEditSubLine?: (row: CaptionLineRow, text: string | null, phase?: 'live' | 'commit' | 'revert') => void;
   /** Click a line: move the playhead to it. */
   onSeekTo?: (sec: number) => void;
   /** Retranslate ONE line (bilingual on). */
-  onRetranslateLine?: (src: string | null, index: number) => void;
+  onRetranslateLine?: (row: CaptionLineRow) => void;
   /** Row key currently retranslating (spinner on that row's button). */
   lineBusyKey?: string | null;
   /** No transcript yet: the empty state offers a direct "extract captions" button (runs ASR in place). */
   onExtract?: () => void;
 }) {
-  const hasCaptions = comp.blocks.some(isSentenceCaption);
+  const hasCaptions = isCaptionsOn(comp);
   const lines = rows ?? [];
   // No tabs (per user): styles sit on top as a collapsible section (~1/2 when lines exist, full height
   // when there is no transcript yet); the line list below is the main body. Collapse is manual only.
@@ -180,8 +184,8 @@ export function CaptionsPanel({
     liveTimerRef.current = window.setTimeout(() => {
       liveTimerRef.current = null;
       const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
-      if (part === 'sub') onEditSubLine?.(row.src, row.index, next || null, 'live');
-      else if (next) onEditLine?.(row.src, row.index, next, 'live');
+      if (part === 'sub') onEditSubLine?.(row, next || null, 'live');
+      else if (next) onEditLine?.(row, next, 'live');
     }, 350);
   };
   const commit = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
@@ -194,21 +198,21 @@ export function CaptionsPanel({
     if (editCancelRef.current) {
       editCancelRef.current = false;
       el.textContent = frozen;
-      if (part === 'sub') onEditSubLine?.(row.src, row.index, frozen || null, 'revert');
-      else onEditLine?.(row.src, row.index, frozen, 'revert');
+      if (part === 'sub') onEditSubLine?.(row, frozen || null, 'revert');
+      else onEditLine?.(row, frozen, 'revert');
       return;
     }
     const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
     if (part === 'sub') {
-      onEditSubLine?.(row.src, row.index, next || null, 'commit'); // cleared = remove this line's translation
+      onEditSubLine?.(row, next || null, 'commit'); // cleared = remove this cue's translation
       return;
     }
     if (!next) {
       el.textContent = frozen; // empty source: restore
-      onEditLine?.(row.src, row.index, frozen, 'revert');
+      onEditLine?.(row, frozen, 'revert');
       return;
     }
-    onEditLine?.(row.src, row.index, next, 'commit');
+    onEditLine?.(row, next, 'commit');
   };
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col">
@@ -376,7 +380,7 @@ export function CaptionsPanel({
                   disabled={lineBusyKey === row.key}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRetranslateLine(row.src, row.index);
+                    onRetranslateLine(row);
                   }}
                   title={t('captions.retranslateLine')}
                   className="text-ink-4 hover:text-accent mt-[4px] shrink-0 opacity-0 transition group-hover:opacity-100 disabled:opacity-100"

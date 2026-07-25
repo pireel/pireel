@@ -120,13 +120,17 @@ export function bulletListBlock(opts: { title?: string; items: string[]; startSe
  *  - sentence-level caption: carries only words (+ optional preset/yPct as the initial form when captionStyle is unset); visuals come from the global preset;
  *  - effect='kinetic-slam' = keyword-slam component (has its own box, independently positioned, ignores the global caption style). */
 export function captionBlock(opts: {
+  /** Explicit id (derived display cues use a deterministic id from their ref, so selection/preview diffing stay stable across re-derivations). */
+  id?: string;
   words: FxWord[];
   /** Component-only: keyword slam. Not passed for sentence-level captions. */
   effect?: 'kinetic-slam';
   /** Bilingual caption sub-line (this segment's translation, rendered directly below the main line, visuals follow the preset). */
   sub?: string;
-  /** Cue block (pre-split to one line at extraction): renders statically, never rotates; overflow wraps. */
+  /** Cue block (one derived display line): renders statically, never rotates; overflow wraps. */
   cue?: boolean;
+  /** Source-sentence pointer {src, seg, w0, w1} for panel edit/translation write-back. */
+  ref?: { src: string | null; seg: number; w0: number; w1: number };
   /** Visual preset id (caption-presets; initial form when captionStyle is unset). */
   preset?: string;
   yPct?: number;
@@ -135,11 +139,12 @@ export function captionBlock(opts: {
 }): Block {
   const { start, dur } = span2(opts.words);
   return {
-    id: blockId('cap'),
+    id: opts.id ?? blockId('cap'),
     templateId: 'caption',
     slots: {
       words: opts.words,
       ...(opts.cue ? { cue: true } : {}),
+      ...(opts.ref ? { ref: opts.ref } : {}),
       ...(opts.effect ? { effect: opts.effect } : {}),
       ...(opts.sub ? { sub: opts.sub } : {}),
       ...(opts.preset ? { preset: opts.preset } : {}),

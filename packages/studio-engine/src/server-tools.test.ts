@@ -78,7 +78,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r = runServerTool('set_captions', { preset: 'ln-clean' }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.comp!.captionStyle?.preset).toBe('ln-clean');
-    expect(r.comp!.blocks.length).toBeGreaterThan(1);
+    expect(r.comp!.captionStyle?.on).toBe(true); // 派生态:只落开关+样式,不物化块进存储
     const r2 = runServerTool('set_captions', { preset: 'ln-clean' }, proj({ context: {} }));
     expect(r2.result.ok).toBe(false);
     const r3 = runServerTool('submit_plan', { plan: { scenes: [{ from: 0, to: 2, framing: 'full' }] } }, proj());
@@ -126,23 +126,25 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     ];
     expect(cutTransitions(shots5)[0]!.half).toBe(1.5);
   });
-  it('set_caption_translations:译文写在转写句上,铺字幕时进块;越界/清除各有口径', () => {
-    // 字幕未开:译文落 context,提示要 set_captions 才显示;comp 不长字幕
+  it('set_caption_translations:译文写在转写句上(整句 sub / 按词范围 cueSubs);字幕=派生态不落块;越界/清除各有口径', () => {
+    // 字幕未开:译文落 context,提示要 set_captions 才显示;comp 不动
     const r = runServerTool('set_caption_translations', { items: [{ index: 0, text: 'First line' }, { index: 2, text: 'Third line' }] }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.result.summary).toContain('set_captions');
     expect(r.context!.asr![0]!.sub).toBe('First line');
     expect(r.context!.asr![1]!.sub).toBeUndefined();
-    // 已有译文的项目开字幕 → 副行进块 slots
+    expect(r.comp).toBeUndefined(); // 字幕从 transcript 派生,译文写入不再重铺块
+    // set_captions = 只落开关+样式(块是运行时物化,永不落库)
     const p2 = proj({ context: { asr: [{ start: 0, end: 5, text: '第一句话', sub: 'Hello there' }] } });
     const r2 = runServerTool('set_captions', { preset: 'ln-clean' }, p2);
-    const cap = r2.comp!.blocks.find((b) => b.templateId === 'caption');
-    expect(cap?.slots.sub).toBe('Hello there');
-    // 字幕已开时配译文 → 整层重铺,副行立刻进块
-    const p3 = proj({ comp: { ...proj().comp, blocks: r2.comp!.blocks }, context: proj().context });
-    const r3 = runServerTool('set_caption_translations', { items: [{ index: 1, text: 'Second line' }] }, p3);
-    expect(r3.comp!.blocks.some((b) => b.slots.sub === 'Second line')).toBe(true);
-    // 越界给行数;空 text 删单句;clear 清全部
+    expect(r2.result.ok).toBe(true);
+    expect(r2.comp!.captionStyle?.on).toBe(true);
+    expect(r2.comp!.captionStyle?.preset).toBe('ln-clean');
+    expect(r2.comp!.blocks.some((b) => b.templateId === 'caption')).toBe(false);
+    // 带词范围 = 逐 cue 译文,落 cueSubs
+    const r3 = runServerTool('set_caption_translations', { items: [{ index: 1, w0: 0, w1: 2, text: 'Second line cue' }] }, proj());
+    expect(r3.context!.asr![1]!.cueSubs).toEqual({ '0:2': 'Second line cue' });
+    // 越界给行数;clear 连 cueSubs 一起清
     const r4 = runServerTool('set_caption_translations', { items: [{ index: 9, text: 'x' }] }, proj());
     expect(r4.result.ok).toBe(false);
     expect(r4.result.error).toContain('3 lines');

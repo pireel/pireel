@@ -41,6 +41,10 @@ export interface StudioDraft {
    *  open via local autosave, so comparing it would make every browser think it's newest, each using
    *  its own copy and overwriting the cloud. Old drafts lack this field = cloud wins. */
   baseVersion?: number | null;
+  /** Edit-context cache (transcripts): captions are DERIVED from the transcript at runtime and never
+   *  persisted as blocks, so the local draft must carry the transcript for offline / zero-backend
+   *  (OSS shell) reopen — otherwise a refresh would lose the caption layer. */
+  context?: { asr?: unknown[]; clipAsr?: Record<string, unknown[]> };
 }
 
 /** Raw read (no empty-content filter): list/rename need to read empty projects. */
@@ -321,6 +325,9 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
     baseVersion: p.version,
+    ...(p.context?.asr?.length || Object.keys(p.context?.clipAsr ?? {}).length
+      ? { context: { ...(p.context?.asr?.length ? { asr: p.context.asr } : {}), ...(Object.keys(p.context?.clipAsr ?? {}).length ? { clipAsr: p.context!.clipAsr } : {}) } }
+      : {}),
   };
   try {
     window.localStorage.setItem(keyFor(p.id), JSON.stringify(draft));
@@ -334,7 +341,7 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
 /** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
  *  video down to sig/duration; preserve title as-is (renaming happens in the project list); read the first-frame
  *  thumbnail from a ref (keep the last one until ready, so it doesn't flicker away). Returns lastSavedAt for the workbench badge. */
-export function useDraftAutosave(comp: Composition, videoSig: string | null, projectId: string, coverThumbRef?: MutableRefObject<string | null>) {
+export function useDraftAutosave(comp: Composition, videoSig: string | null, projectId: string, coverThumbRef?: MutableRefObject<string | null>, contextOf?: () => StudioDraft['context']) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   useEffect(() => {
@@ -354,6 +361,10 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
           videoDurationSec: comp.video?.durationSec ?? null,
           savedAt: Date.now(),
           baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
+          ...(() => {
+            const ctx = contextOf?.();
+            return ctx && (ctx.asr?.length || Object.keys(ctx.clipAsr ?? {}).length) ? { context: ctx } : {};
+          })(),
         };
         window.localStorage.setItem(keyFor(projectId), JSON.stringify(draft));
         setLastSavedAt(draft.savedAt);
