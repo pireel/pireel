@@ -6,7 +6,10 @@ import {
   chunkWords,
   clamp01,
   easeOutCubic,
+  groupAsrWords,
   hasCaptionFx,
+  segmentTokens,
+  wordsFromText,
 } from './caption-fx';
 
 const words: FxWord[] = [
@@ -16,6 +19,60 @@ const words: FxWord[] = [
   { text: '增长', start: 1.5, end: 2.2 },
   { text: '黑客', start: 2.2, end: 3.0 },
 ];
+
+describe('segmentTokens(ICU 词典分词——废除盲切 2 字)', () => {
+  it('中文按真实词界切,不产出跨词的假二元组', () => {
+    const toks = segmentTokens('这个方案不科学');
+    expect(toks).toContain('科学');
+    expect(toks).not.toContain('不科'); // 旧盲切 2 字会产出「不科|学」
+    expect(toks.join('')).toBe('这个方案不科学');
+  });
+  it('标点并入前一个词元,不独立成词', () => {
+    expect(segmentTokens('你好,世界。')).toEqual(['你好,', '世界。']);
+  });
+  it('西文按空格,数字/带点标识符保持完整', () => {
+    expect(segmentTokens('Hello world, this is 3.14')).toEqual(['Hello', 'world,', 'this', 'is', '3.14']);
+    expect(segmentTokens('我们用 Intl.Segmenter 分词')).toContain('Intl.Segmenter');
+  });
+  it('空文本 → 空数组', () => {
+    expect(segmentTokens('  ')).toEqual([]);
+  });
+});
+
+describe('wordsFromText(无 ASR 词级时间的兜底:ICU 词元 + 按字长均摊)', () => {
+  it('时间连续覆盖整句,词元与文本一致', () => {
+    const out = wordsFromText('这个方案不科学', 1, 3);
+    expect(out[0]!.start).toBe(1);
+    expect(out[out.length - 1]!.end).toBeCloseTo(3, 2);
+    for (let i = 1; i < out.length; i++) expect(out[i]!.start).toBeCloseTo(out[i - 1]!.end, 3);
+    expect(out.map((w) => w.text).join('')).toBe('这个方案不科学');
+  });
+});
+
+describe('groupAsrWords(ASR 词元按 ICU 词界归组,时间戳合并)', () => {
+  it('逐字 ASR 词元归组成词,窗口取首字 start / 末字 end', () => {
+    const asr = [...'这个方案不科学'].map((ch, i) => ({ text: ch, start: i * 0.2, end: i * 0.2 + 0.2 }));
+    const out = groupAsrWords('这个方案不科学', asr);
+    expect(out.map((w) => w.text)).toEqual(segmentTokens('这个方案不科学'));
+    const kexue = out.find((w) => w.text === '科学')!;
+    expect(kexue.start).toBeCloseTo(1.0, 3); // 第 6 字(索引 5)开始
+    expect(kexue.end).toBeCloseTo(1.4, 3); // 第 7 字(索引 6)结束
+  });
+  it('标点差异不破坏对齐(字母数字计数口径)', () => {
+    const asr = [
+      { text: '你好', start: 0, end: 0.4 },
+      { text: '世界', start: 0.5, end: 0.9 },
+    ];
+    const out = groupAsrWords('你好,世界。', asr);
+    expect(out.map((w) => w.text)).toEqual(['你好,', '世界。']);
+    expect(out[1]!.start).toBe(0.5);
+  });
+  it('对不齐时退回原始 ASR 词元(真实时序优先)', () => {
+    const asr = [{ text: '完全不同的内容', start: 0, end: 1 }];
+    const out = groupAsrWords('这个方案不科学好长好长', asr);
+    expect(out).toEqual([{ text: '完全不同的内容', start: 0, end: 1 }]);
+  });
+});
 
 describe('chunkWords', () => {
   it('按窗口大小连续分组', () => {

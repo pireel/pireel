@@ -16,8 +16,10 @@ export interface TranscriptSegment {
   end: number;
   text: string;
   words?: { text: string; start: number; end: number }[];
-  /** Bilingual caption sub-line (full-sentence translation, no word-level time) — carried with the sentence when laying/re-laying captions. */
+  /** Bilingual caption sub-line (this segment's translation, no word-level time) — carried with the segment when laying/re-laying captions. */
   sub?: string;
+  /** Cue segment (one on-screen caption line, split at extraction by toCueSegments); absent = legacy sentence segment. */
+  cue?: boolean;
 }
 
 /** Server-operable editing context (fuel for the offline MCP executor): client autosave mirrors

@@ -2180,7 +2180,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const words = (b?.slots.words ?? []) as { text: string; start: number; end: number }[];
     if (!b || !words.length) return;
     const cs = resolveCaptionStyle(comp);
-    const segs = captionLineSegments(words, getCaptionPreset(cs.preset), cs.wPct ?? 56, cs.scale, comp.width);
+    // Cue blocks render as a single static segment — the force-show index is always 0
+    const segs = b.slots.cue === true ? [words] : captionLineSegments(words, getCaptionPreset(cs.preset), cs.wPct ?? 56, cs.scale, comp.width);
     let idx = 0;
     for (let i = 0; i < segs.length; i++) {
       if (segs[i]![0]!.start <= tSec + 1e-3) idx = i;

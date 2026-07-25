@@ -21,7 +21,7 @@ import {
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { beatsForWindow as beatsForWindowPure, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
-import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, toCueSegments } from '@pireel/studio-engine/build-blocks';
 import type { DraftPlan, PlanInsert } from '@pireel/studio-engine/plan';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type VisualTimeline, insertedClipSafeZone } from './visual';
@@ -178,7 +178,7 @@ export function useAgentContext(deps: AgentContextDeps) {
           failClipAsr(src);
           continue;
         }
-        const segs = await studioProviders().transcriber.transcribe(got.file);
+        const segs = toCueSegments(await studioProviders().transcriber.transcribe(got.file), { landscape: compRef.current.width > compRef.current.height });
         setClipAsr((m) => ({ ...m, [src]: segs }));
         clipAsrRef.current = { ...clipAsrRef.current, [src]: segs };
       } catch (e) {

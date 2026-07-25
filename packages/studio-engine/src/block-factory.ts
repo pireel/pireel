@@ -123,8 +123,10 @@ export function captionBlock(opts: {
   words: FxWord[];
   /** Component-only: keyword slam. Not passed for sentence-level captions. */
   effect?: 'kinetic-slam';
-  /** Bilingual caption sub-line (full-sentence translation, rendered directly below the main line, visuals follow the preset). */
+  /** Bilingual caption sub-line (this segment's translation, rendered directly below the main line, visuals follow the preset). */
   sub?: string;
+  /** Cue block (pre-split to one line at extraction): renders statically, never rotates; overflow wraps. */
+  cue?: boolean;
   /** Visual preset id (caption-presets; initial form when captionStyle is unset). */
   preset?: string;
   yPct?: number;
@@ -137,6 +139,7 @@ export function captionBlock(opts: {
     templateId: 'caption',
     slots: {
       words: opts.words,
+      ...(opts.cue ? { cue: true } : {}),
       ...(opts.effect ? { effect: opts.effect } : {}),
       ...(opts.sub ? { sub: opts.sub } : {}),
       ...(opts.preset ? { preset: opts.preset } : {}),
