@@ -607,3 +607,15 @@ describe('素材位入/出场动效预设(slots.anim)', () => {
     expect(renderBlock(b).timelineBody).toContain('scale: 0.96');
   });
 });
+
+describe('captionStyle 稀疏持久化', () => {
+  it('resolve 给稀疏样式补全全部默认(preset/yPct/scale/xPct/wPct)', () => {
+    const c = { width: 1080, height: 1920, durationSec: 10, theme: 'general', video: null, blocks: [], captionStyle: { on: true, preset: 'ln-black' } } as never;
+    const r = resolveCaptionStyle(c);
+    expect(r.preset).toBe('ln-black');
+    expect(r.yPct).toBe(88);
+    expect(r.scale).toBe(1);
+    expect(r.xPct).toBe(50);
+    expect(r.wPct).toBe(56);
+  });
+});

@@ -400,7 +400,8 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
         if (!cues.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
         base = stripDerivedCaptions(c, true); // legacy persisted caption blocks retire now that derivation is proven possible
       }
-      const style = { ...resolveCaptionStyle(base), ...(preset ? { on: true, preset } : {}), ...patch };
+      // SPARSE persistence: merge into the raw stored style (defaults live in the resolver)
+      const style = { ...(base.captionStyle ?? {}), ...(preset ? { on: true, preset } : {}), ...patch };
       return {
         result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(style.preset).name}` },
         comp: { ...base, captionStyle: style },
@@ -411,7 +412,7 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       // Switch off, KEEP the style (preset/positions/translation language round-trip through the toggle); drop any legacy persisted caption blocks.
       return {
         result: { ok: true, summary: 'Removed captions' },
-        comp: { ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)), captionStyle: { ...resolveCaptionStyle(c), on: false } },
+        comp: { ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)), captionStyle: { ...(c.captionStyle ?? {}), on: false } },
       };
     }
     case 'set_caption_translations': {
