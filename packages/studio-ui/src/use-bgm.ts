@@ -260,7 +260,9 @@ export function useBgm(deps: BgmDeps) {
         toast.error(t('workbench.musicGenFailed'));
         return;
       }
-      const file = new File([await bytes.blob()], 'bgm.mp3', { type: 'audio/mpeg' });
+      const type = bytes.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
+      const ext = /wav/.test(type) ? 'wav' : /mp4|m4a|aac/.test(type) ? 'm4a' : 'mp3';
+      const file = new File([await bytes.blob()], `bgm.${ext}`, { type });
       await mountBgmFile(file, prompt.slice(0, 24));
     } finally {
       setGenerating(false);
