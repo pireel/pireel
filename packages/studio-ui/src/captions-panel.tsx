@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Ban, Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
+import { Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
 import { t } from './i18n';
 import {
   type CaptionPreset,
@@ -482,11 +482,7 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
         onClick={() => setPop(pop === 'bg' ? null : 'bg')}
         className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'bg' ? 'border-accent' : 'border-line'}`}
       >
-        {effBg ? (
-          <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effBg }} />
-        ) : (
-          <span className="text-ink-4 flex h-full w-full items-center justify-center"><Ban size={11} /></span>
-        )}
+        <span className="block h-full w-full rounded-sm border border-white/15" style={effBg ? { background: effBg } : NO_COLOR_CHECKER} />
       </button>
       {pop === 'preset' && (
         <PresetPop current={style.preset} onPick={(id) => { setPop(null); onPreset(id); }} />
@@ -628,6 +624,16 @@ function PresetPop({ current, onPick }: { current: string; onPick: (id: string |
   );
 }
 
+/** "No color" swatch face: transparency checkerboard (same visual language as block previews'
+ *  honest ground, scaled to swatch size — screen pixels, block-preview-card convention). */
+const NO_COLOR_CHECKER: CSSProperties = {
+  backgroundColor: '#ffffff',
+  backgroundImage:
+    'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
+  backgroundSize: '8px 8px',
+  backgroundPosition: '0 0,4px 4px',
+};
+
 /** Color picker popover: preset-default chip, optional "no plate", fixed swatches, free custom color. */
 function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPick }: {
   title: string;
@@ -649,7 +655,7 @@ function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPi
             onClick={onNone}
             className={`flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] ${noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
           >
-            <Ban size={10} /> {t('captions.noPlate')}
+            <span className="border-line h-3.5 w-3.5 rounded-[3px] border" style={NO_COLOR_CHECKER} /> {t('captions.noPlate')}
           </button>
         )}
         {swatches.map((c) => (
