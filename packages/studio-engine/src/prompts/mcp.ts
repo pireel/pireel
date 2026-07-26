@@ -27,7 +27,7 @@ import { CAPTION_CATALOG_BLOCK } from './chat';
  *  handshook as "up to date"). Bump this AND SKILL.md's "Skill version" together on EVERY
  *  pireel-agent skill release — skill-version.test.ts pins the two equal, and the server
  *  announces it via initialize.instructions for the agent's update handshake. */
-export const PIREEL_SKILL_VERSION = '2026-07-23.1';
+export const PIREEL_SKILL_VERSION = '2026-07-26.1';
 
 export const MCP_INSTRUCTIONS = `You are connected to Pireel Studio — a video editor for talking-head videos (any aspect — the canvas follows the source footage). Your tools edit the composition LIVE in the user's open studio browser tab: storyboard the video track (shots, framing, cuts), lay designed graphic fragments over it (metric cards, charts, diagrams, callouts), manage subtitles, and cut the footage by its spoken transcript.
 
