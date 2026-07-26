@@ -475,7 +475,7 @@ export const pct = (v: number) => `${n(v * 100)}%`;
 /* ============================ Template registry ============================ */
 
 export interface SlotSpec {
-  type: 'text' | 'text[]' | 'words' | 'image' | 'enum';
+  type: 'text' | 'text[]' | 'words' | 'image' | 'enum' | 'json';
   label: string;
   required?: boolean;
   options?: string[];
@@ -685,7 +685,11 @@ export interface FxWord {
 let _uid = 0;
 export function blockId(prefix = 'b'): string {
   _uid += 1;
-  return `${prefix}${_uid}_${Math.floor(performance.now())}`;
+  // Ids land in CSS selectors (#<id> .cls) — strip characters that would parse as
+  // combinators/pseudo-classes there (a 'kit:metric' templateId prefix once produced
+  // #kit:metric_… selectors that silently matched nothing → fully unstyled blocks).
+  const safe = prefix.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `${safe}${_uid}_${Math.floor(performance.now())}`;
 }
 
 export function span2(words: FxWord[]): { start: number; end: number; dur: number } {

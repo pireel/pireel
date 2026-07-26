@@ -453,6 +453,22 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         }}
         className="min-h-0 flex-1 overflow-auto p-3"
       >
+        {type === 'element' && onInsertTemplate && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {listTemplates()
+              .filter((tp) => tp.id.startsWith('kit:'))
+              .map((tp) => (
+                <button
+                  key={tp.id}
+                  type="button"
+                  onClick={() => onInsertTemplate(tp.id)}
+                  className="border-line text-ink-2 hover:border-accent hover:text-accent rounded-full border px-3 py-1 text-[12px] transition-colors"
+                >
+                  {t(tp.name)}
+                </button>
+              ))}
+          </div>
+        )}
         {showTemplates ? (
           <TemplateGallery templates={templates} onUse={useTemplate} />
         ) : (

@@ -6,6 +6,7 @@
  * component library / inspector enums) grows automatically.
  */
 
+import './kit-templates';
 import {
   type Rendered,
   type Slots,
