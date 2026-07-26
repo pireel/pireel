@@ -18,7 +18,7 @@
 
 import type { ThemeId } from './theme';
 import { type Clip, editedDuration, spans } from './trim';
-import { DEFAULT_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
+import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 
 export type BlockKind = 'caption' | 'title' | 'stat' | 'list' | 'transition' | 'custom' | 'media';
 
@@ -225,6 +225,10 @@ export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
  *  Only affects caption blocks **without a box** (the sentence-level subtitle layer); captions with a box (keyword punches, etc.) are independently
  *  positioned emphasis components not governed by the global style. Default (undefined) = each block renders per its own slots (draft-build theming tradeoff). */
 export interface CaptionStyle {
+  /** Captions layer switch. Captions are DERIVED at runtime from the transcript (displayCues) and are
+   *  never persisted as blocks — this flag (plus the transcript) IS the stored state. Legacy comps
+   *  that still carry persisted caption blocks read as "on" via isCaptionsOn's fallback. */
+  on?: boolean;
   /** Visual preset id (caption-presets registry; the per-word-emphasis / full-sentence mode is also set by the preset). */
   preset: string;
   /** Vertical position: caption's bottom edge distance from canvas top, in % (height-based). */
@@ -242,6 +246,8 @@ export interface CaptionStyle {
   hPct?: number;
   /** Text color override (defaults to the preset's color). Optional and additive — existing projects render unchanged. */
   color?: string;
+  /** Bold override: true = force bold (800), false = force regular (500); unset = the preset's own weight. */
+  bold?: boolean;
   /** Backdrop plate override: a CSS color, or null = force no plate (defaults to the preset's plate). */
   bg?: string | null;
   /** Independent position/font for the translation line (bilingual second line): independent of the main line, dragged/scaled separately on canvas.
@@ -249,7 +255,7 @@ export interface CaptionStyle {
    *  xPct = line-center distance from left %, scale = font factor (same convention as the main line's scale, 1 = preset's original size).
    *  preset/color/bg = independent visual overrides for the translation line; unset = derived from the main line's (overridden) look.
    *  lang = target language chosen in the UI (panel chip selected state + auto-translate for newly inserted segments). */
-  sub?: { preset?: string; color?: string; bg?: string | null; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
+  sub?: { preset?: string; color?: string; bg?: string | null; bold?: boolean; yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number; lang?: string };
 }
 
 export interface Composition {
@@ -264,7 +270,9 @@ export interface Composition {
   /** Palette derived from the frame's base colors (overrides #root color vars, layered after theme defaults). From frame analysis. */
   palette?: Record<string, string>;
   /** Global caption style, see CaptionStyle. At assemble time, overrides sentence-level captions' effect/yPct/scale. */
-  captionStyle?: CaptionStyle;
+  /** SPARSE: only fields the user explicitly set are stored — defaults live in resolveCaptionStyle
+   *  (so default evolution reaches existing projects). Always read through the resolvers. */
+  captionStyle?: Partial<CaptionStyle>;
   /** Mounted frame theme-pack id (written to the document alongside palette on mount): the compose request carries it,
    *  the server injects that frame's design language into ACTIVE THEME (overrides generic aesthetics, engineering contract untouched). */
   frameId?: string;
@@ -602,15 +610,37 @@ export function applyBlockPlacement(block: Block, input: PlaceBlockInput): Block
 
 /** The currently-effective global caption style: explicit setting wins, else derived from the first sentence-level caption's slots (a stable initial value
  *  for the panel selected-state and canvas handles); if there's no caption yet, take the default. */
-/** Default subtitle box width (canvas width %): ≈ 13 CJK chars per line at 40px font. */
+/** Default subtitle box width (canvas width %). The canvas follows the SOURCE aspect with the short
+ *  side normalized to 1080 (normalizeDims): portrait 1080-wide → ≈11 zh chars per line; landscape
+ *  1920-wide → a full single-line subtitle (~21 zh / ~42 latin chars). One ratio, geometry does the rest. */
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
 export function resolveCaptionStyle(comp: Composition): CaptionStyle {
-  if (comp.captionStyle) return { xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, ...comp.captionStyle };
+  if (comp.captionStyle) return { preset: DEFAULT_CAPTION_PRESET, yPct: 88, scale: 1, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, ...comp.captionStyle };
   const first = comp.blocks.find(isSentenceCaption);
   const preset = typeof first?.slots.preset === 'string' ? (first.slots.preset as string) : DEFAULT_CAPTION_PRESET;
   const yPct = typeof first?.slots.yPct === 'number' ? (first.slots.yPct as number) : 88;
   return { preset, yPct, xPct: 50, wPct: DEFAULT_CAPTION_WIDTH_PCT, scale: 1 };
+}
+
+/** Is the captions layer on? The stored truth is captionStyle.on (captions derive from the transcript
+ *  at runtime; blocks are a runtime materialization, never persisted). Legacy comps that predate the
+ *  flag carry persisted caption blocks instead — their presence reads as "on". */
+export function isCaptionsOn(comp: Composition): boolean {
+  return comp.captionStyle?.on ?? comp.blocks.some(isSentenceCaption);
+}
+
+/** Persistence strip: derived caption blocks never land in storage — the transcript + captionStyle.on
+ *  carry the caption state. Only strips when the caller confirms a transcript exists to re-derive from:
+ *  a legacy comp holding caption blocks with NO transcript keeps them persisted (stripping would lose
+ *  the captions with nothing to rebuild from). */
+export function stripDerivedCaptions(comp: Composition, canDerive: boolean): Composition {
+  if (!canDerive || !comp.blocks.some(isSentenceCaption)) return comp;
+  return {
+    ...comp,
+    blocks: comp.blocks.filter((b) => !isSentenceCaption(b)),
+    captionStyle: { ...resolveCaptionStyle(comp), on: true },
+  };
 }
 
 /** Full style for the translation line (bilingual second line) — **same shape as CaptionStyle**, reusing the main line's handle/render/measure conventions
@@ -621,13 +651,17 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
   const m = resolveCaptionStyle(comp);
   const p = getCaptionPreset(m.preset);
   const sub = m.sub ?? {};
-  const scale = sub.scale ?? m.scale * 0.6;
-  const mainFs = Math.max(10, Math.round(p.size * m.scale));
-  const subFs = Math.max(9, Math.round(p.size * scale));
-  const padY = p.bg ? Math.round(subFs * 0.18) * 2 : 0;
+  const scale = sub.scale ?? m.scale * 0.7;
+  const mainFs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * m.scale));
+  // Sub metrics come from the SUB preset + the effective sub plate (preset bg or the bg override) —
+  // gating the padding on the MAIN preset's plate put the derived anchor off whenever they differed.
+  const subP = getCaptionPreset(sub.preset ?? DEFAULT_SUB_CAPTION_PRESET);
+  const subFs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * scale));
+  const subPlate = sub.bg !== undefined ? sub.bg != null : !!subP.bg;
+  const padY = subPlate ? Math.round(subFs * 0.18) * 2 : 0;
   const derivedY = m.yPct + ((mainFs * 0.2 + subFs * 1.35 + padY) / (comp.height || 1920)) * 100;
   return {
-    preset: sub.preset ?? m.preset,
+    preset: sub.preset ?? DEFAULT_SUB_CAPTION_PRESET,
     yPct: Math.min(99, sub.yPct ?? Math.round(derivedY * 10) / 10),
     xPct: sub.xPct ?? m.xPct ?? 50,
     wPct: sub.wPct ?? m.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
@@ -635,6 +669,7 @@ export function resolveSubCaptionStyle(comp: Composition): CaptionStyle {
     ...(sub.hPct ? { hPct: sub.hPct } : {}),
     ...(sub.color != null ? { color: sub.color } : {}),
     ...(sub.bg !== undefined ? { bg: sub.bg } : {}),
+    ...(sub.bold != null ? { bold: sub.bold } : {}),
   };
 }
 

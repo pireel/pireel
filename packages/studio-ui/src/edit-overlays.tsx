@@ -9,7 +9,7 @@
 
 import { useRef, useState } from 'react';
 import { RotateCw } from 'lucide-react';
-import { type CaptionStyle, getCaptionPreset } from '@pireel/studio-engine/composition';
+import { type CaptionStyle, BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 import { startPointerDrag } from './drag-shell';
 
@@ -124,6 +124,8 @@ export function CaptionEditOverlay({
   stageW,
   stageH,
   measured,
+  lines,
+  metrics,
   onChange,
   onLive,
 }: {
@@ -133,10 +135,16 @@ export function CaptionEditOverlay({
   stageH: number;
   /** iframe-measured caption line rect (w/h normalized + scale at measure time): before a measurement, falls back to an estimated band. */
   measured: { w: number; h: number; scale: number } | null;
+  /** Visual line count (cue blocks stack lines at large font sizes): multiplies the analytic text height so the box tracks size changes instantly. Default 1. */
+  lines?: number;
+  /** Render metrics in em factors — the main line and the translation line lay out differently
+   *  (line-height / plate padding / row gap); defaults = the main line's CSS constants. */
+  metrics?: { line: number; padY: number; rowGap: number };
   onChange: (patch: Partial<CaptionStyle>) => void;
   /** Live preview during drag (zero setState, same as the component hf:boxSize contract): workbench sends hf:capStyle to edit the iframe directly. */
   onLive: (style: CaptionStyle) => void;
 }) {
+  const lineCount = Math.max(1, lines ?? 1);
   // Local live style during drag (re-renders only this overlay): the box follows the pointer, not hidden (per user), the iframe is edited directly by onLive.
   // ghost = line-width drag: the baseline solid line stays put, a dashed line follows, the iframe isn't touched, and on release a single rebuild applies the change
   const [liveStyle, setLiveStyle] = useState<CaptionStyle | null>(null);
@@ -147,22 +155,29 @@ export function CaptionEditOverlay({
   const eff = liveStyle ?? style;
   const k = stageH / compH; // comp px → stage px
   const capPreset = getCaptionPreset(style.preset);
-  const fontPx = capPreset.size;
+  const fontPx = BASE_CAPTION_FONT_PX;
   // Box geometry (positioning aligns to the render anchor: line center at xPct, bottom edge at yPct; box height measured, estimated when no measurement).
   // Baseline box = committed style, live box = style during drag: moving follows the solid line directly; widening uses ghost — the baseline solid line
   // stays put, a dashed line follows, and on release the solid line lands in one step (no "snap back to initial then jump", a feel the user called out).
   // Actual text height of a caption line (normalized to stage height): the lower bound of box height (hPct) — the box may be taller than the text (pure padding), not shorter.
   // Actual line height (analytic, same source as the render CSS: fs×1.2 line-height + surface top/bottom padding round(fs×0.22)×2).
   // Can't use the iframe-measured rect — it includes min-height (box height), which would inflate the "box can't be shorter than text" lower bound so the box can't shrink back
+  const M = { line: metrics?.line ?? 1.2, padY: metrics?.padY ?? 0.22, rowGap: metrics?.rowGap ?? 0.12 };
   const textHNorm = (s: CaptionStyle) => {
     const fsC = Math.max(10, Math.round(fontPx * s.scale));
-    const padC = capPreset.bg ? Math.round(fsC * 0.22) * 2 : 0;
-    return ((fsC * 1.2 + padC) * k) / stageH;
+    // Plate presence: an explicit bg override wins (null = forced plateless), else the preset decides
+    const hasPlate = s.bg !== undefined ? s.bg != null : !!capPreset.bg;
+    const padC = hasPlate ? Math.round(fsC * M.padY) * 2 : 0;
+    // Multi-line stacks (cue blocks at large fonts): ONE plate around all lines — N text lines +
+    // row-gaps + the plate's vertical padding once.
+    return ((fsC * M.line * lineCount + Math.round(fsC * M.rowGap) * (lineCount - 1) + padC) * k) / stageH;
   };
+  /** Breathing outset: the border sits slightly outside the caption on all sides (purely visual — drag math is delta-based). */
+  const OUT = 6;
   const rectOf = (s: CaptionStyle) => {
-    const w = Math.max(60, ((s.wPct ?? 56) / 100) * stageW);
-    const h = Math.max(16, Math.max(textHNorm(s), (s.hPct ?? 0) / 100) * stageH);
-    return { left: (stageW * (s.xPct ?? 50)) / 100 - w / 2, top: (stageH * s.yPct) / 100 - h, w, h };
+    const w = Math.max(60, ((s.wPct ?? 56) / 100) * stageW) + OUT * 2;
+    const h = Math.max(16, Math.max(textHNorm(s), (s.hPct ?? 0) / 100) * stageH) + OUT * 2;
+    return { left: (stageW * (s.xPct ?? 50)) / 100 - w / 2, top: (stageH * s.yPct) / 100 - (h - OUT), w, h };
   };
   const baseR = rectOf(style);
   const liveR = rectOf(eff);

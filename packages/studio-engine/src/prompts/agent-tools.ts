@@ -354,7 +354,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🌐',
     label: 'tools.set_caption_translations.label',
     description:
-      'Add a translation line under the sentence captions (bilingual subtitles) — YOU do the translating, this tool only stores it. Workflow: read_script → translate each numbered sentence yourself → pass `items` as {index (the row number from read_script), text}. Translations attach to the transcript and survive cuts/restyles. Main narration by default; pass `shotId` to translate an inserted clip\'s own transcript instead. `text: ""` removes one line; `clear: true` removes all.',
+      'Add a translation line under the sentence captions (bilingual subtitles) — YOU do the translating, this tool only stores it. Workflow: read_script → translate each numbered sentence yourself → pass `items` as {index (the row number from read_script), text}. Translations attach to the transcript and survive cuts/restyles. Main narration by default; pass `shotId` to translate an inserted clip\'s own transcript instead. `text: ""` removes one line; `clear: true` removes all. Pass `lang` (the target language you translated into) so a later language switch can tell your translations apart from stale ones.',
     inputSchema: obj(
       {
         items: {
@@ -362,6 +362,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           description: 'Per-sentence translations; index = the transcript row number shown by read_script.',
           items: obj({ index: { type: 'number' }, text: { type: 'string', description: 'Your translation of that sentence (empty string removes it).' } }, ['index', 'text']),
         },
+        lang: { type: 'string', description: "Target language of these translations (e.g. 'English'). Recommended — untagged translations can't be told apart from stale ones after a language switch." },
         shotId: { type: 'string', description: "An inserted-clip shot id — targets that clip's transcript. Omit for the main narration." },
         clear: { type: 'boolean', description: 'true = remove every translation (all sources); items is then ignored.' },
       },

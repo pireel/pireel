@@ -14,6 +14,7 @@ import {
   type Composition,
   type VideoShot,
   blockKind,
+  isCaptionsOn,
   isSentenceCaption,
   resolveCaptionStyle,
   totalDuration,
@@ -111,7 +112,7 @@ export function useAgentContext(deps: AgentContextDeps) {
         durationSec: totalDuration(c),
         theme: c.theme,
         // Caption layer state (on/off + current preset/position): lets the agent decide set vs remove, and avoid re-enabling
-        ...(c.blocks.some(isSentenceCaption)
+        ...(isCaptionsOn(c)
           ? (() => {
               const cs = resolveCaptionStyle(c);
               return { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } };

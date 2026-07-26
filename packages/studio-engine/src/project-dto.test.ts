@@ -287,7 +287,7 @@ describe('409 重播种(ackedFromDto)', () => {
   it('服务端全量 → 基准,与 buildSaveWire 同口径:大段全部判没变缺席', () => {
     const p = payload();
     const acked = ackedFromDto({
-      comp: p.comp,
+      comp: p.comp!,
       chat: p.chat,
       context: p.context!,
       coverThumb: p.coverThumb,

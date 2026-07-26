@@ -197,8 +197,8 @@ describe('全局花字样式 captionStyle', () => {
     c.captionStyle = { preset: 'em-purple-black', yPct: 60, scale: 1.5 };
     const html = assembleHtml(c);
     expect(html).toContain('bottom:40%'); // 100 - yPct
-    // scale=字号系数(不是区域 transform):em-purple-black 47px × 1.5 ≈ 71px
-    expect(html).toContain('font-size:71px');
+    // scale=字号系数(不是区域 transform):全局基准 48px × 1.5 = 72px(字号不随预设——预设只管颜色/动效)
+    expect(html).toContain('font-size:72px');
     expect(html).not.toContain('scale(1.5)');
     expect(html).toContain('#cf96ff'); // 预设的强调色进了逐词变色时间轴
     expect(html).not.toContain('scaleX:1'); // 旧 highlight 的扫光动画没了 → 真走了预设通道
@@ -231,6 +231,15 @@ describe('全局花字样式 captionStyle', () => {
     // 老数据(无覆盖字段)完全走预设——向后兼容
     c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1 };
     expect(assembleHtml(c)).toContain('background:'); // ln-black 预设自带底板
+  });
+
+  it('译文行状态门控:sub.lang 未设时 slots.sub 休眠不渲染,设了才出 .cap-sub', () => {
+    const c = emptyComposition();
+    c.blocks = [captionBlock({ words, sub: 'Hidden until lang' })];
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1 }; // 无 sub.lang:状态关
+    expect(assembleHtml(c)).not.toContain('cap-sub');
+    c.captionStyle = { preset: 'ln-black', yPct: 88, scale: 1, sub: { lang: 'English' } };
+    expect(assembleHtml(c)).toContain('cap-sub'); // 状态开才渲染
   });
 
   it('副字幕独立样式:subPreset/subColor 只改译文行,主行不动', () => {
@@ -596,5 +605,31 @@ describe('素材位入/出场动效预设(slots.anim)', () => {
     const b = mediaBlock({ startSec: 0, durationSec: 3 });
     b.slots = { media: { type: 'image', url: 'https://x/a.jpg' } };
     expect(renderBlock(b).timelineBody).toContain('scale: 0.96');
+  });
+});
+
+describe('captionStyle 稀疏持久化', () => {
+  it('resolve 给稀疏样式补全全部默认(preset/yPct/scale/xPct/wPct)', () => {
+    const c = { width: 1080, height: 1920, durationSec: 10, theme: 'general', video: null, blocks: [], captionStyle: { on: true, preset: 'ln-black' } } as never;
+    const r = resolveCaptionStyle(c);
+    expect(r.preset).toBe('ln-black');
+    expect(r.yPct).toBe(88);
+    expect(r.scale).toBe(1);
+    expect(r.xPct).toBe(50);
+    expect(r.wPct).toBe(56);
+  });
+});
+
+describe('加粗覆盖(bold:预设起点之上的显式覆盖)', () => {
+  it('captionStyle.bold 烘进 slots 并落到 font-weight:800;译文行 sub.bold 同理(700)', () => {
+    const c = emptyComposition();
+    c.video = { url: 'v.mp4', durationSec: 10 };
+    c.blocks = [captionBlock({ words: [{ text: '你好', start: 0, end: 1 }], sub: 'Hi' })];
+    c.captionStyle = { on: true, preset: 'ln-clean', bold: true, sub: { lang: 'English', bold: true } };
+    const html = assembleHtml(c);
+    expect(html).toContain('font-weight:800');
+    expect(html).toContain('font-weight:700'); // 译文行 bold=700
+    c.captionStyle = { on: true, preset: 'ln-clean', bold: false };
+    expect(assembleHtml(c)).toContain('font-weight:500'); // 显式取消加粗
   });
 });

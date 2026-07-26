@@ -9,31 +9,37 @@
  * tier as build-draft/build-blocks).
  */
 
-import { wordsFromText } from './caption-fx';
+import { cueChunks, wordsFromText } from './caption-fx';
+import { BASE_CAPTION_FONT_PX } from './caption-presets';
+import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
 import { spans as clipSpans, srcToEditedLoose } from './trim';
-import { type AsrSegment, captionBlocksFromAsr } from './build-blocks';
+import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
 import { joinWords } from './caption-fx';
 
 /** Source-domain predicate: the narration/transcript timeline belongs to the narration source (segments without a src field). */
 export const inNarrationSource = (c: VideoShot): boolean => !c.src;
 
+/** Intermediate derived shape: an edited-timeline sentence fragment with si-stamped words + source pointer. */
+export type MappedSeg = Omit<AsrSegment, 'words'> & { words: CueWord[]; ref: CueRef };
+
 /** Map a source's transcript word times (that source's coords) onto the edited
  *  timeline (final coords) and drop words fully cut away — used when laying/re-
  *  laying captions: caption blocks live on the edited timeline, so after cutting
  *  you can't lay them by source time directly. */
-export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource): AsrSegment[] {
-  const out: AsrSegment[] = [];
-  for (const s of segs) {
-    const words = (s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end))
-      .map((w) => {
+export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource, srcKey: string | null = null): MappedSeg[] {
+  const out: MappedSeg[] = [];
+  for (const [segIdx, s] of segs.entries()) {
+    const words: CueWord[] = (s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end))
+      .map((w, wi) => {
         const start = srcToEditedLoose(shots, w.start, inSrc);
         const end = srcToEditedLoose(shots, w.end, inSrc);
         // Word width only shrinks, never grows: when a cut / insert lands mid-word,
         // the loose mapping would swallow the whole inserted duration into the word
         // (making word gaps seamless, so splitting can't detect it) — cap at the
-        // source-domain word width so the jump falls between words instead
-        return { ...w, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
+        // source-domain word width so the jump falls between words instead.
+        // si = the word's index within the source sentence (edit/translation write-back key).
+        return { ...w, si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
       })
       .filter((w) => w.end - w.start > 0.03);
     if (!words.length) continue;
@@ -49,28 +55,95 @@ export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (
       else groups[groups.length - 1]!.push(words[i]!);
     }
     // Translation (sub) follows only the first group: when a sentence is split into several, re-laying the whole-sentence translation would stack two copies
-    groups.forEach((g, gi) => out.push({ start: g[0]!.start, end: g[g.length - 1]!.end, text: joinWords(g.map((w) => w.text)), words: g, ...(gi === 0 && s.sub ? { sub: s.sub } : {}) }));
+    groups.forEach((g, gi) =>
+      out.push({
+        start: g[0]!.start,
+        end: g[g.length - 1]!.end,
+        text: joinWords(g.map((w) => w.text)),
+        words: g,
+        ref: { src: srcKey, seg: segIdx, w0: g[0]!.si ?? 0, w1: g[g.length - 1]!.si ?? 0 },
+        ...(s.lang ? { lang: s.lang } : {}),
+        ...(s.speaker ? { speaker: s.speaker } : {}),
+        ...(gi === 0 && s.sub ? { sub: s.sub } : {}),
+      }),
+    );
   }
   return out;
 }
 
 /** All-source transcript → edited-timeline caption data: narration source + each inserted source mapped by its own predicate, sorted by edited time. */
-export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null, clipAsr: Record<string, AsrSegment[]>): AsrSegment[] {
+export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null, clipAsr: Record<string, AsrSegment[]>): MappedSeg[] {
   return [
     ...(narr?.length ? mapSegsToEdited(narr, shots) : []),
-    ...Object.entries(clipAsr).flatMap(([src, segs]) => (shots.some((c) => c.src === src) ? mapSegsToEdited(segs, shots, (c) => c.src === src) : [])),
+    ...Object.entries(clipAsr).flatMap(([src, segs]) => (shots.some((c) => c.src === src) ? mapSegsToEdited(segs, shots, (c) => c.src === src, src) : [])),
   ].sort((a, b) => a.start - b.start);
+}
+
+/** DISPLAY CUES — the single derivation both the caption blocks and the panel's line list consume,
+ *  so "one row = one on-screen line" holds by construction. Per source sentence: take the words that
+ *  survive the edit (mapSegsToEdited), then split by visual width (cueChunks). Each cue carries
+ *  ref {src, seg, w0, w1} pointing back into the source sentence for edit/translation write-back.
+ *  Cue translation: the sentence's cueSubs["w0:w1"] wins; a whole-sentence sub shows only when the
+ *  sentence maps to exactly this full-range single cue (agent BYO translations keep working 1:1).
+ *  opts.subLang = the CURRENT bilingual target: translations stamped with a DIFFERENT known language
+ *  are stale (left over from a language switch) and are hidden; unstamped ones (legacy/BYO) show. */
+export function displayCues(
+  shots: VideoShot[],
+  narr: AsrSegment[] | null,
+  clipAsr: Record<string, AsrSegment[]>,
+  opts?: { subLang?: string; canvasW?: number },
+): DisplayCue[] {
+  const budgetEm = Math.max(6, Math.floor(((DEFAULT_CAPTION_WIDTH_PCT / 100) * (opts?.canvasW ?? 1080) - BASE_CAPTION_FONT_PX) / BASE_CAPTION_FONT_PX));
+  const out: DisplayCue[] = [];
+  for (const g of mappedCaptionSegs(shots, narr, clipAsr)) {
+    const words = g.words;
+    if (!words.length) continue;
+    const gRef = g.ref;
+    const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
+    const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
+    const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
+    // ONE line per cue, sized by the real canvas (the canvas follows the source aspect, short side
+    // 1080): budget = default box width in em minus plate/safety — a 16:9 canvas holds a full
+    // single-line subtitle (~21em ≈ 42 latin chars ≈ 21 zh chars), portrait ≈11 zh chars. Geometry,
+    // not language, decides the cue size.
+    const chunks = cueChunks(words, { maxEm: budgetEm });
+    for (const c of chunks) {
+      const w0 = c[0]!.si ?? 0;
+      const w1 = c[c.length - 1]!.si ?? 0;
+      const sub = subFresh
+        ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? (srcSeg && w0 === 0 && w1 === srcWordCount - 1 && words.length === srcWordCount ? srcSeg.sub : undefined))
+        : undefined;
+      out.push({
+        start: c[0]!.start,
+        end: Math.max(c[c.length - 1]!.end, c[0]!.start + 0.3),
+        text: joinWords(c.map((w) => w.text)),
+        words: c,
+        cue: true,
+        ...(g.lang ? { lang: g.lang } : {}),
+        ...(g.speaker ? { speaker: g.speaker } : {}),
+        ...(gRef ? { ref: { ...gRef, w0, w1 } } : {}),
+        ...(sub ? { sub } : {}),
+      });
+    }
+  }
+  return out;
 }
 
 /** Captions = a pure computation from the transcript: whenever the transcript
  *  changes (delete sentence/word, restore, edit word, inserted-clip transcript
  *  arrives), recompute the whole layer. No captions laid → return as-is (don't add
  *  a layer); no transcript from any source → keep the existing layer, don't clear. */
-export function relayCaptionLayer(blocks: Block[], shots: VideoShot[], narr: AsrSegment[] | null, clipAsr: Record<string, AsrSegment[]>): Block[] {
+export function relayCaptionLayer(
+  blocks: Block[],
+  shots: VideoShot[],
+  narr: AsrSegment[] | null,
+  clipAsr: Record<string, AsrSegment[]>,
+  opts?: { subLang?: string; canvasW?: number },
+): Block[] {
   if (!blocks.some(isSentenceCaption)) return blocks;
-  const mapped = mappedCaptionSegs(shots, narr, clipAsr);
-  if (!mapped.length) return blocks;
-  return [...blocks.filter((b) => !isSentenceCaption(b)), ...captionBlocksFromAsr(mapped)];
+  const cues = displayCues(shots, narr, clipAsr, opts);
+  if (!cues.length) return blocks;
+  return [...blocks.filter((b) => !isSentenceCaption(b)), ...captionBlocksFromAsr(cues)];
 }
 
 /** Narration sentences within a time window → local-time beats (0 = window start),

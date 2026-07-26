@@ -36,7 +36,7 @@ import {
 import { removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
-import { type AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
@@ -655,24 +655,31 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             return { ok: true, summary: t('workbench.removedCaptions') };
           }
           case 'set_caption_translations': {
-            // Bilingual captions: translations are written to the transcript sentence's sub (same semantics as the offline executor), the caption re-lay brings them out automatically
+            // Bilingual captions: transcript writes go through the SHARED writer (applyCaptionTranslations —
+            // identical semantics to the offline executor); captions re-derive reactively from the transcript.
             const clear = input.clear === true;
+            const lang = typeof input.lang === 'string' && input.lang.trim() ? input.lang.trim() : undefined;
             const items = (Array.isArray(input.items) ? input.items : [])
               .map((it) => {
                 const o = (it ?? {}) as Record<string, unknown>;
-                return { index: Number(o.index), text: typeof o.text === 'string' ? o.text.trim() : null };
+                const w0 = Number(o.w0);
+                const w1 = Number(o.w1);
+                return {
+                  index: Number(o.index),
+                  text: typeof o.text === 'string' ? o.text.trim() : null,
+                  ...(Number.isInteger(w0) && Number.isInteger(w1) && w0 >= 0 && w1 >= w0 ? { w0, w1 } : {}),
+                };
               })
-              .filter((it): it is { index: number; text: string } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
+              .filter((it): it is { index: number; text: string; w0?: number; w1?: number } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
             if (!clear && !items.length) return { ok: false, error: t('workbench.itemsEmptyInvalidNeed') };
-            const stripSub = (segs: AsrSegment[]) => segs.map(({ sub: _s, ...rest }) => rest);
             let summary: string;
             if (clear) {
               if (asrRef.current) {
-                const next = stripSub(asrRef.current);
+                const next = clearCaptionTranslations(asrRef.current);
                 setAsrSentences(next);
                 asrRef.current = next;
               }
-              const nextClips = Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, stripSub(v)]));
+              const nextClips = Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, clearCaptionTranslations(v)]));
               setClipAsr(nextClips);
               clipAsrRef.current = nextClips;
               summary = t('workbench.clearedAllCaptionTranslations');
@@ -684,12 +691,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               if (!segs?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
               const bad = items.filter((it) => it.index >= segs.length);
               if (bad.length) return { ok: false, error: t('workbench.indexOutOfRange', { list: bad.map((b) => b.index).join(', '), n: segs.length }) };
-              const next = segs.map((s, i) => {
-                const hit = items.find((it) => it.index === i);
-                if (!hit) return s;
-                const { sub: _s, ...rest } = s;
-                return hit.text ? { ...rest, sub: hit.text } : rest;
-              });
+              const next = applyCaptionTranslations(segs, items, lang);
               if (src) {
                 const nextClips = { ...clipAsrRef.current, [src]: next };
                 setClipAsr(nextClips);
@@ -700,10 +702,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               }
               summary = t('workbench.setNTranslationLines', { n: items.filter((it) => it.text).length });
             }
-            if (compRef.current.blocks.some(isSentenceCaption)) {
-              setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
-              return { ok: true, summary };
-            }
+            if (compRef.current.blocks.some(isSentenceCaption)) return { ok: true, summary };
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }
           case 'cut_narration': {
