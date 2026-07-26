@@ -13,6 +13,7 @@ import { extractAudio } from '@pireel/studio-engine/video-edit/extract-audio';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { detectLang } from '@pireel/studio-engine/caption-fx';
 import { getCachedAsr, setCachedAsr } from './asr-cache';
 import { t } from './i18n';
 
@@ -66,14 +67,33 @@ export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   // 402 = credits exhausted (creditsGate): say so instead of an opaque HTTP code
   if (r.status === 402) throw new Error(t('chatGen.notEnoughCreditsTop'));
   if (!r.ok) throw new Error(t('common.transcriptionRequestFailedHttp', { status: r.status }));
-  const j = (await r.json()) as { segments?: Array<{ start: number; end: number; text: string }> };
+  const j = (await r.json()) as {
+    lang?: string | null;
+    segments?: Array<{ start: number; end: number; text: string; lang?: string; speaker?: string; words?: Array<{ start: number; end: number; text: string }> }>;
+  };
   // ASR times are in the "audio track's own zero" frame (audio extraction subtracts the audio track's first
   // packet), while playback is in "earliest sample across all tracks". Files whose two tracks' first packets
   // are out of sync need this delta added back, or captions/cut points shift wholesale.
   const off = await audioPlaybackOffset(file);
+  // Language: provider-reported when available, script-detection fallback otherwise (feeds translate
+  // defaults / segmentation hints; per-segment so mixed-language sources stay honest).
+  const fallbackLang = j.lang ?? detectLang((Array.isArray(j.segments) ? j.segments : []).map((s) => s.text ?? '').join(' '));
   const segs: AsrSegment[] = (Array.isArray(j.segments) ? j.segments : [])
     .filter((s) => s.text?.trim())
-    .map((s) => ({ start: Math.max(0, s.start + off), end: Math.max(s.start + off + 0.1, s.end + off), text: s.text.trim() }));
+    .map((s) => {
+      const words = (Array.isArray(s.words) ? s.words : [])
+        .filter((w) => w.text?.trim() && typeof w.start === 'number' && typeof w.end === 'number')
+        .map((w) => ({ text: w.text.trim(), start: Math.max(0, w.start + off), end: Math.max(0, w.end + off) }));
+      const lang = s.lang ?? fallbackLang;
+      return {
+        start: Math.max(0, s.start + off),
+        end: Math.max(s.start + off + 0.1, s.end + off),
+        text: s.text.trim(),
+        ...(lang ? { lang } : {}),
+        ...(s.speaker ? { speaker: s.speaker } : {}),
+        ...(words.length ? { words } : {}),
+      };
+    });
   if (segs.length) setCachedAsr(sig, segs);
   return segs;
 }

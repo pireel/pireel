@@ -19,9 +19,10 @@ import {
   strArr,
   wordsOf,
 } from './composition-core';
-import { type CaptionPreset, getCaptionPreset } from './caption-presets';
+import { type CaptionPreset, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
+import { BASE_CAPTION_FONT_PX, CAPTION_WEIGHT_BOLD, CAPTION_WEIGHT_REGULAR } from './caption-presets';
 import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx, wordsFromText } from './caption-fx';
 
 /* ============================ template render impls ============================ */
@@ -113,13 +114,15 @@ function renderCaption(slots: Slots, id: string): Rendered {
   const ov = {
     ...(typeof slots.color === 'string' ? { color: slots.color as string } : {}),
     ...(slots.bg === null || typeof slots.bg === 'string' ? { bg: slots.bg as string | null } : {}),
+    ...(typeof slots.bold === 'boolean' ? { bold: slots.bold as boolean } : {}),
   };
   const subOv = {
     ...(typeof slots.subPreset === 'string' ? { preset: slots.subPreset as string } : {}),
     ...(typeof slots.subColor === 'string' ? { color: slots.subColor as string } : {}),
     ...(slots.subBg === null || typeof slots.subBg === 'string' ? { bg: slots.subBg as string | null } : {}),
+    ...(typeof slots.subBold === 'boolean' ? { bold: slots.subBold as boolean } : {}),
   };
-  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv);
+  return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv, slots.cue === true);
 }
 
 /** Preset font → CSS font-family (serif → Noto Serif SC, mono → theme --font-num, default → theme body). */
@@ -150,8 +153,8 @@ function presetFontFamilies(p: CaptionPreset): string {
  * selection highlight must locate the same segments). Split budget (in px, item-for-item
  * from the render CSS, all accounted at the ROUNDED real value; lines are nowrap, so even if
  * underestimated it's only symmetric micro-overflow, never a visual wrap):
- *   box width = wPct% × canvas width (canvasW, portrait 1080 / landscape 1920 — hardcoding
- *     1080 halves the landscape line width, been bitten)
+ *   box width = wPct% × canvas width (canvasW from comp.width — the canvas follows the source
+ *     aspect, short side normalized to 1080; always passed as a param, never hardcoded)
  *   − plate left/right padding: exactly the CSS formula round(fs×0.42)×2 (only when there's a plate)
  *   − 0.15em safety margin (subpixel diff between canvas and the layout engine / font-not-ready fallback)
  *   inter-word flex gap = round(fs×0.18), n−1 for n words: accounted precisely as "one per word, one added back from budget".
@@ -162,11 +165,11 @@ function presetFontFamilies(p: CaptionPreset): string {
  */
 
 export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: number, scale: number, canvasW = 1080): FxWord[][] {
-  const fs = Math.max(10, Math.round(p.size * scale));
-  const gapPx = Math.round(fs * 0.18);
-  const spPx = Math.round(fs * 0.12); // extra gap at Latin word boundaries (same spec as render .sp)
+  const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
+  const gapPx = 0; // CJK-adjacent words render with NO spacing (subtitle convention — the old 0.18em decorative gap read as scattered text)
+  const spPx = Math.round(fs * 0.3); // real space width at Latin word boundaries (render .sp)
   const padPx = p.bg ? Math.round(fs * 0.42) * 2 : 0;
-  const canvasFont = `${p.italic ? 'italic ' : ''}${p.weight} ${fs}px ${presetFontFamilies(p)}`;
+  const canvasFont = `${p.italic ? 'italic ' : ''}${CAPTION_WEIGHT_REGULAR} ${fs}px ${presetFontFamilies(p)}`;
   const wordPx = (t: string) => {
     const est = estWordEm(t) * fs;
     const m = measureTextPx(t, canvasFont);
@@ -180,15 +183,21 @@ export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: num
   return chunkWordsBalanced(words, Math.max(fs * 2, budgetPx + gapPx), (w) => wordPx(w.text) + gapPx + (extra.get(w) ?? 0));
 }
 
-function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null } = {}, subOv: { preset?: string; color?: string; bg?: string | null } = {}): Rendered {
+function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean } = {}, cue = false): Rendered {
   // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
   // use (segmentation budget, pill, css, karaoke revert color) consistent with the overridden look.
   if (ov.color != null || ov.bg !== undefined) p = { ...p, ...(ov.color != null ? { text: ov.color } : {}), ...(ov.bg !== undefined ? { bg: ov.bg ?? undefined } : {}) };
   const { start } = span2(words);
   // scale = FONT-SIZE coefficient (user-set: scaling adjusts font size, not a region transform) —
   // size/plate padding/decoration all lay out from the scaled font size, text truly reflows, not a bitmap-style scale of the whole block
-  const fs = Math.max(10, Math.round(p.size * scale));
+  const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
+  // Regular by default — bold ONLY via the user's toggle (presets carry no weight)
+  const mainWeight = ov.bold ? CAPTION_WEIGHT_BOLD : CAPTION_WEIGHT_REGULAR;
   const deco = p.mode === 'emphasis' && p.deco ? `<span class="deco"></span>` : '';
+  // Both modes split into visual lines at the CURRENT font size (same px-accurate budget). The
+  // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
+  // line — standard subtitle look; at scale 1 a cue fits one line so the stack is a single line);
+  // legacy sentence blocks keep the old one-line-at-a-time rotation.
   const segs = captionLineSegments(words, p, wPct, scale, canvasW);
   let wIdx = 0;
   const segHtml = segs
@@ -211,12 +220,12 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // reflow via the same captionLineSegments budget (box width × font size, live), anchored to the
   // main line (line bottom=yPct, center=xPct, box width wPct, box height hPct → min-height), plate/
   // shadow/font all follow the preset. Default (subStyle.yPct unset) = follow directly under the main line.
-  // Translation line's visual base: its own preset when set, else it follows the main line's
-  // (already override-applied) look; sub color/bg overrides apply on top.
-  let subP = subOv.preset ? getCaptionPreset(subOv.preset) : p;
+  // Translation line's visual base: its OWN preset (independent of the main line; ln-clean by default),
+  // sub color/bg overrides apply on top.
+  let subP = getCaptionPreset(subOv.preset ?? DEFAULT_SUB_CAPTION_PRESET);
   if (subOv.color != null || subOv.bg !== undefined) subP = { ...subP, ...(subOv.color != null ? { text: subOv.color } : {}), ...(subOv.bg !== undefined ? { bg: subOv.bg ?? undefined } : {}) };
-  const subScale = subStyle?.scale ?? scale * 0.6;
-  const subFs = Math.max(9, Math.round(subP.size * subScale));
+  const subScale = subStyle?.scale ?? scale * 0.7;
+  const subFs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * subScale));
   const subW = subStyle?.wPct ?? wPct;
   const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), subP, subW, subScale, canvasW) : [];
   const subPill = subP.bg ? `background:${subP.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * 0.28)}px;` : '';
@@ -224,9 +233,16 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     ? `<div class="cap-sub" id="${id}-sub">${subSegs.map((g) => `<div class="cap-sub-line">${g.map((w, k) => `<span${k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' class="sp"' : ''}>${escapeHtml(w.text)}</span>`).join('')}</div>`).join('')}</div>`
     : '';
   const subAnchor = subStyle?.yPct != null ? `bottom:${n(100 - subStyle.yPct)}%;` : `top:calc(${n(yPct)}% + ${Math.round(fs * 0.2)}px);`;
+  // Cue mode: lines live in a bottom-anchored column (.cap-stack) — the stack owns the position
+  // anchor/box width/min-height; each line hugs its own text with its own plate.
+  // ONE plate around the whole stack (multi-line = a single rounded backdrop, not one strip per line);
+  // the stack hugs its widest line (width:auto), so a single-line cue looks exactly like before.
+  const stackCss = cue
+    ? `\n#${id} .cap-stack { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); width:auto; max-width:${n(wPct)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; row-gap:${Math.round(fs * 0.12)}px; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }`
+    : '';
   const subCss = sub
-    ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.12)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; gap:${Math.round(subFs * 0.18)}px; width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${Math.max(500, subP.weight - 200)}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${subP.shadow && !subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''}${subPill} }`
+    ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:auto; max-width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''}${subPill} }
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.3)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${subOv.bold ? 700 : CAPTION_WEIGHT_REGULAR}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
     : '';
   const decoCss =
     p.deco === 'highlight'
@@ -240,22 +256,26 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // cap-center-probe.mjs; after the fix top/bottom whitespace is level at 15/16px).
   const css = `
 #${id} .cap-root { position:absolute; inset:0; }
-#${id} .cap-line { position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; display:flex; flex-wrap:nowrap; align-items:center; gap:${Math.round(fs * 0.18)}px; justify-content:center; width:${n(wPct)}%; pointer-events:auto; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}${pill} }
-#${id} .w { position:relative; top:-0.04em; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${p.weight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${p.shadow && !p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
+${stackCss}
+#${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
+#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${mainWeight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${!p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
-#${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.12)}px; }${subCss}`.trim();
+#${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.3)}px; }${subCss}`.trim();
 
-  // Segment cycling: all hidden first; each segment enters at its first word's time, and goes dark
-  // when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
+  // Legacy segment cycling: all hidden first; each segment enters at its first word's time, and goes
+  // dark when the next enters (last segment stays with the block to the end). Enter/exit are hard cuts
   // (set): the fade-in + rise version had a 0.22s semi-transparent gap between sentences that felt like flicker in playback (user-reported).
-  const lines: string[] = [`gsap.set('#${id} .cap-line', { autoAlpha: 0 });`];
+  // Cue mode has NO cycling — all stacked lines are simply visible; the block window gates on/off.
+  const lines: string[] = cue ? [] : [`gsap.set('#${id} .cap-line', { autoAlpha: 0 });`];
   if (sub) lines.push(`tl.set('#${id}-sub', { autoAlpha: 1 }, 0);`);
-  segs.forEach((g, si) => {
-    const segStart = si === 0 ? 0 : Math.max(0, g[0]!.start - start);
-    lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 1 }, ${n(segStart)});`);
-    const nxt = segs[si + 1];
-    if (nxt) lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 0 }, ${n(Math.max(0, nxt[0]!.start - start))});`);
-  });
+  if (!cue) {
+    segs.forEach((g, si) => {
+      const segStart = si === 0 ? 0 : Math.max(0, g[0]!.start - start);
+      lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 1 }, ${n(segStart)});`);
+      const nxt = segs[si + 1];
+      if (nxt) lines.push(`tl.set('#${id}-s${si}', { autoAlpha: 0 }, ${n(Math.max(0, nxt[0]!.start - start))});`);
+    });
+  }
   if (p.mode === 'emphasis') {
     words.forEach((w, i) => {
       const ws = w.start - start;
@@ -271,7 +291,8 @@ ${decoCss}
       }
     });
   }
-  return { innerHtml: `<div class="cap-root">${segHtml}${subHtml}</div>\n<style>${css}</style>`, timelineBody: lines.join('\n') };
+  const mainHtml = cue ? `<div class="cap-stack">${segHtml}</div>` : segHtml;
+  return { innerHtml: `<div class="cap-root">${mainHtml}${subHtml}</div>\n<style>${css}</style>`, timelineBody: lines.join('\n') };
 }
 
 function renderSlam(words: FxWord[], id: string, scale = 1): Rendered {

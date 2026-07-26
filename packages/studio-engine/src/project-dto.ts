@@ -15,9 +15,19 @@ export interface TranscriptSegment {
   start: number;
   end: number;
   text: string;
+  /** Spoken language of this sentence (provider-reported or script-detected). */
+  lang?: string;
+  /** Speaker id (diarization; absent = single speaker / not enabled). */
+  speaker?: string;
   words?: { text: string; start: number; end: number }[];
-  /** Bilingual caption sub-line (full-sentence translation, no word-level time) — carried with the sentence when laying/re-laying captions. */
+  /** Bilingual whole-sentence translation (shows only when the sentence maps to a single display cue). */
   sub?: string;
+  /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
+  cueSubs?: Record<string, string>;
+  /** Target language sub/cueSubs were translated into (unset = unknown/legacy — displayed as-is). */
+  subLang?: string;
+  /** Short-lived extraction-cueing scheme flag (desegmentCues merges these back into sentences on load). */
+  cue?: boolean;
 }
 
 /** Server-operable editing context (fuel for the offline MCP executor): client autosave mirrors

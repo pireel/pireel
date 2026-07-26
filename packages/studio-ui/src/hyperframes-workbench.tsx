@@ -41,10 +41,13 @@ import {
   blockId,
   blockKind,
   videoFrameTimelineBody,
+  BASE_CAPTION_FONT_PX,
   emptyComposition,
   freeTrack,
   getCaptionPreset,
+  isCaptionsOn,
   isSentenceCaption,
+  stripDerivedCaptions,
   mediaBlock,
   newBlock,
   renderBlock,
@@ -68,14 +71,14 @@ import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { injectPreviewRuntime } from './sample-composition';
 import { playhead } from './playhead';
-import { type AsrSegment } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, captionBlocksFromAsr, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
-import { beatsForWindow as beatsForWindowPure, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
+import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS } from './studio-timeline';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
@@ -1066,7 +1069,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Autosave runs regardless (pure side effect: debounced draft write); the toolbar no longer shows a "project/saved" time
   // videoSigRef first: in the missing-media state (no File on this device) the draft's sig anchor
   // must survive autosave — writing null would wipe the cloud row's reconnect anchor.
-  useDraftAutosave(comp, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef);
+  // Persist-side comp: derived caption blocks are STRIPPED (transcript + captionStyle.on carry the
+  // caption state); only strippable when a transcript exists to re-derive from. The draft also carries
+  // the transcripts so a zero-backend reopen (OSS shell / offline) can re-derive the caption layer.
+  const canDeriveCaptions = (asrSentences?.length ?? 0) > 0 || Object.keys(clipAsr).length > 0;
+  const compForSave = useMemo(() => stripDerivedCaptions(comp, canDeriveCaptions), [comp, canDeriveCaptions]);
+  useDraftAutosave(compForSave, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef, () => ({
+    ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
+  }));
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
   // active buffer to apply live (fitScale isn't in the preview doc, so the write-back doesn't trigger a rebuild — see the assembled comment)
@@ -2168,26 +2179,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // the 300ms rebuild (linear estimation is off when a larger font wraps, hit "box change lags"). The box is a global
     // style handle, it doesn't jump with the playhead / current segment
   }, [selCapId, bufs.active, comp.captionStyle, postPreview]);
-  // Edit-mode force-show: captions fade in, and the playhead often rests at a very low opacity — you can't tune a caption you can't see.
-  // Select a caption (and paused) → force the current segment opaque (segment index computed via the same captionLineSegments as render);
-  // deselect/play → runtime re-runs seekTimelines to restore the true timeline state
+  // Edit-mode force-show RETIRED: it existed for the fade-in era (playhead often rested at a
+  // half-transparent moment). With hard-cut enter/exit and static cue lines, a caption inside its
+  // window is always fully opaque — the only thing forcing still did was paint the SELECTED cue on
+  // top of the one at the playhead (visibility:!important pierces the window gating), i.e. two
+  // captions at once after pausing (user-reported). Keep only the restore/clear message.
   useEffect(() => {
-    if (!selCapId || playing) {
-      postPreview({ type: 'hf:capEdit', id: null });
-      return;
-    }
-    const b = comp.blocks.find((x) => x.id === selCapId);
-    const words = (b?.slots.words ?? []) as { text: string; start: number; end: number }[];
-    if (!b || !words.length) return;
-    const cs = resolveCaptionStyle(comp);
-    const segs = captionLineSegments(words, getCaptionPreset(cs.preset), cs.wPct ?? 56, cs.scale, comp.width);
-    let idx = 0;
-    for (let i = 0; i < segs.length; i++) {
-      if (segs[i]![0]!.start <= tSec + 1e-3) idx = i;
-      else break;
-    }
-    postPreview({ type: 'hf:capEdit', id: selCapId, seg: idx });
-  }, [selCapId, playing, tSec, comp, bufs.active, postPreview]);
+    postPreview({ type: 'hf:capEdit', id: null });
+  }, [selCapId, playing, postPreview]);
+  // Blank-page click clears the caption selection (per user): the stage, the timeline and the captions
+  // panel are keep-zones (data-cap-keep) — a concrete caption chip on the timeline is the one place
+  // that SETS caption selection outside the stage; everywhere else (page chrome, gutters) deselects.
+  useEffect(() => {
+    if (!selCapId) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-cap-keep]')) return;
+      setSelectedIdRaw(null);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selCapId]);
   /** Media dropped on the stage: hitting a component card (media block) present at the current moment = fill it; a miss = create a new component card centered on the drop point. */
   const handleAssetDrop = async (e: React.DragEvent) => {
     const a = dragAsset;
@@ -2639,7 +2652,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // transcribeFile caches by fileSig, the two split halves of the same src share one; failures are blacklisted to avoid re-burning ASR
   const clipAsrBusyRef = useRef<Set<string>>(new Set());
   const clipAsrFailRef = useRef<Set<string>>(new Set());
-  const captionsOn = comp.blocks.some(isSentenceCaption);
+  const captionsOn = isCaptionsOn(comp);
   useEffect(() => {
     if (floatWin !== 'script' && !captionsOn) return;
     for (const shot of (comp.shots ?? []).filter((s) => s.src)) {
@@ -2717,6 +2730,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
   });
+  /** Repair pass for transcripts cue-split at extraction (a short-lived scheme): merge cue segments
+   *  back into sentences on load — display cues are DERIVED at lay time now (displayCues), the
+   *  persisted transcript stays sentence-granular. Idempotent; then re-lay so blocks re-derive. */
+  const migrateTranscriptCues = useCallback(() => {
+    let changed = false;
+    if (asrRef.current?.some((s) => s.cue)) {
+      asrRef.current = desegmentCues(asrRef.current);
+      setAsrSentences(asrRef.current);
+      changed = true;
+    }
+    for (const [src, segs] of Object.entries(clipAsrRef.current)) {
+      if (!segs.some((s) => s.cue)) continue;
+      const m = { ...clipAsrRef.current, [src]: desegmentCues(segs) };
+      clipAsrRef.current = m;
+      setClipAsr(m);
+      changed = true;
+    }
+    if (changed && compRef.current.blocks.some(isSentenceCaption)) {
+      setComp((c) => ({ ...c, blocks: relayCaptionLayer(c.blocks, ensureShots(c), asrRef.current) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Clip insertion (multi-source main track) — see use-clip-insert.ts. Same runTool ref indirection as captions.
   const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectClip, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
     comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, planRef, setPlan, setComp, setSelectedId,
@@ -2786,7 +2821,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   bridgeReclaimRef.current = agentBridge.reclaim;
 
   /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict).
-   *  Null on an empty canvas (a just-opened tab must not blank the cloud) — same rule as the effect. */
+   *  Tri-state: full payload / chat-only (empty canvas but threads exist — the comp section is not
+   *  sent, so a just-opened tab can never blank the cloud comp) / null (nothing worth saving). */
   function buildCloudPayload() {
     const c = compRef.current;
     if (!projectId) return null;
@@ -2798,12 +2834,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const threads = readChatThreads(projectId);
       return threads.length ? { chat: threads, videoSig: null, videoDurationSec: null, coverThumb: null } : null;
     }
+    const canDerive = (asrRef.current?.length ?? 0) > 0 || Object.keys(clipAsrRef.current).length > 0;
     return {
-      comp: { ...c, video: null },
+      comp: { ...stripDerivedCaptions(c, canDerive), video: null },
       chat: readChatThreads(projectId),
       context: {
-        ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-        ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+        // Persistence boundary: runtime derivation markers (cue/ref/si) never land in storage
+        ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+        ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
         ...(planRef.current ? { plan: planRef.current } : {}),
         ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
       },
@@ -2977,6 +3015,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
     if (d.videoSig) videoSigRef.current = d.videoSig;
     setComp(() => ({ ...d.comp, video: null }));
+    // Local-draft transcript hydration (fill gaps only — in-memory state is fresher): captions are
+    // derived from the transcript, so a zero-backend/offline reopen needs it from the draft.
+    const dc = d.context as { asr?: AsrSegment[]; clipAsr?: Record<string, AsrSegment[]> } | undefined;
+    if (dc?.asr?.length && !asrRef.current?.length) {
+      asrRef.current = dc.asr;
+      setAsrSentences(dc.asr);
+    }
+    if (dc?.clipAsr && Object.keys(dc.clipAsr).length && !Object.keys(clipAsrRef.current).length) {
+      clipAsrRef.current = dc.clipAsr;
+      setClipAsr(dc.clipAsr);
+    }
     if (d.videoSig) {
       void loadLocalVideo(d.videoSig).then(async (f) => {
         if (f && pendingRestoreRef.current === d) {
@@ -3006,6 +3055,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // The boot layer's data gate: released once auto-restore (cloud-first falling back to local) finishes —
   // video-byte reconnection (OPFS/cloud fetch) continues behind the gate, not counted as entry waiting
   const [bootDataReady, setBootDataReady] = useState(false);
+  // CAPTIONS ARE DERIVED STATE: transcript × shots × captionStyle.on → display cues, materialized into
+  // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
+  // strips them; the transcript is the single stored source. This one reactive effect replaces the old
+  // scattered manual re-lays: any transcript/cut/toggle change re-derives, so blocks can't go stale.
+  useEffect(() => {
+    if (!bootDataReady) return;
+    const c = compRef.current;
+    const on = isCaptionsOn(c);
+    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { subLang: resolveCaptionStyle(c).sub?.lang, canvasW: c.width }) : [];
+    // On with nothing derivable (no transcript, e.g. a legacy comp whose context never mirrored):
+    // keep whatever exists — the persisted legacy blocks keep rendering, nothing is destroyed.
+    if (on && !cues.length) return;
+    const derived = captionBlocksFromAsr(cues);
+    const sigOf = (bs: typeof derived) => JSON.stringify(bs.map((b) => [b.id, b.startSec, b.durationSec, b.slots.words, b.slots.sub, b.slots.ref]));
+    if (sigOf(derived) === sigOf(c.blocks.filter(isSentenceCaption))) return;
+    setComp((cur) => ({ ...cur, blocks: [...cur.blocks.filter((b) => !isSentenceCaption(b)), ...derived] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootDataReady, asrSentences, clipAsr, comp.shots, comp.captionStyle, comp.width, comp.height, comp.blocks]);
   useEffect(() => {
     if (autoRestoredRef.current) return;
     autoRestoredRef.current = true;
@@ -3082,9 +3149,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             applyRemote(late);
             toast.success(t('workbench.cloudProjectReconnected'));
           }
+          migrateTranscriptCues(); // late-arriving legacy transcript: migrate after it lands
         });
       }
-    })().finally(() => setBootDataReady(true));
+    })().finally(() => {
+      migrateTranscriptCues(); // comp is applied by now — canvas orientation decides the cue budget
+      setBootDataReady(true);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3278,7 +3349,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div className="text-ink-4 text-[11px]">{t('workbench.videoStaysLocalOnly')}</div>
             </button>
           ) : (
-            <div ref={stageBoxRef} className="relative" style={{ width: boxW, height: boxH }}>
+            <div ref={stageBoxRef} data-cap-keep className="relative" style={{ width: boxW, height: boxH }}>
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
                   so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
               <div className="absolute inset-0 overflow-hidden rounded-xl shadow-xl ring-1 ring-black/20">
@@ -3370,18 +3441,40 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 // Sentence-level captions (no box): give global position/scale handles — dragging comp.captionStyle moves all captions at once
                 if (isSentenceCaption(sb)) {
                   const subSelected = capSelPart === 'sub' && typeof sb.slots.sub === 'string' && !!sb.slots.sub;
+                  // Visual line counts (cue blocks stack lines at big font sizes): the selection box height
+                  // is analytic — same splitter as the render, so it tracks font-size changes instantly.
+                  const csSel = resolveCaptionStyle(comp);
+                  const selWords = (sb.slots.words ?? []) as { text: string; start: number; end: number }[];
+                  const mainLines = sb.slots.cue === true && selWords.length ? Math.max(1, captionLineSegments(selWords, getCaptionPreset(csSel.preset), csSel.wPct ?? 56, csSel.scale, comp.width).length) : 1;
+                  const subStyleSel = (() => {
+                    const base = resolveSubCaptionStyle(comp);
+                    if (csSel.sub?.yPct != null) return base; // explicit anchor: bottom convention already
+                    // Default follow-under-main: the derived bottom accounts for ONE line — push it down for extra lines
+                    const subText0 = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
+                    if (!subText0) return base;
+                    const subP0 = getCaptionPreset(base.preset);
+                    const n0 = Math.max(1, captionLineSegments(wordsFromText(subText0, 0, 1), subP0, base.wPct ?? 56, base.scale, comp.width).length);
+                    if (n0 <= 1) return base;
+                    const subFs0 = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * base.scale));
+                    const extra = (subFs0 * 1.35 + Math.round(subFs0 * 0.15)) * (n0 - 1);
+                    return { ...base, yPct: Math.min(99, base.yPct + (extra / comp.height) * 100) };
+                  })();
+                  const subText = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
+                  const subLines = subText ? Math.max(1, captionLineSegments(wordsFromText(subText, 0, 1), getCaptionPreset(subStyleSel.preset), subStyleSel.wPct ?? 56, subStyleSel.scale, comp.width).length) : 1;
                   return (
                     <>
                     {/* Selection sub-target: clicking the main line shows the main handles, the translation line shows the translation handles (two instances of the same component, never overlaid) */}
                     {subSelected && (
                       <CaptionEditOverlay
-                        style={resolveSubCaptionStyle(comp)}
+                        style={subStyleSel}
                         compH={comp.height}
                         stageW={boxW}
                         stageH={boxH}
                         measured={capSubMeasure}
+                        lines={subLines}
+                        metrics={{ line: 1.35, padY: 0.18, rowGap: 0.15 }}
                         onChange={(patch) => {
-                          const keep = resolveCaptionStyle(compRef.current).sub ?? {};
+                          const keep = compRef.current.captionStyle?.sub ?? {};
                           setCaptionStyle({ sub: { ...keep, ...patch } });
                         }}
                         onLive={(v) => postPreview({ type: 'hf:capSubStyle', xPct: v.xPct ?? 50, yPct: v.yPct, ...(v.hPct ? { hPct: v.hPct } : {}) })}
@@ -3394,6 +3487,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       stageW={boxW}
                       stageH={boxH}
                       measured={capMeasure}
+                      lines={mainLines}
                       onChange={setCaptionStyle}
                       onLive={(s) =>
                         // Send only position + box height (the surface min-height follows): the live channel has no font size. Including fontPx would make the iframe
@@ -4137,7 +4231,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           )}
           {!floatWin && libTab === 'captions' && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <CaptionsPanel {...captionsPanelProps()} />
+              <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
             </div>
           )}
           {floatWin && (
@@ -4224,7 +4318,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 />
               )}
               {floatWin === 'captions' && (
-                <CaptionsPanel {...captionsPanelProps()} />
+                <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
               )}
               {floatWin === 'person' && (
                 <PersonFxPanel
@@ -4554,6 +4648,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
+        <div data-cap-keep className="contents">
         <StudioTimeline
           comp={comp}
           playing={playing}
@@ -4568,6 +4663,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           clipPendingAt={clipPending}
           {...timelineCbs}
         />
+        </div>
 
         {/* Test hook: narration script + visual analysis (read-only) */}
         {showDebug && (

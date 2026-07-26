@@ -1242,7 +1242,7 @@ function StudioTimelineImpl({
                 />
               )}
 
-              {/* Caption lane: sentence-caption read-only chips (follow the transcript, no drag/trim; click = playhead jumps to click point, edited from the caption panel) */}
+              {/* Caption lane: sentence-caption chips (follow the transcript, no drag/trim; click = SELECT that caption + jump the playhead; text edited from the caption panel) */}
               {hasCaptions &&
                 captionBlocks.map((b) => (
                   <div
@@ -1251,7 +1251,8 @@ function StudioTimelineImpl({
                     className="absolute overflow-hidden rounded-md bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20"
                     style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
                     onClick={(e) => {
-                      e.stopPropagation(); // read-only: click = jump playhead to click point, no select/deselect
+                      e.stopPropagation();
+                      onSelectBlock(b.id, false); // picking a concrete caption on the timeline selects it (the one place that sets caption selection outside the stage)
                       onSeek(secAt(e.clientX));
                     }}
                   >

@@ -359,7 +359,10 @@ const PREVIEW_RUNTIME = `
       // position edits .cap-line's left/bottom directly; font size edits each .w's font-size (scaling = font size,
       // no transform → zero conflict with the GSAP enter). Backplate padding etc. is re-baked at the new font size on rebuild.
       try {
-        document.querySelectorAll('.cap-line').forEach(function (cl) {
+        // cue docs anchor lines inside .cap-stack (position/box live on the stack); legacy docs position .cap-line directly
+        var capAnchors = document.querySelectorAll('.cap-stack');
+        if (!capAnchors.length) capAnchors = document.querySelectorAll('.cap-line');
+        capAnchors.forEach(function (cl) {
           // skip equal values: rewriting style dirties it and triggers reflow; once per drag frame means continuous stutter
           if (typeof d.xPct === 'number') {
             var lv = d.xPct + '%';
@@ -373,13 +376,13 @@ const PREVIEW_RUNTIME = `
             var mh = d.hPct > 0 ? d.hPct + '%' : '';
             if (cl.style.minHeight !== mh) cl.style.minHeight = mh; // frame height: the backplate (min-height) tracks the drag
           }
-          if (typeof d.fontPx === 'number') {
-            cl.querySelectorAll('.w').forEach(function (wEl) {
-              var fv = d.fontPx + 'px';
-              if (wEl.style.fontSize !== fv) wEl.style.fontSize = fv;
-            });
-          }
         });
+        if (typeof d.fontPx === 'number') {
+          document.querySelectorAll('.cap-line .w').forEach(function (wEl) {
+            var fv = d.fontPx + 'px';
+            if (wEl.style.fontSize !== fv) wEl.style.fontSize = fv;
+          });
+        }
       } catch (err) {}
     }
     else if (d.type === 'hf:capSubStyle') {
@@ -422,8 +425,13 @@ const PREVIEW_RUNTIME = `
         });
         if (d.id != null && typeof d.seg === 'number') {
           var ceEl = document.getElementById(String(d.id));
-          var ceSeg = ceEl && ceEl.querySelector('#' + String(d.id) + '-s' + d.seg);
-          if (ceSeg) ceSeg.setAttribute('data-hf-edit', '1');
+          if (ceEl && d.seg < 0) {
+            // cue stack: every line is on screen together — force them all
+            ceEl.querySelectorAll('.cap-line').forEach(function (ln) { ln.setAttribute('data-hf-edit', '1'); });
+          } else {
+            var ceSeg = ceEl && ceEl.querySelector('#' + String(d.id) + '-s' + d.seg);
+            if (ceSeg) ceSeg.setAttribute('data-hf-edit', '1');
+          }
         } else {
           seekTimelines(lastSeekT); // restore: the timeline rewrites each segment's state at the current time
         }
@@ -435,7 +443,7 @@ const PREVIEW_RUNTIME = `
       // the caption box is the *global-style* handle (user's intent), so measure the first segment as a representative position, don't jump with the current word
       try {
         var msEl = document.getElementById(String(d.id));
-        var msT = msEl && (d.sub ? msEl.querySelector('.cap-sub') : (msEl.querySelector('.cap-line') || msEl));
+        var msT = msEl && (d.sub ? msEl.querySelector('.cap-sub') : (msEl.querySelector('.cap-stack') || msEl.querySelector('.cap-line') || msEl));
         if (msT) {
           var msR = msT.getBoundingClientRect();
           var msW = document.documentElement.clientWidth || 1;

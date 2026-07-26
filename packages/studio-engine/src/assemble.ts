@@ -14,6 +14,7 @@ import {
   n,
   pct,
   renderBlock,
+  resolveCaptionStyle,
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
@@ -451,13 +452,19 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
     const bgStyle = fx.bg.type === 'color' ? `background:${escapeAttr(fx.bg.color)};` : `background:#000 center/cover no-repeat url('${escapeAttr(fx.bg.url)}');`;
     body.push(`<div id="personBg" style="position:absolute;inset:0;display:none;${bgStyle}"></div>`);
   }
-  // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched (style is global state, not baked into the block)
-  const cs = comp.captionStyle;
+  // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched
+  // (style is global state, not baked into the block). RESOLVED here — storage is sparse, defaults come from the resolver.
+  const cs = comp.captionStyle ? resolveCaptionStyle(comp) : undefined;
   const renderOne = (b: Block) => {
-    const capBase = isSentenceCaption(b) ? { ...b, slots: { ...b.slots, canvasW: comp.width } } : b;
+    // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
+    // Translations live in the transcript (and get baked into slots.sub by the relay), but without the
+    // language state they stay dormant — turning translation off hides them without destroying content.
+    const capBase = isSentenceCaption(b)
+      ? { ...b, slots: { ...b.slots, canvasW: comp.width, ...(comp.captionStyle?.sub?.lang ? {} : { sub: undefined }) } }
+      : b;
     const rb =
       cs && isSentenceCaption(b)
-        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
+        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
         : capBase;
     const { innerHtml, timelineBody } = renderBlock(rb);
     // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
