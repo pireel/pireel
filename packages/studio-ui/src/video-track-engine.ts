@@ -80,6 +80,10 @@ export class VideoTrackEngine {
   // Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s, with loop-wrap-aware distance.
   private bgmEl: HTMLAudioElement | null = null;
   private bgmSpec: EngineBgm | null = null;
+  // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
+  // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
+  // matters here, so drift correction is tight (0.08s) against the video element's own clock.
+  private dubs = new Map<string, { el: HTMLAudioElement; url: string }>();
   // Smooth clock: el.currentTime steps at video frame rate (30fps footage = 33ms jumps), so
   // aligning transition progress / overlays directly to it isn't smooth. During playback, advance
   // by wall clock and pull back when drift from the raw clock exceeds 80ms (seek/handoff self-heal).
@@ -230,6 +234,55 @@ export class VideoTrackEngine {
     }
     this.bgmEl.loop = spec.loop;
     this.syncBgm(this.tEdited, this.playing, true);
+  }
+
+  /** Mount/swap/remove a source's narration dub (baked processed audio, same source-seconds timeline).
+   *  Same-url is idempotent; url change swaps the element src in place (re-blend after a strength change). */
+  setNarrationDub(key: string, url: string | null): void {
+    const cur = this.dubs.get(key);
+    if (!url) {
+      if (cur) {
+        cur.el.remove();
+        this.dubs.delete(key);
+      }
+      // hand the sound back to the decode element on the next activate/seek
+      if (!this.playing) this.seek(this.tEdited);
+      return;
+    }
+    if (cur?.url === url) return;
+    if (cur) {
+      cur.el.src = url;
+      cur.el.load();
+      cur.url = url;
+    } else {
+      const a = document.createElement('audio');
+      a.preload = 'auto';
+      a.src = url;
+      this.ensureHost().appendChild(a);
+      this.dubs.set(key, { el: a, url });
+    }
+    if (!this.playing) this.seek(this.tEdited); // re-run activation so muting/dub parking take effect
+  }
+
+  /** Dub sync for the active source (called from activate/seek/tick): the video element stays the clock,
+   *  the dub follows in source seconds; corrections only past 0.08s (audible micro-gap, so keep them rare). */
+  private syncDub(key: string, videoEl: HTMLVideoElement, gain: number, wantPlay: boolean): boolean {
+    for (const [k, d] of this.dubs) {
+      if (k !== key && !d.el.paused) d.el.pause();
+    }
+    const dub = this.dubs.get(key);
+    if (!dub) return false;
+    dub.el.volume = Math.max(0, Math.min(1, gain));
+    if (!dub.el.seeking && Math.abs(dub.el.currentTime - videoEl.currentTime) > 0.08) {
+      try {
+        dub.el.currentTime = videoEl.currentTime;
+      } catch {
+        /* metadata not ready: next tick retries */
+      }
+    }
+    if (wantPlay && dub.el.paused) dub.el.play().catch(() => {});
+    else if (!wantPlay && !dub.el.paused) dub.el.pause();
+    return true;
   }
 
   private bgmSrcTime(t: number): number | null {
@@ -400,7 +453,9 @@ export class VideoTrackEngine {
       /* metadata not ready: the next seek after loadedmetadata covers it */
     }
     el.volume = this.segGain(i);
-    el.muted = !wantPlay; // only the active element makes sound during playback
+    // a mounted dub carries this source's sound → the decode element stays muted no matter what
+    const dubbed = this.syncDub(key, el, this.segGain(i), wantPlay);
+    el.muted = dubbed || !wantPlay; // only the active element makes sound during playback
     if (wantPlay) {
       const p = el.play();
       if (p?.catch) p.catch(() => {});
@@ -544,6 +599,7 @@ export class VideoTrackEngine {
         this.onTick?.(ts);
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
         this.syncBgm(ts, true);
+        if (this.dubs.size && this.syncDub(sg.key, el, this.segGain(this.curIdx), true)) el.muted = true;
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
         // (3) stall backstop — streaming webm duration is estimated via Infinity-seek and may be too
@@ -597,6 +653,7 @@ export class VideoTrackEngine {
     }
     for (const g of this.ghosts.values()) if (!g.paused) g.pause();
     if (this.bgmEl && !this.bgmEl.paused) this.bgmEl.pause();
+    for (const d of this.dubs.values()) if (!d.el.paused) d.el.pause();
   }
 
   /** Re-push the current frame (after a buffer swap the new document's canvas is blank). */
@@ -610,6 +667,8 @@ export class VideoTrackEngine {
     this.bgmEl?.remove();
     this.bgmEl = null;
     this.bgmSpec = null;
+    for (const d of this.dubs.values()) d.el.remove();
+    this.dubs.clear();
     for (const el of this.els.values()) el.remove();
     for (const g of this.ghosts.values()) g.remove();
     for (const u of this.urls.values()) URL.revokeObjectURL(u);

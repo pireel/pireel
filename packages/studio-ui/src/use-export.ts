@@ -74,8 +74,10 @@ export function useStudioExport(deps: {
   clipFilesRef?: MutableRefObject<Map<string, File>>;
   /** BGM payload getter (bytes + speech spans for ducking); null result = export without a bed. */
   bgmExportRef?: MutableRefObject<(() => { file: File; speech: SpeechSpan[] } | null) | null>;
+  /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
+  denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
 }) {
-  const { compRef, videoFileRef, clipFilesRef, bgmExportRef } = deps;
+  const { compRef, videoFileRef, clipFilesRef, bgmExportRef, denoiseExportRef } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -106,6 +108,7 @@ export function useStudioExport(deps: {
       videoFile: videoFileRef.current!,
       clipFiles: clipFilesRef?.current ?? new Map(),
       bgm: bgmExportRef?.current?.() ?? null,
+      denoise: denoiseExportRef?.current?.() ?? null,
       render: opts,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
       shouldCancel: () => exportCancelRef.current,

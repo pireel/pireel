@@ -245,6 +245,9 @@ export interface ClientExportOpts {
   /** BGM bed bytes + the merged speech spans for ducking (workbench derives them from the transcripts).
    *  Absent (or comp.bgm absent) = the untouched narration-only audio path. */
   bgm?: { file: File; speech: SpeechSpan[] } | null;
+  /** Denoise substitution: source key → baked blended audio file. That source's audio track is read
+   *  from this file instead of the source video (video decode untouched) — preview's dub, verbatim. */
+  denoise?: Map<string, File> | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   onProgress?: (done: number, total: number) => void;
@@ -422,6 +425,21 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const from = Math.min(...mine.map((s) => s.srcStart));
     const to = Math.max(...mine.map((s) => s.srcEnd));
     rigs.set(key, await openSource(file, from, to, W, H));
+  }
+
+  // Denoise substitution: swap the source's audio track for the baked blend (same source seconds)
+  const dnInputs: Input[] = [];
+  if (opts.denoise) {
+    for (const [key, f] of opts.denoise) {
+      const rig = rigs.get(key);
+      if (!rig) continue;
+      const input = new Input({ source: new BlobSource(f), formats: ALL_FORMATS });
+      const at = await input.getPrimaryAudioTrack();
+      if (at) {
+        rig.audio = at;
+        dnInputs.push(input);
+      } else void input.dispose();
+    }
   }
 
   // Overlay document + asset inlining
@@ -745,6 +763,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       rig.pending?.close();
       void rig.input.dispose();
     }
+    for (const input of dnInputs) void input.dispose();
     overlay.dispose();
   }
 }

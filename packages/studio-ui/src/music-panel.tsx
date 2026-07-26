@@ -31,6 +31,8 @@ export function MusicPanel({
   onNormalize,
   normalizing,
   normalizeNote,
+  denoise,
+  onSetDenoise,
 }: {
   bgm: BgmTrack | null;
   /** Bed exists in the comp but its bytes aren't mounted (dead blob after reload, recover failed). */
@@ -46,6 +48,9 @@ export function MusicPanel({
   onNormalize: () => void;
   normalizing: boolean;
   normalizeNote: string | null;
+  /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
+  denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | null; progress: number };
+  onSetDenoise: (strength: number | null) => void;
 }) {
   const committedDb = Math.round(bgm?.volumeDb ?? BGM_DEFAULT_DB);
   const [dragDb, setDragDb] = useState<number | null>(null);
@@ -168,6 +173,36 @@ export function MusicPanel({
             </section>
           </>
         )}
+
+        {/* Narration denoise (main source): bake-based — inference once per source, strength re-blends in seconds */}
+        <section className="border-line flex flex-col gap-2 border-t pt-3">
+          {toggle(t('panels.denoiseNarration'), denoise.strength != null, (v) => onSetDenoise(v ? 0.6 : null))}
+          {denoise.strength != null && (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-ink-3 w-7 shrink-0">{t('panels.denoiseStrength')}</span>
+                <input
+                  key={denoise.strength}
+                  type="range"
+                  min={10}
+                  max={100}
+                  step={5}
+                  defaultValue={Math.round(denoise.strength * 100)}
+                  onPointerUp={(e) => onSetDenoise(Number((e.target as HTMLInputElement).value) / 100)}
+                  onKeyUp={(e) => onSetDenoise(Number((e.target as HTMLInputElement).value) / 100)}
+                  className="zoom-range w-full"
+                  aria-label={t('panels.denoiseStrength')}
+                />
+                <span className="text-ink-4 w-8 shrink-0 text-right tabular-nums">{Math.round(denoise.strength * 100)}%</span>
+              </div>
+              {denoise.status === 'baking' && (
+                <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseBaking', { pct: Math.round(denoise.progress * 100) })}</div>
+              )}
+              {denoise.status === 'failed' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseFailedHint')}</div>}
+              {denoise.status === 'ready' && <div className="text-ink-4 text-[10.5px]">{t('panels.denoiseReadyHint')}</div>}
+            </>
+          )}
+        </section>
 
         <section className="border-line flex flex-col gap-1.5 border-t pt-3">
           <div className="text-ink font-medium">{t('panels.unifyLoudness')}</div>
