@@ -358,25 +358,35 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setCapTransBusy(true);
     try {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
-      // Translate DISPLAY CUES (what's actually on screen), one translation per cue, all in one
-      // context-bearing request; store per-cue on the source sentences (cueSubs via the executor).
-      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { subLang: target, canvasW: compRef.current.width }).filter((c) => c.ref);
-      if (!cues.length) {
+      // Translate SENTENCE FRAGMENTS as they survive the edit (mappedCaptionSegs): the post-cut
+      // sentence text, in edited order — the unit the audience actually hears. NOT display cues:
+      // cue-fragment translation is linguistically unsound across word-order-divergent language
+      // pairs, and hundreds of cue rows blew up the request (truncated output → translate_empty).
+      const groups = relayMappedCaptionSegs(ensureShots(compRef.current), asrRef.current, clipAsrRef.current);
+      if (!groups.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
       }
-      const out = await tr(cues.map((c, i) => ({ index: i, text: c.text })), target);
+      const out = await tr(groups.map((g, i) => ({ index: i, text: g.text })), target);
       const byPos = new Map(out.map((o) => [o.index, o.text.trim()]));
-      const groups = new Map<string | null, { index: number; w0: number; w1: number; text: string }[]>();
-      cues.forEach((c, i) => {
+      // Whole sentence intact → seg.sub; a cut/split fragment → range sub cueSubs["w0:w1"] (the
+      // renderer resolves cues by containment while the cut lasts, and hides it after a restore).
+      const bySrc = new Map<string | null, { index: number; w0?: number; w1?: number; text: string }[]>();
+      groups.forEach((g, i) => {
         const textOut = byPos.get(i);
         if (!textOut) return;
-        const r = c.ref!;
-        const arr = groups.get(r.src) ?? [];
-        arr.push({ index: r.seg, w0: r.w0, w1: r.w1, text: textOut });
-        groups.set(r.src, arr);
+        const r = g.ref;
+        const srcSeg = (r.src ? clipAsrRef.current[r.src] : asrRef.current)?.[r.seg];
+        const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
+        const arr = bySrc.get(r.src) ?? [];
+        arr.push(g.words.length === srcWordCount ? { index: r.seg, text: textOut } : { index: r.seg, w0: r.w0, w1: r.w1, text: textOut });
+        bySrc.set(r.src, arr);
       });
-      for (const [src, items] of groups) {
+      if (![...bySrc.values()].some((a) => a.length)) throw new Error(t('workbench.translationFailedTryAgain'));
+      // A full re-translate REPLACES the bilingual layer: clear first so per-cue/fragment keys from
+      // earlier runs (or an earlier cut state) can't shadow the fresh sentence subs.
+      await runTool('set_caption_translations', { clear: true });
+      for (const [src, items] of bySrc) {
         if (!items.length) continue;
         if (src) {
           const shot = (compRef.current.shots ?? []).find((sh) => sh.src === src);

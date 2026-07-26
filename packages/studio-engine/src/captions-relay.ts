@@ -79,12 +79,39 @@ export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null,
   ].sort((a, b) => a.start - b.start);
 }
 
+/** Cue translation lookup, most specific first:
+ *  1. exact per-cue key cueSubs["w0:w1"] — BYO agents / the panel's single-line edits;
+ *  2. sentence NOT intact (words cut / split by an insert): the smallest stored range CONTAINING
+ *     the cue — the panel translates each surviving sentence fragment as one unit and the second
+ *     line persists across that fragment's cues (bilingual-subtitle convention). Skipped when the
+ *     sentence is intact: a fragment translation is by definition from an older cut state.
+ *  3. whole-sentence sub, only when the sentence survives the edit intact — after a word-cut a
+ *     pre-cut sentence translation no longer matches the audible speech, so it hides until the
+ *     user re-translates (restore brings it straight back). */
+function resolveCueSub(srcSeg: AsrSegment | undefined, w0: number, w1: number, segIntact: boolean): string | undefined {
+  if (!srcSeg) return undefined;
+  const exact = srcSeg.cueSubs?.[`${w0}:${w1}`];
+  if (exact) return exact;
+  if (!segIntact) {
+    let best: [number, string] | undefined;
+    for (const [k, v] of Object.entries(srcSeg.cueSubs ?? {})) {
+      if (!v) continue;
+      const i = k.indexOf(':');
+      const a = Number(k.slice(0, i));
+      const b = Number(k.slice(i + 1));
+      if (Number.isFinite(a) && Number.isFinite(b) && a <= w0 && w1 <= b && (!best || b - a < best[0])) best = [b - a, v];
+    }
+    if (best) return best[1];
+    return undefined;
+  }
+  return srcSeg.sub;
+}
+
 /** DISPLAY CUES — the single derivation both the caption blocks and the panel's line list consume,
  *  so "one row = one on-screen line" holds by construction. Per source sentence: take the words that
  *  survive the edit (mapSegsToEdited), then split by visual width (cueChunks). Each cue carries
  *  ref {src, seg, w0, w1} pointing back into the source sentence for edit/translation write-back.
- *  Cue translation: the sentence's cueSubs["w0:w1"] wins; a whole-sentence sub shows only when the
- *  sentence maps to exactly this full-range single cue (agent BYO translations keep working 1:1).
+ *  Cue translation: resolveCueSub (exact per-cue key → containing fragment range → whole-sentence).
  *  opts.subLang = the CURRENT bilingual target: translations stamped with a DIFFERENT known language
  *  are stale (left over from a language switch) and are hidden; unstamped ones (legacy/BYO) show. */
 export function displayCues(
@@ -110,9 +137,7 @@ export function displayCues(
     for (const c of chunks) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
-      const sub = subFresh
-        ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? (srcSeg && w0 === 0 && w1 === srcWordCount - 1 && words.length === srcWordCount ? srcSeg.sub : undefined))
-        : undefined;
+      const sub = subFresh ? resolveCueSub(srcSeg, w0, w1, words.length === srcWordCount) : undefined;
       out.push({
         start: c[0]!.start,
         end: Math.max(c[c.length - 1]!.end, c[0]!.start + 0.3),

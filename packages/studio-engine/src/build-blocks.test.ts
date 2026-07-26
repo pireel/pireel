@@ -119,17 +119,37 @@ describe('displayCues(铺设期派生:剪辑后词流 → 一屏一行,列表与
     expect(cues[0]!.ref!.w0).toBe(0);
     expect(cues[0]!.ref!.w1).toBe(19); // 词范围横跨源句(中段被剪),回写键仍指真实源词序
   });
-  it('译文解析:整句单 cue → seg.sub 生效;cueSubs 按词范围精确匹配', () => {
+  it('译文解析:完好句子的每条 cue 持续显示整句 seg.sub(双语字幕惯例);cueSubs 精确 key 优先', () => {
     const cues = displayCues(oneShot(3), [{ start: 0, end: 3, text: '大家好', sub: 'Hello everyone' }], {});
     expect(cues).toHaveLength(1);
     expect(cues[0]!.sub).toBe('Hello everyone');
-    const long = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, sub: 'stale whole-sentence' }], {});
+    // 长句切成多 cue:上行逐条跳,下行整句停留 —— 每条 cue 都带同一份整句译文
+    const long = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, sub: 'whole-sentence tr' }], {});
     expect(long.length).toBeGreaterThanOrEqual(2);
-    for (const c of long) expect(c.sub).toBeUndefined(); // 整句译文不硬套到多 cue
+    for (const c of long) expect(c.sub).toBe('whole-sentence tr');
+    // 精确 per-cue key(BYO/单行手改)压过整句
     const key = `${long[0]!.ref!.w0}:${long[0]!.ref!.w1}`;
-    const withCueSub = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, cueSubs: { [key]: 'first cue tr' } }], {});
+    const withCueSub = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, sub: 'whole-sentence tr', cueSubs: { [key]: 'first cue tr' } }], {});
     expect(withCueSub[0]!.sub).toBe('first cue tr');
-    expect(withCueSub[1]!.sub).toBeUndefined();
+    expect(withCueSub[1]!.sub).toBe('whole-sentence tr');
+  });
+  it('译文解析:被剪残的句子隐藏整句译文,吃「包含 cue 的区间」译文;恢复后区间译文失效', () => {
+    const words = Array.from({ length: 20 }, (_, i) => ({ text: '字', start: i * 0.5, end: i * 0.5 + 0.5 }));
+    const seg = { start: 0, end: 10, text: words.map((w) => w.text).join(''), words };
+    const cut: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 1.0, treatment: 'full' },
+      { id: 'b', srcStart: 9.0, srcEnd: 10, treatment: 'full' },
+    ];
+    // 剪切后:整句 sub 是剪前译文,不能再显示(译文必须匹配可听语音)
+    const stale = displayCues(cut, [{ ...seg, sub: 'pre-cut whole tr' }], {});
+    expect(stale).toHaveLength(1);
+    expect(stale[0]!.sub).toBeUndefined();
+    // 面板按存活片段回写的区间译文(0:19 横跨剪洞)按 containment 命中残句的 cue
+    const ranged = displayCues(cut, [{ ...seg, cueSubs: { '0:19': 'post-cut fragment tr' } }], {});
+    expect(ranged[0]!.sub).toBe('post-cut fragment tr');
+    // 恢复剪辑(句子重新完好):残句区间译文属于旧剪辑态,不再命中;整句 sub 直接回来
+    const restored = displayCues(oneShot(10), [{ ...seg, sub: 'whole tr', cueSubs: { '0:19': 'post-cut fragment tr' } }], {});
+    for (const c of restored) expect(c.sub).toBe('whole tr');
   });
 });
 
