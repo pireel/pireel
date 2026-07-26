@@ -119,17 +119,37 @@ describe('displayCues(铺设期派生:剪辑后词流 → 一屏一行,列表与
     expect(cues[0]!.ref!.w0).toBe(0);
     expect(cues[0]!.ref!.w1).toBe(19); // 词范围横跨源句(中段被剪),回写键仍指真实源词序
   });
-  it('译文解析:整句单 cue → seg.sub 生效;cueSubs 按词范围精确匹配', () => {
+  it('译文解析:整句译文按词数占比分配到各 cue(下行跟上行同节奏);精确 per-cue key 压过分配', () => {
     const cues = displayCues(oneShot(3), [{ start: 0, end: 3, text: '大家好', sub: 'Hello everyone' }], {});
     expect(cues).toHaveLength(1);
-    expect(cues[0]!.sub).toBe('Hello everyone');
-    const long = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, sub: 'stale whole-sentence' }], {});
+    expect(cues[0]!.sub).toBe('Hello everyone'); // 单 cue 句:整句译文原样落这条
+    // 多 cue 句:译文按每条 cue 的源词占比切片,拼回≈原译文,且不是每条都挂整句
+    const sub = 'one two three four five six seven eight nine ten eleven twelve';
+    const long = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, sub }], {});
     expect(long.length).toBeGreaterThanOrEqual(2);
-    for (const c of long) expect(c.sub).toBeUndefined(); // 整句译文不硬套到多 cue
+    for (const c of long) expect(c.sub).toBeTruthy();
+    expect(long.map((c) => c.sub).join(' ')).toBe(sub);
+    expect(long[0]!.sub).not.toBe(sub);
+    // 精确 per-cue key(BYO/单行手改)压过自己那片,别的 cue 仍吃分配
     const key = `${long[0]!.ref!.w0}:${long[0]!.ref!.w1}`;
-    const withCueSub = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, cueSubs: { [key]: 'first cue tr' } }], {});
-    expect(withCueSub[0]!.sub).toBe('first cue tr');
-    expect(withCueSub[1]!.sub).toBeUndefined();
+    const withCueSub = displayCues(oneShot(10), [{ start: 0, end: 10, text: longText, sub, cueSubs: { [key]: 'manual piece' } }], {});
+    expect(withCueSub[0]!.sub).toBe('manual piece');
+    expect(withCueSub[1]!.sub).toBe(long[1]!.sub);
+  });
+  it('译文解析:不校验剪辑时效——剪切后整句译文照常分配到存活 cue;片段区间译文按组命中', () => {
+    const words = Array.from({ length: 20 }, (_, i) => ({ text: '字', start: i * 0.5, end: i * 0.5 + 0.5 }));
+    const seg = { start: 0, end: 10, text: words.map((w) => w.text).join(''), words };
+    const cut: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 1.0, treatment: 'full' },
+      { id: 'b', srcStart: 9.0, srcEnd: 10, treatment: 'full' },
+    ];
+    // 剪切后整句 sub 不隐藏:直接分配给存活 cue(存了什么显示什么,重不重翻用户自己定)
+    const kept = displayCues(cut, [{ ...seg, sub: 'whole tr' }], {});
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.sub).toBe('whole tr');
+    // 面板对被劈开句子按组回写的区间译文(key=组的 w0:w1)命中该组并分配
+    const ranged = displayCues(cut, [{ ...seg, cueSubs: { '0:19': 'fragment tr' } }], {});
+    expect(ranged[0]!.sub).toBe('fragment tr');
   });
 });
 
