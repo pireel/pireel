@@ -9,8 +9,8 @@
  * (contentEditable; background-only editing state — no border, no size change, zero jitter). Edits
  * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' read_script and the
  * script panel all see the fix; timing untouched, word timing redistributed proportionally). With
- * bilingual on, each row shows the translation line + a per-line retranslate button; editing the
- * source auto-retranslates that line.
+ * bilingual on, each row shows the translation line + a per-line retranslate button; translations
+ * only change when the user asks (the retranslate button / a full re-translate) — never automatically.
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
@@ -142,11 +142,7 @@ export function CaptionsPanel({
   /** Text at edit start: rendered as the React children while editing (constant vdom = React never
    *  rewrites the contentEditable DOM mid-typing, caret survives live re-renders), and the Esc target. */
   const frozenTextRef = useRef('');
-  const liveTimerRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => () => {
-    if (liveTimerRef.current != null) window.clearTimeout(liveTimerRef.current);
-  }, []);
   // Follow the playhead: keep the active row in view (unless the user is editing)
   useEffect(() => {
     if (!activeKey || editingKey) return;
@@ -178,23 +174,16 @@ export function CaptionsPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingKey, editingPart]);
-  /** Live path: debounce keystrokes into the real pipeline (transcript → caption re-lay → preview),
-   *  so the canvas caption follows the typing in near real time. */
+  /** Live path: every keystroke goes straight into the real pipeline (transcript → caption re-lay →
+   *  preview) — the canvas caption follows the typing with no debounce (user-locked; the frozen-vdom
+   *  editing node keeps the caret safe under per-keystroke re-renders). */
   const scheduleLive = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
-    if (liveTimerRef.current != null) window.clearTimeout(liveTimerRef.current);
-    liveTimerRef.current = window.setTimeout(() => {
-      liveTimerRef.current = null;
-      const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
-      if (part === 'sub') onEditSubLine?.(row, next || null, 'live');
-      else if (next) onEditLine?.(row, next, 'live');
-    }, 350);
+    const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (part === 'sub') onEditSubLine?.(row, next || null, 'live');
+    else if (next) onEditLine?.(row, next, 'live');
   };
   const commit = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
     setEditingKey(null);
-    if (liveTimerRef.current != null) {
-      window.clearTimeout(liveTimerRef.current);
-      liveTimerRef.current = null;
-    }
     const frozen = frozenTextRef.current;
     if (editCancelRef.current) {
       editCancelRef.current = false;
