@@ -36,6 +36,8 @@ export interface BlockComposer {
 export interface PlanRequest {
   sentences: PlanSentence[];
   videoDurationSec: number;
+  /** Canvas size (follows the source footage) — orientation gates the framing vocabulary (portrait→corner, landscape→split). */
+  canvas?: { width: number; height: number };
   theme?: string;
   visuals?: PlanVisual[];
   inserts?: PlanInsert[];

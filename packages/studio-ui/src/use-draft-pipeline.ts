@@ -87,6 +87,7 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     const planResp = await studioProviders().planner.plan({
       sentences: segs.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
       videoDurationSec: v?.durationSec ?? 0,
+      canvas: { width: compRef.current.width, height: compRef.current.height },
       theme: compRef.current.theme,
       ...(visuals ? { visuals } : {}),
       ...(inserts.length ? { inserts } : {}),
