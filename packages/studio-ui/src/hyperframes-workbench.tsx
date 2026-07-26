@@ -2283,7 +2283,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const insertTemplateBlock = (templateId: string) => {
     pushUndoSnapshot();
     const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
-    const base = newBlock(templateId, { startSec });
+    let base = newBlock(templateId, { startSec });
+    if (templateId.startsWith('kit:')) {
+      // Kit blocks: language-neutral sample props (defaults carry the design; the value/text is the only content),
+      // a boxed default region, and enough duration for the staged entrance to read.
+      const sample =
+        templateId === 'kit:metric'
+          ? { value: '47%', trend: 'up' }
+          : { text: t('presets.sampleText') };
+      base = { ...base, slots: { ...base.slots, props: sample }, box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 }, durationSec: 4 };
+    }
     const b = { ...base, trackIndex: freeTrack(compRef.current.blocks, base.startSec, base.durationSec, base.trackIndex) };
     setComp((c) => ({ ...c, blocks: [...c.blocks, b] }));
     setSelectedShotId(null);

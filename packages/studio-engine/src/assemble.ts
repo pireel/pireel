@@ -459,9 +459,23 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
     // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
     // Translations live in the transcript (and get baked into slots.sub by the relay), but without the
     // language state they stay dormant — turning translation off hides them without destroying content.
-    const capBase = isSentenceCaption(b)
-      ? { ...b, slots: { ...b.slots, canvasW: comp.width, ...(comp.captionStyle?.sub?.lang ? {} : { sub: undefined }) } }
+    // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
+    // into slots here, where the composition's dimensions are known.
+    const kitBase = b.templateId.startsWith('kit:')
+      ? {
+          ...b,
+          slots: {
+            ...b.slots,
+            boxW: Math.round((b.box?.w ?? 0.86) * W),
+            boxH: Math.round((b.box?.h ?? 0.3) * H),
+            canvasW: W,
+            canvasH: H,
+          },
+        }
       : b;
+    const capBase = isSentenceCaption(kitBase)
+      ? { ...kitBase, slots: { ...kitBase.slots, canvasW: comp.width, ...(comp.captionStyle?.sub?.lang ? {} : { sub: undefined }) } }
+      : kitBase;
     const rb =
       cs && isSentenceCaption(b)
         ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }

@@ -9,10 +9,14 @@
     "./video-edit": "./src/video-edit/index.ts",
     "./*": "./src/*.ts"
   },
-  "sideEffects": ["**/templates.ts", "**/templates.js"],
+  "sideEffects": [
+    "**/templates.ts",
+    "**/templates.js"
+  ],
   "license": "AGPL-3.0-only",
   "dependencies": {
     "fast-json-patch": "^3.1.1",
-    "jsondiffpatch": "^0.7.6"
+    "jsondiffpatch": "^0.7.6",
+    "hyperframes-kit": "link:../../../hyperframes-kit"
   }
 }
