@@ -103,6 +103,8 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.templates': '模板',
   'chatGen.textureMacro': '质感微距',
   'chatGen.themeTitle': '主题:{title}',
+  'chatGen.reasoningDone': '思考过程',
+  'chatGen.reasoningLive': '思考中…',
   'chatGen.thinking': '思考中',
   'chatGen.trackingFootsteps': '跟拍脚步',
   'chatGen.transcribeToEdit': '提取口播稿,用文字直接剪视频',

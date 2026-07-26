@@ -103,6 +103,8 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.templates': 'Templates',
   'chatGen.textureMacro': 'Texture macro',
   'chatGen.themeTitle': 'Theme: {title}',
+  'chatGen.reasoningDone': 'Thought process',
+  'chatGen.reasoningLive': 'Thinking…',
   'chatGen.thinking': 'Thinking',
   'chatGen.trackingFootsteps': 'Tracking footsteps',
   'chatGen.transcribeToEdit': 'Transcribe it so I can edit the video as text',
