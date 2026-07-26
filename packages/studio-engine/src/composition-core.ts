@@ -316,6 +316,8 @@ export interface Composition {
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
+  /** Background-music bed (single track under the whole edited timeline; level/duck/loop/fades). See bgm.ts. */
+  bgm?: import('./bgm').BgmTrack;
 }
 
 /** Person-effect config (global style; matte on/off is per-segment, see VideoShot.personMatte).

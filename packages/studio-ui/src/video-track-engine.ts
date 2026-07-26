@@ -31,6 +31,18 @@ export interface EngineSeg {
   gain?: number;
 }
 
+/** BGM bed spec for the preview (declarative; the gain envelope arrives as a closure so the engine
+ *  stays ignorant of transcripts/spans — workbench builds it from the same pure bgmGainAt as export). */
+export interface EngineBgm {
+  url: string;
+  /** Media duration when known (loop/drift math); unknown → plain offset+t and the element's loop attr wraps. */
+  durationSec?: number;
+  loop: boolean;
+  offsetSec: number;
+  /** Full envelope at edited time t (base level × fades × duck), 0..1. */
+  gainAt: (t: number) => number;
+}
+
 export interface FrameInfo {
   t: number;
   elKey: string;
@@ -64,6 +76,10 @@ export class VideoTrackEngine {
   private ghosts = new Map<string, HTMLVideoElement>(); // key `${srcKey}::pre|post`
   private activeGhost: HTMLVideoElement | null = null;
   private ghostFresh = false; // ghost is in place and not seeking (stale frames mid-seek aren't emitted, prevents side-swap flicker)
+  // BGM bed: one resident <audio> element, volume driven per tick from the spec's envelope closure.
+  // Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s, with loop-wrap-aware distance.
+  private bgmEl: HTMLAudioElement | null = null;
+  private bgmSpec: EngineBgm | null = null;
   // Smooth clock: el.currentTime steps at video frame rate (30fps footage = 33ms jumps), so
   // aligning transition progress / overlays directly to it isn't smooth. During playback, advance
   // by wall clock and pull back when drift from the raw clock exceeds 80ms (seek/handoff self-heal).
@@ -189,6 +205,66 @@ export class VideoTrackEngine {
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" ghost frame (frame2). */
   setTransitions(trs: { cut: number; half: number }[]): void {
     this.trs = trs;
+  }
+
+  /** Mount/swap/remove the BGM bed. Same-url respec (volume/duck knob turns) keeps the element —
+   *  only the envelope closure swaps, no reload, no playback interruption. */
+  setBgm(spec: EngineBgm | null): void {
+    if (!spec) {
+      this.bgmEl?.remove();
+      this.bgmEl = null;
+      this.bgmSpec = null;
+      return;
+    }
+    const sameUrl = this.bgmSpec?.url === spec.url;
+    this.bgmSpec = spec;
+    if (!this.bgmEl) {
+      const a = document.createElement('audio');
+      a.preload = 'auto';
+      this.ensureHost().appendChild(a);
+      this.bgmEl = a;
+    }
+    if (!sameUrl) {
+      this.bgmEl.src = spec.url;
+      this.bgmEl.load();
+    }
+    this.bgmEl.loop = spec.loop;
+    this.syncBgm(this.tEdited, this.playing, true);
+  }
+
+  private bgmSrcTime(t: number): number | null {
+    const s = this.bgmSpec!;
+    if (s.durationSec == null || s.durationSec <= s.offsetSec) return s.offsetSec + t;
+    const span = s.durationSec - s.offsetSec;
+    if (!s.loop) return t < span ? s.offsetSec + t : null;
+    return s.offsetSec + (t % span);
+  }
+
+  /** Per-tick / on-seek bed sync: volume from the envelope closure; drift correction only past 0.35s
+   *  (loop-wrap-aware distance so the frame right after a wrap isn't misread as drift). force = hard seek. */
+  private syncBgm(t: number, wantPlay: boolean, force = false): void {
+    const el = this.bgmEl;
+    const s = this.bgmSpec;
+    if (!el || !s) return;
+    const srcT = this.bgmSrcTime(t);
+    if (srcT == null) {
+      el.volume = 0;
+      if (!el.paused) el.pause();
+      return;
+    }
+    el.volume = Math.max(0, Math.min(1, s.gainAt(t)));
+    const diff = Math.abs(el.currentTime - srcT);
+    const span = s.durationSec != null && s.durationSec > s.offsetSec ? s.durationSec - s.offsetSec : Infinity;
+    const dist = s.loop && Number.isFinite(span) ? Math.min(diff, span - diff) : diff;
+    if ((force || dist > 0.35) && !el.seeking) {
+      try {
+        el.currentTime = srcT;
+      } catch {
+        /* metadata not ready: next tick retries */
+      }
+    }
+    if (wantPlay && el.paused) el.play().catch(() => {});
+    else if (!wantPlay && !el.paused) el.pause();
   }
 
   /** The transition window containing t (with 0.3s warm-up lead) → both-side segment indices; null if the cut doesn't align to a segment boundary. */
@@ -396,6 +472,7 @@ export class VideoTrackEngine {
     const el = this.els.get(seg.key);
     if (!el) return;
     this.syncGhost(this.tEdited); // scrub into a transition window: ghost seeks along (no play while paused)
+    this.syncBgm(this.tEdited, this.playing, true); // park the bed at the new position (aligned resume)
     const gen = ++this.seekGen;
     const push = () => {
       if (gen !== this.seekGen) return;
@@ -423,6 +500,7 @@ export class VideoTrackEngine {
     const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
     if (!inSeg) this.tEdited = this.starts[i]!; // starting play in a dead window: begin at the next playable segment (skip)
     this.activateIdx(i, srcT, true);
+    this.syncBgm(this.tEdited, true, true); // hard-align the bed at play start
     if (this.raf) cancelAnimationFrame(this.raf);
     let lastCt = -1;
     let lastCtAt = performance.now();
@@ -465,6 +543,7 @@ export class VideoTrackEngine {
         this.tSmooth = ts;
         this.onTick?.(ts);
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
+        this.syncBgm(ts, true);
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
         // (3) stall backstop — streaming webm duration is estimated via Infinity-seek and may be too
@@ -517,6 +596,7 @@ export class VideoTrackEngine {
       if (!el.paused) el.pause();
     }
     for (const g of this.ghosts.values()) if (!g.paused) g.pause();
+    if (this.bgmEl && !this.bgmEl.paused) this.bgmEl.pause();
   }
 
   /** Re-push the current frame (after a buffer swap the new document's canvas is blank). */
@@ -527,6 +607,9 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
+    this.bgmEl?.remove();
+    this.bgmEl = null;
+    this.bgmSpec = null;
     for (const el of this.els.values()) el.remove();
     for (const g of this.ghosts.values()) g.remove();
     for (const u of this.urls.values()) URL.revokeObjectURL(u);

@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, Pin, PinOff } from 'lucide-react';
+  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, Pin, PinOff } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -56,6 +56,7 @@ import {
   patchShotAudio,
   shotFilterCss,
   shotGain,
+  type SpeechSpan,
   shotId,
   shotTransformVars,
   DIRECTIONAL_TRANSITIONS,
@@ -112,6 +113,8 @@ import { CaptionsPanel } from './captions-panel';
 import { FramePanel } from './frame-panel';
 import { PersonFxPanel, type MatteState } from './person-fx-panel';
 import { ShotTreatmentPanel } from './shot-treatment-panel';
+import { MusicPanel } from './music-panel';
+import { useBgm } from './use-bgm';
 import { TransitionPanel } from './transition-panel';
 import { MediaAnimPanel } from './media-anim-panel';
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from './person-matte';
@@ -140,8 +143,8 @@ const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. 
 // ⚠️ Temporary for testing: fill only the first N images to save LLM calls, rest stay as placeholders — **remove before launch**.
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
-/** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions. */
-type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions';
+/** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions / music. */
+type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'music';
 
 
 export function HyperframesWorkbench({ projectId, agentView = false }: { projectId: string; agentView?: boolean }) {
@@ -619,7 +622,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setCloudMediaRev((v) => v + 1);
     });
   };
-  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef });
+  /** Export-time BGM payload getter (bytes + duck mask); filled by useBgm below (hook order: it needs consts defined later). */
+  const bgmExportRef = useRef<(() => { file: File; speech: SpeechSpan[] } | null) | null>(null);
+  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, bgmExportRef });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
   const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>({
@@ -2381,6 +2386,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const ensureShots = (c: Composition): VideoShot[] =>
     c.shots && c.shots.length ? c.shots : c.video ? [{ id: shotId(), srcStart: 0, srcEnd: c.video.durationSec, treatment: 'full' as const }] : [];
 
+  // BGM bed + loudness-unify orchestration (upload/generate/knobs/engine sync/export payload — see use-bgm.ts).
+  // Called here (not earlier) because ensureShots/pushUndoSnapshot are consts — TDZ before their definitions.
+  const bgmOps = useBgm({
+    comp, compRef, setComp, videoFileRef, videoSigRef, clipFilesRef, videoEngineRef, asrRef, clipAsrRef,
+    ensureShots, pickFile, backupMediaToCloud, pushUndoSnapshot,
+  });
+  bgmExportRef.current = bgmOps.bgmForExport;
+
   /** Editable caption lines for the captions panel, in edited-timeline order across all sources.
    *  Walk the shot spans; a sentence overlapping a span joins at that span's edited time; split shots
    *  sharing a sentence dedupe to the first occurrence. */
@@ -2793,6 +2806,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
     resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
+    bgmMount: bgmOps.mountBgmFile, bgmPatch: bgmOps.patchBed, bgmRemove: bgmOps.removeBgm,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
@@ -4135,7 +4149,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         ? t('workbench.assetMotion')
                         : floatWin === 'captions'
                           ? t('panels.captions')
-                          : floatWin === 'shot'
+                          : floatWin === 'music'
+                            ? t('panels.music')
+                            : floatWin === 'shot'
                             ? (() => {
                                 const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);
                                 return t('workbench.cameraFraming') + (i >= 0 ? t('workbench.sceneN', { n: i + 1 }) : '');
@@ -4333,6 +4349,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               {floatWin === 'captions' && (
                 <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
               )}
+              {floatWin === 'music' && (
+                <MusicPanel
+                  bgm={comp.bgm ?? null}
+                  fileMissing={!!comp.bgm && !bgmOps.bgmUsable}
+                  hasInserts={(comp.shots ?? []).some((s) => s.src)}
+                  onUpload={() => void bgmOps.uploadBgm()}
+                  onReconnect={() => void bgmOps.uploadBgm()}
+                  onPatch={bgmOps.patchBed}
+                  onPreviewVolume={bgmOps.previewBedVolume}
+                  onRemove={bgmOps.removeBgm}
+                  onGenerate={(p, sec) => void bgmOps.generateBgm(p, sec)}
+                  generating={bgmOps.generating}
+                  onNormalize={() => void bgmOps.normalizeLoudness()}
+                  normalizing={bgmOps.normalizing}
+                  normalizeNote={bgmOps.normalizeNote}
+                />
+              )}
               {floatWin === 'person' && (
                 <PersonFxPanel
                   comp={comp}
@@ -4498,6 +4531,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('workbench.cameraFraming')}</TooltipContent>
+          </Tooltip>
+          {/* Music: BGM bed (global panel — level/duck/loop + loudness unify) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={(e) => (floatWin === 'music' ? setFloatWin(null) : openFloatAt('music', e.currentTarget.getBoundingClientRect()))}
+                disabled={!comp.video}
+                aria-label={t('panels.music')}
+                className={`rounded p-1 disabled:opacity-40 ${floatWin === 'music' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
+              >
+                <Music size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('panels.music')}</TooltipContent>
           </Tooltip>
           <div className="flex-1" />
           {/* Timeline zoom: − thin slider + (borderless, vertically centered) */}

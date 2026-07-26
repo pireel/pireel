@@ -36,7 +36,8 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, shotGain, totalDuration } from '@pireel/studio-engine/composition';
+import { type Composition, type ShotFilter, type SpeechSpan, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, shotGain, totalDuration } from '@pireel/studio-engine/composition';
+import { decodeAudioFile, mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
@@ -241,6 +242,9 @@ export interface ClientExportOpts {
   videoFile: File;
   /** Local insert-clip Files (key = blob URL, same source as workbench clipFilesRef). */
   clipFiles: Map<string, File>;
+  /** BGM bed bytes + the merged speech spans for ducking (workbench derives them from the transcripts).
+   *  Absent (or comp.bgm absent) = the untouched narration-only audio path. */
+  bgm?: { file: File; speech: SpeechSpan[] } | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   onProgress?: (done: number, total: number) => void;
@@ -445,7 +449,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const output = new Output({ format: outFormat, target: new BufferTarget() });
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
-    const anyAudio = segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
+    const withBgm = !!(comp.bgm && opts.bgm?.file);
+    const anyAudio = withBgm || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
@@ -695,10 +700,24 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // Audio track: concatenate in edited-segment order (main segment = narration audio, insert clip = its own), re-stamp timestamps.
+    // Audio track. With a BGM bed: full mix on the 48k grid (narration resampled + bed with the preview's
+    // exact envelope) — see export-audio-mix.ts. Without: concatenate in edited-segment order (main segment =
+    // narration audio, insert clip = its own), re-stamp timestamps.
     // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
     // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
-    if (audioSource) {
+    if (audioSource && withBgm) {
+      const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
+      for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
+      await mixAudioTrack({
+        segs: segs.map((s) => ({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: s.key, gain: s.gain ?? 1 })),
+        audioTracks,
+        bgm: comp.bgm!,
+        bgmBuffer: await decodeAudioFile(opts.bgm!.file),
+        speech: opts.bgm!.speech,
+        totalSec: durationSec,
+        push: (sample) => audioSource.add(sample).then(() => sample.close()),
+      });
+    } else if (audioSource) {
       let edited = 0;
       for (const s of segs) {
         const rig = rigs.get(s.key);
