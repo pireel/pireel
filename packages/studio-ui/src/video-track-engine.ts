@@ -25,6 +25,10 @@ export interface EngineSeg {
   elKey: string;
   srcStart: number;
   srcEnd: number;
+  /** Linear audio gain 0..1 (shotGain of the shot; absent = 1). Applied via the decode element's own volume —
+   *  segments of the same source share one element, so the value re-applies at every handoff, including the
+   *  same-source roll-through swap that skips activateIdx. */
+  gain?: number;
 }
 
 export interface FrameInfo {
@@ -165,6 +169,23 @@ export class VideoTrackEngine {
     return this.total;
   }
 
+  private segGain(i: number): number {
+    const g = this.segs[i]?.gain;
+    return g == null ? 1 : Math.max(0, Math.min(1, g));
+  }
+
+  /** Live volume preview (slider drag): update one segment's gain in place and, if it's the active one,
+   *  apply to the element immediately — no setSegments refeed, no handoff churn. Commit still flows
+   *  through the normal comp → setSegments path. */
+  setSegGain(i: number, gain: number): void {
+    const seg = this.segs[i];
+    if (!seg) return;
+    seg.gain = gain;
+    if (i !== this.curIdx) return;
+    const el = this.els.get(seg.key);
+    if (el) el.volume = this.segGain(i);
+  }
+
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" ghost frame (frame2). */
   setTransitions(trs: { cut: number; half: number }[]): void {
     this.trs = trs;
@@ -302,6 +323,7 @@ export class VideoTrackEngine {
     } catch {
       /* metadata not ready: the next seek after loadedmetadata covers it */
     }
+    el.volume = this.segGain(i);
     el.muted = !wantPlay; // only the active element makes sound during playback
     if (wantPlay) {
       const p = el.play();
@@ -468,6 +490,7 @@ export class VideoTrackEngine {
               // playing right here — swap the active index without a seek so decode isn't interrupted (forcing
               // an in-place currentTime seek stalls 50–150ms, visible as a "flash/stutter" at the cut)
               this.curIdx = nx;
+              el.volume = this.segGain(nx); // roll-through skips activateIdx, but the two shots may carry different gains
             } else {
               this.activateIdx(nx, nxSeg.srcStart, true);
             }

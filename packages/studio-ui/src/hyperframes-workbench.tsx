@@ -53,7 +53,9 @@ import {
   renderBlock,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
+  patchShotAudio,
   shotFilterCss,
+  shotGain,
   shotId,
   shotTransformVars,
   DIRECTIONAL_TRANSITIONS,
@@ -646,7 +648,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const f = clipFilesRef.current.get(s.src);
       eng.setSource(s.src, f ?? (s.src.startsWith('blob:') ? null : s.src));
     }
-    eng.setSegments(shots.map((s) => ({ key: s.src ?? 'main', elKey: s.src ? `clip_${s.id}` : 'main', srcStart: s.srcStart, srcEnd: s.srcEnd })));
+    eng.setSegments(shots.map((s) => ({ key: s.src ?? 'main', elKey: s.src ? `clip_${s.id}` : 'main', srcStart: s.srcStart, srcEnd: s.srcEnd, gain: shotGain(s) })));
     eng.setTransitions(cutTransitions(comp.shots ?? []).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
     if (!playingRef.current) eng.refresh();
   }, [comp.video, comp.shots]);
@@ -2010,6 +2012,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const previewShotFilter = (_sid: string, f: ShotFilter) => {
     postPreview({ type: 'hf:shotVars', vars: { filter: shotFilterCss(f) } });
   };
+  /** Per-shot audio commit (volume/mute): the engine-segment effect refeeds gains from comp.shots. */
+  const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean }) => {
+    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? patchShotAudio(s, patch) : s)) }));
+  };
+  /** Live volume preview during slider drag (zero setState): shots map 1:1 onto engine segments by index. */
+  const previewShotVolume = (sid: string, gainLinear: number) => {
+    const i = (compRef.current.shots ?? []).findIndex((s) => s.id === sid);
+    if (i >= 0) videoEngineRef.current?.setSegGain(i, gainLinear);
+  };
 
   /** Picked an image/video → write into a media-slot block's media slot. */
   const setBlockMedia = (bid: string, media: MediaRef) =>
@@ -2781,7 +2792,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     pickVideoFile, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
-    resizeCutTransition, setShotTreatment, setShotFilter, splitAtPlayhead, trimAtPlayhead, deleteShot,
+    resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
@@ -4307,6 +4318,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     onPreviewTreatSize={previewShotTreatSize}
                     onSetFilter={setShotFilter}
                     onPreviewFilter={previewShotFilter}
+                    onSetAudio={setShotAudio}
+                    onPreviewVolume={previewShotVolume}
                   />
                 </div>
               )}

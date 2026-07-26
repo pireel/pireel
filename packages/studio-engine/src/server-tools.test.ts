@@ -145,6 +145,25 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(videoFrameTimelineBody(r2.comp!.shots!)).not.toContain('filter:'); // 全片无调色=一行不出
     expect(runServerTool('set_video_filter', { shotId: 'nope', brightness: 1.1 }, proj()).result.ok).toBe(false);
   });
+  it('set_shot_audio:批量音量/静音——钳位 [-60,0]、中性摘字段、快照带 [muted]/[vol] 标记', () => {
+    const r = runServerTool('set_shot_audio', { shotIds: ['s1'], volumeDb: -18 }, proj());
+    expect(r.result.ok).toBe(true);
+    const s1 = r.comp!.shots!.find((s) => s.id === 's1')!;
+    expect(s1.volumeDb).toBe(-18);
+    // all:true + mute:静音不吃掉已设音量
+    const r2 = runServerTool('set_shot_audio', { all: true, mute: true }, proj({ comp: r.comp }));
+    expect(r2.comp!.shots!.every((s) => s.audioMuted)).toBe(true);
+    expect(r2.comp!.shots!.find((s) => s.id === 's1')!.volumeDb).toBe(-18);
+    // 快照能看见声音态(muted 优先展示)
+    const snap = runServerTool('get_state', {}, proj({ comp: r2.comp }));
+    expect(snap.result.state).toContain('[muted]');
+    // 归中性:字段摘干净
+    const r3 = runServerTool('set_shot_audio', { all: true, volumeDb: 0, mute: false }, proj({ comp: r2.comp }));
+    expect(r3.comp!.shots!.every((s) => !('volumeDb' in s) && !('audioMuted' in s))).toBe(true);
+    // 空目标/空补丁拒绝
+    expect(runServerTool('set_shot_audio', {}, proj()).result.ok).toBe(false);
+    expect(runServerTool('set_shot_audio', { all: true }, proj()).result.ok).toBe(false);
+  });
   it('add_transition:内容级切点转场——挂后镜 transIn、prevId 锚前镜;非切点拒绝;none 移除;区内禁分割', () => {
     // proj 的切点在 10s(s1|s2)
     const r = runServerTool('add_transition', { atSec: 10.1, effect: 'crosszoom', durationSec: 2 }, proj());

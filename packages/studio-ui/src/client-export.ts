@@ -20,6 +20,7 @@
 
 import {
   ALL_FORMATS,
+  AudioSample,
   AudioSampleSink,
   AudioSampleSource,
   BlobSource,
@@ -35,7 +36,7 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, totalDuration } from '@pireel/studio-engine/composition';
+import { type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, shotGain, totalDuration } from '@pireel/studio-engine/composition';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
@@ -59,6 +60,8 @@ interface ExpSeg {
   key: string;
   /** Per-shot color grade (CSS filter string; 'none'/absent = no grade) — same shotFilterCss as the preview's #vidEl filter. */
   filter?: string;
+  /** Linear audio gain 0..1 (shotGain of the shot; absent = 1). 0 = the segment contributes no audio samples at all. */
+  gain?: number;
 }
 
 export interface SourceRig {
@@ -90,6 +93,21 @@ export async function openSource(file: File, from: number, to: number, W: number
     dw: video.displayWidth * cover,
     dh: video.displayHeight * cover,
   };
+}
+
+/** Rewrite an audio sample's PCM at a flat linear gain (interleaved f32 round-trip; format/rate/channels preserved).
+ *  Only called for 0 < gain < 1 — gain 1 stays on the untouched passthrough path. */
+export function scaleAudioSample(sample: AudioSample, gain: number): AudioSample {
+  const data = new Float32Array(sample.numberOfFrames * sample.numberOfChannels);
+  sample.copyTo(data, { planeIndex: 0, format: 'f32' });
+  for (let i = 0; i < data.length; i++) data[i]! *= gain;
+  return new AudioSample({
+    data,
+    format: 'f32',
+    numberOfChannels: sample.numberOfChannels,
+    sampleRate: sample.sampleRate,
+    timestamp: sample.timestamp,
+  });
 }
 
 /** From the sequential stream, take "the last frame with timestamp ≤ srcT" (same as the spike: webm without cues returns null on random access across large ranges). */
@@ -373,12 +391,14 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const s = sp.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
     const filterCss = shotFilterCss(s.filter);
     const filter = filterCss === 'none' ? {} : { filter: filterCss };
+    const g = shotGain(s);
+    const gain = g === 1 ? {} : { gain: g };
     if (!s.src) {
-      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter });
+      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter, ...gain });
       continue;
     }
     const key = `clip_${s.id}`;
-    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter });
+    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter, ...gain });
     if (!files.has(key)) {
       const local = clipFiles.get(s.src);
       if (local) files.set(key, local);
@@ -425,7 +445,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const output = new Output({ format: outFormat, target: new BufferTarget() });
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
-    const anyAudio = [...rigs.values()].some((r) => r.audio);
+    const anyAudio = segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
@@ -675,16 +695,21 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // Audio track: concatenate in edited-segment order (main segment = narration audio, insert clip = its own), re-stamp timestamps
+    // Audio track: concatenate in edited-segment order (main segment = narration audio, insert clip = its own), re-stamp timestamps.
+    // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
+    // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
     if (audioSource) {
       let edited = 0;
       for (const s of segs) {
         const rig = rigs.get(s.key);
-        if (rig?.audio) {
+        const gain = s.gain ?? 1;
+        if (rig?.audio && gain > 0) {
           const asink = new AudioSampleSink(rig.audio);
           for await (const sample of asink.samples(s.srcStart, s.srcEnd)) {
-            sample.setTimestamp(Math.max(0, edited + (sample.timestamp - s.srcStart)));
-            await audioSource.add(sample);
+            const out = gain === 1 ? sample : scaleAudioSample(sample, gain);
+            out.setTimestamp(Math.max(0, edited + (sample.timestamp - s.srcStart)));
+            await audioSource.add(out);
+            if (out !== sample) out.close();
             sample.close();
           }
         }

@@ -26,7 +26,10 @@ import {
   CAPTION_PRESETS,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
+  VOLUME_DB_MAX,
+  VOLUME_DB_MIN,
   applyBlockPlacement,
+  patchShotAudio,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -91,6 +94,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'duplicate_block',
   'set_shot_treatment',
   'set_video_filter',
+  'set_shot_audio',
   'split_shot',
   'trim_shot',
   'delete_shot',
@@ -154,6 +158,7 @@ function offlineState(p: ServerToolProject): string {
         srcEnd: sp.clip.srcEnd,
         treatment: sp.clip.treatment,
         ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
+        ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
       })),
     },
     pipeline: { asr: !!p.context.asr?.length, plan: !!p.context.plan, visual: false },
@@ -318,6 +323,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       });
       return {
         result: { ok: true, summary: css === 'none' ? 'Reset color grading for this shot' : `Applied color grading: ${css}` },
+        comp: { ...c, shots: next },
+      };
+    }
+    case 'set_shot_audio': {
+      const shots = shotsOf(p);
+      if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
+      const ids = input.all ? new Set(shots.map((s) => s.id)) : new Set((Array.isArray(input.shotIds) ? input.shotIds : []).map(String));
+      if (!ids.size) return { result: { ok: false, error: 'pass shotIds or all:true' } };
+      const hit = shots.filter((s) => ids.has(s.id));
+      if (!hit.length) return { result: { ok: false, error: 'shots not found' } };
+      const patch = {
+        ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+        ...(typeof input.mute === 'boolean' ? { mute: input.mute } : {}),
+      };
+      if (!('volumeDb' in patch) && !('mute' in patch)) return { result: { ok: false, error: 'pass volumeDb and/or mute' } };
+      const next = shots.map((s) => (ids.has(s.id) ? patchShotAudio(s, patch) : s));
+      const bits = [
+        ...('volumeDb' in patch ? [`volume ${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
+        ...('mute' in patch ? [patch.mute ? 'muted' : 'unmuted'] : []),
+      ];
+      return {
+        result: { ok: true, summary: `Audio on ${hit.length} shot${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
         comp: { ...c, shots: next },
       };
     }
