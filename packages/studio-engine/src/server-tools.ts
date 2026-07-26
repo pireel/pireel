@@ -49,7 +49,7 @@ import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
-import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from './build-blocks';
+import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
 import { ensureTemplatesRegistered } from './templates';
@@ -109,8 +109,12 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
 const TREATMENTS = new Set(['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r']);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
-const asAsr = (segs: TranscriptSegment[] | undefined): AsrSegment[] => (segs ?? []) as AsrSegment[];
-const clipAsrOf = (ctx: StudioProjectContext): Record<string, AsrSegment[]> => (ctx.clipAsr ?? {}) as Record<string, AsrSegment[]>;
+// desegmentCues here = the browser's on-load reverse migration (workbench applies it to asrRef): transcripts stored by
+// the short-lived cue-split extraction scheme merge back to sentences, so offline read_script / cut ranges / captions
+// see the SAME rows as the browser. Idempotent — sentence transcripts pass through by reference.
+const asAsr = (segs: TranscriptSegment[] | undefined): AsrSegment[] => desegmentCues((segs ?? []) as AsrSegment[]);
+const clipAsrOf = (ctx: StudioProjectContext): Record<string, AsrSegment[]> =>
+  Object.fromEntries(Object.entries(ctx.clipAsr ?? {}).map(([k, v]) => [k, desegmentCues((v ?? []) as AsrSegment[])]));
 
 /** shots fallback (same convention as workbench ensureShots): never cut = whole clip as one shot (duration from the row's videoDurationSec). */
 function shotsOf(p: ServerToolProject): VideoShot[] {
@@ -162,15 +166,16 @@ function offlineTranscript(p: ServerToolProject): string {
   const row = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`;
   const parts: string[] = [];
   parts.push(
-    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock):\n${(p.context.asr ?? []).map(row).join('\n')}`,
+    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock):\n${asAsr(p.context.asr).map(row).join('\n')}`,
   );
   const bySrc = new Map<string, string[]>();
   for (const s of p.comp.shots ?? []) {
     if (!s.src) continue;
     bySrc.set(s.src, [...(bySrc.get(s.src) ?? []), s.id]);
   }
+  const clipSegs = clipAsrOf(p.context);
   for (const [src, ids] of bySrc) {
-    const segs = p.context.clipAsr?.[src];
+    const segs = clipSegs[src];
     const head = `INSERTED CLIP for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its OWN source seconds)`;
     parts.push(segs?.length ? `${head}:\n${segs.map(row).join('\n')}` : `${head}: (no transcript stored)`);
   }
@@ -485,11 +490,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
         const src = shotIdIn ? shotsOf(p).find((s) => s.id === shotIdIn)?.src : undefined;
         if (shotIdIn && !src) return { result: { ok: false, error: 'this shotId is not an inserted clip (do not pass shotId for the main narration)' } };
-        const segs = src ? p.context.clipAsr?.[src] : p.context.asr;
+        // Through the desegment funnel: translation item indices refer to read_script's (desegmented) line numbers
+        const segs = src ? clipAsrOf(p.context)[src] : asAsr(p.context.asr);
         if (!segs?.length) return { result: { ok: false, error: src ? 'this inserted clip has no transcript' : 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
         const bad = items.filter((it) => it.index >= segs.length);
         if (bad.length) return { result: { ok: false, error: `index out of range: ${bad.map((b) => b.index).join(', ')} (this transcript has ${segs.length} lines; see read_script for line numbers)` } };
-        const next = applyCaptionTranslations(asAsr(segs), items, lang);
+        const next = applyCaptionTranslations(segs, items, lang);
         ctx = src ? { ...p.context, clipAsr: { ...p.context.clipAsr, [src]: next } } : { ...p.context, asr: next };
         summary = `Set ${items.filter((it) => it.text).length} translations`;
       }

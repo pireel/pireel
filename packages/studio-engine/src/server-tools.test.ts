@@ -60,6 +60,21 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(false);
     expect(r2.result.error).toContain('extract_asr');
   });
+  it('read_script:cue 拆分存储的转写走 desegment 漏斗——离线行号与浏览器(载入即合句)同口径', () => {
+    const p = proj({
+      context: {
+        asr: [
+          { start: 0, end: 2, text: '这个方法', cue: true },
+          { start: 2, end: 5, text: '我测了三个月。', cue: true },
+          { start: 5, end: 9, text: '数据不会说谎。', cue: true },
+        ] as never,
+      },
+    });
+    const t2 = (runServerTool('read_script', {}, p).result.data as { transcript: string }).transcript;
+    expect(t2).toContain('0. [0–5s] 这个方法我测了三个月。'); // 两个 cue 合回一句
+    expect(t2).toContain('1. [5–9s] 数据不会说谎。');
+    expect(t2).not.toContain('[0–2s]'); // cue 粒度行不外泄
+  });
   it('move_block/delete_block:改动经 comp 返回(路由落库),原 comp 不被原地改', () => {
     const p = proj();
     const r = runServerTool('move_block', { blockId: 'b1', startSec: 5.5 }, p);
