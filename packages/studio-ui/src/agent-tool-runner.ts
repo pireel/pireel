@@ -125,6 +125,10 @@ export interface AgentToolCtx {
   setShotTreatment: (sid: string, treatment: ShotTreatment) => void;
   setShotFilter: (sid: string, f: ShotFilter | null) => void;
   setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean }) => void;
+  // BGM bed (use-bgm.ts): mount auto-levels from measured loudness; patch = knob changes; remove clears the bed
+  bgmMount: (file: File, label?: string) => Promise<void>;
+  bgmPatch: (patch: { volumeDb?: number; duck?: boolean; loop?: boolean }) => void;
+  bgmRemove: () => void;
   splitAtPlayhead: () => void;
   trimAtPlayhead: (side: 'left' | 'right') => void;
   deleteShot: (sid: string) => void;
@@ -151,7 +155,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio,
+    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, bgmMount, bgmPatch, bgmRemove,
     splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -919,6 +923,40 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               ...('mute' in patch ? [patch.mute ? t('workbench.audioMuted') : t('workbench.audioUnmuted')] : []),
             ];
             return { ok: true, summary: t('workbench.shotAudioSet', { n: hit.length, what: bits.join(' · ') }) };
+          }
+          case 'set_bgm': {
+            if (input.off === true) {
+              if (!c.bgm) return { ok: false, error: t('workbench.noBgmYet') };
+              bgmRemove();
+              return { ok: true, summary: t('workbench.bgmRemoved') };
+            }
+            const knobs = {
+              ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+              ...(typeof input.duck === 'boolean' ? { duck: input.duck } : {}),
+              ...(typeof input.loop === 'boolean' ? { loop: input.loop } : {}),
+            };
+            const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
+            if (urlIn) {
+              report(t('workbench.fetchingMusicBytes'));
+              const pr = await fetch(`/api/media/fetch?url=${encodeURIComponent(urlIn)}`);
+              if (!pr.ok) return { ok: false, error: t('workbench.musicGenFailed') };
+              const name = (() => {
+                try {
+                  return decodeURIComponent(new URL(urlIn).pathname.split('/').pop() || '') || 'bgm.mp3';
+                } catch {
+                  return 'bgm.mp3';
+                }
+              })();
+              const f = new File([await pr.blob()], name, { type: pr.headers.get('content-type') || 'audio/mpeg' });
+              await bgmMount(f);
+              if (Object.keys(knobs).length) bgmPatch(knobs);
+              const db = compRef.current.bgm?.volumeDb;
+              return { ok: true, summary: t('workbench.bgmMounted', { db: db != null ? String(r1(db)) : String(-18) }) };
+            }
+            if (!c.bgm) return { ok: false, error: t('workbench.noBgmYet') };
+            if (!Object.keys(knobs).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
+            bgmPatch(knobs);
+            return { ok: true, summary: t('workbench.bgmAdjusted') };
           }
           case 'insert_clip': {
             // Agent inserts B-roll: the bytes must already be in our storage (a helper-uploaded sig / a CDN url of a library / generated video) —

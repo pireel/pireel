@@ -29,6 +29,7 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  patchBgm,
   patchShotAudio,
   blockId,
   blockKind,
@@ -95,6 +96,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'set_shot_treatment',
   'set_video_filter',
   'set_shot_audio',
+  'set_bgm',
   'split_shot',
   'trim_shot',
   'delete_shot',
@@ -140,6 +142,7 @@ function offlineState(p: ServerToolProject): string {
       height: c.height,
       theme: c.theme,
       ...(cs ? { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } } : {}),
+      ...(c.bgm ? { bgm: { label: c.bgm.label, volumeDb: c.bgm.volumeDb, duck: c.bgm.duck } } : {}),
       blocks: c.blocks.map((b) => ({
         id: b.id,
         label: b.label,
@@ -347,6 +350,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         result: { ok: true, summary: `Audio on ${hit.length} shot${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
         comp: { ...c, shots: next },
       };
+    }
+    case 'set_bgm': {
+      if (input.off === true) {
+        if (!c.bgm) return { result: { ok: false, error: 'no background music yet' } };
+        const { bgm: _drop, ...rest } = c;
+        return { result: { ok: true, summary: 'Removed the background music' }, comp: rest };
+      }
+      const knobs = {
+        ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+        ...(typeof input.duck === 'boolean' ? { duck: input.duck } : {}),
+        ...(typeof input.loop === 'boolean' ? { loop: input.loop } : {}),
+      };
+      const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
+      if (urlIn) {
+        // Offline mount: no loudness measurement without the tab — the bed lands at the default level
+        // (or the explicit volumeDb); the browser re-measures nothing on open, honest defaults are fine.
+        const bed = patchBgm({ src: urlIn }, knobs);
+        return { result: { ok: true, summary: `Laid a background-music bed (${r1(bed.volumeDb ?? -18)}dB, ducks under speech)` }, comp: { ...c, bgm: bed } };
+      }
+      if (!c.bgm) return { result: { ok: false, error: 'no background music yet — pass a url to lay one' } };
+      if (!Object.keys(knobs).length) return { result: { ok: false, error: 'pass volumeDb / duck / loop, or off:true' } };
+      return { result: { ok: true, summary: 'Adjusted the background music' }, comp: { ...c, bgm: patchBgm(c.bgm, knobs) } };
     }
     case 'split_shot': {
       const shots = shotsOf(p);

@@ -439,6 +439,24 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
   {
+    id: 'set_bgm',
+    kind: 'badge',
+    icon: '🎵',
+    label: 'tools.set_bgm.label',
+    description:
+      "Background-music bed under the WHOLE video (one bed, not per-shot). Mount: pass url (audio file on Pireel storage / a generated track) — the level auto-balances against the measured narration loudness and ducks further while speech plays. Adjust: call without url to change knobs of the current bed — volumeDb (-60..0 override), duck (auto-lower under speech, default on), loop (default on). Remove: off:true. Users' own uploads appear in list_assets.",
+    inputSchema: obj(
+      {
+        url: { type: 'string', description: 'Audio url to mount as the bed (replaces the current one). Omit to adjust the existing bed.' },
+        volumeDb: { type: 'number', description: 'Bed level dB, clamped -60..0. Omit on mount = auto level from loudness measurement.' },
+        duck: { type: 'boolean' },
+        loop: { type: 'boolean' },
+        off: { type: 'boolean', description: 'true = remove the bed (other fields ignored).' },
+      },
+      [],
+    ),
+  },
+  {
     id: 'split_shot',
     kind: 'badge',
     icon: '✂️',
