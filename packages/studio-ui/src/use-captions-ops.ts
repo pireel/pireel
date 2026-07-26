@@ -369,17 +369,21 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       }
       const out = await tr(groups.map((g, i) => ({ index: i, text: g.text })), target);
       const byPos = new Map(out.map((o) => [o.index, o.text.trim()]));
-      // Whole sentence intact → seg.sub; a cut/split fragment → range sub cueSubs["w0:w1"] (the
-      // renderer resolves cues by containment while the cut lasts, and hides it after a restore).
+      // One translation per fragment. A sentence in one piece → seg.sub; a sentence split into
+      // several groups (an insert landed mid-sentence) → one range sub per group, so each side
+      // keeps its own translation. The renderer distributes either across that group's cues.
+      const perSeg = new Map<string, number>();
+      groups.forEach((g) => {
+        const k = `${g.ref.src ?? ''}|${g.ref.seg}`;
+        perSeg.set(k, (perSeg.get(k) ?? 0) + 1);
+      });
       const bySrc = new Map<string | null, { index: number; w0?: number; w1?: number; text: string }[]>();
       groups.forEach((g, i) => {
         const textOut = byPos.get(i);
         if (!textOut) return;
         const r = g.ref;
-        const srcSeg = (r.src ? clipAsrRef.current[r.src] : asrRef.current)?.[r.seg];
-        const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
         const arr = bySrc.get(r.src) ?? [];
-        arr.push(g.words.length === srcWordCount ? { index: r.seg, text: textOut } : { index: r.seg, w0: r.w0, w1: r.w1, text: textOut });
+        arr.push((perSeg.get(`${r.src ?? ''}|${r.seg}`) ?? 1) > 1 ? { index: r.seg, w0: r.w0, w1: r.w1, text: textOut } : { index: r.seg, text: textOut });
         bySrc.set(r.src, arr);
       });
       if (![...bySrc.values()].some((a) => a.length)) throw new Error(t('workbench.translationFailedTryAgain'));
