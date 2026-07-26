@@ -24,6 +24,7 @@ import {
   compReceiptDelta,
   freeTrack,
   getCaptionPreset,
+  isCaptionsOn,
   isSentenceCaption,
   renderBlock,
   resolveCaptionStyle,
@@ -144,7 +145,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
   const {
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
-    markGenerating, videoFileRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
+    markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
     noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter,
@@ -166,7 +167,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
         return delta ? { ...res, data: { ...((res.data as Record<string, unknown> | undefined) ?? {}), delta } } : res;
       };
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
-      const READONLY_TOOLS = new Set(['get_block', 'list_assets', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
+      const READONLY_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
       if (!READONLY_TOOLS.has(toolId)) {
         const targetIds = [input.blockId, ...(Array.isArray(input.blockIds) ? (input.blockIds as unknown[]) : [])].filter(
@@ -534,6 +535,41 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 timelineBody: cap(rendered.timelineBody, 800),
               },
             };
+          }
+          case 'review_visuals': {
+            // Delegated eyes for the chat agent: the chat protocol can't return images to the model, so a
+            // vision model looks at the composed frames and the FINDINGS come back as text (issues JSON)
+            const atsIn = Array.isArray(input.atSecs) ? (input.atSecs as unknown[]).map(Number).filter(Number.isFinite) : [];
+            if (!atsIn.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
+            const dur = totalDuration(c);
+            const ats = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 6);
+            try {
+              const frames: { atSec: number; image_base64: string; expected: string }[] = [];
+              for (let i = 0; i < ats.length; i++) {
+                const at = ats[i]!;
+                report(t('workbench.reviewingFrameN', { i: i + 1, n: ats.length }));
+                const shot = await captureCompositionFrame({ comp: c, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at, burnLabel: `${r1(at)}s`, maxDim: 720 });
+                const visBlocks = c.blocks
+                  .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
+                  .map((b) => `${b.id} (${blockKind(b)}${b.box ? `, ${zoneOf(b.box)}` : ''})`);
+                const expected = `${visBlocks.length ? `overlays: ${visBlocks.join('; ')}` : 'no overlays'}${isCaptionsOn(c) ? '; captions: on' : ''}`;
+                frames.push({ atSec: at, image_base64: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1), expected });
+              }
+              report(t('workbench.reviewJudging'));
+              const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }) });
+              const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
+              if (!rr.ok || !j.frames) return { ok: false, error: t('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
+              const total = j.frames.reduce((a, f) => a + f.issues.length, 0);
+              return {
+                ok: true,
+                summary: total ? t('workbench.reviewedIssues', { n: j.frames.length, m: total }) : t('workbench.reviewedClean', { n: j.frames.length }),
+                data: { frames: j.frames, ...(total ? { hint: 'fix real issues (position → place_block, styling/contrast → edit_block), then re-check the affected moment' } : {}) },
+              };
+            } catch (e) {
+              return { ok: false, error: t('workbench.reviewFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
+            } finally {
+              clearToolProgress(toolId);
+            }
           }
           case 'list_assets': {
             // Enumerate the user's media library (uploads + agent imports) + this project's video sources —

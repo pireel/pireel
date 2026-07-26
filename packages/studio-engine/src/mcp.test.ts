@@ -31,7 +31,8 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
 describe('MCP 工具面', () => {
   it('STUDIO_TOOLS 全量映射 + MCP 专属工具(registry 加工具这里自动长出来)', () => {
     const names = new Set(buildMcpTools().map((t) => t.name));
-    for (const d of STUDIO_TOOLS) expect(names.has(d.id)).toBe(true);
+    // chatOnly 工具(review_visuals 这类外包眼睛)不出现在 MCP 面——外部 agent 有自己的眼睛(capture_frame)
+    for (const d of STUDIO_TOOLS) expect(names.has(d.id)).toBe(!d.chatOnly);
     for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'plan_brief', 'submit_plan', 'get_icons']) {
       expect(names.has(extra)).toBe(true);
     }

@@ -121,6 +121,7 @@ const EMPTY_SCHEMA = { type: 'object', properties: {}, additionalProperties: fal
 export function buildMcpTools(): McpToolDef[] {
   const out: McpToolDef[] = [];
   for (const d of STUDIO_TOOLS) {
+    if (d.chatOnly) continue; // chat-surface only (e.g. review_visuals — external agents have their own eyes via capture_frame)
     if (d.id === 'read_frame') {
       // MCP version takes a frame_id param (the internal chat version reads it from session mount state; MCP has no session)
       out.push({
