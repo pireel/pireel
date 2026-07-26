@@ -143,6 +143,7 @@ export function useAgentContext(deps: AgentContextDeps) {
             srcEnd: sp.clip.srcEnd,
             treatment: sp.clip.treatment,
             ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
+            ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
           }));
         })(),
       },

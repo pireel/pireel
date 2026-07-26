@@ -20,6 +20,11 @@ import {
   videoFrameKeyframes,
   videoFrameTimelineBody,
   treatmentVacancyBox,
+  VOLUME_DB_MIN,
+  dbToGain,
+  patchShotAudio,
+  shotGain,
+  type VideoShot,
 } from './composition';
 
 function sampleComp(): Composition {
@@ -631,5 +636,45 @@ describe('加粗覆盖(bold:预设起点之上的显式覆盖)', () => {
     expect(html).toContain('font-weight:700'); // 译文行 bold=700
     c.captionStyle = { on: true, preset: 'ln-clean', bold: false };
     expect(assembleHtml(c)).toContain('font-weight:500'); // 显式取消加粗
+  });
+});
+
+describe('分镜声音(volumeDb/audioMuted)', () => {
+  const shot = (over: Partial<VideoShot> = {}): VideoShot => ({ id: 's1', srcStart: 0, srcEnd: 5, treatment: 'full', ...over });
+
+  it('dbToGain:0dB=1、-6dB≈0.5、地板 -60 及以下=真 0(不是很小声)', () => {
+    expect(dbToGain(0)).toBe(1);
+    expect(dbToGain(-6)).toBeCloseTo(0.501, 2);
+    expect(dbToGain(VOLUME_DB_MIN)).toBe(0);
+    expect(dbToGain(-120)).toBe(0);
+  });
+
+  it('shotGain:未设=1;muted 压过 volumeDb;预览/导出共用这一份换算', () => {
+    expect(shotGain(shot())).toBe(1);
+    expect(shotGain(shot({ volumeDb: -6 }))).toBeCloseTo(0.501, 2);
+    expect(shotGain(shot({ volumeDb: -6, audioMuted: true }))).toBe(0);
+  });
+
+  it('patchShotAudio:钳位到 [-60,0];中性值(0dB/未静音)把字段摘掉,没动过的 comp 字节不变', () => {
+    const s = patchShotAudio(shot(), { volumeDb: -18.234 });
+    expect(s.volumeDb).toBe(-18.2);
+    const boosted = patchShotAudio(shot(), { volumeDb: 6 });
+    expect(boosted.volumeDb).toBeUndefined(); // 钳到 0 = 中性 = 摘掉
+    const floor = patchShotAudio(shot(), { volumeDb: -99 });
+    expect(floor.volumeDb).toBe(-60);
+    const neutral = patchShotAudio(shot({ volumeDb: -6, audioMuted: true }), { volumeDb: 0, mute: false });
+    expect('volumeDb' in neutral).toBe(false);
+    expect('audioMuted' in neutral).toBe(false);
+  });
+
+  it('patchShotAudio:mute 独立于 volumeDb——静音再取消,原音量还在', () => {
+    const quiet = patchShotAudio(shot(), { volumeDb: -12 });
+    const muted = patchShotAudio(quiet, { mute: true });
+    expect(muted.audioMuted).toBe(true);
+    expect(muted.volumeDb).toBe(-12);
+    expect(shotGain(muted)).toBe(0);
+    const back = patchShotAudio(muted, { mute: false });
+    expect(back.audioMuted).toBeUndefined();
+    expect(shotGain(back)).toBeCloseTo(dbToGain(-12), 5);
   });
 });

@@ -422,6 +422,23 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
   {
+    id: 'set_shot_audio',
+    kind: 'badge',
+    icon: '🔊',
+    label: 'tools.set_shot_audio.label',
+    description:
+      "Set shots' own audio: volumeDb attenuates the footage's sound (0 = source level, -60 = silent; boosting above source level is not supported), mute true/false hard-silences while remembering the previous volume. Whole shot, switches at the cut — split_shot first for a partial change. Batch with shotIds or all:true (e.g. quiet every B-roll insert to -18 while narration continues). Omit a field to leave it unchanged.",
+    inputSchema: obj(
+      {
+        shotIds: { type: 'array', items: { type: 'string' }, description: 'Target shot ids (omit when using all).' },
+        all: { type: 'boolean', description: 'true = apply to every shot.' },
+        volumeDb: { type: 'number', description: 'dB, clamped -60..0; 0 resets to source level, -60 = silent.' },
+        mute: { type: 'boolean', description: 'Hard-silence toggle (independent of volumeDb).' },
+      },
+      [],
+    ),
+  },
+  {
     id: 'split_shot',
     kind: 'badge',
     icon: '✂️',

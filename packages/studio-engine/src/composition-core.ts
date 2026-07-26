@@ -127,6 +127,13 @@ export interface VideoShot extends Clip {
    *  prevId anchors to the previous shot — if either neighbor is deleted/replaced (id no longer adjacent), the transition auto-invalidates (cutTransitions
    *  filters it, no need to clean up in every edit path). Duration capped by MAX_TRANSITION_SEC, then clamped by both neighboring shot lengths. */
   transIn?: CutTransition;
+  /** Shot audio level in dB (absent/0 = source level untouched, VOLUME_DB_MIN = silent). Attenuate-only for now:
+   *  preview drives the decode element's own volume (0..1), so a boost above source level can't be previewed honestly —
+   *  the ceiling stays 0 dB until a WebAudio mix stage exists on both ends. Whole shot, flat (no keyframes): shots are
+   *  transcript slices, so "volume changes mid-shot" is expressed by splitting, same as framing/grade. */
+  volumeDb?: number;
+  /** Hard-silence this shot's own audio (independent of volumeDb, so unmuting restores the prior level). */
+  audioMuted?: boolean;
 }
 
 /** Cut transition: the handoff effect between two shots' content. Effect set = 10 picks from the gl-transitions gallery (id matches upstream shader name,
@@ -210,6 +217,36 @@ export function shotFilterCss(f?: ShotFilter): string {
   if (f.contrast != null && f.contrast !== 1) parts.push(`contrast(${clamp(f.contrast, 0.2)})`);
   if (f.saturate != null && f.saturate !== 1) parts.push(`saturate(${clamp(f.saturate, 0)})`);
   return parts.length ? parts.join(' ') : 'none';
+}
+
+/** Shot audio scale (dB semantics, same convention across panel slider / agent tool / preview / export).
+ *  VOLUME_DB_MIN is treated as -inf (true silence); VOLUME_DB_MAX stays 0 while preview is element-volume based (see VideoShot.volumeDb). */
+export const VOLUME_DB_MIN = -60;
+export const VOLUME_DB_MAX = 0;
+
+/** dB → linear gain; at/below VOLUME_DB_MIN snaps to true 0 (not just very quiet). */
+export function dbToGain(db: number): number {
+  if (db <= VOLUME_DB_MIN) return 0;
+  return Math.pow(10, Math.min(VOLUME_DB_MAX, db) / 20);
+}
+
+/** Effective linear gain of a shot's own audio (1 = untouched, 0 = silent). The single source of truth for preview and export. */
+export function shotGain(s: Pick<VideoShot, 'volumeDb' | 'audioMuted'>): number {
+  if (s.audioMuted) return 0;
+  return s.volumeDb == null ? 1 : dbToGain(s.volumeDb);
+}
+
+/** Apply an audio patch to one shot: clamps volumeDb into [VOLUME_DB_MIN, VOLUME_DB_MAX], drops fields at their
+ *  neutral value (0 dB / unmuted) so untouched comps stay byte-identical. Shared by the panel and both tool executors. */
+export function patchShotAudio<T extends VideoShot>(s: T, patch: { volumeDb?: number; mute?: boolean }): T {
+  const { volumeDb: _v, audioMuted: _m, ...rest } = s;
+  const db = patch.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb)) : s.volumeDb;
+  const muted = patch.mute != null ? patch.mute : s.audioMuted;
+  return {
+    ...(rest as T),
+    ...(db != null && db !== 0 ? { volumeDb: Math.round(db * 10) / 10 } : {}),
+    ...(muted ? { audioMuted: true } : {}),
+  };
 }
 
 export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
