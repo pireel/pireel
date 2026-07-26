@@ -115,6 +115,7 @@ import { PersonFxPanel, type MatteState } from './person-fx-panel';
 import { ShotTreatmentPanel } from './shot-treatment-panel';
 import { MusicPanel } from './music-panel';
 import { useBgm } from './use-bgm';
+import { useDenoise } from './use-denoise';
 import { TransitionPanel } from './transition-panel';
 import { MediaAnimPanel } from './media-anim-panel';
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from './person-matte';
@@ -622,9 +623,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setCloudMediaRev((v) => v + 1);
     });
   };
-  /** Export-time BGM payload getter (bytes + duck mask); filled by useBgm below (hook order: it needs consts defined later). */
+  /** Export-time BGM/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
   const bgmExportRef = useRef<(() => { file: File; speech: SpeechSpan[] } | null) | null>(null);
-  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, bgmExportRef });
+  const denoiseExportRef = useRef<(() => Map<string, File> | null) | null>(null);
+  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, bgmExportRef, denoiseExportRef });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
   const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>({
@@ -2393,6 +2395,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ensureShots, pickFile, backupMediaToCloud, pushUndoSnapshot,
   });
   bgmExportRef.current = bgmOps.bgmForExport;
+  // Narration denoise (bake/cache/dub/export substitution — see use-denoise.ts)
+  const denoiseOps = useDenoise({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot });
+  denoiseExportRef.current = denoiseOps.denoiseForExport;
 
   /** Editable caption lines for the captions panel, in edited-timeline order across all sources.
    *  Walk the shot spans; a sentence overlapping a span joins at that span's edited time; split shots
@@ -2806,7 +2811,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
     resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
-    bgmMount: bgmOps.mountBgmFile, bgmPatch: bgmOps.patchBed, bgmRemove: bgmOps.removeBgm,
+    bgmMount: bgmOps.mountBgmFile, bgmPatch: bgmOps.patchBed, bgmRemove: bgmOps.removeBgm, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
@@ -4364,6 +4369,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   onNormalize={() => void bgmOps.normalizeLoudness()}
                   normalizing={bgmOps.normalizing}
                   normalizeNote={bgmOps.normalizeNote}
+                  denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
+                  onSetDenoise={denoiseOps.setDenoise}
                 />
               )}
               {floatWin === 'person' && (

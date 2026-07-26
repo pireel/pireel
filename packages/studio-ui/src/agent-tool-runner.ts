@@ -129,6 +129,8 @@ export interface AgentToolCtx {
   bgmMount: (file: File, label?: string) => Promise<void>;
   bgmPatch: (patch: { volumeDb?: number; duck?: boolean; loop?: boolean }) => void;
   bgmRemove: () => void;
+  /** Narration denoise (use-denoise.ts): strength = on/retune, null = off; bakes in the background. */
+  setDenoise: (strength: number | null) => void;
   splitAtPlayhead: () => void;
   trimAtPlayhead: (side: 'left' | 'right') => void;
   deleteShot: (sid: string) => void;
@@ -155,7 +157,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, bgmMount, bgmPatch, bgmRemove,
+    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, bgmMount, bgmPatch, bgmRemove, setDenoise,
     splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -923,6 +925,17 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               ...('mute' in patch ? [patch.mute ? t('workbench.audioMuted') : t('workbench.audioUnmuted')] : []),
             ];
             return { ok: true, summary: t('workbench.shotAudioSet', { n: hit.length, what: bits.join(' · ') }) };
+          }
+          case 'denoise_audio': {
+            if (input.off === true) {
+              if (!c.audioDenoise) return { ok: false, error: t('workbench.denoiseNotOn') };
+              setDenoise(null);
+              return { ok: true, summary: t('workbench.denoiseTurnedOff') };
+            }
+            if (!videoFileRef.current) return { ok: false, error: t('common.localSourceVideoMissing') };
+            const s = typeof input.strength === 'number' && Number.isFinite(input.strength) ? Math.max(0.05, Math.min(1, input.strength)) : 0.6;
+            setDenoise(s);
+            return { ok: true, summary: t('workbench.denoiseTurnedOn', { pct: Math.round(s * 100) }) };
           }
           case 'set_bgm': {
             if (input.off === true) {
