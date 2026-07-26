@@ -73,7 +73,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   /** Edit one caption line's TEXT (captions panel). Single source of truth = the transcript: the fix
    *  reaches caption re-lay, read_script/agents and the script panel at once. Timing untouched; word
    *  timing redistributed proportionally within the sentence (wordsFromText — karaoke presets keep working).
-   *  Bilingual on → the stale translation is dropped and that line auto-retranslates. */
+   *  No auto-retranslate (user-locked): translations only change when the user asks. */
   const [captionLineBusyKey, setCaptionLineBusyKey] = useState<string | null>(null);
   /** Source-sentence word list a cue range indexes into (materialized deterministically when ASR words are absent). */
   const baseWordsOf = (seg: AsrSegment) => (seg.words?.length ? seg.words : wordsFromText(seg.text, seg.start, seg.end));
@@ -109,14 +109,12 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCaptionLineBusyKey((k) => (k === key ? null : k));
     }
   };
-  /** Live-edited-but-not-committed lines (panel debounces keystrokes through phase 'live'):
-   *  commit uses it to know a retranslate is owed even when the final call's text is already current. */
-  const captionLiveDirtyRef = useRef<Set<string>>(new Set());
   /** Edit one display cue's TEXT: splice the cue's word range inside its source sentence (the
    *  transcript stays the single source of truth; the sentence text is rebuilt from its words).
-   *  Blocks re-derive reactively — no manual re-lay. The edit invalidates this cue's translation and
-   *  any later cue translations of the same sentence (their range keys shift with the word count). */
-  const editCaptionLine = (row: CaptionLineRow, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
+   *  Blocks re-derive reactively — no manual re-lay. The edit drops this cue's stored per-cue
+   *  translation and any later ones of the same sentence (their range keys shift with the word
+   *  count); the sentence-level sub just redistributes over the new words. */
+  const editCaptionLine = (row: CaptionLineRow, nextText: string, _phase: 'live' | 'commit' | 'revert' = 'commit') => {
     const src = row.src;
     const segs = src ? clipAsrRef.current[src] : asrRef.current;
     const old = segs?.[row.index];
@@ -126,11 +124,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     const w1 = Math.max(w0, Math.min(row.w1, base.length - 1));
     const oldCueText = joinWords(base.slice(w0, w1 + 1).map((w) => w.text));
     const changed = nextText !== oldCueText;
-    let newW1 = w1;
     if (changed) {
       const replaced = wordsFromText(nextText, base[w0]!.start, base[w1]!.end);
       if (!replaced.length) return;
-      newW1 = w0 + replaced.length - 1;
       const nextWords = [...base.slice(0, w0), ...replaced, ...base.slice(w1 + 1)];
       // Keep only translations of ranges fully BEFORE the edit; the edited range and everything after shift.
       const keptSubs = Object.fromEntries(
@@ -151,16 +147,6 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         asrRef.current = next;
         setAsrSentences(next);
       }
-    }
-    if (phase === 'live') {
-      if (changed) captionLiveDirtyRef.current.add(row.key);
-      return;
-    }
-    const dirty = captionLiveDirtyRef.current.delete(row.key);
-    if (phase === 'revert') return; // Esc: text restored above (if needed), old sub still matches — nothing else to do
-    // Commit + bilingual on → refresh this cue's translation (also owed when live edits already landed the text)
-    if ((changed || dirty) && resolveCaptionStyle(compRef.current).sub?.lang && studioProviders().translate) {
-      void retranslateCaptionLine(src, row.index, { w0, w1: newW1 });
     }
   };
   /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
@@ -358,25 +344,39 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setCapTransBusy(true);
     try {
       await ensureClipTranscripts(); // translate insert sources too, don't produce half-done bilingual
-      // Translate DISPLAY CUES (what's actually on screen), one translation per cue, all in one
-      // context-bearing request; store per-cue on the source sentences (cueSubs via the executor).
-      const cues = displayCues(ensureShots(compRef.current), asrRef.current, clipAsrRef.current, { subLang: target, canvasW: compRef.current.width }).filter((c) => c.ref);
-      if (!cues.length) {
+      // Translate SENTENCE FRAGMENTS as they survive the edit (mappedCaptionSegs): the post-cut
+      // sentence text, in edited order — the unit the audience actually hears. NOT display cues:
+      // cue-fragment translation is linguistically unsound across word-order-divergent language
+      // pairs, and hundreds of cue rows blew up the request (truncated output → translate_empty).
+      const groups = relayMappedCaptionSegs(ensureShots(compRef.current), asrRef.current, clipAsrRef.current);
+      if (!groups.length) {
         toast.error(t('workbench.noTranscriptShort'));
         return;
       }
-      const out = await tr(cues.map((c, i) => ({ index: i, text: c.text })), target);
+      const out = await tr(groups.map((g, i) => ({ index: i, text: g.text })), target);
       const byPos = new Map(out.map((o) => [o.index, o.text.trim()]));
-      const groups = new Map<string | null, { index: number; w0: number; w1: number; text: string }[]>();
-      cues.forEach((c, i) => {
+      // One translation per fragment. A sentence in one piece → seg.sub; a sentence split into
+      // several groups (an insert landed mid-sentence) → one range sub per group, so each side
+      // keeps its own translation. The renderer distributes either across that group's cues.
+      const perSeg = new Map<string, number>();
+      groups.forEach((g) => {
+        const k = `${g.ref.src ?? ''}|${g.ref.seg}`;
+        perSeg.set(k, (perSeg.get(k) ?? 0) + 1);
+      });
+      const bySrc = new Map<string | null, { index: number; w0?: number; w1?: number; text: string }[]>();
+      groups.forEach((g, i) => {
         const textOut = byPos.get(i);
         if (!textOut) return;
-        const r = c.ref!;
-        const arr = groups.get(r.src) ?? [];
-        arr.push({ index: r.seg, w0: r.w0, w1: r.w1, text: textOut });
-        groups.set(r.src, arr);
+        const r = g.ref;
+        const arr = bySrc.get(r.src) ?? [];
+        arr.push((perSeg.get(`${r.src ?? ''}|${r.seg}`) ?? 1) > 1 ? { index: r.seg, w0: r.w0, w1: r.w1, text: textOut } : { index: r.seg, text: textOut });
+        bySrc.set(r.src, arr);
       });
-      for (const [src, items] of groups) {
+      if (![...bySrc.values()].some((a) => a.length)) throw new Error(t('workbench.translationFailedTryAgain'));
+      // A full re-translate REPLACES the bilingual layer: clear first so per-cue/fragment keys from
+      // earlier runs (or an earlier cut state) can't shadow the fresh sentence subs.
+      await runTool('set_caption_translations', { clear: true });
+      for (const [src, items] of bySrc) {
         if (!items.length) continue;
         if (src) {
           const shot = (compRef.current.shots ?? []).find((sh) => sh.src === src);

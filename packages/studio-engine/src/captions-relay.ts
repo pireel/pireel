@@ -79,12 +79,34 @@ export function mappedCaptionSegs(shots: VideoShot[], narr: AsrSegment[] | null,
   ].sort((a, b) => a.start - b.start);
 }
 
+/** Split a sentence/fragment translation into per-cue pieces, proportional to each cue's share of
+ *  the source words, on the translation's own token boundaries (same tokenizer as captions). The
+ *  second line follows the cue rhythm 1:1 — approximate by nature (word order diverges across
+ *  languages); translation still happens at sentence level upstream for quality. */
+function distributeSub(sub: string, weights: number[]): string[] {
+  const tokens = wordsFromText(sub, 0, 1).map((w) => w.text);
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (!tokens.length || !total) return weights.map(() => '');
+  const out: string[] = [];
+  let used = 0;
+  let acc = 0;
+  for (let i = 0; i < weights.length; i++) {
+    acc += weights[i]!;
+    const upto = i === weights.length - 1 ? tokens.length : Math.round((acc / total) * tokens.length);
+    out.push(joinWords(tokens.slice(used, Math.max(used, upto))));
+    used = Math.max(used, upto);
+  }
+  return out;
+}
+
 /** DISPLAY CUES — the single derivation both the caption blocks and the panel's line list consume,
  *  so "one row = one on-screen line" holds by construction. Per source sentence: take the words that
  *  survive the edit (mapSegsToEdited), then split by visual width (cueChunks). Each cue carries
  *  ref {src, seg, w0, w1} pointing back into the source sentence for edit/translation write-back.
- *  Cue translation: the sentence's cueSubs["w0:w1"] wins; a whole-sentence sub shows only when the
- *  sentence maps to exactly this full-range single cue (agent BYO translations keep working 1:1).
+ *  Cue translation: the group's stored sub (fragment-range key cueSubs["gw0:gw1"], else the
+ *  whole-sentence sub) is DISTRIBUTED across the group's cues by word share — the second line
+ *  follows the cue segmentation; exact per-cue keys (manual line edits / BYO word-sync) override
+ *  their own piece. No cut-staleness checks: whatever is stored gets shown (user-locked).
  *  opts.subLang = the CURRENT bilingual target: translations stamped with a DIFFERENT known language
  *  are stale (left over from a language switch) and are hidden; unstamped ones (legacy/BYO) show. */
 export function displayCues(
@@ -100,19 +122,18 @@ export function displayCues(
     if (!words.length) continue;
     const gRef = g.ref;
     const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
-    const srcWordCount = srcSeg ? (srcSeg.words?.length ?? wordsFromText(srcSeg.text, srcSeg.start, srcSeg.end).length) : 0;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
     // ONE line per cue, sized by the real canvas (the canvas follows the source aspect, short side
     // 1080): budget = default box width in em minus plate/safety — a 16:9 canvas holds a full
     // single-line subtitle (~21em ≈ 42 latin chars ≈ 21 zh chars), portrait ≈11 zh chars. Geometry,
     // not language, decides the cue size.
     const chunks = cueChunks(words, { maxEm: budgetEm });
-    for (const c of chunks) {
+    const groupSub = subFresh ? (srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] ?? srcSeg?.sub) : undefined;
+    const pieces = groupSub ? distributeSub(groupSub, chunks.map((c) => c.length)) : undefined;
+    for (const [ci, c] of chunks.entries()) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
-      const sub = subFresh
-        ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? (srcSeg && w0 === 0 && w1 === srcWordCount - 1 && words.length === srcWordCount ? srcSeg.sub : undefined))
-        : undefined;
+      const sub = subFresh ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? pieces?.[ci]) : undefined;
       out.push({
         start: c[0]!.start,
         end: Math.max(c[c.length - 1]!.end, c[0]!.start + 0.3),

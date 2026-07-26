@@ -9,12 +9,12 @@
  * (contentEditable; background-only editing state — no border, no size change, zero jitter). Edits
  * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' read_script and the
  * script panel all see the fix; timing untouched, word timing redistributed proportionally). With
- * bilingual on, each row shows the translation line + a per-line retranslate button; editing the
- * source auto-retranslates that line.
+ * bilingual on, each row shows the translation line + a per-line retranslate button; translations
+ * only change when the user asks (the retranslate button / a full re-translate) — never automatically.
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Ban, Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
+import { Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
 import { t } from './i18n';
 import {
   type CaptionPreset,
@@ -142,11 +142,7 @@ export function CaptionsPanel({
   /** Text at edit start: rendered as the React children while editing (constant vdom = React never
    *  rewrites the contentEditable DOM mid-typing, caret survives live re-renders), and the Esc target. */
   const frozenTextRef = useRef('');
-  const liveTimerRef = useRef<number | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => () => {
-    if (liveTimerRef.current != null) window.clearTimeout(liveTimerRef.current);
-  }, []);
   // Follow the playhead: keep the active row in view (unless the user is editing)
   useEffect(() => {
     if (!activeKey || editingKey) return;
@@ -178,23 +174,16 @@ export function CaptionsPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingKey, editingPart]);
-  /** Live path: debounce keystrokes into the real pipeline (transcript → caption re-lay → preview),
-   *  so the canvas caption follows the typing in near real time. */
+  /** Live path: every keystroke goes straight into the real pipeline (transcript → caption re-lay →
+   *  preview) — the canvas caption follows the typing with no debounce (user-locked; the frozen-vdom
+   *  editing node keeps the caret safe under per-keystroke re-renders). */
   const scheduleLive = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
-    if (liveTimerRef.current != null) window.clearTimeout(liveTimerRef.current);
-    liveTimerRef.current = window.setTimeout(() => {
-      liveTimerRef.current = null;
-      const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
-      if (part === 'sub') onEditSubLine?.(row, next || null, 'live');
-      else if (next) onEditLine?.(row, next, 'live');
-    }, 350);
+    const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (part === 'sub') onEditSubLine?.(row, next || null, 'live');
+    else if (next) onEditLine?.(row, next, 'live');
   };
   const commit = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
     setEditingKey(null);
-    if (liveTimerRef.current != null) {
-      window.clearTimeout(liveTimerRef.current);
-      liveTimerRef.current = null;
-    }
     const frozen = frozenTextRef.current;
     if (editCancelRef.current) {
       editCancelRef.current = false;
@@ -493,11 +482,7 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
         onClick={() => setPop(pop === 'bg' ? null : 'bg')}
         className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'bg' ? 'border-accent' : 'border-line'}`}
       >
-        {effBg ? (
-          <span className="block h-full w-full rounded-sm border border-white/15" style={{ background: effBg }} />
-        ) : (
-          <span className="text-ink-4 flex h-full w-full items-center justify-center"><Ban size={11} /></span>
-        )}
+        <span className="block h-full w-full rounded-sm border border-white/15" style={effBg ? { background: effBg } : NO_COLOR_CHECKER} />
       </button>
       {pop === 'preset' && (
         <PresetPop current={style.preset} onPick={(id) => { setPop(null); onPreset(id); }} />
@@ -639,6 +624,16 @@ function PresetPop({ current, onPick }: { current: string; onPick: (id: string |
   );
 }
 
+/** "No color" swatch face: transparency checkerboard (same visual language as block previews'
+ *  honest ground, scaled to swatch size — screen pixels, block-preview-card convention). */
+const NO_COLOR_CHECKER: CSSProperties = {
+  backgroundColor: '#ffffff',
+  backgroundImage:
+    'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
+  backgroundSize: '8px 8px',
+  backgroundPosition: '0 0,4px 4px',
+};
+
 /** Color picker popover: preset-default chip, optional "no plate", fixed swatches, free custom color. */
 function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPick }: {
   title: string;
@@ -660,7 +655,7 @@ function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPi
             onClick={onNone}
             className={`flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] ${noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
           >
-            <Ban size={10} /> {t('captions.noPlate')}
+            <span className="border-line h-3.5 w-3.5 rounded-[3px] border" style={NO_COLOR_CHECKER} /> {t('captions.noPlate')}
           </button>
         )}
         {swatches.map((c) => (
