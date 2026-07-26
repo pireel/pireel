@@ -31,6 +31,8 @@ export interface StudioToolDef {
   description: string;
   /** JSON schema — server wraps it via jsonSchema() into tool(); client only reads input, no validation. */
   inputSchema: Record<string, unknown>;
+  /** Chat-surface only: not exposed on MCP (external agents bring their own capability, e.g. review_visuals vs their own eyes). */
+  chatOnly?: boolean;
 }
 
 const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r'] as const;
@@ -262,6 +264,22 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     description:
       "INSPECT one overlay block: returns its timing/track/box plus its actual content (HTML + animation, truncated). Use BEFORE edit_block when you need to know what's inside (e.g. to answer questions about it, or to make a precise change), or to debug why something looks wrong.",
     inputSchema: obj({ blockId: { type: 'string' } }, ['blockId']),
+  },
+  {
+    id: 'review_visuals',
+    kind: 'card',
+    busyText: 'tools.review_visuals.busy',
+    icon: '🔎',
+    label: 'tools.review_visuals.label',
+    chatOnly: true,
+    description:
+      "REVIEW the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures the composed frame at each atSec and reports REAL visual problems as data — overlays covering the speaker, blocks colliding, elements cut off at the edge, unreadable contrast, clutter. Call it after a batch of graphics lands (add_graphics / lay_out / theme change) with each new block's mid moment (max 6), then FIX what it reports (position → place_block, styling/contrast → edit_block) before wrapping up. Skip it for single small edits. Uses hosted vision (small fee per frame).",
+    inputSchema: obj(
+      {
+        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline moments to review — typically each new block's midpoint (max 6)." },
+      },
+      ['atSecs'],
+    ),
   },
   {
     id: 'list_assets',
