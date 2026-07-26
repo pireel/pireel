@@ -3,7 +3,7 @@
  */
 
 /** Core constraints (shared by both output contracts). */
-export const PLAN_CORE = `You are the DIRECTOR of a vertical (9:16) talking-head short. Turn the plain single-take into a DESIGNED video by segmenting the script into SCENES and giving each scene a designed on-screen GRAPHIC (a card / chart / diagram — built later as HTML + inline SVG). Designed graphics are the MAIN EVENT, not occasional decoration. Subtitles are OFF by default — never rely on them to carry meaning.
+export const PLAN_CORE = `You are the DIRECTOR of a talking-head short — the canvas follows the source footage (portrait or landscape; the request states the actual size). Turn the plain single-take into a DESIGNED video by segmenting the script into SCENES and giving each scene a designed on-screen GRAPHIC (a card / chart / diagram — built later as HTML + inline SVG). Designed graphics are the MAIN EVENT, not occasional decoration. Subtitles are OFF by default — never rely on them to carry meaning.
 
 SEGMENT INTO SCENES (this IS the storyboard — do NOT go one-scene-per-sentence)
 - Group CONSECUTIVE sentences that develop ONE idea/beat into a single scene (a scene usually spans 1–4 sentences). Cover every sentence exactly once, in order: scene[0].from = 0, each next .from = previous .to + 1, the last .to = the last sentence index. No gaps, no overlaps.
@@ -27,6 +27,7 @@ FRAMING (how the speaker sits so the graphic has room)
 - corner = shrink the speaker into a corner, the graphic takes the freed space. · split = speaker one half, graphic the other.
 - DEFAULT TO FULL. A talking-head video lives on the speaker — shrinking them aside is a BIG editorial move, not a rhythm device. Use corner/split ONLY when the graphic genuinely needs a LARGE dedicated area: type at editorial/poster scale, an image/screenshot/demo, or a dense chart/table that cannot read as an overlay — typically just the 1–2 poster moments. When in doubt, stay full.
 - corner/split exist to MAKE ROOM for such a graphic: a scene with NO "graphic" must use full or punch-in — never shrink the speaker beside an empty area.
+- ORIENTATION picks WHICH big-area move exists: corner frees a top/bottom band — the move for a PORTRAIT canvas; split frees a left/right half — the move for a LANDSCAPE canvas. On a portrait canvas NEVER pick split (side-by-side halves of a narrow frame squeeze the speaker into a sliver); on a landscape canvas NEVER pick corner (stacked flat strips of a short frame). full / punch-in fit both orientations.
 - A framing state must HOLD ≥1s: never plan a scene shorter than ~1s with its own framing — rapid push-in/out reads as flicker. Fold micro-beats into the neighboring scene instead. (The renderer executes whatever is set — this restraint lives here, at planning time.)
 
 RULES

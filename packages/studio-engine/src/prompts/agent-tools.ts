@@ -395,7 +395,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_treatment.label',
     description:
-      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r (video takes the left/right half, the other half left for blocks). Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
+      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r (video takes the left/right half, the other half left for blocks). ORIENTATION RULE (canvas size is in <composition_state>): on a PORTRAIT canvas never use split-l/split-r (use corner-* to free a top/bottom band); on a LANDSCAPE canvas never use corner-* (use split-l/r to free a side half). Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
     inputSchema: obj(
       {
         shotId: { type: 'string' },

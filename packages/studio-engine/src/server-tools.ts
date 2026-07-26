@@ -132,6 +132,8 @@ function offlineState(p: ServerToolProject): string {
   const situation = buildSituation({
     composition: {
       durationSec: totalDuration(c),
+      width: c.width,
+      height: c.height,
       theme: c.theme,
       ...(cs ? { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } } : {}),
       blocks: c.blocks.map((b) => ({

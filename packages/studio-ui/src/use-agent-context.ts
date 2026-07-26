@@ -110,6 +110,8 @@ export function useAgentContext(deps: AgentContextDeps) {
     return {
       composition: {
         durationSec: totalDuration(c),
+        width: c.width,
+        height: c.height,
         theme: c.theme,
         // Caption layer state (on/off + current preset/position): lets the agent decide set vs remove, and avoid re-enabling
         ...(isCaptionsOn(c)

@@ -164,6 +164,7 @@ export { PLAN_SYSTEM, PLAN_SYSTEM_TOOLS };
 export function buildPlanPrompt(args: {
   sentences: PlanSentence[];
   videoDurationSec: number;
+  canvas?: { width: number; height: number };
   topic?: string;
   visuals?: PlanVisual[];
   inserts?: PlanInsert[];
@@ -203,6 +204,9 @@ export function buildPlanPrompt(args: {
   }
   return [
     args.topic ? `Topic hint: ${args.topic}` : '',
+    args.canvas
+      ? `Canvas: ${Math.round(args.canvas.width)}×${Math.round(args.canvas.height)} (${args.canvas.width >= args.canvas.height ? 'LANDSCAPE — the big-area framing is split, never corner' : 'PORTRAIT — the big-area framing is corner, never split'}).`
+      : '',
     `Video duration: ${args.videoDurationSec.toFixed(1)}s. The FULL script in narrative order (row. [start-end] text, with picture hints where available):`,
     printed.join('\n'),
     hasClips || silent.length
