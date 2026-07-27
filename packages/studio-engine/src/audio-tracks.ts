@@ -14,7 +14,7 @@
  * export bakes identical gains into the PCM mix.
  */
 
-import { VOLUME_DB_MAX, VOLUME_DB_MIN, dbToGain } from './composition-core';
+import { VOLUME_DB_MIN, dbToGain } from './composition-core';
 
 export interface AudioClip {
   id: string;
@@ -44,6 +44,9 @@ export interface AudioClip {
 }
 
 export const AUDIO_DEFAULT_DB = -18;
+/** Lane clips play through a WebAudio gain node, so unlike shots they CAN be boosted past source level.
+ *  VOLUME_DB_MIN (-60 dB) is silence at the bottom end. */
+export const AUDIO_VOLUME_DB_MAX = 20;
 export const AUDIO_FADE_IN_SEC = 0.8;
 export const AUDIO_FADE_OUT_SEC = 1.5;
 /** Longest a single fade may be. */
@@ -73,7 +76,7 @@ export function audioClipDefaults(c: AudioClip): Required<Pick<AudioClip, 'start
   const fadeIn = Math.min(Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC), AUDIO_FADE_MAX_SEC, span);
   return {
     startSec: Math.max(0, c.startSec ?? 0),
-    volumeDb: Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, c.volumeDb ?? AUDIO_DEFAULT_DB)),
+    volumeDb: Math.max(VOLUME_DB_MIN, Math.min(AUDIO_VOLUME_DB_MAX, c.volumeDb ?? AUDIO_DEFAULT_DB)),
     fadeInSec: fadeIn,
     fadeOutSec: Math.min(Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC), AUDIO_FADE_MAX_SEC, Math.max(0, span - fadeIn)),
     speed,
@@ -151,7 +154,7 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   if (next.label) out.label = next.label;
   if (next.durationSec != null) out.durationSec = next.durationSec;
   if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 100) / 100; // same precision as in/out — a coarser start would slide the audio inside the clip on a left trim
-  const db = next.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, next.volumeDb)) : undefined;
+  const db = next.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(AUDIO_VOLUME_DB_MAX, next.volumeDb)) : undefined;
   if (db != null && db !== AUDIO_DEFAULT_DB) out.volumeDb = Math.round(db * 10) / 10;
   const fadeSec = (v: number) => Math.round(Math.max(0, Math.min(AUDIO_FADE_MAX_SEC, v)) * 10) / 10;
   if (next.fadeInSec != null && fadeSec(next.fadeInSec) !== AUDIO_FADE_IN_SEC) out.fadeInSec = fadeSec(next.fadeInSec);

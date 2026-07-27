@@ -79,7 +79,11 @@ export class VideoTrackEngine {
   private ghostFresh = false; // ghost is in place and not seeking (stale frames mid-seek aren't emitted, prevents side-swap flicker)
   // Audio clips (music lane): one resident <audio> element per clip, volume driven per tick from the
   // envelope closure. Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s.
-  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip }>();
+  // Each element is routed through a WebAudio gain node so a clip can be BOOSTED past source level
+  // (element.volume caps at 1). The takeover is permanent per element, so every lane clip goes through
+  // the graph — never half native, half routed. The VIDEO elements stay untouched on the native path.
+  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode }>();
+  private actx: AudioContext | null = null;
   // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
   // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
   // matters here, so drift correction is tight (0.08s) against the video element's own clock.
@@ -217,6 +221,7 @@ export class VideoTrackEngine {
     const keep = new Set(specs.map((sp) => sp.id));
     for (const [id, c] of this.audioClips) {
       if (!keep.has(id)) {
+        c.gain?.disconnect();
         c.el.remove();
         this.audioClips.delete(id);
       }
@@ -291,17 +296,46 @@ export class VideoTrackEngine {
     return true;
   }
 
+  /** Lazily build (and reuse) this clip's WebAudio chain: element → gain → destination. Returns null when
+   *  the browser refuses a context; the caller then degrades to element volume (boosts just won't be
+   *  audible in preview, while export still applies them). */
+  private gainFor(entry: { el: HTMLAudioElement; gain?: GainNode }): GainNode | null {
+    if (entry.gain) return entry.gain;
+    try {
+      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      if (!this.actx) this.actx = new Ctor();
+      const gain = this.actx.createGain();
+      this.actx.createMediaElementSource(entry.el).connect(gain).connect(this.actx.destination);
+      entry.gain = gain;
+      return gain;
+    } catch {
+      return null; // already-taken-over element / autoplay policy: stay on the native path
+    }
+  }
+
   /** Per-tick / on-seek clip sync: volume from the envelope closure, playbackRate = speed with
    *  preservesPitch OFF (matches the export resample); drift correction only past 0.35s. force = hard seek. */
   private syncAudioClips(t: number, wantPlay: boolean, force = false): void {
-    for (const { el, spec } of this.audioClips.values()) {
+    if (wantPlay && this.actx?.state === 'suspended') void this.actx.resume(); // play is a user gesture
+    for (const entry of this.audioClips.values()) {
+      const { el, spec } = entry;
       const srcT = spec.srcTimeAt(t);
+      const gainNode = this.gainFor(entry);
+      const setGain = (g: number) => {
+        if (gainNode) {
+          gainNode.gain.value = Math.max(0, g);
+          el.volume = 1; // the graph carries the level now
+        } else {
+          el.volume = Math.max(0, Math.min(1, g)); // no graph: boosts are inaudible here, export still applies them
+        }
+      };
       if (srcT == null) {
-        el.volume = 0;
+        setGain(0);
         if (!el.paused) el.pause();
         continue;
       }
-      el.volume = Math.max(0, Math.min(1, spec.gainAt(t)));
+      setGain(spec.gainAt(t));
       el.playbackRate = spec.speed;
       (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
       if ((force || Math.abs(el.currentTime - srcT) > 0.35) && !el.seeking) {
@@ -660,8 +694,13 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
-    for (const c of this.audioClips.values()) c.el.remove();
+    for (const c of this.audioClips.values()) {
+      c.gain?.disconnect();
+      c.el.remove();
+    }
     this.audioClips.clear();
+    void this.actx?.close().catch(() => {});
+    this.actx = null;
     for (const d of this.dubs.values()) d.el.remove();
     this.dubs.clear();
     for (const el of this.els.values()) el.remove();
