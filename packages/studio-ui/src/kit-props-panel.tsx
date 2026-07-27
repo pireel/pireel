@@ -14,6 +14,7 @@ import { t } from './i18n';
 
 interface FieldSchema {
   type?: string;
+  format?: string;
   enum?: string[];
   minimum?: number;
   maximum?: number;
@@ -105,6 +106,37 @@ export function KitPropsPanel({
                 onChange={(e) => set(key, Number(e.target.value))}
                 className="accent-accent"
               />
+            </div>
+          );
+        }
+        if (f.format === 'color') {
+          // Empty = follow the theme token, so a theme swap restyles the component; an explicit
+          // colour is kept. Both states need to be reachable, hence the reset swatch.
+          const val = typeof v === 'string' ? v : '';
+          return (
+            <div key={key} className="flex items-center justify-between gap-2" title={f.description}>
+              <span className="text-ink-4 text-[10px]">{fieldLabel(key)}</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => set(key, '')}
+                  title={t('kitProp.followTheme')}
+                  aria-label={t('kitProp.followTheme')}
+                  className={`h-5 w-5 shrink-0 rounded-full border bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!val ? 'border-accent ring-accent ring-1' : 'border-line'}`}
+                />
+                <label
+                  className={`relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border ${val ? 'border-accent ring-accent ring-1' : 'border-line'}`}
+                  style={val ? { background: val } : { background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)' }}
+                >
+                  <input
+                    type="color"
+                    value={/^#[0-9a-fA-F]{6}$/.test(val) ? val : '#ffffff'}
+                    onChange={(e) => set(key, e.target.value)}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    aria-label={fieldLabel(key)}
+                  />
+                </label>
+              </div>
             </div>
           );
         }

@@ -3897,7 +3897,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         <TooltipContent>{t('workbench.personTopSmartCutout')}</TooltipContent>
                       </Tooltip>
                     )}
-                    {!isSentenceCaption(mb) && (
+                    {/* Background / border / corners: block-level chrome for free-form elements.
+                        Kit components carry these in their own props (each renders them in its own
+                        design language), so the generic control would be a second, conflicting one. */}
+                    {!isSentenceCaption(mb) && !mb.templateId.startsWith('kit:') && (
                       <span className="relative inline-flex">
                         <Tooltip>
                           <TooltipTrigger asChild>
