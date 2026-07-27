@@ -124,6 +124,32 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
   return parts.join('');
 }
 
+/** The clip body's own silhouette: full height through the middle, tapering along the fade envelope at
+ *  both ends — so the BACKGROUND reads as the fade too, not just the wave sitting inside a flat block.
+ *  Same fadeShape the gain uses; body px coordinates. */
+function audioBodyPath(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
+  const H = CHIP_BODY_H;
+  const STEPS = 12;
+  const pts: string[] = [`0,${H}`];
+  const ramp = (fromX: number, toX: number, rising: boolean) => {
+    for (let i = 1; i <= STEPS; i++) {
+      const t = i / STEPS;
+      const px = fromX + (toX - fromX) * t;
+      const f = rising ? fadeShape(t) : fadeShape(1 - t);
+      pts.push(`${px.toFixed(2)},${(H - f * H).toFixed(2)}`);
+    }
+  };
+  const fi = d.fadeInSec > 0 ? (d.fadeInSec / Math.max(0.05, spanSec)) * widthPx : 0;
+  const fo = d.fadeOutSec > 0 ? (d.fadeOutSec / Math.max(0.05, spanSec)) * widthPx : 0;
+  if (fi > 0) ramp(0, Math.min(widthPx, fi), true);
+  else pts.push(`0,0`);
+  pts.push(`${Math.max(0, widthPx - fo).toFixed(2)},0`);
+  if (fo > 0) ramp(Math.max(0, widthPx - fo), widthPx, false);
+  else pts.push(`${widthPx.toFixed(2)},0`);
+  pts.push(`${widthPx.toFixed(2)},${H}`);
+  return `M${pts.join('L')}Z`;
+}
+
 /** Where a fade knob sits horizontally (body px), clamped so it stays grabbable inside the clip. */
 function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSec: number): number {
   const raw = (Math.max(0, fadeSec) / Math.max(0.05, spanSec)) * widthPx;
@@ -1403,7 +1429,7 @@ function StudioTimelineImpl({
                         tabIndex={0}
                         title={clip.label || t('panels.musicBed')}
                         className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${
-                          selected ? 'bg-accent/20 border-accent ring-accent/40 z-10 ring-1' : 'bg-accent/10 border-accent/40'
+                          selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
                         }`}
                         style={{ left: x(w.start), width, height: CHIP_H }}
                         onClick={(e) => e.stopPropagation()}
@@ -1438,7 +1464,10 @@ function StudioTimelineImpl({
                         {/* Label strip on top; everything audio-shaped lives in the BODY below it — the same
                             split the reference editor uses, which is why its knees sit in a lane instead of on
                             the chip's corner. */}
-                        <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5" style={{ height: CHIP_LABEL_H }}>
+                        <div
+                          className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 ${selected ? 'bg-accent/25' : 'bg-accent/15'}`}
+                          style={{ height: CHIP_LABEL_H }}
+                        >
                           <Music size={9} className="text-accent shrink-0" />
                           <span className="text-ink-2 truncate text-[9.5px] leading-none">{clip.label || t('panels.musicBed')}</span>
                           {d.speed !== 1 && (
@@ -1454,6 +1483,8 @@ function StudioTimelineImpl({
                           viewBox={`0 0 ${Math.round(contentW)} ${CHIP_BODY_H}`}
                           aria-hidden
                         >
+                          {/* body background tapering along the fade, then the wave on top of it */}
+                          <path d={audioBodyPath(d, contentW, span)} className={selected ? 'text-accent/25' : 'text-accent/15'} fill="currentColor" />
                           {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className="text-accent" fill="currentColor" />}
                         </svg>
                         {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
