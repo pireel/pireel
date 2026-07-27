@@ -4307,7 +4307,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onInsertElement={insertGeneratedElement}
               onDragAsset={setDragAsset}
               onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
-              onOpenMusicGen={() => setFloatWin('music')}
               onOpenGen={(t, anchor) => {
                 setGenType(t);
                 openFloatAt('gen', anchor);
@@ -4357,6 +4356,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   onMention={mentionAsset}
                   generateElement={generateElementStandalone}
                   onInsertTemplate={insertTemplateBlock}
+                  generateAudio={audioOps.generateAudioAsset}
+                  onInsertAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
                 />
               )}
               {floatWin === 'script' && (
@@ -4436,17 +4437,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <MusicPanel
                   clips={comp.audioTracks ?? []}
                   selectedId={selectedAudioId}
-                  onSelect={setSelectedAudioId}
                   usable={audioOps.clipUsable}
-                  onUpload={() => void audioOps.uploadAudio()}
                   onPatch={audioOps.patchClip}
                   onPreviewVolume={audioOps.previewClipVolume}
                   onRemove={(id) => {
                     audioOps.removeClip(id);
                     if (selectedAudioId === id) setSelectedAudioId(null);
                   }}
-                  onGenerate={(p, sec) => void audioOps.generateBgm(p, sec)}
-                  generating={audioOps.generating}
                   denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
                   onSetDenoise={denoiseOps.setDenoise}
                 />

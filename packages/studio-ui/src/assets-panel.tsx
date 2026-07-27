@@ -76,7 +76,7 @@ export type PanelDragAsset =
   | { type: 'audio'; url: string; label?: string }
   | { type: 'element'; element: GenElementResult; prompt: string; label?: string };
 type ViewMode = 'grid' | 'list';
-export type GenType = 'image' | 'video' | 'element';
+export type GenType = 'image' | 'video' | 'element' | 'audio';
 
 const VIEW_KEY = 'studio.assetsPanel.view';
 
@@ -159,7 +159,6 @@ export function AssetsPanel({
   onDragAsset,
   onOpenGen,
   onUseAudio,
-  onOpenMusicGen,
   genRefreshTick = 0,
 }: {
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
@@ -173,8 +172,6 @@ export function AssetsPanel({
   onOpenGen: (type: GenType, anchor?: DOMRect) => void;
   /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). */
   onUseAudio?: (url: string, label?: string) => void;
-  /** Generate under the audio filter: music generation lives in the audio panel — open it. */
-  onOpenMusicGen?: () => void;
   /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
@@ -585,13 +582,8 @@ export function AssetsPanel({
     };
   };
 
-  const openGen = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (kind === 'audio') {
-      onOpenMusicGen?.();
-      return;
-    }
-    onOpenGen(kind === 'all' ? 'image' : kind === 'element' ? 'element' : kind, e.currentTarget.getBoundingClientRect());
-  };
+  const openGen = (e: React.MouseEvent<HTMLButtonElement>) =>
+    onOpenGen(kind === 'all' ? 'image' : kind, e.currentTarget.getBoundingClientRect());
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
