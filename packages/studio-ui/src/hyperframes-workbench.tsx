@@ -2406,7 +2406,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
-  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
+  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
   audioExportRef.current = audioOps.audioForExport;
   /** Music-lane selection (timeline chip ↔ panel row; Del deletes). */
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
@@ -4805,6 +4805,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           assetDragKind={dragAsset?.type ?? null}
           selectedAudioId={selectedAudioId}
           audioPeaks={audioOps.audioPeaks}
+          sourcePeaks={audioOps.sourcePeaks}
           clipPendingAt={clipPending}
           {...timelineCbs}
         />

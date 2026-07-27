@@ -36,6 +36,8 @@ export interface AudioTracksDeps {
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
+  /** Inserted-clip bytes (key = blob url), so the scene rail can draw each source's own waveform. */
+  clipFilesRef: MutableRefObject<Map<string, File>>;
   /** Playhead (edited seconds): new clips land here — "insert at the playhead" is the NLE default. */
   tRef: MutableRefObject<number>;
   pickFile: (accept: string) => Promise<File | null>;
@@ -44,10 +46,15 @@ export interface AudioTracksDeps {
 }
 
 export function useAudioTracks(deps: AudioTracksDeps) {
-  const { comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
+  const { comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
   /** Mounted bytes per clip sig (blob src dies on refresh; the File here is the live handle). */
   const audioFilesRef = useRef<Map<string, File>>(new Map());
   const [audioFileRev, setAudioFileRev] = useState(0);
+  /** Peak envelope per VIDEO source ('main' / insert-clip url) for the scene rail's audio strip: the video
+   *  track has its own sound, and the rail should show it. Measured lazily off the same extract+decode the
+   *  loudness pass uses; failures (no audio track) just leave the strip empty. */
+  const [sourcePeaks, setSourcePeaks] = useState<Map<string, { peaks: Float32Array; durationSec: number }>>(new Map());
+  const srcTriedRef = useRef<Set<string>>(new Set());
   /** Peak envelope per sig for the lane waveform (computed from the same decode as the loudness measure;
    *  in-memory only — recomputed when bytes are recovered, never persisted). */
   const [audioPeaks, setAudioPeaks] = useState<Map<string, Float32Array>>(new Map());
@@ -241,6 +248,32 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.audioTracks]);
 
+  // Scene-rail waveforms: measure each video source once (main + every inserted clip that has bytes)
+  useEffect(() => {
+    const jobs: { key: string; file: File }[] = [];
+    const vf = videoFileRef.current;
+    if (vf) jobs.push({ key: 'main', file: vf });
+    for (const sh of comp.shots ?? []) {
+      if (!sh.src) continue;
+      const f = clipFilesRef.current.get(sh.src);
+      if (f) jobs.push({ key: sh.src, file: f });
+    }
+    for (const j of jobs) {
+      const tag = `${j.key}:${fileSig(j.file)}`;
+      if (srcTriedRef.current.has(tag)) continue;
+      srcTriedRef.current.add(tag);
+      void (async () => {
+        try {
+          const buf = await decodeAudioFile(await extractAudio(j.file));
+          setSourcePeaks((m) => new Map(m).set(j.key, { peaks: peaksOf(buf), durationSec: buf.duration }));
+        } catch {
+          /* source without an audio track / decode failure: the strip just stays empty */
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.shots, comp.video]);
+
   /** Export payload (bytes per usable clip); clips with missing bytes are skipped (panel shows them). */
   const audioForExport = (): { clip: AudioClip; file: File }[] | null => {
     const out: { clip: AudioClip; file: File }[] = [];
@@ -270,6 +303,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   return {
     audioFilesRef,
     audioPeaks,
+    sourcePeaks,
     clipUsable,
     uploadAudio,
     removeClip,
