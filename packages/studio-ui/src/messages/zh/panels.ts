@@ -97,7 +97,7 @@ export const PANELS_ZH: Record<string, string> = {
   'panels.musicFileMissingShort': '文件缺失',
   'panels.music': '音频',
   'panels.musicBed': '音轨',
-  'panels.musicBedHint': '音乐/音效有自己的音轨:素材里的音频可直接拖到时间轴落位,拖动改位置、选中可删;每条能单独调音量、淡入淡出、变速',
+  'panels.musicBedHint': '音轨在时间轴底部:拖素材音频进来落位(默认从播放头开始),拖两端剪长度、拖顶角的圆点调淡入淡出、选中按 Del 删除',
   'panels.musicDurationSec': '时长(秒)',
   'panels.musicPromptPlaceholder': '描述想要的音乐,如:轻快的科技感纯音乐',
   'panels.mute': '静音',

@@ -97,7 +97,7 @@ export const PANELS_EN: Record<string, string> = {
   'panels.musicFileMissingShort': 'file missing',
   'panels.music': 'Audio',
   'panels.musicBed': 'Audio track',
-  'panels.musicBedHint': 'Music and SFX live on their own lane — drag audio from assets onto the timeline, drag to reposition, select to delete; each track has its own level, fades and speed',
+  'panels.musicBedHint': 'Tracks live on the timeline lane: drop audio in (new clips land at the playhead), drag the edges to trim, drag the corner knobs for fades, select and press Del to remove',
   'panels.musicDurationSec': 'Duration (s)',
   'panels.musicPromptPlaceholder': 'Describe the music, e.g. upbeat minimal tech instrumental',
   'panels.mute': 'Mute',

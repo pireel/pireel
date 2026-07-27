@@ -36,16 +36,21 @@ export interface AudioTracksDeps {
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
+  /** Playhead (edited seconds): new clips land here — "insert at the playhead" is the NLE default. */
+  tRef: MutableRefObject<number>;
   pickFile: (accept: string) => Promise<File | null>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
   pushUndoSnapshot: () => void;
 }
 
 export function useAudioTracks(deps: AudioTracksDeps) {
-  const { comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
+  const { comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
   /** Mounted bytes per clip sig (blob src dies on refresh; the File here is the live handle). */
   const audioFilesRef = useRef<Map<string, File>>(new Map());
   const [audioFileRev, setAudioFileRev] = useState(0);
+  /** Peak envelope per sig for the lane waveform (computed from the same decode as the loudness measure;
+   *  in-memory only — recomputed when bytes are recovered, never persisted). */
+  const [audioPeaks, setAudioPeaks] = useState<Map<string, Float32Array>>(new Map());
   const [generating, setGenerating] = useState(false);
   /** Main-narration loudness cache (extract+decode is seconds on long videos — measure once per source). */
   const narrDbRef = useRef<{ sig: string; db: number | null } | null>(null);
@@ -69,13 +74,37 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Whether a clip's bytes are playable right now (mounted File, or a non-blob URL the element can stream). */
   const clipUsable = (c: AudioClip): boolean => (c.sig != null && audioFilesRef.current.has(c.sig)) || !c.src.startsWith('blob:');
 
+  /** Absolute-peak envelope over the whole file (~20 points/s, capped) for the lane waveform. */
+  const peaksOf = (buf: AudioBuffer): Float32Array => {
+    const n = Math.min(2000, Math.max(200, Math.round(buf.duration * 20)));
+    const ch0 = buf.getChannelData(0);
+    const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0;
+    const out = new Float32Array(n);
+    const step = ch0.length / n;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * step);
+      const b = Math.min(ch0.length, Math.floor((i + 1) * step));
+      let peak = 0;
+      // stride-sample long windows: a 5-minute track has ~1M samples per bucket, full scan is wasteful
+      const stride = Math.max(1, Math.floor((b - a) / 400));
+      for (let j = a; j < b; j += stride) {
+        const v = Math.max(Math.abs(ch0[j]!), Math.abs(ch1[j]!));
+        if (v > peak) peak = v;
+      }
+      out[i] = peak;
+    }
+    return out;
+  };
+
   /** Mount music bytes as a NEW clip on the lane: measure → initial level → OPFS + cloud → comp.audioTracks. */
   const mountAudioFile = async (file: File, label?: string, opts?: { startSec?: number }) => {
     let durationSec: number | undefined;
     let volumeDb: number | undefined;
+    let peaks: Float32Array | undefined;
     try {
       const buf = await decodeAudioFile(file);
       durationSec = Math.round(buf.duration * 10) / 10;
+      peaks = peaksOf(buf);
       const clipDb = measureBufferLoudnessDb(buf);
       const narrDb = await narrationDb();
       if (clipDb != null && narrDb != null) volumeDb = bgmAutoVolumeDb(narrDb, clipDb);
@@ -87,10 +116,13 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     const url = URL.createObjectURL(file);
     audioFilesRef.current.set(sig, file);
     setAudioFileRev((v) => v + 1);
+    if (peaks) setAudioPeaks((m) => new Map(m).set(sig, peaks!));
     void saveLocalVideo(file, sig); // the OPFS library is byte-agnostic despite the name
     backupMediaToCloud(file, sig, 'clip'); // sig→key record rides the clips slot (content-addressed vault is type-agnostic)
     pushUndoSnapshot();
-    const startSec = opts?.startSec != null && opts.startSec > 0.05 ? Math.round(opts.startSec * 10) / 10 : undefined;
+    // Drop position when dragged onto the lane, otherwise the playhead (NLE default: new clips land where you are)
+    const at = opts?.startSec ?? tRef.current;
+    const startSec = at > 0.05 ? Math.round(at * 10) / 10 : undefined;
     const clip: AudioClip = {
       id: audioClipId(),
       src: url,
@@ -153,7 +185,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     });
   };
 
-  const patchClip = (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'offsetSec'>>) => {
+  const patchClip = (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => {
     setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => (x.id === id ? patchAudioClip(x, patch) : x)) }));
   };
 
@@ -199,6 +231,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
         void saveLocalVideo(f, sig);
         audioFilesRef.current.set(sig, f);
         setAudioFileRev((v) => v + 1);
+        void decodeAudioFile(f)
+          .then((buf) => setAudioPeaks((m) => new Map(m).set(sig, peaksOf(buf))))
+          .catch(() => {});
         const url = URL.createObjectURL(f);
         setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => (x.sig === sig ? { ...x, src: url } : x)) }));
       })();
@@ -240,6 +275,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
 
   return {
     audioFilesRef,
+    audioPeaks,
     clipUsable,
     uploadAudio,
     removeClip,
