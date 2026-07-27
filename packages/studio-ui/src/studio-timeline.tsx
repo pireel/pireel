@@ -114,21 +114,17 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
   return parts.join('');
 }
 
-/** Fade shading: the attenuated corner region — bounded by an arc from the clip's bottom corner up to the
- *  knob — drawn over the body so that corner simply reads as a dimmer background. Nothing is cut and no
- *  line is drawn across the picture; a zero fade contributes nothing. */
+/** Fade shading: the attenuated corner region, bounded by the straight ramp from the clip's bottom corner
+ *  up to the knob — so the knob sits exactly on the ramp's top vertex. (A quarter-arc boundary reads as a
+ *  blob here: the lane is ~40px tall against a chip hundreds of px wide, and the squash eats the curve.) */
 function audioFadeShade(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
   const px = (sec: number) => Math.max(0, Math.min(widthPx, (sec / Math.max(0.05, spanSec)) * widthPx));
   const H = 100;
   const parts: string[] = [];
-  if (d.fadeInSec > 0) {
-    const fi = px(d.fadeInSec);
-    parts.push(`M0,0L${fi.toFixed(1)},0Q0,0 0,${H}Z`);
-  }
+  if (d.fadeInSec > 0) parts.push(`M0,0L${px(d.fadeInSec).toFixed(1)},0L0,${H}Z`);
   if (d.fadeOutSec > 0) {
-    const fo = px(d.fadeOutSec);
     const W = widthPx;
-    parts.push(`M${W.toFixed(1)},0L${(W - fo).toFixed(1)},0Q${W.toFixed(1)},0 ${W.toFixed(1)},${H}Z`);
+    parts.push(`M${W.toFixed(1)},0L${(W - px(d.fadeOutSec)).toFixed(1)},0L${W.toFixed(1)},${H}Z`);
   }
   return parts.join('');
 }
@@ -1471,7 +1467,7 @@ function StudioTimelineImpl({
                                 drag(e, (cx) => onFadeAudio?.(clip.id, 'in', Math.round(Math.max(0, Math.min(span, secAt(cx) - w.start)) * 10) / 10));
                               }}
                               title={t('panels.fadeIn')}
-                              className={`border-accent bg-panel hover:bg-accent absolute top-1 size-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
+                              className={`border-accent bg-panel hover:bg-accent absolute top-0.5 size-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
                               style={{ left: Math.min(contentW - KNOB_INSET, Math.max(KNOB_INSET, (d.fadeInSec / span) * contentW)) }}
                             />
                             <span
@@ -1480,7 +1476,7 @@ function StudioTimelineImpl({
                                 drag(e, (cx) => onFadeAudio?.(clip.id, 'out', Math.round(Math.max(0, Math.min(span, w.end - secAt(cx))) * 10) / 10));
                               }}
                               title={t('panels.fadeOut')}
-                              className={`border-accent bg-panel hover:bg-accent absolute top-1 size-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
+                              className={`border-accent bg-panel hover:bg-accent absolute top-0.5 size-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
                               style={{ left: Math.max(KNOB_INSET, Math.min(contentW - KNOB_INSET, contentW - (d.fadeOutSec / span) * contentW)) }}
                             />
                           </>
