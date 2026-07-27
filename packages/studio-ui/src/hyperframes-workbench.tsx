@@ -3048,18 +3048,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setDragAsset(null);
       if (a?.type === 'audio') void audioOps.mountAudioFromUrl(a.url, a.label, { startSec: t });
     },
-    onMoveAudio: (id: string, startSec: number) => {
-      pushUndoSnapshot();
-      audioOps.patchClip(id, { startSec });
-    },
-    onTrimAudio: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => {
-      pushUndoSnapshot();
-      audioOps.patchClip(id, patch);
-    },
-    onFadeAudio: (id: string, edge: 'in' | 'out', sec: number) => {
-      pushUndoSnapshot();
-      audioOps.patchClip(id, edge === 'in' ? { fadeInSec: sec } : { fadeOutSec: sec });
-    },
+    // Direct-manipulation lane drags commit on every move and stay OUT of the undo stack —
+    // same convention as element move/resize (a snapshot per pointer frame would flood it).
+    onMoveAudio: (id: string, startSec: number) => audioOps.patchClip(id, { startSec }),
+    onTrimAudio: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => audioOps.patchClip(id, patch),
+    onFadeAudio: (id: string, edge: 'in' | 'out', sec: number) =>
+      audioOps.patchClip(id, edge === 'in' ? { fadeInSec: sec } : { fadeOutSec: sec }),
     onSelectAudio: (id: string | null) => {
       setSelectedAudioId(id);
       if (id) {
