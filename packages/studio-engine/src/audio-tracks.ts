@@ -37,8 +37,10 @@ export interface AudioClip {
   fadeOutSec?: number;
   /** Playback-speed multiplier (absent = 1; clamped AUDIO_SPEED_MIN..MAX). Changes pitch, see header. */
   speed?: number;
-  /** Start offset into the music file (skip a long intro), seconds of SOURCE time. */
-  offsetSec?: number;
+  /** Trim in/out points in SOURCE seconds (lane edge handles). in absent = 0, out absent = durationSec.
+   *  Timeline length = (out − in) ÷ speed. */
+  inSec?: number;
+  outSec?: number;
 }
 
 export const AUDIO_DEFAULT_DB = -18;
@@ -46,6 +48,8 @@ export const AUDIO_FADE_IN_SEC = 0.8;
 export const AUDIO_FADE_OUT_SEC = 1.5;
 export const AUDIO_SPEED_MIN = 0.5;
 export const AUDIO_SPEED_MAX = 2;
+/** Shortest a clip may be trimmed to, in TIMELINE seconds. */
+export const AUDIO_MIN_LEN_SEC = 0.2;
 
 let _audioUid = 0;
 export function audioClipId(): string {
@@ -53,27 +57,50 @@ export function audioClipId(): string {
   return `aud${_audioUid}_${Math.floor(performance.now())}`;
 }
 
-/** Resolved knobs (defaults applied). */
-export function audioClipDefaults(c: AudioClip): Required<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'offsetSec'>> {
+/** Resolved knobs (defaults applied). outSec falls back to the media duration, or Infinity when unknown. */
+export function audioClipDefaults(c: AudioClip): Required<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>> {
+  const inSec = Math.max(0, c.inSec ?? 0);
+  const cap = c.durationSec ?? Infinity;
   return {
     startSec: Math.max(0, c.startSec ?? 0),
     volumeDb: Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, c.volumeDb ?? AUDIO_DEFAULT_DB)),
     fadeInSec: Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC),
     fadeOutSec: Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC),
     speed: Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, c.speed ?? 1)),
-    offsetSec: Math.max(0, c.offsetSec ?? 0),
+    inSec,
+    outSec: Math.max(inSec, Math.min(cap, c.outSec ?? cap)),
   };
 }
 
-/** The clip's window on the edited timeline: [start, end). Length = remaining source length ÷ speed
- *  (no looping — the clip plays once); unknown media duration degrades to the timeline end. */
+/** The clip's window on the edited timeline: [start, end), end = start + trimmed source length ÷ speed.
+ *  Unknown media duration (bytes not mounted yet) degrades to the timeline end so the chip still draws.
+ *  NOT clamped to totalSec — a clip may hang past the end of the video; callers clamp for drawing. */
 export function audioClipWindow(c: AudioClip, totalSec: number): { start: number; end: number } {
   const d = audioClipDefaults(c);
-  const start = Math.min(d.startSec, totalSec);
-  if (c.durationSec != null && c.durationSec > d.offsetSec) {
-    return { start, end: Math.min(totalSec, start + (c.durationSec - d.offsetSec) / d.speed) };
+  const start = d.startSec;
+  if (!Number.isFinite(d.outSec)) return { start, end: Math.max(start, totalSec) };
+  return { start, end: start + (d.outSec - d.inSec) / d.speed };
+}
+
+/** Edge-trim math (lane handles): given the dragged edge's new TIMELINE position, return the patch.
+ *  Left = the in-point moves with the clip's left edge (the tail stays put, NLE convention);
+ *  right = the out-point moves. Both clamp to the media's own bounds and AUDIO_MIN_LEN_SEC. */
+export function audioTrimPatch(c: AudioClip, edge: 'left' | 'right', newEdgeSec: number): Pick<AudioClip, 'startSec' | 'inSec' | 'outSec'> {
+  const d = audioClipDefaults(c);
+  const cap = c.durationSec ?? Infinity;
+  if (edge === 'left') {
+    const end = Number.isFinite(d.outSec) ? d.startSec + (d.outSec - d.inSec) / d.speed : Infinity;
+    // available head room in TIMELINE seconds (how far left the edge can go before running out of source)
+    const minStart = Math.max(0, d.startSec - d.inSec / d.speed);
+    const maxStart = Number.isFinite(end) ? end - AUDIO_MIN_LEN_SEC : d.startSec + (cap - d.inSec) / d.speed - AUDIO_MIN_LEN_SEC;
+    const start = Math.max(minStart, Math.min(maxStart, newEdgeSec));
+    const inSec = Math.max(0, d.inSec + (start - d.startSec) * d.speed);
+    return { startSec: start, inSec, ...(Number.isFinite(d.outSec) ? { outSec: d.outSec } : {}) };
   }
-  return { start, end: totalSec };
+  const minEnd = d.startSec + AUDIO_MIN_LEN_SEC;
+  const maxEnd = Number.isFinite(cap) ? d.startSec + (cap - d.inSec) / d.speed : Infinity;
+  const end = Math.max(minEnd, Math.min(maxEnd, newEdgeSec));
+  return { inSec: d.inSec, outSec: d.inSec + (end - d.startSec) * d.speed };
 }
 
 /** Linear gain of a clip at edited time t (0 outside its window; fades measured inside it). */
@@ -81,6 +108,7 @@ export function audioClipGainAt(c: AudioClip, t: number, totalSec: number): numb
   const d = audioClipDefaults(c);
   const w = audioClipWindow(c, totalSec);
   if (t < w.start || t > w.end) return 0;
+  // fades are measured against the clip's own edges (trimming moves them with the edge)
   let g = dbToGain(d.volumeDb);
   if (d.fadeInSec > 0) g *= Math.min(1, (t - w.start) / d.fadeInSec);
   if (d.fadeOutSec > 0) g *= Math.min(1, Math.max(0, (w.end - t) / d.fadeOutSec));
@@ -88,18 +116,18 @@ export function audioClipGainAt(c: AudioClip, t: number, totalSec: number): numb
 }
 
 /** Position inside the music file for edited time t (source seconds; speed maps timeline→source).
- *  null = outside the clip's playable range. */
+ *  null = outside the clip's trimmed range. */
 export function audioClipSrcTimeAt(c: AudioClip, t: number): number | null {
   const d = audioClipDefaults(c);
   const lt = t - d.startSec;
   if (lt < 0) return null;
-  const srcT = d.offsetSec + lt * d.speed;
-  if (c.durationSec != null && srcT >= c.durationSec) return null;
+  const srcT = d.inSec + lt * d.speed;
+  if (srcT >= d.outSec) return null;
   return srcT;
 }
 
 /** Apply a patch to a clip with the neutrality convention (fields at their default value are dropped). */
-export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'offsetSec'>>): AudioClip {
+export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>): AudioClip {
   const next: AudioClip = { ...cur, ...patch };
   const out: AudioClip = { id: cur.id, src: next.src };
   if (next.sig) out.sig = next.sig;
@@ -112,6 +140,10 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   if (next.fadeOutSec != null && next.fadeOutSec !== AUDIO_FADE_OUT_SEC) out.fadeOutSec = Math.round(Math.max(0, next.fadeOutSec) * 10) / 10;
   const sp = next.speed != null ? Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, next.speed)) : undefined;
   if (sp != null && sp !== 1) out.speed = Math.round(sp * 100) / 100;
-  if (next.offsetSec) out.offsetSec = Math.max(0, next.offsetSec);
+  if (next.inSec) out.inSec = Math.round(Math.max(0, next.inSec) * 100) / 100;
+  // out-point only stored when it actually trims (equal to the media length = untrimmed)
+  if (next.outSec != null && (next.durationSec == null || Math.abs(next.outSec - next.durationSec) > 0.01)) {
+    out.outSec = Math.round(Math.max(0, next.outSec) * 100) / 100;
+  }
   return out;
 }

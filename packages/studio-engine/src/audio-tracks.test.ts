@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AUDIO_DEFAULT_DB,
   AUDIO_FADE_IN_SEC,
+  AUDIO_MIN_LEN_SEC,
   type AudioClip,
   audioClipGainAt,
   audioClipSrcTimeAt,
   audioClipWindow,
+  audioTrimPatch,
   patchAudioClip,
 } from './audio-tracks';
 import { dbToGain } from './composition';
@@ -38,6 +40,32 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(audioClipGainAt(c, 10 + AUDIO_FADE_IN_SEC / 2, 120)).toBeCloseTo(base / 2, 5);
     expect(audioClipGainAt(c, 20, 120)).toBeCloseTo(base, 5);
     expect(audioClipGainAt(c, 39, 120)).toBeCloseTo(base / 2, 5); // 窗口尾 40,淡出 2s → 39 处一半
+  });
+
+  it('audioTrimPatch:左把手连 in 点一起走(尾巴不动)、右把手改 out 点;都夹在素材边界与最短长度内', () => {
+    const c = clip({ startSec: 10, durationSec: 30 }); // 时间轴 10→40
+    // 左把手右移 5s:起点 15,in 点 5(尾巴仍在 40)
+    expect(audioTrimPatch(c, 'left', 15)).toMatchObject({ startSec: 15, inSec: 5 });
+    // 左把手左拖超出素材头:in 已是 0,顶到 10 不能再往左
+    expect(audioTrimPatch(c, 'left', 2).startSec).toBe(10);
+    // 右把手左移到 25:out 点 15
+    expect(audioTrimPatch(c, 'right', 25)).toMatchObject({ outSec: 15 });
+    // 右把手右拖超出素材尾:顶到 40
+    expect(audioTrimPatch(c, 'right', 99).outSec).toBe(30);
+    // 最短长度守住
+    expect(audioTrimPatch(c, 'right', 10).outSec).toBeCloseTo(AUDIO_MIN_LEN_SEC, 5);
+    // 变速下,时间轴位移换算回源秒要乘速度
+    const fast = clip({ startSec: 10, durationSec: 30, speed: 2 });
+    expect(audioTrimPatch(fast, 'left', 12)).toMatchObject({ startSec: 12, inSec: 4 });
+  });
+
+  it('剪过的片段:窗口=(out−in)/速度,源时间从 in 起、到 out 止', () => {
+    const c = clip({ startSec: 10, durationSec: 30, inSec: 5, outSec: 20 });
+    expect(audioClipWindow(c, 120)).toEqual({ start: 10, end: 25 });
+    expect(audioClipSrcTimeAt(c, 10)).toBe(5);
+    expect(audioClipSrcTimeAt(c, 24.9)).toBeCloseTo(19.9, 5);
+    expect(audioClipSrcTimeAt(c, 25)).toBeNull(); // out 点即止
+    expect(audioClipGainAt(c, 26, 120)).toBe(0);
   });
 
   it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {

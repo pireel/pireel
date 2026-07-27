@@ -2402,7 +2402,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
-  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
+  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
   audioExportRef.current = audioOps.audioForExport;
   /** Music-lane selection (timeline chip ↔ panel row; Del deletes). */
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
@@ -3051,6 +3051,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     onMoveAudio: (id: string, startSec: number) => {
       pushUndoSnapshot();
       audioOps.patchClip(id, { startSec });
+    },
+    onTrimAudio: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => {
+      pushUndoSnapshot();
+      audioOps.patchClip(id, patch);
+    },
+    onFadeAudio: (id: string, edge: 'in' | 'out', sec: number) => {
+      pushUndoSnapshot();
+      audioOps.patchClip(id, edge === 'in' ? { fadeInSec: sec } : { fadeOutSec: sec });
     },
     onSelectAudio: (id: string | null) => {
       setSelectedAudioId(id);
@@ -4772,6 +4780,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           assetDragging={!!dragAsset}
           assetDragKind={dragAsset?.type ?? null}
           selectedAudioId={selectedAudioId}
+          audioPeaks={audioOps.audioPeaks}
           clipPendingAt={clipPending}
           {...timelineCbs}
         />

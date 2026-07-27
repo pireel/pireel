@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { Music, Upload, Trash2, Wand2 } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_FADE_IN_SEC, AUDIO_FADE_OUT_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, type AudioClip } from '@pireel/studio-engine/composition';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_IN_SEC, AUDIO_FADE_OUT_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, type AudioClip, audioClipDefaults } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
 const VOL_MIN = -40;
@@ -36,7 +36,7 @@ export function MusicPanel({
   /** Per-clip byte availability (dead blob after reload = false → row shows the missing hint). */
   usable: (c: AudioClip) => boolean;
   onUpload: () => void;
-  onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed'>>) => void;
+  onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => void;
   onPreviewVolume: (id: string, db: number) => void;
   onRemove: (id: string) => void;
   onGenerate: (prompt: string, durationSec: number) => void;
@@ -57,29 +57,40 @@ export function MusicPanel({
   const [prompt, setPrompt] = useState('');
   const [genSec, setGenSec] = useState(60);
 
-  const numField = (label: string, value: number, min: number, max: number, step: number, unit: string, commit: (v: number) => void) => (
-    <div className="flex items-center gap-2">
-      <span className="text-ink-3 w-14 shrink-0">{label}</span>
-      <input
-        key={`${sel?.id}:${label}:${value}`}
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        defaultValue={value}
-        onBlur={(e) => {
-          const v = Math.max(min, Math.min(max, Number(e.target.value)));
-          if (Number.isFinite(v) && v !== value) commit(v);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        }}
-        className="border-line bg-paper text-ink w-16 rounded-md border px-2 py-1 tabular-nums"
-        aria-label={label}
-      />
-      <span className="text-ink-4">{unit}</span>
-    </div>
-  );
+  /** Slider row: drags update the local value at once (readout follows the finger), commit on release —
+   *  fades/speed don't have a live-preview channel, so the value only lands in comp when you let go. */
+  const [dragVal, setDragVal] = useState<{ k: string; v: number } | null>(null);
+  useEffect(() => setDragVal(null), [selectedId]);
+  const slider = (k: string, label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, commit: (v: number) => void) => {
+    const shown = dragVal?.k === k ? dragVal.v : value;
+    const done = () => {
+      setDragVal((d) => {
+        if (d?.k === k && d.v !== value) commit(d.v);
+        return null;
+      });
+    };
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="text-ink-3 flex items-center justify-between">
+          <span>{label}</span>
+          <span className="text-ink-4 tabular-nums">{fmt(shown)}</span>
+        </div>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={shown}
+          onChange={(e) => setDragVal({ k, v: Number(e.target.value) })}
+          onPointerUp={done}
+          onKeyUp={done}
+          onBlur={done}
+          className="zoom-range w-full"
+          aria-label={label}
+        />
+      </div>
+    );
+  };
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
@@ -97,7 +108,11 @@ export function MusicPanel({
                   <Music className={`size-3.5 shrink-0 ${selectedId === c.id ? 'text-accent' : 'text-ink-4'}`} />
                   <span className="text-ink min-w-0 flex-1 truncate">{c.label || t('panels.musicBed')}</span>
                   <span className="text-ink-4 shrink-0 text-[10px] tabular-nums">
-                    {(c.startSec ?? 0).toFixed(1)}s{c.durationSec != null ? ` · ${Math.round(c.durationSec)}s` : ''}
+                    {(() => {
+                      const d = audioClipDefaults(c);
+                      const len = Number.isFinite(d.outSec) ? (d.outSec - d.inSec) / d.speed : null;
+                      return `${d.startSec.toFixed(1)}s${len != null ? ` · ${len.toFixed(1)}s` : ''}`;
+                    })()}
                   </span>
                 </button>
                 {!usable(c) && <span className="text-accent shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
@@ -133,9 +148,9 @@ export function MusicPanel({
               className="zoom-range w-full"
               aria-label={t('panels.volume')}
             />
-            {numField(t('panels.fadeIn'), sel.fadeInSec ?? AUDIO_FADE_IN_SEC, 0, 10, 0.1, 's', (v) => onPatch(sel.id, { fadeInSec: v }))}
-            {numField(t('panels.fadeOut'), sel.fadeOutSec ?? AUDIO_FADE_OUT_SEC, 0, 10, 0.1, 's', (v) => onPatch(sel.id, { fadeOutSec: v }))}
-            {numField(t('panels.speedRate'), sel.speed ?? 1, AUDIO_SPEED_MIN, AUDIO_SPEED_MAX, 0.05, '×', (v) => onPatch(sel.id, { speed: v }))}
+            {slider('fi', t('panels.fadeIn'), sel.fadeInSec ?? AUDIO_FADE_IN_SEC, 0, 10, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}
+            {slider('fo', t('panels.fadeOut'), sel.fadeOutSec ?? AUDIO_FADE_OUT_SEC, 0, 10, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeOutSec: v }))}
+            {slider('sp', t('panels.speedRate'), sel.speed ?? 1, AUDIO_SPEED_MIN, AUDIO_SPEED_MAX, 0.05, (v) => `${v.toFixed(2)}×`, (v) => onPatch(sel.id, { speed: v }))}
             <div className="text-ink-4 text-[10.5px]">{t('panels.speedPitchNote')}</div>
           </section>
         )}

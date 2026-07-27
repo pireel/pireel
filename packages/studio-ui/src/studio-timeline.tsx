@@ -29,7 +29,7 @@ import {
   totalDuration,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
-import { audioClipWindow } from '@pireel/studio-engine/composition';
+import { type AudioClip, audioClipDefaults, audioClipWindow, audioTrimPatch } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -61,6 +61,33 @@ import {
 import { ActiveSceneRing, PlayheadCursor } from './timeline-overlays';
 
 export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
+
+/** Waveform path for one audio chip: absolute-peak envelope of the clip's TRIMMED source slice,
+ *  mirrored around the centreline, in a fixed 0–100 viewBox (the <svg> stretches it to the chip,
+ *  so zoom/trim cost no recompute beyond this cheap resample). ~120 columns is plenty at lane height. */
+function audioWavePath(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>): string {
+  const dur = clip.durationSec ?? 0;
+  const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
+  const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
+  const a = Math.max(0, Math.min(peaks.length - 1, lo));
+  const b = Math.max(a + 1, Math.min(peaks.length, hi));
+  const cols = Math.min(120, b - a);
+  const step = (b - a) / cols;
+  const top: string[] = [];
+  const bottom: string[] = [];
+  for (let i = 0; i < cols; i++) {
+    const s0 = a + Math.floor(i * step);
+    const s1 = Math.max(s0 + 1, a + Math.floor((i + 1) * step));
+    let peak = 0;
+    for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
+    const x = (i / Math.max(1, cols - 1)) * 100;
+    const h = Math.max(1.5, Math.min(48, peak * 46)); // half-height in viewBox units, floor keeps silence visible
+    top.push(`${x.toFixed(2)},${(50 - h).toFixed(2)}`);
+    bottom.push(`${x.toFixed(2)},${(50 + h).toFixed(2)}`);
+  }
+  if (!top.length) return '';
+  return `M${top.join('L')}L${bottom.reverse().join('L')}Z`;
+}
 
 interface StudioTimelineProps {
   comp: Composition;
@@ -120,6 +147,12 @@ interface StudioTimelineProps {
   onDropAssetAudio?: (t: number) => void;
   /** Music-lane chip dragged horizontally: commit that clip's new start (edited seconds). */
   onMoveAudio?: (id: string, startSec: number) => void;
+  /** Music-lane edge handle released: commit the trim patch (in/out points, computed by audioTrimPatch). */
+  onTrimAudio?: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => void;
+  /** Music-lane fade knee released: commit that clip's fade length (seconds). */
+  onFadeAudio?: (id: string, edge: 'in' | 'out', sec: number) => void;
+  /** Peak envelopes per clip sig (lane waveform); absent = bytes not mounted, chip draws label-only. */
+  audioPeaks?: Map<string, Float32Array>;
   /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
   selectedAudioId?: string | null;
   onSelectAudio?: (id: string | null) => void;
@@ -171,6 +204,9 @@ function StudioTimelineImpl({
   onDropAssetClip,
   onDropAssetAudio,
   onMoveAudio,
+  onTrimAudio,
+  onFadeAudio,
+  audioPeaks,
   selectedAudioId,
   onSelectAudio,
   onOpenMusicPanel,
@@ -567,8 +603,9 @@ function StudioTimelineImpl({
   // Music lane: a dedicated bottom row — shown when clips exist, or as a highlighted drop target while an audio asset is being dragged
   const audioClips = comp.audioTracks ?? [];
   const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
-  const [audioDrag, setAudioDrag] = useState<{ id: string; start: number } | null>(null); // live drag position of a chip (commit on release)
-  const audioDragRef = useRef<number | null>(null); // commit reads the ref — a setState updater with side effects would double-fire under StrictMode
+  // Live chip interaction (commit on release): move = whole clip slides, trim = one edge, fade = a knee.
+  const [audioDrag, setAudioDrag] = useState<{ id: string; kind: 'move' | 'trim-l' | 'trim-r' | 'fade-in' | 'fade-out'; start: number; end: number; fadeIn: number; fadeOut: number } | null>(null);
+  const audioDragRef = useRef<{ start: number; end: number; fade: number } | null>(null); // commit reads the ref — a setState updater with side effects would double-fire under StrictMode
   const musicTop = tracksH + ROW_GAP;
   const tracksHWithMusic = musicLane ? musicTop + ROW_H : tracksH;
 
@@ -1290,24 +1327,89 @@ function StudioTimelineImpl({
                   </div>
                 ))}
 
-              {/* Music lane (bottom row): one chip per audio clip — click selects (+ opens the audio panel),
-                  drag horizontally to move; while an audio asset is dragged the lane shows a dashed drop strip.
-                  Overlapping clips overlap visually too (their sounds sum). */}
+              {/* Music lane (bottom row): one chip per audio clip, drawn with its waveform.
+                  Click selects (Del removes), body-drag moves, edge handles trim in/out, and the two
+                  top-corner knees drag the fades. While an audio asset is dragged the empty lane shows
+                  a dashed drop strip. Overlapping clips overlap visually too (their sounds sum). */}
               {musicLane && (
                 <div className="absolute right-0 left-0" style={{ top: musicTop, height: ROW_H }}>
                   {audioClips.map((clip) => {
                     const w = audioClipWindow(clip, dur);
-                    const start = audioDrag?.id === clip.id ? audioDrag.start : w.start;
-                    const width = Math.max(24, x(Math.max(0.5, w.end - w.start)));
+                    const live = audioDrag?.id === clip.id ? audioDrag : null;
+                    const start = live ? live.start : w.start;
+                    const end = Math.min(dur, live ? live.end : w.end);
+                    const width = Math.max(14, x(Math.max(0.05, end - start)));
                     const selected = selectedAudioId === clip.id;
+                    const d = audioClipDefaults(clip);
+                    const fadeIn = live ? live.fadeIn : d.fadeInSec;
+                    const fadeOut = live ? live.fadeOut : d.fadeOutSec;
+                    const peaks = clip.sig ? audioPeaks?.get(clip.sig) : undefined;
+                    const span = Math.max(0.05, end - start);
+                    const knees = selected && width > 56;
+                    // Pointer-down helper: every chip gesture shares the same base snapshot + commit-on-release shape
+                    const gesture = (e: React.PointerEvent, kind: 'move' | 'trim-l' | 'trim-r' | 'fade-in' | 'fade-out') => {
+                      if (e.button !== 0) return;
+                      e.stopPropagation();
+                      const grab = secAt(e.clientX) - (kind === 'trim-r' ? w.end : w.start);
+                      const base = { id: clip.id, kind, start: w.start, end: w.end, fadeIn: d.fadeInSec, fadeOut: d.fadeOutSec };
+                      audioDragRef.current = { start: w.start, end: w.end, fade: kind === 'fade-out' ? d.fadeOutSec : d.fadeInSec };
+                      drag(
+                        e,
+                        (cx) => {
+                          const at = secAt(cx) - grab;
+                          if (kind === 'move') {
+                            let ns = Math.max(0, Math.min(Math.max(0, dur - 0.2), at));
+                            if (ns < 0.15) ns = 0; // snap to the head
+                            audioDragRef.current = { start: ns, end: ns + (w.end - w.start), fade: 0 };
+                            setAudioDrag({ ...base, start: ns, end: ns + (w.end - w.start) });
+                          } else if (kind === 'trim-l') {
+                            const p = audioTrimPatch(clip, 'left', Math.max(0, at));
+                            const ns = p.startSec ?? w.start;
+                            audioDragRef.current = { start: ns, end: w.end, fade: 0 };
+                            setAudioDrag({ ...base, start: ns });
+                          } else if (kind === 'trim-r') {
+                            const p = audioTrimPatch(clip, 'right', at);
+                            const ne = w.start + ((p.outSec ?? 0) - (p.inSec ?? 0)) / d.speed;
+                            audioDragRef.current = { start: w.start, end: ne, fade: 0 };
+                            setAudioDrag({ ...base, end: ne });
+                          } else {
+                            // fade knee: distance from its own edge, capped at the clip's length
+                            const len = Math.max(0.05, w.end - w.start);
+                            const f = Math.max(0, Math.min(len, kind === 'fade-in' ? secAt(cx) - w.start : w.end - secAt(cx)));
+                            const r = Math.round(f * 10) / 10;
+                            audioDragRef.current = { start: w.start, end: w.end, fade: r };
+                            setAudioDrag({ ...base, ...(kind === 'fade-in' ? { fadeIn: r } : { fadeOut: r }) });
+                          }
+                        },
+                        (moved) => {
+                          const st = audioDragRef.current;
+                          audioDragRef.current = null;
+                          setAudioDrag(null);
+                          onSelectAudio?.(clip.id);
+                          if (!moved) {
+                            onOpenMusicPanel?.();
+                            return;
+                          }
+                          if (!st) return;
+                          if (kind === 'move') {
+                            if (Math.abs(st.start - w.start) > 0.01) onMoveAudio?.(clip.id, st.start);
+                          } else if (kind === 'trim-l' || kind === 'trim-r') {
+                            const edge = kind === 'trim-l' ? st.start : st.end;
+                            onTrimAudio?.(clip.id, audioTrimPatch(clip, kind === 'trim-l' ? 'left' : 'right', edge));
+                          } else {
+                            onFadeAudio?.(clip.id, kind === 'fade-in' ? 'in' : 'out', st.fade);
+                          }
+                        },
+                      );
+                    };
                     return (
                       <div
                         key={clip.id}
                         role="button"
                         tabIndex={0}
                         title={clip.label || t('panels.musicBed')}
-                        className={`absolute top-0.5 bottom-0.5 flex cursor-grab items-center gap-1.5 overflow-hidden rounded-md border px-2 active:cursor-grabbing ${
-                          selected ? 'bg-accent/30 border-accent ring-accent/40 z-10 ring-1' : 'bg-accent/15 border-accent/40'
+                        className={`group/aud absolute top-0.5 bottom-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${
+                          selected ? 'bg-accent/25 border-accent ring-accent/40 z-10 ring-1' : 'bg-accent/12 border-accent/40'
                         } text-ink`}
                         style={{ left: x(start), width }}
                         onClick={(e) => e.stopPropagation()}
@@ -1317,31 +1419,61 @@ function StudioTimelineImpl({
                             onOpenMusicPanel?.();
                           }
                         }}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return;
-                          e.stopPropagation();
-                          const grab = secAt(e.clientX) - w.start;
-                          drag(
-                            e,
-                            (cx) => {
-                              let ns = Math.max(0, Math.min(Math.max(0, dur - 1), secAt(cx) - grab));
-                              if (ns < 0.15) ns = 0; // snap to the head
-                              audioDragRef.current = ns;
-                              setAudioDrag({ id: clip.id, start: ns });
-                            },
-                            (moved) => {
-                              const ns = audioDragRef.current;
-                              audioDragRef.current = null;
-                              setAudioDrag(null);
-                              onSelectAudio?.(clip.id);
-                              if (moved && ns != null && Math.abs(ns - w.start) > 0.01) onMoveAudio?.(clip.id, ns);
-                              if (!moved) onOpenMusicPanel?.();
-                            },
-                          );
-                        }}
+                        onPointerDown={(e) => gesture(e, 'move')}
                       >
-                        <Music size={11} className="text-accent shrink-0" />
-                        <span className="truncate text-[10px]">{clip.label || t('panels.musicBed')}</span>
+                        {/* Waveform: absolute-peak envelope, mirrored around the centreline. The path is built in
+                            a fixed 0–100 viewBox and stretched by preserveAspectRatio, so zooming costs nothing.
+                            Only the trimmed [in,out] slice of the source is drawn. */}
+                        {peaks && peaks.length > 1 && (
+                          <svg className="text-accent pointer-events-none absolute inset-0 h-full w-full opacity-70" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+                            <path d={audioWavePath(peaks, clip, d)} fill="currentColor" />
+                          </svg>
+                        )}
+                        {/* Fade wedges: the darkened triangles the fades actually describe */}
+                        {fadeIn > 0 && (
+                          <div
+                            className="bg-panel/55 pointer-events-none absolute top-0 bottom-0 left-0"
+                            style={{ width: `${Math.min(100, (fadeIn / span) * 100)}%`, clipPath: 'polygon(0 0, 100% 0, 0 100%)' }}
+                          />
+                        )}
+                        {fadeOut > 0 && (
+                          <div
+                            className="bg-panel/55 pointer-events-none absolute top-0 right-0 bottom-0"
+                            style={{ width: `${Math.min(100, (fadeOut / span) * 100)}%`, clipPath: 'polygon(0 0, 100% 0, 100% 100%)' }}
+                          />
+                        )}
+                        <div className="pointer-events-none absolute inset-0 flex items-center gap-1.5 px-2">
+                          <Music size={11} className="text-accent shrink-0" />
+                          <span className="truncate text-[10px]">{clip.label || t('panels.musicBed')}</span>
+                        </div>
+                        {/* Trim handles (both edges) */}
+                        <div
+                          onPointerDown={(e) => gesture(e, 'trim-l')}
+                          className="hover:bg-accent/60 absolute top-0 bottom-0 left-0 w-1.5 cursor-ew-resize opacity-0 transition group-hover/aud:opacity-100"
+                          style={selected ? { opacity: 1 } : undefined}
+                        />
+                        <div
+                          onPointerDown={(e) => gesture(e, 'trim-r')}
+                          className="hover:bg-accent/60 absolute top-0 right-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 transition group-hover/aud:opacity-100"
+                          style={selected ? { opacity: 1 } : undefined}
+                        />
+                        {/* Fade knees (top corners, selected + wide enough) */}
+                        {knees && (
+                          <>
+                            <div
+                              onPointerDown={(e) => gesture(e, 'fade-in')}
+                              title={t('panels.fadeIn')}
+                              className="border-accent bg-panel absolute top-0.5 size-2 -translate-x-1/2 cursor-ew-resize rounded-full border"
+                              style={{ left: `${Math.min(100, (fadeIn / span) * 100)}%` }}
+                            />
+                            <div
+                              onPointerDown={(e) => gesture(e, 'fade-out')}
+                              title={t('panels.fadeOut')}
+                              className="border-accent bg-panel absolute top-0.5 size-2 translate-x-1/2 cursor-ew-resize rounded-full border"
+                              style={{ right: `${Math.min(100, (fadeOut / span) * 100)}%` }}
+                            />
+                          </>
+                        )}
                       </div>
                     );
                   })}
