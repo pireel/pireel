@@ -74,6 +74,8 @@ const KNEE_LANE_Y = 4;
 const KNEE_SIZE = 10;
 /** Knees stay this far inside the clip so they never hide under the trim handles or get clipped. */
 const KNEE_EDGE_INSET = 10;
+/** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
+const SCENE_WAVE_H = 13;
 
 /** Waveform vertical scale: dBFS against a noise floor, the pro-tool convention (the reference editor
  *  normalizes 20·log10(peak) over a -50 dB floor; Audacity's Waveform (dB) view and Premiere's
@@ -91,37 +93,50 @@ const WAVE_MAX_BARS = 2400;
  *  fade curve, which is how the reference reads: the fades cut the wave, no wedge is painted over it.
  *  Built over the clip's trimmed [in,out] slice against its true content width, so trimming an edge only
  *  reveals or hides the content. */
-function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
-  const dur = clip.durationSec ?? 0;
-  const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
-  const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
-  const a = Math.max(0, Math.min(peaks.length - 1, lo));
-  const b = Math.max(a + 1, Math.min(peaks.length, hi));
+function waveBars(
+  peaks: Float32Array,
+  from: number,
+  to: number,
+  widthPx: number,
+  heightPx: number,
+  shiftDb: number,
+  envelopeAt?: (frac: number) => number,
+): string {
+  const a = Math.max(0, Math.min(peaks.length - 1, from));
+  const b = Math.max(a + 1, Math.min(peaks.length, to));
   const cols = Math.max(1, Math.min(WAVE_MAX_BARS, Math.round(widthPx / WAVE_BAR_PX)));
   const barW = widthPx / cols;
   const step = (b - a) / cols;
-  const H = CHIP_BODY_H;
   const parts: string[] = [];
   for (let i = 0; i < cols; i++) {
     const s0 = a + Math.floor(i * step);
     const s1 = Math.max(s0 + 1, a + Math.floor((i + 1) * step));
     let peak = 0;
     for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
-    // dB axis shifted by the clip's level: a boost pushes bars up against the ceiling (where they flatten,
-    // exactly as the level itself does), an attenuation lowers the whole shape
-    const db = peak > 0 ? 20 * Math.log10(peak) + d.volumeDb : WAVE_FLOOR_DB;
+    // dB axis shifted by the level: a boost pushes bars up against the ceiling (where they flatten, exactly
+    // as the level itself does), an attenuation lowers the whole shape
+    const db = peak > 0 ? 20 * Math.log10(peak) + shiftDb : WAVE_FLOOR_DB;
     const frac = Math.max(0, Math.min(1, (db - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB));
-    // fade envelope at this bar's moment — the same curve the gain applies (fadeShape)
-    const tLocal = ((i + 0.5) / cols) * spanSec;
+    const h = Math.max(0.7, frac * (heightPx - 1)) * (envelopeAt ? envelopeAt((i + 0.5) / cols) : 1);
+    if (h <= 0.05) continue;
+    const x = i * barW;
+    parts.push(`M${x.toFixed(2)},${heightPx}h${barW.toFixed(2)}v${-h.toFixed(1)}h${(-barW).toFixed(2)}Z`);
+  }
+  return parts.join('');
+}
+
+function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
+  const dur = clip.durationSec ?? 0;
+  const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
+  const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
+  return waveBars(peaks, lo, hi, widthPx, CHIP_BODY_H, d.volumeDb, (f) => {
+    // fade envelope at this bar's moment — the same curve the gain applies
+    const tLocal = f * spanSec;
     let fade = 1;
     if (d.fadeInSec > 0) fade *= fadeShape(tLocal / d.fadeInSec);
     if (d.fadeOutSec > 0) fade *= fadeShape((spanSec - tLocal) / d.fadeOutSec);
-    const h = Math.max(0.7, frac * (H - 1)) * fade;
-    if (h <= 0.05) continue;
-    const x = i * barW;
-    parts.push(`M${x.toFixed(2)},${H}h${barW.toFixed(2)}v${-h.toFixed(1)}h${(-barW).toFixed(2)}Z`);
-  }
-  return parts.join('');
+    return fade;
+  });
 }
 
 /** The clip body's own silhouette: full height through the middle, tapering along the fade envelope at
@@ -222,6 +237,8 @@ interface StudioTimelineProps {
   onFadeAudio?: (id: string, edge: 'in' | 'out', sec: number) => void;
   /** Peak envelopes per clip sig (lane waveform); absent = bytes not mounted, chip draws label-only. */
   audioPeaks?: Map<string, Float32Array>;
+  /** Peak envelopes per VIDEO source ('main' / insert-clip url): the scene cards draw their own audio. */
+  sourcePeaks?: Map<string, { peaks: Float32Array; durationSec: number }>;
   /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
   selectedAudioId?: string | null;
   onSelectAudio?: (id: string | null) => void;
@@ -276,6 +293,7 @@ function StudioTimelineImpl({
   onTrimAudio,
   onFadeAudio,
   audioPeaks,
+  sourcePeaks,
   selectedAudioId,
   onSelectAudio,
   onOpenMusicPanel,
@@ -1107,6 +1125,26 @@ function StudioTimelineImpl({
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
                             </>
                           )}
+                          {/* The video's OWN audio, along the card's bottom edge: same dB scale as the music
+                              lane, shifted by this shot's level so muting or ducking a shot shows here too. */}
+                          {(() => {
+                            const sp = sourcePeaks?.get(shot.src ?? 'main');
+                            if (!sp || sp.durationSec <= 0 || w < 6) return null;
+                            const per = sp.peaks.length / sp.durationSec;
+                            const dbShift = shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0);
+                            return (
+                              <svg
+                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-white/20' : 'text-white/55'}`}
+                                style={{ height: SCENE_WAVE_H }}
+                                viewBox={`0 0 ${Math.round(w)} ${SCENE_WAVE_H}`}
+                                preserveAspectRatio="none"
+                                aria-hidden
+                              >
+                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-black/35" />
+                                <path d={waveBars(sp.peaks, Math.floor(shot.srcStart * per), Math.ceil(shot.srcEnd * per), w, SCENE_WAVE_H, dbShift)} fill="currentColor" />
+                              </svg>
+                            );
+                          })()}
                           {/* Index number */}
                           <span className="absolute left-1 top-1 rounded bg-black/55 px-1 text-[9px] font-semibold leading-[14px] text-white">{i + 1}</span>
                         </button>
