@@ -103,7 +103,7 @@ import { useStudioExport } from './use-export';
 import { DEFAULT_RENDER_OPTS, type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { GenChatPanel, type GenElementResult } from './gen-chat-panel';
-import { kitSampleProps } from './kit-ui';
+import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
 import { KitPropsPanel } from './kit-props-panel';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { AssetsPanel, type GenType, type PanelDragAsset } from './assets-panel';
@@ -2348,14 +2348,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     else if (floatWinRef.current === 'kitProps') setFloatWin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
-  const insertTemplateBlock = (templateId: string) => {
+  const insertTemplateBlock = (templateId: string, kitProps?: Record<string, unknown>) => {
     pushUndoSnapshot();
     const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
     let base = newBlock(templateId, { startSec });
     if (templateId.startsWith('kit:')) {
       // Kit blocks: language-neutral sample props (defaults carry the design; the value/text is the only content),
       // a boxed default region, and enough duration for the staged entrance to read.
-      base = { ...base, slots: { ...base.slots, props: kitSampleProps(templateId.slice(4)) }, box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 }, durationSec: 4 };
+      // Props tuned in the preview lightbox win over the samples; duration matches the preview
+      base = {
+        ...base,
+        slots: { ...base.slots, props: kitProps ?? kitSampleProps(templateId.slice(4)) },
+        box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 },
+        durationSec: KIT_INSERT_DURATION,
+      };
     }
     const b = { ...base, trackIndex: freeTrack(compRef.current.blocks, base.startSec, base.durationSec, base.trackIndex) };
     setComp((c) => ({ ...c, blocks: [...c.blocks, b] }));
@@ -4287,7 +4293,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               comp={comp}
               onInsert={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
               onInsertElement={insertGeneratedElement}
-              onInsertKit={(cid) => insertTemplateBlock(`kit:${cid}`)}
+              onInsertKit={(cid, props) => insertTemplateBlock(`kit:${cid}`, props)}
               onDragAsset={setDragAsset}
               onOpenGen={(t, anchor) => {
                 setGenType(t);

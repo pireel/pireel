@@ -3,6 +3,10 @@
 
 import { t } from './i18n';
 
+/** Seconds a freshly inserted kit block occupies — also the preview length, so entrance/exit
+ *  choreography (lower thirds settle out, steps pace their reveals) reads the same in both. */
+export const KIT_INSERT_DURATION = 4;
+
 export function kitSampleProps(cid: string): Record<string, unknown> {
   if (cid === 'metric') return { value: '47%', trend: 'up' };
   if (cid === 'callout') return { text: t('presets.sampleText') };
