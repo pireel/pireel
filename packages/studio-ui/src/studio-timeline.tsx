@@ -72,15 +72,29 @@ export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
  *  the rounded, overflow-hidden chip and be unclickable. */
 const KNOB_INSET = 7;
 
+/** Waveform vertical scale: dBFS with a noise floor, the pro-tool convention (Audacity's Waveform (dB)
+ *  view defaults to a -60 dB meter range; Premiere ships the same idea as "logarithmic waveform scaling").
+ *  Linear amplitude looks flat for everything quiet — hearing is logarithmic, so the drawing should be too. */
+const WAVE_FLOOR_DB = -60;
+/** Widest a single bar gets (px). Bars are 1px wherever the chip has the room — no gaps, CapCut-style
+ *  filled silhouette — and only widen past this cap on absurdly zoomed-in chips, to bound the path string. */
+const WAVE_BAR_PX = 1;
+const WAVE_MAX_BARS = 2400;
+
+/** Waveform bars for one audio chip: bar height = the source peak in dBFS, SHIFTED by everything that
+ *  changes how loud the clip actually plays — its volume setting and the fade envelope at that moment
+ *  (same dB-axis-shift convention the reference editor uses). So turning the volume down visibly lowers
+ *  the wave, and the fades read as ramps, with no extra coloured overlay on top.
+ *  Built against the chip's real pixel width (viewBox = that width, no stretching) over the clip's
+ *  TRIMMED source slice, so the shape stays honest at every zoom. */
 function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
   const dur = clip.durationSec ?? 0;
   const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
   const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
   const a = Math.max(0, Math.min(peaks.length - 1, lo));
   const b = Math.max(a + 1, Math.min(peaks.length, hi));
-  const BAR = 2;
-  const GAP = 1;
-  const cols = Math.max(1, Math.floor(widthPx / (BAR + GAP)));
+  const cols = Math.max(1, Math.min(WAVE_MAX_BARS, Math.round(widthPx / WAVE_BAR_PX)));
+  const barW = widthPx / cols;
   const step = (b - a) / cols;
   const H = 100;
   const parts: string[] = [];
@@ -91,12 +105,15 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
     for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
     // fade envelope at this bar's moment (same math as audioClipGainAt, drawn instead of overlaid)
     const tLocal = ((i + 0.5) / cols) * spanSec;
-    let f = 1;
-    if (d.fadeInSec > 0) f *= Math.min(1, tLocal / d.fadeInSec);
-    if (d.fadeOutSec > 0) f *= Math.min(1, Math.max(0, (spanSec - tLocal) / d.fadeOutSec));
-    const h = Math.max(1.5, Math.min(H, peak * f * (H * 0.92)));
-    const x = i * (BAR + GAP);
-    parts.push(`M${x},${H}h${BAR}v${-h.toFixed(1)}h${-BAR}Z`);
+    let fade = 1;
+    if (d.fadeInSec > 0) fade *= Math.min(1, tLocal / d.fadeInSec);
+    if (d.fadeOutSec > 0) fade *= Math.min(1, Math.max(0, (spanSec - tLocal) / d.fadeOutSec));
+    const lin = peak * fade;
+    const db = lin > 0 ? 20 * Math.log10(lin) + d.volumeDb : WAVE_FLOOR_DB;
+    const frac = Math.max(0, Math.min(1, (db - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB));
+    const h = Math.max(0.8, frac * H * 0.96);
+    const x = i * barW;
+    parts.push(`M${x.toFixed(2)},${H}h${barW.toFixed(2)}v${-h.toFixed(1)}h${(-barW).toFixed(2)}Z`);
   }
   return parts.join('');
 }
