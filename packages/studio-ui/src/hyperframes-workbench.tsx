@@ -4361,7 +4361,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               selectedId={selectedAudioId}
               usable={audioOps.clipUsable}
               onPatch={audioOps.patchClip}
-              onPreviewVolume={audioOps.previewClipVolume}
               shot={selectedShot ?? null}
               shotCount={(comp.shots ?? []).length}
               onSetShotAudio={(patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }, all: boolean) => {

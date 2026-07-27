@@ -9,7 +9,7 @@
  * same drag discipline as the framing panel.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Music } from 'lucide-react';
 import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
@@ -20,7 +20,6 @@ export function MusicPanel({
   selectedId,
   usable,
   onPatch,
-  onPreviewVolume,
   shot,
   shotCount,
   onSetShotAudio,
@@ -32,7 +31,6 @@ export function MusicPanel({
   /** Per-clip byte availability (dead blob after reload = false → row shows the missing hint). */
   usable: (c: AudioClip) => boolean;
   onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => void;
-  onPreviewVolume: (id: string, db: number) => void;
   /** Selected shot (video track). With no audio clip selected this panel edits the FOOTAGE's own sound. */
   shot: VideoShot | null;
   shotCount: number;
@@ -43,70 +41,33 @@ export function MusicPanel({
 }) {
   const sel = clips.find((c) => c.id === selectedId) ?? null;
   const selD = sel ? audioClipDefaults(sel) : null;
-  const committedDb = Math.round(sel?.volumeDb ?? AUDIO_DEFAULT_DB);
-  const [dragDb, setDragDb] = useState<number | null>(null);
-  useEffect(() => setDragDb(null), [selectedId]);
   // Video-track volume speaks percent of source level (its ceiling is 0 dB — see VideoShot.volumeDb),
   // matching the framing panel's control rather than inventing a second unit for the same field.
-  const shotCommittedPct = Math.round(dbToGain(shot?.volumeDb ?? 0) * 100);
-  const [shotDrag, setShotDrag] = useState<number | null>(null);
-  useEffect(() => setShotDrag(null), [shot?.id]);
-  const shotPct = shotDrag ?? shotCommittedPct;
-  const commitShot = () => {
-    if (shotDrag != null && shotDrag !== shotCommittedPct) {
-      onSetShotAudio({ volumeDb: shotDrag <= 0 ? VOLUME_DB_MIN : Math.max(VOLUME_DB_MIN, Math.min(0, 20 * Math.log10(shotDrag / 100))) }, !shot);
-    }
-    setShotDrag(null);
-  };
-  const dbValue = dragDb ?? committedDb;
-  const commitDb = () => {
-    if (sel && dragDb != null && dragDb !== committedDb) onPatch(sel.id, { volumeDb: dragDb });
-    setDragDb(null);
-  };
+  const shotPct = Math.round(dbToGain(shot?.volumeDb ?? 0) * 100);
+  const setShotPct = (pct: number) =>
+    onSetShotAudio({ volumeDb: pct <= 0 ? VOLUME_DB_MIN : Math.max(VOLUME_DB_MIN, Math.min(0, 20 * Math.log10(pct / 100))) }, !shot);
+  const dbValue = Math.round(sel?.volumeDb ?? AUDIO_DEFAULT_DB);
 
-  /** Slider row: drags update the local value at once (readout follows the finger), commit on release —
-   *  fades/speed don't have a live-preview channel, so the value only lands in comp when you let go. */
-  const [dragVal, setDragVal] = useState<{ k: string; v: number } | null>(null);
-  // Mirror in a ref: the commit reads THIS, never a setState updater. Updaters run during render, so
-  // committing from inside one calls the parent's setState mid-render ("cannot update a component while
-  // rendering a different component") — and StrictMode would fire it twice on top of that.
-  const dragValRef = useRef<{ k: string; v: number } | null>(null);
-  dragValRef.current = dragVal;
-  useEffect(() => setDragVal(null), [selectedId]);
-  const slider = (k: string, label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, commit: (v: number) => void) => {
-    const shown = dragVal?.k === k ? dragVal.v : value;
-    const done = () => {
-      const d = dragValRef.current;
-      dragValRef.current = null;
-      setDragVal(null);
-      if (d?.k === k && d.v !== value) commit(d.v);
-    };
-    return (
-      <div className="flex flex-col gap-1">
-        <div className="text-ink-3 flex items-center justify-between">
-          <span>{label}</span>
-          <span className="text-ink-4 tabular-nums">{fmt(shown)}</span>
-        </div>
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={shown}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            dragValRef.current = { k, v };
-            setDragVal({ k, v });
-          }}
-          onPointerUp={done}
-          onKeyUp={done}
-          onBlur={done}
-          className="zoom-range w-full"
-          aria-label={label}
-        />
+  /** Slider row: writes straight through on every change — no drag buffer, no commit-on-release. The
+   *  value shown is the value applied (and heard); the preview follows comp, so there is nothing to sync. */
+  const slider = (label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, commit: (v: number) => void) => (
+    <div className="flex flex-col gap-1">
+      <div className="text-ink-3 flex items-center justify-between">
+        <span>{label}</span>
+        <span className="text-ink-4 tabular-nums">{fmt(value)}</span>
       </div>
-    );
-  };
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => commit(Number(e.target.value))}
+        className="zoom-range w-full"
+        aria-label={label}
+      />
+    </div>
+  );
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
@@ -135,10 +96,7 @@ export function MusicPanel({
                     step={1}
                     value={shotPct}
                     disabled={!!shot?.audioMuted}
-                    onChange={(e) => setShotDrag(Number(e.target.value))}
-                    onPointerUp={commitShot}
-                    onKeyUp={commitShot}
-                    onBlur={commitShot}
+                    onChange={(e) => setShotPct(Number(e.target.value))}
                     className="zoom-range w-full"
                     aria-label={t('panels.volume')}
                   />
@@ -159,8 +117,8 @@ export function MusicPanel({
                 </div>
                 {shot ? (
                   <>
-                    {slider('sfi', t('panels.fadeIn'), shot.audioFadeInSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeInSec: v }, false))}
-                    {slider('sfo', t('panels.fadeOut'), shot.audioFadeOutSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeOutSec: v }, false))}
+                    {slider(t('panels.fadeIn'), shot.audioFadeInSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeInSec: v }, false))}
+                    {slider(t('panels.fadeOut'), shot.audioFadeOutSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeOutSec: v }, false))}
                   </>
                 ) : (
                   <div className="text-ink-4 text-[10.5px]">{t('panels.selectShotForFades')}</div>
@@ -187,22 +145,15 @@ export function MusicPanel({
               max={AUDIO_VOLUME_DB_MAX}
               step={1}
               value={dbValue}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setDragDb(v);
-                onPreviewVolume(sel.id, v);
-              }}
-              onPointerUp={commitDb}
-              onKeyUp={commitDb}
-              onBlur={commitDb}
+              onChange={(e) => onPatch(sel.id, { volumeDb: Number(e.target.value) })}
               className="zoom-range w-full"
               aria-label={t('panels.volume')}
             />
             {/* Effective values (fades are clamped so the two never overlap) — showing the raw stored number
                 would promise a fade the clip is too short to hold. */}
-            {slider('fi', t('panels.fadeIn'), selD!.fadeInSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}
-            {slider('fo', t('panels.fadeOut'), selD!.fadeOutSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeOutSec: v }))}
-            {slider('sp', t('panels.speedRate'), selD!.speed, AUDIO_SPEED_MIN, AUDIO_SPEED_MAX, 0.05, (v) => `${v.toFixed(2)}×`, (v) => onPatch(sel.id, { speed: v }))}
+            {slider(t('panels.fadeIn'), selD!.fadeInSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}
+            {slider(t('panels.fadeOut'), selD!.fadeOutSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeOutSec: v }))}
+            {slider(t('panels.speedRate'), selD!.speed, AUDIO_SPEED_MIN, AUDIO_SPEED_MAX, 0.05, (v) => `${v.toFixed(2)}×`, (v) => onPatch(sel.id, { speed: v }))}
             <div className="text-ink-4 text-[10.5px]">{t('panels.speedPitchNote')}</div>
           </section>
         )}

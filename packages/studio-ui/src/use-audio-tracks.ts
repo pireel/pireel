@@ -196,26 +196,20 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => (x.id === id ? patchAudioClip(x, patch) : x)) }));
   };
 
-  /** Engine specs from current state; dbOverride feeds the volume slider's live preview. */
-  const engineSpecs = (override?: { id: string; volumeDb: number }): EngineAudioClip[] => {
+  /** Engine specs from current state (panel edits land in comp immediately, so there is no separate
+   *  preview override to thread through — the effect below respecs from whatever comp says). */
+  const engineSpecs = (): EngineAudioClip[] => {
     const c = compRef.current;
     const total = totalDuration(c);
     return (c.audioTracks ?? [])
       .filter(clipUsable)
-      .map((clip) => {
-        const eff = override && override.id === clip.id ? { ...clip, volumeDb: override.volumeDb } : clip;
-        return {
-          id: clip.id,
-          url: clip.src,
-          speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
-          gainAt: (tt: number) => audioClipGainAt(eff, tt, total),
-          srcTimeAt: (tt: number) => audioClipSrcTimeAt(eff, tt),
-        };
-      });
-  };
-
-  const previewClipVolume = (id: string, db: number) => {
-    videoEngineRef.current?.setAudioClips(engineSpecs({ id, volumeDb: db }));
+      .map((clip) => ({
+        id: clip.id,
+        url: clip.src,
+        speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
+        gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
+        srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
+      }));
   };
 
   // Engine sync: respec on any clip/timeline/bytes change (same-url respec swaps only closures — no reload).
@@ -308,7 +302,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     uploadAudio,
     removeClip,
     patchClip,
-    previewClipVolume,
     audioForExport,
     mountAudioFile,
     mountAudioFromUrl,
