@@ -74,9 +74,10 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Whether a clip's bytes are playable right now (mounted File, or a non-blob URL the element can stream). */
   const clipUsable = (c: AudioClip): boolean => (c.sig != null && audioFilesRef.current.has(c.sig)) || !c.src.startsWith('blob:');
 
-  /** Absolute-peak envelope over the whole file (~20 points/s, capped) for the lane waveform. */
+  /** Absolute-peak envelope over the whole file (~100 points/s, capped) for the lane waveform — dense
+   *  enough that a zoomed-in chip still gets a distinct bar per column instead of repeating buckets. */
   const peaksOf = (buf: AudioBuffer): Float32Array => {
-    const n = Math.min(2000, Math.max(200, Math.round(buf.duration * 20)));
+    const n = Math.min(30000, Math.max(200, Math.round(buf.duration * 100)));
     const ch0 = buf.getChannelData(0);
     const ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0;
     const out = new Float32Array(n);
