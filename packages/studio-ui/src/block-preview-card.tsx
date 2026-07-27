@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
-import { type Block, type Composition, blockKind, blockPreviewDoc, renderBlock } from '@pireel/studio-engine/composition';
+import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp, renderBlock } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -54,7 +54,38 @@ export function BlockPreviewFrame({
   // otherwise any edit would reload the entire wall of iframes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const docLoop = animate === 'manual' ? 'hover' : animate; // same doc shape: paused, message-driven
-  const doc = useMemo(() => injectPreviewRuntime(blockPreviewDoc(comp, block, { loop: docLoop, ground })), [block, comp.theme, comp.width, comp.height, comp.palette, docLoop, ground]);
+  // The document is rebuilt only for STRUCTURAL changes (different block, template, canvas, theme,
+  // ground, loop mode, timing/box). Content edits — the props panel, in-place text — patch the one
+  // block inside the live document instead: rebuilding reloads gsap and replays everything, which
+  // made tuning props feel like the preview was thrashing.
+  const docKey = [
+    block.id,
+    block.templateId,
+    `${comp.width}x${comp.height}`,
+    comp.theme ?? '',
+    JSON.stringify(comp.palette ?? null),
+    ground,
+    String(docLoop),
+    block.durationSec,
+    JSON.stringify(block.box ?? null),
+  ].join('|');
+  const latest = useRef(block);
+  latest.current = block;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const doc = useMemo(() => injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground })), [docKey]);
+  // Content patch: assembled against the same mini-composition the document used, so a patched node
+  // is byte-identical to what a rebuild would have produced.
+  const patchedKey = useRef(docKey);
+  useEffect(() => {
+    if (patchedKey.current !== docKey) {
+      patchedKey.current = docKey; // the doc itself was just rebuilt with this block — nothing to patch
+      return;
+    }
+    const mini = previewMiniComp(comp, block);
+    const r = assembleBlockHtml({ ...block, startSec: 0 }, mini);
+    iframeRef.current?.contentWindow?.postMessage({ type: 'hf:blockAdd', blockId: block.id, html: r.html, timelineBody: r.timelineBody }, '*');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [block, docKey]);
   // In checker mode the component doesn't fill the cell: inset and centered so the checkerboard shows around it (filling would hide the "transparency is visible" cue)
   const inset = ground === 'checker' ? 0.86 : 1;
   const h = Math.round(comp.height * (width / comp.width));
