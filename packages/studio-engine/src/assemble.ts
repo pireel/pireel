@@ -616,6 +616,11 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
   const at = Math.min(block.durationSec - 0.06, Math.max(1.0, block.durationSec * 0.85));
   let html = assembleHtml(mini);
   if (opts.ground === 'checker') html = html.replace('</head>', `<style>html, body, #root { ${TRANSPARENT_CSS} }</style></head>`);
+  // Opening frame, declared BEFORE the runtime boots: it aligns to this time and only then reveals
+  // the blocks, so nothing intermediate is ever painted. Looping previews open at 0 (the entrance
+  // plays from its start); static and hover-gated ones open on the stable frame.
+  const bootT = opts.loop === true ? 0 : Math.max(0, at);
+  html = html.replace('</head>', `<script>window.__hfBootT=${n(bootT)};</script></head>`);
   if (opts.loop) {
     // Animated preview: rAF loops the animation — after playing, hold on the stable frame for a beat then restart (used by frame-panel style cards).
     // loop:'hover' = initially paused, controlled by parent postMessage {type:'hf-loop',on} (plays only on cover-wall hover);
@@ -626,7 +631,9 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
     return `${html}\n<script>(function(){var playing=${auto ? 'true' : 'false'};var t0=performance.now();
 function tick(){if(playing){var t=((performance.now()-t0)/1000)%${n(cycle)};if(t>${n(at)})t=${n(at)};try{window.__hfPreview&&window.__hfPreview.seek(t);}catch(e){}}requestAnimationFrame(tick);}
 addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();playing=true;}else{playing=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
-setTimeout(function(){if(!playing){try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}t0=performance.now();tick();},50);})();</script>`;
+(function start(){if(!window.__hfPreview){setTimeout(start,16);return;}t0=performance.now();tick();})();})();</script>`;
   }
-  return `${html}\n<script>setTimeout(function(){try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(e){}},0);</script>`;
+  // Static card: the head-declared boot time already opened it on the stable frame; a full seek
+  // afterwards only matters for media (video currentTime), which a single-block preview has none of.
+  return html;
 }

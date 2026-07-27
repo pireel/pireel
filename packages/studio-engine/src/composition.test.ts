@@ -553,7 +553,8 @@ describe('blockPreviewDoc(单块 hover 预览)', () => {
     expect(doc).not.toContain('id="vidEl"'); // 不带视频
     expect(doc).toContain('87%');
     expect(doc).toMatch(/data-start="0"/); // 归一到 0 起点
-    expect(doc).toContain('window.__hfPreview'); // 定格 seek 脚本
+    // 定格时刻在 head 声明(运行时据此对齐后才揭示块,首帧即稳定帧):块 2s → 取 max(1.0, 2*0.85)=1.7
+    expect(doc).toMatch(/window\.__hfBootT=1\.7/);
   });
 });
 
