@@ -92,8 +92,9 @@ export interface BlockPatchPair {
   geom: boolean; // box/contentBox/scale/rotation → hf:boxSize/hf:rotate
   timing: boolean; // startSec/durationSec → hf:blockTiming (runtime reads data-start dynamically per frame, changing the attribute takes effect immediately)
   style: boolean; // bg/border/radius/opacity → hf:blockStyle (shares blockBgCss with assemble, identical output)
-  slots: boolean; // slots text → skippable only if it's an echo of an iframe in-place text edit (the caller verifies echo)
-  kitProps: boolean; // kit block props → parent re-renders the one block and swaps it in via hf:blockHtml
+  slots: boolean; // slots changed → parent re-assembles the block and swaps the node in via hf:blockAdd (echo of an iframe text edit skips even that)
+  kitProps: boolean; // kit block props → parent re-renders the one block's content via hf:blockHtml
+  replace: boolean; // templateId swap → full node replace via hf:blockAdd
 }
 const PATCH_GEOM = new Set(['box', 'contentBox', 'scale', 'rotation']);
 const PATCH_TIMING = new Set(['startSec', 'durationSec']);
@@ -103,7 +104,7 @@ const PATCH_IGNORE = new Set(['fitScale', 'label']); // not in the preview doc (
 /** Only block-level changes that can be patched in place (geometry/time-window/appearance/slots echo) + pure deletes: return a patch list;
  *  any other change (new block / track swap / template swap / caption re-lay / comp-level field…) returns null and goes to a full doc rebuild.
  *  On a hit, skip the rebuild (rebuild = double-buffer swap = video reload, the source of "flicker per edit") and commit the final value once into the active doc. */
-export function blockPatchableChange(a: Composition | null, b: Composition): { pairs: BlockPatchPair[]; removed: Block[] } | null {
+export function blockPatchableChange(a: Composition | null, b: Composition): { pairs: BlockPatchPair[]; removed: Block[]; added: Block[] } | null {
   if (!a || a === b) return null;
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Composition>;
   for (const k of keys) {
@@ -113,19 +114,25 @@ export function blockPatchableChange(a: Composition | null, b: Composition): { p
   const ba = a.blocks;
   const bb = b.blocks;
   if (ba === bb) return null;
-  // Order-preserving id pairing: deletions allowed; additions/reorders → null (they touch DOM structure, leave to the rebuild)
+  // Id pairing, order-checked: deletions and ADDITIONS are patchable (hf:remove / hf:blockAdd);
+  // reorders of surviving blocks change stacking (DOM order) → leave to the rebuild.
+  const posA = new Map(ba.map((x, i) => [x.id, i] as const));
+  const idsB = new Set(bb.map((x) => x.id));
   const pairs: BlockPatchPair[] = [];
-  const removed: Block[] = [];
-  let j = 0;
-  for (const x of ba) {
-    const y = bb[j];
-    if (!y || y.id !== x.id) {
-      removed.push(x);
+  const removed: Block[] = ba.filter((x) => !idsB.has(x.id));
+  const added: Block[] = [];
+  let last = -1;
+  for (const y of bb) {
+    const i = posA.get(y.id);
+    if (i === undefined) {
+      added.push(y);
       continue;
     }
-    j++;
+    if (i < last) return null; // surviving blocks reordered
+    last = i;
+    const x = ba[i]!;
     if (x === y) continue;
-    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, slots: false, kitProps: false };
+    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, slots: false, kitProps: false, replace: false };
     const ks = new Set([...Object.keys(x), ...Object.keys(y)]);
     for (const k of ks) {
       const xv = (x as unknown as Record<string, unknown>)[k];
@@ -136,19 +143,19 @@ export function blockPatchableChange(a: Composition | null, b: Composition): { p
         p.geom = true;
       } else if (PATCH_TIMING.has(k)) p.timing = true;
       else if (PATCH_STYLE.has(k)) p.style = true;
+      else if (k === 'templateId') p.replace = true;
       else if (k === 'slots') {
-        // Kit blocks derive HTML from slots.props — the parent can re-render just this block
-        // and swap it in place, no echo required (hf:blockHtml carries the fresh render)
+        // Kit blocks derive HTML from slots.props — content-only re-render (hf:blockHtml);
+        // any other slots change re-assembles the whole node (hf:blockAdd replace)
         if (y.templateId.startsWith('kit:')) p.kitProps = true;
         else p.slots = true;
       }
       else return null;
     }
-    if (p.geom || p.timing || p.style || p.slots || p.kitProps) pairs.push(p);
+    if (p.geom || p.timing || p.style || p.slots || p.kitProps || p.replace) pairs.push(p);
   }
-  if (j !== bb.length) return null; // bb has blocks ba doesn't (addition/reorder)
-  if (!pairs.length && !removed.length) return null;
-  return { pairs, removed };
+  if (!pairs.length && !removed.length && !added.length) return null;
+  return { pairs, removed, added };
 }
 
 /** Translate the whole block: box (crop window) and contentBox (content anchor) move together, keeping the crop relationship unchanged. */
