@@ -150,7 +150,7 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   if (next.sig) out.sig = next.sig;
   if (next.label) out.label = next.label;
   if (next.durationSec != null) out.durationSec = next.durationSec;
-  if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 10) / 10;
+  if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 100) / 100; // same precision as in/out — a coarser start would slide the audio inside the clip on a left trim
   const db = next.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, next.volumeDb)) : undefined;
   if (db != null && db !== AUDIO_DEFAULT_DB) out.volumeDb = Math.round(db * 10) / 10;
   const fadeSec = (v: number) => Math.round(Math.max(0, Math.min(AUDIO_FADE_MAX_SEC, v)) * 10) / 10;

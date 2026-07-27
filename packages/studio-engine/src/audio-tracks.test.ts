@@ -100,6 +100,16 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(fast.fadeOutSec).toBe(0);
   });
 
+  it('左端裁剪后音频不会在片段内滑动:起点与入点同一精度落库(0.01)', () => {
+    const c = clip({ startSec: 10, durationSec: 30 });
+    const p = audioTrimPatch(c, 'left', 15.037);
+    const saved = patchAudioClip(c, p);
+    // 落库后 起点位移 与 入点前进 必须相等(差值即为音频在片段内的滑动量)
+    const moved = (saved.startSec ?? 0) - 10;
+    const consumed = saved.inSec ?? 0;
+    expect(Math.abs(moved - consumed)).toBeLessThan(0.011);
+  });
+
   it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {
     const c = clip({ sig: 's', label: '轻快', durationSec: 30 });
     const same = patchAudioClip(c, { volumeDb: AUDIO_DEFAULT_DB, speed: 1, fadeInSec: AUDIO_FADE_IN_SEC });
@@ -108,7 +118,7 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(changed.volumeDb).toBe(-24);
     expect(changed.speed).toBe(1.26);
     expect(changed.fadeOutSec).toBe(3);
-    expect(changed.startSec).toBe(12.3);
+    expect(changed.startSec).toBe(12.34); // 0.01 精度:与 in/out 同口径,左端裁剪才不会让音频在片段内滑动
     const clamped = patchAudioClip(c, { speed: 9 });
     expect(clamped.speed).toBe(2);
   });
