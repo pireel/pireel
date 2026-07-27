@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
@@ -175,8 +175,6 @@ export function AssetsPanel({
   genRefreshTick?: number;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
-  // Element category browsing ("Mine" first; each category shows one row of two cards, header right-arrow opens detail)
-  const [elCat, setElCat] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() =>
     typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid',
   );
@@ -362,7 +360,7 @@ export function AssetsPanel({
       </button>
       <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
         {it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : <ImageIcon size={9} />}
-        {it.origin === 'preset' ? (t('common.theme')) : it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
+        {it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
       </span>
       {it.deletable && (
         <button
@@ -537,10 +535,7 @@ export function AssetsPanel({
               <button
                 key={k.v}
                 type="button"
-                onClick={() => {
-                  setKind(k.v);
-                  setElCat(null); // switching filter returns to the category overview
-                }}
+                onClick={() => setKind(k.v)}
                 className={`rounded-md px-2 py-0.5 text-[11px] transition ${
                   kind === k.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
                 }`}
@@ -604,57 +599,25 @@ export function AssetsPanel({
             )}
           </div>
         ) : kind === 'element' && !q.trim() ? (
-          // Element category browsing: "Mine" first; overview shows one row of two cards per category, header right-arrow opens detail
-          elCat ? (
-            <div>
-              <button
-                type="button"
-                onClick={() => setElCat(null)}
-                className="text-ink-2 hover:text-ink mb-2 flex items-center gap-1 text-[12px] font-medium"
-              >
-                <ChevronLeft size={13} /> {elCat === 'mine' ? t('common.mine') : (kitGroup.id === elCat ? kitGroup.title : elCat)}
-                <span className="text-ink-4 font-normal">
-                  · {(elCat === 'mine' ? mineItems : kitGroup.id === elCat ? kitGroup.items : []).length}
-                </span>
-              </button>
-              {elCat === 'mine' && mineItems.length === 0 ? (
-                <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-6 text-center text-[10.5px]">
-                  {t('panels.noElementsOwnYet')}
-                  <br />
-                  {t('panels.selectElementCanvasSave')}
+          // Elements laid out flat: "Mine" then the component library, every card visible — the
+          // library is small enough to browse in one pass, and a click-through level only hid it.
+          <div className="space-y-3.5">
+            {[{ id: 'mine', title: t('common.mine'), items: mineItems }, kitGroup].map((g) => (
+              <section key={g.id}>
+                <div className="text-ink-2 mb-1.5 flex items-center text-[12px] font-medium">
+                  {g.title}
+                  <span className="text-ink-4 ml-1 font-normal">{g.items.length}</span>
                 </div>
-              ) : (
-                <div className="columns-2 gap-1.5">
-                  {(elCat === 'mine' ? mineItems : kitGroup.id === elCat ? kitGroup.items : []).map(gridCard)}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3.5">
-              {[{ id: 'mine', title: t('common.mine'), items: mineItems }, kitGroup].map((g) => (
-                <section key={g.id}>
-                  <button
-                    type="button"
-                    onClick={() => setElCat(g.id)}
-                    className="text-ink-2 hover:text-ink mb-1.5 flex w-full items-center justify-between text-[12px] font-medium"
-                  >
-                    <span>
-                      {g.title}
-                      <span className="text-ink-4 ml-1 font-normal">{g.items.length}</span>
-                    </span>
-                    <ChevronRight size={13} />
-                  </button>
-                  {g.items.length === 0 ? (
-                    <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-4 text-center text-[10.5px]">
-                      {t('panels.selectElementCanvasSave')}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 items-start gap-1.5">{g.items.slice(0, 2).map(gridCard)}</div>
-                  )}
-                </section>
-              ))}
-            </div>
-          )
+                {g.items.length === 0 ? (
+                  <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-4 text-center text-[10.5px]">
+                    {t('panels.selectElementCanvasSave')}
+                  </div>
+                ) : (
+                  <div className="columns-2 gap-1.5">{g.items.map(gridCard)}</div>
+                )}
+              </section>
+            ))}
+          </div>
         ) : view === 'grid' ? (
           // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns
           <div className="columns-2 gap-1.5">{shown.map(gridCard)}</div>
@@ -674,7 +637,7 @@ export function AssetsPanel({
                     <div className="text-ink truncate text-[11px]">{it.label}</div>
                     <div className="text-ink-4 flex items-center gap-1 text-[10px]">
                       {it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : <ImageIcon size={9} />}
-                      {it.origin === 'preset' ? (t('common.theme')) : it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
+                      {it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
                       {it.createdAt ? ` · ${new Date(it.createdAt).toLocaleDateString()}` : ''}
                     </div>
                   </div>
