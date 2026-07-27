@@ -86,11 +86,12 @@ const WAVE_BAR_PX = 1;
 const WAVE_MAX_BARS = 2400;
 
 /** Waveform bars for one audio chip, in BODY pixel coordinates (the svg is 1:1 with px — no viewBox
- *  stretching, which is what squashed earlier shapes). Height = the source peak in dBFS shifted by the
- *  clip's VOLUME (dB-axis shift, same convention as the reference editor) — deliberately NOT by the
- *  fades, which are drawn as a wedge instead. The waveform means CONTENT, so trimming an edge only
- *  reveals or hides it. Built over the clip's trimmed [in,out] slice against its true content width. */
-function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number): string {
+ *  stretching, which is what squashed earlier shapes). Bar height = the source peak in dBFS shifted by
+ *  the clip's VOLUME (dB-axis shift), then SHAPED BY THE FADE ENVELOPE — the wave's own top edge is the
+ *  fade curve, which is how the reference reads: the fades cut the wave, no wedge is painted over it.
+ *  Built over the clip's trimmed [in,out] slice against its true content width, so trimming an edge only
+ *  reveals or hides the content. */
+function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
   const dur = clip.durationSec ?? 0;
   const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
   const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
@@ -108,54 +109,26 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
     for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
     const db = peak > 0 ? 20 * Math.log10(peak) + d.volumeDb : WAVE_FLOOR_DB;
     const frac = Math.max(0, Math.min(1, (db - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB));
-    const h = Math.max(0.7, frac * (H - 1));
+    // fade envelope at this bar's moment — the same curve the gain applies (fadeShape)
+    const tLocal = ((i + 0.5) / cols) * spanSec;
+    let fade = 1;
+    if (d.fadeInSec > 0) fade *= fadeShape(tLocal / d.fadeInSec);
+    if (d.fadeOutSec > 0) fade *= fadeShape((spanSec - tLocal) / d.fadeOutSec);
+    const h = Math.max(0.7, frac * (H - 1)) * fade;
+    if (h <= 0.05) continue;
     const x = i * barW;
     parts.push(`M${x.toFixed(2)},${H}h${barW.toFixed(2)}v${-h.toFixed(1)}h${(-barW).toFixed(2)}Z`);
   }
   return parts.join('');
 }
 
-/** Where a fade knee lands horizontally (body px), clamped so it stays grabbable inside the clip. */
+/** Where a fade knob sits horizontally (body px), clamped so it stays grabbable inside the clip. */
 function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSec: number): number {
   const raw = (Math.max(0, fadeSec) / Math.max(0.05, spanSec)) * widthPx;
   const inset = Math.min(KNEE_EDGE_INSET, Math.max(0, widthPx / 2));
   const at = edge === 'in' ? raw : widthPx - raw;
   return Math.min(widthPx - inset, Math.max(inset, at));
 }
-
-/** Sampled fade ramp from the silent corner to the knee, shaped by the SAME curve the gain uses
- *  (fadeShape) — so the line on the lane is literally the envelope being applied, eased at both ends
- *  instead of a hard diagonal. 12 steps is what the reference renderer samples. */
-function fadeRampPoints(x0: number, x1: number, yBottom: number, yKnee: number): string[] {
-  const STEPS = 12;
-  const pts: string[] = [];
-  for (let s = 1; s <= STEPS; s++) {
-    const t = s / STEPS;
-    const px = x0 + (x1 - x0) * t;
-    const py = yBottom + (yKnee - yBottom) * fadeShape(t);
-    pts.push(`${px.toFixed(2)},${py.toFixed(2)}`);
-  }
-  return pts;
-}
-
-/** Fade wedge + ramp, the reference editor's exact construction: the ramp curves from the body's silent
- *  BOTTOM corner up to the knee sitting in the fade lane, the region above it is darkened, and the ramp
- *  itself is stroked — losing that stroke is what made the shading read as a shapeless blob. Body px. */
-function audioFadeShapes(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): { fill: string; ramp: string } {
-  const H = CHIP_BODY_H;
-  const fill: string[] = [];
-  const ramp: string[] = [];
-  const build = (cornerX: number, kneeX: number) => {
-    const pts = fadeRampPoints(cornerX, kneeX, H, KNEE_LANE_Y);
-    ramp.push(`M${cornerX.toFixed(2)},${H}L${pts.join('L')}`);
-    // wedge: up the clip's edge, across the fade lane to the knee, then back down along the curve
-    fill.push(`M${cornerX.toFixed(2)},${H}L${cornerX.toFixed(2)},${KNEE_LANE_Y}L${kneeX.toFixed(2)},${KNEE_LANE_Y}L${[...pts].reverse().slice(1).join('L')}Z`);
-  };
-  if (d.fadeInSec > 0) build(0, audioKneeX(d.fadeInSec, 'in', widthPx, spanSec));
-  if (d.fadeOutSec > 0) build(widthPx, audioKneeX(d.fadeOutSec, 'out', widthPx, spanSec));
-  return { fill: fill.join(''), ramp: ramp.join('') };
-}
-
 
 interface StudioTimelineProps {
   comp: Composition;
@@ -1408,7 +1381,6 @@ function StudioTimelineImpl({
                     const peaks = clip.sig ? audioPeaks?.get(clip.sig) : undefined;
                     const span = Math.max(0.05, w.end - w.start);
                     const knobs = width > 56; // narrow chips have no room for knees (drag the panel sliders instead)
-                    const fadeShapes = audioFadeShapes(d, contentW, span);
                     // Every gesture commits on EVERY move (same as the element track): the chip's DOM box is
                     // driven straight off comp state, so the edge tracks the pointer 1:1 at any zoom and there
                     // is no local "ghost" geometry to drift. Direct-manipulation drags stay out of the undo
@@ -1454,6 +1426,9 @@ function StudioTimelineImpl({
                         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5" style={{ height: CHIP_LABEL_H }}>
                           <Music size={9} className="text-accent shrink-0" />
                           <span className="text-ink-2 truncate text-[9.5px] leading-none">{clip.label || t('panels.musicBed')}</span>
+                          {d.speed !== 1 && (
+                            <span className="text-ink-3 bg-panel/70 shrink-0 rounded px-1 text-[9px] leading-[12px] tabular-nums">{d.speed.toFixed(2).replace(/0$/, '')}×</span>
+                          )}
                         </div>
                         {/* Body svg is 1:1 with pixels (no viewBox stretching, so nothing gets squashed) and
                             spans the clip's TRUE content width, so the chip crops it: dragging an edge reveals
@@ -1464,10 +1439,7 @@ function StudioTimelineImpl({
                           viewBox={`0 0 ${Math.round(contentW)} ${CHIP_BODY_H}`}
                           aria-hidden
                         >
-                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW)} className="text-accent/90" fill="currentColor" />}
-                          {/* Darkened wedge above the ramp + the stroked ramp itself */}
-                          <path d={fadeShapes.fill} fill="#000" fillOpacity={0.35} />
-                          <path d={fadeShapes.ramp} className="text-accent" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className="text-accent" fill="currentColor" />}
                         </svg>
                         {/* Trim handles (both edges) — edge follows the pointer exactly, like the element track */}
                         <span
@@ -1507,14 +1479,7 @@ function StudioTimelineImpl({
                                 className={`absolute z-10 flex cursor-ew-resize items-center justify-center transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
                                 style={{ left: kx - 7, top: CHIP_LABEL_H + KNEE_LANE_Y - 7, width: 14, height: 14 }}
                               >
-                                <span
-                                  className="bg-accent block"
-                                  style={{
-                                    width: KNEE_SIZE,
-                                    height: KNEE_SIZE,
-                                    clipPath: edge === 'in' ? 'polygon(0 100%, 100% 100%, 100% 0)' : 'polygon(0 0, 0 100%, 100% 100%)',
-                                  }}
-                                />
+                                <span className="block rounded-full border-2 border-white/90 bg-transparent shadow-sm" style={{ width: KNEE_SIZE, height: KNEE_SIZE }} />
                               </span>
                             );
                           })}
