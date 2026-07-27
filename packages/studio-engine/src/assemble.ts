@@ -599,8 +599,11 @@ ${scripts.join('\n')}
 // The document only goes transparent; the checkerboard is drawn by the preview container in **screen pixels** (drawing it inside the document gets scaled and blurred — been there)
 const TRANSPARENT_CSS = 'background:transparent !important;';
 
-export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: boolean | 'hover'; ground?: 'stage' | 'checker' } = {}): string {
-  const mini: Composition = {
+/** The single-block composition a preview document renders: the block normalized to start at 0,
+ *  on the project's canvas/theme. Exported so in-place preview patches assemble the block against
+ *  the SAME composition the document was built from (otherwise a patched node drifts from a rebuild). */
+export function previewMiniComp(comp: Composition, block: Block): Composition {
+  return {
     width: comp.width,
     height: comp.height,
     theme: comp.theme,
@@ -611,6 +614,10 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
     // Caption previews also take the global style — timeline mini-cards / style cards match what's seen in the final cut
     ...(comp.captionStyle ? { captionStyle: comp.captionStyle } : {}),
   };
+}
+
+export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: boolean | 'hover'; ground?: 'stage' | 'checker' } = {}): string {
+  const mini = previewMiniComp(comp, block);
   // Pause on the stable frame after the entrance animation ends (show full content, not stuck mid-reveal); entrances mostly finish within 1s,
   // take 85% but at least 1s, capped at 0.06s before the end (avoid the tail exit)
   const at = Math.min(block.durationSec - 0.06, Math.max(1.0, block.durationSec * 0.85));
