@@ -16,6 +16,8 @@ interface FieldSchema {
   type?: string;
   format?: string;
   enum?: string[];
+  /** Declared in the component schema: this field only matters while `field` holds one of `in`. */
+  showWhen?: { field: string; in: string[] };
   minimum?: number;
   maximum?: number;
   maxLength?: number;
@@ -48,7 +50,11 @@ export function KitPropsPanel({
   // would stringify and destroy the data on first keystroke. Content for those is edited on the
   // canvas or via the agent until a row editor exists.
   const fields = Object.entries((def.jsonSchema as { properties?: Record<string, FieldSchema> }).properties ?? {}).filter(
-    ([, f]) => f.type !== 'array',
+    ([, f]) =>
+      f.type !== 'array' &&
+      // Dependency declared by the schema, not by this panel — a new component that declares one
+      // hides correctly with no change here. The value is kept, just not shown.
+      (!f.showWhen || f.showWhen.in.includes(String(current[f.showWhen.field] ?? ''))),
   );
 
   const set = (key: string, v: unknown) => {
