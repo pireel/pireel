@@ -459,14 +459,17 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎵',
     label: 'tools.set_bgm.label',
     description:
-      "Background-music bed under the WHOLE video (one bed, not per-shot). Mount: pass url (audio file on Pireel storage / a generated track) — the level auto-balances against the measured narration loudness and ducks further while speech plays. Adjust: call without url to change knobs of the current bed — volumeDb (-60..0 override), duck (auto-lower under speech, default on), loop (default on). Remove: off:true. Users' own uploads appear in list_assets.",
+      "Audio tracks on the music lane (plain clips: no looping, no auto-ducking; overlapping clips sum). Add: pass url (audio on Pireel storage / a generated track) + optional startSec — the initial level auto-balances against the measured narration loudness; the receipt returns trackId. Adjust: pass trackId (or omit when exactly one track exists) + any of volumeDb (-60..0), fadeInSec, fadeOutSec, speed (0.5..2, pitch shifts), startSec. Remove: off:true with trackId (or without = remove all). Current tracks show in the snapshot; users' own uploads appear in list_assets.",
     inputSchema: obj(
       {
-        url: { type: 'string', description: 'Audio url to mount as the bed (replaces the current one). Omit to adjust the existing bed.' },
-        volumeDb: { type: 'number', description: 'Bed level dB, clamped -60..0. Omit on mount = auto level from loudness measurement.' },
-        duck: { type: 'boolean' },
-        loop: { type: 'boolean' },
-        off: { type: 'boolean', description: 'true = remove the bed (other fields ignored).' },
+        url: { type: 'string', description: 'Audio url to ADD as a new track. Omit to adjust an existing one.' },
+        trackId: { type: 'string', description: 'Target track id (from the snapshot / add receipt).' },
+        startSec: { type: 'number', description: 'Position on the edited timeline (seconds).' },
+        volumeDb: { type: 'number', description: 'Level dB, clamped -60..0. Omit on add = auto level from loudness measurement.' },
+        fadeInSec: { type: 'number' },
+        fadeOutSec: { type: 'number' },
+        speed: { type: 'number', description: 'Playback-rate multiplier 0.5..2 (changes pitch on purpose — matches export).' },
+        off: { type: 'boolean', description: 'true = remove the track (all tracks when trackId omitted).' },
       },
       [],
     ),

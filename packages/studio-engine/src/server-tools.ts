@@ -29,7 +29,8 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
-  patchBgm,
+  audioClipId,
+  patchAudioClip,
   patchShotAudio,
   blockId,
   blockKind,
@@ -142,7 +143,7 @@ function offlineState(p: ServerToolProject): string {
       height: c.height,
       theme: c.theme,
       ...(cs ? { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } } : {}),
-      ...(c.bgm ? { bgm: { label: c.bgm.label, volumeDb: c.bgm.volumeDb, duck: c.bgm.duck } } : {}),
+      ...(c.audioTracks?.length ? { audio: c.audioTracks.map((a) => ({ id: a.id, label: a.label, startSec: a.startSec ?? 0, volumeDb: a.volumeDb, speed: a.speed })) } : {}),
       ...(c.audioDenoise ? { denoise: { strength: c.audioDenoise.strength } } : {}),
       blocks: c.blocks.map((b) => ({
         id: b.id,
@@ -353,26 +354,37 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
     }
     case 'set_bgm': {
-      if (input.off === true) {
-        if (!c.bgm) return { result: { ok: false, error: 'no background music yet' } };
-        const { bgm: _drop, ...rest } = c;
-        return { result: { ok: true, summary: 'Removed the background music' }, comp: rest };
-      }
+      const tracks = c.audioTracks ?? [];
+      const trackIdIn = typeof input.trackId === 'string' ? input.trackId : '';
       const knobs = {
         ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
-        ...(typeof input.duck === 'boolean' ? { duck: input.duck } : {}),
-        ...(typeof input.loop === 'boolean' ? { loop: input.loop } : {}),
+        ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+        ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
+        ...(typeof input.speed === 'number' && Number.isFinite(input.speed) ? { speed: input.speed } : {}),
+        ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
       };
+      if (input.off === true) {
+        if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
+        if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };
+        const next = trackIdIn ? tracks.filter((x) => x.id !== trackIdIn) : [];
+        const { audioTracks: _drop, ...rest } = c;
+        return { result: { ok: true, summary: trackIdIn ? 'Removed the audio track' : 'Removed all audio tracks' }, comp: next.length ? { ...c, audioTracks: next } : rest };
+      }
       const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
       if (urlIn) {
-        // Offline mount: no loudness measurement without the tab — the bed lands at the default level
-        // (or the explicit volumeDb); the browser re-measures nothing on open, honest defaults are fine.
-        const bed = patchBgm({ src: urlIn }, knobs);
-        return { result: { ok: true, summary: `Laid a background-music bed (${r1(bed.volumeDb ?? -18)}dB, ducks under speech)` }, comp: { ...c, bgm: bed } };
+        // Offline add: no loudness measurement without the tab — the clip lands at the default level
+        // (or the explicit volumeDb); honest defaults are fine.
+        const clip = patchAudioClip({ id: audioClipId(), src: urlIn }, knobs);
+        return {
+          result: { ok: true, summary: `Added an audio track (${r1(clip.volumeDb ?? -18)}dB)`, data: { trackId: clip.id } },
+          comp: { ...c, audioTracks: [...tracks, clip] },
+        };
       }
-      if (!c.bgm) return { result: { ok: false, error: 'no background music yet — pass a url to lay one' } };
-      if (!Object.keys(knobs).length) return { result: { ok: false, error: 'pass volumeDb / duck / loop, or off:true' } };
-      return { result: { ok: true, summary: 'Adjusted the background music' }, comp: { ...c, bgm: patchBgm(c.bgm, knobs) } };
+      const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
+      if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
+      if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
+      if (!Object.keys(knobs).length) return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec, or off:true' } };
+      return { result: { ok: true, summary: 'Adjusted the audio track' }, comp: { ...c, audioTracks: tracks.map((x) => (x.id === target.id ? patchAudioClip(x, knobs) : x)) } };
     }
     case 'split_shot': {
       const shots = shotsOf(p);

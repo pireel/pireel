@@ -120,7 +120,7 @@ export function useAgentContext(deps: AgentContextDeps) {
               return { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } };
             })()
           : {}),
-        ...(c.bgm ? { bgm: { label: c.bgm.label, volumeDb: c.bgm.volumeDb, duck: c.bgm.duck } } : {}),
+        ...(c.audioTracks?.length ? { audio: c.audioTracks.map((a) => ({ id: a.id, label: a.label, startSec: a.startSec ?? 0, volumeDb: a.volumeDb, speed: a.speed })) } : {}),
         ...(c.audioDenoise ? { denoise: { strength: c.audioDenoise.strength } } : {}),
         blocks: c.blocks.map((b) => ({
           id: b.id,

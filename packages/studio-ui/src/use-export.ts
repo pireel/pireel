@@ -15,7 +15,7 @@
 
 import { useRef, useState, type MutableRefObject } from 'react';
 import { toast } from '@pireel/ui/toast';
-import type { Composition, SpeechSpan } from '@pireel/studio-engine/composition';
+import type { AudioClip, Composition } from '@pireel/studio-engine/composition';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
@@ -72,12 +72,12 @@ export function useStudioExport(deps: {
   videoFileRef: MutableRefObject<File | null>;
   /** Local insert-clip File table (key = blob URL); used by client compositing to fetch insert clips. */
   clipFilesRef?: MutableRefObject<Map<string, File>>;
-  /** BGM payload getter (bytes + speech spans for ducking); null result = export without a bed. */
-  bgmExportRef?: MutableRefObject<(() => { file: File; speech: SpeechSpan[] } | null) | null>;
+  /** Audio-clip payload getter (clip + bytes per usable track); null result = export without audio tracks. */
+  audioExportRef?: MutableRefObject<(() => { clip: AudioClip; file: File }[] | null) | null>;
   /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
   denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
 }) {
-  const { compRef, videoFileRef, clipFilesRef, bgmExportRef, denoiseExportRef } = deps;
+  const { compRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -107,7 +107,7 @@ export function useStudioExport(deps: {
       comp: c,
       videoFile: videoFileRef.current!,
       clipFiles: clipFilesRef?.current ?? new Map(),
-      bgm: bgmExportRef?.current?.() ?? null,
+      audio: audioExportRef?.current?.() ?? null,
       denoise: denoiseExportRef?.current?.() ?? null,
       render: opts,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),

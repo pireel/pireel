@@ -12,7 +12,7 @@
  * Don't bypass this entry and import sibling files directly — the registry-ready order is guaranteed here.
  */
 
-export * from './bgm';
+export * from './audio-tracks';
 export * from './caption-presets';
 export * from './composition-core';
 export * from './receipt-delta';

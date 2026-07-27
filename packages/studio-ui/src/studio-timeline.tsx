@@ -29,7 +29,7 @@ import {
   totalDuration,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
-import { bgmWindow } from '@pireel/studio-engine/composition';
+import { audioClipWindow } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -116,11 +116,14 @@ interface StudioTimelineProps {
   onDropAsset?: (t: number) => void;
   /** Asset dropped on the main track: handled as a clip insert (video = whole clip, image = 5s static frame); workbench fetches bytes via insertClipCore. */
   onDropAssetClip?: (t: number) => void;
-  /** Audio asset dropped anywhere on the timeline: mount as the BGM bed starting at the drop time (music lane). */
+  /** Audio asset dropped anywhere on the timeline: add a clip starting at the drop time (music lane). */
   onDropAssetAudio?: (t: number) => void;
-  /** Music-lane bed chip dragged horizontally: commit the new start (edited seconds). */
-  onMoveBgm?: (startSec: number) => void;
-  /** Click the bed chip (no drag): open the audio panel. */
+  /** Music-lane chip dragged horizontally: commit that clip's new start (edited seconds). */
+  onMoveAudio?: (id: string, startSec: number) => void;
+  /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
+  selectedAudioId?: string | null;
+  onSelectAudio?: (id: string | null) => void;
+  /** Click a chip (no drag): select + open the audio panel. */
   onOpenMusicPanel?: () => void;
   /** Filmstrips for externally inserted clips (shotId -> frames, t = the clip's own source time). */
   clipStrips?: Record<string, FilmstripFrame[]>;
@@ -167,7 +170,9 @@ function StudioTimelineImpl({
   onDropAsset,
   onDropAssetClip,
   onDropAssetAudio,
-  onMoveBgm,
+  onMoveAudio,
+  selectedAudioId,
+  onSelectAudio,
   onOpenMusicPanel,
   onInsertClipAt,
   onOpenTransition,
@@ -559,10 +564,11 @@ function StudioTimelineImpl({
   };
   const slotTop = (slot: number) => (slot === 0 ? 0 : H0 + ROW_GAP + (slot - 1) * (ROW_H + ROW_GAP));
   const tracksH = slotTop(displayTracks.length - 1) + (displayTracks.length > 1 ? ROW_H : H0);
-  // Music lane: a dedicated bottom row — shown when a bed exists, or as a highlighted drop target while an audio asset is being dragged
-  const musicLane = !!comp.bgm || assetDragKind === 'audio';
-  const [bgmDragStart, setBgmDragStart] = useState<number | null>(null); // live drag position of the bed chip (commit on release)
-  const bgmDragRef = useRef<number | null>(null); // commit reads the ref — a setState updater with side effects would double-fire under StrictMode
+  // Music lane: a dedicated bottom row — shown when clips exist, or as a highlighted drop target while an audio asset is being dragged
+  const audioClips = comp.audioTracks ?? [];
+  const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
+  const [audioDrag, setAudioDrag] = useState<{ id: string; start: number } | null>(null); // live drag position of a chip (commit on release)
+  const audioDragRef = useRef<number | null>(null); // commit reads the ref — a setState updater with side effects would double-fire under StrictMode
   const musicTop = tracksH + ROW_GAP;
   const tracksHWithMusic = musicLane ? musicTop + ROW_H : tracksH;
 
@@ -1284,54 +1290,62 @@ function StudioTimelineImpl({
                   </div>
                 ))}
 
-              {/* Music lane (bottom row): the BGM bed chip — drag horizontally to move its start, click to open
-                  the audio panel; while an audio asset is dragged the empty lane shows as a dashed drop strip */}
+              {/* Music lane (bottom row): one chip per audio clip — click selects (+ opens the audio panel),
+                  drag horizontally to move; while an audio asset is dragged the lane shows a dashed drop strip.
+                  Overlapping clips overlap visually too (their sounds sum). */}
               {musicLane && (
                 <div className="absolute right-0 left-0" style={{ top: musicTop, height: ROW_H }}>
-                  {comp.bgm ? (
-                    (() => {
-                      const w = bgmWindow(comp.bgm, dur);
-                      const start = bgmDragStart ?? w.start;
-                      const width = Math.max(24, x(Math.max(0.5, w.end - w.start)));
-                      return (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          title={comp.bgm.label || t('panels.musicBed')}
-                          className="bg-accent/20 border-accent/50 text-ink absolute top-0.5 bottom-0.5 flex cursor-grab items-center gap-1.5 overflow-hidden rounded-md border px-2 active:cursor-grabbing"
-                          style={{ left: x(start), width }}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') onOpenMusicPanel?.();
-                          }}
-                          onPointerDown={(e) => {
-                            if (e.button !== 0) return;
-                            e.stopPropagation();
-                            const grab = secAt(e.clientX) - w.start;
-                            drag(
-                              e,
-                              (cx) => {
-                                let ns = Math.max(0, Math.min(Math.max(0, dur - 1), secAt(cx) - grab));
-                                if (ns < 0.15) ns = 0; // snap to the head
-                                bgmDragRef.current = ns;
-                                setBgmDragStart(ns);
-                              },
-                              (moved) => {
-                                const ns = bgmDragRef.current;
-                                bgmDragRef.current = null;
-                                setBgmDragStart(null);
-                                if (moved && ns != null && Math.abs(ns - w.start) > 0.01) onMoveBgm?.(ns);
-                                if (!moved) onOpenMusicPanel?.();
-                              },
-                            );
-                          }}
-                        >
-                          <Music size={11} className="text-accent shrink-0" />
-                          <span className="truncate text-[10px]">{comp.bgm.label || t('panels.musicBed')}</span>
-                        </div>
-                      );
-                    })()
-                  ) : (
+                  {audioClips.map((clip) => {
+                    const w = audioClipWindow(clip, dur);
+                    const start = audioDrag?.id === clip.id ? audioDrag.start : w.start;
+                    const width = Math.max(24, x(Math.max(0.5, w.end - w.start)));
+                    const selected = selectedAudioId === clip.id;
+                    return (
+                      <div
+                        key={clip.id}
+                        role="button"
+                        tabIndex={0}
+                        title={clip.label || t('panels.musicBed')}
+                        className={`absolute top-0.5 bottom-0.5 flex cursor-grab items-center gap-1.5 overflow-hidden rounded-md border px-2 active:cursor-grabbing ${
+                          selected ? 'bg-accent/30 border-accent ring-accent/40 z-10 ring-1' : 'bg-accent/15 border-accent/40'
+                        } text-ink`}
+                        style={{ left: x(start), width }}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            onSelectAudio?.(clip.id);
+                            onOpenMusicPanel?.();
+                          }
+                        }}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return;
+                          e.stopPropagation();
+                          const grab = secAt(e.clientX) - w.start;
+                          drag(
+                            e,
+                            (cx) => {
+                              let ns = Math.max(0, Math.min(Math.max(0, dur - 1), secAt(cx) - grab));
+                              if (ns < 0.15) ns = 0; // snap to the head
+                              audioDragRef.current = ns;
+                              setAudioDrag({ id: clip.id, start: ns });
+                            },
+                            (moved) => {
+                              const ns = audioDragRef.current;
+                              audioDragRef.current = null;
+                              setAudioDrag(null);
+                              onSelectAudio?.(clip.id);
+                              if (moved && ns != null && Math.abs(ns - w.start) > 0.01) onMoveAudio?.(clip.id, ns);
+                              if (!moved) onOpenMusicPanel?.();
+                            },
+                          );
+                        }}
+                      >
+                        <Music size={11} className="text-accent shrink-0" />
+                        <span className="truncate text-[10px]">{clip.label || t('panels.musicBed')}</span>
+                      </div>
+                    );
+                  })}
+                  {audioClips.length === 0 && (
                     <div className="border-accent/50 text-accent absolute inset-x-0 top-0.5 bottom-0.5 flex items-center justify-center gap-1.5 rounded-md border border-dashed text-[10px]">
                       <Music size={11} /> {t('panels.dropAudioHere')}
                     </div>
