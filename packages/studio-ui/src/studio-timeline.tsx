@@ -1137,14 +1137,14 @@ function StudioTimelineImpl({
                             const dbShift = shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0);
                             return (
                               <svg
-                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent/30' : 'text-accent'}`}
+                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent/25' : 'text-accent/60'}`}
                                 style={{ height: SCENE_WAVE_H }}
                                 viewBox={`0 0 ${Math.round(w)} ${SCENE_WAVE_H}`}
                                 preserveAspectRatio="none"
                                 aria-hidden
                               >
                                 {/* same blue as the music lane: the two audio surfaces read as one material */}
-                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-accent/15" />
+                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-accent/8" />
                                 <path d={waveBars(sp.peaks, Math.floor(shot.srcStart * per), Math.ceil(shot.srcEnd * per), w, SCENE_WAVE_H, dbShift)} fill="currentColor" />
                               </svg>
                             );
@@ -1507,7 +1507,7 @@ function StudioTimelineImpl({
                             split the reference editor uses, which is why its knees sit in a lane instead of on
                             the chip's corner. */}
                         <div
-                          className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 ${selected ? 'bg-accent/25' : 'bg-accent/15'}`}
+                          className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 ${selected ? 'bg-accent/18' : 'bg-accent/10'}`}
                           style={{ height: CHIP_LABEL_H }}
                         >
                           <Music size={9} className="text-accent shrink-0" />
@@ -1526,8 +1526,8 @@ function StudioTimelineImpl({
                           aria-hidden
                         >
                           {/* body background tapering along the fade, then the wave on top of it */}
-                          <path d={audioBodyPath(d, contentW, span)} className={selected ? 'text-accent/25' : 'text-accent/15'} fill="currentColor" />
-                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className="text-accent" fill="currentColor" />}
+                          <path d={audioBodyPath(d, contentW, span)} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
+                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className="text-accent/60" fill="currentColor" />}
                         </svg>
                         {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
                             trim the wave is nudged the other way so the audio stays pinned to the timeline —
