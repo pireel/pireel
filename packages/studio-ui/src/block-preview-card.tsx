@@ -28,6 +28,7 @@ export function BlockPreviewFrame({
   block,
   width,
   animate = false,
+  replayKey,
   ground = 'checker',
   focus,
   children,
@@ -39,8 +40,12 @@ export function BlockPreviewFrame({
   ground?: 'stage' | 'checker';
   /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
   focus?: { x: number; y: number; w: number; h: number };
-  /** Animated preview: true = auto-loop; 'hover' = play on hover, return to stable frame on leave. Default freezes the stable frame. */
-  animate?: boolean | 'hover';
+  /** Animated preview: true = auto-loop; 'hover' = play on hover, return to stable frame on leave;
+   *  'manual' = frozen on the stable frame, replayed only via replayKey. Default freezes the stable frame. */
+  animate?: boolean | 'hover' | 'manual';
+  /** Bump to replay the entrance once (used with animate='manual'): the preview plays from the
+   *  start and settles back on the stable frame. Editing props re-renders WITHOUT replaying. */
+  replayKey?: number;
   /** Overlay layer (timestamp stamp / hover buttons / generating cover), mounted in the same relative container */
   children?: ReactNode;
 }) {
@@ -48,7 +53,8 @@ export function BlockPreviewFrame({
   // Re-render the doc only when this block (or theme/canvas size/palette) changes — deliberately not depending on the whole comp,
   // otherwise any edit would reload the entire wall of iframes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const doc = useMemo(() => injectPreviewRuntime(blockPreviewDoc(comp, block, { loop: animate, ground })), [block, comp.theme, comp.width, comp.height, comp.palette, animate, ground]);
+  const docLoop = animate === 'manual' ? 'hover' : animate; // same doc shape: paused, message-driven
+  const doc = useMemo(() => injectPreviewRuntime(blockPreviewDoc(comp, block, { loop: docLoop, ground })), [block, comp.theme, comp.width, comp.height, comp.palette, docLoop, ground]);
   // In checker mode the component doesn't fill the cell: inset and centered so the checkerboard shows around it (filling would hide the "transparency is visible" cue)
   const inset = ground === 'checker' ? 0.86 : 1;
   const h = Math.round(comp.height * (width / comp.width));
@@ -57,7 +63,18 @@ export function BlockPreviewFrame({
   const padX = focus ? Math.round(width / 2 - (focus.x + focus.w / 2) * scale) : Math.round((width * (1 - inset)) / 2);
   const padY = focus ? Math.round(h / 2 - (focus.y + focus.h / 2) * scale) : Math.round((h * (1 - inset)) / 2);
   // The sandboxed iframe (opaque origin) can't reach __hfPreview, so hover play control goes through postMessage
-  const setLoop = (on: boolean) => iframeRef.current?.contentWindow?.postMessage({ type: 'hf-loop', on }, '*');
+  const setLoop = (on: boolean, once = false) => iframeRef.current?.contentWindow?.postMessage({ type: 'hf-loop', on, once }, '*');
+  // Replay on demand. Skips the initial mount (the doc already opens on the stable frame) and
+  // never fires on prop edits — those re-render the doc, which opens frozen again.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    if (replayKey !== undefined) setLoop(true, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayKey]);
   return (
     <div
       className={`relative ${ground === 'checker' ? '' : 'bg-black/40'}`}

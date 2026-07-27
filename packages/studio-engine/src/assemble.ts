@@ -623,14 +623,16 @@ export function blockPreviewDoc(comp: Composition, block: Block, opts: { loop?: 
   html = html.replace('</head>', `<script>window.__hfBootT=${n(bootT)};</script></head>`);
   if (opts.loop) {
     // Animated preview: rAF loops the animation — after playing, hold on the stable frame for a beat then restart (used by frame-panel style cards).
+    // {type:'hf-loop',on:true,once:true} plays the entrance ONE time and settles on the stable frame
+    // (the lightbox's replay button) — without `once` it keeps cycling.
     // loop:'hover' = initially paused, controlled by parent postMessage {type:'hf-loop',on} (plays only on cover-wall hover);
     // a sandboxed iframe (opaque origin) can't reach __hfPreview from the parent, so control must go through messages.
     const HOLD = 1.2;
     const cycle = Math.max(0.5, at) + HOLD;
     const auto = opts.loop === true;
-    return `${html}\n<script>(function(){var playing=${auto ? 'true' : 'false'};var t0=performance.now();
-function tick(){if(playing){var t=((performance.now()-t0)/1000)%${n(cycle)};if(t>${n(at)})t=${n(at)};try{window.__hfPreview&&window.__hfPreview.seek(t);}catch(e){}}requestAnimationFrame(tick);}
-addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();playing=true;}else{playing=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
+    return `${html}\n<script>(function(){var playing=${auto ? 'true' : 'false'};var once=false;var t0=performance.now();
+function tick(){if(playing){var e=(performance.now()-t0)/1000;var t=once?Math.min(e,${n(at)}):e%${n(cycle)};if(t>${n(at)})t=${n(at)};try{window.__hfPreview&&window.__hfPreview.seek(t);}catch(err){}if(once&&e>=${n(at)})playing=false;}requestAnimationFrame(tick);}
+addEventListener('message',function(e){var d=e&&e.data;if(!d||d.type!=='hf-loop')return;if(d.on){t0=performance.now();once=!!d.once;playing=true;}else{playing=false;once=false;try{window.__hfPreview&&window.__hfPreview.seek(${n(at)});}catch(err){}}});
 (function start(){if(!window.__hfPreview){setTimeout(start,16);return;}t0=performance.now();tick();})();})();</script>`;
   }
   // Static card: the head-declared boot time already opened it on the stable frame; a full seek

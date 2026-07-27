@@ -1,4 +1,5 @@
 export const PANELS_EN: Record<string, string> = {
+  'panels.replayAnimation': 'Replay',
   'kitProp.cells': 'Cells',
   'kitProp.series': 'Series',
   'kitProp.items': 'Items',

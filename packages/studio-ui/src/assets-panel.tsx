@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, RotateCcw, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
@@ -706,6 +706,7 @@ function AssetLightbox({
   // Kit preview is a real kit block on the same render path as the canvas — what you tune here is
   // exactly what lands. Edits live in this state only: the library entry is never touched.
   const [draft, setDraft] = useState<Record<string, unknown>>(() => (item.kit ? kitSampleProps(item.kit) : {}));
+  const [replayKey, setReplayKey] = useState(0);
   useEffect(() => setDraft(item.kit ? kitSampleProps(item.kit) : {}), [item.id, item.kit]);
   const kitBlock = useMemo(
     () =>
@@ -758,7 +759,7 @@ function AssetLightbox({
           </div>
         )}
         {kitBlock ? (
-          <LightboxKit block={kitBlock} />
+          <LightboxKit block={kitBlock} replayKey={replayKey} />
         ) : item.kind === 'element' && item.element ? (
           // Element live preview: auto-loops (same render as card hover, just always playing + larger)
           <LightboxElement item={item} comp={comp} />
@@ -791,16 +792,30 @@ function AssetLightbox({
         </div>
       )}
       </div>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onInsert(kitBlock ? draft : undefined);
-        }}
-        className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
-      >
-        <Plus size={13} /> {t('panels.insertOntoCanvas')}
-      </button>
+      <div className="flex items-center gap-2">
+        {kitBlock && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setReplayKey((k) => k + 1);
+            }}
+            className="inline-flex items-center gap-1 rounded-md bg-white/15 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-white/25"
+          >
+            <RotateCcw size={13} /> {t('panels.replayAnimation')}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onInsert(kitBlock ? draft : undefined);
+          }}
+          className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
+        >
+          <Plus size={13} /> {t('panels.insertOntoCanvas')}
+        </button>
+      </div>
     </div>
   );
 }
@@ -888,10 +903,11 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
 /** Lightbox element live preview: same render as ElementTile, larger + always looping (local iframe, available immediately). */
 /** Large kit preview: the block renders through the same assembler path the canvas uses, so the
  *  tuned result is exactly what gets inserted. Sized to the 16:9 component design canvas. */
-function LightboxKit({ block }: { block: Block }) {
+function LightboxKit({ block, replayKey }: { block: Block; replayKey: number }) {
   const pc = STATIC_ELEMENT_PREVIEW_COMP;
   const width = Math.max(240, Math.min(window.innerWidth - 352, Math.round(window.innerHeight * 0.78 * (pc.width / pc.height))));
-  return <BlockPreviewFrame comp={pc} block={block} width={width} animate />;
+  // Frozen on the stable frame: prop edits re-render in place, and the entrance replays only when asked
+  return <BlockPreviewFrame comp={pc} block={block} width={width} animate="manual" replayKey={replayKey} />;
 }
 
 function LightboxElement({ item, comp }: { item: LibraryItem; comp: Composition }) {

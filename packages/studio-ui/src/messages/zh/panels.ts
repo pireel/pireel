@@ -1,4 +1,5 @@
 export const PANELS_ZH: Record<string, string> = {
+  'panels.replayAnimation': '重播动效',
   'kitProp.cells': '数据项',
   'kitProp.series': '数据列',
   'kitProp.items': '条目',
