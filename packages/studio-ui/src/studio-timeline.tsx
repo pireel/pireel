@@ -72,22 +72,22 @@ export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
  *  the rounded, overflow-hidden chip and be unclickable. */
 const KNOB_INSET = 7;
 
-/** Waveform vertical scale: dBFS with a noise floor, the pro-tool convention (Audacity's Waveform (dB)
- *  view defaults to a -60 dB meter range; Premiere ships the same idea as "logarithmic waveform scaling").
- *  Linear amplitude looks flat for everything quiet — hearing is logarithmic, so the drawing should be too. */
-const WAVE_FLOOR_DB = -60;
-/** Widest a single bar gets (px). Bars are 1px wherever the chip has the room — no gaps, CapCut-style
- *  filled silhouette — and only widen past this cap on absurdly zoomed-in chips, to bound the path string. */
+/** Waveform vertical scale: dBFS against a noise floor, the pro-tool convention (the reference editor
+ *  normalizes 20·log10(peak) over a -50 dB floor; Audacity's Waveform (dB) view and Premiere's
+ *  "logarithmic waveform scaling" are the same idea). Linear amplitude draws everything quiet as a flat
+ *  line — hearing is logarithmic, so the drawing is too. */
+const WAVE_FLOOR_DB = -50;
+/** Bars are 1px with no gaps (filled silhouette); the cap only kicks in on absurdly zoomed-in chips, to
+ *  bound the path string. */
 const WAVE_BAR_PX = 1;
 const WAVE_MAX_BARS = 2400;
 
-/** Waveform bars for one audio chip: bar height = the source peak in dBFS, SHIFTED by everything that
- *  changes how loud the clip actually plays — its volume setting and the fade envelope at that moment
- *  (same dB-axis-shift convention the reference editor uses). So turning the volume down visibly lowers
- *  the wave, and the fades read as ramps, with no extra coloured overlay on top.
- *  Built against the chip's real pixel width (viewBox = that width, no stretching) over the clip's
- *  TRIMMED source slice, so the shape stays honest at every zoom. */
-function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
+/** Waveform bars for one audio chip. Height = the source peak in dBFS shifted by the clip's VOLUME
+ *  (dB-axis shift, same convention as the reference editor) — deliberately NOT by the fades: a fade to
+ *  half gain is only -6 dB and would be invisible here, which is exactly why fades are drawn as a curve
+ *  (audioFadeCurve) instead. The waveform means CONTENT, so trimming an edge only reveals or hides it.
+ *  Built over the clip's trimmed [in,out] slice against the chip's true content width in px. */
+function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number): string {
   const dur = clip.durationSec ?? 0;
   const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
   const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
@@ -103,18 +103,22 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
     const s1 = Math.max(s0 + 1, a + Math.floor((i + 1) * step));
     let peak = 0;
     for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
-    // fade envelope at this bar's moment (same math as audioClipGainAt, drawn instead of overlaid)
-    const tLocal = ((i + 0.5) / cols) * spanSec;
-    let fade = 1;
-    if (d.fadeInSec > 0) fade *= Math.min(1, tLocal / d.fadeInSec);
-    if (d.fadeOutSec > 0) fade *= Math.min(1, Math.max(0, (spanSec - tLocal) / d.fadeOutSec));
-    const lin = peak * fade;
-    const db = lin > 0 ? 20 * Math.log10(lin) + d.volumeDb : WAVE_FLOOR_DB;
+    const db = peak > 0 ? 20 * Math.log10(peak) + d.volumeDb : WAVE_FLOOR_DB;
     const frac = Math.max(0, Math.min(1, (db - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB));
     const h = Math.max(0.8, frac * H * 0.96);
     const x = i * barW;
     parts.push(`M${x.toFixed(2)},${H}h${barW.toFixed(2)}v${-h.toFixed(1)}h${(-barW).toFixed(2)}Z`);
   }
+  return parts.join('');
+}
+
+/** Fade ramps drawn over the wave: a line from the silent corner up to each knee (the NLE convention —
+ *  the fade is an edit on top of the content, not a change to the content's picture). */
+function audioFadeCurve(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
+  const px = (sec: number) => Math.max(0, Math.min(widthPx, (sec / Math.max(0.05, spanSec)) * widthPx));
+  const parts: string[] = [];
+  if (d.fadeInSec > 0) parts.push(`M0,100L${px(d.fadeInSec).toFixed(2)},2`);
+  if (d.fadeOutSec > 0) parts.push(`M${(widthPx - px(d.fadeOutSec)).toFixed(2)},2L${widthPx.toFixed(2)},100`);
   return parts.join('');
 }
 
@@ -1362,11 +1366,12 @@ function StudioTimelineImpl({
                   {audioClips.map((clip) => {
                     const w = audioClipWindow(clip, dur);
                     const end = Math.min(dur, w.end);
-                    const width = Math.max(14, x(Math.max(0.05, end - w.start)));
+                    const contentW = x(Math.max(0.05, w.end - w.start)); // the clip's real length in px
+                    const width = Math.max(14, x(Math.max(0.05, end - w.start))); // visible box (clipped at the timeline end)
                     const selected = selectedAudioId === clip.id;
                     const d = audioClipDefaults(clip);
                     const peaks = clip.sig ? audioPeaks?.get(clip.sig) : undefined;
-                    const span = Math.max(0.05, end - w.start);
+                    const span = Math.max(0.05, w.end - w.start);
                     const knobs = width > 56; // narrow chips have no room for knobs (drag the panel sliders instead)
                     // Every gesture commits on EVERY move (same as the element track): the chip's DOM box is
                     // driven straight off comp state, so the edge tracks the pointer 1:1 at any zoom and there
@@ -1410,11 +1415,18 @@ function StudioTimelineImpl({
                         {/* Waveform: absolute-peak envelope, bottom-aligned. The path lives in a fixed viewBox
                             and is stretched by preserveAspectRatio, so zooming costs nothing. Only the trimmed
                             [in,out] slice of the source is drawn. */}
-                        {peaks && peaks.length > 1 && (
-                          <svg className="text-accent/90 pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${Math.round(width)} 100`} preserveAspectRatio="none" aria-hidden>
-                            <path d={audioWaveBars(peaks, clip, d, width, span)} fill="currentColor" />
-                          </svg>
-                        )}
+                        {/* Content width (unclamped by the timeline end / the min chip width): the wave is anchored
+                            to the audio itself, so dragging an edge crops the chip and the wave stays put. */}
+                        <svg
+                          className="text-accent/90 pointer-events-none absolute top-0 bottom-0 left-0"
+                          style={{ width: contentW }}
+                          viewBox={`0 0 ${Math.round(contentW)} 100`}
+                          preserveAspectRatio="none"
+                          aria-hidden
+                        >
+                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW)} fill="currentColor" />}
+                          <path d={audioFadeCurve(d, contentW, span)} className="text-accent" fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                        </svg>
                         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 py-0.5">
                           <Music size={10} className="text-accent shrink-0" />
                           <span className="text-ink-2 truncate text-[10px] leading-none">{clip.label || t('panels.musicBed')}</span>
@@ -1445,7 +1457,7 @@ function StudioTimelineImpl({
                               }}
                               title={t('panels.fadeIn')}
                               className={`border-accent bg-panel hover:bg-accent absolute top-1 size-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
-                              style={{ left: Math.min(width - KNOB_INSET, Math.max(KNOB_INSET, (d.fadeInSec / span) * width)) }}
+                              style={{ left: Math.min(contentW - KNOB_INSET, Math.max(KNOB_INSET, (d.fadeInSec / span) * contentW)) }}
                             />
                             <span
                               onPointerDown={(e) => {
@@ -1453,8 +1465,8 @@ function StudioTimelineImpl({
                                 drag(e, (cx) => onFadeAudio?.(clip.id, 'out', Math.round(Math.max(0, Math.min(span, w.end - secAt(cx))) * 10) / 10));
                               }}
                               title={t('panels.fadeOut')}
-                              className={`border-accent bg-panel hover:bg-accent absolute top-1 size-2.5 translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
-                              style={{ right: Math.min(width - KNOB_INSET, Math.max(KNOB_INSET, (d.fadeOutSec / span) * width)) }}
+                              className={`border-accent bg-panel hover:bg-accent absolute top-1 size-2.5 -translate-x-1/2 cursor-ew-resize rounded-full border-2 shadow-sm transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
+                              style={{ left: Math.max(KNOB_INSET, Math.min(contentW - KNOB_INSET, contentW - (d.fadeOutSec / span) * contentW)) }}
                             />
                           </>
                         )}
