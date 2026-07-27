@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, Pin, PinOff } from 'lucide-react';
+  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, Pin, PinOff, SlidersHorizontal } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -102,6 +102,8 @@ import { useStudioExport } from './use-export';
 import { DEFAULT_RENDER_OPTS, type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { GenChatPanel, type GenElementResult } from './gen-chat-panel';
+import { kitSampleProps } from './kit-ui';
+import { KitPropsPanel } from './kit-props-panel';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { AssetsPanel, type GenType, type PanelDragAsset } from './assets-panel';
 import { addElementEntry } from './element-history';
@@ -2280,6 +2282,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     toast.info(t('workbench.afterGeneratingClickInsert'));
   };
   /** Template panel → insert a new block of that template at the playhead (default slot data, edit text after). */
+  // Kit props popover (block toolbar); closes when the selection changes.
+  const [kitPropsOpen, setKitPropsOpen] = useState(false);
+  useEffect(() => setKitPropsOpen(false), [selectedId]);
   const insertTemplateBlock = (templateId: string) => {
     pushUndoSnapshot();
     const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
@@ -2287,11 +2292,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (templateId.startsWith('kit:')) {
       // Kit blocks: language-neutral sample props (defaults carry the design; the value/text is the only content),
       // a boxed default region, and enough duration for the staged entrance to read.
-      const sample =
-        templateId === 'kit:metric'
-          ? { value: '47%', trend: 'up' }
-          : { text: t('presets.sampleText') };
-      base = { ...base, slots: { ...base.slots, props: sample }, box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 }, durationSec: 4 };
+      base = { ...base, slots: { ...base.slots, props: kitSampleProps(templateId.slice(4)) }, box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 }, durationSec: 4 };
     }
     const b = { ...base, trackIndex: freeTrack(compRef.current.blocks, base.startSec, base.durationSec, base.trackIndex) };
     setComp((c) => ({ ...c, blocks: [...c.blocks, b] }));
@@ -3721,6 +3722,33 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       </TooltipTrigger>
                       <TooltipContent>{agentView ? t('workbench.copyBlockReferenceAgent') : t('workbench.tellChatHowChange')}</TooltipContent>
                     </Tooltip>
+                    {/* Kit block: schema-generated props editor (the props ARE the block; edits re-render derived) */}
+                    {mb.templateId.startsWith('kit:') && (
+                      <div className="relative">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => setKitPropsOpen((v) => !v)}
+                              className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${kitPropsOpen ? 'text-accent' : 'text-ink-3 hover:text-ink'}`}
+                            >
+                              <SlidersHorizontal size={13} /> {t('workbench.kitProps')}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{t('workbench.kitPropsTip')}</TooltipContent>
+                        </Tooltip>
+                        {kitPropsOpen && (
+                          <div className="border-line bg-panel absolute left-1/2 top-[calc(100%+8px)] z-50 -translate-x-1/2 rounded-lg border shadow-lg">
+                            <KitPropsPanel
+                              block={mb}
+                              onPatch={(props) => {
+                                setComp((c) => ({ ...c, blocks: c.blocks.map((b) => (b.id === mb.id ? { ...b, slots: { ...b.slots, props } } : b)) }));
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {/* Sync content: one-click fill the data-edit text slots from the narration script in the block's time window (preset component = generic
                         placeholder, this step matches it to real content after dropping; hidden when the OSS shell has no syncFill capability) */}
                     {mb.templateId === 'custom' &&
@@ -4206,6 +4234,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               comp={comp}
               onInsert={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
               onInsertElement={insertGeneratedElement}
+              onInsertKit={(cid) => insertTemplateBlock(`kit:${cid}`)}
               onDragAsset={setDragAsset}
               onOpenGen={(t, anchor) => {
                 setGenType(t);

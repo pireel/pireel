@@ -1,4 +1,6 @@
 export const WORKBENCH_EN: Record<string, string> = {
+  'workbench.kitProps': 'Props',
+  'workbench.kitPropsTip': 'Edit component properties',
   'workbench.addMainVideoBefore': 'Add a main video before inserting B-roll',
   'workbench.adjustBoxHeight': 'Adjust box height',
   'workbench.adjustLineWidth': 'Adjust line width',
