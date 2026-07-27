@@ -43,7 +43,12 @@ export function KitPropsPanel({
     [def, block.slots],
   );
   if (!def) return null;
-  const fields = Object.entries((def.jsonSchema as { properties?: Record<string, FieldSchema> }).properties ?? {});
+  // Row-array props (chart series, kpi cells, steps items) have no control yet — a text input
+  // would stringify and destroy the data on first keystroke. Content for those is edited on the
+  // canvas or via the agent until a row editor exists.
+  const fields = Object.entries((def.jsonSchema as { properties?: Record<string, FieldSchema> }).properties ?? {}).filter(
+    ([, f]) => f.type !== 'array',
+  );
 
   const set = (key: string, v: unknown) => {
     const raw = ((block.slots as { props?: Record<string, unknown> }).props ?? {}) as Record<string, unknown>;
