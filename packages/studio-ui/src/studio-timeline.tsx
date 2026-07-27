@@ -139,11 +139,10 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
   });
 }
 
-/** The clip body's own silhouette: full height through the middle, tapering along the fade envelope at
+/** An audio body's own silhouette: full height through the middle, tapering along the fade envelope at
  *  both ends — so the BACKGROUND reads as the fade too, not just the wave sitting inside a flat block.
- *  Same fadeShape the gain uses; body px coordinates. */
-function audioBodyPath(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
-  const H = CHIP_BODY_H;
+ *  Shared by the lane chips and the scene cards' audio band; same fadeShape the gain uses. */
+function fadeBodyPath(widthPx: number, H: number, fadeInSec: number, fadeOutSec: number, spanSec: number): string {
   const STEPS = 12;
   const pts: string[] = [`0,${H}`];
   const ramp = (fromX: number, toX: number, rising: boolean) => {
@@ -154,8 +153,8 @@ function audioBodyPath(d: ReturnType<typeof audioClipDefaults>, widthPx: number,
       pts.push(`${px.toFixed(2)},${(H - f * H).toFixed(2)}`);
     }
   };
-  const fi = d.fadeInSec > 0 ? (d.fadeInSec / Math.max(0.05, spanSec)) * widthPx : 0;
-  const fo = d.fadeOutSec > 0 ? (d.fadeOutSec / Math.max(0.05, spanSec)) * widthPx : 0;
+  const fi = fadeInSec > 0 ? (fadeInSec / Math.max(0.05, spanSec)) * widthPx : 0;
+  const fo = fadeOutSec > 0 ? (fadeOutSec / Math.max(0.05, spanSec)) * widthPx : 0;
   if (fi > 0) ramp(0, Math.min(widthPx, fi), true);
   else pts.push(`0,0`);
   pts.push(`${Math.max(0, widthPx - fo).toFixed(2)},0`);
@@ -1143,8 +1142,12 @@ function StudioTimelineImpl({
                                 preserveAspectRatio="none"
                                 aria-hidden
                               >
-                                {/* same blue as the music lane: the two audio surfaces read as one material */}
-                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-accent/8" />
+                                {/* same blue as the music lane, and the backing tapers with the fades exactly
+                                    like a lane clip's body — the band IS the shot's audio, shape included */}
+                                <path
+                                  d={fadeBodyPath(w, SCENE_WAVE_H, shot.audioFadeInSec ?? 0, shot.audioFadeOutSec ?? 0, Math.max(0.01, shot.srcEnd - shot.srcStart))}
+                                  className="fill-accent/8"
+                                />
                                 <path
                                   d={waveBars(
                                     sp.peaks,
@@ -1540,7 +1543,7 @@ function StudioTimelineImpl({
                           aria-hidden
                         >
                           {/* body background tapering along the fade, then the wave on top of it */}
-                          <path d={audioBodyPath(d, contentW, span)} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
+                          <path d={fadeBodyPath(contentW, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span)} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
                           {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className="text-accent/60" fill="currentColor" />}
                         </svg>
                         {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
