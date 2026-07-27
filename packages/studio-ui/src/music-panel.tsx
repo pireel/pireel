@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { Music, Upload, Trash2, Wand2 } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, type AudioClip, audioClipDefaults } from '@pireel/studio-engine/composition';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, type AudioClip, audioClipDefaults } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
 const VOL_MIN = -40;
@@ -151,8 +151,8 @@ export function MusicPanel({
             />
             {/* Effective values (fades are clamped so the two never overlap) — showing the raw stored number
                 would promise a fade the clip is too short to hold. */}
-            {slider('fi', t('panels.fadeIn'), selD!.fadeInSec, 0, 10, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}
-            {slider('fo', t('panels.fadeOut'), selD!.fadeOutSec, 0, 10, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeOutSec: v }))}
+            {slider('fi', t('panels.fadeIn'), selD!.fadeInSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}
+            {slider('fo', t('panels.fadeOut'), selD!.fadeOutSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeOutSec: v }))}
             {slider('sp', t('panels.speedRate'), selD!.speed, AUDIO_SPEED_MIN, AUDIO_SPEED_MAX, 0.05, (v) => `${v.toFixed(2)}×`, (v) => onPatch(sel.id, { speed: v }))}
             <div className="text-ink-4 text-[10.5px]">{t('panels.speedPitchNote')}</div>
           </section>
