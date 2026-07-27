@@ -71,6 +71,8 @@ export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
 /** How far a fade knob is held off the chip's own edge (px): a 0s fade would otherwise sit half outside
  *  the rounded, overflow-hidden chip and be unclickable. */
 const KNOB_INSET = 7;
+/** Chip height inside the music lane (row height minus the 2px breathing room top and bottom). */
+const CHIP_H = AUDIO_ROW_H - 4;
 
 /** Waveform vertical scale: dBFS against a noise floor, the pro-tool convention (the reference editor
  *  normalizes 20·log10(peak) over a -50 dB floor; Audacity's Waveform (dB) view and Premiere's
@@ -112,15 +114,22 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
   return parts.join('');
 }
 
-/** Fade ramps drawn over the wave: a line from the silent corner up to each knee (the NLE convention —
- *  the fade is an edit on top of the content, not a change to the content's picture). */
-function audioFadeCurve(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
+/** Fade shape as a CUT in the clip's body (CapCut convention): the faded corner is carved away by a
+ *  curve running from the bottom corner up to the knob, so the chip's silhouette itself shows the fade —
+ *  no line drawn over the picture. Zero fade degenerates to the plain square corner. Coordinates are the
+ *  element's own px box, which is what CSS clip-path: path() wants. */
+function audioFadeClipPath(d: ReturnType<typeof audioClipDefaults>, widthPx: number, heightPx: number, spanSec: number): string | undefined {
+  if (d.fadeInSec <= 0 && d.fadeOutSec <= 0) return undefined;
   const px = (sec: number) => Math.max(0, Math.min(widthPx, (sec / Math.max(0.05, spanSec)) * widthPx));
-  const parts: string[] = [];
-  if (d.fadeInSec > 0) parts.push(`M0,100L${px(d.fadeInSec).toFixed(2)},2`);
-  if (d.fadeOutSec > 0) parts.push(`M${(widthPx - px(d.fadeOutSec)).toFixed(2)},2L${widthPx.toFixed(2)},100`);
-  return parts.join('');
+  const fi = px(d.fadeInSec);
+  const fo = px(d.fadeOutSec);
+  const W = widthPx;
+  const H = heightPx;
+  const head = fi > 0 ? `M0,${H}Q0,0 ${fi.toFixed(1)},0` : `M0,${H}L0,0`;
+  const tail = fo > 0 ? `L${(W - fo).toFixed(1)},0Q${W.toFixed(1)},0 ${W.toFixed(1)},${H}` : `L${W.toFixed(1)},0L${W.toFixed(1)},${H}`;
+  return `path('${head}${tail}Z')`;
 }
+
 
 interface StudioTimelineProps {
   comp: Composition;
@@ -1383,10 +1392,8 @@ function StudioTimelineImpl({
                         role="button"
                         tabIndex={0}
                         title={clip.label || t('panels.musicBed')}
-                        className={`group/aud absolute top-0.5 bottom-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${
-                          selected ? 'bg-accent/15 border-accent ring-accent/40 z-10 ring-1' : 'bg-accent/10 border-accent/40'
-                        } text-ink`}
-                        style={{ left: x(w.start), width }}
+                        className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md active:cursor-grabbing ${selected ? 'z-10' : ''}`}
+                        style={{ left: x(w.start), width, height: CHIP_H }}
                         onClick={(e) => e.stopPropagation()}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
@@ -1415,18 +1422,26 @@ function StudioTimelineImpl({
                         {/* Waveform: absolute-peak envelope, bottom-aligned. The path lives in a fixed viewBox
                             and is stretched by preserveAspectRatio, so zooming costs nothing. Only the trimmed
                             [in,out] slice of the source is drawn. */}
-                        {/* Content width (unclamped by the timeline end / the min chip width): the wave is anchored
-                            to the audio itself, so dragging an edge crops the chip and the wave stays put. */}
-                        <svg
-                          className="text-accent/90 pointer-events-none absolute top-0 bottom-0 left-0"
-                          style={{ width: contentW }}
-                          viewBox={`0 0 ${Math.round(contentW)} 100`}
-                          preserveAspectRatio="none"
-                          aria-hidden
+                        {/* Body = background + wave, carved by the fade cut. Handles and the label live on the
+                            outer box so the cut never eats them. The wave's svg spans the clip's TRUE content
+                            width (unclamped by the timeline end / the min chip width) and the box crops it, so
+                            dragging an edge reveals or hides the wave instead of rescaling it. */}
+                        <div
+                          className={`pointer-events-none absolute inset-0 rounded-md border ${selected ? 'bg-accent/20 border-accent' : 'bg-accent/10 border-accent/40'}`}
+                          style={{ clipPath: audioFadeClipPath(d, contentW, CHIP_H, span) }}
                         >
-                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW)} fill="currentColor" />}
-                          <path d={audioFadeCurve(d, contentW, span)} className="text-accent" fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-                        </svg>
+                          {peaks && peaks.length > 1 && (
+                            <svg
+                              className="text-accent/90 absolute top-0 bottom-0 left-0"
+                              style={{ width: contentW }}
+                              viewBox={`0 0 ${Math.round(contentW)} 100`}
+                              preserveAspectRatio="none"
+                              aria-hidden
+                            >
+                              <path d={audioWaveBars(peaks, clip, d, contentW)} fill="currentColor" />
+                            </svg>
+                          )}
+                        </div>
                         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 py-0.5">
                           <Music size={10} className="text-accent shrink-0" />
                           <span className="text-ink-2 truncate text-[10px] leading-none">{clip.label || t('panels.musicBed')}</span>
