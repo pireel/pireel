@@ -341,8 +341,10 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const patch = {
         ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
         ...(typeof input.mute === 'boolean' ? { mute: input.mute } : {}),
+        ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+        ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
       };
-      if (!('volumeDb' in patch) && !('mute' in patch)) return { result: { ok: false, error: 'pass volumeDb and/or mute' } };
+      if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass volumeDb / mute / fadeInSec / fadeOutSec' } };
       const next = shots.map((s) => (ids.has(s.id) ? patchShotAudio(s, patch) : s));
       const bits = [
         ...('volumeDb' in patch ? [`volume ${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),

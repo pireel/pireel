@@ -9,11 +9,10 @@ import {
   audioClipSrcTimeAt,
   audioClipWindow,
   audioTrimPatch,
-  fadeShape,
   splitAudioClipAt,
   patchAudioClip,
 } from './audio-tracks';
-import { dbToGain } from './composition';
+import { dbToGain, fadeShape } from './composition';
 
 const clip = (over: Partial<AudioClip> = {}): AudioClip => ({ id: 'a1', src: 'blob:x', ...over });
 

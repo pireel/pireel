@@ -10,8 +10,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Music, Trash2 } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
+import { Music } from 'lucide-react';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
 
@@ -21,7 +21,6 @@ export function MusicPanel({
   usable,
   onPatch,
   onPreviewVolume,
-  onRemove,
   shot,
   shotCount,
   onSetShotAudio,
@@ -34,11 +33,10 @@ export function MusicPanel({
   usable: (c: AudioClip) => boolean;
   onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => void;
   onPreviewVolume: (id: string, db: number) => void;
-  onRemove: (id: string) => void;
   /** Selected shot (video track). With no audio clip selected this panel edits the FOOTAGE's own sound. */
   shot: VideoShot | null;
   shotCount: number;
-  onSetShotAudio: (patch: { volumeDb?: number; mute?: boolean }, all: boolean) => void;
+  onSetShotAudio: (patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }, all: boolean) => void;
   /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
   denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | null; progress: number };
   onSetDenoise: (strength: number | null) => void;
@@ -150,6 +148,14 @@ export function MusicPanel({
                     <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${shot?.audioMuted ? 'translate-x-3.5' : ''}`} />
                   </button>
                 </div>
+                {shot ? (
+                  <>
+                    {slider('sfi', t('panels.fadeIn'), shot.audioFadeInSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeInSec: v }, false))}
+                    {slider('sfo', t('panels.fadeOut'), shot.audioFadeOutSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeOutSec: v }, false))}
+                  </>
+                ) : (
+                  <div className="text-ink-4 text-[10.5px]">{t('panels.selectShotForFades')}</div>
+                )}
                 <div className="text-ink-4 text-[10.5px]">{t('panels.selectAudioClipFirst')}</div>
               </>
             )}
@@ -161,9 +167,6 @@ export function MusicPanel({
               <Music className="text-accent size-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">{sel.label || t('panels.musicBed')}</span>
               {!usable(sel) && <span className="text-accent shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
-              <button type="button" onClick={() => onRemove(sel.id)} aria-label={t('panels.removeMusic')} className="text-ink-4 hover:text-ink shrink-0">
-                <Trash2 className="size-3.5" />
-              </button>
             </div>
             <div className="text-ink flex items-center justify-between font-medium">
               <span>{t('panels.volume')}</span>
