@@ -452,6 +452,49 @@ const PREVIEW_RUNTIME = `
         }
       } catch (err) {}
     }
+    else if (d.type === 'hf:blockAdd' && d.blockId && d.html) {
+      // In-place block insert / whole-node replace (new block, template swap, non-echo slots change,
+      // caption restyle): the html is assembled by the parent from the same per-block assembler the
+      // full rebuild uses, so the patched node matches a later rebuild byte for byte.
+      try {
+        var baTmp = document.createElement('div');
+        baTmp.innerHTML = String(d.html);
+        var baNode = baTmp.firstElementChild;
+        if (baNode) {
+          var baOld = document.getElementById(String(d.blockId));
+          if (baOld && baOld.classList.contains('comp')) { baOld.replaceWith(baNode); }
+          else {
+            // DOM order = stacking: insert before the block currently at the target index (parent
+            // computes it against the post-remove, sorted block list), else append on top
+            var baList = Array.prototype.slice.call(document.querySelectorAll('.comp'));
+            var baParent = (baList[0] && baList[0].parentElement) || document.getElementById('root') || document.body;
+            var baRef = typeof d.index === 'number' && d.index >= 0 ? baList[d.index] : null;
+            if (baRef && baRef.parentElement === baParent) baParent.insertBefore(baNode, baRef);
+            else baParent.appendChild(baNode);
+          }
+          if (window.__timelines && window.__timelines[d.blockId]) {
+            try { window.__timelines[d.blockId].kill(); } catch (e1) {}
+            delete window.__timelines[d.blockId];
+          }
+          var baTl = gsap.timeline({ paused: true });
+          try { new Function('tl', String(d.timelineBody || ''))(baTl); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
+          window.__timelines[d.blockId] = baTl;
+          seekTimelines(lastSeekT);
+        }
+      } catch (err) {}
+    }
+    else if (d.type === 'hf:setVars' && typeof d.css === 'string') {
+      // Instant theme/palette recolor: inline vars on #root override the baked stylesheet rule;
+      // the stage background follows (html/body/#root all carry it in the assembled doc).
+      try {
+        var svRoot = document.getElementById('root');
+        if (svRoot) svRoot.style.cssText = d.css + (d.bg ? 'background:' + d.bg + ';' : '');
+        if (d.bg) {
+          document.documentElement.style.background = d.bg;
+          document.body.style.background = d.bg;
+        }
+      } catch (err) {}
+    }
     else if (d.type === 'hf:blockHtml' && d.blockId) {
       // Kit props edit: swap ONE block's content and rebuild only its timeline — a full doc
       // rebuild (double-buffer swap + video reload) for a one-block tweak reads as "updating…" lag.

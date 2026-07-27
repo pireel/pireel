@@ -392,6 +392,83 @@ export function blockBgCss(bg: string, surfaceOnly: boolean): string {
   return `--panel:${escapeAttr(bg)};--paper:${escapeAttr(bg)};${ink}${surfaceOnly ? '' : `background:${escapeAttr(bg)};`}`;
 }
 
+/** Assemble ONE block into its outer container HTML + timeline body — byte-identical to what the
+ *  full document assembler emits for it. Shared by assembleHtml and the workbench's in-place patch
+ *  channel (hf:blockAdd/hf:blockHtml), so patched blocks always match a later rebuild exactly. */
+export function assembleBlockHtml(b: Block, comp: Composition): { html: string; timelineBody: string } {
+  return assembleBlockWith(b, comp, comp.captionStyle ? resolveCaptionStyle(comp) : undefined);
+}
+
+function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof resolveCaptionStyle> | undefined): { html: string; timelineBody: string } {
+  const { width: W, height: H } = comp;
+
+    // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
+    // Translations live in the transcript (and get baked into slots.sub by the relay), but without the
+    // language state they stay dormant — turning translation off hides them without destroying content.
+    // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
+    // into slots here, where the composition's dimensions are known.
+    const kitBase = b.templateId.startsWith('kit:')
+      ? {
+          ...b,
+          slots: {
+            ...b.slots,
+            boxW: Math.round((b.box?.w ?? 0.86) * W),
+            boxH: Math.round((b.box?.h ?? 0.3) * H),
+            canvasW: W,
+            canvasH: H,
+          },
+        }
+      : b;
+    const capBase = isSentenceCaption(kitBase)
+      ? { ...kitBase, slots: { ...kitBase.slots, canvasW: comp.width, ...(comp.captionStyle?.sub?.lang ? {} : { sub: undefined }) } }
+      : kitBase;
+    const rb =
+      cs && isSentenceCaption(b)
+        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
+        : capBase;
+    const { innerHtml, timelineBody } = renderBlock(rb);
+    // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
+    const fit = b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
+    // Uniform content scaling: CSS scale property (around center), doesn't affect layout (autofit's scrollWidth measure stays uncontaminated),
+    // and doesn't enter the transform chain (won't be overwritten by the autofit transform)
+    const scaleCss = typeof b.scale === 'number' && Math.abs(b.scale - 1) > 0.005 ? `scale:${n(b.scale)};` : '';
+    // Component background (set by the user on the floating bar): see helpers blockBgCss/customHasSurface (the in-place patch channel reuses the same logic)
+    const hasSurface = customHasSurface(b.templateId, innerHtml);
+    const bgCss = b.bg ? blockBgCss(b.bg, hasSurface) : '';
+    // Border/opacity/radius/rotation are applied to the outermost container (= the framing box)
+    const frame: string[] = [];
+    if (b.border) frame.push(`border:3px solid ${escapeAttr(b.border)};`);
+    // Radius: use the user's explicit value if set; otherwise give a default radius when there's a backing/border (matches old behavior)
+    if (typeof b.radius === 'number' && b.radius > 0) frame.push(`border-radius:${n(b.radius)}px;`);
+    else if ((b.bg || b.border) && b.box) frame.push('border-radius:var(--radius,24px);');
+    if (typeof b.opacity === 'number' && b.opacity < 0.995) frame.push(`opacity:${n(Math.max(0.05, b.opacity))};`);
+    // Whole-block rotation: rotate the outermost container around center (a box block's crop window / full-canvas layer rotates with it); independent of the content layer's scale/autofit
+    if (typeof b.rotation === 'number' && Math.abs(b.rotation) > 0.01) frame.push(`transform:rotate(${n(b.rotation)}deg);transform-origin:center center;`);
+    const attrs =
+      `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
+      `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
+      `data-width="${W}" data-height="${H}"`;
+    let html: string;
+    if (b.box) {
+      // box block = two layers: the container is the crop window (overflow:hidden, dragging edges/corners only moves the window), the content layer
+      // [data-hf-content] is anchored to the canvas by contentBox — cropping doesn't reflow content, anything outside the window is clipped;
+      // bg surface / autofit / content scaling all live in the content layer (± scaling only scales content, over-window is clipped = zoom within the framing box).
+      const cb = b.contentBox ?? b.box;
+      const pos = `left:${pct(b.box.x)};top:${pct(b.box.y)};width:${pct(b.box.w)};height:${pct(b.box.h)};`;
+      const rel = `left:${pct((cb.x - b.box.x) / b.box.w)};top:${pct((cb.y - b.box.y) / b.box.h)};width:${pct(cb.w / b.box.w)};height:${pct(cb.h / b.box.h)};`;
+      html =
+        `<div class="comp" ${attrs} style="position:absolute;${pos}overflow:hidden;${frame.join('')}">\n` +
+        `<div data-hf-content style="position:absolute;${rel}${bgCss}${scaleCss}${fit}">\n${innerHtml}\n</div>\n</div>`;
+    } else {
+      // Full-canvas block (caption layer, etc.): a single flat layer, no crop/scale semantics.
+      // The sentence-caption container doesn't take clicks (pointer-events:none, .cap-line is auto): the container is inset:0 spanning
+      // the whole canvas, and if it took clicks, clicking any blank area while captions are on-screen would hit it — "click blank to select a shot" would break entirely
+      const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
+      html = `<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${innerHtml}\n</div>`;
+    }
+    return { html, timelineBody };
+}
+
 export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js'): string {
   const { width: W, height: H } = comp;
   const theme = getTheme(comp.theme);
@@ -456,71 +533,9 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   // (style is global state, not baked into the block). RESOLVED here — storage is sparse, defaults come from the resolver.
   const cs = comp.captionStyle ? resolveCaptionStyle(comp) : undefined;
   const renderOne = (b: Block) => {
-    // State-first bilingual gate: the translation line renders ONLY while captionStyle.sub.lang is set.
-    // Translations live in the transcript (and get baked into slots.sub by the relay), but without the
-    // language state they stay dormant — turning translation off hides them without destroying content.
-    // Kit blocks derive HTML at render time — bake the sizing context (box/canvas px)
-    // into slots here, where the composition's dimensions are known.
-    const kitBase = b.templateId.startsWith('kit:')
-      ? {
-          ...b,
-          slots: {
-            ...b.slots,
-            boxW: Math.round((b.box?.w ?? 0.86) * W),
-            boxH: Math.round((b.box?.h ?? 0.3) * H),
-            canvasW: W,
-            canvasH: H,
-          },
-        }
-      : b;
-    const capBase = isSentenceCaption(kitBase)
-      ? { ...kitBase, slots: { ...kitBase.slots, canvasW: comp.width, ...(comp.captionStyle?.sub?.lang ? {} : { sub: undefined }) } }
-      : kitBase;
-    const rb =
-      cs && isSentenceCaption(b)
-        ? { ...capBase, slots: { ...capBase.slots, preset: cs.preset, yPct: cs.yPct, xPct: cs.xPct ?? 50, wPct: cs.wPct ?? 56, scale: cs.scale, ...(cs.hPct ? { hPct: cs.hPct } : {}), ...(cs.color != null ? { color: cs.color } : {}), ...(cs.bg !== undefined ? { bg: cs.bg } : {}), ...(cs.bold != null ? { bold: cs.bold } : {}), ...(cs.sub?.preset != null ? { subPreset: cs.sub.preset } : {}), ...(cs.sub?.color != null ? { subColor: cs.sub.color } : {}), ...(cs.sub?.bg !== undefined ? { subBg: cs.sub.bg } : {}), ...(cs.sub?.bold != null ? { subBold: cs.sub.bold } : {}), ...(cs.sub?.yPct != null ? { subYPct: cs.sub.yPct } : {}), ...(cs.sub?.xPct != null ? { subXPct: cs.sub.xPct } : {}), ...(cs.sub?.wPct != null ? { subWPct: cs.sub.wPct } : {}), ...(cs.sub?.scale != null ? { subScale: cs.sub.scale } : {}), ...(cs.sub?.hPct != null ? { subHPct: cs.sub.hPct } : {}) } }
-        : capBase;
-    const { innerHtml, timelineBody } = renderBlock(rb);
-    // autofit: when content overflows, scale the whole thing to just fit the box (measured empirically), preview = export
-    const fit = b.fitScale && b.fitScale < 0.999 ? `transform:scale(${n(b.fitScale)});transform-origin:center center;` : '';
-    // Uniform content scaling: CSS scale property (around center), doesn't affect layout (autofit's scrollWidth measure stays uncontaminated),
-    // and doesn't enter the transform chain (won't be overwritten by the autofit transform)
-    const scaleCss = typeof b.scale === 'number' && Math.abs(b.scale - 1) > 0.005 ? `scale:${n(b.scale)};` : '';
-    // Component background (set by the user on the floating bar): see helpers blockBgCss/customHasSurface (the in-place patch channel reuses the same logic)
-    const hasSurface = customHasSurface(b.templateId, innerHtml);
-    const bgCss = b.bg ? blockBgCss(b.bg, hasSurface) : '';
-    // Border/opacity/radius/rotation are applied to the outermost container (= the framing box)
-    const frame: string[] = [];
-    if (b.border) frame.push(`border:3px solid ${escapeAttr(b.border)};`);
-    // Radius: use the user's explicit value if set; otherwise give a default radius when there's a backing/border (matches old behavior)
-    if (typeof b.radius === 'number' && b.radius > 0) frame.push(`border-radius:${n(b.radius)}px;`);
-    else if ((b.bg || b.border) && b.box) frame.push('border-radius:var(--radius,24px);');
-    if (typeof b.opacity === 'number' && b.opacity < 0.995) frame.push(`opacity:${n(Math.max(0.05, b.opacity))};`);
-    // Whole-block rotation: rotate the outermost container around center (a box block's crop window / full-canvas layer rotates with it); independent of the content layer's scale/autofit
-    if (typeof b.rotation === 'number' && Math.abs(b.rotation) > 0.01) frame.push(`transform:rotate(${n(b.rotation)}deg);transform-origin:center center;`);
-    const attrs =
-      `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
-      `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
-      `data-width="${W}" data-height="${H}"`;
-    if (b.box) {
-      // box block = two layers: the container is the crop window (overflow:hidden, dragging edges/corners only moves the window), the content layer
-      // [data-hf-content] is anchored to the canvas by contentBox — cropping doesn't reflow content, anything outside the window is clipped;
-      // bg surface / autofit / content scaling all live in the content layer (± scaling only scales content, over-window is clipped = zoom within the framing box).
-      const cb = b.contentBox ?? b.box;
-      const pos = `left:${pct(b.box.x)};top:${pct(b.box.y)};width:${pct(b.box.w)};height:${pct(b.box.h)};`;
-      const rel = `left:${pct((cb.x - b.box.x) / b.box.w)};top:${pct((cb.y - b.box.y) / b.box.h)};width:${pct(cb.w / b.box.w)};height:${pct(cb.h / b.box.h)};`;
-      body.push(
-        `<div class="comp" ${attrs} style="position:absolute;${pos}overflow:hidden;${frame.join('')}">\n` +
-          `<div data-hf-content style="position:absolute;${rel}${bgCss}${scaleCss}${fit}">\n${innerHtml}\n</div>\n</div>`,
-      );
-    } else {
-      // Full-canvas block (caption layer, etc.): a single flat layer, no crop/scale semantics.
-      // The sentence-caption container doesn't take clicks (pointer-events:none, .cap-line is auto): the container is inset:0 spanning
-      // the whole canvas, and if it took clicks, clicking any blank area while captions are on-screen would hit it — "click blank to select a shot" would break entirely
-      const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
-      body.push(`<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${innerHtml}\n</div>`);
-    }
-    scripts.push(timelineScript(b.id, timelineBody));
+    const r = assembleBlockWith(b, comp, cs);
+    body.push(r.html);
+    scripts.push(timelineScript(b.id, r.timelineBody));
   };
   for (const b of behind) renderOne(b);
   if (fxPipeline) {

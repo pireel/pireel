@@ -51,6 +51,7 @@ import {
   mediaBlock,
   newBlock,
   renderBlock,
+  assembleBlockHtml,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
   shotFilterCss,
@@ -818,10 +819,29 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const id = setTimeout(() => {
       builtFontsTickRef.current = fontsTick;
       if (!fontsChanged && themeMountOnlyChange(lastBuiltCompRef.current, comp)) {
+        // Instant recolor: push the new palette vars into the live doc (root vars + stage background)
+        postPreview({
+          type: 'hf:setVars',
+          css: themeVarsCss(getTheme(comp.theme), comp.palette),
+          bg: comp.palette?.paper ?? getTheme(comp.theme).background,
+        });
         lastBuiltCompRef.current = comp;
         return;
       }
       if (!fontsChanged && capPosOnlyChange(lastBuiltCompRef.current, comp)) {
+        lastBuiltCompRef.current = comp;
+        return;
+      }
+      if (!fontsChanged && capOnly && !pendingSwitchRef.current) {
+        // Caption global style (preset/scale/width/color/plate/bold/sub): re-assemble ONLY the
+        // sentence-caption nodes with the new resolved style and swap them in place — segmentation
+        // re-runs inside the render, so even size/width changes stay off the rebuild path
+        const pcomp = previewCompOf(comp);
+        for (const cb of pcomp.blocks) {
+          if (!isSentenceCaption(cb)) continue;
+          const r = assembleBlockHtml(cb, pcomp);
+          postPreview({ type: 'hf:blockAdd', blockId: cb.id, html: r.html, timelineBody: r.timelineBody });
+        }
         lastBuiltCompRef.current = comp;
         return;
       }
@@ -831,11 +851,29 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // When a swap is pending, step aside and rebuild (see the ref comment).
       if (!fontsChanged && patchable && !pendingSwitchRef.current) {
         const echo = iframeEditEchoRef.current;
-        // slots changes must all be echoes of iframe in-place text edits (active doc is already current); slots changed
-        // by other sources (agent/panel/image swap) leave the active doc stale and must rebuild
-        if (patchable.pairs.every((p) => !p.slots || echo.has(p.b.id))) {
+        // Structural in-place patches (node add/replace): person-matte splits blocks around the matte
+        // canvas (index math breaks), and mass additions (lay_out) are better served by one rebuild.
+        const structuralN = patchable.added.length + patchable.pairs.filter((p) => p.replace || (p.slots && !echo.has(p.b.id))).length;
+        const fxSplit = !!comp.video && (comp.shots ?? []).some((sh) => sh.personMatte);
+        if (structuralN === 0 || (!fxSplit && patchable.added.length <= 8)) {
+          // Same comp variant the doc was assembled from (image thumbs, fitScale reset) — patched bytes must match a rebuild
+          const pcomp = previewCompOf(comp);
+          const pblockOf = (id: string) => pcomp.blocks.find((x) => x.id === id);
+          // DOM order = stacking = blocks stable-sorted by (sentence captions topmost, else trackIndex) — mirror of the assembler
+          const zKey = (x: Block) => (isSentenceCaption(x) ? Number.MAX_SAFE_INTEGER : x.trackIndex);
+          const sorted = [...pcomp.blocks].sort((x, y) => zKey(x) - zKey(y));
+          const domIndexOf = (id: string) => sorted.findIndex((x) => x.id === id);
+          const sendNode = (id: string, withIndex: boolean) => {
+            const pb = pblockOf(id);
+            if (!pb) return;
+            const r = assembleBlockHtml(pb, pcomp);
+            postPreview({ type: 'hf:blockAdd', blockId: id, html: r.html, timelineBody: r.timelineBody, ...(withIndex ? { index: domIndexOf(id) } : {}) });
+          };
+          // removes first: insertion indexes are computed against the post-remove DOM
+          for (const r of patchable.removed) postPreview({ type: 'hf:remove', id: r.id });
           for (const p of patchable.pairs) {
-            if (p.slots) echo.delete(p.b.id);
+            if (p.replace || (p.slots && !echo.has(p.b.id))) sendNode(p.b.id, false);
+            else if (p.slots) echo.delete(p.b.id);
             if (p.geom) {
               const box = p.b.box!;
               const cb = p.b.contentBox ?? box;
@@ -883,8 +921,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               });
             }
           }
-          for (const r of patchable.removed) postPreview({ type: 'hf:remove', id: r.id });
-          if (patchable.pairs.some((p) => p.geom || p.style)) postPreview({ type: 'hf:measureFit' });
+          for (const nb of [...patchable.added].sort((x, y) => domIndexOf(x.id) - domIndexOf(y.id))) sendNode(nb.id, true);
+          if (patchable.added.length || patchable.pairs.some((p) => p.geom || p.style || p.replace || p.slots || p.kitProps)) postPreview({ type: 'hf:measureFit' });
           lastBuiltCompRef.current = comp;
           return;
         }
