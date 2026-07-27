@@ -149,7 +149,7 @@ const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. 
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
 /** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions / music. */
-type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'music';
+type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions';
 
 
 export function HyperframesWorkbench({ projectId, agentView = false }: { projectId: string; agentView?: boolean }) {
@@ -359,7 +359,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [filmstrip, setFilmstrip] = useState<FilmstripFrame[]>([]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
   const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead (click the time readout)
-  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
+  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
   // space; unpinned = floating overlay above the canvas, the stage keeps full width). Both persist.
@@ -2408,6 +2408,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
   const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
   audioExportRef.current = audioOps.audioForExport;
+  /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
+  const openAudioTab = () => {
+    setFloatWin(null);
+    setLibTab('audio');
+    setLibCollapsed(false);
+  };
   /** Music-lane selection (timeline chip ↔ panel row; Del deletes). */
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
   const selectedAudioIdRef = useRef<string | null>(null);
@@ -3095,7 +3101,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         setSelectedShotIdRaw(null);
       }
     },
-    onOpenMusicPanel: () => setFloatWin('music'),
+    onOpenMusicPanel: () => openAudioTab(),
     onReorderTracks: (topToBottom: number[]) => {
       // Timeline overlay tracks top-to-bottom = canvas z high-to-low (NLE convention): re-index z by the new display order.
       // Index from 2 (top row = K+1): z=1 always the sentence-caption layer (hidden on the timeline, not reordered)
@@ -4230,8 +4236,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         ? t('workbench.assetMotion')
                         : floatWin === 'captions'
                           ? t('panels.captions')
-                          : floatWin === 'music'
-                            ? t('panels.music')
                             : floatWin === 'shot'
                             ? (() => {
                                 const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);
@@ -4265,8 +4269,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   { v: 'assets', label: 'workbench.assets' },
                   { v: 'script', label: 'workbench.scriptCut' },
                   { v: 'captions', label: 'panels.captions' },
+                  { v: 'audio', label: 'panels.music' },
                   // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
-                ] as { v: 'assets' | 'frames' | 'script' | 'captions'; label: string }[]
+                ] as { v: 'assets' | 'frames' | 'script' | 'captions' | 'audio'; label: string }[]
               ).map((tab) => (
                 <button
                   key={tab.v}
@@ -4337,6 +4342,29 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 onReplaceWord={replaceScriptWord}
               />
             </div>
+          )}
+          {!floatWin && libTab === 'audio' && (
+            <MusicPanel
+              clips={comp.audioTracks ?? []}
+              selectedId={selectedAudioId}
+              usable={audioOps.clipUsable}
+              onPatch={audioOps.patchClip}
+              onPreviewVolume={audioOps.previewClipVolume}
+              onRemove={(id) => {
+                audioOps.removeClip(id);
+                if (selectedAudioId === id) setSelectedAudioId(null);
+              }}
+              shot={selectedShot ?? null}
+              shotCount={(comp.shots ?? []).length}
+              onSetShotAudio={(patch, all) => {
+                const ids = all ? (comp.shots ?? []).map((sh) => sh.id) : selectedShot ? [selectedShot.id] : [];
+                if (!ids.length) return;
+                pushUndoSnapshot();
+                for (const id of ids) setShotAudio(id, patch);
+              }}
+              denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
+              onSetDenoise={denoiseOps.setDenoise}
+            />
           )}
           {!floatWin && libTab === 'captions' && (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -4432,21 +4460,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               )}
               {floatWin === 'captions' && (
                 <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
-              )}
-              {floatWin === 'music' && (
-                <MusicPanel
-                  clips={comp.audioTracks ?? []}
-                  selectedId={selectedAudioId}
-                  usable={audioOps.clipUsable}
-                  onPatch={audioOps.patchClip}
-                  onPreviewVolume={audioOps.previewClipVolume}
-                  onRemove={(id) => {
-                    audioOps.removeClip(id);
-                    if (selectedAudioId === id) setSelectedAudioId(null);
-                  }}
-                  denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
-                  onSetDenoise={denoiseOps.setDenoise}
-                />
               )}
               {floatWin === 'person' && (
                 <PersonFxPanel
@@ -4614,15 +4627,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </TooltipTrigger>
             <TooltipContent>{t('workbench.cameraFraming')}</TooltipContent>
           </Tooltip>
-          {/* Music: BGM bed (global panel — level/duck/loop + loudness unify) */}
+          {/* Audio settings: opens the rail's audio tab (selected clip, or the video's own sound) */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={(e) => (floatWin === 'music' ? setFloatWin(null) : openFloatAt('music', e.currentTarget.getBoundingClientRect()))}
+                onClick={openAudioTab}
                 disabled={!comp.video}
                 aria-label={t('panels.music')}
-                className={`rounded p-1 disabled:opacity-40 ${floatWin === 'music' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
+                className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === 'audio' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
                 <Music size={14} />
               </button>

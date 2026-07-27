@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { Music, Trash2 } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, VOLUME_DB_MIN, type AudioClip, audioClipDefaults } from '@pireel/studio-engine/composition';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
 
@@ -22,6 +22,9 @@ export function MusicPanel({
   onPatch,
   onPreviewVolume,
   onRemove,
+  shot,
+  shotCount,
+  onSetShotAudio,
   denoise,
   onSetDenoise,
 }: {
@@ -32,6 +35,10 @@ export function MusicPanel({
   onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => void;
   onPreviewVolume: (id: string, db: number) => void;
   onRemove: (id: string) => void;
+  /** Selected shot (video track). With no audio clip selected this panel edits the FOOTAGE's own sound. */
+  shot: VideoShot | null;
+  shotCount: number;
+  onSetShotAudio: (patch: { volumeDb?: number; mute?: boolean }, all: boolean) => void;
   /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
   denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | null; progress: number };
   onSetDenoise: (strength: number | null) => void;
@@ -41,6 +48,18 @@ export function MusicPanel({
   const committedDb = Math.round(sel?.volumeDb ?? AUDIO_DEFAULT_DB);
   const [dragDb, setDragDb] = useState<number | null>(null);
   useEffect(() => setDragDb(null), [selectedId]);
+  // Video-track volume speaks percent of source level (its ceiling is 0 dB — see VideoShot.volumeDb),
+  // matching the framing panel's control rather than inventing a second unit for the same field.
+  const shotCommittedPct = Math.round(dbToGain(shot?.volumeDb ?? 0) * 100);
+  const [shotDrag, setShotDrag] = useState<number | null>(null);
+  useEffect(() => setShotDrag(null), [shot?.id]);
+  const shotPct = shotDrag ?? shotCommittedPct;
+  const commitShot = () => {
+    if (shotDrag != null && shotDrag !== shotCommittedPct) {
+      onSetShotAudio({ volumeDb: shotDrag <= 0 ? VOLUME_DB_MIN : Math.max(VOLUME_DB_MIN, Math.min(0, 20 * Math.log10(shotDrag / 100))) }, !shot);
+    }
+    setShotDrag(null);
+  };
   const dbValue = dragDb ?? committedDb;
   const commitDb = () => {
     if (sel && dragDb != null && dragDb !== committedDb) onPatch(sel.id, { volumeDb: dragDb });
@@ -88,7 +107,54 @@ export function MusicPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
         {/* Settings only: this panel adjusts the SELECTED clip. Adding content (upload / generate) lives in
             the assets panel, the same place images and video come from. */}
-        {!sel && <div className="text-ink-4">{t('panels.selectAudioClipFirst')}</div>}
+        {/* No audio clip selected → this is the VIDEO's own sound (the selected shot, or every shot when
+            none is selected), so switching here always lands on something adjustable. */}
+        {!sel && (
+          <section className="flex flex-col gap-2.5">
+            <div className="text-ink flex items-center justify-between font-medium">
+              <span>{t('panels.videoSound')}</span>
+              <span className="text-ink-4 text-[10.5px]">{shot ? t('panels.thisShotOnly') : t('panels.allShotsN', { n: shotCount })}</span>
+            </div>
+            {shotCount === 0 ? (
+              <div className="text-ink-4">{t('panels.uploadVideoForPortraitFx')}</div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-ink-3 w-7 shrink-0">{t('panels.volume')}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={shotPct}
+                    disabled={!!shot?.audioMuted}
+                    onChange={(e) => setShotDrag(Number(e.target.value))}
+                    onPointerUp={commitShot}
+                    onKeyUp={commitShot}
+                    onBlur={commitShot}
+                    className="zoom-range w-full"
+                    aria-label={t('panels.volume')}
+                  />
+                  <span className="text-ink-4 w-8 shrink-0 text-right tabular-nums">{shotPct}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-ink-3">{t('panels.mute')}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!!shot?.audioMuted}
+                    aria-label={t('panels.mute')}
+                    onClick={() => onSetShotAudio({ mute: !shot?.audioMuted }, !shot)}
+                    className={`h-4.5 w-8 rounded-full p-0.5 transition ${shot?.audioMuted ? 'bg-accent' : 'bg-ink-4/30'}`}
+                  >
+                    <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${shot?.audioMuted ? 'translate-x-3.5' : ''}`} />
+                  </button>
+                </div>
+                <div className="text-ink-4 text-[10.5px]">{t('panels.selectAudioClipFirst')}</div>
+              </>
+            )}
+          </section>
+        )}
         {sel && (
           <section className="flex flex-col gap-2.5">
             <div className="text-ink flex items-center gap-1.5 font-medium">
