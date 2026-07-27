@@ -141,7 +141,7 @@ const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. 
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
 /** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions. */
-type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions';
+type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'kitProps';
 
 
 export function HyperframesWorkbench({ projectId, agentView = false }: { projectId: string; agentView?: boolean }) {
@@ -2282,9 +2282,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     toast.info(t('workbench.afterGeneratingClickInsert'));
   };
   /** Template panel → insert a new block of that template at the playhead (default slot data, edit text after). */
-  // Kit props popover (block toolbar); closes when the selection changes.
-  const [kitPropsOpen, setKitPropsOpen] = useState(false);
-  useEffect(() => setKitPropsOpen(false), [selectedId]);
+  // Kit block selected -> the props panel pops in the rail area (and follows the selection away).
+  useEffect(() => {
+    const b = selectedId ? compRef.current.blocks.find((x) => x.id === selectedId) : null;
+    const isKit = !!b?.templateId.startsWith('kit:');
+    if (isKit) setFloatWin('kitProps');
+    else if (floatWinRef.current === 'kitProps') setFloatWin(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
   const insertTemplateBlock = (templateId: string) => {
     pushUndoSnapshot();
     const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
@@ -3724,30 +3729,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     </Tooltip>
                     {/* Kit block: schema-generated props editor (the props ARE the block; edits re-render derived) */}
                     {mb.templateId.startsWith('kit:') && (
-                      <div className="relative">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => setKitPropsOpen((v) => !v)}
-                              className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${kitPropsOpen ? 'text-accent' : 'text-ink-3 hover:text-ink'}`}
-                            >
-                              <SlidersHorizontal size={13} /> {t('workbench.kitProps')}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('workbench.kitPropsTip')}</TooltipContent>
-                        </Tooltip>
-                        {kitPropsOpen && (
-                          <div className="border-line bg-panel absolute left-1/2 top-[calc(100%+8px)] z-50 -translate-x-1/2 rounded-lg border shadow-lg">
-                            <KitPropsPanel
-                              block={mb}
-                              onPatch={(props) => {
-                                setComp((c) => ({ ...c, blocks: c.blocks.map((b) => (b.id === mb.id ? { ...b, slots: { ...b.slots, props } } : b)) }));
-                              }}
-                            />
-                          </div>
-                        )}
-                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => (floatWin === 'kitProps' ? setFloatWin(null) : openFloatAt('kitProps'))}
+                            className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === 'kitProps' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
+                          >
+                            <SlidersHorizontal size={13} /> {t('workbench.kitProps')}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t('workbench.kitPropsTip')}</TooltipContent>
+                      </Tooltip>
                     )}
                     {/* Sync content: one-click fill the data-edit text slots from the narration script in the block's time window (preset component = generic
                         placeholder, this step matches it to real content after dropping; hidden when the OSS shell has no syncFill capability) */}
@@ -4155,6 +4148,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <span className="text-ink truncate px-1 text-[12px] font-medium">
                   {floatWin === 'script'
                     ? t('workbench.smartScriptCut')
+                    : floatWin === 'kitProps'
+                    ? t('workbench.kitProps')
                     : floatWin === 'person'
                       ? t('workbench.portrait')
                       : floatWin === 'anim'
@@ -4374,6 +4369,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   }}
                 />
               )}
+              {floatWin === 'kitProps' &&
+                (() => {
+                  const b = selectedId ? comp.blocks.find((x) => x.id === selectedId) : null;
+                  if (!b || !b.templateId.startsWith('kit:')) return null; // auto-close effect takes over
+                  return (
+                    <KitPropsPanel
+                      block={b}
+                      onPatch={(props) => {
+                        setComp((c) => ({ ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, slots: { ...x.slots, props } } : x)) }));
+                      }}
+                    />
+                  );
+                })()}
               {floatWin === 'anim' &&
                 (() => {
                   const b = selectedId ? comp.blocks.find((x) => x.id === selectedId) : null;
