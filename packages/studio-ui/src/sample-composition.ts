@@ -300,6 +300,25 @@ const PREVIEW_RUNTIME = `
 
   window.__hfPreview = { seek: seek, seekTimelines: seekTimelines, play: play, pause: pause, clock: clock, duration: duration, measureFit: measureFit };
 
+  // Boot reveal: the document ships with .comp hidden (see injectPreviewRuntime). Until gsap has
+  // loaded and each timeline exists, the DOM sits at its NATURAL end state — painting that and then
+  // snapping back to the entrance start is the "flash then restart" users see. Align everything to
+  // t=0 first, then drop the hiding rule. Both steps run SYNCHRONOUSLY here (still inside the
+  // script task, before the first paint) — never behind rAF/timeout: an offscreen export iframe can
+  // have those throttled, which would leave every block hidden and export blank frames.
+  try {
+    // __hfBootT: the moment the document wants to open on (single-block previews declare it in <head>
+    // so the very first painted frame is already correct — see blockPreviewDoc)
+    seekTimelines(typeof window.__hfBootT === 'number' ? window.__hfBootT : 0);
+    var bootHide = document.getElementById('hf-boot-hide');
+    if (bootHide && bootHide.parentNode) bootHide.parentNode.removeChild(bootHide);
+  } catch (eBoot) {
+    try {
+      var bh = document.getElementById('hf-boot-hide');
+      if (bh && bh.parentNode) bh.parentNode.removeChild(bh); // never leave the doc stuck invisible
+    } catch (eBoot2) {}
+  }
+
   // parent control protocol: once the iframe is sandboxed (opaque origin) the parent can't reach contentWindow.__hfPreview,
   // so all control goes through messages. __hfPreview is kept (blockPreviewDoc's single-block preview calls it in-doc).
   window.addEventListener('message', function (e) {
@@ -864,9 +883,16 @@ const PREVIEW_RUNTIME = `
 </script>`;
 
 /** Inject the preview runtime into the composition HTML (before </body>). */
+/** Hides overlay blocks until the runtime has aligned them to t=0 (removed synchronously at the end
+ *  of PREVIEW_RUNTIME). Without it the browser paints the un-animated end state while the external
+ *  gsap script is still loading, then the entrance yanks everything back — a visible flash.
+ *  Scoped to .comp so the stage background and the video keep painting immediately. */
+const BOOT_HIDE = `<style id="hf-boot-hide">.comp{visibility:hidden}</style>`;
+
 export function injectPreviewRuntime(html: string): string {
-  if (html.includes('</body>')) return html.replace('</body>', `${PREVIEW_RUNTIME}\n</body>`);
-  return html + PREVIEW_RUNTIME;
+  const withHide = html.includes('</head>') ? html.replace('</head>', `${BOOT_HIDE}</head>`) : BOOT_HIDE + html;
+  if (withHide.includes('</body>')) return withHide.replace('</body>', `${PREVIEW_RUNTIME}\n</body>`);
+  return withHide + PREVIEW_RUNTIME;
 }
 
 /** Preview handle type exposed by the iframe. */
