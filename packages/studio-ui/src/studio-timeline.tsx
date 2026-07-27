@@ -29,7 +29,7 @@ import {
   totalDuration,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
-import { AUDIO_FADE_MAX_SEC, type AudioClip, audioClipDefaults, audioClipWindow, audioTrimPatch, fadeShape } from '@pireel/studio-engine/composition';
+import { AUDIO_FADE_MAX_SEC, type AudioClip, audioClipDefaults, audioClipWindow, audioTrimPatch, fadeShape, shotFadeAt } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -1145,7 +1145,21 @@ function StudioTimelineImpl({
                               >
                                 {/* same blue as the music lane: the two audio surfaces read as one material */}
                                 <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-accent/8" />
-                                <path d={waveBars(sp.peaks, Math.floor(shot.srcStart * per), Math.ceil(shot.srcEnd * per), w, SCENE_WAVE_H, dbShift)} fill="currentColor" />
+                                <path
+                                  d={waveBars(
+                                    sp.peaks,
+                                    Math.floor(shot.srcStart * per),
+                                    Math.ceil(shot.srcEnd * per),
+                                    w,
+                                    SCENE_WAVE_H,
+                                    dbShift,
+                                    // shot fades shape the band exactly as they shape a lane clip's wave
+                                    shot.audioFadeInSec || shot.audioFadeOutSec
+                                      ? (f) => shotFadeAt(shot, f * Math.max(0.01, shot.srcEnd - shot.srcStart), Math.max(0.01, shot.srcEnd - shot.srcStart))
+                                      : undefined,
+                                  )}
+                                  fill="currentColor"
+                                />
                               </svg>
                             );
                           })()}
