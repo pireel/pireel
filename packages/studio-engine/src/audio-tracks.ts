@@ -46,6 +46,8 @@ export interface AudioClip {
 export const AUDIO_DEFAULT_DB = -18;
 export const AUDIO_FADE_IN_SEC = 0.8;
 export const AUDIO_FADE_OUT_SEC = 1.5;
+/** Longest a single fade may be. */
+export const AUDIO_FADE_MAX_SEC = 10;
 export const AUDIO_SPEED_MIN = 0.5;
 export const AUDIO_SPEED_MAX = 2;
 /** Shortest a clip may be trimmed to, in TIMELINE seconds. */
@@ -68,12 +70,12 @@ export function audioClipDefaults(c: AudioClip): Required<Pick<AudioClip, 'start
   const outSec = Math.max(inSec, Math.min(cap, c.outSec ?? cap));
   const speed = Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, c.speed ?? 1));
   const span = Number.isFinite(outSec) ? (outSec - inSec) / speed : Infinity;
-  const fadeIn = Math.min(Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC), span);
+  const fadeIn = Math.min(Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC), AUDIO_FADE_MAX_SEC, span);
   return {
     startSec: Math.max(0, c.startSec ?? 0),
     volumeDb: Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, c.volumeDb ?? AUDIO_DEFAULT_DB)),
     fadeInSec: fadeIn,
-    fadeOutSec: Math.min(Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC), Math.max(0, span - fadeIn)),
+    fadeOutSec: Math.min(Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC), AUDIO_FADE_MAX_SEC, Math.max(0, span - fadeIn)),
     speed,
     inSec,
     outSec,
@@ -151,8 +153,9 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 10) / 10;
   const db = next.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, next.volumeDb)) : undefined;
   if (db != null && db !== AUDIO_DEFAULT_DB) out.volumeDb = Math.round(db * 10) / 10;
-  if (next.fadeInSec != null && next.fadeInSec !== AUDIO_FADE_IN_SEC) out.fadeInSec = Math.round(Math.max(0, next.fadeInSec) * 10) / 10;
-  if (next.fadeOutSec != null && next.fadeOutSec !== AUDIO_FADE_OUT_SEC) out.fadeOutSec = Math.round(Math.max(0, next.fadeOutSec) * 10) / 10;
+  const fadeSec = (v: number) => Math.round(Math.max(0, Math.min(AUDIO_FADE_MAX_SEC, v)) * 10) / 10;
+  if (next.fadeInSec != null && fadeSec(next.fadeInSec) !== AUDIO_FADE_IN_SEC) out.fadeInSec = fadeSec(next.fadeInSec);
+  if (next.fadeOutSec != null && fadeSec(next.fadeOutSec) !== AUDIO_FADE_OUT_SEC) out.fadeOutSec = fadeSec(next.fadeOutSec);
   const sp = next.speed != null ? Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, next.speed)) : undefined;
   if (sp != null && sp !== 1) out.speed = Math.round(sp * 100) / 100;
   if (next.inSec) out.inSec = Math.round(Math.max(0, next.inSec) * 100) / 100;
