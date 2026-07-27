@@ -20,12 +20,13 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import { confirm } from '@pireel/ui/confirm';
-import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
+import type { Block, Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { type GenJob, listStudioGens, pollCreation } from './gen-api';
 import { type ElementEntry, type GenElementResult, loadElementEntries, removeElementEntry, syncElementEntries } from './element-history';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
-import { kitSampleProps } from './kit-ui';
+import { KitPropsPanel } from './kit-props-panel';
+import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
 import { BlockPreviewFrame } from './block-preview-card';
 import { t } from './i18n';
 
@@ -165,8 +166,9 @@ export function AssetsPanel({
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Insert an element (seedId re-scoping and empty-slot backfill happen on the insert side). */
   onInsertElement: (el: GenElementResult, prompt: string) => void;
-  /** Insert a kit component as a props-driven block. */
-  onInsertKit?: (component: string) => void;
+  /** Insert a kit component as a props-driven block; props override the sample defaults
+   *  (the preview lightbox lets you tune them before inserting). */
+  onInsertKit?: (component: string, props?: Record<string, unknown>) => void;
   /** Drag out an asset (asset on dragstart, null on dragend) — workbench uses this to overlay a drop layer on stage/timeline. */
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
@@ -454,9 +456,9 @@ export function AssetsPanel({
     }
   };
 
-  const insertOf = (it: LibraryItem) => {
+  const insertOf = (it: LibraryItem, kitProps?: Record<string, unknown>) => {
     if (it.kit) {
-      onInsertKit?.(it.kit);
+      onInsertKit?.(it.kit, kitProps);
       return;
     }
     if (it.kind === 'element') {
@@ -677,8 +679,8 @@ export function AssetsPanel({
           item={preview}
           comp={comp}
           onClose={() => setPreview(null)}
-          onInsert={() => {
-            insertOf(preview);
+          onInsert={(kitProps) => {
+            insertOf(preview, kitProps);
             setPreview(null);
           }}
         />
@@ -689,7 +691,38 @@ export function AssetsPanel({
 
 /** Large asset preview: click backdrop / Esc to close; bottom has an "Insert into canvas" shortcut.
  *  Full-res URLs aren't small, so show a "Loading" placeholder until ready. */
-function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; comp: Composition; onClose: () => void; onInsert: () => void }) {
+function AssetLightbox({
+  item,
+  comp,
+  onClose,
+  onInsert,
+}: {
+  item: LibraryItem;
+  comp: Composition;
+  onClose: () => void;
+  /** Kit items pass the props tuned in the lightbox; everything else inserts as-is. */
+  onInsert: (kitProps?: Record<string, unknown>) => void;
+}) {
+  // Kit preview is a real kit block on the same render path as the canvas — what you tune here is
+  // exactly what lands. Edits live in this state only: the library entry is never touched.
+  const [draft, setDraft] = useState<Record<string, unknown>>(() => (item.kit ? kitSampleProps(item.kit) : {}));
+  useEffect(() => setDraft(item.kit ? kitSampleProps(item.kit) : {}), [item.id, item.kit]);
+  const kitBlock = useMemo(
+    () =>
+      item.kit
+        ? {
+            id: `lb_${item.kit}`,
+            templateId: `kit:${item.kit}`,
+            slots: { props: draft },
+            startSec: 0,
+            durationSec: KIT_INSERT_DURATION,
+            trackIndex: 2,
+            box: { x: 0, y: 0, w: 1, h: 1 },
+            label: item.label,
+          }
+        : null,
+    [item.kit, item.label, draft],
+  );
   // Elements get a local iframe live preview, available immediately (no network load), so skip the ready placeholder
   const [ready, setReady] = useState(item.kind === 'element');
   // Size the placeholder box to the asset's true aspect ratio (element = canvas ratio; unknown dims default to 16:9)
@@ -709,12 +742,14 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
       onClick={onClose}
       className="fixed inset-0 z-[100] flex cursor-zoom-out flex-col items-center justify-center gap-3 bg-black/70 p-6"
     >
+      <div className="flex max-w-full items-stretch gap-3">
       <div
         role="presentation"
         onClick={(e) => e.stopPropagation()}
         className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
         // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
-        style={{ aspectRatio: ar, width: `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
+        // (kit items reserve room for the props panel beside them)
+        style={{ aspectRatio: ar, width: `min(calc(100vw - ${kitBlock ? '22rem' : '6rem'}), calc(78vh * ${ar}))` }}
       >
         {!ready && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
@@ -722,7 +757,9 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
             <span className="text-[12px]">{t('panels.loading')}</span>
           </div>
         )}
-        {item.kind === 'element' && item.element ? (
+        {kitBlock ? (
+          <LightboxKit block={kitBlock} />
+        ) : item.kind === 'element' && item.element ? (
           // Element live preview: auto-loops (same render as card hover, just always playing + larger)
           <LightboxElement item={item} comp={comp} />
         ) : item.kind === 'video' ? (
@@ -744,11 +781,21 @@ function AssetLightbox({ item, comp, onClose, onInsert }: { item: LibraryItem; c
           />
         )}
       </div>
+      {kitBlock && (
+        <div
+          role="presentation"
+          onClick={(e) => e.stopPropagation()}
+          className="bg-panel cursor-default overflow-y-auto rounded-lg shadow-2xl"
+        >
+          <KitPropsPanel block={kitBlock} onPatch={setDraft} />
+        </div>
+      )}
+      </div>
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onInsert();
+          onInsert(kitBlock ? draft : undefined);
         }}
         className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
       >
@@ -839,6 +886,14 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
 }
 
 /** Lightbox element live preview: same render as ElementTile, larger + always looping (local iframe, available immediately). */
+/** Large kit preview: the block renders through the same assembler path the canvas uses, so the
+ *  tuned result is exactly what gets inserted. Sized to the 16:9 component design canvas. */
+function LightboxKit({ block }: { block: Block }) {
+  const pc = STATIC_ELEMENT_PREVIEW_COMP;
+  const width = Math.max(240, Math.min(window.innerWidth - 352, Math.round(window.innerHeight * 0.78 * (pc.width / pc.height))));
+  return <BlockPreviewFrame comp={pc} block={block} width={width} animate />;
+}
+
 function LightboxElement({ item, comp }: { item: LibraryItem; comp: Composition }) {
   const el = item.element!;
   // Render theme elements at their design size (1920×1080): a vertical project canvas would make text large and box small (px is relative to canvas width)
