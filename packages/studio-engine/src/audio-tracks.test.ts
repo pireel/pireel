@@ -4,6 +4,7 @@ import {
   AUDIO_FADE_IN_SEC,
   AUDIO_MIN_LEN_SEC,
   type AudioClip,
+  audioClipDefaults,
   audioClipGainAt,
   audioClipSrcTimeAt,
   audioClipWindow,
@@ -81,6 +82,22 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(audioClipGainAt(c, 1, 60)).toBeCloseTo(base * 0.5, 5);
     expect(audioClipGainAt(c, 0.5, 60)).toBeCloseTo(base * fadeShape(0.25), 5);
     expect(audioClipGainAt(c, 29, 60)).toBeCloseTo(base * 0.5, 5); // 尾端对称
+  });
+
+  it('淡入淡出永不重叠:淡入吃片段长度、淡出吃剩下的;拉长片段后存的值原样恢复', () => {
+    // 2s 的短片段 + 默认 0.8/1.5 → 相加 2.3s 会叠在一起
+    const short = clip({ durationSec: 2 });
+    const ds = audioClipDefaults(short);
+    expect(ds.fadeInSec).toBe(0.8);
+    expect(ds.fadeOutSec).toBeCloseTo(1.2, 5); // 2 − 0.8
+    expect(ds.fadeInSec + ds.fadeOutSec).toBeCloseTo(2, 5);
+    // 存的值没被改写:片段变长(或剪短的 out 点还原)后照旧
+    expect(audioClipDefaults(clip({ durationSec: 30 })).fadeOutSec).toBe(1.5);
+    // 变速缩短时间轴长度时同样夹紧
+    expect(audioClipDefaults(clip({ durationSec: 2, speed: 2 })).fadeInSec).toBe(0.8); // span 1s… 淡入先吃
+    const fast = audioClipDefaults(clip({ durationSec: 2, speed: 2, fadeInSec: 5 }));
+    expect(fast.fadeInSec).toBe(1);
+    expect(fast.fadeOutSec).toBe(0);
   });
 
   it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {
