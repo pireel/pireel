@@ -40,7 +40,7 @@ export function MusicPanel({
   hasInserts: boolean;
   onUpload: () => void;
   onReconnect: () => void;
-  onPatch: (patch: Partial<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop'>>) => void;
+  onPatch: (patch: Partial<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop' | 'startSec'>>) => void;
   onPreviewVolume: (db: number) => void;
   onRemove: () => void;
   onGenerate: (prompt: string, durationSec: number) => void;
