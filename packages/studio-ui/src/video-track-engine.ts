@@ -39,6 +39,8 @@ export interface EngineBgm {
   durationSec?: number;
   loop: boolean;
   offsetSec: number;
+  /** Bed start on the edited timeline (music-lane drag position); before it the bed is parked silent. */
+  startSec: number;
   /** Full envelope at edited time t (base level × fades × duck), 0..1. */
   gainAt: (t: number) => number;
 }
@@ -287,10 +289,12 @@ export class VideoTrackEngine {
 
   private bgmSrcTime(t: number): number | null {
     const s = this.bgmSpec!;
-    if (s.durationSec == null || s.durationSec <= s.offsetSec) return s.offsetSec + t;
+    const lt = t - s.startSec;
+    if (lt < 0) return null;
+    if (s.durationSec == null || s.durationSec <= s.offsetSec) return s.offsetSec + lt;
     const span = s.durationSec - s.offsetSec;
-    if (!s.loop) return t < span ? s.offsetSec + t : null;
-    return s.offsetSec + (t % span);
+    if (!s.loop) return lt < span ? s.offsetSec + lt : null;
+    return s.offsetSec + (lt % span);
   }
 
   /** Per-tick / on-seek bed sync: volume from the envelope closure; drift correction only past 0.35s

@@ -36,6 +36,9 @@ export interface BgmTrack {
   fadeOutSec?: number;
   /** Start offset into the music file (skip a long intro), seconds. */
   offsetSec?: number;
+  /** Where the bed begins on the EDITED timeline (drag position on the music lane; absent = 0).
+   *  The bed runs from here to the end of the timeline (loop) or until the music runs out (no loop). */
+  startSec?: number;
 }
 
 export const BGM_DEFAULT_DB = -18;
@@ -86,7 +89,7 @@ export function duckFactorAt(t: number, spans: SpeechSpan[]): number {
 }
 
 /** Resolved knobs (defaults applied). */
-export function bgmDefaults(b: BgmTrack): Required<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop' | 'fadeInSec' | 'fadeOutSec' | 'offsetSec'>> {
+export function bgmDefaults(b: BgmTrack): Required<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop' | 'fadeInSec' | 'fadeOutSec' | 'offsetSec' | 'startSec'>> {
   return {
     volumeDb: Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, b.volumeDb ?? BGM_DEFAULT_DB)),
     duck: b.duck !== false,
@@ -94,35 +97,51 @@ export function bgmDefaults(b: BgmTrack): Required<Pick<BgmTrack, 'volumeDb' | '
     fadeInSec: Math.max(0, b.fadeInSec ?? BGM_FADE_IN_SEC),
     fadeOutSec: Math.max(0, b.fadeOutSec ?? BGM_FADE_OUT_SEC),
     offsetSec: Math.max(0, b.offsetSec ?? 0),
+    startSec: Math.max(0, b.startSec ?? 0),
   };
+}
+
+/** The bed's window on the edited timeline: [startSec, end). Loop = runs to the timeline end;
+ *  no loop = until the music runs out (unknown duration degrades to the timeline end). */
+export function bgmWindow(b: BgmTrack, totalSec: number): { start: number; end: number } {
+  const d = bgmDefaults(b);
+  const start = Math.min(d.startSec, totalSec);
+  if (!d.loop && b.durationSec != null && b.durationSec > d.offsetSec) {
+    return { start, end: Math.min(totalSec, start + (b.durationSec - d.offsetSec)) };
+  }
+  return { start, end: totalSec };
 }
 
 /** Linear gain of the bed at edited time t. totalSec = edited timeline length (for the tail fade).
  *  speech = MERGED spans (pass [] to disable ducking regardless of the flag). */
 export function bgmGainAt(b: BgmTrack, t: number, totalSec: number, speech: SpeechSpan[]): number {
   const d = bgmDefaults(b);
-  if (t < 0 || t > totalSec) return 0;
-  if (!d.loop && b.durationSec != null && d.offsetSec + t >= b.durationSec) return 0; // played out, no loop
+  const w = bgmWindow(b, totalSec);
+  if (t < w.start || t > w.end) return 0;
+  const lt = t - w.start;
   let g = dbToGain(d.volumeDb);
-  if (d.fadeInSec > 0) g *= Math.min(1, t / d.fadeInSec);
-  if (d.fadeOutSec > 0) g *= Math.min(1, Math.max(0, (totalSec - t) / d.fadeOutSec));
+  if (d.fadeInSec > 0) g *= Math.min(1, lt / d.fadeInSec);
+  if (d.fadeOutSec > 0) g *= Math.min(1, Math.max(0, (w.end - t) / d.fadeOutSec));
   if (d.duck) g *= duckFactorAt(t, speech);
   return g;
 }
 
 /** Position inside the music file for edited time t (loop = modulo over the remaining length after offset).
- *  null = past the end of a non-looping bed. durationSec unknown → plain offset+t (element loop attr handles wrap). */
+ *  null = before the bed's start / past the end of a non-looping bed. durationSec unknown →
+ *  plain offset+(t−start) (element loop attr handles wrap). */
 export function bgmSrcTimeAt(b: BgmTrack, t: number): number | null {
   const d = bgmDefaults(b);
-  if (b.durationSec == null || b.durationSec <= d.offsetSec) return d.offsetSec + t;
+  const lt = t - d.startSec;
+  if (lt < 0) return null;
+  if (b.durationSec == null || b.durationSec <= d.offsetSec) return d.offsetSec + lt;
   const span = b.durationSec - d.offsetSec;
-  if (!d.loop) return t < span ? d.offsetSec + t : null;
-  return d.offsetSec + (t % span);
+  if (!d.loop) return lt < span ? d.offsetSec + lt : null;
+  return d.offsetSec + (lt % span);
 }
 
 /** Apply a patch to the bed with the same neutrality convention as patchShotAudio: fields at their
  *  default value are dropped so untouched beds stay minimal. null clears the whole bed. */
-export function patchBgm(cur: BgmTrack, patch: Partial<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop' | 'fadeInSec' | 'fadeOutSec' | 'offsetSec'>>): BgmTrack {
+export function patchBgm(cur: BgmTrack, patch: Partial<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop' | 'fadeInSec' | 'fadeOutSec' | 'offsetSec' | 'startSec'>>): BgmTrack {
   const next: BgmTrack = { ...cur, ...patch };
   const out: BgmTrack = { src: next.src };
   if (next.sig) out.sig = next.sig;
@@ -135,5 +154,6 @@ export function patchBgm(cur: BgmTrack, patch: Partial<Pick<BgmTrack, 'volumeDb'
   if (next.fadeInSec != null && next.fadeInSec !== BGM_FADE_IN_SEC) out.fadeInSec = Math.max(0, next.fadeInSec);
   if (next.fadeOutSec != null && next.fadeOutSec !== BGM_FADE_OUT_SEC) out.fadeOutSec = Math.max(0, next.fadeOutSec);
   if (next.offsetSec) out.offsetSec = Math.max(0, next.offsetSec);
+  if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 10) / 10;
   return out;
 }

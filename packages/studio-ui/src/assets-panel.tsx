@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Music, Pause, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
@@ -48,7 +48,7 @@ const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, th
 
 interface LibraryItem {
   id: string;
-  kind: 'image' | 'video' | 'element';
+  kind: 'image' | 'video' | 'audio' | 'element';
   origin: 'upload' | 'gen' | 'preset';
   /** Elements only: preset category (data/structure/…); user elements lack this = "Mine". */
   category?: string;
@@ -68,11 +68,12 @@ interface LibraryItem {
   prompt?: string;
 }
 
-type KindFilter = 'all' | 'image' | 'video' | 'element';
+type KindFilter = 'all' | 'image' | 'video' | 'audio' | 'element';
 
 /** Drag payload from the panel: image/video = MediaRef + dims; element = the element itself (seedId re-scoped on insert). */
 export type PanelDragAsset =
   | (MediaRef & { label?: string; dims?: { w: number; h: number } })
+  | { type: 'audio'; url: string; label?: string }
   | { type: 'element'; element: GenElementResult; prompt: string; label?: string };
 type ViewMode = 'grid' | 'list';
 export type GenType = 'image' | 'video' | 'element';
@@ -108,12 +109,12 @@ const fileDims = (f: File, kind: 'image' | 'video'): Promise<{ w: number; h: num
   });
 
 function materialToItem(it: MaterialItem): LibraryItem | null {
-  if (it.kind !== 'image' && it.kind !== 'video') return null;
+  if (it.kind !== 'image' && it.kind !== 'video' && it.kind !== 'audio') return null;
   return {
     id: `up:${it.id}`,
     kind: it.kind,
     origin: 'upload',
-    insertUrl: imageThumb(it.url, 'original'),
+    insertUrl: it.kind === 'audio' ? it.url : imageThumb(it.url, 'original'),
     thumbSrc: it.thumb_url ?? (it.kind === 'image' ? it.url : null),
     label: it.label ?? (it.kind === 'video' ? t('panels.untitledVideo') : t('panels.untitledImage')),
     createdAt: it.created_at ?? 0,
@@ -157,6 +158,8 @@ export function AssetsPanel({
   onInsertElement,
   onDragAsset,
   onOpenGen,
+  onUseAudio,
+  onOpenMusicGen,
   genRefreshTick = 0,
 }: {
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
@@ -168,10 +171,39 @@ export function AssetsPanel({
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
   onOpenGen: (type: GenType, anchor?: DOMRect) => void;
+  /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). */
+  onUseAudio?: (url: string, label?: string) => void;
+  /** Generate under the audio filter: music generation lives in the audio panel — open it. */
+  onOpenMusicGen?: () => void;
   /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
+  // Audio inline preview: one shared element, click toggles (no lightbox for sound)
+  const [audioPlaying, setAudioPlaying] = useState<string | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const toggleAudio = (url: string) => {
+    if (!audioElRef.current) {
+      audioElRef.current = new Audio();
+      audioElRef.current.onended = () => setAudioPlaying(null);
+    }
+    const a = audioElRef.current;
+    if (audioPlaying === url) {
+      a.pause();
+      setAudioPlaying(null);
+      return;
+    }
+    a.src = url;
+    a.play().catch(() => {});
+    setAudioPlaying(url);
+  };
+  useEffect(
+    () => () => {
+      audioElRef.current?.pause();
+      audioElRef.current = null;
+    },
+    [],
+  );
   // Element category browsing ("Mine" first; each category shows one row of two cards, header right-arrow opens detail)
   const [elCat, setElCat] = useState<string | null>(null);
   const [view, setView] = useState<ViewMode>(() =>
@@ -193,14 +225,14 @@ export function AssetsPanel({
   const loadUploads = useCallback((silent = false) => {
     const seq = ++reqSeq.current;
     if (!silent) setLoading(true);
-    const get = (k: 'image' | 'video') =>
+    const get = (k: 'image' | 'video' | 'audio') =>
       fetch(`/api/me/materials?tab=global&kind=${k}&limit=200`)
         .then((r) => (r.ok ? r.json() : null))
         .then((j: { items?: MaterialItem[] } | null) => j?.items ?? [])
         .catch(() => [] as MaterialItem[]);
-    return Promise.all([get('image'), get('video')]).then(([imgs, vids]) => {
+    return Promise.all([get('image'), get('video'), get('audio')]).then(([imgs, vids, auds]) => {
       if (seq !== reqSeq.current) return; // superseded by a newer load
-      setUploads([...imgs, ...vids].map(materialToItem).filter((x): x is LibraryItem => !!x));
+      setUploads([...imgs, ...vids, ...auds].map(materialToItem).filter((x): x is LibraryItem => !!x));
       if (!silent) setLoading(false);
     });
   }, []);
@@ -365,6 +397,43 @@ export function AssetsPanel({
     [gens, kind],
   );
 
+  /** Audio card (both view modes): icon row, click = inline play toggle, draggable to the timeline, hover = set-as-BGM/delete. */
+  const audioCard = (it: LibraryItem) => (
+    <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 flex w-full items-center gap-2 overflow-hidden rounded-md border px-2 py-1.5 transition">
+      <button
+        type="button"
+        title={it.label}
+        aria-label={audioPlaying === it.insertUrl ? t('panels.pauseAudio') : t('panels.playAudio')}
+        onClick={() => it.insertUrl && toggleAudio(it.insertUrl)}
+        {...dragProps(it)}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+      >
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${audioPlaying === it.insertUrl ? 'bg-accent text-white' : 'bg-panel-2 text-ink-3'}`}>
+          {audioPlaying === it.insertUrl ? <Pause size={12} /> : <Music size={12} />}
+        </span>
+        <span className="text-ink-2 min-w-0 flex-1 truncate text-[11px]">{it.label}</span>
+      </button>
+      {it.deletable && (
+        <button
+          type="button"
+          title={t('panels.deleteAsset')}
+          aria-label={t('panels.deleteAsset')}
+          onClick={() => void doDelete(it)}
+          className="hidden h-5 w-5 shrink-0 items-center justify-center rounded bg-black/40 text-white hover:bg-red-600 group-hover:inline-flex"
+        >
+          <Trash2 size={11} />
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => insertOf(it)}
+        className="bg-accent hidden shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
+      >
+        <Plus size={9} /> {t('panels.useAsBgm')}
+      </button>
+    </div>
+  );
+
   /** Grid card (shared by masonry / category overview / category detail): click to preview, draggable, hover to insert/delete. */
   const gridCard = (it: LibraryItem) => (
     <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 inline-block w-full break-inside-avoid overflow-hidden rounded-md border align-top transition">
@@ -409,14 +478,14 @@ export function AssetsPanel({
     if (uploading) return;
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*,video/*';
+    input.accept = 'image/*,video/*,audio/*';
     input.onchange = async () => {
       const f = input.files?.[0];
       if (!f) return;
-      const k = f.type.startsWith('video/') ? 'video' : 'image';
+      const k = f.type.startsWith('video/') ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'image';
       setUploading(true);
       try {
-        const dims = await fileDims(f, k); // measured locally, persisted along with the upload
+        const dims = k === 'audio' ? null : await fileDims(f, k); // measured locally, persisted along with the upload
         const { url } = await studioProviders().uploads.upload(f, { contentType: f.type || 'application/octet-stream', filename: f.name });
         await fetch('/api/me/uploads', {
           method: 'POST',
@@ -476,7 +545,11 @@ export function AssetsPanel({
       if (it.element) onInsertElement(it.element, it.prompt ?? it.label);
       return;
     }
-    if (it.insertUrl) onInsert({ type: it.kind, url: it.insertUrl }, it.label, dimsOf(it));
+    if (it.kind === 'audio') {
+      if (it.insertUrl) onUseAudio?.(it.insertUrl, it.label);
+      return;
+    }
+    if (it.insertUrl) onInsert({ type: it.kind as 'image' | 'video', url: it.insertUrl }, it.label, dimsOf(it));
   };
   const dragProps = (it: LibraryItem) => {
     // Elements are draggable on par with images (unified): payload carries the element itself, drop semantics live in workbench
@@ -492,6 +565,16 @@ export function AssetsPanel({
       };
     }
     if (!it.insertUrl) return {};
+    if (it.kind === 'audio') {
+      return {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = 'copy';
+          onDragAsset?.({ type: 'audio', url: it.insertUrl!, label: it.label });
+        },
+        onDragEnd: () => onDragAsset?.(null),
+      };
+    }
     return {
       draggable: true,
       onDragStart: (e: React.DragEvent) => {
@@ -502,8 +585,13 @@ export function AssetsPanel({
     };
   };
 
-  const openGen = (e: React.MouseEvent<HTMLButtonElement>) =>
+  const openGen = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (kind === 'audio') {
+      onOpenMusicGen?.();
+      return;
+    }
     onOpenGen(kind === 'all' ? 'image' : kind === 'element' ? 'element' : kind, e.currentTarget.getBoundingClientRect());
+  };
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -546,6 +634,7 @@ export function AssetsPanel({
                 { v: 'image', label: 'panels.image' },
                 { v: 'video', label: 'panels.video' },
                 { v: 'element', label: 'panels.element' },
+                { v: 'audio', label: 'panels.music' },
               ] as { v: KindFilter; label: string }[]
             ).map((k) => (
               <button
@@ -670,11 +759,18 @@ export function AssetsPanel({
             </div>
           )
         ) : view === 'grid' ? (
-          // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns
-          <div className="columns-2 gap-1.5">{shown.map(gridCard)}</div>
+          // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns.
+          // Audio rows sit above the masonry (a full-width icon row would break column flow mid-stream).
+          <>
+            {shown.some((it) => it.kind === 'audio') && <div className="mb-1.5 space-y-0">{shown.filter((it) => it.kind === 'audio').map(audioCard)}</div>}
+            <div className="columns-2 gap-1.5">{shown.filter((it) => it.kind !== 'audio').map(gridCard)}</div>
+          </>
         ) : (
           <div className="divide-line divide-y">
-            {shown.map((it) => (
+            {shown.map((it) =>
+              it.kind === 'audio' ? (
+                <div key={it.id} className="px-3 py-1">{audioCard(it)}</div>
+              ) : (
               <div key={it.id} className="hover:bg-panel-2 group flex w-full items-center gap-2 px-3 py-1.5 transition">
                 <button
                   type="button"
@@ -713,7 +809,8 @@ export function AssetsPanel({
                   </button>
                 )}
               </div>
-            ))}
+              ),
+            )}
           </div>
         )}
       </div>

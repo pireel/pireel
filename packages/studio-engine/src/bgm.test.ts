@@ -67,6 +67,18 @@ describe('BGM 音床包络(双端同源纯函数)', () => {
     expect(bgmSrcTimeAt(bed(), 7)).toBe(7); // durationSec 未知
   });
 
+  it('startSec 窗口:起点前增益 0/源时间 null,fade-in 从窗口起点算,不 loop 的窗到曲尽为止', () => {
+    const b = bed({ startSec: 10, durationSec: 30 });
+    expect(bgmGainAt(b, 5, 60, [])).toBe(0);
+    expect(bgmSrcTimeAt(b, 5)).toBeNull();
+    expect(bgmSrcTimeAt(b, 15)).toBe(5); // (15-10) % 30
+    // fade-in 半程以窗口起点为原点
+    expect(bgmGainAt(b, 10 + BGM_FADE_IN_SEC / 2, 60, [])).toBeCloseTo(dbToGain(BGM_DEFAULT_DB) / 2, 5);
+    const once = bed({ startSec: 10, durationSec: 20, loop: false });
+    expect(bgmSrcTimeAt(once, 31)).toBeNull(); // 10+20 播完
+    expect(bgmGainAt(once, 31, 60, [])).toBe(0);
+  });
+
   it('patchBgm:默认值摘字段(-18dB/duck on/loop on 不落库);显式偏离才存;null 语义由调用方清 bgm 字段', () => {
     const cur = bed({ sig: 's1', label: '轻快', durationSec: 30 });
     const same = patchBgm(cur, { volumeDb: BGM_DEFAULT_DB, duck: true, loop: true });

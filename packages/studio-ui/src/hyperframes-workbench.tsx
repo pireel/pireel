@@ -2224,6 +2224,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const a = dragAsset;
     setDragAsset(null);
     if (!a) return;
+    if (a.type === 'audio') {
+      // Audio dropped on the stage: there's no visual placement for sound — mount as the bed from 0
+      void bgmOps.mountBgmFromUrl(a.url, a.label);
+      return;
+    }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const nx = (e.clientX - rect.left) / rect.width;
     const ny = (e.clientY - rect.top) / rect.height;
@@ -3018,8 +3023,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Main-track drop = insert a clip: video as a whole segment, image as a 5s still frame (per user); components aren't clip-ized (the timeline side already intercepts)
       const a = dragAsset;
       setDragAsset(null);
-      if (a && a.type !== 'element') void insertLibraryClipAt(a, t);
+      if (a && a.type !== 'element' && a.type !== 'audio') void insertLibraryClipAt(a, t);
     },
+    onDropAssetAudio: (t: number) => {
+      // Audio drop (music lane / anywhere audio is allowed): mount as the bed starting at the drop time
+      const a = dragAsset;
+      setDragAsset(null);
+      if (a?.type === 'audio') void bgmOps.mountBgmFromUrl(a.url, a.label, { startSec: t });
+    },
+    onMoveBgm: (startSec: number) => {
+      pushUndoSnapshot();
+      bgmOps.patchBed({ startSec });
+    },
+    onOpenMusicPanel: () => setFloatWin('music'),
     onReorderTracks: (topToBottom: number[]) => {
       // Timeline overlay tracks top-to-bottom = canvas z high-to-low (NLE convention): re-index z by the new display order.
       // Index from 2 (top row = K+1): z=1 always the sentence-caption layer (hidden on the timeline, not reordered)
@@ -4230,6 +4246,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onInsert={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
               onInsertElement={insertGeneratedElement}
               onDragAsset={setDragAsset}
+              onUseAudio={(url, label) => void bgmOps.mountBgmFromUrl(url, label)}
+              onOpenMusicGen={() => setFloatWin('music')}
               onOpenGen={(t, anchor) => {
                 setGenType(t);
                 openFloatAt('gen', anchor);

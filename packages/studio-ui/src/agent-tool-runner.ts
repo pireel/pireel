@@ -127,7 +127,7 @@ export interface AgentToolCtx {
   setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean }) => void;
   // BGM bed (use-bgm.ts): mount auto-levels from measured loudness; patch = knob changes; remove clears the bed
   bgmMount: (file: File, label?: string) => Promise<void>;
-  bgmPatch: (patch: { volumeDb?: number; duck?: boolean; loop?: boolean }) => void;
+  bgmPatch: (patch: { volumeDb?: number; duck?: boolean; loop?: boolean; startSec?: number }) => void;
   bgmRemove: () => void;
   /** Narration denoise (use-denoise.ts): strength = on/retune, null = off; bakes in the background. */
   setDenoise: (strength: number | null) => void;

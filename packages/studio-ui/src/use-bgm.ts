@@ -84,8 +84,9 @@ export function useBgm(deps: BgmDeps) {
     return db;
   };
 
-  /** Mount music bytes as the bed: measure → auto level → OPFS + cloud → comp.bgm. */
-  const mountBgmFile = async (file: File, label?: string) => {
+  /** Mount music bytes as the bed: measure → auto level → OPFS + cloud → comp.bgm.
+   *  opts.startSec = drop position on the music lane (absent = bed from 0). */
+  const mountBgmFile = async (file: File, label?: string, opts?: { startSec?: number }) => {
     let durationSec: number | undefined;
     let volumeDb: number | undefined;
     try {
@@ -105,15 +106,57 @@ export function useBgm(deps: BgmDeps) {
     void saveLocalVideo(file, sig); // the OPFS library is byte-agnostic despite the name
     backupMediaToCloud(file, sig, 'clip'); // sig→key record rides the clips slot (content-addressed vault is type-agnostic)
     pushUndoSnapshot();
+    const startSec = opts?.startSec != null && opts.startSec > 0.05 ? Math.round(opts.startSec * 10) / 10 : undefined;
     setComp((c) => ({
       ...c,
-      bgm: { src: url, sig, label: label ?? file.name.replace(/\.[a-z0-9]+$/i, ''), ...(durationSec != null ? { durationSec } : {}), ...(volumeDb != null && volumeDb !== 0 ? { volumeDb } : {}) },
+      bgm: {
+        src: url,
+        sig,
+        label: label ?? file.name.replace(/\.[a-z0-9]+$/i, ''),
+        ...(durationSec != null ? { durationSec } : {}),
+        ...(volumeDb != null && volumeDb !== 0 ? { volumeDb } : {}),
+        ...(startSec != null ? { startSec } : {}),
+      },
     }));
+  };
+
+  /** Mount from an asset URL (assets-panel "use as BGM" / timeline drop): fetch bytes through the
+   *  same-origin proxy, then the exact upload path (loudness auto-level included). */
+  const mountBgmFromUrl = async (url: string, label?: string, opts?: { startSec?: number }) => {
+    const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`);
+    if (!r.ok) {
+      toast.error(t('workbench.musicGenFailed'));
+      return;
+    }
+    const type = r.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
+    const name = (() => {
+      try {
+        return decodeURIComponent(new URL(url).pathname.split('/').pop() || '') || 'bgm';
+      } catch {
+        return 'bgm';
+      }
+    })();
+    await mountBgmFile(new File([await r.blob()], name, { type }), label, opts);
   };
 
   const uploadBgm = async () => {
     const f = await pickFile('audio/*');
-    if (f) await mountBgmFile(f);
+    if (!f) return;
+    await mountBgmFile(f);
+    // Audio CONTENT lives in the assets library (classification: content vs settings) — register the
+    // upload there too, best-effort: the bed already works from local bytes if this fails.
+    void (async () => {
+      try {
+        const { url } = await studioProviders().uploads.upload(f, { contentType: f.type || 'audio/mpeg', filename: f.name });
+        await fetch('/api/me/uploads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'audio', url, label: f.name, role: 'general', mime: f.type, byte_size: f.size }),
+        });
+      } catch {
+        /* asset registration is a bonus, not a dependency */
+      }
+    })();
   };
 
   const removeBgm = () => {
@@ -126,7 +169,7 @@ export function useBgm(deps: BgmDeps) {
     });
   };
 
-  const patchBed = (patch: Partial<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop'>>) => {
+  const patchBed = (patch: Partial<Pick<BgmTrack, 'volumeDb' | 'duck' | 'loop' | 'startSec'>>) => {
     setComp((c) => (c.bgm ? { ...c, bgm: patchBgm(c.bgm, patch) } : c));
   };
 
@@ -140,6 +183,7 @@ export function useBgm(deps: BgmDeps) {
       durationSec: bgm.durationSec,
       loop: bgm.loop !== false,
       offsetSec: bgm.offsetSec ?? 0,
+      startSec: bgm.startSec ?? 0,
       gainAt: (tt: number) => bgmGainAt(b, tt, total, spans),
     };
   };
@@ -279,6 +323,7 @@ export function useBgm(deps: BgmDeps) {
     bgmForExport,
     speechSpans,
     mountBgmFile,
+    mountBgmFromUrl,
     normalizeLoudness,
     normalizing,
     normalizeNote,
