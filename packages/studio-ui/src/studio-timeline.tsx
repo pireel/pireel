@@ -75,7 +75,7 @@ const KNEE_SIZE = 10;
 /** Knees stay this far inside the clip so they never hide under the trim handles or get clipped. */
 const KNEE_EDGE_INSET = 10;
 /** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
-const SCENE_WAVE_H = 13;
+const SCENE_WAVE_H = 18;
 
 /** Waveform vertical scale: dBFS against a noise floor, the pro-tool convention (the reference editor
  *  normalizes 20·log10(peak) over a -50 dB floor; Audacity's Waveform (dB) view and Premiere's
@@ -310,7 +310,10 @@ function StudioTimelineImpl({
   const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
   // Filmstrip tiles (like a mainstream editor): square tiles (width=height, object-cover crop), grid anchored on **source time** —
   // each card just "windows" (stripTiles) the continuous strip; after split/trim each segment continues the original strip, never re-laying-out trailing segments
-  const thumbW = SCENE_H - SCENE_PAD_T - SCENE_PAD_B;
+  // Card = thumbnails on top, the footage's own audio strip beneath them (never overlaid — a wave drawn on
+  // the picture is unreadable). Tiles stay square against the film area, so its height drives their width.
+  const filmH = SCENE_H - SCENE_PAD_T - SCENE_PAD_B - SCENE_WAVE_H;
+  const thumbW = filmH;
   const tileDur = thumbW / pps; // source duration one tile covers
   const filmTiles = useMemo(() => stripTiles(filmstrip ?? [], 0, videoDur, tileDur, pps), [filmstrip, videoDur, tileDur, pps]);
 
@@ -1113,14 +1116,14 @@ function StudioTimelineImpl({
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 return stripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
-                                  <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
+                                  <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                                 ));
                               })()}
                             </div>
                           ) : (
                             <>
                               {stripTiles(filmstrip ?? [], shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
-                                <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
+                                <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                               ))}
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
                             </>
@@ -1134,13 +1137,13 @@ function StudioTimelineImpl({
                             const dbShift = shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0);
                             return (
                               <svg
-                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-white/20' : 'text-white/55'}`}
+                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-white/25' : 'text-white/70'}`}
                                 style={{ height: SCENE_WAVE_H }}
                                 viewBox={`0 0 ${Math.round(w)} ${SCENE_WAVE_H}`}
                                 preserveAspectRatio="none"
                                 aria-hidden
                               >
-                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-black/35" />
+                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-black/55" />
                                 <path d={waveBars(sp.peaks, Math.floor(shot.srcStart * per), Math.ceil(shot.srcEnd * per), w, SCENE_WAVE_H, dbShift)} fill="currentColor" />
                               </svg>
                             );
