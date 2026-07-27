@@ -41,6 +41,22 @@ function renderKitBlock(component: string, slots: Slots, blockId: string): Rende
 
 export const KIT_TEMPLATE_PREFIX = 'kit:';
 
+/** Kit component registry (props JSON Schemas, defaults, summaries) — the source for
+ *  pickers, the props editor panel and agent tool contracts. */
+export { components as kitComponents } from 'hyperframes-kit';
+
+/** Render a kit component as a standalone element (asset-panel previews, thumbnails):
+ *  explicit box/canvas instead of assembler-injected slots. */
+export function kitElement(
+  component: string,
+  id: string,
+  props: unknown,
+  box: { w: number; h: number },
+  canvas: { w: number; h: number } = { w: 1920, h: 1080 },
+): Rendered {
+  return renderKitBlock(component, { props, boxW: box.w, boxH: box.h, canvasW: canvas.w, canvasH: canvas.h }, id);
+}
+
 for (const [cid, def] of Object.entries(components)) {
   registerTemplate({
     id: `${KIT_TEMPLATE_PREFIX}${cid}`,

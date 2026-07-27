@@ -1,4 +1,6 @@
 export const WORKBENCH_ZH: Record<string, string> = {
+  'workbench.kitProps': '属性',
+  'workbench.kitPropsTip': '编辑组件属性',
   'workbench.addMainVideoBefore': '先有主视频再插 B-roll',
   'workbench.adjustBoxHeight': '调整框高',
   'workbench.adjustLineWidth': '调整行宽',

@@ -26,6 +26,8 @@ import { type ElementEntry, type GenElementResult, loadElementEntries, removeEle
 import { framePack, kindLabel } from '@pireel/studio-frames/locales';
 import { overlayElements } from '@pireel/studio-frames/overlay-elements';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
+import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
+import { kitSampleProps } from './kit-ui';
 import { presetElements } from './preset-elements';
 import { useFrameCatalog } from './use-frame-catalog';
 import { BlockPreviewFrame } from './block-preview-card';
@@ -52,6 +54,8 @@ interface LibraryItem {
   origin: 'upload' | 'gen' | 'preset';
   /** Elements only: preset category (data/structure/…); user elements lack this = "Mine". */
   category?: string;
+  /** Kit component id — insertion creates a props-driven kit block, not baked HTML. */
+  kit?: string;
   /** Full-res direct URL for insert/preview (elements have none). */
   insertUrl?: string;
   /** Thumbnail source (bare key or URL, through imageThumb); null → video uses <video> first frame or placeholder. */
@@ -155,6 +159,7 @@ export function AssetsPanel({
   comp,
   onInsert,
   onInsertElement,
+  onInsertKit,
   onDragAsset,
   onOpenGen,
   genRefreshTick = 0,
@@ -164,6 +169,8 @@ export function AssetsPanel({
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Insert an element (seedId re-scoping and empty-slot backfill happen on the insert side). */
   onInsertElement: (el: GenElementResult, prompt: string) => void;
+  /** Insert a kit component as a props-driven block. */
+  onInsertKit?: (component: string) => void;
   /** Drag out an asset (asset on dragstart, null on dragend) — workbench uses this to overlay a drop layer on stage/timeline. */
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
@@ -343,6 +350,32 @@ export function AssetsPanel({
     }));
   }, [frames]);
   const themeItemsAll = useMemo(() => themeGroups.flatMap((g) => g.items), [themeGroups]);
+  // Kit components: the abstraction of the theme elements — insert = a props-driven block
+  // (templateId 'kit:*'), preview = a defaults+sample render with the general theme baked.
+  const kitGroup = useMemo(() => {
+    const vars = themeVarsCss(getTheme('general'));
+    return {
+      id: 'kit',
+      title: t('panels.kitComponents'),
+      items: Object.keys(kitComponents).map((cid): LibraryItem => {
+        const seedId = `kitprev_${cid.replace(/[^a-zA-Z0-9_-]/g, '')}`;
+        const r = kitElement(cid, seedId, kitSampleProps(cid), { w: 1920, h: 1080 });
+        const label = t(`engine.kit.${cid}`);
+        return {
+          id: `kit:${cid}`,
+          kind: 'element' as const,
+          origin: 'preset' as const,
+          category: 'kit',
+          label,
+          prompt: label,
+          createdAt: 0,
+          deletable: false,
+          kit: cid,
+          element: { seedId, innerHtml: `${r.innerHtml}\n<style data-hf-baked>#${seedId}{${vars}}</style>`, timelineBody: r.timelineBody, label, designW: 1920, designH: 1080 },
+        };
+      }),
+    };
+  }, []);
   const mineItems = useMemo(() => elements.map(elementToItem).sort((a, b) => b.createdAt - a.createdAt), [elements]);
   // Overlay preview uses a static 16:9 canvas constant — tokens are baked, so preview has zero dependency
   // on the project comp; chat theme mount/swap (comp.palette changes) no longer re-renders the whole element wall
@@ -351,7 +384,7 @@ export function AssetsPanel({
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     // Under the element filter, theme elements join the search pool (createdAt=0 naturally sorts last)
-    const pool = kind === 'element' ? [...items, ...themeItemsAll] : items;
+    const pool = kind === 'element' ? [...items, ...kitGroup.items, ...themeItemsAll] : items;
     return pool.filter((it) => (kind === 'all' || it.kind === kind) && (!needle || it.label.toLowerCase().includes(needle)));
   }, [items, themeItemsAll, kind, q]);
 
@@ -472,6 +505,10 @@ export function AssetsPanel({
   };
 
   const insertOf = (it: LibraryItem) => {
+    if (it.kit) {
+      onInsertKit?.(it.kit);
+      return;
+    }
     if (it.kind === 'element') {
       if (it.element) onInsertElement(it.element, it.prompt ?? it.label);
       return;
@@ -479,6 +516,7 @@ export function AssetsPanel({
     if (it.insertUrl) onInsert({ type: it.kind, url: it.insertUrl }, it.label, dimsOf(it));
   };
   const dragProps = (it: LibraryItem) => {
+    if (it.kit) return {};
     // Elements are draggable on par with images (unified): payload carries the element itself, drop semantics live in workbench
     if (it.kind === 'element') {
       if (!it.element) return {};
@@ -626,9 +664,9 @@ export function AssetsPanel({
                 onClick={() => setElCat(null)}
                 className="text-ink-2 hover:text-ink mb-2 flex items-center gap-1 text-[12px] font-medium"
               >
-                <ChevronLeft size={13} /> {elCat === 'mine' ? t('common.mine') : (themeGroups.find((g) => g.id === elCat)?.title ?? elCat)}
+                <ChevronLeft size={13} /> {elCat === 'mine' ? t('common.mine') : ([kitGroup, ...themeGroups].find((g) => g.id === elCat)?.title ?? elCat)}
                 <span className="text-ink-4 font-normal">
-                  · {(elCat === 'mine' ? mineItems : (themeGroups.find((g) => g.id === elCat)?.items ?? [])).length}
+                  · {(elCat === 'mine' ? mineItems : ([kitGroup, ...themeGroups].find((g) => g.id === elCat)?.items ?? [])).length}
                 </span>
               </button>
               {elCat === 'mine' && mineItems.length === 0 ? (
@@ -639,13 +677,13 @@ export function AssetsPanel({
                 </div>
               ) : (
                 <div className="columns-2 gap-1.5">
-                  {(elCat === 'mine' ? mineItems : (themeGroups.find((g) => g.id === elCat)?.items ?? [])).map(gridCard)}
+                  {(elCat === 'mine' ? mineItems : ([kitGroup, ...themeGroups].find((g) => g.id === elCat)?.items ?? [])).map(gridCard)}
                 </div>
               )}
             </div>
           ) : (
             <div className="space-y-3.5">
-              {[{ id: 'mine', title: t('common.mine'), items: mineItems }, ...themeGroups].map((g) => (
+              {[{ id: 'mine', title: t('common.mine'), items: mineItems }, kitGroup, ...themeGroups].map((g) => (
                 <section key={g.id}>
                   <button
                     type="button"
