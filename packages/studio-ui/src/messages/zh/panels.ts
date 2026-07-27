@@ -1,4 +1,6 @@
 export const PANELS_ZH: Record<string, string> = {
+  'kitProp.customColor': '自定义颜色',
+  'kitProp.opacity': '不透明度',
   'kitProp.surface': '底板',
   'kitProp.surfaceColor': '底板颜色',
   'kitProp.border': '描边',

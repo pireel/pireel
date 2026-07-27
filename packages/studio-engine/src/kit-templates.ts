@@ -46,6 +46,9 @@ export const KIT_TEMPLATE_PREFIX = 'kit:';
  *  pickers, the props editor panel and agent tool contracts. */
 export { components as kitComponents } from 'hyperframes-kit';
 
+/** Designed surface colours (Morandi) offered by the kit — the props panel's swatch row. */
+export { SURFACE_SWATCHES as kitSurfaceSwatches } from 'hyperframes-kit';
+
 /** Render a kit component as a standalone element (asset-panel previews, thumbnails):
  *  explicit box/canvas instead of assembler-injected slots. */
 export function kitElement(
