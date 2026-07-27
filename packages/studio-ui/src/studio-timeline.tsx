@@ -114,20 +114,23 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
   return parts.join('');
 }
 
-/** Fade shape as a CUT in the clip's body (CapCut convention): the faded corner is carved away by a
- *  curve running from the bottom corner up to the knob, so the chip's silhouette itself shows the fade —
- *  no line drawn over the picture. Zero fade degenerates to the plain square corner. Coordinates are the
- *  element's own px box, which is what CSS clip-path: path() wants. */
-function audioFadeClipPath(d: ReturnType<typeof audioClipDefaults>, widthPx: number, heightPx: number, spanSec: number): string | undefined {
-  if (d.fadeInSec <= 0 && d.fadeOutSec <= 0) return undefined;
+/** Fade shading: the attenuated corner region — bounded by an arc from the clip's bottom corner up to the
+ *  knob — drawn over the body so that corner simply reads as a dimmer background. Nothing is cut and no
+ *  line is drawn across the picture; a zero fade contributes nothing. */
+function audioFadeShade(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
   const px = (sec: number) => Math.max(0, Math.min(widthPx, (sec / Math.max(0.05, spanSec)) * widthPx));
-  const fi = px(d.fadeInSec);
-  const fo = px(d.fadeOutSec);
-  const W = widthPx;
-  const H = heightPx;
-  const head = fi > 0 ? `M0,${H}Q0,0 ${fi.toFixed(1)},0` : `M0,${H}L0,0`;
-  const tail = fo > 0 ? `L${(W - fo).toFixed(1)},0Q${W.toFixed(1)},0 ${W.toFixed(1)},${H}` : `L${W.toFixed(1)},0L${W.toFixed(1)},${H}`;
-  return `path('${head}${tail}Z')`;
+  const H = 100;
+  const parts: string[] = [];
+  if (d.fadeInSec > 0) {
+    const fi = px(d.fadeInSec);
+    parts.push(`M0,0L${fi.toFixed(1)},0Q0,0 0,${H}Z`);
+  }
+  if (d.fadeOutSec > 0) {
+    const fo = px(d.fadeOutSec);
+    const W = widthPx;
+    parts.push(`M${W.toFixed(1)},0L${(W - fo).toFixed(1)},0Q${W.toFixed(1)},0 ${W.toFixed(1)},${H}Z`);
+  }
+  return parts.join('');
 }
 
 
@@ -1392,7 +1395,9 @@ function StudioTimelineImpl({
                         role="button"
                         tabIndex={0}
                         title={clip.label || t('panels.musicBed')}
-                        className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md active:cursor-grabbing ${selected ? 'z-10' : ''}`}
+                        className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${
+                          selected ? 'bg-accent/20 border-accent ring-accent/40 z-10 ring-1' : 'bg-accent/10 border-accent/40'
+                        }`}
                         style={{ left: x(w.start), width, height: CHIP_H }}
                         onClick={(e) => e.stopPropagation()}
                         onKeyDown={(e) => {
@@ -1426,22 +1431,17 @@ function StudioTimelineImpl({
                             outer box so the cut never eats them. The wave's svg spans the clip's TRUE content
                             width (unclamped by the timeline end / the min chip width) and the box crops it, so
                             dragging an edge reveals or hides the wave instead of rescaling it. */}
-                        <div
-                          className={`pointer-events-none absolute inset-0 rounded-md border ${selected ? 'bg-accent/20 border-accent' : 'bg-accent/10 border-accent/40'}`}
-                          style={{ clipPath: audioFadeClipPath(d, contentW, CHIP_H, span) }}
+                        <svg
+                          className="pointer-events-none absolute top-0 bottom-0 left-0"
+                          style={{ width: contentW }}
+                          viewBox={`0 0 ${Math.round(contentW)} 100`}
+                          preserveAspectRatio="none"
+                          aria-hidden
                         >
-                          {peaks && peaks.length > 1 && (
-                            <svg
-                              className="text-accent/90 absolute top-0 bottom-0 left-0"
-                              style={{ width: contentW }}
-                              viewBox={`0 0 ${Math.round(contentW)} 100`}
-                              preserveAspectRatio="none"
-                              aria-hidden
-                            >
-                              <path d={audioWaveBars(peaks, clip, d, contentW)} fill="currentColor" />
-                            </svg>
-                          )}
-                        </div>
+                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW)} className="text-accent/90" fill="currentColor" />}
+                          {/* Faded corners read as a dimmer background — the boundary arc is what the knob drags */}
+                          <path d={audioFadeShade(d, contentW, span)} className="text-panel/70" fill="currentColor" />
+                        </svg>
                         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 py-0.5">
                           <Music size={10} className="text-accent shrink-0" />
                           <span className="text-ink-2 truncate text-[10px] leading-none">{clip.label || t('panels.musicBed')}</span>
