@@ -1,4 +1,9 @@
 export const PANELS_EN: Record<string, string> = {
+  'kitProp.title': 'Title',
+  'kitProp.subtitle': 'Subtitle',
+  'kitProp.kicker': 'Kicker',
+  'kitSample.ltTitle': 'Guest Name',
+  'kitSample.ltSub': 'Title · Role',
   'panels.kitComponents': 'Components',
   'kitProp.variant': 'Variant',
   'kitProp.motion': 'Motion',

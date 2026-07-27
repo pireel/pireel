@@ -6,6 +6,7 @@
  */
 
 export const ZH_ENGINE: Record<string, string> = {
+
   'engine.animatedCaptions': '动效字幕',
   'engine.blackTape': '黑条白字',
   'engine.blackUnderline': '黑底划线',
@@ -14,6 +15,7 @@ export const ZH_ENGINE: Record<string, string> = {
   'engine.bulletPoints': '要点',
   'engine.cleanWhite': '干净白字',
   'engine.customHtml': '自定义 HTML',
+  'engine.kit.lowerThird': '人名条',
   'engine.kit.metric': '指标卡',
   'engine.kit.callout': '金句卡',
   'engine.kit.props': '组件参数',
@@ -105,6 +107,7 @@ export const EN_ENGINE: Record<string, string> = {
   'engine.bulletPoints': 'Bullet points',
   'engine.cleanWhite': 'Clean white',
   'engine.customHtml': 'Custom HTML',
+  'engine.kit.lowerThird': 'Lower third',
   'engine.kit.metric': 'Metric',
   'engine.kit.callout': 'Callout',
   'engine.kit.props': 'Component props',

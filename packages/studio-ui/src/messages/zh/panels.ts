@@ -1,4 +1,9 @@
 export const PANELS_ZH: Record<string, string> = {
+  'kitProp.title': '主标题',
+  'kitProp.subtitle': '副标题',
+  'kitProp.kicker': '眉标',
+  'kitSample.ltTitle': '嘉宾姓名',
+  'kitSample.ltSub': '头衔 · 身份',
   'panels.kitComponents': '组件库',
   'kitProp.variant': '版式',
   'kitProp.motion': '动效',

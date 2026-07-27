@@ -26,11 +26,12 @@ const TOKEN_BRIDGE =
 
 const px = (v: unknown, fallback: number): number => (typeof v === 'number' && v > 0 ? v : fallback);
 
-function renderKitBlock(component: string, slots: Slots, blockId: string): Rendered {
+function renderKitBlock(component: string, slots: Slots, blockId: string, durationSec?: number): Rendered {
   const ctx = {
     box: { w: px(slots.boxW, 920), h: px(slots.boxH, 560) },
     canvas: { w: px(slots.canvasW, 1080), h: px(slots.canvasH, 1920) },
     ...(typeof slots.lang === 'string' && slots.lang ? { lang: slots.lang } : {}),
+    ...(typeof durationSec === 'number' && durationSec > 0 ? { durationSec } : {}),
   };
   const out = renderKit(component, blockId, slots.props, ctx);
   return {
@@ -66,7 +67,7 @@ for (const [cid, def] of Object.entries(components)) {
     // props is a JSON slot: created empty (defaults render a finished-looking block),
     // filled by pickers/agents with schema-validated values. See `components[cid].jsonSchema`.
     slots: { props: { type: 'json', label: 'engine.kit.props' } },
-    render: (slots, blockId) => renderKitBlock(cid, slots, blockId),
+    render: (slots, blockId, _startSec, durationSec) => renderKitBlock(cid, slots, blockId, durationSec),
   });
   void def; // schema/summary consumed by pickers and agent tooling, not by registration
 }
