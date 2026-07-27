@@ -9,7 +9,7 @@
  * same drag discipline as the framing panel.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Music } from 'lucide-react';
 import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
@@ -67,14 +67,19 @@ export function MusicPanel({
   /** Slider row: drags update the local value at once (readout follows the finger), commit on release —
    *  fades/speed don't have a live-preview channel, so the value only lands in comp when you let go. */
   const [dragVal, setDragVal] = useState<{ k: string; v: number } | null>(null);
+  // Mirror in a ref: the commit reads THIS, never a setState updater. Updaters run during render, so
+  // committing from inside one calls the parent's setState mid-render ("cannot update a component while
+  // rendering a different component") — and StrictMode would fire it twice on top of that.
+  const dragValRef = useRef<{ k: string; v: number } | null>(null);
+  dragValRef.current = dragVal;
   useEffect(() => setDragVal(null), [selectedId]);
   const slider = (k: string, label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, commit: (v: number) => void) => {
     const shown = dragVal?.k === k ? dragVal.v : value;
     const done = () => {
-      setDragVal((d) => {
-        if (d?.k === k && d.v !== value) commit(d.v);
-        return null;
-      });
+      const d = dragValRef.current;
+      dragValRef.current = null;
+      setDragVal(null);
+      if (d?.k === k && d.v !== value) commit(d.v);
     };
     return (
       <div className="flex flex-col gap-1">
@@ -88,7 +93,11 @@ export function MusicPanel({
           max={max}
           step={step}
           value={shown}
-          onChange={(e) => setDragVal({ k, v: Number(e.target.value) })}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            dragValRef.current = { k, v };
+            setDragVal({ k, v });
+          }}
           onPointerUp={done}
           onKeyUp={done}
           onBlur={done}
