@@ -28,6 +28,8 @@ export interface MixSeg {
   key: string;
   /** Linear per-shot gain (shotGain); 0 = contributes nothing. */
   gain: number;
+  /** Segment-local fade factor (shotFadeAt); absent = flat. */
+  fadeAt?: (tLocal: number) => number;
 }
 
 /** Sequential PCM reader over one source's audio samples: monotonic srcT only (matches how the
@@ -57,9 +59,10 @@ class PcmStream {
   }
 
   /** Add this source's PCM over [srcT0, srcT0 + frames/MIX_RATE) into out (interleaved stereo) at outOffset frames. */
-  async read(srcT0: number, frames: number, out: Float32Array, outOffset: number, gain: number): Promise<void> {
-    if (gain <= 0) return;
+  async read(srcT0: number, frames: number, out: Float32Array, outOffset: number, gainAt: (k: number) => number): Promise<void> {
     for (let k = 0; k < frames; k++) {
+      const gain = gainAt(k);
+      if (gain <= 0) continue;
       const srcT = srcT0 + k / MIX_RATE;
       await this.advanceTo(srcT);
       const c = this.cur;
@@ -140,7 +143,8 @@ export async function mixAudioTrack(args: {
       const outOffset = Math.round((a - t0) * MIX_RATE);
       const n = Math.min(frames - outOffset, Math.round((b - a) * MIX_RATE));
       if (n <= 0) continue;
-      await reader.read(s.srcStart + (a - segStarts[i]!), n, buf, outOffset, s.gain);
+      const localAt = a - segStarts[i]!; // segment-local seconds where this chunk slice starts
+      await reader.read(s.srcStart + localAt, n, buf, outOffset, (k) => s.gain * (s.fadeAt ? s.fadeAt(localAt + k / MIX_RATE) : 1));
     }
 
     // Audio clips (overlaps simply sum)

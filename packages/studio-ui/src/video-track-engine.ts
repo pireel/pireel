@@ -29,6 +29,9 @@ export interface EngineSeg {
    *  segments of the same source share one element, so the value re-applies at every handoff, including the
    *  same-source roll-through swap that skips activateIdx. */
   gain?: number;
+  /** Segment-local fade factor (shotFadeAt); absent = no fade. Evaluated per tick, so the level rides the
+   *  curve instead of stepping at the segment's edges. */
+  fadeAt?: (tLocal: number) => number;
 }
 
 /** Audio-clip spec for the preview (declarative; envelope + source-time mapping arrive as closures
@@ -193,9 +196,13 @@ export class VideoTrackEngine {
     return this.total;
   }
 
-  private segGain(i: number): number {
-    const g = this.segs[i]?.gain;
-    return g == null ? 1 : Math.max(0, Math.min(1, g));
+  private segGain(i: number, tEdited?: number): number {
+    const seg = this.segs[i];
+    if (!seg) return 1;
+    const base = seg.gain == null ? 1 : Math.max(0, Math.min(1, seg.gain));
+    if (!seg.fadeAt || base <= 0) return base;
+    const local = (tEdited ?? this.tEdited) - (this.starts[i] ?? 0);
+    return Math.max(0, Math.min(1, base * seg.fadeAt(local)));
   }
 
   /** Live volume preview (slider drag): update one segment's gain in place and, if it's the active one,
@@ -629,6 +636,7 @@ export class VideoTrackEngine {
         this.onTick?.(ts);
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
         this.syncAudioClips(ts, true);
+        if (this.segs[idx]?.fadeAt && !el.muted) el.volume = this.segGain(idx, ts); // shot audio fades ride the clock
         if (this.dubs.size && this.syncDub(sg.key, el, this.segGain(this.curIdx), true)) el.muted = true;
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;

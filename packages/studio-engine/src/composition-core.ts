@@ -134,6 +134,11 @@ export interface VideoShot extends Clip {
   volumeDb?: number;
   /** Hard-silence this shot's own audio (independent of volumeDb, so unmuting restores the prior level). */
   audioMuted?: boolean;
+  /** Fade the shot's own audio in/out at ITS edges, seconds (absent = 0, i.e. a hard start/stop — the
+   *  default has to be no fade, or every cut in a narration would breathe). Shaped by fadeShape, same as
+   *  the audio lane; preview and export both evaluate shotGainAt. */
+  audioFadeInSec?: number;
+  audioFadeOutSec?: number;
 }
 
 /** Cut transition: the handoff effect between two shots' content. Effect set = 10 picks from the gl-transitions gallery (id matches upstream shader name,
@@ -225,6 +230,8 @@ export function shotFilterCss(f?: ShotFilter): string {
  *  Audio-lane clips run through a WebAudio gain node instead and have their own, higher ceiling (see audio-tracks). */
 export const VOLUME_DB_MIN = -60;
 export const VOLUME_DB_MAX = 0;
+/** Longest a shot's own audio fade may be. */
+export const SHOT_FADE_MAX_SEC = 10;
 
 /** dB → linear gain; at/below VOLUME_DB_MIN snaps to true 0 (not just very quiet). */
 export function dbToGain(db: number): number {
@@ -232,22 +239,47 @@ export function dbToGain(db: number): number {
   return Math.pow(10, db / 20); // no ceiling here — each surface clamps its own (shots at 0 dB, lane clips higher)
 }
 
-/** Effective linear gain of a shot's own audio (1 = untouched, 0 = silent). The single source of truth for preview and export. */
+/** Effective linear gain of a shot's own audio (1 = untouched, 0 = silent), before its fades. */
 export function shotGain(s: Pick<VideoShot, 'volumeDb' | 'audioMuted'>): number {
   if (s.audioMuted) return 0;
   return s.volumeDb == null ? 1 : dbToGain(s.volumeDb);
 }
 
+/** Smoothstep, the shape every fade in the project uses (audio lane and shot audio alike). */
+export function fadeShape(t: number): number {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
+
+/** A shot's fade factor at tLocal seconds into a segment of length lenSec (1 = untouched). */
+export function shotFadeAt(s: Pick<VideoShot, 'audioFadeInSec' | 'audioFadeOutSec'>, tLocal: number, lenSec: number): number {
+  let f = 1;
+  if (s.audioFadeInSec) f *= fadeShape(tLocal / s.audioFadeInSec);
+  if (s.audioFadeOutSec) f *= fadeShape((lenSec - tLocal) / s.audioFadeOutSec);
+  return f;
+}
+
+/** Full gain of a shot's audio at tLocal into the segment: level × fades. Preview and export share it. */
+export function shotGainAt(s: Pick<VideoShot, 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'>, tLocal: number, lenSec: number): number {
+  const g = shotGain(s);
+  return g <= 0 ? 0 : g * shotFadeAt(s, tLocal, lenSec);
+}
+
 /** Apply an audio patch to one shot: clamps volumeDb into [VOLUME_DB_MIN, VOLUME_DB_MAX], drops fields at their
  *  neutral value (0 dB / unmuted) so untouched comps stay byte-identical. Shared by the panel and both tool executors. */
-export function patchShotAudio<T extends VideoShot>(s: T, patch: { volumeDb?: number; mute?: boolean }): T {
-  const { volumeDb: _v, audioMuted: _m, ...rest } = s;
+export function patchShotAudio<T extends VideoShot>(s: T, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }): T {
+  const { volumeDb: _v, audioMuted: _m, audioFadeInSec: _fi, audioFadeOutSec: _fo, ...rest } = s;
   const db = patch.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb)) : s.volumeDb;
   const muted = patch.mute != null ? patch.mute : s.audioMuted;
+  const fade = (v: number | undefined) => (v == null ? undefined : Math.round(Math.max(0, Math.min(SHOT_FADE_MAX_SEC, v)) * 10) / 10);
+  const fi = patch.fadeInSec != null ? fade(patch.fadeInSec) : s.audioFadeInSec;
+  const fo = patch.fadeOutSec != null ? fade(patch.fadeOutSec) : s.audioFadeOutSec;
   return {
     ...(rest as T),
     ...(db != null && db !== 0 ? { volumeDb: Math.round(db * 10) / 10 } : {}),
     ...(muted ? { audioMuted: true } : {}),
+    ...(fi ? { audioFadeInSec: fi } : {}),
+    ...(fo ? { audioFadeOutSec: fo } : {}),
   };
 }
 

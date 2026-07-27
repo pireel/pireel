@@ -23,7 +23,9 @@ import {
   VOLUME_DB_MIN,
   dbToGain,
   patchShotAudio,
+  shotFadeAt,
   shotGain,
+  shotGainAt,
   type VideoShot,
 } from './composition';
 
@@ -665,6 +667,23 @@ describe('分镜声音(volumeDb/audioMuted)', () => {
     const neutral = patchShotAudio(shot({ volumeDb: -6, audioMuted: true }), { volumeDb: 0, mute: false });
     expect('volumeDb' in neutral).toBe(false);
     expect('audioMuted' in neutral).toBe(false);
+  });
+
+  it('分镜音频淡入淡出:默认无淡化(每个切点都喘气才是错的),设了才走 smoothstep,并夹在 10s 内', () => {
+    const s = shot();
+    expect(shotFadeAt(s, 0, 10)).toBe(1); // 默认 = 硬切
+    const faded = patchShotAudio(s, { fadeInSec: 2, fadeOutSec: 1 });
+    expect(faded.audioFadeInSec).toBe(2);
+    expect(shotFadeAt(faded, 0, 10)).toBe(0);
+    expect(shotFadeAt(faded, 1, 10)).toBe(0.5); // smoothstep 中点
+    expect(shotFadeAt(faded, 5, 10)).toBe(1);
+    expect(shotFadeAt(faded, 9.5, 10)).toBe(0.5); // 尾端 1s 淡出
+    // 整体增益 = 电平 × 淡化;静音压过一切
+    const quiet = patchShotAudio(faded, { volumeDb: -6 });
+    expect(shotGainAt(quiet, 5, 10)).toBeCloseTo(dbToGain(-6), 5);
+    expect(shotGainAt(patchShotAudio(quiet, { mute: true }), 5, 10)).toBe(0);
+    expect(patchShotAudio(s, { fadeInSec: 99 }).audioFadeInSec).toBe(10);
+    expect(patchShotAudio(faded, { fadeInSec: 0 }).audioFadeInSec).toBeUndefined(); // 归零=摘字段
   });
 
   it('patchShotAudio:mute 独立于 volumeDb——静音再取消,原音量还在', () => {

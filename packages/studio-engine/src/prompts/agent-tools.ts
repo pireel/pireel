@@ -427,13 +427,15 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔊',
     label: 'tools.set_shot_audio.label',
     description:
-      "Set shots' own audio: volumeDb attenuates the footage's sound (0 = source level, -60 = silent; boosting above source level is not supported), mute true/false hard-silences while remembering the previous volume. Whole shot, switches at the cut — split_shot first for a partial change. Batch with shotIds or all:true (e.g. quiet every B-roll insert to -18 while narration continues). Omit a field to leave it unchanged.",
+      "Set shots' own audio: volumeDb attenuates the footage's sound (0 = source level, -60 = silent; boosting above source level is not supported), mute true/false hard-silences while remembering the previous volume, fadeInSec/fadeOutSec fade that shot's audio at its own edges (0 = hard cut, ≤10s — use it for the piece's opening/ending, not on every shot). Whole shot, switches at the cut — split_shot first for a partial change. Batch with shotIds or all:true (e.g. quiet every B-roll insert to -18 while narration continues). Omit a field to leave it unchanged.",
     inputSchema: obj(
       {
         shotIds: { type: 'array', items: { type: 'string' }, description: 'Target shot ids (omit when using all).' },
         all: { type: 'boolean', description: 'true = apply to every shot.' },
         volumeDb: { type: 'number', description: 'dB, clamped -60..0; 0 resets to source level, -60 = silent.' },
         mute: { type: 'boolean', description: 'Hard-silence toggle (independent of volumeDb).' },
+        fadeInSec: { type: 'number', description: "Fade this shot's audio in over N seconds (0 = none)." },
+        fadeOutSec: { type: 'number', description: "Fade this shot's audio out over N seconds (0 = none)." },
       },
       [],
     ),

@@ -57,6 +57,7 @@ import {
   audioClipWindow,
   audioTrimPatch,
   patchShotAudio,
+  shotFadeAt,
   shotFilterCss,
   shotGain,
   type AudioClip,
@@ -659,7 +660,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const f = clipFilesRef.current.get(s.src);
       eng.setSource(s.src, f ?? (s.src.startsWith('blob:') ? null : s.src));
     }
-    eng.setSegments(shots.map((s) => ({ key: s.src ?? 'main', elKey: s.src ? `clip_${s.id}` : 'main', srcStart: s.srcStart, srcEnd: s.srcEnd, gain: shotGain(s) })));
+    eng.setSegments(
+      shots.map((s) => ({
+        key: s.src ?? 'main',
+        elKey: s.src ? `clip_${s.id}` : 'main',
+        srcStart: s.srcStart,
+        srcEnd: s.srcEnd,
+        gain: shotGain(s),
+        ...(s.audioFadeInSec || s.audioFadeOutSec
+          ? { fadeAt: (local: number) => shotFadeAt(s, local, Math.max(0.01, s.srcEnd - s.srcStart)) }
+          : {}),
+      })),
+    );
     eng.setTransitions(cutTransitions(comp.shots ?? []).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
     if (!playingRef.current) eng.refresh();
   }, [comp.video, comp.shots]);
@@ -2031,7 +2043,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     postPreview({ type: 'hf:shotVars', vars: { filter: shotFilterCss(f) } });
   };
   /** Per-shot audio commit (volume/mute): the engine-segment effect refeeds gains from comp.shots. */
-  const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean }) => {
+  const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => {
     setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? patchShotAudio(s, patch) : s)) }));
   };
   /** Live volume preview during slider drag (zero setState): shots map 1:1 onto engine segments by index. */
@@ -4350,13 +4362,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               usable={audioOps.clipUsable}
               onPatch={audioOps.patchClip}
               onPreviewVolume={audioOps.previewClipVolume}
-              onRemove={(id) => {
-                audioOps.removeClip(id);
-                if (selectedAudioId === id) setSelectedAudioId(null);
-              }}
               shot={selectedShot ?? null}
               shotCount={(comp.shots ?? []).length}
-              onSetShotAudio={(patch, all) => {
+              onSetShotAudio={(patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }, all: boolean) => {
                 const ids = all ? (comp.shots ?? []).map((sh) => sh.id) : selectedShot ? [selectedShot.id] : [];
                 if (!ids.length) return;
                 pushUndoSnapshot();

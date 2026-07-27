@@ -124,7 +124,7 @@ export interface AgentToolCtx {
   resizeCutTransition: (shotId: string, durationSec: number) => void;
   setShotTreatment: (sid: string, treatment: ShotTreatment) => void;
   setShotFilter: (sid: string, f: ShotFilter | null) => void;
-  setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean }) => void;
+  setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
   audioMount: (file: File, label?: string, opts?: { startSec?: number }) => Promise<string | undefined>;
   audioPatch: (id: string, patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number; speed?: number; startSec?: number }) => void;
@@ -917,8 +917,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const patch = {
               ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
               ...(typeof input.mute === 'boolean' ? { mute: input.mute } : {}),
+              ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+              ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
             };
-            if (!('volumeDb' in patch) && !('mute' in patch)) return { ok: false, error: t('workbench.passVolumeOrMute') };
+            if (!Object.keys(patch).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
             for (const s of hit) setShotAudio(s.id, patch);
             const bits = [
               ...('volumeDb' in patch ? [`${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),

@@ -14,7 +14,7 @@
  * export bakes identical gains into the PCM mix.
  */
 
-import { VOLUME_DB_MIN, dbToGain } from './composition-core';
+import { VOLUME_DB_MIN, dbToGain, fadeShape } from './composition-core';
 
 export interface AudioClip {
   id: string;
@@ -129,13 +129,6 @@ export function splitAudioClipAt(c: AudioClip, atSec: number, newId: () => strin
   const head = patchAudioClip(c, { inSec: d.inSec, outSec: cutSrc, fadeOutSec: 0 });
   const tail = patchAudioClip({ ...c, id: newId() }, { startSec: atSec, inSec: cutSrc, outSec: d.outSec, fadeInSec: 0 });
   return [head, tail];
-}
-
-/** Fade shaping: smoothstep, so a fade eases in and out of silence instead of cornering. The timeline
- *  draws this exact curve on the clip — what you see on the lane IS the gain being applied. */
-export function fadeShape(t: number): number {
-  const x = Math.max(0, Math.min(1, t));
-  return x * x * (3 - 2 * x);
 }
 
 /** Linear gain of a clip at edited time t (0 outside its window; fades measured inside it). */
