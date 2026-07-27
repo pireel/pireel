@@ -452,6 +452,25 @@ const PREVIEW_RUNTIME = `
         }
       } catch (err) {}
     }
+    else if (d.type === 'hf:blockHtml' && d.blockId) {
+      // Kit props edit: swap ONE block's content and rebuild only its timeline — a full doc
+      // rebuild (double-buffer swap + video reload) for a one-block tweak reads as "updating…" lag.
+      try {
+        var bhEl = document.getElementById(String(d.blockId));
+        if (bhEl && bhEl.classList.contains('comp')) {
+          var bhHost = bhEl.querySelector('[data-hf-content]') || bhEl;
+          bhHost.innerHTML = String(d.innerHtml || '');
+          if (window.__timelines && window.__timelines[d.blockId]) {
+            try { window.__timelines[d.blockId].kill(); } catch (e1) {}
+            delete window.__timelines[d.blockId];
+          }
+          var bhTl = gsap.timeline({ paused: true });
+          try { new Function('tl', String(d.timelineBody || ''))(bhTl); } catch (e2) { console.warn('[hf] blockHtml timeline', d.blockId, e2); }
+          window.__timelines[d.blockId] = bhTl;
+          seekTimelines(lastSeekT); // re-align the fresh paused timeline to the current playhead
+        }
+      } catch (err) {}
+    }
     else if (d.type === 'hf:remove' && d.id) {
       // instant block delete (don't wait for the 300ms debounced rebuild + double-buffer swap): delete must feel immediate; the rebuild still runs, and the swapped-in doc simply doesn't have this block
       try {
