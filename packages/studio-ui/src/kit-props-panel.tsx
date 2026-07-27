@@ -8,7 +8,7 @@
  */
 
 import { useMemo } from 'react';
-import { kitComponents } from '@pireel/studio-engine/kit-templates';
+import { kitComponents, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
 import type { Block } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
@@ -110,13 +110,18 @@ export function KitPropsPanel({
           );
         }
         if (f.format === 'color') {
-          // Empty = follow the theme token, so a theme swap restyles the component; an explicit
-          // colour is kept. Both states need to be reachable, hence the reset swatch.
+          // Empty = follow the theme token (a theme swap restyles the component); an explicit
+          // colour survives it. Alpha rides on the same value as #rrggbbaa — a surface over busy
+          // footage often wants to let some through — and is only offered once a colour is chosen.
           const val = typeof v === 'string' ? v : '';
+          const rgb = val.slice(0, 7);
+          const alpha = val.length === 9 ? Math.round((parseInt(val.slice(7, 9), 16) / 255) * 100) : 100;
+          const withAlpha = (hex6: string, a: number) =>
+            a >= 100 ? hex6 : hex6 + Math.round((a / 100) * 255).toString(16).padStart(2, '0');
           return (
-            <div key={key} className="flex items-center justify-between gap-2" title={f.description}>
+            <div key={key} className="flex flex-col gap-1.5" title={f.description}>
               <span className="text-ink-4 text-[10px]">{fieldLabel(key)}</span>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 <button
                   type="button"
                   onClick={() => set(key, '')}
@@ -124,19 +129,47 @@ export function KitPropsPanel({
                   aria-label={t('kitProp.followTheme')}
                   className={`h-5 w-5 shrink-0 rounded-full border bg-[linear-gradient(135deg,transparent_44%,#f43f5e_44%,#f43f5e_56%,transparent_56%)] ${!val ? 'border-accent ring-accent ring-1' : 'border-line'}`}
                 />
+                {kitSurfaceSwatches.map((sw) => (
+                  <button
+                    key={sw.value}
+                    type="button"
+                    onClick={() => set(key, withAlpha(sw.value, alpha))}
+                    title={sw.name}
+                    aria-label={sw.name}
+                    className={`h-5 w-5 shrink-0 rounded-full border ${rgb.toLowerCase() === sw.value.toLowerCase() ? 'border-accent ring-accent ring-1' : 'border-line'}`}
+                    style={{ background: sw.value }}
+                  />
+                ))}
                 <label
-                  className={`relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border ${val ? 'border-accent ring-accent ring-1' : 'border-line'}`}
-                  style={val ? { background: val } : { background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)' }}
+                  title={t('kitProp.customColor')}
+                  className="border-line relative h-5 w-5 shrink-0 cursor-pointer overflow-hidden rounded-full border"
+                  style={{ background: 'conic-gradient(#f43f5e,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#f43f5e)' }}
                 >
                   <input
                     type="color"
-                    value={/^#[0-9a-fA-F]{6}$/.test(val) ? val : '#ffffff'}
-                    onChange={(e) => set(key, e.target.value)}
+                    value={/^#[0-9a-fA-F]{6}$/.test(rgb) ? rgb : '#ffffff'}
+                    onChange={(e) => set(key, withAlpha(e.target.value, alpha))}
                     className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label={fieldLabel(key)}
+                    aria-label={t('kitProp.customColor')}
                   />
                 </label>
               </div>
+              {val && (
+                <label className="flex items-center gap-1.5">
+                  <span className="text-ink-4 shrink-0 text-[10px]">
+                    {t('kitProp.opacity')} {alpha}%
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={alpha}
+                    onChange={(e) => set(key, withAlpha(rgb, Number(e.target.value)))}
+                    className="accent-accent min-w-0 flex-1"
+                  />
+                </label>
+              )}
             </div>
           );
         }
