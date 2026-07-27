@@ -8,6 +8,7 @@ import {
   audioClipSrcTimeAt,
   audioClipWindow,
   audioTrimPatch,
+  fadeShape,
   patchAudioClip,
 } from './audio-tracks';
 import { dbToGain } from './composition';
@@ -66,6 +67,20 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(audioClipSrcTimeAt(c, 24.9)).toBeCloseTo(19.9, 5);
     expect(audioClipSrcTimeAt(c, 25)).toBeNull(); // out 点即止
     expect(audioClipGainAt(c, 26, 120)).toBe(0);
+  });
+
+  it('淡化=smoothstep 平滑曲线(时间轴画的就是这条增益曲线),两端相切于 0/1、中点仍是一半', () => {
+    const c = clip({ startSec: 0, durationSec: 30, fadeInSec: 2, fadeOutSec: 2 });
+    const base = dbToGain(AUDIO_DEFAULT_DB);
+    expect(fadeShape(0)).toBe(0);
+    expect(fadeShape(1)).toBe(1);
+    expect(fadeShape(0.5)).toBe(0.5);
+    // 平滑:1/4 处比线性更低(缓入),3/4 处比线性更高(缓出)
+    expect(fadeShape(0.25)).toBeLessThan(0.25);
+    expect(fadeShape(0.75)).toBeGreaterThan(0.75);
+    expect(audioClipGainAt(c, 1, 60)).toBeCloseTo(base * 0.5, 5);
+    expect(audioClipGainAt(c, 0.5, 60)).toBeCloseTo(base * fadeShape(0.25), 5);
+    expect(audioClipGainAt(c, 29, 60)).toBeCloseTo(base * 0.5, 5); // 尾端对称
   });
 
   it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {
