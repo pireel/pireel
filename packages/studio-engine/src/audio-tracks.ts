@@ -57,18 +57,26 @@ export function audioClipId(): string {
   return `aud${_audioUid}_${Math.floor(performance.now())}`;
 }
 
-/** Resolved knobs (defaults applied). outSec falls back to the media duration, or Infinity when unknown. */
+/** Resolved knobs (defaults applied). outSec falls back to the media duration, or Infinity when unknown.
+ *  The two fades are kept APART: fade-in is capped by the clip's length and fade-out by whatever is left
+ *  after it, so they can never overlap into one blob (the reference editor clamps the same way). Short
+ *  clips therefore show shorter fades than the stored value — the stored value is preserved, so making the
+ *  clip longer again restores it. */
 export function audioClipDefaults(c: AudioClip): Required<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>> {
   const inSec = Math.max(0, c.inSec ?? 0);
   const cap = c.durationSec ?? Infinity;
+  const outSec = Math.max(inSec, Math.min(cap, c.outSec ?? cap));
+  const speed = Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, c.speed ?? 1));
+  const span = Number.isFinite(outSec) ? (outSec - inSec) / speed : Infinity;
+  const fadeIn = Math.min(Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC), span);
   return {
     startSec: Math.max(0, c.startSec ?? 0),
     volumeDb: Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, c.volumeDb ?? AUDIO_DEFAULT_DB)),
-    fadeInSec: Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC),
-    fadeOutSec: Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC),
-    speed: Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, c.speed ?? 1)),
+    fadeInSec: fadeIn,
+    fadeOutSec: Math.min(Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC), Math.max(0, span - fadeIn)),
+    speed,
     inSec,
-    outSec: Math.max(inSec, Math.min(cap, c.outSec ?? cap)),
+    outSec,
   };
 }
 
