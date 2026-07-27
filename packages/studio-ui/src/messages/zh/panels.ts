@@ -1,4 +1,10 @@
 export const PANELS_ZH: Record<string, string> = {
+  'kitProp.surface': '底板',
+  'kitProp.surfaceColor': '底板颜色',
+  'kitProp.border': '描边',
+  'kitProp.borderColor': '描边颜色',
+  'kitProp.radius': '圆角',
+  'kitProp.followTheme': '跟随主题',
   'panels.replayAnimation': '重播动效',
   'kitProp.cells': '数据项',
   'kitProp.series': '数据列',
@@ -39,7 +45,6 @@ export const PANELS_ZH: Record<string, string> = {
   'kitProp.note': '注释',
   'kitProp.trend': '趋势',
   'kitProp.ghost': '幽灵数字',
-  'kitProp.surface': '底板',
   'kitProp.text': '文案',
   'kitProp.support': '辅助行',
   'panels.addTransition': '添加转场',

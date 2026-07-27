@@ -1,4 +1,10 @@
 export const PANELS_EN: Record<string, string> = {
+  'kitProp.surface': 'Surface',
+  'kitProp.surfaceColor': 'Surface colour',
+  'kitProp.border': 'Border',
+  'kitProp.borderColor': 'Border colour',
+  'kitProp.radius': 'Corners',
+  'kitProp.followTheme': 'Follow theme',
   'panels.replayAnimation': 'Replay',
   'kitProp.cells': 'Cells',
   'kitProp.series': 'Series',
@@ -39,7 +45,6 @@ export const PANELS_EN: Record<string, string> = {
   'kitProp.note': 'Note',
   'kitProp.trend': 'Trend',
   'kitProp.ghost': 'Ghost numeral',
-  'kitProp.surface': 'Surface',
   'kitProp.text': 'Text',
   'kitProp.support': 'Support line',
   'panels.addTransition': 'Add transition',
