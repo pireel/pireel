@@ -220,14 +220,16 @@ export function shotFilterCss(f?: ShotFilter): string {
 }
 
 /** Shot audio scale (dB semantics, same convention across panel slider / agent tool / preview / export).
- *  VOLUME_DB_MIN is treated as -inf (true silence); VOLUME_DB_MAX stays 0 while preview is element-volume based (see VideoShot.volumeDb). */
+ *  VOLUME_DB_MIN is treated as -inf (true silence). VOLUME_DB_MAX is the SHOT ceiling: a shot's audio rides its
+ *  decode element's own volume (0..1), so a shot cannot be boosted past source level and stay honest in preview.
+ *  Audio-lane clips run through a WebAudio gain node instead and have their own, higher ceiling (see audio-tracks). */
 export const VOLUME_DB_MIN = -60;
 export const VOLUME_DB_MAX = 0;
 
 /** dB → linear gain; at/below VOLUME_DB_MIN snaps to true 0 (not just very quiet). */
 export function dbToGain(db: number): number {
   if (db <= VOLUME_DB_MIN) return 0;
-  return Math.pow(10, Math.min(VOLUME_DB_MAX, db) / 20);
+  return Math.pow(10, db / 20); // no ceiling here — each surface clamps its own (shots at 0 dB, lane clips higher)
 }
 
 /** Effective linear gain of a shot's own audio (1 = untouched, 0 = silent). The single source of truth for preview and export. */

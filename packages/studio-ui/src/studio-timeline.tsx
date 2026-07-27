@@ -107,6 +107,8 @@ function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeo
     const s1 = Math.max(s0 + 1, a + Math.floor((i + 1) * step));
     let peak = 0;
     for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
+    // dB axis shifted by the clip's level: a boost pushes bars up against the ceiling (where they flatten,
+    // exactly as the level itself does), an attenuation lowers the whole shape
     const db = peak > 0 ? 20 * Math.log10(peak) + d.volumeDb : WAVE_FLOOR_DB;
     const frac = Math.max(0, Math.min(1, (db - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB));
     // fade envelope at this bar's moment — the same curve the gain applies (fadeShape)

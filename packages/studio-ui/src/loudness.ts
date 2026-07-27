@@ -9,6 +9,8 @@
  * here needs broadcast-legal numbers.
  */
 
+import { AUDIO_VOLUME_DB_MAX, VOLUME_DB_MIN } from '@pireel/studio-engine/composition';
+
 const WIN_SEC = 0.4;
 const HOP_SEC = 0.2;
 const ABS_GATE_DB = -55;
@@ -68,9 +70,9 @@ export function measureBufferLoudnessDb(buf: AudioBuffer): number | null {
   return Math.round(db(kept.reduce((a, b) => a + b, 0) / kept.length) * 10) / 10;
 }
 
-/** Bed volumeDb from measured loudness (clamped to the storable [-60, 0] range). */
+/** Clip volumeDb from measured loudness (clamped to the lane's storable range). */
 export function bgmAutoVolumeDb(narrationDb: number, bgmDb: number): number {
   const v = narrationDb - BGM_AUTO_UNDER_DB - bgmDb;
-  return Math.round(Math.max(-60, Math.min(0, v)) * 10) / 10;
+  return Math.round(Math.max(VOLUME_DB_MIN, Math.min(AUDIO_VOLUME_DB_MAX, v)) * 10) / 10;
 }
 

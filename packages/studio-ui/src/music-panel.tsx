@@ -11,10 +11,9 @@
 
 import { useEffect, useState } from 'react';
 import { Music, Upload, Trash2, Wand2 } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, type AudioClip, audioClipDefaults } from '@pireel/studio-engine/composition';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, VOLUME_DB_MIN, type AudioClip, audioClipDefaults } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
-const VOL_MIN = -40;
 
 export function MusicPanel({
   clips,
@@ -130,12 +129,12 @@ export function MusicPanel({
           <section className="flex flex-col gap-2.5">
             <div className="text-ink flex items-center justify-between font-medium">
               <span>{t('panels.volume')}</span>
-              <span className="text-ink-4 tabular-nums">{dbValue}dB</span>
+              <span className="text-ink-4 tabular-nums">{dbValue <= VOLUME_DB_MIN ? t('panels.muted') : `${dbValue > 0 ? '+' : ''}${dbValue}dB`}</span>
             </div>
             <input
               type="range"
-              min={VOL_MIN}
-              max={0}
+              min={VOLUME_DB_MIN}
+              max={AUDIO_VOLUME_DB_MAX}
               step={1}
               value={dbValue}
               onChange={(e) => {
