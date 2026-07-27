@@ -358,10 +358,14 @@ export function AssetsPanel({
         {it.kind === 'element' ? <ElementTile item={it} comp={it.origin === 'preset' ? presetPreviewComp : comp} /> : <TileThumb item={it} />}
         <div className="text-ink-3 truncate px-1.5 py-1 text-[10px]">{it.label}</div>
       </button>
-      <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
-        {it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : <ImageIcon size={9} />}
-        {it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
-      </span>
+      {/* Origin badge: only where it disambiguates. Elements live under their own section heading,
+          so a label on every card was pure noise. */}
+      {it.kind !== 'element' && (
+        <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
+          {it.kind === 'video' ? <Clapperboard size={9} /> : <ImageIcon size={9} />}
+          {it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
+        </span>
+      )}
       {it.deletable && (
         <button
           type="button"
