@@ -31,18 +31,17 @@ export interface EngineSeg {
   gain?: number;
 }
 
-/** BGM bed spec for the preview (declarative; the gain envelope arrives as a closure so the engine
- *  stays ignorant of transcripts/spans — workbench builds it from the same pure bgmGainAt as export). */
-export interface EngineBgm {
+/** Audio-clip spec for the preview (declarative; envelope + source-time mapping arrive as closures
+ *  so the engine stays ignorant of the clip model — workbench builds them from the same pure fns as export). */
+export interface EngineAudioClip {
+  id: string;
   url: string;
-  /** Media duration when known (loop/drift math); unknown → plain offset+t and the element's loop attr wraps. */
-  durationSec?: number;
-  loop: boolean;
-  offsetSec: number;
-  /** Bed start on the edited timeline (music-lane drag position); before it the bed is parked silent. */
-  startSec: number;
-  /** Full envelope at edited time t (base level × fades × duck), 0..1. */
+  /** Playback speed (element playbackRate; preservesPitch=false so preview matches the export's resample). */
+  speed: number;
+  /** Full envelope at edited time t (level × fades), 0..1; 0 outside the clip's window. */
   gainAt: (t: number) => number;
+  /** Edited time → source seconds; null = outside the playable range (element parks paused). */
+  srcTimeAt: (t: number) => number | null;
 }
 
 export interface FrameInfo {
@@ -78,10 +77,9 @@ export class VideoTrackEngine {
   private ghosts = new Map<string, HTMLVideoElement>(); // key `${srcKey}::pre|post`
   private activeGhost: HTMLVideoElement | null = null;
   private ghostFresh = false; // ghost is in place and not seeking (stale frames mid-seek aren't emitted, prevents side-swap flicker)
-  // BGM bed: one resident <audio> element, volume driven per tick from the spec's envelope closure.
-  // Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s, with loop-wrap-aware distance.
-  private bgmEl: HTMLAudioElement | null = null;
-  private bgmSpec: EngineBgm | null = null;
+  // Audio clips (music lane): one resident <audio> element per clip, volume driven per tick from the
+  // envelope closure. Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s.
+  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip }>();
   // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
   // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
   // matters here, so drift correction is tight (0.08s) against the video element's own clock.
@@ -213,29 +211,35 @@ export class VideoTrackEngine {
     this.trs = trs;
   }
 
-  /** Mount/swap/remove the BGM bed. Same-url respec (volume/duck knob turns) keeps the element —
-   *  only the envelope closure swaps, no reload, no playback interruption. */
-  setBgm(spec: EngineBgm | null): void {
-    if (!spec) {
-      this.bgmEl?.remove();
-      this.bgmEl = null;
-      this.bgmSpec = null;
-      return;
+  /** Reconcile the audio-clip set: same-url respec (knob turns) keeps the element — only the closures
+   *  swap, no reload, no playback interruption; removed ids drop their elements. */
+  setAudioClips(specs: EngineAudioClip[]): void {
+    const keep = new Set(specs.map((sp) => sp.id));
+    for (const [id, c] of this.audioClips) {
+      if (!keep.has(id)) {
+        c.el.remove();
+        this.audioClips.delete(id);
+      }
     }
-    const sameUrl = this.bgmSpec?.url === spec.url;
-    this.bgmSpec = spec;
-    if (!this.bgmEl) {
-      const a = document.createElement('audio');
-      a.preload = 'auto';
-      this.ensureHost().appendChild(a);
-      this.bgmEl = a;
+    for (const spec of specs) {
+      const cur = this.audioClips.get(spec.id);
+      if (!cur) {
+        const a = document.createElement('audio');
+        a.preload = 'auto';
+        a.src = spec.url;
+        a.dataset.hfSrcTag = spec.url;
+        this.ensureHost().appendChild(a);
+        this.audioClips.set(spec.id, { el: a, spec });
+      } else {
+        if (cur.el.dataset.hfSrcTag !== spec.url) {
+          cur.el.src = spec.url;
+          cur.el.dataset.hfSrcTag = spec.url;
+          cur.el.load();
+        }
+        cur.spec = spec;
+      }
     }
-    if (!sameUrl) {
-      this.bgmEl.src = spec.url;
-      this.bgmEl.load();
-    }
-    this.bgmEl.loop = spec.loop;
-    this.syncBgm(this.tEdited, this.playing, true);
+    this.syncAudioClips(this.tEdited, this.playing, true);
   }
 
   /** Mount/swap/remove a source's narration dub (baked processed audio, same source-seconds timeline).
@@ -287,41 +291,29 @@ export class VideoTrackEngine {
     return true;
   }
 
-  private bgmSrcTime(t: number): number | null {
-    const s = this.bgmSpec!;
-    const lt = t - s.startSec;
-    if (lt < 0) return null;
-    if (s.durationSec == null || s.durationSec <= s.offsetSec) return s.offsetSec + lt;
-    const span = s.durationSec - s.offsetSec;
-    if (!s.loop) return lt < span ? s.offsetSec + lt : null;
-    return s.offsetSec + (lt % span);
-  }
-
-  /** Per-tick / on-seek bed sync: volume from the envelope closure; drift correction only past 0.35s
-   *  (loop-wrap-aware distance so the frame right after a wrap isn't misread as drift). force = hard seek. */
-  private syncBgm(t: number, wantPlay: boolean, force = false): void {
-    const el = this.bgmEl;
-    const s = this.bgmSpec;
-    if (!el || !s) return;
-    const srcT = this.bgmSrcTime(t);
-    if (srcT == null) {
-      el.volume = 0;
-      if (!el.paused) el.pause();
-      return;
-    }
-    el.volume = Math.max(0, Math.min(1, s.gainAt(t)));
-    const diff = Math.abs(el.currentTime - srcT);
-    const span = s.durationSec != null && s.durationSec > s.offsetSec ? s.durationSec - s.offsetSec : Infinity;
-    const dist = s.loop && Number.isFinite(span) ? Math.min(diff, span - diff) : diff;
-    if ((force || dist > 0.35) && !el.seeking) {
-      try {
-        el.currentTime = srcT;
-      } catch {
-        /* metadata not ready: next tick retries */
+  /** Per-tick / on-seek clip sync: volume from the envelope closure, playbackRate = speed with
+   *  preservesPitch OFF (matches the export resample); drift correction only past 0.35s. force = hard seek. */
+  private syncAudioClips(t: number, wantPlay: boolean, force = false): void {
+    for (const { el, spec } of this.audioClips.values()) {
+      const srcT = spec.srcTimeAt(t);
+      if (srcT == null) {
+        el.volume = 0;
+        if (!el.paused) el.pause();
+        continue;
       }
+      el.volume = Math.max(0, Math.min(1, spec.gainAt(t)));
+      el.playbackRate = spec.speed;
+      (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
+      if ((force || Math.abs(el.currentTime - srcT) > 0.35) && !el.seeking) {
+        try {
+          el.currentTime = srcT;
+        } catch {
+          /* metadata not ready: next tick retries */
+        }
+      }
+      if (wantPlay && el.paused) el.play().catch(() => {});
+      else if (!wantPlay && !el.paused) el.pause();
     }
-    if (wantPlay && el.paused) el.play().catch(() => {});
-    else if (!wantPlay && !el.paused) el.pause();
   }
 
   /** The transition window containing t (with 0.3s warm-up lead) → both-side segment indices; null if the cut doesn't align to a segment boundary. */
@@ -531,7 +523,7 @@ export class VideoTrackEngine {
     const el = this.els.get(seg.key);
     if (!el) return;
     this.syncGhost(this.tEdited); // scrub into a transition window: ghost seeks along (no play while paused)
-    this.syncBgm(this.tEdited, this.playing, true); // park the bed at the new position (aligned resume)
+    this.syncAudioClips(this.tEdited, this.playing, true); // park the clips at the new position (aligned resume)
     const gen = ++this.seekGen;
     const push = () => {
       if (gen !== this.seekGen) return;
@@ -559,7 +551,7 @@ export class VideoTrackEngine {
     const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
     if (!inSeg) this.tEdited = this.starts[i]!; // starting play in a dead window: begin at the next playable segment (skip)
     this.activateIdx(i, srcT, true);
-    this.syncBgm(this.tEdited, true, true); // hard-align the bed at play start
+    this.syncAudioClips(this.tEdited, true, true); // hard-align the clips at play start
     if (this.raf) cancelAnimationFrame(this.raf);
     let lastCt = -1;
     let lastCtAt = performance.now();
@@ -602,7 +594,7 @@ export class VideoTrackEngine {
         this.tSmooth = ts;
         this.onTick?.(ts);
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
-        this.syncBgm(ts, true);
+        this.syncAudioClips(ts, true);
         if (this.dubs.size && this.syncDub(sg.key, el, this.segGain(this.curIdx), true)) el.muted = true;
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
@@ -656,7 +648,7 @@ export class VideoTrackEngine {
       if (!el.paused) el.pause();
     }
     for (const g of this.ghosts.values()) if (!g.paused) g.pause();
-    if (this.bgmEl && !this.bgmEl.paused) this.bgmEl.pause();
+    for (const c of this.audioClips.values()) if (!c.el.paused) c.el.pause();
     for (const d of this.dubs.values()) if (!d.el.paused) d.el.pause();
   }
 
@@ -668,9 +660,8 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
-    this.bgmEl?.remove();
-    this.bgmEl = null;
-    this.bgmSpec = null;
+    for (const c of this.audioClips.values()) c.el.remove();
+    this.audioClips.clear();
     for (const d of this.dubs.values()) d.el.remove();
     this.dubs.clear();
     for (const el of this.els.values()) el.remove();

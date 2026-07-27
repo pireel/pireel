@@ -36,7 +36,7 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type Composition, type ShotFilter, type SpeechSpan, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, shotGain, totalDuration } from '@pireel/studio-engine/composition';
+import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, shotGain, totalDuration } from '@pireel/studio-engine/composition';
 import { decodeAudioFile, mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
@@ -242,9 +242,8 @@ export interface ClientExportOpts {
   videoFile: File;
   /** Local insert-clip Files (key = blob URL, same source as workbench clipFilesRef). */
   clipFiles: Map<string, File>;
-  /** BGM bed bytes + the merged speech spans for ducking (workbench derives them from the transcripts).
-   *  Absent (or comp.bgm absent) = the untouched narration-only audio path. */
-  bgm?: { file: File; speech: SpeechSpan[] } | null;
+  /** Audio-track clips + their bytes. Absent/empty = the untouched narration-only audio path. */
+  audio?: { clip: AudioClip; file: File }[] | null;
   /** Denoise substitution: source key → baked blended audio file. That source's audio track is read
    *  from this file instead of the source video (video decode untouched) — preview's dub, verbatim. */
   denoise?: Map<string, File> | null;
@@ -467,8 +466,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const output = new Output({ format: outFormat, target: new BufferTarget() });
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
-    const withBgm = !!(comp.bgm && opts.bgm?.file);
-    const anyAudio = withBgm || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
+    const withClips = !!opts.audio?.length;
+    const anyAudio = withClips || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
@@ -718,20 +717,20 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // Audio track. With a BGM bed: full mix on the 48k grid (narration resampled + bed with the preview's
-    // exact envelope) — see export-audio-mix.ts. Without: concatenate in edited-segment order (main segment =
+    // Audio track. With audio clips: full mix on the 48k grid (narration resampled + each clip with the
+    // preview's exact envelope) — see export-audio-mix.ts. Without: concatenate in edited-segment order (main segment =
     // narration audio, insert clip = its own), re-stamp timestamps.
     // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
     // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
-    if (audioSource && withBgm) {
+    if (audioSource && withClips) {
       const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
       for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
+      const clips: { clip: AudioClip; buffer: AudioBuffer }[] = [];
+      for (const a of opts.audio!) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
       await mixAudioTrack({
         segs: segs.map((s) => ({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: s.key, gain: s.gain ?? 1 })),
         audioTracks,
-        bgm: comp.bgm!,
-        bgmBuffer: await decodeAudioFile(opts.bgm!.file),
-        speech: opts.bgm!.speech,
+        clips,
         totalSec: durationSec,
         push: (sample) => audioSource.add(sample).then(() => sample.close()),
       });

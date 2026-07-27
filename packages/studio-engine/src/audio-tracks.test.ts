@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest';
+import {
+  AUDIO_DEFAULT_DB,
+  AUDIO_FADE_IN_SEC,
+  type AudioClip,
+  audioClipGainAt,
+  audioClipSrcTimeAt,
+  audioClipWindow,
+  patchAudioClip,
+} from './audio-tracks';
+import { dbToGain } from './composition';
+
+const clip = (over: Partial<AudioClip> = {}): AudioClip => ({ id: 'a1', src: 'blob:x', ...over });
+
+describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+变速)', () => {
+  it('窗口=起点+曲长/速度,一遍播完不循环;起点前后增益 0、源时间 null', () => {
+    const c = clip({ startSec: 10, durationSec: 30 });
+    expect(audioClipWindow(c, 120)).toEqual({ start: 10, end: 40 });
+    expect(audioClipGainAt(c, 5, 120)).toBe(0);
+    expect(audioClipSrcTimeAt(c, 5)).toBeNull();
+    expect(audioClipSrcTimeAt(c, 15)).toBe(5);
+    expect(audioClipSrcTimeAt(c, 41)).toBeNull(); // 播完即止
+    expect(audioClipGainAt(c, 41, 120)).toBe(0);
+  });
+
+  it('变速:窗口按速度缩放,timeline→source 映射乘 speed', () => {
+    const c = clip({ startSec: 10, durationSec: 30, speed: 2 });
+    expect(audioClipWindow(c, 120)).toEqual({ start: 10, end: 25 }); // 30s 素材 2x = 15s
+    expect(audioClipSrcTimeAt(c, 20)).toBe(20); // (20-10)*2
+    const slow = clip({ durationSec: 10, speed: 0.5 });
+    expect(audioClipWindow(slow, 120)).toEqual({ start: 0, end: 20 });
+    expect(audioClipSrcTimeAt(slow, 10)).toBe(5);
+  });
+
+  it('增益:默认 -18dB 档位,淡入以窗口起点为原点、淡出贴窗口末尾', () => {
+    const c = clip({ startSec: 10, durationSec: 30, fadeOutSec: 2 });
+    const base = dbToGain(AUDIO_DEFAULT_DB);
+    expect(audioClipGainAt(c, 10 + AUDIO_FADE_IN_SEC / 2, 120)).toBeCloseTo(base / 2, 5);
+    expect(audioClipGainAt(c, 20, 120)).toBeCloseTo(base, 5);
+    expect(audioClipGainAt(c, 39, 120)).toBeCloseTo(base / 2, 5); // 窗口尾 40,淡出 2s → 39 处一半
+  });
+
+  it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {
+    const c = clip({ sig: 's', label: '轻快', durationSec: 30 });
+    const same = patchAudioClip(c, { volumeDb: AUDIO_DEFAULT_DB, speed: 1, fadeInSec: AUDIO_FADE_IN_SEC });
+    expect(same).toEqual({ id: 'a1', src: 'blob:x', sig: 's', label: '轻快', durationSec: 30 });
+    const changed = patchAudioClip(c, { volumeDb: -24.04, speed: 1.256, fadeOutSec: 3, startSec: 12.34 });
+    expect(changed.volumeDb).toBe(-24);
+    expect(changed.speed).toBe(1.26);
+    expect(changed.fadeOutSec).toBe(3);
+    expect(changed.startSec).toBe(12.3);
+    const clamped = patchAudioClip(c, { speed: 9 });
+    expect(clamped.speed).toBe(2);
+  });
+});

@@ -316,8 +316,8 @@ export interface Composition {
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
-  /** Background-music bed (single track under the whole edited timeline; level/duck/loop/fades). See bgm.ts. */
-  bgm?: import('./bgm').BgmTrack;
+  /** Audio tracks on the music lane (plain NLE clips: position/level/fades/speed, no loop, sounds sum). See bgm.ts. */
+  audioTracks?: import('./audio-tracks').AudioClip[];
   /** Narration denoise (MAIN source; baked in the browser — the wet file is cached, strength is a
    *  bake-time dry/wet blend so preview and export play one identical blended file). 0 < strength ≤ 1. */
   audioDenoise?: { strength: number };

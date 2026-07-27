@@ -56,7 +56,7 @@ import {
   patchShotAudio,
   shotFilterCss,
   shotGain,
-  type SpeechSpan,
+  type AudioClip,
   shotId,
   shotTransformVars,
   DIRECTIONAL_TRANSITIONS,
@@ -114,7 +114,7 @@ import { FramePanel } from './frame-panel';
 import { PersonFxPanel, type MatteState } from './person-fx-panel';
 import { ShotTreatmentPanel } from './shot-treatment-panel';
 import { MusicPanel } from './music-panel';
-import { useBgm } from './use-bgm';
+import { useAudioTracks } from './use-audio-tracks';
 import { useDenoise } from './use-denoise';
 import { TransitionPanel } from './transition-panel';
 import { MediaAnimPanel } from './media-anim-panel';
@@ -623,10 +623,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setCloudMediaRev((v) => v + 1);
     });
   };
-  /** Export-time BGM/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
-  const bgmExportRef = useRef<(() => { file: File; speech: SpeechSpan[] } | null) | null>(null);
+  /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
+  const audioExportRef = useRef<(() => { clip: AudioClip; file: File }[] | null) | null>(null);
   const denoiseExportRef = useRef<(() => Map<string, File> | null) | null>(null);
-  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, bgmExportRef, denoiseExportRef });
+  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
   const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>({
@@ -1620,11 +1620,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // the source panel / deselects. All yield when the cursor is in an input/editable area; don't intercept Enter: focus
   // often sits on a toolbar button, and Enter would do "button trigger + block delete" together, making blocks vanish.
   // removeBlock/deleteShot etc. read the latest per-render closures via keysRef.
-  const keysRef = useRef<{ removeBlock: (id: string) => void; deleteBlocks: (ids: Set<string>) => void; deleteShot: (sid: string) => void; deleteShots: (ids: Set<string>) => void; closeCode: () => void; closeFloat: () => void; deleteTransition: () => void; undo: () => void; redo: () => void; floatWin: FloatKind | null }>({
+  const keysRef = useRef<{ removeBlock: (id: string) => void; deleteBlocks: (ids: Set<string>) => void; deleteShot: (sid: string) => void; deleteShots: (ids: Set<string>) => void; removeAudio: (id: string) => void; closeCode: () => void; closeFloat: () => void; deleteTransition: () => void; undo: () => void; redo: () => void; floatWin: FloatKind | null }>({
     removeBlock: () => {},
     deleteBlocks: () => {},
     deleteShot: () => {},
     deleteShots: () => {},
+    removeAudio: () => {},
     closeCode: () => {},
     closeFloat: () => {},
     deleteTransition: () => {},
@@ -1698,6 +1699,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // Transition selected (panel open): delete this transition, not the shot
         e.preventDefault();
         keysRef.current.deleteTransition();
+        return;
+      }
+      if (selectedAudioIdRef.current) {
+        // Music-lane clip selected: Del removes it (audio selection is exclusive with block/shot per click)
+        e.preventDefault();
+        keysRef.current.removeAudio(selectedAudioIdRef.current);
         return;
       }
       const bids = selectedBlockIdsRef.current;
@@ -2226,7 +2233,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!a) return;
     if (a.type === 'audio') {
       // Audio dropped on the stage: there's no visual placement for sound — mount as the bed from 0
-      void bgmOps.mountBgmFromUrl(a.url, a.label);
+      void audioOps.mountAudioFromUrl(a.url, a.label);
       return;
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2393,13 +2400,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const ensureShots = (c: Composition): VideoShot[] =>
     c.shots && c.shots.length ? c.shots : c.video ? [{ id: shotId(), srcStart: 0, srcEnd: c.video.durationSec, treatment: 'full' as const }] : [];
 
-  // BGM bed + loudness-unify orchestration (upload/generate/knobs/engine sync/export payload — see use-bgm.ts).
-  // Called here (not earlier) because ensureShots/pushUndoSnapshot are consts — TDZ before their definitions.
-  const bgmOps = useBgm({
-    comp, compRef, setComp, videoFileRef, videoSigRef, clipFilesRef, videoEngineRef, asrRef, clipAsrRef,
-    ensureShots, pickFile, backupMediaToCloud, pushUndoSnapshot,
-  });
-  bgmExportRef.current = bgmOps.bgmForExport;
+  // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
+  // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
+  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
+  audioExportRef.current = audioOps.audioForExport;
+  /** Music-lane selection (timeline chip ↔ panel row; Del deletes). */
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  const selectedAudioIdRef = useRef<string | null>(null);
+  selectedAudioIdRef.current = selectedAudioId;
+  useEffect(() => {
+    if (selectedAudioId && !(comp.audioTracks ?? []).some((c) => c.id === selectedAudioId)) setSelectedAudioId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.audioTracks]);
   // Narration denoise (bake/cache/dub/export substitution — see use-denoise.ts)
   const denoiseOps = useDenoise({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot });
   denoiseExportRef.current = denoiseOps.denoiseForExport;
@@ -2545,6 +2557,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     deleteBlocks,
     deleteShot,
     deleteShots,
+    removeAudio: (id: string) => {
+      audioOps.removeClip(id);
+      setSelectedAudioId(null);
+    },
     closeCode: () => setFloatWin(null),
     closeFloat: () => setFloatWin(null),
     deleteTransition: () => {
@@ -2816,7 +2832,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
     resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
-    bgmMount: bgmOps.mountBgmFile, bgmPatch: bgmOps.patchBed, bgmRemove: bgmOps.removeBgm, setDenoise: denoiseOps.setDenoise,
+    audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
@@ -2975,6 +2991,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setSelectedId(null);
       setSelectedShotIds(new Set());
       setSelectedShotIdRaw(null);
+      setSelectedAudioId(null);
     },
     onOpenShotSettings: openShotSettings,
     onMoveBlock: moveBlock,
@@ -3029,11 +3046,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Audio drop (music lane / anywhere audio is allowed): mount as the bed starting at the drop time
       const a = dragAsset;
       setDragAsset(null);
-      if (a?.type === 'audio') void bgmOps.mountBgmFromUrl(a.url, a.label, { startSec: t });
+      if (a?.type === 'audio') void audioOps.mountAudioFromUrl(a.url, a.label, { startSec: t });
     },
-    onMoveBgm: (startSec: number) => {
+    onMoveAudio: (id: string, startSec: number) => {
       pushUndoSnapshot();
-      bgmOps.patchBed({ startSec });
+      audioOps.patchClip(id, { startSec });
+    },
+    onSelectAudio: (id: string | null) => {
+      setSelectedAudioId(id);
+      if (id) {
+        setSelectedId(null);
+        setSelectedShotIds(new Set());
+        setSelectedShotIdRaw(null);
+      }
     },
     onOpenMusicPanel: () => setFloatWin('music'),
     onReorderTracks: (topToBottom: number[]) => {
@@ -4246,7 +4271,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onInsert={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
               onInsertElement={insertGeneratedElement}
               onDragAsset={setDragAsset}
-              onUseAudio={(url, label) => void bgmOps.mountBgmFromUrl(url, label)}
+              onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
               onOpenMusicGen={() => setFloatWin('music')}
               onOpenGen={(t, anchor) => {
                 setGenType(t);
@@ -4374,19 +4399,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               )}
               {floatWin === 'music' && (
                 <MusicPanel
-                  bgm={comp.bgm ?? null}
-                  fileMissing={!!comp.bgm && !bgmOps.bgmUsable}
-                  hasInserts={(comp.shots ?? []).some((s) => s.src)}
-                  onUpload={() => void bgmOps.uploadBgm()}
-                  onReconnect={() => void bgmOps.uploadBgm()}
-                  onPatch={bgmOps.patchBed}
-                  onPreviewVolume={bgmOps.previewBedVolume}
-                  onRemove={bgmOps.removeBgm}
-                  onGenerate={(p, sec) => void bgmOps.generateBgm(p, sec)}
-                  generating={bgmOps.generating}
-                  onNormalize={() => void bgmOps.normalizeLoudness()}
-                  normalizing={bgmOps.normalizing}
-                  normalizeNote={bgmOps.normalizeNote}
+                  clips={comp.audioTracks ?? []}
+                  selectedId={selectedAudioId}
+                  onSelect={setSelectedAudioId}
+                  usable={audioOps.clipUsable}
+                  onUpload={() => void audioOps.uploadAudio()}
+                  onPatch={audioOps.patchClip}
+                  onPreviewVolume={audioOps.previewClipVolume}
+                  onRemove={(id) => {
+                    audioOps.removeClip(id);
+                    if (selectedAudioId === id) setSelectedAudioId(null);
+                  }}
+                  onGenerate={(p, sec) => void audioOps.generateBgm(p, sec)}
+                  generating={audioOps.generating}
                   denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
                   onSetDenoise={denoiseOps.setDenoise}
                 />
@@ -4746,6 +4771,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           pps={pps}
           assetDragging={!!dragAsset}
           assetDragKind={dragAsset?.type ?? null}
+          selectedAudioId={selectedAudioId}
           clipPendingAt={clipPending}
           {...timelineCbs}
         />

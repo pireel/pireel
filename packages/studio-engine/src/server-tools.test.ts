@@ -164,20 +164,32 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(runServerTool('set_shot_audio', {}, proj()).result.ok).toBe(false);
     expect(runServerTool('set_shot_audio', { all: true }, proj()).result.ok).toBe(false);
   });
-  it('set_bgm:url 铺床(默认档位摘字段)、旋钮就地调、off 移除;快照带 Music bed 行', () => {
-    const r = runServerTool('set_bgm', { url: 'https://cdn.pireel.com/bgm.mp3' }, proj());
+  it('set_bgm:加轨(默认档位摘字段/回执带 trackId)、按 trackId 调、多轨必须点名、off 删一条或全删', () => {
+    const r = runServerTool('set_bgm', { url: 'https://cdn.pireel.com/bgm.mp3', startSec: 12 }, proj());
     expect(r.result.ok).toBe(true);
-    expect(r.comp!.bgm).toEqual({ src: 'https://cdn.pireel.com/bgm.mp3' }); // 默认 -18dB/duck/loop 全是缺省=不落字段
+    const id1 = (r.result.data as { trackId: string }).trackId;
+    const t1 = r.comp!.audioTracks![0]!;
+    expect(t1).toEqual({ id: id1, src: 'https://cdn.pireel.com/bgm.mp3', startSec: 12 }); // -18dB/淡入淡出/1x 全默认=不落字段
     const snap = runServerTool('get_state', {}, proj({ comp: r.comp }));
-    expect(snap.result.state).toContain('Music bed: ON');
-    const r2 = runServerTool('set_bgm', { volumeDb: -24, duck: false }, proj({ comp: r.comp }));
-    expect(r2.comp!.bgm).toEqual({ src: 'https://cdn.pireel.com/bgm.mp3', volumeDb: -24, duck: false });
-    const r3 = runServerTool('set_bgm', { off: true }, proj({ comp: r2.comp }));
-    expect(r3.result.ok).toBe(true);
-    expect('bgm' in r3.comp!).toBe(false);
-    // 没床时旋钮/off 都拒绝
+    expect(snap.result.state).toContain('Audio tracks');
+    expect(snap.result.state).toContain(`@${id1}`);
+    // 单轨时可省 trackId
+    const r2 = runServerTool('set_bgm', { volumeDb: -24, speed: 1.5, fadeOutSec: 3 }, proj({ comp: r.comp }));
+    expect(r2.comp!.audioTracks![0]).toMatchObject({ volumeDb: -24, speed: 1.5, fadeOutSec: 3 });
+    // 第二条轨:多轨后必须点名
+    const r3 = runServerTool('set_bgm', { url: 'https://cdn.pireel.com/sfx.mp3' }, proj({ comp: r2.comp }));
+    expect(r3.comp!.audioTracks!.length).toBe(2);
+    expect(runServerTool('set_bgm', { volumeDb: -30 }, proj({ comp: r3.comp })).result.ok).toBe(false);
+    const id2 = (r3.result.data as { trackId: string }).trackId;
+    expect(runServerTool('set_bgm', { trackId: id2, volumeDb: -30 }, proj({ comp: r3.comp })).comp!.audioTracks![1]!.volumeDb).toBe(-30);
+    // off:点名删一条 / 不点名全删
+    const r4 = runServerTool('set_bgm', { off: true, trackId: id1 }, proj({ comp: r3.comp }));
+    expect(r4.comp!.audioTracks!.map((x) => x.id)).toEqual([id2]);
+    const r5 = runServerTool('set_bgm', { off: true }, proj({ comp: r3.comp }));
+    expect('audioTracks' in r5.comp!).toBe(false);
+    // 没轨时旋钮/off 都拒绝
     expect(runServerTool('set_bgm', { off: true }, proj()).result.ok).toBe(false);
-    expect(runServerTool('set_bgm', { duck: false }, proj()).result.ok).toBe(false);
+    expect(runServerTool('set_bgm', { volumeDb: -30 }, proj()).result.ok).toBe(false);
   });
   it('add_transition:内容级切点转场——挂后镜 transIn、prevId 锚前镜;非切点拒绝;none 移除;区内禁分割', () => {
     // proj 的切点在 10s(s1|s2)

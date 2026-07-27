@@ -1,10 +1,7 @@
 /**
- * Loudness measurement + the two normalization decisions built on it:
- *  - BGM auto level: when a bed is added, set its volumeDb so it sits BGM_AUTO_UNDER_DB below the
- *    measured narration loudness (ducking then adds its own drop while speech is present).
- *  - 响度统一 (unify loudness): bring every inserted clip to the MAIN narration's loudness via
- *    per-shot volumeDb. Attenuate-only (preview can't honestly boost, see VideoShot.volumeDb) —
- *    quieter-than-main inserts stay at 0 dB and are reported back instead of silently "fixed".
+ * Loudness measurement + the auto-level decision built on it: when an audio clip is mounted,
+ * its initial volumeDb is set so it sits BGM_AUTO_UNDER_DB below the measured narration loudness
+ * (a starting point, not a lock — the user's slider always wins afterwards).
  *
  * Measure = gated RMS in dBFS (a two-stage gate in the spirit of EBU R128 integrated loudness,
  * not the full K-weighted spec): 400 ms windows / 200 ms hop, absolute gate -55 dBFS, then a
@@ -77,10 +74,3 @@ export function bgmAutoVolumeDb(narrationDb: number, bgmDb: number): number {
   return Math.round(Math.max(-60, Math.min(0, v)) * 10) / 10;
 }
 
-/** Per-source volumeDb to match the main narration (attenuate-only). null = can't fix by attenuation
- *  (source is quieter than main — needs boost, unsupported; caller reports it instead). */
-export function matchLoudnessDb(mainDb: number, srcDb: number): number | null {
-  const delta = mainDb - srcDb;
-  if (delta >= -0.5) return null; // already at/below main → nothing to attenuate (0.5 dB dead-band)
-  return Math.round(Math.max(-60, delta) * 10) / 10;
-}

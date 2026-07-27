@@ -1,25 +1,26 @@
 /**
- * Export audio mixing (only engaged when a BGM bed exists — without one, client-export keeps
+ * Export audio mixing (only engaged when audio tracks exist — without any, client-export keeps
  * its untouched passthrough/scale path, zero regression).
  *
  * Grid: everything lands on one 48 kHz stereo f32 timeline. Narration segments are pulled from
  * their MediaBunny sample streams sequentially (per-source monotonic, same discipline as the
- * video side), linearly resampled onto the grid with per-shot gain; the bed is read from a
- * decoded AudioBuffer with loop/offset mapping and the SAME bgmGainAt envelope the preview
- * uses (precomputed at 100 Hz, interpolated per frame). Sum → clamp → 1 s AudioSamples.
+ * video side), linearly resampled onto the grid with per-shot gain; each audio clip is read from
+ * its decoded AudioBuffer through the SAME audioClipGainAt/audioClipSrcTimeAt math the preview
+ * uses (per-clip envelope precomputed at 100 Hz, speed = linear resample → pitch shifts, matching
+ * the preview's preservesPitch=false). Sum → clamp → 1 s AudioSamples.
  *
- * Numeric scale note: at bed levels (≤ -6 dB) plus speech the sum rarely exceeds [-1, 1];
+ * Numeric scale note: at typical clip levels (≤ -6 dB) plus speech the sum rarely exceeds [-1, 1];
  * hard clamp is the honest cheap guard (no lookahead limiter in v1).
  */
 
 import { AudioSample, AudioSampleSink } from 'mediabunny';
 import type { InputAudioTrack } from 'mediabunny';
-import { type BgmTrack, type SpeechSpan, bgmGainAt, bgmSrcTimeAt } from '@pireel/studio-engine/composition';
+import { type AudioClip, audioClipGainAt, audioClipSrcTimeAt } from '@pireel/studio-engine/composition';
 
 export const MIX_RATE = 48000;
 export const MIX_CH = 2;
 const CHUNK_SEC = 1;
-const ENV_RATE = 100; // bed envelope precompute grid (fades/duck ramps are ≥0.35s — 10 ms is plenty)
+const ENV_RATE = 100; // per-clip envelope precompute grid (fades are ≥0.1s scale — 10 ms is plenty)
 
 export interface MixSeg {
   srcStart: number;
@@ -78,20 +79,22 @@ class PcmStream {
   }
 }
 
-/** Mix narration segments + BGM bed into the output audio track. push receives ready samples in order. */
+export interface MixAudioClip {
+  clip: AudioClip;
+  /** Decoded media (decodeAudioData at any rate — read generically). */
+  buffer: AudioBuffer;
+}
+
+/** Mix narration segments + audio clips into the output audio track. push receives ready samples in order. */
 export async function mixAudioTrack(args: {
   segs: MixSeg[];
   /** Per-source audio track (absent = source has no audio). */
   audioTracks: Map<string, InputAudioTrack>;
-  bgm: BgmTrack | null;
-  /** Decoded bed (decodeAudioData at any rate — read generically). */
-  bgmBuffer: AudioBuffer | null;
-  /** MERGED speech spans on the edited timeline (ducking mask). */
-  speech: SpeechSpan[];
+  clips: MixAudioClip[];
   totalSec: number;
   push: (sample: AudioSample) => Promise<void>;
 }): Promise<void> {
-  const { segs, audioTracks, bgm, bgmBuffer, speech, totalSec, push } = args;
+  const { segs, audioTracks, clips, totalSec, push } = args;
   // Per-source sequential readers spanning that source's full used range
   const readers = new Map<string, PcmStream>();
   for (const [key, track] of audioTracks) {
@@ -110,12 +113,12 @@ export async function mixAudioTrack(args: {
       acc += Math.max(0, s.srcEnd - s.srcStart);
     }
   }
-  // Bed envelope precompute (same bgmGainAt as preview)
-  let env: Float32Array | null = null;
-  if (bgm && bgmBuffer) {
-    env = new Float32Array(Math.ceil(totalSec * ENV_RATE) + 2);
-    for (let i = 0; i < env.length; i++) env[i] = bgmGainAt(bgm, i / ENV_RATE, totalSec, speech);
-  }
+  // Per-clip envelope precompute (same audioClipGainAt as preview)
+  const envs = clips.map(({ clip }) => {
+    const env = new Float32Array(Math.ceil(totalSec * ENV_RATE) + 2);
+    for (let i = 0; i < env.length; i++) env[i] = audioClipGainAt(clip, i / ENV_RATE, totalSec);
+    return env;
+  });
 
   const totalFrames = Math.ceil(totalSec * MIX_RATE);
   const chunkFrames = CHUNK_SEC * MIX_RATE;
@@ -140,23 +143,25 @@ export async function mixAudioTrack(args: {
       await reader.read(s.srcStart + (a - segStarts[i]!), n, buf, outOffset, s.gain);
     }
 
-    // Bed
-    if (bgm && bgmBuffer && env) {
-      const ch0 = bgmBuffer.getChannelData(0);
-      const ch1 = bgmBuffer.numberOfChannels > 1 ? bgmBuffer.getChannelData(1) : ch0;
-      const bRate = bgmBuffer.sampleRate;
-      const bFrames = bgmBuffer.length;
+    // Audio clips (overlaps simply sum)
+    for (let ci = 0; ci < clips.length; ci++) {
+      const { clip, buffer } = clips[ci]!;
+      const env = envs[ci]!;
+      const ch0 = buffer.getChannelData(0);
+      const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : ch0;
+      const bRate = buffer.sampleRate;
+      const bFrames = buffer.length;
       for (let k = 0; k < frames; k++) {
         const t = t0 + k / MIX_RATE;
         const ei = t * ENV_RATE;
         const e0 = Math.min(env.length - 2, Math.floor(ei));
         const g = env[e0]! + (env[e0 + 1]! - env[e0]!) * (ei - e0);
         if (g <= 0) continue;
-        const srcT = bgmSrcTimeAt(bgm, t);
+        const srcT = audioClipSrcTimeAt(clip, t);
         if (srcT == null) continue;
         const p = srcT * bRate;
-        const i0 = Math.floor(p) % bFrames;
-        const i1 = (i0 + 1) % bFrames;
+        const i0 = Math.min(bFrames - 1, Math.floor(p));
+        const i1 = Math.min(bFrames - 1, i0 + 1);
         const frac = p - Math.floor(p);
         const o = k * MIX_CH;
         buf[o]! += (ch0[i0]! + (ch0[i1]! - ch0[i0]!) * frac) * g;
