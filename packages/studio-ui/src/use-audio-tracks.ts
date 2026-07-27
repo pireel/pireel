@@ -51,7 +51,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Peak envelope per sig for the lane waveform (computed from the same decode as the loudness measure;
    *  in-memory only — recomputed when bytes are recovered, never persisted). */
   const [audioPeaks, setAudioPeaks] = useState<Map<string, Float32Array>>(new Map());
-  const [generating, setGenerating] = useState(false);
   /** Main-narration loudness cache (extract+decode is seconds on long videos — measure once per source). */
   const narrDbRef = useRef<{ sig: string; db: number | null } | null>(null);
   const recoverTriedRef = useRef<Set<string>>(new Set());
@@ -252,26 +251,20 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     return out.length ? out : null;
   };
 
-  /** Hosted music generation → bytes → the same mount path as upload. */
-  const generateBgm = async (prompt: string, durationSec: number) => {
-    if (generating) return;
-    setGenerating(true);
-    try {
-      const r = await fetch('/api/studio/music', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, duration_sec: durationSec }),
-      });
-      if (!r.ok) {
-        const msg = (await r.json().catch(() => null)) as { error?: string } | null;
-        toast.error(msg?.error || t('workbench.musicGenFailed'));
-        return;
-      }
-      const { url } = (await r.json()) as { url: string };
-      await mountAudioFromUrl(url, prompt.slice(0, 24));
-    } finally {
-      setGenerating(false);
+  /** Hosted music generation. Returns the stored url and leaves it in the assets library (the route
+   *  registers it) — placing it on the lane is a separate, explicit action, exactly like a generated image. */
+  const generateAudioAsset = async (prompt: string, durationSec: number): Promise<string> => {
+    const r = await fetch('/api/studio/music', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt, duration_sec: durationSec }),
+    });
+    if (!r.ok) {
+      const msg = (await r.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(msg?.error || t('workbench.musicGenFailed'));
     }
+    const { url } = (await r.json()) as { url: string };
+    return url;
   };
 
   return {
@@ -285,7 +278,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     audioForExport,
     mountAudioFile,
     mountAudioFromUrl,
-    generateBgm,
-    generating,
+    generateAudioAsset,
   };
 }
