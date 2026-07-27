@@ -103,6 +103,13 @@ export function audioTrimPatch(c: AudioClip, edge: 'left' | 'right', newEdgeSec:
   return { inSec: d.inSec, outSec: d.inSec + (end - d.startSec) * d.speed };
 }
 
+/** Fade shaping: smoothstep, so a fade eases in and out of silence instead of cornering. The timeline
+ *  draws this exact curve on the clip — what you see on the lane IS the gain being applied. */
+export function fadeShape(t: number): number {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
+
 /** Linear gain of a clip at edited time t (0 outside its window; fades measured inside it). */
 export function audioClipGainAt(c: AudioClip, t: number, totalSec: number): number {
   const d = audioClipDefaults(c);
@@ -110,8 +117,8 @@ export function audioClipGainAt(c: AudioClip, t: number, totalSec: number): numb
   if (t < w.start || t > w.end) return 0;
   // fades are measured against the clip's own edges (trimming moves them with the edge)
   let g = dbToGain(d.volumeDb);
-  if (d.fadeInSec > 0) g *= Math.min(1, (t - w.start) / d.fadeInSec);
-  if (d.fadeOutSec > 0) g *= Math.min(1, Math.max(0, (w.end - t) / d.fadeOutSec));
+  if (d.fadeInSec > 0) g *= fadeShape((t - w.start) / d.fadeInSec);
+  if (d.fadeOutSec > 0) g *= fadeShape((w.end - t) / d.fadeOutSec);
   return g;
 }
 

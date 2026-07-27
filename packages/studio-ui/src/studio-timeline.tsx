@@ -29,7 +29,7 @@ import {
   totalDuration,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
-import { type AudioClip, audioClipDefaults, audioClipWindow, audioTrimPatch } from '@pireel/studio-engine/composition';
+import { type AudioClip, audioClipDefaults, audioClipWindow, audioTrimPatch, fadeShape } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -123,23 +123,36 @@ function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSe
   return Math.min(widthPx - inset, Math.max(inset, at));
 }
 
-/** Fade wedge + ramp, the reference editor's exact shape: the ramp runs from the body's silent BOTTOM
- *  corner up to the knee sitting in the fade lane, the region above it is darkened, and the ramp itself
- *  is stroked — losing that stroke is what made the shading read as a shapeless blob. Body px coords. */
+/** Sampled fade ramp from the silent corner to the knee, shaped by the SAME curve the gain uses
+ *  (fadeShape) — so the line on the lane is literally the envelope being applied, eased at both ends
+ *  instead of a hard diagonal. 12 steps is what the reference renderer samples. */
+function fadeRampPoints(x0: number, x1: number, yBottom: number, yKnee: number): string[] {
+  const STEPS = 12;
+  const pts: string[] = [];
+  for (let s = 1; s <= STEPS; s++) {
+    const t = s / STEPS;
+    const px = x0 + (x1 - x0) * t;
+    const py = yBottom + (yKnee - yBottom) * fadeShape(t);
+    pts.push(`${px.toFixed(2)},${py.toFixed(2)}`);
+  }
+  return pts;
+}
+
+/** Fade wedge + ramp, the reference editor's exact construction: the ramp curves from the body's silent
+ *  BOTTOM corner up to the knee sitting in the fade lane, the region above it is darkened, and the ramp
+ *  itself is stroked — losing that stroke is what made the shading read as a shapeless blob. Body px. */
 function audioFadeShapes(d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): { fill: string; ramp: string } {
   const H = CHIP_BODY_H;
   const fill: string[] = [];
   const ramp: string[] = [];
-  if (d.fadeInSec > 0) {
-    const kx = audioKneeX(d.fadeInSec, 'in', widthPx, spanSec);
-    fill.push(`M0,${H}L0,${KNEE_LANE_Y}L${kx.toFixed(1)},${KNEE_LANE_Y}Z`);
-    ramp.push(`M0,${H}L${kx.toFixed(1)},${KNEE_LANE_Y}`);
-  }
-  if (d.fadeOutSec > 0) {
-    const kx = audioKneeX(d.fadeOutSec, 'out', widthPx, spanSec);
-    fill.push(`M${widthPx.toFixed(1)},${H}L${widthPx.toFixed(1)},${KNEE_LANE_Y}L${kx.toFixed(1)},${KNEE_LANE_Y}Z`);
-    ramp.push(`M${widthPx.toFixed(1)},${H}L${kx.toFixed(1)},${KNEE_LANE_Y}`);
-  }
+  const build = (cornerX: number, kneeX: number) => {
+    const pts = fadeRampPoints(cornerX, kneeX, H, KNEE_LANE_Y);
+    ramp.push(`M${cornerX.toFixed(2)},${H}L${pts.join('L')}`);
+    // wedge: up the clip's edge, across the fade lane to the knee, then back down along the curve
+    fill.push(`M${cornerX.toFixed(2)},${H}L${cornerX.toFixed(2)},${KNEE_LANE_Y}L${kneeX.toFixed(2)},${KNEE_LANE_Y}L${[...pts].reverse().slice(1).join('L')}Z`);
+  };
+  if (d.fadeInSec > 0) build(0, audioKneeX(d.fadeInSec, 'in', widthPx, spanSec));
+  if (d.fadeOutSec > 0) build(widthPx, audioKneeX(d.fadeOutSec, 'out', widthPx, spanSec));
   return { fill: fill.join(''), ramp: ramp.join('') };
 }
 
