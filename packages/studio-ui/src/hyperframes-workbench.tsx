@@ -1360,6 +1360,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         applyFits(d.fits);
         return;
       }
+      // In-place patched node finished loading its media → clear the block's loading badge
+      // (the buffer-swap clear never fires for in-place patches)
+      if (d.type === 'hf:mediaReady' && d.blockId) {
+        setMediaBusyPhase(String(d.blockId), null);
+        return;
+      }
       // Measured caption-line rect (hf:measure reply): the selection box uses it to hug the real caption area
       if (d.type === 'measure' && fromActive && d.rect) {
         if (d.sub) setCapSubMeasure({ w: d.rect.w, h: d.rect.h, scale: resolveSubCaptionStyle(compRef.current).scale });

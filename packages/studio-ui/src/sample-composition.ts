@@ -472,14 +472,34 @@ const PREVIEW_RUNTIME = `
             if (baRef && baRef.parentElement === baParent) baParent.insertBefore(baNode, baRef);
             else baParent.appendChild(baNode);
           }
+          // Report when the node's media has actually loaded — the parent clears the block's
+          // "loading" badge on this signal (in-place patches never trigger the buffer swap the
+          // badge used to wait for; without this it hangs until the 20s fallback). Runs right
+          // after insertion so a failure in the timeline section below can't starve it.
+          (function () {
+            var pend = 0;
+            var done = function () { pend--; if (pend <= 0) fpost({ type: 'hf:mediaReady', blockId: String(d.blockId) }); };
+            var media = baNode.querySelectorAll('img, video');
+            for (var mi = 0; mi < media.length; mi++) {
+              var m = media[mi];
+              var ready = m.tagName === 'IMG' ? (m.complete && m.naturalWidth > 0) : m.readyState >= 2;
+              if (ready) continue;
+              pend++;
+              m.addEventListener(m.tagName === 'IMG' ? 'load' : 'loadeddata', done, { once: true });
+              m.addEventListener('error', done, { once: true });
+            }
+            if (pend === 0) fpost({ type: 'hf:mediaReady', blockId: String(d.blockId) });
+          })();
           if (window.__timelines && window.__timelines[d.blockId]) {
             try { window.__timelines[d.blockId].kill(); } catch (e1) {}
             delete window.__timelines[d.blockId];
           }
-          var baTl = gsap.timeline({ paused: true });
-          try { new Function('tl', String(d.timelineBody || ''))(baTl); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
-          window.__timelines[d.blockId] = baTl;
-          seekTimelines(lastSeekT);
+          try {
+            var baTl = gsap.timeline({ paused: true });
+            try { new Function('tl', String(d.timelineBody || ''))(baTl); } catch (e2) { console.warn('[hf] blockAdd timeline', d.blockId, e2); }
+            window.__timelines[d.blockId] = baTl;
+            seekTimelines(lastSeekT);
+          } catch (e3) { console.warn('[hf] blockAdd', d.blockId, e3); }
         }
       } catch (err) {}
     }
