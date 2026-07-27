@@ -1137,13 +1137,14 @@ function StudioTimelineImpl({
                             const dbShift = shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0);
                             return (
                               <svg
-                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-white/25' : 'text-white/70'}`}
+                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent/30' : 'text-accent'}`}
                                 style={{ height: SCENE_WAVE_H }}
                                 viewBox={`0 0 ${Math.round(w)} ${SCENE_WAVE_H}`}
                                 preserveAspectRatio="none"
                                 aria-hidden
                               >
-                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-black/55" />
+                                {/* same blue as the music lane: the two audio surfaces read as one material */}
+                                <rect width={Math.round(w)} height={SCENE_WAVE_H} className="fill-accent/15" />
                                 <path d={waveBars(sp.peaks, Math.floor(shot.srcStart * per), Math.ceil(shot.srcEnd * per), w, SCENE_WAVE_H, dbShift)} fill="currentColor" />
                               </svg>
                             );
@@ -1155,7 +1156,7 @@ function StudioTimelineImpl({
                         {/* Treatment badge (per shot): click selects the shot -> opens the right-side treatment panel (style cards). Sits at the scene card's bottom-left.
                             Treatment always applies to the whole shot (one shot = one treatment; split to localize), and applies as set — no "merge if dwell is too short"
                             (that restraint is for LLM shot-planning, not for user manual cuts). */}
-                        <div className="absolute z-30" style={{ left: x(start) + 3, bottom: SCENE_PAD_B + 1 }}>
+                        <div className="absolute z-30" style={{ left: x(start) + 3, bottom: SCENE_PAD_B + SCENE_WAVE_H + 2 }}>
                           <button
                             type="button"
                             onPointerDown={(e) => e.stopPropagation()}
