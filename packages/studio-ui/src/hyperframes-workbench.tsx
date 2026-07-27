@@ -53,6 +53,9 @@ import {
   renderBlock,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
+  audioClipId,
+  audioClipWindow,
+  audioTrimPatch,
   patchShotAudio,
   shotFilterCss,
   shotGain,
@@ -62,6 +65,7 @@ import {
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
   cutTransitions,
+  splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
   treatmentVacancyBox,
@@ -2429,6 +2433,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  if it lands on a boundary and doesn't cut, don't touch the undo/redo stack (clearing the redo line without re-rendering would leave button states stale). */
   const splitAtPlayhead = () => {
     const c = compRef.current;
+    // An audio clip is selected → the toolbar acts on IT (same rule the Del key follows): split it in two
+    // at the playhead, leaving the timeline untouched.
+    const audId = selectedAudioIdRef.current;
+    if (audId) {
+      const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
+      if (!clip) return;
+      const halves = splitAudioClipAt(clip, tRef.current, audioClipId);
+      if (!halves) {
+        toast.error(t('workbench.movePlayheadToSplitAudio'));
+        return;
+      }
+      pushUndoSnapshot();
+      setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === audId ? halves : [x])) }));
+      return;
+    }
     if (!c.video) return;
     const shots = ensureShots(c);
     if (splitBlockedByTransition(shots, tRef.current)) {
@@ -2444,6 +2463,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  shifts left, captions/effect blocks compress along with it. Read compRef (setComp wrapper writes synchronously) — the agent firing multiple trim tools in one round doesn't swallow the previous step. */
   const trimAtPlayhead = (side: 'left' | 'right') => {
     const c = compRef.current;
+    // Audio clip selected → trim ITS edge to the playhead (same math the lane handles use)
+    const audId = selectedAudioIdRef.current;
+    if (audId) {
+      const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
+      if (!clip) return;
+      const w = audioClipWindow(clip, totalDuration(c));
+      if (tRef.current <= w.start + 0.05 || tRef.current >= w.end - 0.05) {
+        toast.error(t('workbench.movePlayheadToTrimAudio'));
+        return;
+      }
+      pushUndoSnapshot();
+      audioOps.patchClip(audId, audioTrimPatch(clip, side, tRef.current));
+      return;
+    }
     if (!c.video) return;
     const shots = ensureShots(c);
     const r = side === 'left' ? trimLeftAtEdited(shots, tRef.current) : trimRightAtEdited(shots, tRef.current);
@@ -4511,7 +4544,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div className="bg-line mx-0.5 h-4 w-px shrink-0" />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon />
                   </button>
                 </TooltipTrigger>
@@ -4519,7 +4552,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="left" />
                   </button>
                 </TooltipTrigger>
@@ -4527,7 +4560,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="right" />
                   </button>
                 </TooltipTrigger>

@@ -173,6 +173,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.missingBlockidsWhichElements': '缺少 blockIds:要删哪些组件?',
   'workbench.motion': '动效',
   'workbench.movedNameSecS': '已把「{name}」移到 {sec}s',
+  'workbench.movePlayheadToSplitAudio': '把播放头移到这段音频中间再分割',
+  'workbench.movePlayheadToTrimAudio': '把播放头移到这段音频中间再裁剪',
   'workbench.movePlayheadToTrim': '把播放头放到片段中间再剪',
   'workbench.msgUndoHint': '{msg}(⌘Z 撤销)',
   'workbench.nameFromSTrack': '「{name}」 {from}–{to}s · 轨{track}',

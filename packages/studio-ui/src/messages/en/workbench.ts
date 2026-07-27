@@ -173,6 +173,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.missingBlockidsWhichElements': 'Missing blockIds: which elements should be deleted?',
   'workbench.motion': 'Motion',
   'workbench.movedNameSecS': 'Moved "{name}" to {sec}s',
+  'workbench.movePlayheadToSplitAudio': 'Move the playhead inside this audio clip to split it',
+  'workbench.movePlayheadToTrimAudio': 'Move the playhead inside this audio clip to trim it',
   'workbench.movePlayheadToTrim': 'Move the playhead into the middle of a clip to trim',
   'workbench.msgUndoHint': '{msg} (⌘Z to undo)',
   'workbench.nameFromSTrack': '"{name}" {from}–{to}s · track {track}',

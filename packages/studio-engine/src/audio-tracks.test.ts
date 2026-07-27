@@ -10,6 +10,7 @@ import {
   audioClipWindow,
   audioTrimPatch,
   fadeShape,
+  splitAudioClipAt,
   patchAudioClip,
 } from './audio-tracks';
 import { dbToGain } from './composition';
@@ -108,6 +109,28 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     const moved = (saved.startSec ?? 0) - 10;
     const consumed = saved.inSec ?? 0;
     expect(Math.abs(moved - consumed)).toBeLessThan(0.011);
+  });
+
+  it('splitAudioClipAt:切点变成前半的出点/后半的入点,时间轴上纹丝不动;内侧淡化归零;太靠边不切', () => {
+    const c = clip({ startSec: 10, durationSec: 30 });
+    const r = splitAudioClipAt(c, 20, () => 'a2')!;
+    expect(r).toBeTruthy();
+    const [head, tail] = r;
+    expect(head.outSec).toBe(10); // (20−10)×1 源秒
+    expect(tail.id).toBe('a2');
+    expect(tail.startSec).toBe(20);
+    expect(tail.inSec).toBe(10);
+    expect(tail.outSec).toBeUndefined(); // 到素材尾 = 不落字段
+    // 两半接起来仍覆盖原窗口,中间没有空隙
+    expect(audioClipWindow(head, 120)).toEqual({ start: 10, end: 20 });
+    expect(audioClipWindow(tail, 120)).toEqual({ start: 20, end: 40 });
+    // 切口两侧不该有淡化
+    expect(head.fadeOutSec).toBe(0);
+    expect(tail.fadeInSec).toBe(0);
+    expect(audioClipDefaults(head).fadeInSec).toBe(0.8); // 外侧淡化保留
+    // 贴边不切
+    expect(splitAudioClipAt(c, 10.05, () => 'x')).toBeNull();
+    expect(splitAudioClipAt(c, 39.95, () => 'x')).toBeNull();
   });
 
   it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {

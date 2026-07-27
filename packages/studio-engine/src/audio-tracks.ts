@@ -116,6 +116,21 @@ export function audioTrimPatch(c: AudioClip, edge: 'left' | 'right', newEdgeSec:
   return { inSec: d.inSec, outSec: d.inSec + (end - d.startSec) * d.speed };
 }
 
+/** Split a lane clip at an edited-timeline moment into [head, tail]. Both keep the same source; the cut
+ *  point becomes the head's out-point and the tail's in-point, so nothing moves on the timeline. Fades are
+ *  zeroed on the two inner edges (a default fade there would dip the audio at a cut that removed nothing).
+ *  null = the playhead isn't inside the clip with room for both halves. */
+export function splitAudioClipAt(c: AudioClip, atSec: number, newId: () => string): [AudioClip, AudioClip] | null {
+  const d = audioClipDefaults(c);
+  if (!Number.isFinite(d.outSec)) return null;
+  const end = d.startSec + (d.outSec - d.inSec) / d.speed;
+  if (atSec < d.startSec + AUDIO_MIN_LEN_SEC || atSec > end - AUDIO_MIN_LEN_SEC) return null;
+  const cutSrc = d.inSec + (atSec - d.startSec) * d.speed;
+  const head = patchAudioClip(c, { inSec: d.inSec, outSec: cutSrc, fadeOutSec: 0 });
+  const tail = patchAudioClip({ ...c, id: newId() }, { startSec: atSec, inSec: cutSrc, outSec: d.outSec, fadeInSec: 0 });
+  return [head, tail];
+}
+
 /** Fade shaping: smoothstep, so a fade eases in and out of silence instead of cornering. The timeline
  *  draws this exact curve on the clip — what you see on the lane IS the gain being applied. */
 export function fadeShape(t: number): number {
