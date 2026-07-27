@@ -644,6 +644,11 @@ function StudioTimelineImpl({
   // Music lane: a dedicated bottom row — shown when clips exist, or as a highlighted drop target while an audio asset is being dragged
   const audioClips = comp.audioTracks ?? [];
   const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
+  // Live gesture on a music chip: kept LOCAL so a drag re-renders only this component — writing comp per
+  // pointer frame re-rendered the whole workbench and re-specced the audio engine (that was the stutter),
+  // while painting the DOM by hand fought React for the same left/width props (that was the "not live").
+  // The same values are committed once on release, so nothing shifts when the drag ends.
+  const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
   const musicTop = tracksH + ROW_GAP;
   const tracksHWithMusic = musicLane ? musicTop + AUDIO_ROW_H : tracksH;
 
@@ -1371,7 +1376,10 @@ function StudioTimelineImpl({
                   a dashed drop strip. Overlapping clips overlap visually too (their sounds sum). */}
               {musicLane && (
                 <div className="absolute right-0 left-0" style={{ top: musicTop, height: AUDIO_ROW_H }}>
-                  {audioClips.map((clip) => {
+                  {audioClips.map((base) => {
+                    // during a gesture this clip renders from the live patch; everything below (window,
+                    // wave slice, fades, knee positions) derives from it, so there is one source of truth
+                    const clip = audioDrag?.id === base.id ? { ...base, ...audioDrag.patch } : base;
                     const w = audioClipWindow(clip, dur);
                     const end = Math.min(dur, w.end);
                     const contentW = x(Math.max(0.05, w.end - w.start)); // the clip's real length in px
@@ -1406,7 +1414,6 @@ function StudioTimelineImpl({
                         onPointerDown={(e) => {
                           if (e.button !== 0) return;
                           e.stopPropagation();
-                          const chip = e.currentTarget as HTMLElement;
                           const grab = secAt(e.clientX) - w.start;
                           let at = w.start;
                           drag(
@@ -1415,12 +1422,12 @@ function StudioTimelineImpl({
                               let ns = Math.max(0, Math.min(Math.max(0, dur - 0.2), snap(secAt(cx) - grab, [w.start, w.end])));
                               if (ns < 0.15) ns = 0; // snap to the head
                               at = ns;
-                              chip.style.left = `${x(ns)}px`; // paint only; comp is written once on release
+                              setAudioDrag({ id: base.id, patch: { startSec: ns } });
                             },
                             (moved) => {
-                              chip.style.left = '';
-                              onSelectAudio?.(clip.id);
-                              if (moved) onMoveAudio?.(clip.id, at);
+                              setAudioDrag(null);
+                              onSelectAudio?.(base.id);
+                              if (moved) onMoveAudio?.(base.id, at);
                               else onOpenMusicPanel?.();
                             },
                           );
@@ -1455,25 +1462,19 @@ function StudioTimelineImpl({
                             key={edge}
                             onPointerDown={(e) => {
                               e.stopPropagation();
-                              const chip = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
-                              const wave = chip.querySelector('svg') as SVGElement | null;
-                              let patch = audioTrimPatch(clip, edge, edge === 'left' ? w.start : w.end);
+                              let patch = audioTrimPatch(base, edge, edge === 'left' ? w.start : w.end);
                               drag(
                                 e,
                                 (cx) => {
-                                  patch = audioTrimPatch(clip, edge, Math.max(0, snap(secAt(cx), [w.start, w.end])));
-                                  const ns = patch.startSec ?? w.start;
-                                  const ne = ns + ((patch.outSec ?? d.outSec) - (patch.inSec ?? d.inSec)) / d.speed;
-                                  chip.style.left = `${x(ns)}px`;
-                                  chip.style.width = `${Math.max(14, x(Math.max(0.05, Math.min(dur, ne) - ns)))}px`;
-                                  if (wave) wave.style.left = `${-x(ns - w.start)}px`;
+                                  // always measured off the ORIGINAL clip, so the edge tracks the pointer
+                                  // without accumulating rounding from the live preview
+                                  patch = audioTrimPatch(base, edge, Math.max(0, snap(secAt(cx), [w.start, w.end])));
+                                  setAudioDrag({ id: base.id, patch });
                                 },
                                 (moved) => {
-                                  chip.style.left = '';
-                                  chip.style.width = '';
-                                  if (wave) wave.style.left = '';
-                                  onSelectAudio?.(clip.id);
-                                  if (moved) onTrimAudio?.(clip.id, patch);
+                                  setAudioDrag(null);
+                                  onSelectAudio?.(base.id);
+                                  if (moved) onTrimAudio?.(base.id, patch);
                                 },
                               );
                             }}
@@ -1493,26 +1494,18 @@ function StudioTimelineImpl({
                                 key={edge}
                                 onPointerDown={(e) => {
                                   e.stopPropagation();
-                                  const knob = e.currentTarget as HTMLElement;
-                                  const chip = knob.parentElement as HTMLElement;
-                                  const wavePath = chip.querySelector('svg path') as SVGPathElement | null;
                                   let sec = edge === 'in' ? d.fadeInSec : d.fadeOutSec;
                                   drag(
                                     e,
                                     (cx) => {
                                       const raw = edge === 'in' ? secAt(cx) - w.start : w.end - secAt(cx);
                                       sec = Math.round(Math.max(0, Math.min(span, AUDIO_FADE_MAX_SEC, raw)) * 10) / 10;
-                                      // paint: move the knob and redraw the wave under the new envelope
-                                      knob.style.left = `${audioKneeX(sec, edge, contentW, span) - 7}px`;
-                                      if (wavePath && peaks) {
-                                        const live = { ...d, [edge === 'in' ? 'fadeInSec' : 'fadeOutSec']: sec };
-                                        wavePath.setAttribute('d', audioWaveBars(peaks, clip, live, contentW, span));
-                                      }
+                                      setAudioDrag({ id: base.id, patch: edge === 'in' ? { fadeInSec: sec } : { fadeOutSec: sec } });
                                     },
                                     (moved) => {
-                                      knob.style.left = '';
-                                      onSelectAudio?.(clip.id);
-                                      if (moved) onFadeAudio?.(clip.id, edge, sec);
+                                      setAudioDrag(null);
+                                      onSelectAudio?.(base.id);
+                                      if (moved) onFadeAudio?.(base.id, edge, sec);
                                     },
                                   );
                                 }}
