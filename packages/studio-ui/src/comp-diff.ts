@@ -93,6 +93,7 @@ export interface BlockPatchPair {
   timing: boolean; // startSec/durationSec → hf:blockTiming (runtime reads data-start dynamically per frame, changing the attribute takes effect immediately)
   style: boolean; // bg/border/radius/opacity → hf:blockStyle (shares blockBgCss with assemble, identical output)
   slots: boolean; // slots text → skippable only if it's an echo of an iframe in-place text edit (the caller verifies echo)
+  kitProps: boolean; // kit block props → parent re-renders the one block and swaps it in via hf:blockHtml
 }
 const PATCH_GEOM = new Set(['box', 'contentBox', 'scale', 'rotation']);
 const PATCH_TIMING = new Set(['startSec', 'durationSec']);
@@ -124,7 +125,7 @@ export function blockPatchableChange(a: Composition | null, b: Composition): { p
     }
     j++;
     if (x === y) continue;
-    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, slots: false };
+    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, slots: false, kitProps: false };
     const ks = new Set([...Object.keys(x), ...Object.keys(y)]);
     for (const k of ks) {
       const xv = (x as unknown as Record<string, unknown>)[k];
@@ -135,10 +136,15 @@ export function blockPatchableChange(a: Composition | null, b: Composition): { p
         p.geom = true;
       } else if (PATCH_TIMING.has(k)) p.timing = true;
       else if (PATCH_STYLE.has(k)) p.style = true;
-      else if (k === 'slots') p.slots = true;
+      else if (k === 'slots') {
+        // Kit blocks derive HTML from slots.props — the parent can re-render just this block
+        // and swap it in place, no echo required (hf:blockHtml carries the fresh render)
+        if (y.templateId.startsWith('kit:')) p.kitProps = true;
+        else p.slots = true;
+      }
       else return null;
     }
-    if (p.geom || p.timing || p.style || p.slots) pairs.push(p);
+    if (p.geom || p.timing || p.style || p.slots || p.kitProps) pairs.push(p);
   }
   if (j !== bb.length) return null; // bb has blocks ba doesn't (addition/reorder)
   if (!pairs.length && !removed.length) return null;

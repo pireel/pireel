@@ -855,6 +855,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               if (!Object.is(p.a.rotation, p.b.rotation)) postPreview({ type: 'hf:rotate', blockId: p.b.id, deg: p.b.rotation ?? 0 });
             }
             if (p.timing) postPreview({ type: 'hf:blockTiming', blockId: p.b.id, start: p.b.startSec, duration: p.b.durationSec });
+            if (p.kitProps) {
+              // Re-render THIS kit block with the same sizing context the assembler would bake,
+              // and swap it into the active doc — a props tweak must not cost a doc rebuild
+              const kb = p.b;
+              const kslots = {
+                ...kb.slots,
+                boxW: Math.round((kb.box?.w ?? 0.86) * comp.width),
+                boxH: Math.round((kb.box?.h ?? 0.3) * comp.height),
+                canvasW: comp.width,
+                canvasH: comp.height,
+              };
+              const kr = renderBlock({ ...kb, slots: kslots });
+              postPreview({ type: 'hf:blockHtml', blockId: kb.id, innerHtml: kr.innerHtml, timelineBody: kr.timelineBody });
+            }
             if (p.style) {
               const nb = p.b;
               const inner = String((nb.slots as { innerHtml?: unknown }).innerHtml ?? '');
