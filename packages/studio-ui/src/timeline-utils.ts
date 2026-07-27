@@ -6,6 +6,7 @@ import type { FilmstripFrame } from './media';
 export const PREVIEW_W = 108; // hover element preview width
 
 export const ROW_H = 30; // overlay track (element/caption) row height: compact to save space (user's call)
+export const AUDIO_ROW_H = 44; // music lane: taller than an overlay row — the waveform and the fade knobs need the room
 export const SCENE_H = 78; // track 0 = scene rail, taller to fit scene cards
 export const SCENE_PAD_T = 12; // gap above scene card (like a mainstream editor): drag from gap = marquee, from card = reorder; bigger on top for easier hit
 export const SCENE_PAD_B = 8; // gap below scene card
