@@ -23,15 +23,11 @@ import { confirm } from '@pireel/ui/confirm';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { type GenJob, listStudioGens, pollCreation } from './gen-api';
 import { type ElementEntry, type GenElementResult, loadElementEntries, removeElementEntry, syncElementEntries } from './element-history';
-import { framePack, kindLabel } from '@pireel/studio-frames/locales';
-import { overlayElements } from '@pireel/studio-frames/overlay-elements';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
 import { kitSampleProps } from './kit-ui';
-import { presetElements } from './preset-elements';
-import { useFrameCatalog } from './use-frame-catalog';
 import { BlockPreviewFrame } from './block-preview-card';
-import { studioLocale, t } from './i18n';
+import { t } from './i18n';
 
 interface MaterialItem {
   id: string;
@@ -302,54 +298,6 @@ export function AssetsPanel({
   // reference). Same overlay structure × each theme's skin: theme tokens are baked into innerHtml at block
   // scope (data-hf-baked) — preview, insert, and theme-swap all look identical, and once inserted the piece
   // is unaffected by the project theme or other elements (independence).
-  const frames = useFrameCatalog();
-  const themeGroups = useMemo(() => {
-    const loc = studioLocale();
-    const base = presetElements();
-    return frames.map((fr) => ({
-      id: fr.id,
-      title: framePack(loc, fr.id)?.title ?? fr.title,
-      items: (() => {
-        const vars = themeVarsCss(getTheme('general'), fr.palette ?? undefined);
-        // Prefer a dedicated overlay set (hand-crafted per dialect, character lives in the piece); themes without one fall back to generic structure × skin
-        const own = overlayElements(fr.id);
-        if (own) {
-          return own.map(({ kind: kd, make }): LibraryItem => {
-            const b = make();
-            const slots = b.slots as { innerHtml: string; timelineBody: string };
-            // kd is a frames-canonical Chinese kind — localized by the frames package (kindLabel), NOT the UI catalogs
-            const kdLabel = kindLabel(loc, kd);
-            return {
-              id: `th:${fr.id}:${kd}`,
-              kind: 'element' as const,
-              origin: 'preset' as const,
-              category: fr.id,
-              label: kdLabel,
-              prompt: kdLabel,
-              createdAt: 0,
-              deletable: false,
-              element: { seedId: b.id, innerHtml: `${slots.innerHtml}\n<style data-hf-baked>#${b.id}{${vars}}</style>`, timelineBody: slots.timelineBody, label: kdLabel, designW: 1920, designH: 1080 },
-            };
-          });
-        }
-        return base.map((p): LibraryItem => {
-          const baked = `${p.element.innerHtml}\n<style data-hf-baked>#${p.element.seedId}{${vars}}</style>`;
-          return {
-            id: `th:${fr.id}:${p.id}`,
-            kind: 'element' as const,
-            origin: 'preset' as const,
-            category: fr.id,
-            label: p.label,
-            prompt: p.label,
-            createdAt: 0,
-            deletable: false,
-            element: { ...p.element, innerHtml: baked },
-          };
-        });
-      })(),
-    }));
-  }, [frames]);
-  const themeItemsAll = useMemo(() => themeGroups.flatMap((g) => g.items), [themeGroups]);
   // Kit components: the abstraction of the theme elements — insert = a props-driven block
   // (templateId 'kit:*'), preview = a defaults+sample render with the general theme baked.
   const kitGroup = useMemo(() => {
@@ -383,10 +331,10 @@ export function AssetsPanel({
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    // Under the element filter, theme elements join the search pool (createdAt=0 naturally sorts last)
-    const pool = kind === 'element' ? [...items, ...kitGroup.items, ...themeItemsAll] : items;
+    // Under the element filter, kit components join the search pool (createdAt=0 naturally sorts last)
+    const pool = kind === 'element' ? [...items, ...kitGroup.items] : items;
     return pool.filter((it) => (kind === 'all' || it.kind === kind) && (!needle || it.label.toLowerCase().includes(needle)));
-  }, [items, themeItemsAll, kind, q]);
+  }, [items, kitGroup, kind, q]);
 
   const pendingJobs = useMemo(
     () =>
@@ -664,9 +612,9 @@ export function AssetsPanel({
                 onClick={() => setElCat(null)}
                 className="text-ink-2 hover:text-ink mb-2 flex items-center gap-1 text-[12px] font-medium"
               >
-                <ChevronLeft size={13} /> {elCat === 'mine' ? t('common.mine') : ([kitGroup, ...themeGroups].find((g) => g.id === elCat)?.title ?? elCat)}
+                <ChevronLeft size={13} /> {elCat === 'mine' ? t('common.mine') : (kitGroup.id === elCat ? kitGroup.title : elCat)}
                 <span className="text-ink-4 font-normal">
-                  · {(elCat === 'mine' ? mineItems : ([kitGroup, ...themeGroups].find((g) => g.id === elCat)?.items ?? [])).length}
+                  · {(elCat === 'mine' ? mineItems : kitGroup.id === elCat ? kitGroup.items : []).length}
                 </span>
               </button>
               {elCat === 'mine' && mineItems.length === 0 ? (
@@ -677,13 +625,13 @@ export function AssetsPanel({
                 </div>
               ) : (
                 <div className="columns-2 gap-1.5">
-                  {(elCat === 'mine' ? mineItems : ([kitGroup, ...themeGroups].find((g) => g.id === elCat)?.items ?? [])).map(gridCard)}
+                  {(elCat === 'mine' ? mineItems : kitGroup.id === elCat ? kitGroup.items : []).map(gridCard)}
                 </div>
               )}
             </div>
           ) : (
             <div className="space-y-3.5">
-              {[{ id: 'mine', title: t('common.mine'), items: mineItems }, kitGroup, ...themeGroups].map((g) => (
+              {[{ id: 'mine', title: t('common.mine'), items: mineItems }, kitGroup].map((g) => (
                 <section key={g.id}>
                   <button
                     type="button"
