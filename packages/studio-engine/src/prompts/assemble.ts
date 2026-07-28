@@ -4,7 +4,7 @@
  * Order is stable → volatile, because the whole prefix up to the first change is what a provider
  * can cache:
  *
- *   L0 base contract      never changes
+ *   fragment contract     never changes (this stack's base; the editor's own is on the agent side)
  *   L1 props grammar      never changes
  *   L4 vocabulary         changes when the preset changes
  *   L3.1 editorial        changes when the preset changes
@@ -16,7 +16,7 @@
  */
 
 import { BLOCK_HTML_BODY } from './block-system';
-import { L0_CONTRACT } from './l0-contract';
+import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
 import { catalogSection } from './l4-catalog';
 import { getPreset } from './presets';
@@ -36,15 +36,15 @@ After the note line, in THIS order:
 /** The component path's system prompt. */
 export function buildKitSystem(opts?: { presetId?: string; voice?: string }): string {
   const preset = getPreset(opts?.presetId);
-  const system = [L0_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
+  const system = [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
   return withStyleDirection(system, opts?.voice);
 }
 
-/** The free-form path's system prompt. Same L0 and L3.1 as the component path — only the
- *  capability layer and the output contract differ, which is the whole claim of the stack. */
+/** The free-form path's system prompt. Same base contract and L3.1 as the component path — only
+ *  the capability layer and the output contract differ, which is the whole claim of the stack. */
 export function buildHtmlSystem(opts?: { presetId?: string }): string {
   const preset = getPreset(opts?.presetId);
-  return [L0_CONTRACT, BLOCK_HTML_BODY, preset.editorial, HTML_OUTPUT].join('\n\n');
+  return [FRAGMENT_CONTRACT, BLOCK_HTML_BODY, preset.editorial, HTML_OUTPUT].join('\n\n');
 }
 
 /** The default free-form system (spoken preset) — the theme brief is appended by withActiveTheme,
