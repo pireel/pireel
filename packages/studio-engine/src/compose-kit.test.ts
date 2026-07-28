@@ -7,9 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildKitPrompt, parseKitResponse } from './compose';
-import { BLOCK_SYSTEM, FRAGMENT_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem, withStyleDirection } from './prompts';
-import { assembleKitTheme, frameVoice } from './briefs';
-import { registerBlueprints } from './blueprint-registry';
+import { BLOCK_SYSTEM, FRAGMENT_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem } from './prompts';
 import { components } from '@pireel/studio-kit';
 
 const seed = { id: 'b1', kind: 'custom', innerHtml: '', timelineBody: '' };
@@ -28,30 +26,6 @@ describe('the layer stack', () => {
     expect(buildHtmlSystem()).not.toContain(L1_PROPS_SPEC);
     expect(KIT).toContain('```json');
     expect(buildHtmlSystem()).toContain('```html');
-  });
-
-  it('the theme voice goes last, so switching themes invalidates only the tail', () => {
-    const withVoice = buildKitSystem({ voice: 'Cool, precise, conclusion-first.' });
-    expect(withVoice.startsWith(KIT)).toBe(true);
-    expect(withVoice).toContain('Cool, precise, conclusion-first.');
-    expect(withVoice).toContain('never overrides');
-  });
-
-  it('an unknown preset falls back rather than failing generation', () => {
-    expect(buildKitSystem({ presetId: 'no-such-preset' })).toBe(KIT);
-  });
-
-  it('EVERYTHING frame-derived is a tail — stagings included, not just the voice', () => {
-    // Stagings briefly lived inside L4, which meant a theme switch invalidated the cached prefix
-    // from the catalogue down. Registering a staging must only ever append.
-    registerBlueprints('cache-test-frame', [
-      { id: 'cache-test-frame/x', component: 'metric', name: 'X', html: '<div class="bp-root"></div>', css: '' },
-    ]);
-    const withFrame = buildKitSystem({ frameId: 'cache-test-frame', voice: 'quiet' });
-    expect(withFrame.startsWith(KIT)).toBe(true);
-    expect(withFrame).toContain('cache-test-frame/x');
-    expect(withFrame.indexOf('cache-test-frame/x')).toBeLessThan(withFrame.indexOf('<style_direction>'));
-    registerBlueprints('cache-test-frame', []); // leave the registry as found
   });
 
   it('the preset decides the vocabulary', () => {
@@ -76,48 +50,6 @@ describe('the component path', () => {
 
   it('is a fraction of the free-form path — the components absorbed the rest', () => {
     expect(KIT.length).toBeLessThan(BLOCK_SYSTEM.length);
-  });
-});
-
-describe('style direction', () => {
-  it('adds nothing when no theme is attached', () => {
-    expect(withStyleDirection(KIT, '')).toBe(KIT);
-    expect(withStyleDirection(KIT, undefined)).toBe(KIT);
-  });
-
-  it('an authored voice wins over the playbook lead', () => {
-    expect(frameVoice({ title: 'T', body: '# T\n\nlead prose.\n\n## Typography\n- 64px', voice: 'authored' })).toBe('authored');
-  });
-
-  it('falls back to the lead paragraph, never the implementation sections', () => {
-    const v = frameVoice({ title: 'T', body: '# Boardroom\n\nCool white paper, navy ink.\n\nSecond para about surfaces.\n\n## Typography\n- Action titles: 64-90px' });
-    expect(v).toBe('Cool white paper, navy ink.');
-    expect(v).not.toContain('64-90px');
-    expect(v).not.toContain('Second para');
-  });
-
-  it('strips token names and declarations out of the voice', () => {
-    // A model that only fills props must never be handed CSS — it will try to use it.
-    const v = frameVoice({ title: 'T', body: '# M\n\nThe ONLY color is `--accent` red, on a `background:var(--paper)` page with `heavy` borders.' });
-    expect(v).not.toContain('--accent');
-    expect(v).not.toContain('var(--paper)');
-    expect(v).toContain('heavy borders'); // plain emphasis survives, unwrapped
-  });
-
-  it('every shipped frame yields a voice with no CSS in it', async () => {
-    const { frameRegistry } = await import('@pireel/studio-frames/vite');
-    for (const f of frameRegistry.list()) {
-      const v = frameVoice({ title: f.title, body: f.body });
-      expect(v.length, `${f.id} has no lead prose`).toBeGreaterThan(40);
-      for (const leak of ['var(--', 'px;', '{', '}']) expect(v, `${f.id} voice leaks ${leak}`).not.toContain(leak);
-    }
-  });
-
-  it('the kit theme carries the voice and no token table', () => {
-    const t = assembleKitTheme({ title: 'Boardroom', body: '# B\n\nCool white paper.\n\n## Token semantics\n- --paper cool white' })!;
-    expect(t).toContain('Boardroom');
-    expect(t).toContain('Cool white paper.');
-    expect(t).not.toContain('--paper');
   });
 });
 

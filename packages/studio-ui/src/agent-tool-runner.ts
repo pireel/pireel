@@ -398,7 +398,9 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 const beats = beatsForWindow(slot.startSec, slot.durationSec);
                 const neighbors = neighborsFrom(roster, slot.id);
                 const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
-                const parsed = await composeBlockChecked(seed, placeholderSpec(slot), undefined, { kit: true });
+                // Themed projects generate HTML: the theme is a prose description the model builds
+                // from (playbook via frameId), not a skin on the JSON components. Kit = themeless.
+                const parsed = await composeBlockChecked(seed, placeholderSpec(slot), undefined, compRef.current.frameId ? undefined : { kit: true });
                 if (parsed.declined) {
                   // compose's veto over the plan: with the actual sentences in hand, this moment has
                   // nothing a graphic can say — remove the slot rather than leaving an empty shell
@@ -977,11 +979,12 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : r1(tRef.current);
               const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
+              // Same routing as the batch fill: themed → HTML in the theme's language, themeless → kit.
               let parsed = await composeBlockChecked(
                 seed,
                 `Create a new overlay element for this content: ${String(input.instruction ?? '')}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
-                { kit: true },
+                compRef.current.frameId ? undefined : { kit: true },
               );
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than

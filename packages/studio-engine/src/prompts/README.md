@@ -42,8 +42,10 @@ prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 | L2 预设 | `presets/` | 口播/vlog…**路由层**:决定加载哪套 L3.1 + L4 | 加预设时 |
 | L4 能力词汇 | `l4-catalog.ts` | 该预设的组件目录,**从 schema 派生** | 加组件 = 零改动 |
 | L3.1 编辑判断 | `presets/spoken.ts` | 什么值得上屏/verbatim/语言/反单调/节奏 | 常改 |
-| 输出契约 | `assemble.ts` | ```json(组件路径)/ ```html+```js(自由路径) | 随路径 |
-| L3.2 主题 voice | `style-direction.ts` | frame 的气质,**放最后** | 切主题 |
+| 输出契约 | `assemble.ts` | ```json(组件路径)/ ```html+```js(主题路径) | 随路径 |
+
+**主题不进组件路径**:主题=给 LLM 的文字描述(frame playbook,经 withActiveTheme 注入
+html 路径尾部),挂主题的项目生成主题化 HTML;组件路径只服务无主题项目,组件本身不感知主题。
 
 **情境不是一层**:box/beats/邻居/口播稿/指令每次都不同,只能进 user message
 (`buildKitPrompt`/`buildBlockPrompt`),进 system 就把缓存前缀毒化了。

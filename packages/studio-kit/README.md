@@ -82,15 +82,14 @@ Components consume CSS custom properties with designed fallbacks — set them on
 
 Full token surface: `--sk-fg` `--sk-muted` `--sk-accent` `--sk-accent-2` `--sk-panel` `--sk-panel-2` `--sk-line` `--sk-radius` `--sk-shadow` `--sk-font-head` `--sk-font-num`.
 
-## Blueprints and themes
+## Components are themeless by design
 
-A component's built-in variants are code, so only this package can add them. A **blueprint** is the same thing expressed as data — markup, bare-selector rules, and declared motion — so a theme can carry stagings of its own and a model can author one. Three guarantees make a blueprint safe to accept from a generator:
-
-1. **Scoping is not optional.** Selectors are written bare; the renderer prefixes each with the block id. An unscoped selector cannot be expressed.
-2. **No raw pixels.** Sizes come from the scale (`{{hero}}`, `{{pad}}`…), computed from the box the block actually occupies.
-3. **No hand-written motion.** Steps name a preset and a target; the tuned easing stays in the library.
-
-A **theme** bundles three things: a `palette` (the skin), a `voice` (what the theme is for and how it behaves, written for the model that fills components in), and its own `blueprints`. `themes/` ships three deliberately divergent examples — `press`, `slab`, `console`.
+A themed project does not restyle these components — it generates themed HTML instead: the theme
+is a prose description for the model (its character, palette, layout language), and the model
+builds markup from that description plus the component norms. The kit is the THEMELESS path,
+where a model fills typed props and the built-in variants own every visual decision. The CSS
+custom properties above exist so a host palette can tint the built-ins; that is the extent of
+theming here.
 
 ## Design principles
 

@@ -17,7 +17,6 @@
 
 import { components, render as renderKit } from '@pireel/studio-kit';
 import { registerTemplate, type Rendered, type Slots } from './composition-core';
-import { getBlueprint } from './blueprint-registry';
 
 /** Map studio palette tokens onto the kit's theme surface (kit fallbacks used when a token is unset). */
 const TOKEN_BRIDGE =
@@ -28,15 +27,11 @@ const TOKEN_BRIDGE =
 const px = (v: unknown, fallback: number): number => (typeof v === 'number' && v > 0 ? v : fallback);
 
 function renderKitBlock(component: string, slots: Slots, blockId: string, durationSec?: number): Rendered {
-  // A staging the block was made with. Unknown ids resolve to undefined and the component renders
-  // its built-in variant — a project must open after a theme's stagings are renamed or removed.
-  const blueprint = getBlueprint(typeof slots.blueprintId === 'string' ? slots.blueprintId : undefined);
   const ctx = {
     box: { w: px(slots.boxW, 920), h: px(slots.boxH, 560) },
     canvas: { w: px(slots.canvasW, 1080), h: px(slots.canvasH, 1920) },
     ...(typeof slots.lang === 'string' && slots.lang ? { lang: slots.lang } : {}),
     ...(typeof durationSec === 'number' && durationSec > 0 ? { durationSec } : {}),
-    ...(blueprint ? { blueprint } : {}),
   };
   const out = renderKit(component, blockId, slots.props, ctx);
   return {
@@ -54,9 +49,6 @@ export { components as kitComponents } from '@pireel/studio-kit';
 /** Designed surface colours (Morandi) offered by the kit — the props panel's swatch row. */
 export { SURFACE_SWATCHES as kitSurfaceSwatches } from '@pireel/studio-kit';
 
-/** The shared surface props — the panel hides these while a staging is active (a staging paints
- *  its own surface, so the knobs would do nothing). */
-export { SURFACE_FIELDS as kitSurfaceFields } from '@pireel/studio-kit';
 
 /** Render a kit component as a standalone element (asset-panel previews, thumbnails):
  *  explicit box/canvas instead of assembler-injected slots. */
@@ -78,7 +70,7 @@ for (const [cid, def] of Object.entries(components)) {
     defaultTrackIndex: 2,
     // props is a JSON slot: created empty (defaults render a finished-looking block),
     // filled by pickers/agents with schema-validated values. See `components[cid].jsonSchema`.
-    slots: { props: { type: 'json', label: 'engine.kit.props' }, blueprintId: { type: 'text', label: 'engine.kit.blueprintId' } },
+    slots: { props: { type: 'json', label: 'engine.kit.props' } },
     render: (slots, blockId, _startSec, durationSec) => renderKitBlock(cid, slots, blockId, durationSec),
   });
   void def; // schema/summary consumed by pickers and agent tooling, not by registration

@@ -32,7 +32,7 @@ export interface ComposedBlock {
 /** The block fields a result becomes. Spread onto a block: `{ ...b, ...composedBlockFields(r) }`. */
 export function composedBlockFields(r: ComposedBlock): { templateId: string; slots: Record<string, unknown> } {
   return r.kit
-    ? { templateId: `kit:${r.kit.component}`, slots: { props: r.kit.props, ...(r.kit.staging ? { blueprintId: r.kit.staging } : {}) } }
+    ? { templateId: `kit:${r.kit.component}`, slots: { props: r.kit.props } }
     : { templateId: 'custom', slots: { innerHtml: r.innerHtml, timelineBody: r.timelineBody } };
 }
 
@@ -40,10 +40,5 @@ export function composedBlockFields(r: ComposedBlock): { templateId: string; slo
 export function kitChoiceOf(b: { templateId: string; slots?: Record<string, unknown> }): KitChoice | null {
   if (!b.templateId.startsWith('kit:')) return null;
   const props = b.slots?.props;
-  const staging = b.slots?.blueprintId;
-  return {
-    component: b.templateId.slice(4),
-    props: typeof props === 'object' && props !== null ? (props as Record<string, unknown>) : {},
-    ...(typeof staging === 'string' && staging ? { staging } : {}),
-  };
+  return { component: b.templateId.slice(4), props: typeof props === 'object' && props !== null ? (props as Record<string, unknown>) : {} };
 }

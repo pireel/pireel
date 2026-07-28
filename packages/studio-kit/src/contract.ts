@@ -44,9 +44,6 @@ export interface RenderCtx {
   /** Block lifetime in seconds, when the host knows it — components with exit
    *  choreography (lower thirds) settle out before the end; absent = no exit. */
   durationSec?: number;
-  /** Theme-supplied staging for this component (see blueprint.ts). Present = render it instead of
-   *  a built-in variant; the component still parses and validates the props. */
-  blueprint?: unknown;
 }
 
 /**
