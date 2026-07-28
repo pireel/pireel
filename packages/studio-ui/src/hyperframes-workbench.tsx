@@ -57,7 +57,8 @@ import {
   audioClipWindow,
   audioTrimPatch,
   patchShotAudio,
-  shotFadeAt,
+  segmentFadeFn,
+  shotsContiguous,
   shotFilterCss,
   shotGain,
   type AudioClip,
@@ -672,20 +673,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       eng.setSource(s.src, f ?? (s.src.startsWith('blob:') ? null : s.src));
     }
     eng.setSegments(
-      // Seam micro-fades (segmentFadeFn) are deliberately NOT applied here: they are 12 ms long and preview
-      // rides el.volume off the rAF clock (~16 ms/tick), so it could neither render them nor benefit — the
-      // splice click is per-sample and only the export mixer works at that resolution. Preview carries the
-      // shot's own fades, which are seconds long and land accurately.
-      shots.map((s) => ({
-        key: s.src ?? 'main',
-        elKey: s.src ? `clip_${s.id}` : 'main',
-        srcStart: s.srcStart,
-        srcEnd: s.srcEnd,
-        gain: shotGain(s),
-        ...(s.audioFadeInSec || s.audioFadeOutSec
-          ? { fadeAt: (local: number) => shotFadeAt(s, local, Math.max(0.01, s.srcEnd - s.srcStart)) }
-          : {}),
-      })),
+      // Same envelope the export mixer builds (segmentFadeFn): the shot's own fades × micro-fades on edges
+      // that meet a non-contiguous neighbour. Preview drives it off the rAF clock, so a 30 ms ramp lands as
+      // two or three volume steps rather than a smooth curve — coarse, but it's the same treatment at the
+      // same seams, which is what keeps preview honest about the export.
+      shots.map((s, i) => {
+        const prev = shots[i - 1];
+        const next = shots[i + 1];
+        const fade = segmentFadeFn(
+          s,
+          Math.max(0.01, s.srcEnd - s.srcStart),
+          !!prev && !shotsContiguous(prev, s),
+          !!next && !shotsContiguous(s, next),
+        );
+        return {
+          key: s.src ?? 'main',
+          elKey: s.src ? `clip_${s.id}` : 'main',
+          srcStart: s.srcStart,
+          srcEnd: s.srcEnd,
+          gain: shotGain(s),
+          ...(fade ? { fadeAt: fade } : {}),
+        };
+      }),
     );
     eng.setTransitions(cutTransitions(comp.shots ?? []).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
     if (!playingRef.current) eng.refresh();

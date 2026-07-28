@@ -261,8 +261,10 @@ export function shotFadeAt(s: Pick<VideoShot, 'audioFadeInSec' | 'audioFadeOutSe
 
 /** Splice micro-fade (sec). Butt-joining two points of a recording that weren't adjacent leaves a waveform
  *  discontinuity — the noise floor jumps mid-cycle and the ear hears a click, even when both sides sound fine.
- *  12 ms of fade on each spliced edge removes it and is far too short to read as a fade. */
-export const SPLICE_FADE_SEC = 0.012;
+ *  A fade on each spliced edge removes it. 30 ms is still far too short to read as a fade, and unlike a
+ *  shorter one it survives the preview's rAF-clock volume writes (~16 ms/tick) as an actual ramp rather than
+ *  a single stray sample — which is what lets preview and export share the treatment. */
+export const SPLICE_FADE_SEC = 0.03;
 
 /** Does a's tail flow straight into b's head? (a split that removed nothing — same source, same instant.)
  *  Such a boundary is not a splice: the waveform is continuous across it and needs no micro-fade. */
