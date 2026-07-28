@@ -461,7 +461,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎵',
     label: 'tools.set_bgm.label',
     description:
-      "Audio tracks on the music lane (plain clips: no looping, no auto-ducking; overlapping clips sum). Add: pass url (audio on Pireel storage / a generated track) + optional startSec — the initial level auto-balances against the measured narration loudness; the receipt returns trackId. Adjust: pass trackId (or omit when exactly one track exists) + any of volumeDb (-60..+20; 0 = source level, -60 = silent), fadeInSec, fadeOutSec (≤10s each), speed (0.5..2, pitch shifts), startSec. Remove: off:true with trackId (or without = remove all). Current tracks show in the snapshot; users' own uploads appear in list_assets.",
+      "Audio tracks on the music lane (plain clips: no looping, no auto-ducking; overlapping clips sum). Add: pass url (audio on Pireel storage / a generated track) + optional startSec — the initial level auto-balances against the measured narration loudness; the receipt returns trackId. Adjust: pass trackId (or omit when exactly one track exists) + any of volumeDb (-60..+20; 0 = source level, -60 = silent), fadeInSec, fadeOutSec (≤10s each), speed (0.5..2, pitch shifts), startSec, mute. Shorten a track: headSec/tailSec move that EDGE to a timeline second, dropping the audio outside it (a bed that outruns the video: pass tailSec = the video's duration). splitAtSec cuts one track into two independent ones at that second — the way to give the halves different levels or drop the middle. Remove: off:true with trackId (or without = remove all). Current tracks show in the snapshot; users' own uploads appear in list_assets.",
     inputSchema: obj(
       {
         url: { type: 'string', description: 'Audio url to ADD as a new track. Omit to adjust an existing one.' },
@@ -471,6 +471,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         fadeInSec: { type: 'number' },
         fadeOutSec: { type: 'number' },
         speed: { type: 'number', description: 'Playback-rate multiplier 0.5..2 (changes pitch on purpose — matches export).' },
+        mute: { type: 'boolean', description: 'Silence the track while keeping it (and its level) in place.' },
+        headSec: { type: 'number', description: 'Move the track\'s START to this edited-timeline second, trimming the audio before it.' },
+        tailSec: { type: 'number', description: 'Move the track\'s END to this edited-timeline second, trimming the audio after it.' },
+        splitAtSec: { type: 'number', description: 'Split the track in two at this edited-timeline second (returns the new track id).' },
         off: { type: 'boolean', description: 'true = remove the track (all tracks when trackId omitted).' },
       },
       [],

@@ -41,6 +41,9 @@ export interface AudioClip {
    *  Timeline length = (out − in) ÷ speed. */
   inSec?: number;
   outSec?: number;
+  /** Silenced without losing its level (same convention as a shot's audioMuted). A document property:
+   *  preview AND export both honour it — unlike solo, which is monitoring-only and never stored. */
+  muted?: boolean;
 }
 
 export const AUDIO_DEFAULT_DB = -18;
@@ -134,6 +137,7 @@ export function splitAudioClipAt(c: AudioClip, atSec: number, newId: () => strin
 /** Linear gain of a clip at edited time t (0 outside its window; fades measured inside it). */
 export function audioClipGainAt(c: AudioClip, t: number, totalSec: number): number {
   const d = audioClipDefaults(c);
+  if (c.muted) return 0;
   const w = audioClipWindow(c, totalSec);
   if (t < w.start || t > w.end) return 0;
   // fades are measured against the clip's own edges (trimming moves them with the edge)
@@ -155,7 +159,7 @@ export function audioClipSrcTimeAt(c: AudioClip, t: number): number | null {
 }
 
 /** Apply a patch to a clip with the neutrality convention (fields at their default value are dropped). */
-export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>): AudioClip {
+export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>): AudioClip {
   const next: AudioClip = { ...cur, ...patch };
   const out: AudioClip = { id: cur.id, src: next.src };
   if (next.sig) out.sig = next.sig;
@@ -169,6 +173,7 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   if (next.fadeOutSec != null && fadeSec(next.fadeOutSec) !== AUDIO_FADE_OUT_SEC) out.fadeOutSec = fadeSec(next.fadeOutSec);
   const sp = next.speed != null ? Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, next.speed)) : undefined;
   if (sp != null && sp !== 1) out.speed = Math.round(sp * 100) / 100;
+  if (next.muted) out.muted = true;
   if (next.inSec) out.inSec = Math.round(Math.max(0, next.inSec) * 100) / 100;
   // out-point only stored when it actually trims (equal to the media length = untrimmed)
   if (next.outSec != null && (next.durationSec == null || Math.abs(next.outSec - next.durationSec) > 0.01)) {

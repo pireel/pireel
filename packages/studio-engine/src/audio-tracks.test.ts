@@ -132,6 +132,17 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(splitAudioClipAt(c, 39.95, () => 'x')).toBeNull();
   });
 
+  it('静音:增益恒 0 但音量与淡化原样保留,解除即回来', () => {
+    const c = clip({ durationSec: 40, startSec: 10, volumeDb: -6 });
+    const muted = patchAudioClip(c, { muted: true });
+    expect(muted.muted).toBe(true);
+    expect(muted.volumeDb).toBe(-6); // 静音不是把音量拉到底,原值得留着
+    expect(audioClipGainAt(muted, 25, 60)).toBe(0);
+    const back = patchAudioClip(muted, { muted: false });
+    expect('muted' in back).toBe(false); // 中性值摘字段,老工程逐字不变
+    expect(audioClipGainAt(back, 25, 60)).toBeCloseTo(audioClipGainAt(c, 25, 60), 10);
+  });
+
   it('patchAudioClip:默认值摘字段(-18dB/淡入0.8/淡出1.5/speed 1 不落库),钳位后仍等默认也摘', () => {
     const c = clip({ sig: 's', label: '轻快', durationSec: 30 });
     const same = patchAudioClip(c, { volumeDb: AUDIO_DEFAULT_DB, speed: 1, fadeInSec: AUDIO_FADE_IN_SEC });

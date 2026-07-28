@@ -30,8 +30,11 @@ import {
   VOLUME_DB_MIN,
   applyBlockPlacement,
   audioClipId,
+  audioClipWindow,
+  audioTrimPatch,
   patchAudioClip,
   patchShotAudio,
+  splitAudioClipAt,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -143,7 +146,14 @@ function offlineState(p: ServerToolProject): string {
       height: c.height,
       theme: c.theme,
       ...(cs ? { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } } : {}),
-      ...(c.audioTracks?.length ? { audio: c.audioTracks.map((a) => ({ id: a.id, label: a.label, startSec: a.startSec ?? 0, volumeDb: a.volumeDb, speed: a.speed })) } : {}),
+      ...(c.audioTracks?.length
+        ? {
+            audio: c.audioTracks.map((a) => {
+              const w = audioClipWindow(a, totalDuration(c)); // agents need the span, not just where it starts — "does the bed outrun the video" is unanswerable from startSec alone
+              return { id: a.id, label: a.label, startSec: w.start, endSec: w.end, volumeDb: a.volumeDb, speed: a.speed, muted: a.muted };
+            }),
+          }
+        : {}),
       ...(c.audioDenoise ? { denoise: { strength: c.audioDenoise.strength } } : {}),
       blocks: c.blocks.map((b) => ({
         id: b.id,
@@ -364,6 +374,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
         ...(typeof input.speed === 'number' && Number.isFinite(input.speed) ? { speed: input.speed } : {}),
         ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
+        ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
       };
       if (input.off === true) {
         if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
@@ -385,8 +396,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
       if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
       if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
-      if (!Object.keys(knobs).length) return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec, or off:true' } };
-      return { result: { ok: true, summary: 'Adjusted the audio track' }, comp: { ...c, audioTracks: tracks.map((x) => (x.id === target.id ? patchAudioClip(x, knobs) : x)) } };
+      // Split first: it's the one op that changes the track COUNT, so it can't be combined with knobs
+      const splitAt = Number(input.splitAtSec);
+      if (Number.isFinite(splitAt)) {
+        const halves = splitAudioClipAt(target, splitAt, audioClipId);
+        if (!halves) return { result: { ok: false, error: 'that second is outside the track (or too close to an edge to leave two usable halves)' } };
+        return {
+          result: { ok: true, summary: `Split the audio track at ${r1(splitAt)}s`, data: { trackId: halves[0].id, newTrackId: halves[1].id } },
+          comp: { ...c, audioTracks: tracks.flatMap((x) => (x.id === target.id ? halves : [x])) },
+        };
+      }
+      // Edge trims run through the same math as the lane handles (source in/out + start all move together)
+      const head = Number(input.headSec);
+      const tail = Number(input.tailSec);
+      let trimmed = target;
+      if (Number.isFinite(head)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'left', Math.max(0, head)));
+      if (Number.isFinite(tail)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'right', Math.max(0, tail)));
+      const trimming = trimmed !== target;
+      if (!Object.keys(knobs).length && !trimming) {
+        return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec / mute / headSec / tailSec / splitAtSec, or off:true' } };
+      }
+      const next = Object.keys(knobs).length ? patchAudioClip(trimmed, knobs) : trimmed;
+      return { result: { ok: true, summary: trimming ? 'Trimmed the audio track' : 'Adjusted the audio track' }, comp: { ...c, audioTracks: tracks.map((x) => (x.id === target.id ? next : x)) } };
     }
     case 'split_shot': {
       const shots = shotsOf(p);

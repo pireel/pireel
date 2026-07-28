@@ -9,7 +9,7 @@
  *  - generation: POST /api/studio/music → bytes → the same mount path as upload.
  */
 
-import { useEffect, useRef, useState, type MutableRefObject, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type SetStateAction } from 'react';
 import {
   type AudioClip,
   type Composition,
@@ -192,9 +192,20 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     });
   };
 
-  const patchClip = (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => {
+  const patchClip = (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => {
     setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => (x.id === id ? patchAudioClip(x, patch) : x)) }));
   };
+
+  /** Solo (monitoring only): while set, ONLY that clip is audible in preview — every other clip and the
+   *  footage's own sound go quiet. Deliberately not part of the composition: it answers "what does this one
+   *  sound like", not "what should the video be", so it never persists and never reaches export. Muting a
+   *  clip, which IS a decision about the video, lives on the clip (AudioClip.muted). */
+  const [soloId, setSoloId] = useState<string | null>(null);
+  const soloRef = useRef<string | null>(null);
+  soloRef.current = soloId;
+  useEffect(() => {
+    if (soloId && !(comp.audioTracks ?? []).some((c) => c.id === soloId)) setSoloId(null); // clip gone → drop it
+  }, [comp.audioTracks, soloId]);
 
   /** Engine specs from current state (panel edits land in comp immediately, so there is no separate
    *  preview override to thread through — the effect below respecs from whatever comp says). */
@@ -207,7 +218,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
         id: clip.id,
         url: clip.src,
         speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
-        gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
+        gainAt: (tt: number) => (soloRef.current && soloRef.current !== clip.id ? 0 : audioClipGainAt(clip, tt, total)),
         srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
       }));
   };
@@ -215,8 +226,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   // Engine sync: respec on any clip/timeline/bytes change (same-url respec swaps only closures — no reload).
   useEffect(() => {
     videoEngineRef.current?.setAudioClips(engineSpecs());
+    videoEngineRef.current?.setMonitorMuteVideo(!!soloId); // solo silences the footage too, or it isn't solo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.audioTracks, comp.shots, comp.video, audioFileRev]);
+  }, [comp.audioTracks, comp.shots, comp.video, audioFileRev, soloId]);
 
   // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
   useEffect(() => {
@@ -294,9 +306,24 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     return url;
   };
 
+  /** True peak per clip sig (linear 0..1), for the panel's clipping warning — computed off the same peak
+   *  envelope the waveform draws, so it costs one pass over a few thousand floats per newly mounted clip. */
+  const clipPeaks = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const [sig, peaks] of audioPeaks) {
+      let m = 0;
+      for (const v of peaks) if (v > m) m = v;
+      out.set(sig, m);
+    }
+    return out;
+  }, [audioPeaks]);
+
   return {
     audioFilesRef,
     audioPeaks,
+    clipPeaks,
+    soloId,
+    setSoloId,
     sourcePeaks,
     clipUsable,
     uploadAudio,

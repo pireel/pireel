@@ -188,6 +188,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.audioUnmuted': '取消静音',
   'workbench.audioTrackNotFound': '找不到这条音轨',
   'workbench.bgmAdjusted': '已调整音轨',
+  'workbench.bgmSplit': '已分割音轨',
+  'workbench.bgmTrimmed': '已裁剪音轨',
   'workbench.bgmMounted': '已加一条音轨({db}dB)',
   'workbench.bgmRemoved': '已删除音轨',
   'workbench.denoiseFailed': '降噪处理失败,预览与导出继续用原声',

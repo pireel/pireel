@@ -16,7 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Film, Loader2, Music, Plus } from 'lucide-react';
+import { ArrowLeftRight, Film, Loader2, Music, Plus, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
@@ -1527,8 +1527,8 @@ function StudioTimelineImpl({
                           className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 ${selected ? 'bg-accent/18' : 'bg-accent/10'}`}
                           style={{ height: CHIP_LABEL_H }}
                         >
-                          <Music size={9} className="text-accent shrink-0" />
-                          <span className="text-ink-2 truncate text-[9.5px] leading-none">{clip.label || t('panels.musicBed')}</span>
+                          {clip.muted ? <VolumeX size={9} className="text-ink-4 shrink-0" /> : <Music size={9} className="text-accent shrink-0" />}
+                          <span className={`truncate text-[9.5px] leading-none ${clip.muted ? 'text-ink-4 line-through' : 'text-ink-2'}`}>{clip.label || t('panels.musicBed')}</span>
                           {d.speed !== 1 && (
                             <span className="text-ink-3 bg-panel/70 shrink-0 rounded px-1 text-[9px] leading-[12px] tabular-nums">{d.speed.toFixed(2).replace(/0$/, '')}×</span>
                           )}
@@ -1544,7 +1544,8 @@ function StudioTimelineImpl({
                         >
                           {/* body background tapering along the fade, then the wave on top of it */}
                           <path d={fadeBodyPath(contentW, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span)} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
-                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className="text-accent/60" fill="currentColor" />}
+                          {/* Muted keeps its shape but loses its colour — the clip is still there to reason about, it just makes no sound */}
+                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
                         </svg>
                         {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
                             trim the wave is nudged the other way so the audio stays pinned to the timeline —

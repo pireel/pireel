@@ -9,8 +9,9 @@
  * uses (per-clip envelope precomputed at 100 Hz, speed = linear resample → pitch shifts, matching
  * the preview's preservesPitch=false). Sum → clamp → 1 s AudioSamples.
  *
- * Numeric scale note: at typical clip levels (≤ -6 dB) plus speech the sum rarely exceeds [-1, 1];
- * hard clamp is the honest cheap guard (no lookahead limiter in v1).
+ * Numeric scale note: at typical clip levels plus speech the sum rarely exceeds [-1, 1], but lane clips can
+ * be boosted well past source level, so the summed buffer goes through a soft limiter (softClip) instead of
+ * a hard clamp — no lookahead, it just bends the top instead of squaring it off.
  */
 
 import { AudioSample, AudioSampleSink } from 'mediabunny';
@@ -21,6 +22,18 @@ export const MIX_RATE = 48000;
 export const MIX_CH = 2;
 const CHUNK_SEC = 1;
 const ENV_RATE = 100; // per-clip envelope precompute grid (fades are ≥0.1s scale — 10 ms is plenty)
+
+/** Where the soft limiter starts bending the signal (linear). Below it nothing is touched at all — most
+ *  material never reaches -1.9 dBFS — above it the curve approaches 1.0 asymptotically instead of the flat
+ *  top a hard clamp produces. A clamp turns a peak into a square edge, and squares are buzz; this loses a
+ *  little of the peak's shape instead. The knee is C1-continuous (slope 1 on both sides), so nothing kinks. */
+const SOFT_KNEE = 0.8;
+export function softClip(v: number): number {
+  const a = v < 0 ? -v : v;
+  if (a <= SOFT_KNEE) return v;
+  const shaped = SOFT_KNEE + (1 - SOFT_KNEE) * (1 - Math.exp(-(a - SOFT_KNEE) / (1 - SOFT_KNEE)));
+  return v < 0 ? -shaped : shaped;
+}
 
 export interface MixSeg {
   srcStart: number;
@@ -173,12 +186,9 @@ export async function mixAudioTrack(args: {
       }
     }
 
-    // Clamp + emit
+    // Soft limit + emit
     const out = buf.subarray(0, frames * MIX_CH).slice();
-    for (let i = 0; i < out.length; i++) {
-      const v = out[i]!;
-      out[i] = v > 1 ? 1 : v < -1 ? -1 : v;
-    }
+    for (let i = 0; i < out.length; i++) out[i] = softClip(out[i]!);
     await push(new AudioSample({ data: out, format: 'f32', numberOfChannels: MIX_CH, sampleRate: MIX_RATE, timestamp: t0 }));
   }
 }

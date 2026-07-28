@@ -91,6 +91,9 @@ export class VideoTrackEngine {
   // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
   // matters here, so drift correction is tight (0.08s) against the video element's own clock.
   private dubs = new Map<string, { el: HTMLAudioElement; url: string }>();
+  // Solo monitoring: while an audio clip is soloed the footage's own sound is silenced in preview only
+  // (see setMonitorMuteVideo) — this never enters the composition and never reaches the export mixer.
+  private monitorMuteVideo = false;
   // Smooth clock: el.currentTime steps at video frame rate (30fps footage = 33ms jumps), so
   // aligning transition progress / overlays directly to it isn't smooth. During playback, advance
   // by wall clock and pull back when drift from the raw clock exceeds 80ms (seek/handoff self-heal).
@@ -199,10 +202,26 @@ export class VideoTrackEngine {
   private segGain(i: number, tEdited?: number): number {
     const seg = this.segs[i];
     if (!seg) return 1;
+    if (this.monitorMuteVideo) return 0;
     const base = seg.gain == null ? 1 : Math.max(0, Math.min(1, seg.gain));
     if (!seg.fadeAt || base <= 0) return base;
     const local = (tEdited ?? this.tEdited) - (this.starts[i] ?? 0);
     return Math.max(0, Math.min(1, base * seg.fadeAt(local)));
+  }
+
+  /** Monitoring-only footage mute (an audio clip is soloed): silences the video track's own sound in
+   *  PREVIEW without touching the composition — nothing here reaches the export mixer. Applied inside
+   *  segGain, so every writer (activation, roll-through, per-tick fades, dub) picks it up. */
+  setMonitorMuteVideo(on: boolean): void {
+    if (this.monitorMuteVideo === on) return;
+    this.monitorMuteVideo = on;
+    const seg = this.segs[this.curIdx];
+    if (!seg) return;
+    const g = this.segGain(this.curIdx);
+    const el = this.els.get(seg.key);
+    if (el) el.volume = g; // paused too: no tick would come to apply it
+    const dub = this.dubs.get(seg.key);
+    if (dub) dub.el.volume = g;
   }
 
   /** Live volume preview (slider drag): update one segment's gain in place and, if it's the active one,
