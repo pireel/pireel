@@ -372,7 +372,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [clipAsr, setClipAsr] = useState<Record<string, AsrSegment[]>>({});
   const [filmstrip, setFilmstrip] = useState<FilmstripFrame[]>([]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
-  const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead (click the time readout)
+  const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead
+  // near=true: only scroll when the playhead would be off-screen (jumps made from another panel), vs the
+  // transport readout, which always centres because that IS the request.
+  const [locateNear, setLocateNear] = useState(false);
+  const locateTimeline = (near = false) => {
+    setLocateNear(near);
+    setLocateSignal((n) => n + 1);
+  };
   const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
@@ -4393,7 +4400,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 videoDurationSec={comp.video?.durationSec ?? 0}
                 extracting={asrBusy}
                 onExtract={() => void extractForScript()}
-                onSeek={(sec) => applyT(Math.max(0, sec))}
+                onSeek={(sec) => {
+                  applyT(Math.max(0, sec));
+                  locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
+                }}
                 onCut={cutSrcRanges}
                 onRestore={restoreSrcRanges}
                 onReplaceWord={replaceScriptWord}
@@ -4451,7 +4461,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   videoDurationSec={comp.video?.durationSec ?? 0}
                   extracting={asrBusy}
                   onExtract={() => void extractForScript()}
-                  onSeek={(sec) => applyT(Math.max(0, sec))}
+                  onSeek={(sec) => {
+                  applyT(Math.max(0, sec));
+                  locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
+                }}
                   onCut={cutSrcRanges}
                   onRestore={restoreSrcRanges}
                   onReplaceWord={replaceScriptWord}
@@ -4578,7 +4591,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setLocateSignal((n) => n + 1)}
+                onClick={() => locateTimeline()}
                 disabled={!hasContent}
                 className="hover:bg-panel-2 shrink-0 rounded px-1 disabled:pointer-events-none"
                 aria-label={t('workbench.scrollPlayhead')}
@@ -4864,6 +4877,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           comp={comp}
           playing={playing}
           locateSignal={locateSignal}
+          locateNear={locateNear}
           selectedShotIds={selectedShotIds}
           selectedBlockIds={selectedBlockIds}
           filmstrip={filmstrip}
