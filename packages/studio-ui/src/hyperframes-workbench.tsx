@@ -4274,6 +4274,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     { v: 'image', label: 'panels.image' },
                     { v: 'video', label: 'panels.video' },
                     { v: 'element', label: 'panels.element' },
+                    { v: 'audio', label: 'panels.music' },
                   ] as { v: GenType; label: string }[]
                 ).map((gt) => (
                   <button
