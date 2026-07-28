@@ -2,10 +2,11 @@
 
 /**
  * Right-rail script panel (Descript-style transcript-driven editing): the whole script is a word-level plain-text stream —
- * click a word to pop up "delete / replace"; drag-select multiple words = batch delete; inter-sentence silence is inlined
- * as a (…9.4s) marker you can click to delete. Deleting words/silence = deleting the corresponding video range (source
- * time -> current-edit mapping lives in workbench cutSrcRanges).
- * Top batch actions: one-click delete silence, delete filler words (uh/um…, requires true word-level timestamps).
+ * click a word to pop up "delete / replace"; drag-select multiple words = batch delete; a pause (between sentences or
+ * inside one) is inlined as a (…9.4s) marker you can click to shorten. Clicking either a word or a marker also moves the
+ * playhead there and brings that moment into view on the timeline. Deleting words/pauses = deleting the corresponding
+ * video range (source time -> current-edit mapping lives in workbench cutSrcRanges).
+ * Top batch actions: one-click pause trim, delete filler words (uh/um…, requires true word-level timestamps).
  * The panel only computes, it doesn't cut — cut/replace go through callbacks (workbench centralizes undo snapshot / block compaction / caption sync).
  */
 
@@ -187,6 +188,14 @@ export function ScriptPanel({
     onSeek(srcToEditedLoose(shots, word.start, inSrcOf(it.src)));
   };
 
+  /** Pause marker click: pop delete/restore AND move the playhead there, same as clicking a word — a marker
+   *  is a position in the video too. A compressed-away pause has no edited time of its own; the loose
+   *  mapping lands on the seam it left behind, which is the moment worth looking at. */
+  const openGapPop = (e: React.MouseEvent, g: Gap) => {
+    setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) });
+    onSeek(srcToEditedLoose(shots, g.range[0], inSrcOf(null)));
+  };
+
   /** Drag multi-select: on mouseup, gather the words the selection covers — present ones can be batch-deleted, deleted ones
    *  batch-restored (a mixed selection offers both actions). Grouped by source: each source's timeline is independent, so delete ranges can't merge across sources. */
   const onMouseUp = (e: React.MouseEvent) => {
@@ -277,13 +286,7 @@ export function ScriptPanel({
           Never scrolls horizontally: add spaces between Latin words for line-break opportunities, break-words as a fallback for over-long tokens (URLs/long numbers) */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words px-3 py-2.5 text-[13px] leading-[1.9]" onMouseUp={onMouseUp}>
         {gapAfter.has(-1) && (
-          <GapToken
-            gap={gapAfter.get(-1)!}
-            onClick={(e) => {
-              const g = gapAfter.get(-1)!;
-              setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) });
-            }}
-          />
+          <GapToken gap={gapAfter.get(-1)!} onClick={(e) => openGapPop(e, gapAfter.get(-1)!)} />
         )}
         {items.map((it) => (
           <span key={`${it.src ?? 'n'}:${it.si}`}>
@@ -325,22 +328,12 @@ export function ScriptPanel({
                 if (g)
                   return [
                     node,
-                    <GapToken
-                      key={`g${wi}`}
-                      gap={g}
-                      onClick={(e) => setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) })}
-                    />,
+                    <GapToken key={`g${wi}`} gap={g} onClick={(e) => openGapPop(e, g)} />,
                   ];
                 return wi < arr.length - 1 && needsSpace(it.words[wi]!.text, it.words[wi + 1]!.text) ? [node, ' '] : [node];
               })}
             {it.src === null && gapAfter.has(it.si) && (
-              <GapToken
-                gap={gapAfter.get(it.si)!}
-                onClick={(e) => {
-                  const g = gapAfter.get(it.si)!;
-                  setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) });
-                }}
-              />
+              <GapToken gap={gapAfter.get(it.si)!} onClick={(e) => openGapPop(e, gapAfter.get(it.si)!)} />
             )}{' '}
           </span>
         ))}
