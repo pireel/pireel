@@ -2042,7 +2042,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // Instant: apply the framing transform directly via the hf:shotVars live channel (the rebuild's keyframe end value
     // matches, so landing has no jump); structural parts like the partner vacancy / keyframe sequence are picked up by the debounced rebuild afterward
     const cur = compRef.current.shots?.find((x) => x.id === sid);
-    if (cur) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(treatment, cur.treatSize) });
+    if (cur) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(treatment, cur.treatSize, cur.treatCrop) });
     setComp((c) => {
       const shots = (c.shots ?? []).map((s) => (s.id === sid ? { ...s, treatment } : s));
       return syncVacancyPartner({ ...c, shots }, sid);
@@ -2058,7 +2058,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  canvas render mode: every segment's framing is applied on the #vidEl canvas. */
   const previewShotTreatSize = (sid: string, size: number) => {
     const s = compRef.current.shots?.find((x) => x.id === sid);
-    if (s) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(s.treatment, size) });
+    if (s) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(s.treatment, size, s.treatCrop) });
+  };
+  /** Half-split crop position (0–100): which part of the frame survives the fill. Same live channel as size. */
+  const setShotTreatCrop = (sid: string, crop: number) =>
+    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? { ...s, treatCrop: crop } : s)) }));
+  const previewShotTreatCrop = (sid: string, crop: number) => {
+    const s = compRef.current.shots?.find((x) => x.id === sid);
+    if (s) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(s.treatment, s.treatSize, crop) });
   };
   /** Shot-level color grade commit: filter changes take the same fast path as framing (hf:vidTimeline swaps the body
    *  in place, grade keyframes are inside it); if the playhead is within this shot, apply the instant value first, don't
@@ -4417,6 +4424,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     onSetTreatment={setShotTreatment}
                     onSetTreatSize={setShotTreatSize}
                     onPreviewTreatSize={previewShotTreatSize}
+                    onSetTreatCrop={setShotTreatCrop}
+                    onPreviewTreatCrop={previewShotTreatCrop}
                     onSetFilter={setShotFilter}
                     onPreviewFilter={previewShotFilter}
                   />

@@ -479,10 +479,21 @@ describe('视频分镜片段 shots', () => {
     expect(treatmentVacancyBox('split-r')!.x).toBeLessThan(0.5);
   });
 
-  it('videoFrameTimelineBody:half=split-l 用半屏 transform', () => {
+  it('videoFrameTimelineBody:半分铺满半区(不缩小),靠裁切占位', () => {
     const body = videoFrameTimelineBody([{ id: 'a', srcStart: 0, srcEnd: 4, treatment: 'split-l' }]);
-    expect(body).toContain('scale: 0.5');
+    // 铺满 = 不缩放,画面裁掉另一半;缺省居中取,所以左半显示的是源的中段
+    expect(body).toContain('scale: 1');
     expect(body).toContain('xPercent: -25');
+    expect(body).toContain("clipPath: 'inset(0% 25% 0% 25%)'"); // 保留源的中段
+  });
+
+  it('videoFrameTimelineBody:裁切位置改的是保留哪一段,不改占位', () => {
+    const left = videoFrameTimelineBody([{ id: 'a', srcStart: 0, srcEnd: 4, treatment: 'split-l', treatCrop: 0 }]);
+    const right = videoFrameTimelineBody([{ id: 'a', srcStart: 0, srcEnd: 4, treatment: 'split-l', treatCrop: 100 }]);
+    expect(left).toContain('xPercent: 0'); // 保留最左边一段
+    expect(left).toContain("clipPath: 'inset(0% 50% 0% 0%)'");
+    expect(right).toContain('xPercent: -50'); // 保留最右边一段
+    expect(right).toContain("clipPath: 'inset(0% 0% 0% 50%)'");
   });
 
   it('videoFrameTimelineBody:生成的是合法可执行 GSAP,调用时序正确', () => {

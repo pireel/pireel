@@ -30,7 +30,7 @@ export function sameExceptCapStyle(a: Composition | null, b: Composition): boole
   return true;
 }
 
-/** Only shot framing/grade (treatment/treatSize/filter) changed: skip the rebuild — hf:shotVars was already applied instantly,
+/** Only shot framing/grade (treatment/treatSize/treatCrop/filter) changed: skip the rebuild — hf:shotVars was already applied instantly,
  *  and the vid timeline is swapped in place by hf:vidTimeline (identical to what a rebuild would bake, with framing and grade keyframes inside the body).
  *  Any other field/structural change doesn't take this path. */
 export function shotFramingOnlyChange(a: Composition | null, b: Composition): boolean {
@@ -48,8 +48,8 @@ export function shotFramingOnlyChange(a: Composition | null, b: Composition): bo
     const x = sa[i]!;
     const y = sb[i]!;
     if (x === y) continue;
-    const { treatment: _xt, treatSize: _xs, filter: _xf, ...rx } = x;
-    const { treatment: _yt, treatSize: _ys, filter: _yf, ...ry } = y;
+    const { treatment: _xt, treatSize: _xs, treatCrop: _xc, filter: _xf, ...rx } = x;
+    const { treatment: _yt, treatSize: _ys, treatCrop: _yc, filter: _yf, ...ry } = y;
     const kx = Object.keys(rx) as (keyof typeof rx)[];
     if (kx.length !== Object.keys(ry).length) return false;
     for (const k of kx) if (!Object.is(rx[k], (ry as typeof rx)[k])) return false;

@@ -59,39 +59,40 @@ function TreatmentPreview({ t }: { t: ShotTreatment }) {
         </>
       );
       break;
+    // Splits FILL their half — flush to the edges, no margin, square inner corner
     case 'split-l':
       inner = (
         <>
-          {vid(2, 2, 45, 92)}
-          {bust(24.5, 56, 3.2)}
-          {bars(56, 38, 32)}
+          {vid(0, 0, 48, 96, 0)}
+          {bust(24, 58, 3.4)}
+          {bars(57, 38, 31)}
         </>
       );
       break;
     case 'split-r':
       inner = (
         <>
-          {bars(8, 38, 32)}
-          {vid(49, 2, 45, 92)}
-          {bust(71.5, 56, 3.2)}
+          {bars(8, 38, 31)}
+          {vid(48, 0, 48, 96, 0)}
+          {bust(72, 58, 3.4)}
         </>
       );
       break;
     case 'split-t':
       inner = (
         <>
-          {vid(2, 2, 92, 45)}
-          {bust(48, 32, 3.2)}
-          {bars(14, 60, 72)}
+          {vid(0, 0, 96, 48, 0)}
+          {bust(48, 33, 3.4)}
+          {bars(14, 60, 68)}
         </>
       );
       break;
     case 'split-b':
       inner = (
         <>
-          {bars(14, 14, 72)}
-          {vid(2, 51, 92, 45)}
-          {bust(48, 81, 3.2)}
+          {bars(14, 14, 68)}
+          {vid(0, 48, 96, 48, 0)}
+          {bust(48, 81, 3.4)}
         </>
       );
       break;
@@ -121,6 +122,8 @@ export function ShotTreatmentPanel({
   onSetTreatment,
   onSetTreatSize,
   onPreviewTreatSize,
+  onSetTreatCrop,
+  onPreviewTreatCrop,
   onSetFilter,
   onPreviewFilter,
 }: {
@@ -129,6 +132,9 @@ export function ShotTreatmentPanel({
   onSetTreatSize: (shotId: string, size: number) => void;
   /** Live preview while dragging (edits the iframe directly, zero setState); commits via onSetTreatSize on release. */
   onPreviewTreatSize: (shotId: string, size: number) => void;
+  /** Half-split crop position (0–100 along the split axis, 50 = centred), same live-preview contract. */
+  onSetTreatCrop: (shotId: string, crop: number) => void;
+  onPreviewTreatCrop: (shotId: string, crop: number) => void;
   /** Commit per-shot grading (null = reset all); live preview via onPreviewFilter while dragging. */
   onSetFilter: (shotId: string, f: ShotFilter | null) => void;
   onPreviewFilter: (shotId: string, f: ShotFilter) => void;
@@ -141,6 +147,16 @@ export function ShotTreatmentPanel({
   const commitSize = () => {
     if (dragSize != null && dragSize !== committedSize) onSetTreatSize(shot.id, dragSize);
     setDragSize(null);
+  };
+  // Crop position (half-splits only): a filled half always cuts something — this picks what survives
+  const isSplit = shot.treatment.startsWith('split-');
+  const committedCrop = shot.treatCrop ?? 50;
+  const [dragCrop, setDragCrop] = useState<number | null>(null);
+  useEffect(() => setDragCrop(null), [shot.id, shot.treatment]);
+  const cropValue = dragCrop ?? committedCrop;
+  const commitCrop = () => {
+    if (dragCrop != null && dragCrop !== committedCrop) onSetTreatCrop(shot.id, dragCrop);
+    setDragCrop(null);
   };
   // Grading sliders (shown as percent, 100 = neutral): local value + live preview while dragging, commits on release
   const [dragFilter, setDragFilter] = useState<ShotFilter | null>(null);
@@ -200,6 +216,37 @@ export function ShotTreatmentPanel({
               className="zoom-range w-full"
               aria-label={t('panels.framingSize')}
             />
+          </section>
+        )}
+
+        {/* Crop position (half-splits): the half is filled, so choose which part of the frame survives */}
+        {isSplit && (
+          <section className="flex flex-col gap-1.5">
+            <div className="text-ink flex items-center justify-between font-medium">
+              <span>{t('panels.cropPosition')}</span>
+              <span className="text-ink-4 tabular-nums">{Math.round(cropValue)}</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={cropValue}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setDragCrop(v);
+                onPreviewTreatCrop(shot.id, v);
+              }}
+              onPointerUp={commitCrop}
+              onKeyUp={commitCrop}
+              onBlur={commitCrop}
+              className="zoom-range w-full"
+              aria-label={t('panels.cropPosition')}
+            />
+            <div className="text-ink-4 flex justify-between text-[10px]">
+              <span>{shot.treatment === 'split-t' || shot.treatment === 'split-b' ? t('panels.cropTop') : t('panels.cropLeft')}</span>
+              <span>{shot.treatment === 'split-t' || shot.treatment === 'split-b' ? t('panels.cropBottom') : t('panels.cropRight')}</span>
+            </div>
           </section>
         )}
 

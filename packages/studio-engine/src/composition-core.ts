@@ -120,9 +120,13 @@ export interface VideoShot extends Clip {
   /** Enable smart matte for this shot (per-segment, user-set: the toggle only affects the selected segment, no global/auto backfill).
    *  When on, the parent budgets a mask for this segment; person effects (personFx) only take effect on matte-enabled segments. */
   personMatte?: boolean;
-  /** Framing size 0–100 (unitless, CapCut convention): punch-in = zoom amount, corner = small-window size, half-split = video width.
+  /** Framing size 0–100 (unitless, CapCut convention): punch-in = zoom amount, corner = small-window size, half-split = the share of the axis the video takes.
    *  Default = each type's TREAT_SIZE_DEFAULT (equivalent to the old constants). 'full' has no such concept. */
   treatSize?: number;
+  /** Half-split only — WHICH part of the frame survives the crop, 0–100 along the split axis (0 = the
+   *  top/left edge, 100 = the bottom/right, default 50 = centred). A filled half shows a window of the
+   *  source, so something is always cut; this is the knob for choosing what. Ignored by other framings. */
+  treatCrop?: number;
   /** Shot-level color grade (1 = neutral, only stores fields deviating from neutral; applies to the whole shot, swaps at the cut with no transition).
    *  Preview = #vidEl's CSS filter, export = ctx.filter, same shotFilterCss convention on both ends. */
   filter?: ShotFilter;
@@ -348,34 +352,62 @@ function treatScale(tr: ShotTreatment, size?: number): number {
 /** Shot framing → GSAP transform variable object (transform-only, compositor layer, scrub-safe, same-source as export).
  *  Corner-shrink leaves a 2% margin from the corner, half-split hugs the edge; offset tracks scale (xPercent = (1-s)/2 convention).
  *  Export: while dragging the size slider, the parent uses this to emit hf:shotVars directly to the preview for a live set (zero setState, commits only on release). */
-export function shotTransformVars(tr: ShotTreatment, size?: number): { scale: number; xPercent: number; yPercent: number; borderRadius: number } {
+export interface ShotVars {
+  scale: number;
+  xPercent: number;
+  yPercent: number;
+  borderRadius: number;
+  /** Always emitted (inset(0%) when nothing is cropped) so a tween between any two framings interpolates. */
+  clipPath: string;
+}
+
+/**
+ * A half-split FILLS its half. The video stays at full size and is CROPPED to the band it occupies,
+ * instead of being scaled down and parked at an edge — a shrunken window left dead margins beside
+ * it, which is not the half-and-half layout anyone means. Cropping means part of the frame is cut,
+ * so `crop` picks which part survives (default centred).
+ *
+ * corner/punch-in keep the scale-and-park model: those ARE a small window over the footage.
+ */
+export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: number): ShotVars {
   const s = treatScale(tr, size);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
-  const edge = r3(((1 - s) / 2) * 100);
   const corner = r3(((1 - s) / 2 - 0.02) * 100);
+  const NONE = 'inset(0%)';
+  // The freed share, and where in it the surviving window starts (o=0 keeps the near edge, 1 the far).
+  const gap = 1 - s;
+  const o = Math.min(1, Math.max(0, (typeof crop === 'number' ? crop : 50) / 100));
+  const near = r3(-o * gap * 100); // video parked at the low edge (top / left)
+  const far = r3((1 - o) * gap * 100); // video parked at the high edge (bottom / right)
+  // clip-path is applied in the element's OWN box and the transform moves the clipped result, so the
+  // cut has to name the surviving WINDOW OF THE SOURCE, not the band of canvas it lands in — cutting
+  // "the far half" and then translating carried the visible band half off-screen. The window is the
+  // same either way the video is parked; only the translate differs.
+  const cutNear = r3(o * gap * 100);
+  const cutFar = r3((1 - o) * gap * 100);
   switch (tr) {
     case 'punch-in':
-      return { scale: r3(s), xPercent: 0, yPercent: 0, borderRadius: 0 };
+      return { scale: r3(s), xPercent: 0, yPercent: 0, borderRadius: 0, clipPath: NONE };
     case 'corner-br':
-      return { scale: r3(s), xPercent: corner, yPercent: corner, borderRadius: 54 };
+      return { scale: r3(s), xPercent: corner, yPercent: corner, borderRadius: 54, clipPath: NONE };
     case 'corner-tl':
-      return { scale: r3(s), xPercent: -corner, yPercent: -corner, borderRadius: 54 };
+      return { scale: r3(s), xPercent: -corner, yPercent: -corner, borderRadius: 54, clipPath: NONE };
     case 'split-l':
-      return { scale: r3(s), xPercent: -edge, yPercent: 0, borderRadius: 24 };
+      return { scale: 1, xPercent: near, yPercent: 0, borderRadius: 0, clipPath: `inset(0% ${cutFar}% 0% ${cutNear}%)` };
     case 'split-r':
-      return { scale: r3(s), xPercent: edge, yPercent: 0, borderRadius: 24 };
+      return { scale: 1, xPercent: far, yPercent: 0, borderRadius: 0, clipPath: `inset(0% ${cutFar}% 0% ${cutNear}%)` };
     case 'split-t':
-      return { scale: r3(s), xPercent: 0, yPercent: -edge, borderRadius: 24 };
+      return { scale: 1, xPercent: 0, yPercent: near, borderRadius: 0, clipPath: `inset(${cutNear}% 0% ${cutFar}% 0%)` };
     case 'split-b':
-      return { scale: r3(s), xPercent: 0, yPercent: edge, borderRadius: 24 };
+      return { scale: 1, xPercent: 0, yPercent: far, borderRadius: 0, clipPath: `inset(${cutNear}% 0% ${cutFar}% 0%)` };
     default:
-      return { scale: 1, xPercent: 0, yPercent: 0, borderRadius: 0 };
+      return { scale: 1, xPercent: 0, yPercent: 0, borderRadius: 0, clipPath: NONE };
   }
 }
 
-function shotVars(tr: ShotTreatment, size?: number): string {
-  const v = shotTransformVars(tr, size);
-  return `{ scale: ${n(v.scale)}, xPercent: ${n(v.xPercent)}, yPercent: ${n(v.yPercent)}, borderRadius: ${n(v.borderRadius)} }`;
+function shotVars(tr: ShotTreatment, size?: number, crop?: number): string {
+  const v = shotTransformVars(tr, size, crop);
+  return `{ scale: ${n(v.scale)}, xPercent: ${n(v.xPercent)}, yPercent: ${n(v.yPercent)}, borderRadius: ${n(v.borderRadius)}, clipPath: '${v.clipPath}' }`;
 }
 
 /**
@@ -389,16 +421,15 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
       return { x: 0.06, y: 0.1, w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
     case 'corner-tl': // video shrinks to top-left → frees a large bottom block
       return { x: 0.06, y: Math.min(0.7, s + 0.06), w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
-    case 'split-l': // video takes the left half → frees the right half (width tracks occupied width)
-      return { x: Math.min(0.72, s + 0.02), y: 0.12, w: Math.max(0.2, 1 - s - 0.08), h: 0.76 };
-    case 'split-r': // video takes the right half → frees the left half
-      return { x: 0.06, y: 0.12, w: Math.max(0.2, 1 - s - 0.08), h: 0.76 };
-    case 'split-t': // video takes the top half → frees the bottom half (height tracks occupied height)
-      return { x: 0.06, y: Math.min(0.72, s + 0.02), w: 0.88, h: Math.max(0.2, 1 - s - 0.08) };
-    case 'split-b': // video takes the bottom half → frees the top half
-      // y starts at the margin, not at 0.12: the freed extent runs along the SPLIT axis here, so
-      // borrowing the l/r cross-axis inset pushed the box 4% into the video.
-      return { x: 0.06, y: 0.06, w: 0.88, h: Math.max(0.2, 1 - s - 0.08) };
+    // A split fills its share exactly, so the freed band is the remaining (1 - s), inset by a margin.
+    case 'split-l': // video takes the left band → frees the right
+      return { x: s + 0.04, y: 0.06, w: Math.max(0.2, 1 - s - 0.08), h: 0.88 };
+    case 'split-r': // video takes the right band → frees the left
+      return { x: 0.04, y: 0.06, w: Math.max(0.2, 1 - s - 0.08), h: 0.88 };
+    case 'split-t': // video takes the top band → frees the bottom
+      return { x: 0.06, y: s + 0.04, w: 0.88, h: Math.max(0.2, 1 - s - 0.08) };
+    case 'split-b': // video takes the bottom band → frees the top
+      return { x: 0.06, y: 0.04, w: 0.88, h: Math.max(0.2, 1 - s - 0.08) };
     default:
       return null;
   }
@@ -412,19 +443,19 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
  * (see prompts/plan.ts FRAMING); framings on shot fragments the user hand-cut are executed as-is.
  * Registered to __timelines['vid'].
  */
-export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotTreatment; size?: number }[] {
+export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotTreatment; size?: number; crop?: number }[] {
   const sp = spans(shots);
   if (sp.length === 0) return [];
 
   // canvas render mode: the video track is **one canvas**; all segments' framings (including other-source inserts) are applied to it uniformly
-  const keys: { at: number; tr: ShotTreatment; size?: number }[] = [];
+  const keys: { at: number; tr: ShotTreatment; size?: number; crop?: number }[] = [];
   for (const { clip, editedStart } of sp) {
-    keys.push({ at: editedStart, tr: clip.treatment, size: (clip as VideoShot).treatSize });
+    keys.push({ at: editedStart, tr: clip.treatment, size: (clip as VideoShot).treatSize, crop: (clip as VideoShot).treatCrop });
   }
   const final: typeof keys = [];
   for (const k of keys) {
     const prev = final[final.length - 1];
-    if (!prev || prev.tr !== k.tr || (prev.size ?? -1) !== (k.size ?? -1)) final.push(k);
+    if (!prev || prev.tr !== k.tr || (prev.size ?? -1) !== (k.size ?? -1) || (prev.crop ?? -1) !== (k.crop ?? -1)) final.push(k);
   }
   return final;
 }
@@ -436,11 +467,11 @@ export function videoFrameTimelineBody(shots: VideoShot[]): string {
   const final = videoFrameKeyframes(shots);
   if (!final.length) return '';
 
-  const lines: string[] = [`tl.set('#vidEl', ${shotVars(final[0]!.tr, final[0]!.size)}, 0);`];
+  const lines: string[] = [`tl.set('#vidEl', ${shotVars(final[0]!.tr, final[0]!.size, final[0]!.crop)}, 0);`];
   for (let i = 1; i < final.length; i++) {
     const gap = (final[i + 1]?.at ?? total) - final[i]!.at;
     const dur = Math.max(0.2, Math.min(0.5, gap - 0.05));
-    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotVars(final[i]!.tr, final[i]!.size)}), ${n(final[i]!.at)});`);
+    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotVars(final[i]!.tr, final[i]!.size, final[i]!.crop)}), ${n(final[i]!.at)});`);
   }
   // Color-grade keyframes (deduped independently of framing): jump-cut semantics — swap at the cut (set), no transition tween.
   // No grading anywhere = no lines emitted; if any, neutral segments emit a 'none' reset, otherwise the prior shot's filter leaks into the next.
