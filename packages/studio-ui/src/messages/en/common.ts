@@ -51,6 +51,8 @@ export const COMMON_EN: Record<string, string> = {
   'common.push': 'Push',
   'common.retry': 'Retry',
   'common.rightHalf': 'Right half',
+  'common.topHalf': 'Top half',
+  'common.bottomHalf': 'Bottom half',
   'common.rotate': 'Rotate',
   'common.sourceNoVideoTrack': 'The source has no video track',
   'common.syncingProject': 'Syncing your project…',

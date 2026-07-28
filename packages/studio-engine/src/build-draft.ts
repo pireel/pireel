@@ -264,27 +264,29 @@ export function contentCuts(visual: VisualTimeline | undefined, cuts: number[]):
 /* ============================ Framing / placement ============================ */
 
 /**
- * Framing → concrete ShotTreatment.
+ * Framing → concrete ShotTreatment. Three independent inputs, and they used to be confused:
  *
- * Two independent inputs, and they were being confused:
- *  - THE CANVAS decides WHICH room-making move exists. corner frees a top/bottom band, which only
- *    works on a portrait frame; split frees a left/right half, which only works on a landscape one.
- *    Splitting a portrait frame squeezes the speaker into a sliver; stacking a landscape one leaves
- *    two flat strips. So the model's corner/split choice means "make room" and the aspect picks how.
- *  - THE PERSON decides the DIRECTION within that move, keeping them where they already are and
- *    freeing the other side for the graphic.
- *
- * Stated this way the illegal combination cannot be produced at all, rather than being a rule the
- * planning prompt is asked to respect.
+ *  - THE MOVE comes from the plan: corner shrinks the speaker into a corner, split gives them half.
+ *  - THE CANVAS picks the SPLIT AXIS. Halving the long side leaves two usable halves; halving the
+ *    short side leaves slivers (l/r on portrait) or flat strips (t/b on landscape). So a portrait
+ *    frame splits top/bottom and a landscape frame splits left/right — the illegal pairing cannot
+ *    be expressed here, rather than being a rule the planning prompt is asked to respect.
+ *  - THE PERSON picks the DIRECTION within the move: keep them where they already are, and free
+ *    the other side for the graphic. Sideways from the person label, vertically from the face box.
  */
 function framingToTreatment(framing: Framing, vis: VisSeg | null, canvas: { w: number; h: number }): ShotTreatment {
+  const onLeft = vis?.label.person === 'left';
   switch (framing) {
     case 'punch-in':
       return 'punch-in';
     case 'corner':
+      return onLeft ? 'corner-tl' : 'corner-br';
     case 'split': {
-      const onLeft = vis?.label.person === 'left';
-      return canvas.h > canvas.w ? (onLeft ? 'corner-tl' : 'corner-br') : onLeft ? 'split-l' : 'split-r';
+      if (canvas.w >= canvas.h) return onLeft ? 'split-l' : 'split-r';
+      // Portrait: keep the speaker in the half their face already occupies. No face box → bottom,
+      // matching the sideways default (the video takes the second half, the graphic the first).
+      const faceY = vis?.geom?.face ? vis.geom.face.y + vis.geom.face.h / 2 : 1;
+      return faceY < 0.5 ? 'split-t' : 'split-b';
     }
     default:
       return 'full';

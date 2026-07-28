@@ -51,6 +51,8 @@ export const COMMON_ZH: Record<string, string> = {
   'common.push': '推移',
   'common.retry': '重试',
   'common.rightHalf': '右半',
+  'common.topHalf': '上半',
+  'common.bottomHalf': '下半',
   'common.rotate': '旋转',
   'common.sourceNoVideoTrack': '源缺视频轨',
   'common.syncingProject': '正在同步项目…',

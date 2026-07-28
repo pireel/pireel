@@ -87,8 +87,11 @@ export interface StudioVideo {
 }
 
 /** Shot treatment — how the talking-head video is framed within a segment (shrink to corner to make room for graphics / punch-in emphasis / half-split / fullscreen).
- *  split-l/-r = half-split: video takes the left/right half, the other half goes to a hyperframes block (partnerBlockId). */
-export type ShotTreatment = 'full' | 'punch-in' | 'corner-br' | 'corner-tl' | 'split-l' | 'split-r';
+ *  split-l/-r/-t/-b = half-split: the video takes one half, the other half goes to a hyperframes block (partnerBlockId).
+ *  The split axis is a canvas decision, not a taste one — halving the LONG side leaves two usable
+ *  halves, halving the short side leaves slivers (l/r on a portrait frame) or flat strips (t/b on a
+ *  landscape one). Vertical platforms lean on t/b the way wide ones lean on l/r. */
+export type ShotTreatment = 'full' | 'punch-in' | 'corner-br' | 'corner-tl' | 'split-l' | 'split-r' | 'split-t' | 'split-b';
 
 /**
  * One shot on the video track = one **clip**: keeps the source-video segment [srcStart, srcEnd).
@@ -219,6 +222,8 @@ export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
   { id: 'corner-tl', name: 'common.cornerTopLeft' },
   { id: 'split-l', name: 'common.leftHalf' },
   { id: 'split-r', name: 'common.rightHalf' },
+  { id: 'split-t', name: 'common.topHalf' },
+  { id: 'split-b', name: 'common.bottomHalf' },
 ];
 
 /** Global caption style (Vids Captions style): preset/position/scale tuned in one place, applied uniformly to all sentence-level captions.
@@ -327,6 +332,8 @@ export const TREAT_SIZE_DEFAULT: Record<ShotTreatment, number> = {
   'corner-tl': 35,
   'split-l': 50,
   'split-r': 50,
+  'split-t': 50,
+  'split-b': 50,
 };
 
 /** Framing size 0–100 → video scale: punch-in 1.05–2.0, corner 0.2–0.6, half-split 0.3–0.7. */
@@ -334,7 +341,7 @@ function treatScale(tr: ShotTreatment, size?: number): number {
   const v = Math.max(0, Math.min(100, size ?? TREAT_SIZE_DEFAULT[tr])) / 100;
   if (tr === 'punch-in') return 1.05 + v * 0.95;
   if (tr === 'corner-br' || tr === 'corner-tl') return 0.2 + v * 0.4;
-  if (tr === 'split-l' || tr === 'split-r') return 0.3 + v * 0.4;
+  if (tr.startsWith('split-')) return 0.3 + v * 0.4;
   return 1;
 }
 
@@ -357,6 +364,10 @@ export function shotTransformVars(tr: ShotTreatment, size?: number): { scale: nu
       return { scale: r3(s), xPercent: -edge, yPercent: 0, borderRadius: 24 };
     case 'split-r':
       return { scale: r3(s), xPercent: edge, yPercent: 0, borderRadius: 24 };
+    case 'split-t':
+      return { scale: r3(s), xPercent: 0, yPercent: -edge, borderRadius: 24 };
+    case 'split-b':
+      return { scale: r3(s), xPercent: 0, yPercent: edge, borderRadius: 24 };
     default:
       return { scale: 1, xPercent: 0, yPercent: 0, borderRadius: 0 };
   }
@@ -382,6 +393,12 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
       return { x: Math.min(0.72, s + 0.02), y: 0.12, w: Math.max(0.2, 1 - s - 0.08), h: 0.76 };
     case 'split-r': // video takes the right half → frees the left half
       return { x: 0.06, y: 0.12, w: Math.max(0.2, 1 - s - 0.08), h: 0.76 };
+    case 'split-t': // video takes the top half → frees the bottom half (height tracks occupied height)
+      return { x: 0.06, y: Math.min(0.72, s + 0.02), w: 0.88, h: Math.max(0.2, 1 - s - 0.08) };
+    case 'split-b': // video takes the bottom half → frees the top half
+      // y starts at the margin, not at 0.12: the freed extent runs along the SPLIT axis here, so
+      // borrowing the l/r cross-axis inset pushed the box 4% into the video.
+      return { x: 0.06, y: 0.06, w: 0.88, h: Math.max(0.2, 1 - s - 0.08) };
     default:
       return null;
   }
