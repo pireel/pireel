@@ -258,7 +258,6 @@ export function ScriptPanel({
           type="button"
           disabled={!silences.length}
           onClick={() => onCut(silences.map((g) => ({ src: null, range: g.range })), t('panels.deletedNSilencesSec', { n: silences.length, sec: silenceTotal.toFixed(1) }))}
-          title={silences.length ? t('panels.deleteSpeechFreeGaps', { sec: MIN_PAUSE_SEC, keep: KEEP_AIR_SEC }) : t('panels.noSilencesDelete')}
           className="border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40"
         >
           <Scissors size={11} /> {silences.length ? t('panels.cutSilencesNSec', { n: silences.length, sec: silenceTotal.toFixed(1) }) : t('panels.cutSilences')}
