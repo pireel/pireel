@@ -45,6 +45,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
+import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { fileSig } from './media';
 import { saveLocalVideo } from './local-media';
@@ -112,7 +113,8 @@ export interface AgentToolCtx {
     seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
     instruction: string,
     onDelta?: (raw: string) => void,
-  ) => Promise<{ innerHtml: string; timelineBody: string; note: string }>;
+    opts?: ComposeMode,
+  ) => Promise<ComposedBlock>;
   noteOf: (raw: string) => string;
   // Block edits
   moveBlock: (id: string, startSec: number) => void;
@@ -395,12 +397,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 const beats = beatsForWindow(slot.startSec, slot.durationSec);
                 const neighbors = neighborsFrom(roster, slot.id);
                 const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
-                const parsed = await composeBlockChecked(seed, placeholderSpec(slot));
+                const parsed = await composeBlockChecked(seed, placeholderSpec(slot), undefined, { kit: true });
                 setComp((cc) => ({
                   ...cc,
-                  blocks: cc.blocks.map((b) =>
-                    b.id === slot.id ? { ...b, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } : b,
-                  ),
+                  blocks: cc.blocks.map((b) => (b.id === slot.id ? { ...b, ...composedBlockFields(parsed) } : b)),
                 }));
               };
               const worker = async () => {
@@ -967,13 +967,15 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : r1(tRef.current);
               const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              const parsed = await composeBlockChecked(seed, `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${String(input.instruction ?? '')}`, (acc) =>
-                report(noteOf(acc) || t('panels.generating')),
+              const parsed = await composeBlockChecked(
+                seed,
+                `Create a new overlay element for this content: ${String(input.instruction ?? '')}`,
+                (acc) => report(noteOf(acc) || t('panels.generating')),
+                { kit: true },
               );
               const nb: Block = {
                 id: seed.id,
-                templateId: 'custom',
-                slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody },
+                ...composedBlockFields(parsed),
                 startSec: at,
                 durationSec: 3,
                 trackIndex: freeTrack(compRef.current.blocks, at, 3),
@@ -994,12 +996,14 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             try {
               markGenerating([b.id], true); // lock editing during the rewrite too (the result replaces the whole slots)
               const seed = { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label };
-              const parsed = await composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('workbench.editing')));
+              // A kit block is edited as props; anything else keeps writing markup. Editing follows
+              // what the block already IS — silently converting one into the other would throw away
+              // whatever the user tuned by hand.
+              const current = kitChoiceOf(b);
+              const parsed = await composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('workbench.editing')), current ? { kit: true, current } : undefined);
               setComp((cc) => ({
                 ...cc,
-                blocks: cc.blocks.map((x) =>
-                  x.id === b.id ? { ...x, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } : x,
-                ),
+                blocks: cc.blocks.map((x) => (x.id === b.id ? { ...x, ...composedBlockFields(parsed) } : x)),
               }));
               return { ok: true, summary: parsed.note || t('workbench.elementUpdated') };
             } finally {

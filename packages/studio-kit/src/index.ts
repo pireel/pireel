@@ -33,6 +33,7 @@ export { defineSchema, en, num, bool, text, reqText, color, rows, shownWhen, typ
 export { typeScale, fitDown, isCjk, type TypeScale } from './sizing';
 export * as motion from './motion';
 export { renderBlueprint, type Blueprint, type MotionStep } from './blueprint';
+export { catalogText, surfaceText, type CatalogDef } from './catalog';
 export { themeVars, themeBlueprints, type Theme, type Palette } from './theme';
 export { themes } from './themes/index';
 export { SURFACE_FIELDS, SURFACE_SWATCHES, surfaceCss, radiusCss, hasPanel, type SurfaceProps } from './surface';
