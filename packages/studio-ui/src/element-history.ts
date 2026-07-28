@@ -23,6 +23,10 @@ export interface GenElementResult {
   /** Design reference size (theme elements = 1920×1080): on insert, cq-ify against this and pick an in-canvas fit window rather than filling the screen. */
   designW?: number;
   designH?: number;
+  /** Present = the element IS a kit component (themeless generation): insertion creates a
+   *  props-driven kit block directly — no offscreen measurement, no cq-ization; innerHtml/
+   *  timelineBody above are only the derived preview for the library card. */
+  kit?: { component: string; props: Record<string, unknown> };
 }
 
 export interface ElementEntry {
