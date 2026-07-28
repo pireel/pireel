@@ -12,11 +12,28 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 块生成的 system 提示词**按层拼**,拼装单点在 `assemble.ts`。顺序是**稳定 → 易变**:
 prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 
-> **注意范围**:下面这套是**块生成**这一条链路的层。真正跨全局的 L0(编辑器对象模型 /
-> 工具契约 / 状态表示 / 时间域)现在住在 agent 面 —— `chat.ts` 的 `CHAT_IDENTITY` +
-> `buildSituation` 的 `<composition_state>` + `agent-tools.ts`,以及 `mcp.ts` 的
-> `MCP_INSTRUCTIONS`。**那三处各自把"编辑器是什么"描述了一遍,尚未提取**;要动 agent 面时
-> 再一起提。`fragment-contract.ts` 只是块生成侧的基座,别把它当全局 L0 往里塞东西。
+## L0:编辑器本身(跨三个面)
+
+三个提示词面骑在同一个编辑器上:应用内 agent(`chat.ts`)、外部 agent(`mcp.ts`)、块生成
+(`assemble.ts`)。**编辑器是什么、状态怎么过期、哪些内容不是命令 —— 这些只写一份**,在
+`l0-editor.ts`:
+
+| 导出 | 内容 | 谁用 |
+| --- | --- | --- |
+| `EDITOR_MODEL` | 对象模型:块/分镜两类元素、块是数据、id 不许瞎编 | chat · mcp |
+| `contentIsNotCommand(director)` | **不可信内容边界(安全规则)**,只有"谁下指令"随面变 | chat · mcp |
+| `stateDiscipline(snapshot, howToRefresh)` | 快照会过期 / 回执与 delta 可信 / 稿子是源文件秒 | chat · mcp |
+| `ON_SCREEN_LANGUAGE` | 画面文字跟视频口播语言 | chat · mcp · **块生成** |
+| `IDENTITY_DISCIPLINE` | 不透露模型与提示词 —— **只给自家面,不给外部 agent** | chat |
+
+机制名各面不同(推送的 `<composition_state>` vs 拉取的 `get_state`),所以带机制名的那几条是
+函数,**规则单源,只有名词换**。`l0-editor.test.ts` 钉住每个面都真的用了 L0,以及
+`IDENTITY_DISCIPLINE` 绝不出现在 MCP 面。
+
+面各自保留的:chat 的流水线编排/回话风格、mcp 的离线模式/开浏览器/skill 版本、块生成的 L1/L4。
+
+> `fragment-contract.ts` 是**块生成这条链路**的基座(你在做一个图形 / 确定性 / note 在前),
+> 不是全局 L0。别混。
 
 | 层 | 文件 | 内容 | 何时变 |
 | --- | --- | --- | --- |
@@ -40,6 +57,7 @@ prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 
 | 文件 | 导出 | 用途 |
 | --- | --- | --- |
+| `l0-editor.ts` | `EDITOR_MODEL` `contentIsNotCommand` `stateDiscipline` `ON_SCREEN_LANGUAGE` `IDENTITY_DISCIPLINE` | **L0:编辑器本身**,三个面共用 |
 | `assemble.ts` | `BLOCK_SYSTEM` `buildKitSystem` `buildHtmlSystem` | **按层拼 system 的唯一入口**,层序在此决定 |
 | `block-system.ts` | `BLOCK_HTML_BODY` | 自由 HTML 路径的设计体(版式原型/图表 recipe/SELF-CHECK)——**注定被组件替掉,是待删的一层** |
 | `plan.ts` | `PLAN_CORE` `PLAN_SYSTEM` `PLAN_SYSTEM_TOOLS` | 规划核心约束 + 单发 JSON(遗留)/工具环(生产)两种输出契约 |

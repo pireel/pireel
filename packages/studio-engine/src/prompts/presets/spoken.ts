@@ -10,6 +10,8 @@
  * say" are the same rules; two copies would drift the moment one is tuned.
  */
 
+import { ON_SCREEN_LANGUAGE } from '../l0-editor';
+
 /** L3.1 — how to decide what goes on screen in a talking-head piece. */
 export const SPOKEN_EDITORIAL = `WHAT EARNS A GRAPHIC
 The speaker is the piece; a graphic exists to carry what speech carries badly — a figure, a
@@ -21,10 +23,7 @@ WHAT IT SAYS
 - Take figures, names and keywords VERBATIM from what was actually said. Never invent a number, and
   never round one that was stated precisely.
 - ONE idea per graphic. It has to read in one to two seconds while someone is talking over it.
-- LANGUAGE: on-screen text follows the SPOKEN SCRIPT's language. The instruction's language and the
-  note's language are irrelevant to it — a Chinese instruction over an English script still yields
-  English on screen, and the reverse. Never translate the given content; switch language only if the
-  instruction explicitly orders it.
+- LANGUAGE: ${ON_SCREEN_LANGUAGE}
 - Do NOT produce a running subtitle or a plain lower-third of the narration unless the instruction
   explicitly asks for subtitles or a keyword caption.
 

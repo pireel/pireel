@@ -23,6 +23,7 @@
 // Layered assembly (see assemble.ts for the stack and why the order is what it is)
 export { BLOCK_SYSTEM, buildHtmlSystem, buildKitSystem } from './assemble';
 export { FRAGMENT_CONTRACT } from './fragment-contract';
+export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
 export { L1_PROPS_SPEC } from './l1-props-spec';
 export { catalogSection } from './l4-catalog';
 export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
