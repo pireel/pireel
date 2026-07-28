@@ -89,7 +89,9 @@ export function KitPropsPanel({
   };
 
   return (
-    <div className="flex w-60 flex-col gap-2.5 p-3">
+    // Scroll is each docked panel's own job (the shell is a plain min-h-0 flex row) — without
+    // overflow here the fields past the viewport were simply clipped.
+    <div className="flex h-full min-h-0 w-60 flex-col gap-2.5 overflow-y-auto p-3">
       {onSetStaging && stagings.length > 0 && (
         <div className="flex flex-col gap-1">
           <span className="text-ink-4 text-[10px]">{t('kitProp.staging')}</span>
