@@ -794,7 +794,7 @@ function AssetLightbox({
           onClick={(e) => e.stopPropagation()}
           className="bg-panel cursor-default overflow-y-auto rounded-lg shadow-2xl"
         >
-          <KitPropsPanel block={kitBlock} onPatch={setDraft} frameId={comp.frameId} onSetStaging={setDraftStaging} />
+          <KitPropsPanel block={kitBlock} onPatch={setDraft} onSetStaging={setDraftStaging} />
         </div>
       )}
       </div>

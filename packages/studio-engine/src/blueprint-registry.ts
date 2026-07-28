@@ -37,3 +37,12 @@ export function frameBlueprints(frameId?: string, component?: string): Blueprint
   const list = frameId ? (byFrame.get(frameId) ?? []) : [];
   return component ? list.filter((b) => b.component === component) : list;
 }
+
+/** Every registered staging of one component, across ALL frames (frame registration order).
+ *  The props panel offers these regardless of which theme the project has attached — a block may
+ *  wear any theme's look; only GENERATION stays scoped to the attached theme (l4-catalog). */
+export function componentBlueprints(component: string): Blueprint[] {
+  const out: Blueprint[] = [];
+  for (const list of byFrame.values()) for (const b of list) if (b.component === component) out.push(b);
+  return out;
+}

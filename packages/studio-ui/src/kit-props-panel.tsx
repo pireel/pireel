@@ -9,8 +9,9 @@
 
 import { useMemo } from 'react';
 import { kitComponents, kitSurfaceFields, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
-import { frameBlueprints } from '@pireel/studio-engine/blueprint-registry';
+import { componentBlueprints } from '@pireel/studio-engine/blueprint-registry';
 import type { Block } from '@pireel/studio-engine/composition';
+import { useFrameCatalog } from './use-frame-catalog';
 import { t } from './i18n';
 
 interface FieldSchema {
@@ -35,20 +36,32 @@ function fieldLabel(key: string): string {
 export function KitPropsPanel({
   block,
   onPatch,
-  frameId,
   onSetStaging,
 }: {
   block: Block;
   /** Full next props object (caller owns comp update + undo). */
   onPatch: (props: Record<string, unknown>) => void;
-  /** Attached theme — its stagings for this component become a picker row. Absent = row hidden. */
-  frameId?: string;
-  /** Switch the block's staging (undefined = the component's built-in variant). The row renders
-   *  only when this is provided AND the theme actually stages this component. */
+  /** Switch which theme's look this block wears (undefined = the component's built-in variant).
+   *  The row lists EVERY theme that stages this component — not just the attached one: a block may
+   *  borrow any theme's look. Row hidden when no theme stages the component (nothing to choose). */
   onSetStaging?: (blueprintId: string | undefined) => void;
 }) {
   const cid = block.templateId.slice('kit:'.length);
-  const stagings = useMemo(() => frameBlueprints(frameId, cid), [frameId, cid]);
+  const catalog = useFrameCatalog();
+  const stagings = useMemo(() => {
+    const list = componentBlueprints(cid);
+    // Per-frame counts first, so a theme with several looks for one component labels each.
+    const perFrame = new Map<string, number>();
+    for (const b of list) {
+      const fid = b.id.split('/')[0]!;
+      perFrame.set(fid, (perFrame.get(fid) ?? 0) + 1);
+    }
+    return list.map((b) => {
+      const fid = b.id.split('/')[0]!;
+      const title = catalog.find((f) => f.id === fid)?.title ?? fid;
+      return { id: b.id, label: (perFrame.get(fid) ?? 0) > 1 ? `${title} · ${b.name}` : title };
+    });
+  }, [cid, catalog]);
   const currentStaging = typeof (block.slots as { blueprintId?: unknown }).blueprintId === 'string' ? String((block.slots as { blueprintId?: unknown }).blueprintId) : undefined;
   const def = (kitComponents as Record<string, { jsonSchema: Record<string, unknown>; defaults: Record<string, unknown> }>)[cid];
   const current = useMemo(
@@ -99,7 +112,7 @@ export function KitPropsPanel({
                   currentStaging === bp.id ? 'border-accent text-accent bg-accent/5' : 'border-line text-ink-3 hover:text-ink'
                 }`}
               >
-                {bp.name}
+                {bp.label}
               </button>
             ))}
           </div>
