@@ -12,9 +12,15 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 块生成的 system 提示词**按层拼**,拼装单点在 `assemble.ts`。顺序是**稳定 → 易变**:
 prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 
+> **注意范围**:下面这套是**块生成**这一条链路的层。真正跨全局的 L0(编辑器对象模型 /
+> 工具契约 / 状态表示 / 时间域)现在住在 agent 面 —— `chat.ts` 的 `CHAT_IDENTITY` +
+> `buildSituation` 的 `<composition_state>` + `agent-tools.ts`,以及 `mcp.ts` 的
+> `MCP_INSTRUCTIONS`。**那三处各自把"编辑器是什么"描述了一遍,尚未提取**;要动 agent 面时
+> 再一起提。`fragment-contract.ts` 只是块生成侧的基座,别把它当全局 L0 往里塞东西。
+
 | 层 | 文件 | 内容 | 何时变 |
 | --- | --- | --- | --- |
-| L0 基础契约 | `l0-contract.ts` | 你在做什么/确定性/不许改没要求的/note 在前 | 几乎不变 |
+| 片段契约 | `fragment-contract.ts` | 你在做什么/确定性/不许改没要求的/note 在前(**块生成侧的基座,不是全局 L0**) | 几乎不变 |
 | L1 props 规范 | `l1-props-spec.ts` | 字段种类·夹取语义·缺省即成品(也是将来自造组件的语法) | 几乎不变 |
 | L2 预设 | `presets/` | 口播/vlog…**路由层**:决定加载哪套 L3.1 + L4 | 加预设时 |
 | L4 能力词汇 | `l4-catalog.ts` | 该预设的组件目录,**从 schema 派生** | 加组件 = 零改动 |

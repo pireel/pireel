@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildKitPrompt, parseKitResponse } from './compose';
-import { BLOCK_SYSTEM, L0_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem, withStyleDirection } from './prompts';
+import { BLOCK_SYSTEM, FRAGMENT_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem, withStyleDirection } from './prompts';
 import { assembleKitTheme, frameVoice } from './briefs';
 import { components } from '@pireel/studio-kit';
 
@@ -17,7 +17,7 @@ const KIT = buildKitSystem();
 describe('the layer stack', () => {
   it('both paths share the base contract and the editorial layer', () => {
     for (const system of [KIT, buildHtmlSystem()]) {
-      expect(system).toContain(L0_CONTRACT);
+      expect(system).toContain(FRAGMENT_CONTRACT);
       expect(system).toContain(SPOKEN_EDITORIAL);
     }
   });
