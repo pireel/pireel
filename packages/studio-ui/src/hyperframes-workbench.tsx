@@ -192,6 +192,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, []);
   const selectedShotIdsRef = useRef<Set<string>>(selectedShotIds);
   selectedShotIdsRef.current = selectedShotIds;
+  // Audio-lane selection (timeline chip ↔ audio settings; Del deletes, and the toolbar's split/trim act on it).
+  // Declared alongside the other selection state so every selection path can clear it — the three are mutually
+  // exclusive: whatever the user picks last owns the toolbar.
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  const selectedAudioIdRef = useRef<string | null>(null);
+  selectedAudioIdRef.current = selectedAudioId;
+  // Picking a component or a shot drops the audio selection (the reverse lives in onSelectAudio, which clears
+  // both sets in the same batch — so this effect sees an empty selection there and leaves the audio alone).
+  useEffect(() => {
+    if (selectedId || selectedShotIds.size) setSelectedAudioId(null);
+  }, [selectedId, selectedShotIds]);
   /** ⌘/Ctrl click: toggle a shot in/out of the multi-select set; anchor follows the last-interacted shot. */
   const toggleShotSelect = useCallback((id: string) => {
     setSelectedId(null);
@@ -1449,6 +1460,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (d.type === 'select') {
         // Clicking a block during playback = wanting to edit it: pause first (clicking blank still only deselects, doesn't interrupt playback)
         if (d.blockId && playingRef.current) setPlaying(false);
+        setSelectedAudioId(null); // a click on the stage is "somewhere else" for the audio lane, hit or miss
         setSelectedId(d.blockId ?? null);
         setCapSelPart(d.part === 'sub' ? 'sub' : 'main'); // caption sub-target: main line / translation line each get their own handles
         setImgSel(null); // if the same click hit an image, the imgSel message right after refills it
@@ -2426,10 +2438,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setLibTab('audio');
     setLibCollapsed(false);
   };
-  /** Music-lane selection (timeline chip ↔ panel row; Del deletes). */
-  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
-  const selectedAudioIdRef = useRef<string | null>(null);
-  selectedAudioIdRef.current = selectedAudioId;
+  // Selected clip removed (undo, agent edit, delete) → drop the dangling selection
   useEffect(() => {
     if (selectedAudioId && !(comp.audioTracks ?? []).some((c) => c.id === selectedAudioId)) setSelectedAudioId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
