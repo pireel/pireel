@@ -587,14 +587,16 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
           case 'list_assets': {
             // Enumerate the user's media library (uploads + agent imports) + this project's video sources —
             // the agent references real urls instead of guessing or asking the user to describe what they have
-            const kindIn = input.kind === 'image' || input.kind === 'video' ? input.kind : 'all';
+            const kindIn = input.kind === 'image' || input.kind === 'video' || input.kind === 'audio' ? input.kind : 'all';
             const limit = Math.min(Math.max(Math.round(Number(input.limit) || 30), 1), 100);
-            const fetchKind = (k: 'image' | 'video') =>
+            const fetchKind = (k: 'image' | 'video' | 'audio') =>
               fetch(`/api/me/materials?tab=global&kind=${k}&limit=${limit}`)
                 .then((r) => (r.ok ? r.json() : null))
                 .then((j: { items?: { id: string; url: string; label: string | null; kind: string; width: number | null; height: number | null; created_at: number }[] } | null) => j?.items ?? [])
                 .catch(() => []);
-            const kinds: ('image' | 'video')[] = kindIn === 'all' ? ['image', 'video'] : [kindIn];
+            // Audio belongs here as much as stills do: set_bgm needs a url, and without this the agent could
+            // only place a bed the user had already pasted into the conversation.
+            const kinds: ('image' | 'video' | 'audio')[] = kindIn === 'all' ? ['image', 'video', 'audio'] : [kindIn];
             const lists = await Promise.all(kinds.map(fetchKind));
             const assets = lists
               .flat()
