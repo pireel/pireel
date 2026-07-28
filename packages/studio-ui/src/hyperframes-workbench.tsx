@@ -66,7 +66,8 @@ import {
 } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { deleteClipById, removeEditedInterval, removeEditedRange, removeSrcRanges, restoreSrcRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from '@pireel/studio-engine/trim';
-import { parseBlockResponse } from '@pireel/studio-engine/compose';
+import { parseBlockResponse, parseKitResponse } from '@pireel/studio-engine/compose';
+import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { clearToolProgress, setToolProgress } from './tool-progress';
@@ -1946,6 +1947,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
       instruction: string,
       onDelta?: (raw: string) => void,
+      opts?: ComposeMode,
     ): Promise<string> => {
       const script = asrSentences?.map((s) => s.text).join('') ?? ''; // full narration text as context
       const context: { script?: string; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] } = {};
@@ -1962,6 +1964,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           ...(compRef.current.frameId ? { frameId: compRef.current.frameId } : {}), // frame design language goes into ACTIVE THEME
           lang: localeRef.current, // note (the human sentence in chat) uses the UI language
           ...(Object.keys(context).length ? { context } : {}),
+          ...(opts?.kit ? { mode: 'kit' as const, ...(opts.current ? { current: opts.current } : {}) } : {}),
         },
         onDelta,
       );
@@ -1982,7 +1985,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
       instruction: string,
       onDelta?: (raw: string) => void,
-    ): Promise<{ innerHtml: string; timelineBody: string; note: string }> => {
+      opts?: ComposeMode,
+    ): Promise<ComposedBlock> => {
+      // Kit path: no lint round. The component's own schema is the gate and it never throws —
+      // there is no such thing as malformed markup to bounce back, only props that clamp.
+      if (opts?.kit) {
+        const raw = await composeBlockRaw(seed, instruction, onDelta, opts);
+        const { choice, note } = parseKitResponse(raw);
+        if (!choice) throw new Error(t('workbench.noComponentFitsThisMoment'));
+        return { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, note, kit: choice };
+      }
       const raw = await composeBlockRaw(seed, instruction, onDelta);
       let parsed = parseBlockResponse(raw, { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody });
       let issues = lintBlock({ blockId: seed.id, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });

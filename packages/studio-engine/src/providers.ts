@@ -10,7 +10,7 @@
  *    or `unavailableProviders()` to run the editor pure-local (BYO agent only).
  */
 
-import type { BlockEdit, ComposeContext } from './compose';
+import type { BlockEdit, ComposeContext, KitChoice } from './compose';
 import type { DraftPlan, PlanInsert, PlanSentence, PlanVisual } from './plan';
 import type { AsrSegment } from './build-blocks';
 import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
@@ -25,6 +25,10 @@ export interface ComposeRequest {
   /** UI language for the human-facing note line. */
   lang?: string;
   context?: ComposeContext;
+  /** 'kit' asks for a component choice ({component, props}); default 'html' writes a markup fragment. */
+  mode?: 'kit' | 'html';
+  /** kit mode: the component this block already shows, when editing rather than creating. */
+  current?: KitChoice | null;
 }
 
 /** Generates block HTML/animation from a request. Hosted: server LLM. OSS: own key or unavailable (use the BYO agent flow instead). */

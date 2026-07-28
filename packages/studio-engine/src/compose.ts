@@ -59,14 +59,12 @@ export interface BlockEdit {
 
 export { BLOCK_SYSTEM };
 
-export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; context?: ComposeContext; lang?: string }): string {
-  const parts: string[] = [`BLOCK_ID = ${args.block.id} (scope all selectors under #${args.block.id})`, `Block kind: ${args.block.kind}`];
-  if (args.block.boxPx)
-    parts.push(
-      // "must not overflow" is a hard constraint: autofit (scroll size) can't detect overflow of absolutely-positioned content,
-      // and overflowing text lands on the face / off-canvas — prefer too small over overflow; headline gets a hard cap
-      `This fragment's box is about ${args.block.boxPx.w}×${args.block.boxPx.h}px inside the FIXED 1080px-wide canvas reference (px is consistent — the whole canvas scales uniformly for preview/export). HARD CONSTRAINT: everything must fit INSIDE ${args.block.boxPx.w}×${args.block.boxPx.h}px — nothing may stick out (overflowing content lands on the speaker's face or off-canvas; there is no auto-shrink for absolutely-positioned overflow). When unsure, size type one step SMALLER, never larger. Keep the largest headline ≤ ${Math.max(40, Math.round(args.block.boxPx.h / 4))}px and total content height (with margins) within the box. Adapt the layout to this box's aspect ratio.`,
-    );
+/** Everything both paths say about the moment being designed — the box, the clock, the speech,
+ *  the neighbours. Only the head (who you are talking to) and the tail (what to return) differ,
+ *  so this stays one function: context drift between the HTML and kit paths would make their
+ *  outputs incomparable, and comparing them is the whole point of running both. */
+function momentParts(args: { block: BlockEdit; context?: ComposeContext }): string[] {
+  const parts: string[] = [];
   if (args.block.durationSec)
     parts.push(
       `This fragment is on screen for about ${args.block.durationSec.toFixed(1)}s. For SEQUENTIAL content (steps / numbered list / pipeline / timeline), reveal the items ONE BY ONE spread ACROSS this whole duration (PPT / presenter rhythm — advance through them over the seconds), and highlight the active item; do NOT reveal them all at time 0. For non-sequential content, one calm reveal near the start then hold still.`,
@@ -88,6 +86,18 @@ export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; 
         .map((x) => `  ${x.start.toFixed(1)}–${x.end.toFixed(1)}s 「${x.text}」`)
         .join('\n')}\nSYNC the reveals to these timestamps: reveal/highlight each item EXACTLY when its content is spoken (match each item to the beat that mentions it), using these local times directly as the GSAP positions — NOT an even auto-spread.`,
     );
+  return parts;
+}
+
+export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; context?: ComposeContext; lang?: string }): string {
+  const parts: string[] = [`BLOCK_ID = ${args.block.id} (scope all selectors under #${args.block.id})`, `Block kind: ${args.block.kind}`];
+  if (args.block.boxPx)
+    parts.push(
+      // "must not overflow" is a hard constraint: autofit (scroll size) can't detect overflow of absolutely-positioned content,
+      // and overflowing text lands on the face / off-canvas — prefer too small over overflow; headline gets a hard cap
+      `This fragment's box is about ${args.block.boxPx.w}×${args.block.boxPx.h}px inside the FIXED 1080px-wide canvas reference (px is consistent — the whole canvas scales uniformly for preview/export). HARD CONSTRAINT: everything must fit INSIDE ${args.block.boxPx.w}×${args.block.boxPx.h}px — nothing may stick out (overflowing content lands on the speaker's face or off-canvas; there is no auto-shrink for absolutely-positioned overflow). When unsure, size type one step SMALLER, never larger. Keep the largest headline ≤ ${Math.max(40, Math.round(args.block.boxPx.h / 4))}px and total content height (with margins) within the box. Adapt the layout to this box's aspect ratio.`,
+    );
+  parts.push(...momentParts(args));
   parts.push(`Current INNER HTML:\n\`\`\`html\n${args.block.innerHtml}\n\`\`\``);
   parts.push(`Current TIMELINE BODY:\n\`\`\`js\n${args.block.timelineBody}\n\`\`\``);
   parts.push(`Instruction: ${args.instruction}`);
@@ -111,6 +121,61 @@ export function parseBlockResponse(
     timelineBody: js?.[1]?.trim() || fb.timelineBody,
     note,
   };
+}
+
+/* ============================ Kit path (component + props) ============================ */
+
+/** What the kit path returns: a component choice, or nothing when the moment deserves no graphic. */
+export interface KitChoice {
+  component: string;
+  props: Record<string, unknown>;
+}
+
+export function buildKitPrompt(args: {
+  block: BlockEdit;
+  instruction: string;
+  context?: ComposeContext;
+  lang?: string;
+  /** The component this block already shows, when editing rather than creating. */
+  current?: KitChoice | null;
+}): string {
+  const parts: string[] = [];
+  if (args.block.boxPx)
+    // No overflow warning here: the component computes every size from this box, so the model
+    // cannot overflow it. The box is stated because it decides which staging reads well.
+    parts.push(
+      `The box for this graphic is ${args.block.boxPx.w}×${args.block.boxPx.h}px (${args.block.boxPx.w >= args.block.boxPx.h * 1.2 ? 'wide' : args.block.boxPx.h >= args.block.boxPx.w * 1.2 ? 'tall' : 'roughly square'}). Sizes are computed for you — pick the staging that suits this shape.`,
+    );
+  parts.push(...momentParts(args));
+  if (args.current)
+    parts.push(`This graphic currently is:\n\`\`\`json\n${JSON.stringify(args.current, null, 2)}\n\`\`\`\nKeep everything the instruction does not mention.`);
+  parts.push(`Instruction: ${args.instruction}`);
+  const noteLang = args.lang ? `the user's UI language "${args.lang}"` : 'the same language as the instruction above';
+  parts.push(`Reply with ONE short note in ${noteLang}, then one \`\`\`json fence holding {"component":…,"props":{…}} — or null.`);
+  return parts.join('\n\n');
+}
+
+/** Read the model's answer. A missing/!parseable fence is not an error here: it means "no graphic",
+ *  which is a legitimate answer the prompt explicitly asks for. Callers distinguish the two by
+ *  `choice === null` (deliberate or unusable — both mean: leave the moment alone). */
+export function parseKitResponse(text: string): { choice: KitChoice | null; note: string } {
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  const note = (fence ? text.replace(fence[0], '') : text).trim() || 'Chose a component';
+  const raw = fence?.[1]?.trim() ?? text.trim();
+  if (!raw || /^null$/i.test(raw)) return { choice: null, note };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { choice: null, note };
+  }
+  if (typeof parsed !== 'object' || parsed === null) return { choice: null, note };
+  const o = parsed as Record<string, unknown>;
+  if (typeof o.component !== 'string' || !o.component) return { choice: null, note };
+  // Props are NOT validated here — the component's own schema is the gate, and it never throws.
+  // Validating twice would only add a second, weaker opinion about what is acceptable.
+  const props = typeof o.props === 'object' && o.props !== null ? (o.props as Record<string, unknown>) : {};
+  return { choice: { component: o.component, props }, note };
 }
 
 export async function composeBlock(

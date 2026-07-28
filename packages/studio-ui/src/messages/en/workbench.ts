@@ -181,6 +181,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.nameGeneratingEditAfter': '"{name}" is generating — edit it after it finishes',
   'workbench.needUrlOrSig': 'Give at least one of url or sig (sig = fingerprint returned by the asset-import helper; url = an address from the user asset library / generated videos)',
   'workbench.newElement': 'New element',
+  'workbench.noComponentFitsThisMoment': 'Nothing here worth putting on screen — no graphic made',
   'workbench.nFailedPlaceholdersRemain': ', {n} failed (placeholders remain — say "redo graphics" to retry)',
   'workbench.nMoreRedoSteps': ' ({n} more redo steps left)',
   'workbench.nMoreUndoSteps': ' ({n} more undo steps left)',

@@ -21,6 +21,7 @@
  */
 
 export { BLOCK_SYSTEM } from './block-system';
+export { KIT_BLOCK_SYSTEM, kitStyleDirection } from './block-kit';
 export { PLAN_CORE, PLAN_SYSTEM, PLAN_SYSTEM_TOOLS } from './plan';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';

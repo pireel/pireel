@@ -181,6 +181,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.nameGeneratingEditAfter': '「{name}」正在生成中,等它完成再改',
   'workbench.needUrlOrSig': 'url 或 sig 至少给一个(sig=asset-import helper 上传返回的指纹;url=用户素材库/生成视频的地址)',
   'workbench.newElement': '新组件',
+  'workbench.noComponentFitsThisMoment': '这段没有值得上屏的内容,没生成组件',
   'workbench.nFailedPlaceholdersRemain': ',{n} 张失败(占位还在,可以再说「重新配图」)',
   'workbench.nMoreRedoSteps': '(还可再重做 {n} 步)',
   'workbench.nMoreUndoSteps': '(还可再撤 {n} 步)',
