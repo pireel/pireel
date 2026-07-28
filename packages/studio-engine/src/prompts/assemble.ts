@@ -19,14 +19,15 @@ import { BLOCK_HTML_BODY } from './block-system';
 import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
 import { catalogSection } from './l4-catalog';
+import { frameBlueprints } from '../blueprint-registry';
 import { getPreset } from './presets';
 import { withStyleDirection } from './style-direction';
 
 /** Path-specific output contract — the only part of the stack that knows what the answer looks like. */
 const KIT_OUTPUT = `OUTPUT
 After the note line, ONE \`\`\`json fence:
-{"component": "<id>", "props": { … }}   — or  null  when this moment deserves no graphic.
-Only keys listed for that component; anything else is dropped.`;
+{"component": "<id>", "staging": "<id>"?, "props": { … }}   — or  null  when this moment deserves
+no graphic. Only keys listed for that component; anything else is dropped.`;
 
 const HTML_OUTPUT = `OUTPUT
 After the note line, in THIS order:
@@ -34,9 +35,10 @@ After the note line, in THIS order:
 - then one \`\`\`js block = the full TIMELINE BODY.`;
 
 /** The component path's system prompt. */
-export function buildKitSystem(opts?: { presetId?: string; voice?: string }): string {
+export function buildKitSystem(opts?: { presetId?: string; voice?: string; frameId?: string }): string {
   const preset = getPreset(opts?.presetId);
-  const system = [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
+  const stagings = frameBlueprints(opts?.frameId);
+  const system = [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components, stagings), preset.editorial, KIT_OUTPUT].join('\n\n');
   return withStyleDirection(system, opts?.voice);
 }
 

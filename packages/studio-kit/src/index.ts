@@ -130,11 +130,11 @@ export function render(component: ComponentId | (string & {}), id: string, props
   if (bp && bp.component === component && typeof bp.html === 'string') {
     // Theme staging: props are still parsed by the component's own schema (so a blueprint can
     // never receive a value the component wouldn't accept), then arranged by the blueprint.
+    // The blueprint owns the surface — a staging that paints its own plate (a bordered panel, a
+    // taped card) must not also receive the generic one underneath it.
     const parsed = def.parse ? def.parse(props) : (props as Record<string, unknown>);
-    const p = parsed as unknown as SurfaceProps;
     const s = typeScale(ctx);
-    const surface = 'surface' in parsed ? surfaceCss(p, s) : '';
-    const out = renderBlueprint(bp, id, parsed as Record<string, unknown>, s, surface);
+    const out = renderBlueprint(bp, id, parsed as Record<string, unknown>, s, '');
     return { html: out.html, timeline: out.timeline };
   }
   return def.render(id, props, ctx);

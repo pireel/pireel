@@ -129,6 +129,8 @@ export function parseBlockResponse(
 export interface KitChoice {
   component: string;
   props: Record<string, unknown>;
+  /** A theme staging id. Absent = the component's built-in variant. */
+  staging?: string;
 }
 
 export function buildKitPrompt(args: {
@@ -175,7 +177,10 @@ export function parseKitResponse(text: string): { choice: KitChoice | null; note
   // Props are NOT validated here — the component's own schema is the gate, and it never throws.
   // Validating twice would only add a second, weaker opinion about what is acceptable.
   const props = typeof o.props === 'object' && o.props !== null ? (o.props as Record<string, unknown>) : {};
-  return { choice: { component: o.component, props }, note };
+  // A staging id is not checked here either: an unknown one resolves to no blueprint at render and
+  // the component's built-in variant carries the block — degrading, not discarding the whole answer.
+  const staging = typeof o.staging === 'string' && o.staging ? o.staging : undefined;
+  return { choice: { component: o.component, props, ...(staging ? { staging } : {}) }, note };
 }
 
 export async function composeBlock(

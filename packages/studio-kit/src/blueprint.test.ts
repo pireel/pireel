@@ -80,3 +80,30 @@ describe('blueprint staging', () => {
     expect(html).not.toContain('.num'); // fell back to the built-in staging
   });
 });
+
+describe('nested sections', () => {
+  // Regression: a lazy section match closed the loop at the first {{/}} it met, so a row body
+  // containing an optional field rendered ONE truncated item. Every list staging hit this.
+  const list = bp({
+    component: 'steps',
+    html: '<div class="bp-root">{{#items}}<p class="r">{{text}}{{?note}}<i>{{note}}</i>{{/}}</p>{{/}}</div>',
+    css: '.r{font-size:{{labelPx}}px}',
+  });
+
+  it('renders every row when a row contains an optional field', () => {
+    const { html } = render('steps', 'k', { items: [{ text: 'one', note: 'n1' }, { text: 'two' }, { text: 'three', note: 'n3' }] }, { ...CTX, blueprint: list });
+    expect(html.match(/class="r"/g)).toHaveLength(3);
+    expect(html).toContain('two');
+    expect(html).toContain('three');
+  });
+
+  it('keeps the optional field per row, not across rows', () => {
+    const { html } = render('steps', 'k', { items: [{ text: 'one', note: 'n1' }, { text: 'two' }] }, { ...CTX, blueprint: list });
+    expect(html.match(/<i>/g)).toHaveLength(1);
+  });
+
+  it('leaves an unbalanced template as literal text rather than guessing', () => {
+    const broken = bp({ component: 'steps', html: '<div class="bp-root">{{#items}}<p>{{text}}</p></div>' });
+    expect(() => render('steps', 'k', { items: [{ text: 'x' }] }, { ...CTX, blueprint: broken })).not.toThrow();
+  });
+});
