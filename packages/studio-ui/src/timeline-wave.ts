@@ -30,10 +30,11 @@ export function waveBars(
   heightPx: number,
   shiftDb: number,
   envelopeAt?: (frac: number) => number,
+  maxBars = WAVE_MAX_BARS,
 ): string {
   const a = Math.max(0, Math.min(peaks.length - 1, from));
   const b = Math.max(a + 1, Math.min(peaks.length, to));
-  const cols = Math.max(1, Math.min(WAVE_MAX_BARS, Math.round(widthPx / WAVE_BAR_PX)));
+  const cols = Math.max(1, Math.min(maxBars, Math.round(widthPx / WAVE_BAR_PX)));
   const barW = widthPx / cols;
   const step = (b - a) / cols;
   const parts: string[] = [];
