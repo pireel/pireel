@@ -7,6 +7,10 @@
  * descriptions of one system drift, and one of them is a SECURITY rule — the worst kind to keep
  * two copies of, because the copy that isn't updated is the one an attack goes through.
  *
+ * The editor's VERBS — the tool contracts — are the other half of this layer and live in
+ * l0-agent-tools.ts: same single-source-across-surfaces rule, kept separate only because they are
+ * data (schemas) rather than prose.
+ *
  * What belongs here: true of the editor no matter who is driving. What doesn't: how a particular
  * surface gets its state, which tools it has, how it should talk. Those stay with their surface.
  *

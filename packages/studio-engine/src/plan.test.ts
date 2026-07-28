@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePlan, unifiedPlanRows } from './plan';
+import { parsePlan, unifiedPlanRows , planSceneBand } from './plan';
 
 describe('parsePlan(场景化 storyboard)', () => {
   it('解析场景:from/to/framing/graphic(组件+brief+真实数据)+ 标题/片尾', () => {
@@ -237,5 +237,24 @@ describe('插入段平权分镜(统一叙事流 → 装配层分解)', () => {
     );
     expect(r.map((x) => x.src)).toEqual(['main', 1, 'main']);
     expect(r[1]).toMatchObject({ local: 0, text: 'x' });
+  });
+});
+
+describe('planSceneBand(节奏公式:从 3-8s hold 规则推出的场景数带)', () => {
+  it('带子=时长/8 到 时长/4,目标≈时长/6', () => {
+    expect(planSceneBand(60)).toEqual({ min: 7, max: 15, target: 10 });
+    expect(planSceneBand(30)).toEqual({ min: 3, max: 8, target: 5 });
+  });
+  it('短视频有地板:永远不会算出 0-1 个场景的荒谬目标', () => {
+    const b = planSceneBand(8);
+    expect(b.min).toBeGreaterThanOrEqual(2);
+    expect(b.max).toBeGreaterThanOrEqual(3);
+    expect(b.target).toBeGreaterThanOrEqual(b.min);
+    expect(b.target).toBeLessThanOrEqual(b.max);
+  });
+  it('目标数以具体数字进 prompt(模型跟数字远比自己积分 3-8s 可靠)', () => {
+    const p = buildPlanPrompt({ sentences: [{ index: 0, text: '大家好', start: 0, end: 60 }], videoDurationSec: 60 });
+    expect(p).toContain('plan ABOUT 10 scenes');
+    expect(p).toContain('healthy band 7–15');
   });
 });

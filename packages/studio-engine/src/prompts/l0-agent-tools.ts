@@ -1,4 +1,17 @@
 /**
+ * L0, the tool surface — the editor's VERBS, next to l0-editor.ts's nouns.
+ *
+ * One layer, two files, and the split is mechanical, not conceptual: l0-editor.ts is prose every
+ * surface splices into its system text, while this file is DATA (JSON schemas + descriptions) that
+ * hosts attach as tools. Both describe the same editor, and both are single-source across surfaces:
+ * the in-app chat attaches these via streamText, the MCP server exposes the same table (with
+ * per-surface description overrides where a mechanism doesn't exist there — see mcp.ts), and the
+ * client executes via onToolCall. A tool that existed in one surface's copy but not the other's
+ * would be the drift L0 exists to prevent.
+ *
+ * (Previous header follows — the operational contract for adding tools is unchanged.)
+ */
+/**
  * Studio editing agent toolset — defined once, shared by server and client.
  *
  * Key design: these tools are NOT executed on the server. The server only uses their

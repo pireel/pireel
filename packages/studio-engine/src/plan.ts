@@ -139,6 +139,21 @@ export function unifiedPlanRows(sentences: PlanSentence[], inserts?: PlanInsert[
 /** Planning prompt (core constraints + output contract) is assembled in prompts/index.ts; body in prompts/plan-*.md. */
 export { PLAN_SYSTEM, PLAN_SYSTEM_TOOLS };
 
+/**
+ * Scene-count band, DERIVED from the pacing rule rather than restated beside it: graphics hold
+ * 3–8s (PLAN_CORE), so a d-second video healthily carries between d/8 and d/4 scenes. Stated as
+ * numbers in the request because a model follows "about 9 scenes (7–14)" far more reliably than
+ * it integrates "3–8s each" over a duration it never multiplies out — under-segmenting was the
+ * common failure: six sentences of distinct beats merged into two scenes.
+ */
+export function planSceneBand(videoDurationSec: number): { min: number; max: number; target: number } {
+  const d = Math.max(0, videoDurationSec);
+  const min = Math.max(2, Math.floor(d / 8));
+  const max = Math.max(3, Math.ceil(d / 4));
+  const target = Math.min(max, Math.max(min, Math.round(d / 6)));
+  return { min, max, target };
+}
+
 export function buildPlanPrompt(args: {
   sentences: PlanSentence[];
   videoDurationSec: number;
@@ -183,9 +198,13 @@ export function buildPlanPrompt(args: {
   return [
     args.topic ? `Topic hint: ${args.topic}` : '',
     args.canvas
-      ? `Canvas: ${Math.round(args.canvas.width)}×${Math.round(args.canvas.height)} (${args.canvas.width >= args.canvas.height ? 'LANDSCAPE — the big-area framing is split, never corner' : 'PORTRAIT — the big-area framing is corner, never split'}).`
+      ? `Canvas: ${Math.round(args.canvas.width)}×${Math.round(args.canvas.height)} (${args.canvas.width >= args.canvas.height ? 'LANDSCAPE' : 'PORTRAIT'} — the split axis follows the canvas automatically; choose corner or split freely).`
       : '',
-    `Video duration: ${args.videoDurationSec.toFixed(1)}s. The FULL script in narrative order (row. [start-end] text, with picture hints where available):`,
+    (() => {
+      const band = planSceneBand(args.videoDurationSec);
+      return `Video duration: ${args.videoDurationSec.toFixed(1)}s → plan ABOUT ${band.target} scenes (healthy band ${band.min}–${band.max}). Under ${band.min} means distinct beats are being merged away; over ${band.max} means graphics will flash by unread. The band is a pacing constraint, not a style choice.`;
+    })(),
+    `The FULL script in narrative order (row. [start-end] text, with picture hints where available):`,
     printed.join('\n'),
     hasClips || silent.length
       ? `INSERTED CLIPS: rows tagged [clip #k] are spliced-in footage — part of the SAME narrative, planned together with everything around them (their graphics/framing come from their own words, with full context of the surrounding story). Their timestamps are the clip's OWN clock (they restart; compare times only within one source). HARD RULE: a scene must never mix [clip #k] rows with narration rows, or rows of two different clips — the footage changes at the boundary, so end the scene there and start a new one. Untagged "---" marker lines are silent clips: their footage stays untouched; no scene or graphic covers them.`
