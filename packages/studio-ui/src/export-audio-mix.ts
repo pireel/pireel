@@ -192,9 +192,3 @@ export async function mixAudioTrack(args: {
     await push(new AudioSample({ data: out, format: 'f32', numberOfChannels: MIX_CH, sampleRate: MIX_RATE, timestamp: t0 }));
   }
 }
-
-/** Decode a music file to PCM for mixing/analysis (OfflineAudioContext needs no user gesture). */
-export async function decodeAudioFile(blob: Blob): Promise<AudioBuffer> {
-  const octx = new OfflineAudioContext(MIX_CH, 8, MIX_RATE);
-  return octx.decodeAudioData(await blob.arrayBuffer());
-}

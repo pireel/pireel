@@ -37,7 +37,8 @@ import {
   type VideoSample,
 } from 'mediabunny';
 import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, segmentFadeFn, shotFilterCss, shotGain, shotsContiguous, totalDuration } from '@pireel/studio-engine/composition';
-import { decodeAudioFile, mixAudioTrack } from './export-audio-mix';
+import { decodeAudioFile } from './audio-decode';
+import { mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';

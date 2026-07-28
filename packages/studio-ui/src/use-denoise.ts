@@ -12,10 +12,10 @@
 
 import { useEffect, useRef, useState, type MutableRefObject, type SetStateAction } from 'react';
 import type { Composition } from '@pireel/studio-engine/composition';
-import { extractAudio } from '@pireel/studio-engine/video-edit/extract-audio';
 import { toast } from '@pireel/ui/toast';
 import type { VideoTrackEngine } from './video-track-engine';
-import { blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from './denoise';
+import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from './denoise';
+import { decodeVideoAudio, toMono } from './audio-decode';
 import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { t } from './i18n';
@@ -55,9 +55,10 @@ export function useDenoise(deps: DenoiseDeps) {
     setStatus('baking');
     setProgress(0);
     try {
-      const dryBlob = await extractAudio(f);
+      const dryBuf = await decodeVideoAudio(f);
       if (runId !== runIdRef.current) return;
-      const dry = await decodeMono48k(dryBlob);
+      if (!dryBuf) throw new Error('source has no audio track');
+      const dry = await toMono(dryBuf, DENOISE_RATE);
       if (runId !== runIdRef.current) return;
       // wet: OPFS cache by source sig — inference runs once per source ever
       const wetKey = `dnwet:${sig}`;

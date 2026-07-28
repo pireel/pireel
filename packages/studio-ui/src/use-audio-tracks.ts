@@ -22,9 +22,8 @@ import {
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import type { EngineAudioClip, VideoTrackEngine } from './video-track-engine';
-import { decodeAudioFile } from './export-audio-mix';
-import { bgmAutoVolumeDb, measureBufferLoudnessDb, measureLoudnessDb } from './loudness';
-import { extractAudio } from '@pireel/studio-engine/video-edit/extract-audio';
+import { decodeAudioFile, decodeVideoAudio } from './audio-decode';
+import { bgmAutoVolumeDb, measureBufferLoudnessDb } from './loudness';
 import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { t } from './i18n';
@@ -69,7 +68,8 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     if (narrDbRef.current?.sig === sig) return narrDbRef.current.db;
     let db: number | null = null;
     try {
-      db = await measureLoudnessDb(await extractAudio(f));
+      const buf = await decodeVideoAudio(f);
+      db = buf ? measureBufferLoudnessDb(buf) : null;
     } catch {
       /* no audio track / decode failure → default clip level */
     }
@@ -270,8 +270,8 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       srcTriedRef.current.add(tag);
       void (async () => {
         try {
-          const buf = await decodeAudioFile(await extractAudio(j.file));
-          setSourcePeaks((m) => new Map(m).set(j.key, { peaks: peaksOf(buf), durationSec: buf.duration }));
+          const buf = await decodeVideoAudio(j.file);
+          if (buf) setSourcePeaks((m) => new Map(m).set(j.key, { peaks: peaksOf(buf), durationSec: buf.duration }));
         } catch {
           /* source without an audio track / decode failure: the strip just stays empty */
         }

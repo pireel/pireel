@@ -10,13 +10,9 @@
 
 import { useEffect, useState } from 'react';
 import type { ShotFilter, ShotTreatment, VideoShot } from '@pireel/studio-engine/composition';
-import { SHOT_TREATMENTS, TREAT_SIZE_DEFAULT, VOLUME_DB_MIN, dbToGain, shotGain } from '@pireel/studio-engine/composition';
+import { SHOT_TREATMENTS, TREAT_SIZE_DEFAULT } from '@pireel/studio-engine/composition';
+import { AudioLevel } from './audio-level';
 import { t } from './i18n';
-
-/** Volume slider ↔ storage mapping: the slider is linear percent of source level (0–100, mainstream-editor-style),
- *  storage is dB (agent/tool convention). 0% maps to the -inf floor. */
-const pctToDb = (pct: number): number => (pct <= 0 ? VOLUME_DB_MIN : Math.max(VOLUME_DB_MIN, Math.min(0, 20 * Math.log10(pct / 100))));
-const dbToPct = (db: number | undefined): number => Math.round(dbToGain(db ?? 0) * 100);
 
 /** One framing effect card: 1:1 frame filling the card, silhouette + image/text placeholder bars positioned by type (label sits below the card). */
 function TreatmentPreview({ t }: { t: ShotTreatment }) {
@@ -111,7 +107,6 @@ export function ShotTreatmentPanel({
   onSetFilter,
   onPreviewFilter,
   onSetAudio,
-  onPreviewVolume,
 }: {
   shot: VideoShot;
   onSetTreatment: (shotId: string, t: ShotTreatment) => void;
@@ -121,9 +116,8 @@ export function ShotTreatmentPanel({
   /** Commit per-shot grading (null = reset all); live preview via onPreviewFilter while dragging. */
   onSetFilter: (shotId: string, f: ShotFilter | null) => void;
   onPreviewFilter: (shotId: string, f: ShotFilter) => void;
-  /** Commit per-shot audio (volume in dB / mute); live volume preview via onPreviewVolume (linear gain 0..1) while dragging. */
+  /** Per-shot audio level (dB). Muting is a TRACK action and lives on the timeline's track header. */
   onSetAudio: (shotId: string, patch: { volumeDb?: number; mute?: boolean }) => void;
-  onPreviewVolume: (shotId: string, gainLinear: number) => void;
 }) {
   // Size slider: local value + live iframe preview while dragging (zero setState); commits to comp on release / after keyboard adjust
   const committedSize = shot.treatSize ?? TREAT_SIZE_DEFAULT[shot.treatment];
@@ -143,20 +137,7 @@ export function ShotTreatmentPanel({
     if (dragFilter) onSetFilter(shot.id, filterNeutral ? null : dragFilter);
     setDragFilter(null);
   };
-  // Volume slider (percent of source level): local value + live element-volume preview while dragging, commits dB on release
-  const committedPct = dbToPct(shot.volumeDb);
-  const [dragPct, setDragPct] = useState<number | null>(null);
-  useEffect(() => setDragPct(null), [shot.id]);
-  const pctValue = dragPct ?? committedPct;
   const muted = !!shot.audioMuted;
-  const commitVolume = () => {
-    if (dragPct != null && dragPct !== committedPct) onSetAudio(shot.id, { volumeDb: pctToDb(dragPct) });
-    setDragPct(null);
-  };
-  const toggleMute = () => {
-    onSetAudio(shot.id, { mute: !muted });
-    onPreviewVolume(shot.id, !muted ? 0 : shotGain({ volumeDb: shot.volumeDb })); // instant, don't wait for the segment refeed
-  };
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Title (framing · scene N)/close live in the floating-window header; only a one-line hint here */}
@@ -247,41 +228,12 @@ export function ShotTreatmentPanel({
           })}
         </section>
 
-        {/* Sound (whole shot, this segment's own audio): volume percent + mute; switches at the cut like framing/grade */}
+        {/* Sound (whole shot, this segment's own audio): the SAME level control the audio panel uses —
+            one slider, one dB scale, one implementation. Muting is per track, up on the timeline. */}
         <section className="flex flex-col gap-1.5">
-          <div className="text-ink flex items-center justify-between font-medium">
-            <span>{t('panels.sound')}</span>
-            <button
-              type="button"
-              onClick={toggleMute}
-              aria-pressed={muted}
-              className={`rounded px-1.5 py-0.5 text-[10.5px] transition ${muted ? 'bg-accent/15 text-accent' : 'text-ink-4 hover:text-ink'}`}
-            >
-              {muted ? t('panels.muted') : t('panels.mute')}
-            </button>
-          </div>
-          <div className={`flex items-center gap-2 ${muted ? 'pointer-events-none opacity-40' : ''}`}>
-            <span className="text-ink-3 w-7 shrink-0">{t('panels.volume')}</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={pctValue}
-              disabled={muted}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setDragPct(v);
-                onPreviewVolume(shot.id, v / 100); // follow the finger: set the decode element's volume directly
-              }}
-              onPointerUp={commitVolume}
-              onKeyUp={commitVolume}
-              onBlur={commitVolume}
-              className="zoom-range w-full"
-              aria-label={t('panels.volume')}
-            />
-            <span className="text-ink-4 w-8 shrink-0 text-right tabular-nums">{pctValue}</span>
-          </div>
+          <div className="text-ink font-medium">{t('panels.sound')}</div>
+          <AudioLevel db={shot.volumeDb ?? 0} disabled={muted} onChange={(db) => onSetAudio(shot.id, { volumeDb: db })} />
+          {muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
         </section>
       </div>
     </div>

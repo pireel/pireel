@@ -660,11 +660,14 @@ describe('分镜声音(volumeDb/audioMuted)', () => {
     expect(shotGain(shot({ volumeDb: -6, audioMuted: true }))).toBe(0);
   });
 
-  it('patchShotAudio:钳位到 [-60,0];中性值(0dB/未静音)把字段摘掉,没动过的 comp 字节不变', () => {
+  it('patchShotAudio:钳位到 [-60,+20];中性值(0dB/未静音)把字段摘掉,没动过的 comp 字节不变', () => {
     const s = patchShotAudio(shot(), { volumeDb: -18.234 });
     expect(s.volumeDb).toBe(-18.2);
+    // 分镜与音轨同一把尺子:抬升是真的(录轻了就推上去),预览靠 gain node、导出靠改 PCM
     const boosted = patchShotAudio(shot(), { volumeDb: 6 });
-    expect(boosted.volumeDb).toBeUndefined(); // 钳到 0 = 中性 = 摘掉
+    expect(boosted.volumeDb).toBe(6);
+    expect(shotGain(boosted)).toBeCloseTo(1.995, 3);
+    expect(patchShotAudio(shot(), { volumeDb: 99 }).volumeDb).toBe(20);
     const floor = patchShotAudio(shot(), { volumeDb: -99 });
     expect(floor.volumeDb).toBe(-60);
     const neutral = patchShotAudio(shot({ volumeDb: -6, audioMuted: true }), { volumeDb: 0, mute: false });

@@ -25,9 +25,9 @@ export interface EngineSeg {
   elKey: string;
   srcStart: number;
   srcEnd: number;
-  /** Linear audio gain 0..1 (shotGain of the shot; absent = 1). Applied via the decode element's own volume —
-   *  segments of the same source share one element, so the value re-applies at every handoff, including the
-   *  same-source roll-through swap that skips activateIdx. */
+  /** Linear audio gain (shotGain of the shot; absent = 1, and >1 is a real boost — see setElGain). Segments of
+   *  the same source share one element, so the value re-applies at every handoff, including the same-source
+   *  roll-through swap that skips activateIdx. */
   gain?: number;
   /** Segment-local fade factor (shotFadeAt); absent = no fade. Evaluated per tick, so the level rides the
    *  curve instead of stepping at the segment's edges. */
@@ -41,7 +41,7 @@ export interface EngineAudioClip {
   url: string;
   /** Playback speed (element playbackRate; preservesPitch=false so preview matches the export's resample). */
   speed: number;
-  /** Full envelope at edited time t (level × fades), 0..1; 0 outside the clip's window. */
+  /** Full envelope at edited time t (level × fades); 0 outside the clip's window, may exceed 1 (boost). */
   gainAt: (t: number) => number;
   /** Edited time → source seconds; null = outside the playable range (element parks paused). */
   srcTimeAt: (t: number) => number | null;
@@ -84,7 +84,8 @@ export class VideoTrackEngine {
   // envelope closure. Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s.
   // Each element is routed through a WebAudio gain node so a clip can be BOOSTED past source level
   // (element.volume caps at 1). The takeover is permanent per element, so every lane clip goes through
-  // the graph — never half native, half routed. The VIDEO elements stay untouched on the native path.
+  // the graph — never half native, half routed. Video elements get the same treatment, but lazily
+  // (setElGain): footage is usually attenuated, and an unnecessary AudioContext is a liability.
   private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode }>();
   private actx: AudioContext | null = null;
   // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
@@ -94,6 +95,9 @@ export class VideoTrackEngine {
   // Solo monitoring: while an audio clip is soloed the footage's own sound is silenced in preview only
   // (see setMonitorMuteVideo) — this never enters the composition and never reaches the export mixer.
   private monitorMuteVideo = false;
+  // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
+  // (see setElGain). Keyed by element so a recreated element simply gets a fresh chain.
+  private elGains = new WeakMap<HTMLMediaElement, { el: HTMLMediaElement; gain?: GainNode }>();
   // Smooth clock: el.currentTime steps at video frame rate (30fps footage = 33ms jumps), so
   // aligning transition progress / overlays directly to it isn't smooth. During playback, advance
   // by wall clock and pull back when drift from the raw clock exceeds 80ms (seek/handoff self-heal).
@@ -179,7 +183,24 @@ export class VideoTrackEngine {
     this.els.set(key, v);
   }
 
-  setSegments(segs: EngineSeg[]): void {
+  setSegments(segs: EngineSeg[]): boolean {
+    // Level-only respec (a volume/fade edit leaves the cut list identical): keep the clock, the active
+    // index and the decode state exactly as they are and just swap the numbers in. Without this, dragging
+    // a volume slider re-seats the whole segment table on every pointer move — and mid-playback that
+    // means restarting playback per frame.
+    const sameShape =
+      this.segs.length === segs.length &&
+      this.segs.every((s, i) => {
+        const n = segs[i]!;
+        return n.key === s.key && n.elKey === s.elKey && Math.abs(n.srcStart - s.srcStart) < 1e-6 && Math.abs(n.srcEnd - s.srcEnd) < 1e-6;
+      });
+    if (sameShape) {
+      this.segs = segs;
+      const cur = this.segs[this.curIdx];
+      const el = cur && this.els.get(cur.key);
+      if (el && !el.muted) this.setElGain(el, this.segGain(this.curIdx)); // audible immediately, no wait for the next tick
+      return false;
+    }
     this.segs = segs;
     this.starts = [];
     let acc = 0;
@@ -193,6 +214,7 @@ export class VideoTrackEngine {
     // curIdx, and without re-locating it spins dead — restart playback from the current film time
     // (play clamps t, re-finds a playable segment, reschedules rAF)
     if (this.playing) this.play(Math.min(this.tEdited, this.total));
+    return true;
   }
 
   get durationSec(): number {
@@ -203,10 +225,10 @@ export class VideoTrackEngine {
     const seg = this.segs[i];
     if (!seg) return 1;
     if (this.monitorMuteVideo) return 0;
-    const base = seg.gain == null ? 1 : Math.max(0, Math.min(1, seg.gain));
+    const base = seg.gain == null ? 1 : Math.max(0, seg.gain); // >1 is a real boost — setElGain routes it
     if (!seg.fadeAt || base <= 0) return base;
     const local = (tEdited ?? this.tEdited) - (this.starts[i] ?? 0);
-    return Math.max(0, Math.min(1, base * seg.fadeAt(local)));
+    return Math.max(0, base * seg.fadeAt(local));
   }
 
   /** Monitoring-only footage mute (an audio clip is soloed): silences the video track's own sound in
@@ -219,21 +241,9 @@ export class VideoTrackEngine {
     if (!seg) return;
     const g = this.segGain(this.curIdx);
     const el = this.els.get(seg.key);
-    if (el) el.volume = g; // paused too: no tick would come to apply it
+    if (el) this.setElGain(el, g); // paused too: no tick would come to apply it
     const dub = this.dubs.get(seg.key);
-    if (dub) dub.el.volume = g;
-  }
-
-  /** Live volume preview (slider drag): update one segment's gain in place and, if it's the active one,
-   *  apply to the element immediately — no setSegments refeed, no handoff churn. Commit still flows
-   *  through the normal comp → setSegments path. */
-  setSegGain(i: number, gain: number): void {
-    const seg = this.segs[i];
-    if (!seg) return;
-    seg.gain = gain;
-    if (i !== this.curIdx) return;
-    const el = this.els.get(seg.key);
-    if (el) el.volume = this.segGain(i);
+    if (dub) this.setElGain(dub.el, g);
   }
 
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" ghost frame (frame2). */
@@ -309,7 +319,7 @@ export class VideoTrackEngine {
     }
     const dub = this.dubs.get(key);
     if (!dub) return false;
-    dub.el.volume = Math.max(0, Math.min(1, gain));
+    this.setElGain(dub.el, gain);
     if (!dub.el.seeking && Math.abs(dub.el.currentTime - videoEl.currentTime) > 0.08) {
       try {
         dub.el.currentTime = videoEl.currentTime;
@@ -322,10 +332,10 @@ export class VideoTrackEngine {
     return true;
   }
 
-  /** Lazily build (and reuse) this clip's WebAudio chain: element → gain → destination. Returns null when
+  /** Lazily build (and reuse) an element's WebAudio chain: element → gain → destination. Returns null when
    *  the browser refuses a context; the caller then degrades to element volume (boosts just won't be
    *  audible in preview, while export still applies them). */
-  private gainFor(entry: { el: HTMLAudioElement; gain?: GainNode }): GainNode | null {
+  private gainFor(entry: { el: HTMLMediaElement; gain?: GainNode }): GainNode | null {
     if (entry.gain) return entry.gain;
     try {
       const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -338,6 +348,25 @@ export class VideoTrackEngine {
     } catch {
       return null; // already-taken-over element / autoplay policy: stay on the native path
     }
+  }
+
+  /** Set a video/dub element's level, boosts included. An element's own volume caps at 1, so anything above
+   *  source level has to go through the graph. The takeover is permanent per element, so it happens lazily —
+   *  a project that never boosts never creates an AudioContext, and therefore can't be silenced by one that
+   *  won't start. Once routed, the node carries every level (never half native, half routed). */
+  private setElGain(el: HTMLMediaElement, g: number): void {
+    let entry = this.elGains.get(el);
+    if (!entry && g > 1) {
+      entry = { el };
+      if (this.gainFor(entry)) this.elGains.set(el, entry);
+      else entry = undefined; // no context: stay native, boost is inaudible here (export still applies it)
+    }
+    if (entry?.gain) {
+      entry.gain.gain.value = Math.max(0, g);
+      el.volume = 1;
+      return;
+    }
+    el.volume = Math.max(0, Math.min(1, g));
   }
 
   /** Per-tick / on-seek clip sync: volume from the envelope closure, playbackRate = speed with
@@ -508,7 +537,7 @@ export class VideoTrackEngine {
     } catch {
       /* metadata not ready: the next seek after loadedmetadata covers it */
     }
-    el.volume = this.segGain(i);
+    this.setElGain(el, this.segGain(i));
     // a mounted dub carries this source's sound → the decode element stays muted no matter what
     const dubbed = this.syncDub(key, el, this.segGain(i), wantPlay);
     el.muted = dubbed || !wantPlay; // only the active element makes sound during playback
@@ -655,7 +684,7 @@ export class VideoTrackEngine {
         this.onTick?.(ts);
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
         this.syncAudioClips(ts, true);
-        if (this.segs[idx]?.fadeAt && !el.muted) el.volume = this.segGain(idx, ts); // shot audio fades ride the clock
+        if (this.segs[idx]?.fadeAt && !el.muted) this.setElGain(el, this.segGain(idx, ts)); // shot audio fades ride the clock
         if (this.dubs.size && this.syncDub(sg.key, el, this.segGain(this.curIdx), true)) el.muted = true;
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
@@ -682,7 +711,7 @@ export class VideoTrackEngine {
               // playing right here — swap the active index without a seek so decode isn't interrupted (forcing
               // an in-place currentTime seek stalls 50–150ms, visible as a "flash/stutter" at the cut)
               this.curIdx = nx;
-              el.volume = this.segGain(nx); // roll-through skips activateIdx, but the two shots may carry different gains
+              this.setElGain(el, this.segGain(nx)); // roll-through skips activateIdx, but the two shots may carry different gains
             } else {
               this.activateIdx(nx, nxSeg.srcStart, true);
             }

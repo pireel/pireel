@@ -9,7 +9,7 @@
  * here needs broadcast-legal numbers.
  */
 
-import { AUDIO_VOLUME_DB_MAX, VOLUME_DB_MIN } from '@pireel/studio-engine/composition';
+import { VOLUME_DB_MAX, VOLUME_DB_MIN } from '@pireel/studio-engine/composition';
 
 const WIN_SEC = 0.4;
 const HOP_SEC = 0.2;
@@ -19,20 +19,8 @@ const REL_GATE_DB = 10;
 /** How far under narration the bed base level sits (duck stacks on top during speech). */
 export const BGM_AUTO_UNDER_DB = 12;
 
-/** Gated RMS loudness of an AUDIO blob in dBFS; null = decode failed or effectively silent.
- *  (For a video file, extract the audio first — extract-audio.ts — decodeAudioData wants audio data.) */
-export async function measureLoudnessDb(blob: Blob): Promise<number | null> {
-  let buf: AudioBuffer;
-  try {
-    const octx = new OfflineAudioContext(1, 8, 16000);
-    buf = await octx.decodeAudioData(await blob.arrayBuffer());
-  } catch {
-    return null;
-  }
-  return measureBufferLoudnessDb(buf);
-}
-
-/** Same gated RMS over an already-decoded buffer (callers that decoded for other reasons skip the second decode). */
+/** Gated RMS loudness over a decoded buffer, dBFS; null = effectively silent. Callers decode once (see
+ *  audio-decode.ts) and reuse that buffer for peaks/loudness alike — nothing here re-decodes. */
 export function measureBufferLoudnessDb(buf: AudioBuffer): number | null {
   const n = buf.length;
   if (!n) return null;
@@ -73,6 +61,6 @@ export function measureBufferLoudnessDb(buf: AudioBuffer): number | null {
 /** Clip volumeDb from measured loudness (clamped to the lane's storable range). */
 export function bgmAutoVolumeDb(narrationDb: number, bgmDb: number): number {
   const v = narrationDb - BGM_AUTO_UNDER_DB - bgmDb;
-  return Math.round(Math.max(VOLUME_DB_MIN, Math.min(AUDIO_VOLUME_DB_MAX, v)) * 10) / 10;
+  return Math.round(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, v)) * 10) / 10;
 }
 
