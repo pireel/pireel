@@ -36,7 +36,7 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, shotFadeAt, shotFilterCss, shotGain, totalDuration } from '@pireel/studio-engine/composition';
+import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, segmentFadeFn, shotFilterCss, shotGain, shotsContiguous, totalDuration } from '@pireel/studio-engine/composition';
 import { decodeAudioFile, mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
@@ -63,7 +63,7 @@ interface ExpSeg {
   filter?: string;
   /** Linear audio gain 0..1 (shotGain of the shot; absent = 1). 0 = the segment contributes no audio samples at all. */
   gain?: number;
-  /** Segment-local fade factor (shotFadeAt); absent = flat. */
+  /** Segment-local fade factor (segmentFadeFn: shot fades × seam micro-fades); absent = flat. */
   fadeAt?: (tLocal: number) => number;
 }
 
@@ -400,16 +400,23 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   // Segment table (edited order) + each source's File
   const segs: ExpSeg[] = [];
   const files = new Map<string, File>([['main', videoFile]]);
-  for (const sp of clipSpans(shots)) {
-    const s = sp.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
+  const spans = clipSpans(shots);
+  for (let i = 0; i < spans.length; i++) {
+    const s = spans[i]!.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
     const filterCss = shotFilterCss(s.filter);
     const filter = filterCss === 'none' ? {} : { filter: filterCss };
     const g = shotGain(s);
     const gain = g === 1 ? {} : { gain: g };
-    const fade =
-      s.audioFadeInSec || s.audioFadeOutSec
-        ? { fadeAt: (local: number) => shotFadeAt(s, local, Math.max(0.01, s.srcEnd - s.srcStart)) }
-        : {};
+    // Same envelope as the preview: own fades × seam micro-fades at edges that meet a non-contiguous neighbour
+    const prev = spans[i - 1]?.clip as typeof s | undefined;
+    const next = spans[i + 1]?.clip as typeof s | undefined;
+    const fadeFn = segmentFadeFn(
+      s,
+      Math.max(0.01, s.srcEnd - s.srcStart),
+      !!prev && !shotsContiguous(prev, s),
+      !!next && !shotsContiguous(s, next),
+    );
+    const fade = fadeFn ? { fadeAt: fadeFn } : {};
     if (!s.src) {
       segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter, ...gain, ...fade });
       continue;

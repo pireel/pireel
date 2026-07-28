@@ -259,6 +259,39 @@ export function shotFadeAt(s: Pick<VideoShot, 'audioFadeInSec' | 'audioFadeOutSe
   return f;
 }
 
+/** Splice micro-fade (sec). Butt-joining two points of a recording that weren't adjacent leaves a waveform
+ *  discontinuity — the noise floor jumps mid-cycle and the ear hears a click, even when both sides sound fine.
+ *  12 ms of fade on each spliced edge removes it and is far too short to read as a fade. */
+export const SPLICE_FADE_SEC = 0.012;
+
+/** Does a's tail flow straight into b's head? (a split that removed nothing — same source, same instant.)
+ *  Such a boundary is not a splice: the waveform is continuous across it and needs no micro-fade. */
+export function shotsContiguous(a: Pick<VideoShot, 'src' | 'srcEnd'>, b: Pick<VideoShot, 'src' | 'srcStart'>): boolean {
+  return (a.src ?? null) === (b.src ?? null) && Math.abs(a.srcEnd - b.srcStart) < 1e-3;
+}
+
+/** Micro-fade factor for a segment whose head/tail edges are splices (1 = untouched). */
+export function spliceFadeAt(tLocal: number, lenSec: number, headSpliced: boolean, tailSpliced: boolean): number {
+  const d = Math.min(SPLICE_FADE_SEC, lenSec / 2); // a segment shorter than two micro-fades just fades through
+  let f = 1;
+  if (headSpliced && d > 0) f *= fadeShape(tLocal / d);
+  if (tailSpliced && d > 0) f *= fadeShape((lenSec - tLocal) / d);
+  return f;
+}
+
+/** The complete per-segment audio envelope: the shot's own fades × the seam micro-fades. Returns null when the
+ *  segment needs no envelope at all, so preview and export can keep their untouched-passthrough fast paths. */
+export function segmentFadeFn(
+  s: Pick<VideoShot, 'audioFadeInSec' | 'audioFadeOutSec'>,
+  lenSec: number,
+  headSpliced: boolean,
+  tailSpliced: boolean,
+): ((tLocal: number) => number) | null {
+  const own = !!(s.audioFadeInSec || s.audioFadeOutSec);
+  if (!own && !headSpliced && !tailSpliced) return null;
+  return (tLocal: number) => (own ? shotFadeAt(s, tLocal, lenSec) : 1) * spliceFadeAt(tLocal, lenSec, headSpliced, tailSpliced);
+}
+
 /** Full gain of a shot's audio at tLocal into the segment: level × fades. Preview and export share it. */
 export function shotGainAt(s: Pick<VideoShot, 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'>, tLocal: number, lenSec: number): number {
   const g = shotGain(s);
