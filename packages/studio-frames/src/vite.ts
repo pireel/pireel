@@ -1,6 +1,7 @@
 /** Vite entry: globs every frame.md under content/ and builds a ready frameRegistry.
  *  Non-Vite consumers use createFrameRegistry from ./registry with their own content map. */
 import { createFrameRegistry } from './registry';
+import './blueprints'; // side effect: registers each frame's stagings with the engine
 
 const FRAME_FILES = import.meta.glob('../content/*/frame.md', {
   query: '?raw',

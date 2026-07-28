@@ -61,24 +61,42 @@ const truthy = (v: unknown): boolean =>
 /** Render the template body against a scope. Unknown fields resolve to '' rather than throwing —
  *  a blueprint referencing a prop the component doesn't have degrades to a gap, not a crash. */
 function fill(tpl: string, scope: BlueprintScope, escape: (s: string) => string): string {
-  // Sections first (they contain plain fields), innermost-last via a single pass with a stack
-  const sectionRe = /\{\{([#?])(\w+)\}\}([\s\S]*?)\{\{\/\}\}/;
+  const open = /\{\{([#?])(\w+)\}\}/;
   let out = tpl;
-  for (let guard = 0; guard < 50; guard++) {
-    const m = sectionRe.exec(out);
+  for (let guard = 0; guard < 200; guard++) {
+    const m = open.exec(out);
     if (!m) break;
-    const [whole, kind, field, body] = m as unknown as [string, string, string, string];
+    const [whole, kind, field] = m as unknown as [string, string, string];
+    const bodyStart = m.index + whole.length;
+    // Scan for the CLOSER THAT MATCHES, counting nested opens. A lazy `[\s\S]*?{{/}}` would stop at
+    // the first closer it meets — so a row containing an optional field ({{#rows}}…{{?note}}…{{/}}…{{/}})
+    // silently lost the rest of its body and the loop rendered one truncated item.
+    const token = /\{\{[#?]\w+\}\}|\{\{\/\}\}/g;
+    token.lastIndex = bodyStart;
+    let depth = 1;
+    let closeStart = -1;
+    let closeEnd = -1;
+    for (let t = token.exec(out); t; t = token.exec(out)) {
+      if (t[0] === '{{/}}') {
+        depth -= 1;
+        if (depth === 0) {
+          closeStart = t.index;
+          closeEnd = t.index + t[0].length;
+          break;
+        }
+      } else depth += 1;
+    }
+    if (closeStart < 0) break; // unbalanced — leave the rest as literal text rather than guessing
+    const body = out.slice(bodyStart, closeStart);
     const val = scope[field];
     let rendered = '';
     if (kind === '#') {
       const list = Array.isArray(val) ? val : [];
-      rendered = list
-        .map((row, i) => fill(body, { ...scope, ...(row as BlueprintScope), i, n: i + 1 }, escape))
-        .join('');
+      rendered = list.map((row, i) => fill(body, { ...scope, ...(row as BlueprintScope), i, n: i + 1 }, escape)).join('');
     } else if (truthy(val)) {
       rendered = fill(body, scope, escape);
     }
-    out = out.slice(0, m.index) + rendered + out.slice(m.index + whole.length);
+    out = out.slice(0, m.index) + rendered + out.slice(closeEnd);
   }
   return out.replace(/\{\{(\w+)\}\}/g, (_, k: string) => escape(asText(scope[k])));
 }
