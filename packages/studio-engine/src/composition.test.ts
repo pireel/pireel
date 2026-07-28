@@ -20,6 +20,7 @@ import {
   videoFrameKeyframes,
   videoFrameTimelineBody,
   treatmentVacancyBox,
+  shotTransformVars,
 } from './composition';
 
 function sampleComp(): Composition {
@@ -663,4 +664,16 @@ describe('半分取景的空位框不压视频', () => {
       expect(overlaps, `${tr} 空位框 ${JSON.stringify(b)} 压在视频上`).toBe(false);
     });
   }
+});
+
+describe('取景 clipPath 可插值(所有取景同 token 数)', () => {
+  // GSAP 补间复杂字符串按数字 token 配对:'inset(0%)' 对 'inset(0% 50% 0% 0%)' 数量不齐,
+  // 过渡时 transform 平滑滑动而裁切瞬跳。钉住:每种取景的 clipPath 都是 4 个数字。
+  it('每种取景 4 个 inset 分量,任意两种之间都能补间', () => {
+    const ALL = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+    for (const tr of ALL) {
+      const clip = shotTransformVars(tr).clipPath;
+      expect(clip.match(/[\d.]+%/g), `${tr} → ${clip}`).toHaveLength(4);
+    }
+  });
 });
