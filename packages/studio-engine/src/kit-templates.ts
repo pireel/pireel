@@ -54,6 +54,10 @@ export { components as kitComponents } from '@pireel/studio-kit';
 /** Designed surface colours (Morandi) offered by the kit — the props panel's swatch row. */
 export { SURFACE_SWATCHES as kitSurfaceSwatches } from '@pireel/studio-kit';
 
+/** The shared surface props — the panel hides these while a staging is active (a staging paints
+ *  its own surface, so the knobs would do nothing). */
+export { SURFACE_FIELDS as kitSurfaceFields } from '@pireel/studio-kit';
+
 /** Render a kit component as a standalone element (asset-panel previews, thumbnails):
  *  explicit box/canvas instead of assembler-injected slots. */
 export function kitElement(
