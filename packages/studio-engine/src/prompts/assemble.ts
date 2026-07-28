@@ -18,7 +18,7 @@
 import { BLOCK_HTML_BODY } from './block-system';
 import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
-import { catalogSection } from './l4-catalog';
+import { catalogSection, stagingSection } from './l4-catalog';
 import { frameBlueprints } from '../blueprint-registry';
 import { getPreset } from './presets';
 import { withStyleDirection } from './style-direction';
@@ -34,12 +34,13 @@ After the note line, in THIS order:
 - one \`\`\`html block = the full INNER HTML,
 - then one \`\`\`js block = the full TIMELINE BODY.`;
 
-/** The component path's system prompt. */
+/** The component path's system prompt. Everything frame-derived — the theme's stagings and its
+ *  voice — appends AFTER the stable stack, so switching themes invalidates only the tail. */
 export function buildKitSystem(opts?: { presetId?: string; voice?: string; frameId?: string }): string {
   const preset = getPreset(opts?.presetId);
-  const stagings = frameBlueprints(opts?.frameId);
-  const system = [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components, stagings), preset.editorial, KIT_OUTPUT].join('\n\n');
-  return withStyleDirection(system, opts?.voice);
+  const base = [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
+  const stagings = stagingSection(frameBlueprints(opts?.frameId), preset.components);
+  return withStyleDirection(stagings ? `${base}\n\n${stagings}` : base, opts?.voice);
 }
 
 /** The free-form path's system prompt. Same base contract and L3.1 as the component path — only

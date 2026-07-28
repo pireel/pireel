@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { buildKitPrompt, parseKitResponse } from './compose';
 import { BLOCK_SYSTEM, FRAGMENT_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem, withStyleDirection } from './prompts';
 import { assembleKitTheme, frameVoice } from './briefs';
+import { registerBlueprints } from './blueprint-registry';
 import { components } from '@pireel/studio-kit';
 
 const seed = { id: 'b1', kind: 'custom', innerHtml: '', timelineBody: '' };
@@ -38,6 +39,19 @@ describe('the layer stack', () => {
 
   it('an unknown preset falls back rather than failing generation', () => {
     expect(buildKitSystem({ presetId: 'no-such-preset' })).toBe(KIT);
+  });
+
+  it('EVERYTHING frame-derived is a tail — stagings included, not just the voice', () => {
+    // Stagings briefly lived inside L4, which meant a theme switch invalidated the cached prefix
+    // from the catalogue down. Registering a staging must only ever append.
+    registerBlueprints('cache-test-frame', [
+      { id: 'cache-test-frame/x', component: 'metric', name: 'X', html: '<div class="bp-root"></div>', css: '' },
+    ]);
+    const withFrame = buildKitSystem({ frameId: 'cache-test-frame', voice: 'quiet' });
+    expect(withFrame.startsWith(KIT)).toBe(true);
+    expect(withFrame).toContain('cache-test-frame/x');
+    expect(withFrame.indexOf('cache-test-frame/x')).toBeLessThan(withFrame.indexOf('<style_direction>'));
+    registerBlueprints('cache-test-frame', []); // leave the registry as found
   });
 
   it('the preset decides the vocabulary', () => {
