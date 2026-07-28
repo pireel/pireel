@@ -213,7 +213,10 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
   const [modelId, setModelId] = useState('');
   useEffect(() => {
-    if (type === 'element') return;
+    // element composes locally; audio has no model choice (one tool, tiered by length) — and asking
+    // for a kind the catalog doesn't know returns EVERY model, whose first row then quoted as if the
+    // user were generating an image. That's where the wrong price came from.
+    if (type === 'element' || type === 'audio') return;
     let cancelled = false;
     void fetch(`/api/models?kind=${type}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -248,10 +251,16 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     if (type === 'video') {
       return { duration_sec: vidDur, count: 1, resolution: vidRes, aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
     }
+    if (type === 'audio') return { tier: audioSec < 30 ? 'clip' : 'song' };
     return {};
-  }, [type, ratio, count, vidDur, quality, vidRes, modelId]);
-  // elements: modelId empty → useQuote returns null, no request
-  const quoteCredits = useQuote({ toolId: type === 'video' ? 'video-gen' : 'image-gen', modelId: type === 'element' ? '' : modelId, params: quoteParams });
+  }, [type, ratio, count, vidDur, quality, vidRes, modelId, audioSec]);
+  // elements: modelId empty → useQuote returns null, no request. Audio quotes its own per-call tool,
+  // whose only dimension is which tier the length buys.
+  const quoteCredits = useQuote({
+    toolId: type === 'video' ? 'video-gen' : type === 'audio' ? 'music-gen' : 'image-gen',
+    modelId: type === 'element' || type === 'audio' ? '' : modelId,
+    params: quoteParams,
+  });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   // templates / mine tabs: only image and video panels have a template library (elements use "base blocks", not here)
   const templates = type === 'element' || type === 'audio' ? [] : (TEMPLATES_BY_TYPE[type] ?? []);
