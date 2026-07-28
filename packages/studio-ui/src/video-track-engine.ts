@@ -362,11 +362,16 @@ export class VideoTrackEngine {
       else entry = undefined; // no context: stay native, boost is inaudible here (export still applies it)
     }
     if (entry?.gain) {
-      entry.gain.gain.value = Math.max(0, g);
-      el.volume = 1;
+      const v = Math.max(0, g);
+      if (entry.gain.gain.value !== v) entry.gain.gain.value = v;
+      if (el.volume !== 1) el.volume = 1;
       return;
     }
-    el.volume = Math.max(0, Math.min(1, g));
+    // Write only on change. Every segment now carries a fade envelope (the seam micro-fades), so this runs
+    // every frame of playback — and assigning el.volume is not free: it is a media-element property whose
+    // setter reaches into the platform's audio path. The value is constant outside the ramps.
+    const v = Math.max(0, Math.min(1, g));
+    if (el.volume !== v) el.volume = v;
   }
 
   /** Per-tick / on-seek clip sync: volume from the envelope closure, playbackRate = speed with

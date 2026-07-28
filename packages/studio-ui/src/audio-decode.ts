@@ -18,7 +18,13 @@ export async function decodeAudioFile(blob: Blob): Promise<AudioBuffer> {
 }
 
 /** Decode a VIDEO file's audio track to PCM at its own sample rate. null = the file has no audio.
- *  Channels are capped at two: everything downstream (peaks, loudness, denoise) mixes down anyway. */
+ *  Channels are capped at two: everything downstream (peaks, loudness, denoise) mixes down anyway.
+ *
+ *  Two things this is careful about, because it runs while the user is working: samples are written
+ *  straight into the AudioBuffer (a second staging copy would double the footprint — a ten-minute
+ *  stereo track is already ~230 MB of f32), and the loop hands the main thread back every few
+ *  milliseconds. A decode that resolves its samples without ever yielding to the event loop starves
+ *  rendering and input for as long as it runs, which reads as the whole UI stuttering. */
 export async function decodeVideoAudio(file: File): Promise<AudioBuffer | null> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
   try {
@@ -26,32 +32,35 @@ export async function decodeVideoAudio(file: File): Promise<AudioBuffer | null> 
     if (!track) return null;
     const rate = track.sampleRate;
     const chCount = Math.min(ANALYSIS_CH, track.numberOfChannels);
-    const duration = await track.computeDuration();
-    const total = Math.max(1, Math.ceil(duration * rate) + rate); // +1s slack: sample timestamps can run past the reported duration
-    const chans = Array.from({ length: chCount }, () => new Float32Array(total));
-    let end = 0;
+    const duration = await track.computeDuration(); // "max end timestamp", so it covers every sample
+    const total = Math.max(1, Math.ceil(duration * rate));
+    const octx = new OfflineAudioContext(chCount, total, rate);
+    const buf = octx.createBuffer(chCount, total, rate);
+    const chans = Array.from({ length: chCount }, (_, c) => buf.getChannelData(c));
+    let any = false;
+    let since = performance.now();
     for await (const sample of new AudioSampleSink(track).samples()) {
       const frames = sample.numberOfFrames;
       const srcCh = sample.numberOfChannels;
       const data = new Float32Array(frames * srcCh);
       sample.copyTo(data, { planeIndex: 0, format: 'f32' });
+      const at = Math.round(sample.timestamp * rate); // place by timestamp: a stream with gaps stays time-aligned
       sample.close();
-      // Place by timestamp rather than by running count: a stream with gaps stays time-aligned
-      const at = Math.round(sample.timestamp * rate);
-      if (at >= total) continue;
-      const n = Math.min(frames, total - at);
-      for (let c = 0; c < chCount; c++) {
-        const out = chans[c]!;
-        const sc = srcCh === 1 ? 0 : Math.min(c, srcCh - 1);
-        for (let i = 0; i < n; i++) out[at + i] = data[i * srcCh + sc]!;
+      if (at < total) {
+        const n = Math.min(frames, total - at);
+        for (let c = 0; c < chCount; c++) {
+          const out = chans[c]!;
+          const sc = srcCh === 1 ? 0 : Math.min(c, srcCh - 1);
+          for (let i = 0; i < n; i++) out[at + i] = data[i * srcCh + sc]!;
+        }
+        any = true;
       }
-      if (at + n > end) end = at + n;
+      if (performance.now() - since > 8) {
+        await new Promise((r) => setTimeout(r, 0)); // a macrotask, so a frame can actually paint
+        since = performance.now();
+      }
     }
-    if (!end) return null;
-    const octx = new OfflineAudioContext(chCount, end, rate);
-    const buf = octx.createBuffer(chCount, end, rate);
-    for (let c = 0; c < chCount; c++) buf.copyToChannel(chans[c]!.subarray(0, end), c);
-    return buf;
+    return any ? buf : null;
   } finally {
     await input.dispose();
   }
