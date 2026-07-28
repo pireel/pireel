@@ -680,7 +680,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const f = clipFilesRef.current.get(s.src);
       eng.setSource(s.src, f ?? (s.src.startsWith('blob:') ? null : s.src));
     }
-    eng.setSegments(
+    const shapeChanged = eng.setSegments(
       // Same envelope the export mixer builds (segmentFadeFn): the shot's own fades × micro-fades on edges
       // that meet a non-contiguous neighbour. Preview drives it off the rAF clock, so a 30 ms ramp lands as
       // two or three volume steps rather than a smooth curve — coarse, but it's the same treatment at the
@@ -705,7 +705,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }),
     );
     eng.setTransitions(cutTransitions(comp.shots ?? []).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
-    if (!playingRef.current) eng.refresh();
+    // A level-only respec keeps the frame it already shows — re-pushing one per pointer move while dragging
+    // a volume slider is work nobody can see.
+    if (shapeChanged && !playingRef.current) eng.refresh();
   }, [comp.video, comp.shots]);
   /** Transition pre-bake cache (same idea as Premiere's "render preview"): baked in the background to a webp frame
    *  sequence, decoded to bitmaps only near the window and discarded once past; the signature includes cut/duration/
@@ -2085,11 +2087,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const videoTrackMuted = (comp.shots ?? []).length > 0 && (comp.shots ?? []).every((s) => s.audioMuted);
   const audioTrackMuted = (comp.audioTracks ?? []).length > 0 && (comp.audioTracks ?? []).every((c) => c.muted);
 
-  /** Live volume preview during slider drag (zero setState): shots map 1:1 onto engine segments by index. */
-  const previewShotVolume = (sid: string, gainLinear: number) => {
-    const i = (compRef.current.shots ?? []).findIndex((s) => s.id === sid);
-    if (i >= 0) videoEngineRef.current?.setSegGain(i, gainLinear);
-  };
 
   /** Picked an image/video → write into a media-slot block's media slot. */
   const setBlockMedia = (bid: string, media: MediaRef) =>
@@ -4515,7 +4512,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     onSetFilter={setShotFilter}
                     onPreviewFilter={previewShotFilter}
                     onSetAudio={setShotAudio}
-                    onPreviewVolume={previewShotVolume}
                   />
                 </div>
               )}

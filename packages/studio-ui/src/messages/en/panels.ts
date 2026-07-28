@@ -102,7 +102,6 @@ export const PANELS_EN: Record<string, string> = {
   'panels.musicBedHint': 'Settings for the selected clip; uploading and generating audio live in Assets, same as images',
   'panels.musicDurationSec': 'Duration (s)',
   'panels.musicPromptPlaceholder': 'Describe the music, e.g. upbeat minimal tech instrumental',
-  'panels.mute': 'Mute',
   'panels.muted': 'Muted',
   'panels.removeMusic': 'Remove track',
   'panels.selectShotOrAudioFirst': 'Select a shot or an audio clip on the timeline first',

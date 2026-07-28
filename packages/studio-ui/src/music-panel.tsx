@@ -8,15 +8,15 @@
  * expects the speaker icon. Adding audio isn't here either — uploads and generation live
  * in the assets panel, the same place images and video come from.
  *
- * Both level controls speak dB off the same slider; only the ceiling differs, and for a
- * reason: footage plays through the video element (which cannot exceed source level) while
- * lane clips run through a gain node and can be boosted. Plain NLE semantics — no looping,
+ * Both level controls are the same control: same dB scale, same range, same code — a shot's
+ * sound and a music bed are both just sound. Plain NLE semantics — no looping,
  * no ducking; clips are placed, trimmed, and sum when they overlap. Every control writes
  * through on change; the value shown is the value playing.
  */
 
 import { Music } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MAX, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults } from '@pireel/studio-engine/composition';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, SHOT_FADE_MAX_SEC, type AudioClip, type VideoShot, audioClipDefaults } from '@pireel/studio-engine/composition';
+import { AudioLevel } from './audio-level';
 import { t } from './i18n';
 
 
@@ -62,27 +62,6 @@ export function MusicPanel({
   const clipsAt = selPeak && selPeak > 0 ? Math.floor(20 * Math.log10(1 / selPeak)) : null;
   const clipping = clipsAt != null && dbValue > clipsAt;
 
-  /** Level row (both kinds of audio): dB, with -60 shown as silence. Only the ceiling differs. */
-  const levelRow = (value: number, max: number, disabled: boolean, commit: (db: number) => void) => (
-    <>
-      <div className="text-ink flex items-center justify-between font-medium">
-        <span>{t('panels.volume')}</span>
-        <span className="text-ink-4 tabular-nums">{value <= VOLUME_DB_MIN ? t('panels.muted') : `${value > 0 ? '+' : ''}${value}dB`}</span>
-      </div>
-      <input
-        type="range"
-        min={VOLUME_DB_MIN}
-        max={max}
-        step={1}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => commit(Number(e.target.value))}
-        className="zoom-range w-full disabled:opacity-40"
-        aria-label={t('panels.volume')}
-      />
-    </>
-  );
-
   /** Slider row: writes straight through on every change — no drag buffer, no commit-on-release. The
    *  value shown is the value applied (and heard); the preview follows comp, so there is nothing to sync. */
   const slider = (label: string, value: number, min: number, max: number, step: number, fmt: (v: number) => string, commit: (v: number) => void) => (
@@ -122,7 +101,7 @@ export function MusicPanel({
               <div className="text-ink-4">{t('panels.selectShotOrAudioFirst')}</div>
             ) : (
               <>
-                {levelRow(Math.round(shot.volumeDb ?? 0), VOLUME_DB_MAX, !!shot.audioMuted, (db) => onSetShotAudio({ volumeDb: db }))}
+                <AudioLevel db={shot.volumeDb ?? 0} disabled={!!shot.audioMuted} onChange={(db) => onSetShotAudio({ volumeDb: db })} />
                 {shot.audioMuted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
                 {slider(t('panels.fadeIn'), shot.audioFadeInSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeInSec: v }))}
                 {slider(t('panels.fadeOut'), shot.audioFadeOutSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeOutSec: v }))}
@@ -137,7 +116,7 @@ export function MusicPanel({
               <span className="min-w-0 flex-1 truncate">{sel.label || t('panels.musicBed')}</span>
               {!usable(sel) && <span className="text-accent shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
             </div>
-            {levelRow(dbValue, AUDIO_VOLUME_DB_MAX, !!sel.muted, (db) => onPatch(sel.id, { volumeDb: db }))}
+            <AudioLevel db={dbValue} disabled={!!sel.muted} onChange={(db) => onPatch(sel.id, { volumeDb: db })} />
             {sel.muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
             {clipping && !sel.muted && <div className="text-accent text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
             {/* Solo is the one listening control that IS per clip: it answers "what does this one sound like",

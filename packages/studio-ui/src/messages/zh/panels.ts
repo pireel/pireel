@@ -102,7 +102,6 @@ export const PANELS_ZH: Record<string, string> = {
   'panels.musicBedHint': '这里是选中音频的设置;上传/生成音频在「素材」里,和图片一样',
   'panels.musicDurationSec': '时长(秒)',
   'panels.musicPromptPlaceholder': '描述想要的音乐,如:轻快的科技感纯音乐',
-  'panels.mute': '静音',
   'panels.muted': '已静音',
   'panels.removeMusic': '删除音轨',
   'panels.selectShotOrAudioFirst': '先在时间轴上选中分镜或音频',
