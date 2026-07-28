@@ -1,0 +1,19 @@
+{
+  "name": "@pireel/studio-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed motion-graphics components for video overlays: JSON in, animated HTML out. One schema per component yields the LLM contract, the TypeScript type, and a parser that never throws. Zero dependencies.",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "demo": "tsx demo/build.ts && echo 'open demo/dist/index.html'"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
