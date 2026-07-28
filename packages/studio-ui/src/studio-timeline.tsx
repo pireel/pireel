@@ -176,8 +176,12 @@ interface StudioTimelineProps {
   comp: Composition;
   /** During playback: auto-scroll to follow the playhead when it leaves the viewport (stops if the user scrolls manually, until next play). */
   playing: boolean;
-  /** Locate signal: each increment = scroll the timeline to center on the current playhead (triggered by clicking the transport time readout). */
+  /** Locate signal: each increment = scroll the timeline to the current playhead (transport readout, or a
+   *  jump made from another panel). */
   locateSignal: number;
+  /** With the current signal, only scroll if the playhead is off-screen (a jump from elsewhere, e.g. clicking
+   *  a word in the script) instead of re-centring a view that already shows it. */
+  locateNear?: boolean;
   /** Shot multi-select set (Cmd-click / marquee): highlight + batch delete + playhead ring yields. Single select = a one-element set. */
   selectedShotIds: Set<string>;
   /** Block multi-select set (Cmd-click / marquee, can span multiple element tracks): highlight + batch delete. Single select = a one-element set. */
@@ -292,6 +296,7 @@ function StudioTimelineImpl({
   comp,
   playing,
   locateSignal,
+  locateNear,
   selectedShotIds,
   selectedBlockIds,
   filmstrip,
@@ -640,6 +645,16 @@ function StudioTimelineImpl({
   useEffect(() => {
     if (playing) followRef.current = true; // playback started: restart following
   }, [playing]);
+  /** Is the playhead inside the visible content area right now? (the sticky gutter covers the left edge,
+   *  so "visible" starts at +GUTTER). Unknown layout counts as visible — never yank the view on a guess. */
+  const playheadOnScreen = useCallback(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return true;
+    const contentX = content.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+    const px = contentX + playhead.get() * pps;
+    return px >= el.scrollLeft + GUTTER && px <= el.scrollLeft + el.clientWidth - 8;
+  }, [pps]);
   useEffect(() => {
     if (!playing) return;
     let lastCheck = 0;
@@ -649,28 +664,29 @@ function StudioTimelineImpl({
       const now = performance.now();
       if (now - lastCheck < 250) return;
       lastCheck = now;
-      const el = scrollRef.current;
-      const content = contentRef.current;
-      if (!el || !content) return;
-      const contentX = content.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
-      const px = contentX + playhead.get() * pps;
-      const visLeft = el.scrollLeft + GUTTER; // left is covered by the sticky gutter; visible content starts at +GUTTER
-      const visRight = el.scrollLeft + el.clientWidth;
-      if (px < visLeft || px > visRight - 8) scrollToPlayhead(0.1);
+      if (!playheadOnScreen()) scrollToPlayhead(0.1);
     };
     const unsub = playhead.subscribe(follow);
     follow(); // correct once at play start
     return unsub;
-  }, [playing, pps, scrollToPlayhead]);
-  // Click transport time readout -> center on the playhead (triggered by incrementing locateSignal; skip first mount)
+  }, [playing, scrollToPlayhead, playheadOnScreen]);
+  // Locate the playhead (triggered by incrementing locateSignal; skip first mount). Two flavours: the
+  // transport readout always centres — it's an explicit "where am I" — while a jump made somewhere else
+  // (clicking a word in the script) only scrolls when the playhead would otherwise be off-screen, so the
+  // timeline doesn't lurch under a user who can already see where they landed.
   const scrollToPlayheadRef = useRef(scrollToPlayhead);
   scrollToPlayheadRef.current = scrollToPlayhead;
+  const locateNearRef = useRef(locateNear);
+  locateNearRef.current = locateNear;
+  const onScreenRef = useRef(playheadOnScreen);
+  onScreenRef.current = playheadOnScreen;
   const firstLocateRef = useRef(true);
   useEffect(() => {
     if (firstLocateRef.current) {
       firstLocateRef.current = false;
       return;
     }
+    if (locateNearRef.current && onScreenRef.current()) return;
     scrollToPlayheadRef.current(0.5);
   }, [locateSignal]);
   const lastScrollLeftRef = useRef(0);
