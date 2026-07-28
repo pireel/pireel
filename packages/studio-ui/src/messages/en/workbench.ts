@@ -137,6 +137,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.unpinAssetsBar': 'Unpin the assets bar (float over the canvas)',
   'workbench.filledNDesignGraphics': 'Filled {n} design graphics',
   'workbench.nSlotsSkippedNothingToSay': ', {n} skipped (nothing worth showing)',
+  'workbench.slotRemovedNothingToSay': 'Nothing worth showing at this moment — removed the empty slot',
   'workbench.filtersAppliedCss': 'Filters applied: {css}',
   'workbench.focusedName': 'Focused "{name}"',
   'workbench.focusedShotN': 'Focused shot #{n}',

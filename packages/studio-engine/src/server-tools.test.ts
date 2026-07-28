@@ -231,3 +231,38 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.ok).toBe(false);
   });
 });
+
+describe('apply_block:kit 契约答案(离线执行器)', () => {
+  const PH = { id: 'ph1', templateId: 'media', slots: { spec: '87% 完播率大数字' }, startSec: 2, durationSec: 3, trackIndex: 2, label: '待配图' };
+  const withPh = () => {
+    const p = proj();
+    p.comp.blocks.push({ ...PH, slots: { ...PH.slots } });
+    return p;
+  };
+  it('组件 json 落成 kit 块(占位被填,存 props 不存 markup)', () => {
+    const raw = '选了数字卡。\n```json\n{"component":"metric","props":{"value":"87%","label":"完播率"}}\n```';
+    const r = runServerTool('apply_block', { raw, blockId: 'ph1' }, withPh());
+    expect(r.result.ok).toBe(true);
+    const b = r.comp!.blocks.find((x) => x.id === 'ph1')!;
+    expect(b.templateId).toBe('kit:metric');
+    expect((b.slots as { props: { value: string } }).props.value).toBe('87%');
+    expect((b.slots as { innerHtml?: string }).innerHtml).toBeUndefined();
+  });
+  it('新块:组件 json 直接落 kit 模板', () => {
+    const r = runServerTool('apply_block', { raw: '```json\n{"component":"callout","props":{"text":"先发布再完美"}}\n```', atSec: 1 }, proj());
+    expect(r.result.ok).toBe(true);
+    const nb = r.comp!.blocks.find((x) => x.templateId === 'kit:callout')!;
+    expect((nb.slots as { props: { text: string } }).props.text).toBe('先发布再完美');
+  });
+  it('占位收到明确 null → 移除空槽;custom → 打回让它换 markup 契约重来;未知组件报明确错', () => {
+    const r1 = runServerTool('apply_block', { raw: '```json\nnull\n```', blockId: 'ph1' }, withPh());
+    expect(r1.result.ok).toBe(true);
+    expect(r1.comp!.blocks.some((x) => x.id === 'ph1')).toBe(false);
+    const r2 = runServerTool('apply_block', { raw: '```json\n{"custom": true}\n```', blockId: 'ph1' }, withPh());
+    expect(r2.result.ok).toBe(false);
+    expect(String((r2.result as { error?: string }).error)).toContain('format:"html"');
+    const r3 = runServerTool('apply_block', { raw: '```json\n{"component":"sparkline","props":{}}\n```', blockId: 'ph1' }, withPh());
+    expect(r3.result.ok).toBe(false);
+    expect(String((r3.result as { error?: string }).error)).toContain('sparkline');
+  });
+});
