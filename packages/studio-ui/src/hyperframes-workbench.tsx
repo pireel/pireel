@@ -56,6 +56,7 @@ import {
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
+  patchAudioClip,
   patchShotAudio,
   segmentFadeFn,
   shotsContiguous,
@@ -2071,6 +2072,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => {
     setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? patchShotAudio(s, patch) : s)) }));
   };
+  /** Track-level mute state (the timeline's speaker icons). A track counts as muted when EVERY item on it
+   *  is — no new field for it: silencing a track is silencing its contents, and per-item mute already
+   *  exists. The toggles live in timelineCbs (stable identity for the memoized timeline). */
+  const videoTrackMuted = (comp.shots ?? []).length > 0 && (comp.shots ?? []).every((s) => s.audioMuted);
+  const audioTrackMuted = (comp.audioTracks ?? []).length > 0 && (comp.audioTracks ?? []).every((c) => c.muted);
+
   /** Live volume preview during slider drag (zero setState): shots map 1:1 onto engine segments by index. */
   const previewShotVolume = (sid: string, gainLinear: number) => {
     const i = (compRef.current.shots ?? []).findIndex((s) => s.id === sid);
@@ -3136,6 +3143,22 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }
     },
     onOpenMusicPanel: () => openAudioTab(),
+    /** Track mute: toggling preserves every item's level (that's what audioMuted/muted are for), so
+     *  unmuting restores the mix instead of flattening it. One undo step for the whole track. */
+    onToggleVideoMute: () => {
+      const shots = compRef.current.shots ?? [];
+      if (!shots.length) return;
+      const next = !shots.every((s) => s.audioMuted);
+      pushUndoSnapshot();
+      setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => patchShotAudio(s, { mute: next })) }));
+    },
+    onToggleAudioMute: () => {
+      const clips = compRef.current.audioTracks ?? [];
+      if (!clips.length) return;
+      const next = !clips.every((x) => x.muted);
+      pushUndoSnapshot();
+      setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => patchAudioClip(x, { muted: next })) }));
+    },
     onReorderTracks: (topToBottom: number[]) => {
       // Timeline overlay tracks top-to-bottom = canvas z high-to-low (NLE convention): re-index z by the new display order.
       // Index from 2 (top row = K+1): z=1 always the sentence-caption layer (hidden on the timeline, not reordered)
@@ -4386,10 +4409,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               soloId={audioOps.soloId}
               onSolo={audioOps.setSoloId}
               peakOf={(c) => (c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null)}
-              shot={selectedShot ?? null}
-              shotCount={(comp.shots ?? []).length}
-              onSetShotAudio={(patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }, all: boolean) => {
-                const ids = all ? (comp.shots ?? []).map((sh) => sh.id) : selectedShot ? [selectedShot.id] : [];
+              shots={(comp.shots ?? []).filter((sh) => selectedShotIds.has(sh.id))}
+              onSetShotAudio={(patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => {
+                // Multi-select takes the edit as one action: every selected shot, one undo step
+                const ids = (comp.shots ?? []).filter((sh) => selectedShotIds.has(sh.id)).map((sh) => sh.id);
                 if (!ids.length) return;
                 pushUndoSnapshot();
                 for (const id of ids) setShotAudio(id, patch);
@@ -4849,6 +4872,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           assetDragging={!!dragAsset}
           assetDragKind={dragAsset?.type ?? null}
           selectedAudioId={selectedAudioId}
+          videoMuted={videoTrackMuted}
+          audioMuted={audioTrackMuted}
           audioPeaks={audioOps.audioPeaks}
           sourcePeaks={audioOps.sourcePeaks}
           clipPendingAt={clipPending}

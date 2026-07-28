@@ -12,7 +12,7 @@ export const SCENE_PAD_T = 12; // gap above scene card (like CapCut): drag from 
 export const SCENE_PAD_B = 8; // gap below scene card
 export const ROW_GAP = 6;
 export const RULER_H = 24;
-export const GUTTER = 40;
+export const GUTTER = 58; // kind icon + the track's mute toggle
 export const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
 export const EDGE_PAD = 12; // breathing room between gutter and content: keeps first block's selection ring (ring-2 outset) and first cut-point "+" half-circle (10px) from being clipped by the sticky gutter
 export const SHOT_GAP = 2; // hairline gap between shot cards (taken off the right edge, left edge stays time-accurate)
