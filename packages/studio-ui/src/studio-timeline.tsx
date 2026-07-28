@@ -29,7 +29,7 @@ import {
   totalDuration,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
-import { AUDIO_FADE_MAX_SEC, type AudioClip, audioClipDefaults, audioClipWindow, audioTrimPatch, fadeShape, shotFadeAt } from '@pireel/studio-engine/composition';
+import { shotFadeAt } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -60,117 +60,13 @@ import {
   stripTiles,
 } from './timeline-utils';
 import { ActiveSceneRing, PlayheadCursor } from './timeline-overlays';
+import { AudioLane } from './timeline-audio-lane';
+import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
 
 export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
 
-/* ---- Audio chip geometry (mirrors the reference editor's ClipRenderer) ---- */
-/** Chip height inside the music lane (row height minus the 2px breathing room top and bottom). */
-const CHIP_H = AUDIO_ROW_H - 4;
-/** Label strip across the top; the waveform, fade wedge and knees all live in the BODY below it. */
-const CHIP_LABEL_H = 14;
-const CHIP_BODY_H = CHIP_H - CHIP_LABEL_H;
-/** Knees sit in a fixed "fade lane" a few px below the body's top edge — not on the chip's corner. */
-const KNEE_LANE_Y = 4;
-const KNEE_SIZE = 10;
-/** Knees stay this far inside the clip so they never hide under the trim handles or get clipped. */
-const KNEE_EDGE_INSET = 10;
 /** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
 const SCENE_WAVE_H = 18;
-
-/** Waveform vertical scale: dBFS against a noise floor, the pro-tool convention (the reference editor
- *  normalizes 20·log10(peak) over a -50 dB floor; Audacity's Waveform (dB) view and Premiere's
- *  "logarithmic waveform scaling" are the same idea). Linear amplitude draws everything quiet as a flat
- *  line — hearing is logarithmic, so the drawing is too. */
-const WAVE_FLOOR_DB = -50;
-/** Bars are 1px with no gaps (filled silhouette); the cap only kicks in on absurdly zoomed-in chips, to
- *  bound the path string. */
-const WAVE_BAR_PX = 1;
-const WAVE_MAX_BARS = 2400;
-
-/** Waveform bars for one audio chip, in BODY pixel coordinates (the svg is 1:1 with px — no viewBox
- *  stretching, which is what squashed earlier shapes). Bar height = the source peak in dBFS shifted by
- *  the clip's VOLUME (dB-axis shift), then SHAPED BY THE FADE ENVELOPE — the wave's own top edge is the
- *  fade curve, which is how the reference reads: the fades cut the wave, no wedge is painted over it.
- *  Built over the clip's trimmed [in,out] slice against its true content width, so trimming an edge only
- *  reveals or hides the content. */
-function waveBars(
-  peaks: Float32Array,
-  from: number,
-  to: number,
-  widthPx: number,
-  heightPx: number,
-  shiftDb: number,
-  envelopeAt?: (frac: number) => number,
-): string {
-  const a = Math.max(0, Math.min(peaks.length - 1, from));
-  const b = Math.max(a + 1, Math.min(peaks.length, to));
-  const cols = Math.max(1, Math.min(WAVE_MAX_BARS, Math.round(widthPx / WAVE_BAR_PX)));
-  const barW = widthPx / cols;
-  const step = (b - a) / cols;
-  const parts: string[] = [];
-  for (let i = 0; i < cols; i++) {
-    const s0 = a + Math.floor(i * step);
-    const s1 = Math.max(s0 + 1, a + Math.floor((i + 1) * step));
-    let peak = 0;
-    for (let j = s0; j < s1 && j < peaks.length; j++) if (peaks[j]! > peak) peak = peaks[j]!;
-    // dB axis shifted by the level: a boost pushes bars up against the ceiling (where they flatten, exactly
-    // as the level itself does), an attenuation lowers the whole shape
-    const db = peak > 0 ? 20 * Math.log10(peak) + shiftDb : WAVE_FLOOR_DB;
-    const frac = Math.max(0, Math.min(1, (db - WAVE_FLOOR_DB) / -WAVE_FLOOR_DB));
-    const h = Math.max(0.7, frac * (heightPx - 1)) * (envelopeAt ? envelopeAt((i + 0.5) / cols) : 1);
-    if (h <= 0.05) continue;
-    const x = i * barW;
-    parts.push(`M${x.toFixed(2)},${heightPx}h${barW.toFixed(2)}v${-h.toFixed(1)}h${(-barW).toFixed(2)}Z`);
-  }
-  return parts.join('');
-}
-
-function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
-  const dur = clip.durationSec ?? 0;
-  const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
-  const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
-  return waveBars(peaks, lo, hi, widthPx, CHIP_BODY_H, d.volumeDb, (f) => {
-    // fade envelope at this bar's moment — the same curve the gain applies
-    const tLocal = f * spanSec;
-    let fade = 1;
-    if (d.fadeInSec > 0) fade *= fadeShape(tLocal / d.fadeInSec);
-    if (d.fadeOutSec > 0) fade *= fadeShape((spanSec - tLocal) / d.fadeOutSec);
-    return fade;
-  });
-}
-
-/** An audio body's own silhouette: full height through the middle, tapering along the fade envelope at
- *  both ends — so the BACKGROUND reads as the fade too, not just the wave sitting inside a flat block.
- *  Shared by the lane chips and the scene cards' audio band; same fadeShape the gain uses. */
-function fadeBodyPath(widthPx: number, H: number, fadeInSec: number, fadeOutSec: number, spanSec: number): string {
-  const STEPS = 12;
-  const pts: string[] = [`0,${H}`];
-  const ramp = (fromX: number, toX: number, rising: boolean) => {
-    for (let i = 1; i <= STEPS; i++) {
-      const t = i / STEPS;
-      const px = fromX + (toX - fromX) * t;
-      const f = rising ? fadeShape(t) : fadeShape(1 - t);
-      pts.push(`${px.toFixed(2)},${(H - f * H).toFixed(2)}`);
-    }
-  };
-  const fi = fadeInSec > 0 ? (fadeInSec / Math.max(0.05, spanSec)) * widthPx : 0;
-  const fo = fadeOutSec > 0 ? (fadeOutSec / Math.max(0.05, spanSec)) * widthPx : 0;
-  if (fi > 0) ramp(0, Math.min(widthPx, fi), true);
-  else pts.push(`0,0`);
-  pts.push(`${Math.max(0, widthPx - fo).toFixed(2)},0`);
-  if (fo > 0) ramp(Math.max(0, widthPx - fo), widthPx, false);
-  else pts.push(`${widthPx.toFixed(2)},0`);
-  pts.push(`${widthPx.toFixed(2)},${H}`);
-  return `M${pts.join('L')}Z`;
-}
-
-/** Where a fade knob sits horizontally (body px), clamped so it stays grabbable inside the clip. */
-function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSec: number): number {
-  const raw = (Math.max(0, fadeSec) / Math.max(0.05, spanSec)) * widthPx;
-  const inset = Math.min(KNEE_EDGE_INSET, Math.max(0, widthPx / 2));
-  const at = edge === 'in' ? raw : widthPx - raw;
-  return Math.min(widthPx - inset, Math.max(inset, at));
-}
 
 interface StudioTimelineProps {
   comp: Composition;
@@ -377,22 +273,6 @@ function StudioTimelineImpl({
     }
     return out;
   }, [sceneSpans, sourcePeaks, pps]);
-  /** One lane clip's two paths (tapered body + waveform). Same reason as the scene bands: during a gesture
-   *  only the clip under the pointer actually changes shape, so every other chip reuses its memoized paths. */
-  const laneBand = useCallback(
-    (clip: AudioClip) => {
-      const w = audioClipWindow(clip, dur);
-      const span = Math.max(0.05, w.end - w.start);
-      const contentW = span * pps;
-      const d = audioClipDefaults(clip);
-      const peaks = clip.sig ? audioPeaks?.get(clip.sig) : undefined;
-      return {
-        body: fadeBodyPath(contentW, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span),
-        wave: peaks && peaks.length > 1 ? audioWaveBars(peaks, clip, d, contentW, span) : null,
-      };
-    },
-    [dur, pps, audioPeaks],
-  );
   // Filmstrip tiles (like CapCut): square tiles (width=height, object-cover crop), grid anchored on **source time** —
   // each card just "windows" (stripTiles) the continuous strip; after split/trim each segment continues the original strip, never re-laying-out trailing segments
   // Card = thumbnails on top, the footage's own audio strip beneath them (never overlaid — a wave drawn on
@@ -503,7 +383,8 @@ function StudioTimelineImpl({
 
   // Content layer's left edge (changes with scroll); recompute each frame while dragging
   const contentLeft = () => contentRef.current?.getBoundingClientRect().left ?? 0;
-  const secAt = (clientX: number) => Math.max(0, Math.min(dur, (clientX - contentLeft()) / pps));
+  // stable identities: the music lane is memoized, and a fresh closure per render would defeat that
+  const secAt = useCallback((clientX: number) => Math.max(0, Math.min(dur, (clientX - (contentRef.current?.getBoundingClientRect().left ?? 0)) / pps)), [dur, pps]);
   /** Shared marquee engine (scene track / element track): anchor in content coordinates (base moves with scroll, x0/y0 stay fixed in content coords),
    *  end point recomputed each frame from base's **live** rect -> supports edge auto-scroll throughout; keeps scrolling via rAF even when the pointer sits still at the edge.
    *  baseRef = coordinate-base DOM; draggedRef = whether it became a drag; onDrag = draw rectangle; onCommit = hit test; onClick = pure click (no drag). */
@@ -599,7 +480,7 @@ function StudioTimelineImpl({
   // and at the viewport's left/right edge it keeps auto horizontal-scrolling (same rAF pattern as shot reorder / marquee) —
   // the scroll shifts the content coordinate base, so scrolled frames replay onMove even with the pointer sitting still,
   // which is what lets a playhead/trim drag keep advancing past the visible window. draggingRef makes hover-seek yield.
-  const drag = (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
+  const drag = useCallback((e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
     e.preventDefault();
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); // keep receiving move/up even outside the window
@@ -656,7 +537,7 @@ function StudioTimelineImpl({
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
-  };
+  }, []);
 
   // Cmd + wheel zoom (zoom value is controlled by the transport slider)
   useEffect(() => {
@@ -789,13 +670,7 @@ function StudioTimelineImpl({
   // Music lane: a dedicated bottom row — shown when clips exist, or as a highlighted drop target while an audio asset is being dragged
   // stable identity: `?? []` alone would hand the memo below a fresh array on every render
   const audioClips = useMemo(() => comp.audioTracks ?? [], [comp.audioTracks]);
-  const laneWaves = useMemo(() => new Map(audioClips.map((c) => [c.id, laneBand(c)])), [audioClips, laneBand]);
   const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
-  // Live gesture on a music chip: kept LOCAL so a drag re-renders only this component — writing comp per
-  // pointer frame re-rendered the whole workbench and re-specced the audio engine (that was the stutter),
-  // while painting the DOM by hand fought React for the same left/width props (that was the "not live").
-  // The same values are committed once on release, so nothing shifts when the drag ends.
-  const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
   const musicTop = tracksH + ROW_GAP;
   const tracksHWithMusic = musicLane ? musicTop + AUDIO_ROW_H : tracksH;
 
@@ -1542,172 +1417,26 @@ function StudioTimelineImpl({
                   </div>
                 ))}
 
-              {/* Music lane (bottom row): one chip per audio clip, drawn with its waveform.
-                  Click selects (Del removes), body-drag moves, edge handles trim in/out, and the two
-                  top-corner knees drag the fades. While an audio asset is dragged the empty lane shows
-                  a dashed drop strip. Overlapping clips overlap visually too (their sounds sum). */}
+              {/* Music lane (bottom row), in its own component: a move/trim/fade gesture writes a value per
+                  pointer frame, and keeping that state down there is what stops it re-rendering the whole
+                  timeline sixty times a second. */}
               {musicLane && (
-                <div className="absolute right-0 left-0" style={{ top: musicTop, height: AUDIO_ROW_H }}>
-                  {audioClips.map((base) => {
-                    // during a gesture this clip renders from the live patch; everything below (window,
-                    // wave slice, fades, knee positions) derives from it, so there is one source of truth
-                    const clip = audioDrag?.id === base.id ? { ...base, ...audioDrag.patch } : base;
-                    const w = audioClipWindow(clip, dur);
-                    const end = Math.min(dur, w.end);
-                    const contentW = x(Math.max(0.05, w.end - w.start)); // the clip's real length in px
-                    const width = Math.max(14, x(Math.max(0.05, end - w.start))); // visible box (clipped at the timeline end)
-                    const selected = selectedAudioId === clip.id;
-                    const d = audioClipDefaults(clip);
-                    const span = Math.max(0.05, w.end - w.start);
-                    // only the clip under the pointer is reshaped mid-gesture; the rest keep their memoized paths
-                    const band = audioDrag?.id === base.id ? laneBand(clip) : (laneWaves.get(base.id) ?? laneBand(clip));
-                    const knobs = width > 56; // narrow chips have no room for knees (drag the panel sliders instead)
-                    // Gestures paint through the DOM and commit ONCE on release: a state write per pointer
-                    // frame re-rendered the whole timeline (and re-specced the audio engine), which is what
-                    // made trimming stutter. During a drag we only touch this chip's own left/width and its
-                    // wave path — no React render — then a single commit lands the value. Direct-manipulation
-                    // drags stay out of the undo stack (element-track convention).
-                    return (
-                      <div
-                        key={clip.id}
-                        role="button"
-                        tabIndex={0}
-                        title={clip.label || t('panels.musicBed')}
-                        className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${
-                          selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
-                        }`}
-                        style={{ left: x(w.start), width, height: CHIP_H }}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            onSelectAudio?.(clip.id);
-                            onOpenMusicPanel?.();
-                          }
-                        }}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return;
-                          e.stopPropagation();
-                          const grab = secAt(e.clientX) - w.start;
-                          let at = w.start;
-                          drag(
-                            e,
-                            (cx) => {
-                              let ns = Math.max(0, Math.min(Math.max(0, dur - 0.2), snap(secAt(cx) - grab, [w.start, w.end])));
-                              if (ns < 0.15) ns = 0; // snap to the head
-                              at = ns;
-                              setAudioDrag({ id: base.id, patch: { startSec: ns } });
-                            },
-                            (moved) => {
-                              setAudioDrag(null);
-                              onSelectAudio?.(base.id);
-                              if (moved) onMoveAudio?.(base.id, at);
-                              else onOpenMusicPanel?.();
-                            },
-                          );
-                        }}
-                      >
-                        {/* Label strip on top; everything audio-shaped lives in the BODY below it — the same
-                            split the reference editor uses, which is why its knees sit in a lane instead of on
-                            the chip's corner. */}
-                        <div
-                          className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 ${selected ? 'bg-accent/18' : 'bg-accent/10'}`}
-                          style={{ height: CHIP_LABEL_H }}
-                        >
-                          {clip.muted ? <VolumeX size={9} className="text-ink-4 shrink-0" /> : <Music size={9} className="text-accent shrink-0" />}
-                          <span className={`truncate text-[9.5px] leading-none ${clip.muted ? 'text-ink-4 line-through' : 'text-ink-2'}`}>{clip.label || t('panels.musicBed')}</span>
-                          {d.speed !== 1 && (
-                            <span className="text-ink-3 bg-panel/70 shrink-0 rounded px-1 text-[9px] leading-[12px] tabular-nums">{d.speed.toFixed(2).replace(/0$/, '')}×</span>
-                          )}
-                        </div>
-                        {/* Body svg is 1:1 with pixels (no viewBox stretching, so nothing gets squashed) and
-                            spans the clip's TRUE content width, so the chip crops it: dragging an edge reveals
-                            or hides the wave instead of rescaling it. */}
-                        <svg
-                          className="pointer-events-none absolute left-0"
-                          style={{ top: CHIP_LABEL_H, width: contentW, height: CHIP_BODY_H }}
-                          viewBox={`0 0 ${Math.round(contentW)} ${CHIP_BODY_H}`}
-                          aria-hidden
-                        >
-                          {/* body background tapering along the fade, then the wave on top of it */}
-                          <path d={band.body} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
-                          {/* Muted keeps its shape but loses its colour — the clip is still there to reason about, it just makes no sound */}
-                          {band.wave && <path d={band.wave} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
-                        </svg>
-                        {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
-                            trim the wave is nudged the other way so the audio stays pinned to the timeline —
-                            dragging reveals or hides it, it never slides. */}
-                        {(['left', 'right'] as const).map((edge) => (
-                          <span
-                            key={edge}
-                            onPointerDown={(e) => {
-                              e.stopPropagation();
-                              let patch = audioTrimPatch(base, edge, edge === 'left' ? w.start : w.end);
-                              drag(
-                                e,
-                                (cx) => {
-                                  // always measured off the ORIGINAL clip, so the edge tracks the pointer
-                                  // without accumulating rounding from the live preview
-                                  patch = audioTrimPatch(base, edge, Math.max(0, snap(secAt(cx), [w.start, w.end])));
-                                  setAudioDrag({ id: base.id, patch });
-                                },
-                                (moved) => {
-                                  setAudioDrag(null);
-                                  onSelectAudio?.(base.id);
-                                  if (moved) onTrimAudio?.(base.id, patch);
-                                },
-                              );
-                            }}
-                            className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${edge === 'left' ? 'left-0 rounded-l' : 'right-0 rounded-r'} ${
-                              selected ? 'bg-white/50' : 'bg-white/0 group-hover/aud:bg-white/40'
-                            }`}
-                          />
-                        ))}
-                        {/* Fade knees: small squares in the fade lane, sitting on the ramp's top vertex, with a
-                            diagonal glyph pointing the way the ramp runs. The wedge is always drawn — only the
-                            grabs are hover/selected (14px hit area around an 8px glyph). */}
-                        {knobs &&
-                          (['in', 'out'] as const).map((edge) => {
-                            const kx = audioKneeX(edge === 'in' ? d.fadeInSec : d.fadeOutSec, edge, contentW, span);
-                            return (
-                              <span
-                                key={edge}
-                                onPointerDown={(e) => {
-                                  e.stopPropagation();
-                                  let sec = edge === 'in' ? d.fadeInSec : d.fadeOutSec;
-                                  drag(
-                                    e,
-                                    (cx) => {
-                                      const raw = edge === 'in' ? secAt(cx) - w.start : w.end - secAt(cx);
-                                      sec = Math.round(Math.max(0, Math.min(span, AUDIO_FADE_MAX_SEC, raw)) * 10) / 10;
-                                      setAudioDrag({ id: base.id, patch: edge === 'in' ? { fadeInSec: sec } : { fadeOutSec: sec } });
-                                    },
-                                    (moved) => {
-                                      setAudioDrag(null);
-                                      onSelectAudio?.(base.id);
-                                      if (moved) onFadeAudio?.(base.id, edge, sec);
-                                    },
-                                  );
-                                }}
-                                title={t(edge === 'in' ? 'panels.fadeIn' : 'panels.fadeOut')}
-                                className={`absolute z-10 flex cursor-ew-resize items-center justify-center transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
-                                style={{ left: kx - 7, top: CHIP_LABEL_H + KNEE_LANE_Y - 7, width: 14, height: 14 }}
-                              >
-                                <span
-                                  className="border-accent block rounded-full border-2 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
-                                  style={{ width: KNEE_SIZE, height: KNEE_SIZE }}
-                                />
-                              </span>
-                            );
-                          })}
-                      </div>
-                    );
-                  })}
-                  {audioClips.length === 0 && (
-                    <div className="border-accent/50 text-accent absolute inset-x-0 top-0.5 bottom-0.5 flex items-center justify-center gap-1.5 rounded-md border border-dashed text-[10px]">
-                      <Music size={11} /> {t('panels.dropAudioHere')}
-                    </div>
-                  )}
-                </div>
+                <AudioLane
+                  clips={audioClips}
+                  dur={dur}
+                  pps={pps}
+                  top={musicTop}
+                  peaks={audioPeaks}
+                  selectedId={selectedAudioId}
+                  onSelect={onSelectAudio}
+                  onMove={onMoveAudio}
+                  onTrim={onTrimAudio}
+                  onFade={onFadeAudio}
+                  onOpenPanel={onOpenMusicPanel}
+                  secAt={secAt}
+                  snap={snap}
+                  drag={drag}
+                />
               )}
 
               {/* Snap alignment guide (when a drag hits a cut point / whole second / adjacent block edge / playhead) */}
