@@ -137,6 +137,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.unpinAssetsBar': '取消固定(悬浮在画布上)',
   'workbench.filledNDesignGraphics': '已配 {n} 张设计图形',
   'workbench.nSlotsSkippedNothingToSay': '、{n} 段无可上屏内容已跳过',
+  'workbench.slotRemovedNothingToSay': '该时刻无可上屏内容,已移除空占位',
   'workbench.filtersAppliedCss': '已调色:{css}',
   'workbench.focusedName': '定位到「{name}」',
   'workbench.focusedShotN': '定位到分镜 #{n}',

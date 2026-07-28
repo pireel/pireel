@@ -16,6 +16,7 @@
  * route's job; this just takes data and returns data, directly pinnable by vitest.
  */
 
+import { interpretApplyRaw } from './briefs';
 import {
   type Block,
   type Composition,
@@ -520,6 +521,46 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       // non-existent block = last round's handed-back new-block id, treated as the
       // new-block id as-is (no more "component not found" that dead-ends the retry).
       const applyId = target?.id ?? bid ?? blockId('ai');
+      // The raw text follows whichever contract the brief carried — component JSON on a themeless
+      // project, fenced markup on a themed one. Shape-detect and give each answer its own meaning
+      // (shared interpreter with the browser bridge, so the semantics cannot drift).
+      const shape = interpretApplyRaw(raw);
+      if (shape.kind === 'kit') {
+        const slots = { props: shape.props };
+        if (target) {
+          return {
+            result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id } },
+            comp: { ...c, blocks: c.blocks.map((x) => (x.id === target.id ? { ...x, templateId: `kit:${shape.component}`, slots } : x)) },
+          };
+        }
+        const kAt = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : 0;
+        const kDur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
+        const kb: Block = {
+          id: applyId,
+          templateId: `kit:${shape.component}`,
+          slots,
+          startSec: kAt,
+          durationSec: kDur,
+          trackIndex: freeTrack(c.blocks, kAt, kDur),
+          label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
+        };
+        return { result: { ok: true, summary: 'Added block', data: { newBlockId: kb.id } }, comp: { ...c, blocks: [...c.blocks, kb] } };
+      }
+      if (shape.kind === 'kit-unknown') {
+        return { result: { ok: false, error: `unknown component "${shape.component}" — use an id from the brief's COMPONENTS list, answer {"custom": true} for a bespoke build, or null for no graphic` } };
+      }
+      if (shape.kind === 'custom') {
+        // The model judged no component carries this. Markup needs the markup contract — hand the
+        // agent back to the brief rather than accepting free-form output against the kit brief.
+        return { result: { ok: false, error: 'the model chose a bespoke build — call compose_block_brief again with format:"html" for the markup contract, generate against it, then apply_block with that raw text' } };
+      }
+      if (shape.kind === 'declined') {
+        if (target && isPlaceholder(target)) {
+          // The moment deserves no graphic: remove the empty slot instead of leaving a shell.
+          return { result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } }, comp: { ...c, blocks: c.blocks.filter((x) => x.id !== target.id) } };
+        }
+        return { result: { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' } };
+      }
       const fb = target && !isPlaceholder(target) ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
       const parsed = parseBlockResponse(raw, fb);
       const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
@@ -618,7 +659,13 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           result: {
             ok: true,
             summary: 'Fetched block context (cloud)',
-            data: { ...base, block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label }, ...(script ? { context: { script } } : {}) },
+            data: {
+              ...base,
+              block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label },
+              // A kit block edits as props — same as the bridge context (unmentioned fields survive).
+              ...(b.templateId.startsWith('kit:') ? { kitCurrent: { component: b.templateId.slice(4), props: (b.slots as { props?: Record<string, unknown> }).props ?? {} } } : {}),
+              ...(script ? { context: { script } } : {}),
+            },
           },
         };
       }

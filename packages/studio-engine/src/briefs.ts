@@ -15,11 +15,12 @@
  * converges here (assembleComposeTheme) to prevent drift between two places.
  */
 
-import { type BlockEdit, type ComposeContext, BLOCK_SYSTEM, buildBlockPrompt, withTheme } from './compose';
+import { type BlockEdit, type ComposeContext, type KitChoice, BLOCK_SYSTEM, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
 import { type PlanInsert, type PlanSentence, type PlanVisual, buildPlanPrompt } from './plan';
-import { FRAME_PLAYBOOK_PREAMBLE, PLAN_SYSTEM } from './prompts';
+import { FRAME_PLAYBOOK_PREAMBLE, PLAN_SYSTEM, buildKitSystem } from './prompts';
 import { planWithActiveTheme } from './prompts';
 import { type ThemeId, getTheme, themeForLlm } from './theme';
+import { isComponentId } from '@pireel/studio-kit';
 
 export interface FrameContent {
   title: string;
@@ -45,12 +46,34 @@ export interface ComposeBriefInput {
   palette?: Record<string, string>;
   frame?: FrameContent | null;
   lang?: string;
+  /** Override the routing (an agent answered {"custom": true} and needs the markup contract for a
+   *  themeless project; or wants to fill props on a themed one). Default: frame ? html : kit. */
+  format?: 'kit' | 'html';
+  /** The component a targeted kit block currently shows, so a BYO edit keeps unmentioned props. */
+  kitCurrent?: KitChoice | null;
 }
 
-/** Block-generation brief: the caller takes system+prompt, generates with its OWN model, and passes the raw output back to apply_block.
- *  The output-format contract (note → \`\`\`html → \`\`\`js) is at the end of the prompt, not a separate doc. */
-export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string } {
+/** Block-generation brief: the caller takes system+prompt, generates with its OWN model, and passes
+ *  the raw output back to apply_block. Routing mirrors the in-app client: a themed project
+ *  generates HTML (the theme is a prose description the model builds from); a themeless one fills
+ *  a component's typed props. The returned `format` names which contract the text will follow. */
+export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string; format: 'kit' | 'html' } {
+  const format = input.format ?? (input.frame ? 'html' : 'kit');
+  if (format === 'kit') {
+    return {
+      format,
+      system: buildKitSystem(),
+      prompt: buildKitPrompt({
+        block: input.block,
+        instruction: input.instruction,
+        ...(input.context ? { context: input.context } : {}),
+        ...(input.lang ? { lang: input.lang } : {}),
+        ...(input.kitCurrent ? { current: input.kitCurrent } : {}),
+      }),
+    };
+  }
   return {
+    format,
     system: withTheme(BLOCK_SYSTEM, assembleComposeTheme(input.theme, input.palette, input.frame)),
     prompt: buildBlockPrompt({
       block: input.block,
@@ -59,6 +82,33 @@ export function assembleComposeBrief(input: ComposeBriefInput): { system: string
       ...(input.lang ? { lang: input.lang } : {}),
     }),
   };
+}
+
+/* ============================ apply_block raw interpretation ============================ */
+
+/** What a BYO agent's raw answer turned out to be. Shared by both apply_block executors (browser
+ *  bridge + offline) so the three-way null semantics cannot drift between them. */
+export type ApplyRawOutcome =
+  | { kind: 'html' }
+  | { kind: 'kit'; component: string; props: Record<string, unknown>; note: string }
+  | { kind: 'kit-unknown'; component: string; note: string }
+  | { kind: 'custom'; note: string }
+  | { kind: 'declined'; note: string };
+
+/** Shape-detect an apply_block payload. An html answer always carries a \`\`\`html fence and a kit
+ *  answer never does, so the fence decides; fenceless text that parses as neither falls back to
+ *  the html path, whose own fallbacks and lint handle it (legacy behaviour). */
+export function interpretApplyRaw(raw: string): ApplyRawOutcome {
+  if (/```html/i.test(raw)) return { kind: 'html' };
+  const k = parseKitResponse(raw);
+  if (k.choice) {
+    return isComponentId(k.choice.component)
+      ? { kind: 'kit', component: k.choice.component, props: k.choice.props, note: k.note }
+      : { kind: 'kit-unknown', component: k.choice.component, note: k.note };
+  }
+  if (k.custom) return { kind: 'custom', note: k.note };
+  if (k.declined) return { kind: 'declined', note: k.note };
+  return { kind: 'html' };
 }
 
 export interface PlanBriefInput {

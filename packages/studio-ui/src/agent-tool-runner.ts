@@ -39,6 +39,7 @@ import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
+import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -1084,7 +1085,14 @@ export async function runExternalTool(ctx: AgentToolCtx, tool: string, input: Re
           return {
             ok: true,
             summary: t('workbench.fetchedBlockContext'),
-            data: { ...base, block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label }, ...(script ? { context: { script } } : {}) },
+            data: {
+              ...base,
+              block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label },
+              // A kit block is edited as props: hand the brief what it currently shows, so an
+              // external edit keeps unmentioned fields exactly like the in-app path does.
+              ...(b.templateId.startsWith('kit:') ? { kitCurrent: kitChoiceOf(b) } : {}),
+              ...(script ? { context: { script } } : {}),
+            },
           };
         }
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
@@ -1106,6 +1114,49 @@ export async function runExternalTool(ctx: AgentToolCtx, tool: string, input: Re
         // Reuse it so the generated CSS's #id scope survives the retry instead of chasing a fresh
         // mint each round (the loop that drove external agents off the BYO path).
         const applyId = target?.id ?? bid ?? blockId('ai');
+        // Same shared interpreter as the offline executor — component JSON, custom escape and the
+        // deliberate null each get their own meaning; markup falls through to the lint path.
+        const shape = interpretApplyRaw(raw);
+        if (shape.kind === 'kit') {
+          pushUndoSnapshot();
+          if (target) {
+            setComp((cc) => ({ ...cc, blocks: cc.blocks.map((x) => (x.id === target.id ? { ...x, templateId: `kit:${shape.component}`, slots: { props: shape.props } } : x)) }));
+            setSelectedShotId(null);
+            setSelectedId(target.id);
+            applyT(Math.max(0, target.startSec + 0.01));
+            return { ok: true, summary: isPlaceholder(target) ? t('workbench.filledLabel', { label: target.label ?? t('workbench.graphic') }) : t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id } };
+          }
+          const kAt = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
+          const kDur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
+          const kb: Block = {
+            id: applyId,
+            templateId: `kit:${shape.component}`,
+            slots: { props: shape.props },
+            startSec: kAt,
+            durationSec: kDur,
+            trackIndex: freeTrack(c2.blocks, kAt, kDur),
+            label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
+          };
+          setComp((cc) => ({ ...cc, blocks: [...cc.blocks, kb] }));
+          setSelectedShotId(null);
+          setSelectedId(kb.id);
+          applyT(Math.max(0, kAt + 0.01));
+          return { ok: true, summary: t('workbench.elementAdded'), data: { newBlockId: kb.id } };
+        }
+        if (shape.kind === 'kit-unknown') {
+          return { ok: false, error: `unknown component "${shape.component}" — use an id from the brief's COMPONENTS list, answer {"custom": true} for a bespoke build, or null for no graphic` };
+        }
+        if (shape.kind === 'custom') {
+          return { ok: false, error: 'the model chose a bespoke build — call compose_block_brief again with format:"html" for the markup contract, generate against it, then apply_block with that raw text' };
+        }
+        if (shape.kind === 'declined') {
+          if (target && isPlaceholder(target)) {
+            pushUndoSnapshot();
+            setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((x) => x.id !== target.id) }));
+            return { ok: true, summary: t('workbench.slotRemovedNothingToSay'), data: { removedBlockId: target.id } };
+          }
+          return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
+        }
         const parsed = parseBlockResponse(raw, fb);
         const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
         // Same hard line as composeBlockChecked: hard problems are bounced back for the external model to fix itself (it is the "one fix round" model)

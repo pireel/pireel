@@ -159,7 +159,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Targets: `blockId` of a pending placeholder (omit `instruction` — its design spec is the instruction); `blockId` of an existing block + `instruction` = rewrite; no blockId + `instruction` = new element at `atSec`. The default way to create/edit block content — charges no Pireel credits.',
+        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. The contract follows the project: THEMELESS projects get a component contract (answer = one ```json fence: {component, props} / {"custom": true} for a bespoke build / null for no graphic); projects with a theme attached get the markup contract (note + ```html + ```js — the theme playbook rides in the system). Pass format:"html" to force markup (e.g. after answering {"custom": true}). YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Targets: `blockId` of a pending placeholder (omit `instruction` — its design spec is the instruction); `blockId` of an existing block + `instruction` = rewrite; no blockId + `instruction` = new element at `atSec`. The default way to create/edit block content — charges no Pireel credits.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -167,13 +167,14 @@ export function buildMcpTools(): McpToolDef[] {
           blockId: { type: 'string', description: 'Target block id (placeholder to fill, or existing block to rewrite). Omit for a new element.' },
           atSec: { type: 'number', description: 'New element only: timeline start seconds (defaults to playhead).' },
           instruction: { type: 'string', description: 'What to build/change. Required unless targeting a placeholder.' },
+          format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract (default follows the project: themeless → kit, themed → html). Use "html" after answering {"custom": true}.' },
         },
       },
     },
     {
       name: 'apply_block',
       description:
-        'Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text (note + ```html + ```js fences). On lint failure you get the issues back — fix ONLY those and re-apply. Placeholder blockId → fills it; existing blockId → overwrites; neither → inserts a new element.',
+        'Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text in whichever contract the brief carried (component json / fenced markup; a deliberate null on a placeholder removes the slot). On lint failure you get the issues back — fix ONLY those and re-apply. Placeholder blockId → fills it; existing blockId → overwrites; neither → inserts a new element.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -447,7 +448,8 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         const suggested = typeof data.suggested_instruction === 'string' ? data.suggested_instruction : '';
         const instruction = typeof args.instruction === 'string' && args.instruction.trim() ? args.instruction.trim() : suggested;
         if (!instruction) return toolResponse(raw.id, { ok: false, error: 'instruction required (only placeholders carry their own design spec)' });
-        return toolResponse(raw.id, deps.assembleComposeBrief(data, instruction));
+        const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
+        return toolResponse(raw.id, deps.assembleComposeBrief({ ...data, ...format }, instruction));
       }
 
       if (!MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && !STUDIO_TOOL_MAP[name]) {
