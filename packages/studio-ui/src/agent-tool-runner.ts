@@ -8,6 +8,7 @@
 
 import type { MutableRefObject, SetStateAction } from 'react';
 import {
+  type AudioClip,
   type Block,
   type CaptionStyle,
   type Composition,
@@ -21,6 +22,8 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  audioClipId,
+  audioTrimPatch,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -32,6 +35,7 @@ import {
   resolveCaptionStyle,
   shotFilterCss,
   shotId,
+  splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
   zoneOf,
@@ -948,6 +952,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
               ...(typeof input.speed === 'number' && Number.isFinite(input.speed) ? { speed: input.speed } : {}),
               ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
+              ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
             };
             if (input.off === true) {
               if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
@@ -979,9 +984,24 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
             if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
             if (!target) return { ok: false, error: t('workbench.audioTrackNotFound') };
-            if (!Object.keys(knobs).length) return { ok: false, error: t('workbench.passAudioKnobs') };
-            audioPatch(target.id, knobs);
-            return { ok: true, summary: t('workbench.bgmAdjusted') };
+            // Split changes the track COUNT, so it stands alone rather than combining with the knobs
+            const splitAt = Number(input.splitAtSec);
+            if (Number.isFinite(splitAt)) {
+              const halves = splitAudioClipAt(target, splitAt, audioClipId);
+              if (!halves) return { ok: false, error: t('workbench.movePlayheadToSplitAudio') };
+              setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === target.id ? halves : [x])) }));
+              return { ok: true, summary: t('workbench.bgmSplit'), data: { trackId: halves[0].id, newTrackId: halves[1].id } };
+            }
+            // Edge trims: same math as the lane's own handles (start + source in/out move together)
+            const headSec = Number(input.headSec);
+            const tailSec = Number(input.tailSec);
+            let trimPatch: Partial<AudioClip> = {};
+            if (Number.isFinite(headSec)) trimPatch = { ...trimPatch, ...audioTrimPatch(target, 'left', Math.max(0, headSec)) };
+            if (Number.isFinite(tailSec)) trimPatch = { ...trimPatch, ...audioTrimPatch({ ...target, ...trimPatch }, 'right', Math.max(0, tailSec)) };
+            const trimming = Object.keys(trimPatch).length > 0;
+            if (!Object.keys(knobs).length && !trimming) return { ok: false, error: t('workbench.passAudioKnobs') };
+            audioPatch(target.id, { ...trimPatch, ...knobs });
+            return { ok: true, summary: trimming ? t('workbench.bgmTrimmed') : t('workbench.bgmAdjusted') };
           }
           case 'insert_clip': {
             // Agent inserts B-roll: the bytes must already be in our storage (a helper-uploaded sig / a CDN url of a library / generated video) —

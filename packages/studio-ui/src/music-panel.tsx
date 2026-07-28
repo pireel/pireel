@@ -1,15 +1,15 @@
 'use client';
 
 /**
- * Audio panel (global): the music lane's track list + the selected clip's settings
- * (level / fade-in / fade-out / speed), plus narration denoise. Plain NLE semantics —
- * no looping, no ducking; clips are placed, trimmed by their own length, and sum when
- * they overlap. Selection is shared with the timeline lane (click a chip there or a
- * row here). Volume drags preview live via the engine element; commit on release —
- * same drag discipline as the framing panel.
+ * Audio panel (global): settings for whatever is selected — an audio clip (level, mute,
+ * solo, fades, speed) or, with nothing selected, the footage's own sound — plus narration
+ * denoise. Adding audio is not here: uploads and generation live in the assets panel, the
+ * same place images and video come from. Plain NLE semantics — no looping, no ducking;
+ * clips are placed, trimmed by their own length, and sum when they overlap. Selection is
+ * shared with the timeline lane. Every control writes through on change; the value shown
+ * is the value playing.
  */
 
-import { useState } from 'react';
 import { Music } from 'lucide-react';
 import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
@@ -20,6 +20,9 @@ export function MusicPanel({
   selectedId,
   usable,
   onPatch,
+  soloId,
+  onSolo,
+  peakOf,
   shot,
   shotCount,
   onSetShotAudio,
@@ -30,7 +33,12 @@ export function MusicPanel({
   selectedId: string | null;
   /** Per-clip byte availability (dead blob after reload = false → row shows the missing hint). */
   usable: (c: AudioClip) => boolean;
-  onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec'>>) => void;
+  onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => void;
+  /** Solo = monitoring only (hear this clip alone, footage included): never stored, never exported. */
+  soloId: string | null;
+  onSolo: (id: string | null) => void;
+  /** The clip's true peak (linear, 0..1) once its bytes are decoded — drives the clipping warning. */
+  peakOf: (c: AudioClip) => number | null;
   /** Selected shot (video track). With no audio clip selected this panel edits the FOOTAGE's own sound. */
   shot: VideoShot | null;
   shotCount: number;
@@ -47,6 +55,12 @@ export function MusicPanel({
   const setShotPct = (pct: number) =>
     onSetShotAudio({ volumeDb: pct <= 0 ? VOLUME_DB_MIN : Math.max(VOLUME_DB_MIN, Math.min(0, 20 * Math.log10(pct / 100))) }, !shot);
   const dbValue = Math.round(sel?.volumeDb ?? AUDIO_DEFAULT_DB);
+  // Clipping: this clip alone, at this level, already exceeds full scale. Only flagged once the bytes are
+  // decoded (peak unknown = say nothing rather than guess), and it's a warning, not a cap — the export
+  // limiter catches what gets through, but a limiter working hard is not the same as a level set right.
+  const selPeak = sel ? peakOf(sel) : null;
+  const clipsAt = selPeak && selPeak > 0 ? Math.floor(20 * Math.log10(1 / selPeak)) : null;
+  const clipping = clipsAt != null && dbValue > clipsAt;
 
   /** Slider row: writes straight through on every change — no drag buffer, no commit-on-release. The
    *  value shown is the value applied (and heard); the preview follows comp, so there is nothing to sync. */
@@ -149,6 +163,36 @@ export function MusicPanel({
               className="zoom-range w-full"
               aria-label={t('panels.volume')}
             />
+            {clipping && <div className="text-accent text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
+            <div className="flex items-center justify-between">
+              <span className="text-ink-3">{t('panels.mute')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!sel.muted}
+                aria-label={t('panels.mute')}
+                onClick={() => onPatch(sel.id, { muted: !sel.muted })}
+                className={`h-4.5 w-8 rounded-full p-0.5 transition ${sel.muted ? 'bg-accent' : 'bg-ink-4/30'}`}
+              >
+                <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${sel.muted ? 'translate-x-3.5' : ''}`} />
+              </button>
+            </div>
+            {/* Solo sits next to mute because that's where an editor looks for it, but it is a different KIND
+                of switch: mute is part of the video, solo is just how you're listening right now. */}
+            <div className="flex items-center justify-between">
+              <span className="text-ink-3">{t('panels.soloListen')}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={soloId === sel.id}
+                aria-label={t('panels.soloListen')}
+                onClick={() => onSolo(soloId === sel.id ? null : sel.id)}
+                className={`h-4.5 w-8 rounded-full p-0.5 transition ${soloId === sel.id ? 'bg-accent' : 'bg-ink-4/30'}`}
+              >
+                <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${soloId === sel.id ? 'translate-x-3.5' : ''}`} />
+              </button>
+            </div>
+            {soloId === sel.id && <div className="text-ink-4 text-[10.5px]">{t('panels.soloListenHint')}</div>}
             {/* Effective values (fades are clamped so the two never overlap) — showing the raw stored number
                 would promise a fade the clip is too short to hold. */}
             {slider(t('panels.fadeIn'), selD!.fadeInSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}

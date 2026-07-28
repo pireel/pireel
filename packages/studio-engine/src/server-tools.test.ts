@@ -191,6 +191,34 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(runServerTool('set_bgm', { off: true }, proj()).result.ok).toBe(false);
     expect(runServerTool('set_bgm', { volumeDb: -30 }, proj()).result.ok).toBe(false);
   });
+  it('set_bgm:静音/裁两端/分割——离线执行器与轨道手柄同一套边界数学', () => {
+    // 有 durationSec 才谈得上裁剪(离线加轨拿不到时长,直接给一条已知时长的轨)
+    const base = proj();
+    const clip = { id: 'aud1', src: 'https://cdn.pireel.com/bgm.mp3', durationSec: 60, startSec: 0 };
+    const withClip = { ...base.comp, audioTracks: [clip] };
+    // 静音:落 muted 字段,音量原样留着(解除静音就回来)
+    const m = runServerTool('set_bgm', { mute: true, volumeDb: -12 }, proj({ comp: withClip }));
+    expect(m.comp!.audioTracks![0]).toMatchObject({ muted: true, volumeDb: -12 });
+    expect(runServerTool('set_bgm', { mute: false }, proj({ comp: m.comp })).comp!.audioTracks![0]!.muted).toBeUndefined();
+    // 裁头:起点右移,同时吃掉等量的源内容(音频不跟着滑走)
+    const h = runServerTool('set_bgm', { headSec: 5 }, proj({ comp: withClip }));
+    expect(h.comp!.audioTracks![0]).toMatchObject({ startSec: 5, inSec: 5 });
+    // 裁尾:只改出点,起点不动
+    const tl = runServerTool('set_bgm', { tailSec: 20 }, proj({ comp: withClip }));
+    expect(tl.comp!.audioTracks![0]!.outSec).toBe(20);
+    expect(tl.comp!.audioTracks![0]!.startSec).toBeUndefined();
+    // 分割:一条变两条,接缝处两侧不各来一次默认淡化
+    const sp = runServerTool('set_bgm', { splitAtSec: 25 }, proj({ comp: withClip }));
+    const [head, tail] = sp.comp!.audioTracks!;
+    expect(sp.comp!.audioTracks!.length).toBe(2);
+    expect(head!.outSec).toBe(25);
+    expect(tail!.startSec).toBe(25);
+    expect(head!.fadeOutSec).toBe(0);
+    expect(tail!.fadeInSec).toBe(0);
+    expect((sp.result.data as { newTrackId: string }).newTrackId).toBe(tail!.id);
+    // 轨外的分割点拒绝,不静默产出一条零长轨
+    expect(runServerTool('set_bgm', { splitAtSec: 999 }, proj({ comp: withClip })).result.ok).toBe(false);
+  });
   it('add_transition:内容级切点转场——挂后镜 transIn、prevId 锚前镜;非切点拒绝;none 移除;区内禁分割', () => {
     // proj 的切点在 10s(s1|s2)
     const r = runServerTool('add_transition', { atSec: 10.1, effect: 'crosszoom', durationSec: 2 }, proj());

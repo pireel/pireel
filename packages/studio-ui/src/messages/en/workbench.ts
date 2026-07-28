@@ -188,6 +188,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.audioUnmuted': 'unmuted',
   'workbench.audioTrackNotFound': 'Audio track not found',
   'workbench.bgmAdjusted': 'Audio track adjusted',
+  'workbench.bgmSplit': 'Audio track split',
+  'workbench.bgmTrimmed': 'Audio track trimmed',
   'workbench.bgmMounted': 'Audio track added ({db}dB)',
   'workbench.bgmRemoved': 'Audio track removed',
   'workbench.denoiseFailed': 'Denoise failed — preview and export keep the original audio',
