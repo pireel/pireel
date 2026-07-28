@@ -1,5 +1,5 @@
 /**
- * hyperframes-kit components as block templates.
+ * Studio Kit components as block templates.
  *
  * A kit block stores ONLY `{ templateId: 'kit:<component>', slots: { props } }` —
  * HTML/timeline are derived at render time (same philosophy as derived captions:
@@ -10,19 +10,19 @@
  * before render — the component computes all type sizes from it. Kit prop parsing
  * never throws: malformed props degrade to designed defaults.
  *
- * The kit consumes --hfk-* tokens; here they are bridged to the composition's
+ * The kit consumes --sk-* tokens; here they are bridged to the composition's
  * theme palette (--fg/--panel/--accent…) so frames' palettes restyle kit blocks
  * with zero kit knowledge of the studio theme system.
  */
 
-import { components, render as renderKit } from 'hyperframes-kit';
+import { components, render as renderKit } from '@pireel/studio-kit';
 import { registerTemplate, type Rendered, type Slots } from './composition-core';
 
 /** Map studio palette tokens onto the kit's theme surface (kit fallbacks used when a token is unset). */
 const TOKEN_BRIDGE =
-  '--hfk-fg:var(--fg);--hfk-muted:var(--muted);--hfk-accent:var(--accent);--hfk-accent-2:var(--accent-2);' +
-  '--hfk-panel:var(--panel);--hfk-panel-2:var(--panel-2);--hfk-line:var(--line);--hfk-radius:var(--radius);' +
-  '--hfk-shadow:var(--shadow);--hfk-font-head:var(--font-head);--hfk-font-num:var(--font-num);';
+  '--sk-fg:var(--fg);--sk-muted:var(--muted);--sk-accent:var(--accent);--sk-accent-2:var(--accent-2);' +
+  '--sk-panel:var(--panel);--sk-panel-2:var(--panel-2);--sk-line:var(--line);--sk-radius:var(--radius);' +
+  '--sk-shadow:var(--shadow);--sk-font-head:var(--font-head);--sk-font-num:var(--font-num);';
 
 const px = (v: unknown, fallback: number): number => (typeof v === 'number' && v > 0 ? v : fallback);
 
@@ -35,7 +35,7 @@ function renderKitBlock(component: string, slots: Slots, blockId: string, durati
   };
   const out = renderKit(component, blockId, slots.props, ctx);
   return {
-    innerHtml: `<div class="hfk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}">\n${out.html}\n</div>`,
+    innerHtml: `<div class="sk-root" style="position:absolute;inset:0;${TOKEN_BRIDGE}">\n${out.html}\n</div>`,
     timelineBody: out.timeline,
   };
 }
@@ -44,10 +44,10 @@ export const KIT_TEMPLATE_PREFIX = 'kit:';
 
 /** Kit component registry (props JSON Schemas, defaults, summaries) — the source for
  *  pickers, the props editor panel and agent tool contracts. */
-export { components as kitComponents } from 'hyperframes-kit';
+export { components as kitComponents } from '@pireel/studio-kit';
 
 /** Designed surface colours (Morandi) offered by the kit — the props panel's swatch row. */
-export { SURFACE_SWATCHES as kitSurfaceSwatches } from 'hyperframes-kit';
+export { SURFACE_SWATCHES as kitSurfaceSwatches } from '@pireel/studio-kit';
 
 /** Render a kit component as a standalone element (asset-panel previews, thumbnails):
  *  explicit box/canvas instead of assembler-injected slots. */

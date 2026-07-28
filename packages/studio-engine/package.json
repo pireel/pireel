@@ -17,6 +17,6 @@
   "dependencies": {
     "fast-json-patch": "^3.1.1",
     "jsondiffpatch": "^0.7.6",
-    "hyperframes-kit": "link:../../../hyperframes-kit"
+    "@pireel/studio-kit": "workspace:*"
   }
 }

@@ -655,7 +655,7 @@ function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPi
             onClick={onNone}
             className={`flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] ${noneActive ? 'border-accent text-ink bg-accent/10' : 'border-line text-ink-3 hover:border-accent'}`}
           >
-            <span className="border-line h-3.5 w-3.5 rounded-[3px] border" style={NO_COLOR_CHECKER} /> {t('captions.noPlate')}
+            <span className="border-line h-3.5 w-3.5 rounded-sm border" style={NO_COLOR_CHECKER} /> {t('captions.noPlate')}
           </button>
         )}
         {swatches.map((c) => (
