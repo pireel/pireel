@@ -121,3 +121,25 @@ describe('parseKitResponse', () => {
     expect(components.metric.parse!(r.choice!.props).variant).toBe('hero-number');
   });
 });
+
+describe('custom escape — built-ins are a library, not a cage', () => {
+  it('the contract offers all three answers', async () => {
+    const { buildKitSystem } = await import('./prompts');
+    const sys = buildKitSystem();
+    expect(sys).toContain('{"custom": true}');
+    expect(sys).toContain('custom is an escape, not a style choice');
+  });
+
+  it('{"custom": true} parses as its own answer — not a veto, not a hiccup', () => {
+    const r = parseKitResponse('这段是个层级图,组件装不下。\n```json\n{"custom": true}\n```');
+    expect(r.custom).toBe(true);
+    expect(r.declined).toBe(false);
+    expect(r.choice).toBeNull();
+  });
+
+  it('the three nulls stay distinct', () => {
+    expect(parseKitResponse('```json\nnull\n```')).toMatchObject({ declined: true, custom: false });
+    expect(parseKitResponse('```json\n{"custom": true}\n```')).toMatchObject({ declined: false, custom: true });
+    expect(parseKitResponse('```json\n{broken\n```')).toMatchObject({ declined: false, custom: false });
+  });
+});

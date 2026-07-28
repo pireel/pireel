@@ -155,30 +155,33 @@ export function buildKitPrompt(args: {
   return parts.join('\n\n');
 }
 
-/** Read the model's answer. `choice: null` covers two situations that must NOT be conflated:
- *  `declined: true` is the model deliberately answering null — the prompt invites that, and the
- *  caller decides what a veto means (drop the placeholder, retry free-form). Everything else that
- *  fails to parse is a hiccup, not an opinion — callers should regenerate, never treat it as "the
- *  model said no". Folding the two together turned every malformed output into a silent veto. */
-export function parseKitResponse(text: string): { choice: KitChoice | null; note: string; declined: boolean } {
+/** Read the model's answer. `choice: null` covers three situations that must NOT be conflated:
+ *  `declined` — the model deliberately answered null: the moment deserves no graphic at all;
+ *  `custom`  — the moment deserves one but no component carries it (content-driven, or the user
+ *              described something no schema fits): route to the free-form designer;
+ *  neither   — the output failed to parse: a hiccup, not an opinion — regenerate.
+ *  Folding these together turned "needs a bespoke build" into a deleted slot. */
+export function parseKitResponse(text: string): { choice: KitChoice | null; note: string; declined: boolean; custom: boolean } {
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
   const note = (fence ? text.replace(fence[0], '') : text).trim() || 'Chose a component';
   const raw = fence?.[1]?.trim() ?? text.trim();
-  if (/^null$/i.test(raw)) return { choice: null, note, declined: true };
-  if (!raw) return { choice: null, note, declined: false };
+  const none = { choice: null, note, declined: false, custom: false };
+  if (/^null$/i.test(raw)) return { ...none, declined: true };
+  if (!raw) return none;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { choice: null, note, declined: false };
+    return none;
   }
-  if (typeof parsed !== 'object' || parsed === null) return { choice: null, note, declined: false };
+  if (typeof parsed !== 'object' || parsed === null) return none;
   const o = parsed as Record<string, unknown>;
-  if (typeof o.component !== 'string' || !o.component) return { choice: null, note, declined: false };
+  if (o.custom === true) return { ...none, custom: true };
+  if (typeof o.component !== 'string' || !o.component) return none;
   // Props are NOT validated here — the component's own schema is the gate, and it never throws.
   // Validating twice would only add a second, weaker opinion about what is acceptable.
   const props = typeof o.props === 'object' && o.props !== null ? (o.props as Record<string, unknown>) : {};
-  return { choice: { component: o.component, props }, note, declined: false };
+  return { choice: { component: o.component, props }, note, declined: false, custom: false };
 }
 
 export async function composeBlock(

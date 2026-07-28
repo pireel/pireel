@@ -23,9 +23,14 @@ import { getPreset } from './presets';
 
 /** Path-specific output contract — the only part of the stack that knows what the answer looks like. */
 const KIT_OUTPUT = `OUTPUT
-After the note line, ONE \`\`\`json fence:
-{"component": "<id>", "props": { … }}   — or  null  when this moment deserves no graphic.
-Only keys listed for that component; anything else is dropped.`;
+After the note line, ONE \`\`\`json fence, holding exactly one of:
+{"component": "<id>", "props": { … }}   — a component carries this moment. Only keys listed for
+                                          that component; anything else is dropped.
+{"custom": true}                        — the moment DESERVES a graphic but no component carries it
+                                          (a diagram, a bespoke layout, something the user described
+                                          that fits no schema). A free-form designer takes over.
+null                                    — the moment deserves NO graphic at all.
+Prefer a component whenever one fits; custom is an escape, not a style choice.`;
 
 const HTML_OUTPUT = `OUTPUT
 After the note line, in THIS order:
