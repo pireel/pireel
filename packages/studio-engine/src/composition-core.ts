@@ -434,8 +434,13 @@ function shotVars(tr: ShotTreatment, size?: number, crop?: number): string {
  * Normalized "vacancy" box freed up by framing (placement for the other half of a half-split/corner = partner block).
  * full/punch-in fill or zoom → no vacancy, returns null. Coords leave a margin, not edge-to-edge.
  */
+/** Caption no-go floor (same 0.84 line pickGraphicBox clamps to): the sentence-caption layer lives
+ *  in the bottom band, and a freed area running under it would put the graphic beneath the words. */
+const VACANCY_CAPTION_FLOOR = 0.84;
+
 export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox | null {
   const s = treatScale(tr, size);
+  const raw = ((): NormBox | null => {
   switch (tr) {
     case 'corner-br': // video shrinks to bottom-right → frees a large top block (height tracks small-window size)
       return { x: 0.06, y: 0.1, w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
@@ -453,6 +458,10 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
     default:
       return null;
   }
+  })();
+  // Clamp the freed area above the caption band — bottom-reaching vacancies (split-t's band, the
+  // side columns, corner-tl's block) ran to y≈0.96, straight through where captions render.
+  return raw ? { ...raw, h: Math.max(0.2, Math.min(raw.h, VACANCY_CAPTION_FLOOR - raw.y)) } : null;
 }
 
 /**

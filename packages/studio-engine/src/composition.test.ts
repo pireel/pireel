@@ -667,6 +667,15 @@ describe('半分取景的空位框不压视频', () => {
   }
 });
 
+describe('空位框不进字幕带', () => {
+  it('所有取景的空位框 y+h ≤ 0.84(字幕层的地界)', () => {
+    for (const tr of ['corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const) {
+      const b = treatmentVacancyBox(tr)!;
+      expect(b.y + b.h, `${tr} 空位框伸进了字幕带`).toBeLessThanOrEqual(0.84 + 1e-9);
+    }
+  });
+});
+
 describe('取景 clipPath 可插值(所有取景同 token 数)', () => {
   // GSAP 补间复杂字符串按数字 token 配对:'inset(0%)' 对 'inset(0% 50% 0% 0%)' 数量不齐,
   // 过渡时 transform 平滑滑动而裁切瞬跳。钉住:每种取景的 clipPath 都是 4 个数字。
