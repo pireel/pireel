@@ -4474,7 +4474,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       onPatch={(props) => {
                         setComp((c) => ({ ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, slots: { ...x.slots, props } } : x)) }));
                       }}
-                      frameId={comp.frameId}
                       onSetStaging={(blueprintId) => {
                         pushUndoSnapshot();
                         setComp((c) => ({
