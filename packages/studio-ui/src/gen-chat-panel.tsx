@@ -577,7 +577,9 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
           />
           <div className="flex items-center gap-1 px-2 pb-2 pt-1">
             {type === 'audio' && (
-              <label className="text-ink-3 flex items-center gap-1.5 text-[11px]">
+              // Reference, not a contract: the model takes it as a wish (see the music route), and it also
+              // decides which tier is bought — under 30s is the cheaper short-clip model.
+              <label className="text-ink-3 flex items-center gap-1.5 text-[11px]" title={t('panels.musicDurationHint')}>
                 {t('panels.musicDurationSec')}
                 <input
                   type="number"
