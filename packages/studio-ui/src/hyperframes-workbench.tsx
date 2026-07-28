@@ -1991,9 +1991,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // there is no such thing as malformed markup to bounce back, only props that clamp.
       if (opts?.kit) {
         const raw = await composeBlockRaw(seed, instruction, onDelta, opts);
-        const { choice, note } = parseKitResponse(raw);
-        if (!choice) throw new Error(t('workbench.noComponentFitsThisMoment'));
-        return { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, note, kit: choice };
+        const { choice, note, declined } = parseKitResponse(raw);
+        if (choice) return { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, note, kit: choice };
+        // A deliberate null is an ANSWER — surface it and let the caller decide what a veto means.
+        if (declined) return { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, note, declined: true };
+        // Anything else is a hiccup, not an opinion: fall through to the free-form path for this
+        // block instead of failing it (the lint loop below still guards that output).
       }
       const raw = await composeBlockRaw(seed, instruction, onDelta);
       let parsed = parseBlockResponse(raw, { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody });
