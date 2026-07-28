@@ -23,6 +23,10 @@ export interface ComposedBlock {
   note: string;
   /** Present on the kit path — the block stores props, not markup. */
   kit?: KitChoice;
+  /** Kit path only: the model deliberately answered null — this moment deserves no graphic. The
+   *  fields above are just the seed echoed back; do NOT store them. What a veto means belongs to
+   *  the caller: a batch fill drops the placeholder, an explicit user request retries free-form. */
+  declined?: boolean;
 }
 
 /** The block fields a result becomes. Spread onto a block: `{ ...b, ...composedBlockFields(r) }`. */

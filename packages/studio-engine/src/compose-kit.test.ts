@@ -148,14 +148,20 @@ describe('parseKitResponse', () => {
     expect(parseKitResponse('note\n```\n{"component":"title","props":{"title":"Hi"}}\n```').choice?.component).toBe('title');
   });
 
-  it('reads null as a deliberate "no graphic here"', () => {
-    expect(parseKitResponse('nothing worth showing\n```json\nnull\n```').choice).toBeNull();
+  it('reads null as a deliberate "no graphic here" — and marks it as such', () => {
+    const r = parseKitResponse('nothing worth showing\n```json\nnull\n```');
+    expect(r.choice).toBeNull();
+    expect(r.declined).toBe(true);
+    expect(parseKitResponse('null').declined).toBe(true); // bare, unfenced
   });
 
-  it('degrades rather than throws on junk', () => {
+  it('junk degrades to null WITHOUT the declined mark — a hiccup is not a veto', () => {
+    // Conflating the two turned every malformed output into "the model said no", which
+    // deleted placeholders on transient failures. Callers regenerate on !declined nulls.
     for (const junk of ['', 'just prose', '```json\n{oops\n```', '```json\n[]\n```', '```json\n{"props":{}}\n```']) {
-      expect(() => parseKitResponse(junk)).not.toThrow();
-      expect(parseKitResponse(junk).choice).toBeNull();
+      const r = parseKitResponse(junk);
+      expect(r.choice).toBeNull();
+      expect(r.declined, `"${junk.slice(0, 20)}" must not read as a veto`).toBe(false);
     }
   });
 

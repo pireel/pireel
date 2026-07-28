@@ -157,30 +157,33 @@ export function buildKitPrompt(args: {
   return parts.join('\n\n');
 }
 
-/** Read the model's answer. A missing/!parseable fence is not an error here: it means "no graphic",
- *  which is a legitimate answer the prompt explicitly asks for. Callers distinguish the two by
- *  `choice === null` (deliberate or unusable — both mean: leave the moment alone). */
-export function parseKitResponse(text: string): { choice: KitChoice | null; note: string } {
+/** Read the model's answer. `choice: null` covers two situations that must NOT be conflated:
+ *  `declined: true` is the model deliberately answering null — the prompt invites that, and the
+ *  caller decides what a veto means (drop the placeholder, retry free-form). Everything else that
+ *  fails to parse is a hiccup, not an opinion — callers should regenerate, never treat it as "the
+ *  model said no". Folding the two together turned every malformed output into a silent veto. */
+export function parseKitResponse(text: string): { choice: KitChoice | null; note: string; declined: boolean } {
   const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
   const note = (fence ? text.replace(fence[0], '') : text).trim() || 'Chose a component';
   const raw = fence?.[1]?.trim() ?? text.trim();
-  if (!raw || /^null$/i.test(raw)) return { choice: null, note };
+  if (/^null$/i.test(raw)) return { choice: null, note, declined: true };
+  if (!raw) return { choice: null, note, declined: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { choice: null, note };
+    return { choice: null, note, declined: false };
   }
-  if (typeof parsed !== 'object' || parsed === null) return { choice: null, note };
+  if (typeof parsed !== 'object' || parsed === null) return { choice: null, note, declined: false };
   const o = parsed as Record<string, unknown>;
-  if (typeof o.component !== 'string' || !o.component) return { choice: null, note };
+  if (typeof o.component !== 'string' || !o.component) return { choice: null, note, declined: false };
   // Props are NOT validated here — the component's own schema is the gate, and it never throws.
   // Validating twice would only add a second, weaker opinion about what is acceptable.
   const props = typeof o.props === 'object' && o.props !== null ? (o.props as Record<string, unknown>) : {};
   // A staging id is not checked here either: an unknown one resolves to no blueprint at render and
   // the component's built-in variant carries the block — degrading, not discarding the whole answer.
   const staging = typeof o.staging === 'string' && o.staging ? o.staging : undefined;
-  return { choice: { component: o.component, props, ...(staging ? { staging } : {}) }, note };
+  return { choice: { component: o.component, props, ...(staging ? { staging } : {}) }, note, declined: false };
 }
 
 export async function composeBlock(

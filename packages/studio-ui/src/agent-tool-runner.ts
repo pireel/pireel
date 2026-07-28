@@ -382,6 +382,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               const CONCURRENCY = 3;
               let done = 0;
               let failed = 0;
+              let skipped = 0; // deliberate model vetoes (moment carries nothing) — slots removed, not failures
               const queue = [...slots];
               // Neighbor list (component + gist, in time order): fed to each compose so the model actively differs from adjacent components (anti-monotony).
               // Takes the graphic slots of the whole composition (placeholders + already-filled custom) — even when re-filling one, it can see what's around it.
@@ -398,6 +399,14 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 const neighbors = neighborsFrom(roster, slot.id);
                 const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
                 const parsed = await composeBlockChecked(seed, placeholderSpec(slot), undefined, { kit: true });
+                if (parsed.declined) {
+                  // compose's veto over the plan: with the actual sentences in hand, this moment has
+                  // nothing a graphic can say — remove the slot rather than leaving an empty shell
+                  // in the composition forever.
+                  skipped += 1;
+                  setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => b.id !== slot.id) }));
+                  return;
+                }
                 setComp((cc) => ({
                   ...cc,
                   blocks: cc.blocks.map((b) => (b.id === slot.id ? { ...b, ...composedBlockFields(parsed) } : b)),
@@ -419,13 +428,14 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 }
               };
               await Promise.all(Array.from({ length: Math.min(CONCURRENCY, slots.length) }, worker));
-              const okCount = slots.length - failed;
+              const okCount = slots.length - failed - skipped;
               return {
-                ok: okCount > 0,
+                ok: okCount > 0 || skipped > 0,
                 summary:
                   t('workbench.filledNDesignGraphics', { n: okCount }) +
+                  (skipped ? t('workbench.nSlotsSkippedNothingToSay', { n: skipped }) : '') +
                   (failed ? t('workbench.nFailedPlaceholdersRemain', { n: failed }) : ''),
-                ...(okCount === 0 ? { error: t('workbench.allGraphicsFailedTry') } : {}),
+                ...(okCount === 0 && skipped === 0 ? { error: t('workbench.allGraphicsFailedTry') } : {}),
               };
             } finally {
               markGenerating(lockedIds, false);
@@ -967,12 +977,22 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : r1(tRef.current);
               const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              const parsed = await composeBlockChecked(
+              let parsed = await composeBlockChecked(
                 seed,
                 `Create a new overlay element for this content: ${String(input.instruction ?? '')}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
                 { kit: true },
               );
+              // An explicit user request never maps to "nothing worth showing" — a deliberate null
+              // here means no component carries the ask, so take the free-form path rather than
+              // bouncing the request back at the user.
+              if (parsed.declined) {
+                parsed = await composeBlockChecked(
+                  seed,
+                  `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${String(input.instruction ?? '')}`,
+                  (acc) => report(noteOf(acc) || t('panels.generating')),
+                );
+              }
               const nb: Block = {
                 id: seed.id,
                 ...composedBlockFields(parsed),
@@ -1001,6 +1021,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               // whatever the user tuned by hand.
               const current = kitChoiceOf(b);
               const parsed = await composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('workbench.editing')), current ? { kit: true, current } : undefined);
+              // A declined edit means the model refused to change the component — keep the block
+              // exactly as it is (never silently convert a kit block to markup) and hand the note
+              // back so the agent can rephrase or explain.
+              if (parsed.declined) return { ok: false, error: parsed.note || t('workbench.aiEditFailed') };
               setComp((cc) => ({
                 ...cc,
                 blocks: cc.blocks.map((x) => (x.id === b.id ? { ...x, ...composedBlockFields(parsed) } : x)),
