@@ -1,17 +1,22 @@
 'use client';
 
 /**
- * Audio panel (global): settings for whatever is selected — an audio clip (level, mute,
- * solo, fades, speed) or, with nothing selected, the footage's own sound — plus narration
- * denoise. Adding audio is not here: uploads and generation live in the assets panel, the
- * same place images and video come from. Plain NLE semantics — no looping, no ducking;
- * clips are placed, trimmed by their own length, and sum when they overlap. Selection is
- * shared with the timeline lane. Every control writes through on change; the value shown
- * is the value playing.
+ * Audio panel: settings for whatever is selected — an audio clip (level, solo, fades,
+ * speed) or the selected shots' own sound (level, fades). Nothing selected = nothing to
+ * adjust, so the section says so instead of silently addressing every shot. Muting isn't
+ * here at all: it's per TRACK and lives on the timeline's track header, where an editor
+ * expects the speaker icon. Adding audio isn't here either — uploads and generation live
+ * in the assets panel, the same place images and video come from.
+ *
+ * Both level controls speak dB off the same slider; only the ceiling differs, and for a
+ * reason: footage plays through the video element (which cannot exceed source level) while
+ * lane clips run through a gain node and can be boosted. Plain NLE semantics — no looping,
+ * no ducking; clips are placed, trimmed, and sum when they overlap. Every control writes
+ * through on change; the value shown is the value playing.
  */
 
 import { Music } from 'lucide-react';
-import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults, dbToGain } from '@pireel/studio-engine/composition';
+import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, AUDIO_VOLUME_DB_MAX, SHOT_FADE_MAX_SEC, VOLUME_DB_MAX, VOLUME_DB_MIN, type AudioClip, type VideoShot, audioClipDefaults } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
 
@@ -23,8 +28,7 @@ export function MusicPanel({
   soloId,
   onSolo,
   peakOf,
-  shot,
-  shotCount,
+  shots,
   onSetShotAudio,
   denoise,
   onSetDenoise,
@@ -39,21 +43,17 @@ export function MusicPanel({
   onSolo: (id: string | null) => void;
   /** The clip's true peak (linear, 0..1) once its bytes are decoded — drives the clipping warning. */
   peakOf: (c: AudioClip) => number | null;
-  /** Selected shot (video track). With no audio clip selected this panel edits the FOOTAGE's own sound. */
-  shot: VideoShot | null;
-  shotCount: number;
-  onSetShotAudio: (patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }, all: boolean) => void;
+  /** SELECTED shots (video track). Empty = nothing selected, so the footage section has no target.
+   *  Several = every one of them takes the edit; the values shown are the first one's. */
+  shots: VideoShot[];
+  onSetShotAudio: (patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => void;
   /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
   denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | null; progress: number };
   onSetDenoise: (strength: number | null) => void;
 }) {
   const sel = clips.find((c) => c.id === selectedId) ?? null;
   const selD = sel ? audioClipDefaults(sel) : null;
-  // Video-track volume speaks percent of source level (its ceiling is 0 dB — see VideoShot.volumeDb),
-  // matching the framing panel's control rather than inventing a second unit for the same field.
-  const shotPct = Math.round(dbToGain(shot?.volumeDb ?? 0) * 100);
-  const setShotPct = (pct: number) =>
-    onSetShotAudio({ volumeDb: pct <= 0 ? VOLUME_DB_MIN : Math.max(VOLUME_DB_MIN, Math.min(0, 20 * Math.log10(pct / 100))) }, !shot);
+  const shot = shots[0] ?? null; // anchor: what the controls display when several shots share the edit
   const dbValue = Math.round(sel?.volumeDb ?? AUDIO_DEFAULT_DB);
   // Clipping: this clip alone, at this level, already exceeds full scale. Only flagged once the bytes are
   // decoded (peak unknown = say nothing rather than guess), and it's a warning, not a cap — the export
@@ -61,6 +61,27 @@ export function MusicPanel({
   const selPeak = sel ? peakOf(sel) : null;
   const clipsAt = selPeak && selPeak > 0 ? Math.floor(20 * Math.log10(1 / selPeak)) : null;
   const clipping = clipsAt != null && dbValue > clipsAt;
+
+  /** Level row (both kinds of audio): dB, with -60 shown as silence. Only the ceiling differs. */
+  const levelRow = (value: number, max: number, disabled: boolean, commit: (db: number) => void) => (
+    <>
+      <div className="text-ink flex items-center justify-between font-medium">
+        <span>{t('panels.volume')}</span>
+        <span className="text-ink-4 tabular-nums">{value <= VOLUME_DB_MIN ? t('panels.muted') : `${value > 0 ? '+' : ''}${value}dB`}</span>
+      </div>
+      <input
+        type="range"
+        min={VOLUME_DB_MIN}
+        max={max}
+        step={1}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => commit(Number(e.target.value))}
+        className="zoom-range w-full disabled:opacity-40"
+        aria-label={t('panels.volume')}
+      />
+    </>
+  );
 
   /** Slider row: writes straight through on every change — no drag buffer, no commit-on-release. The
    *  value shown is the value applied (and heard); the preview follows comp, so there is nothing to sync. */
@@ -87,57 +108,24 @@ export function MusicPanel({
     <div className="flex h-full min-h-0 w-full flex-col">
       <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.musicBedHint')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
-        {/* Settings only: this panel adjusts the SELECTED clip. Adding content (upload / generate) lives in
-            the assets panel, the same place images and video come from. */}
-        {/* No audio clip selected → this is the VIDEO's own sound (the selected shot, or every shot when
-            none is selected), so switching here always lands on something adjustable. */}
+        {/* No audio clip selected → the selected shots' own sound. Selection is exclusive, so exactly one
+            of these two sections is live at a time, and neither addresses anything the user didn't pick. */}
         {!sel && (
           <section className="flex flex-col gap-2.5">
             <div className="text-ink flex items-center justify-between font-medium">
               <span>{t('panels.videoSound')}</span>
-              <span className="text-ink-4 text-[10.5px]">{shot ? t('panels.thisShotOnly') : t('panels.allShotsN', { n: shotCount })}</span>
+              {shots.length > 1 && <span className="text-ink-4 text-[10.5px]">{t('panels.nShotsSelected', { n: shots.length })}</span>}
             </div>
-            {shotCount === 0 ? (
-              <div className="text-ink-4">{t('panels.uploadVideoForPortraitFx')}</div>
+            {!shot ? (
+              // Nothing selected: the old fallback quietly addressed EVERY shot, which is a big edit to
+              // trigger by accident. Say what to select instead.
+              <div className="text-ink-4">{t('panels.selectShotOrAudioFirst')}</div>
             ) : (
               <>
-                <div className="flex items-center gap-2">
-                  <span className="text-ink-3 w-7 shrink-0">{t('panels.volume')}</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={shotPct}
-                    disabled={!!shot?.audioMuted}
-                    onChange={(e) => setShotPct(Number(e.target.value))}
-                    className="zoom-range w-full"
-                    aria-label={t('panels.volume')}
-                  />
-                  <span className="text-ink-4 w-8 shrink-0 text-right tabular-nums">{shotPct}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-3">{t('panels.mute')}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={!!shot?.audioMuted}
-                    aria-label={t('panels.mute')}
-                    onClick={() => onSetShotAudio({ mute: !shot?.audioMuted }, !shot)}
-                    className={`h-4.5 w-8 rounded-full p-0.5 transition ${shot?.audioMuted ? 'bg-accent' : 'bg-ink-4/30'}`}
-                  >
-                    <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${shot?.audioMuted ? 'translate-x-3.5' : ''}`} />
-                  </button>
-                </div>
-                {shot ? (
-                  <>
-                    {slider(t('panels.fadeIn'), shot.audioFadeInSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeInSec: v }, false))}
-                    {slider(t('panels.fadeOut'), shot.audioFadeOutSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeOutSec: v }, false))}
-                  </>
-                ) : (
-                  <div className="text-ink-4 text-[10.5px]">{t('panels.selectShotForFades')}</div>
-                )}
-                <div className="text-ink-4 text-[10.5px]">{t('panels.selectAudioClipFirst')}</div>
+                {levelRow(Math.round(shot.volumeDb ?? 0), VOLUME_DB_MAX, !!shot.audioMuted, (db) => onSetShotAudio({ volumeDb: db }))}
+                {shot.audioMuted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
+                {slider(t('panels.fadeIn'), shot.audioFadeInSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeInSec: v }))}
+                {slider(t('panels.fadeOut'), shot.audioFadeOutSec ?? 0, 0, SHOT_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onSetShotAudio({ fadeOutSec: v }))}
               </>
             )}
           </section>
@@ -149,36 +137,11 @@ export function MusicPanel({
               <span className="min-w-0 flex-1 truncate">{sel.label || t('panels.musicBed')}</span>
               {!usable(sel) && <span className="text-accent shrink-0 text-[10px]">{t('panels.musicFileMissingShort')}</span>}
             </div>
-            <div className="text-ink flex items-center justify-between font-medium">
-              <span>{t('panels.volume')}</span>
-              <span className="text-ink-4 tabular-nums">{dbValue <= VOLUME_DB_MIN ? t('panels.muted') : `${dbValue > 0 ? '+' : ''}${dbValue}dB`}</span>
-            </div>
-            <input
-              type="range"
-              min={VOLUME_DB_MIN}
-              max={AUDIO_VOLUME_DB_MAX}
-              step={1}
-              value={dbValue}
-              onChange={(e) => onPatch(sel.id, { volumeDb: Number(e.target.value) })}
-              className="zoom-range w-full"
-              aria-label={t('panels.volume')}
-            />
-            {clipping && <div className="text-accent text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
-            <div className="flex items-center justify-between">
-              <span className="text-ink-3">{t('panels.mute')}</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={!!sel.muted}
-                aria-label={t('panels.mute')}
-                onClick={() => onPatch(sel.id, { muted: !sel.muted })}
-                className={`h-4.5 w-8 rounded-full p-0.5 transition ${sel.muted ? 'bg-accent' : 'bg-ink-4/30'}`}
-              >
-                <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${sel.muted ? 'translate-x-3.5' : ''}`} />
-              </button>
-            </div>
-            {/* Solo sits next to mute because that's where an editor looks for it, but it is a different KIND
-                of switch: mute is part of the video, solo is just how you're listening right now. */}
+            {levelRow(dbValue, AUDIO_VOLUME_DB_MAX, !!sel.muted, (db) => onPatch(sel.id, { volumeDb: db }))}
+            {sel.muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
+            {clipping && !sel.muted && <div className="text-accent text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
+            {/* Solo is the one listening control that IS per clip: it answers "what does this one sound like",
+                which is a question about a clip, not about a track. Mute is per track, up on the timeline. */}
             <div className="flex items-center justify-between">
               <span className="text-ink-3">{t('panels.soloListen')}</span>
               <button

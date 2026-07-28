@@ -16,7 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Film, Loader2, Music, Plus, VolumeX } from 'lucide-react';
+import { ArrowLeftRight, Film, Loader2, Music, Plus, Volume2, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
@@ -238,6 +238,12 @@ interface StudioTimelineProps {
   audioPeaks?: Map<string, Float32Array>;
   /** Peak envelopes per VIDEO source ('main' / insert-clip url): the scene cards draw their own audio. */
   sourcePeaks?: Map<string, { peaks: Float32Array; durationSec: number }>;
+  /** Track-level mute (the speaker icon in front of each track): silences that whole track — every shot's
+   *  own sound, or every clip on the music lane. A composition decision, so the export honours it. */
+  videoMuted?: boolean;
+  onToggleVideoMute?: () => void;
+  audioMuted?: boolean;
+  onToggleAudioMute?: () => void;
   /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
   selectedAudioId?: string | null;
   onSelectAudio?: (id: string | null) => void;
@@ -258,6 +264,29 @@ interface StudioTimelineProps {
 /** memo: callback props have stable identity via the workbench's useStableCallbacks; timeline-irrelevant
  *  state changes in the workbench (export progress / panel switch / generating state) no longer re-render this big tree. comp changes still render as usual. */
 export const StudioTimeline = memo(StudioTimelineImpl);
+
+/** Track mute toggle (track header): the NLE speaker icon, in front of the track it silences. Mute is a
+ *  TRACK property here rather than a per-clip one — "quiet the music while I listen to the cut" is a
+ *  statement about a track, and per-item silencing is already the level slider's bottom stop. */
+function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={muted}
+      title={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
+      aria-label={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
+      onPointerDown={(e) => e.stopPropagation()} // the row itself starts a track drag
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={`hover:bg-panel-2 rounded p-0.5 transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+    >
+      {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+    </button>
+  );
+}
 
 function StudioTimelineImpl({
   comp,
@@ -293,6 +322,10 @@ function StudioTimelineImpl({
   onFadeAudio,
   audioPeaks,
   sourcePeaks,
+  videoMuted,
+  onToggleVideoMute,
+  audioMuted,
+  onToggleAudioMute,
   selectedAudioId,
   onSelectAudio,
   onOpenMusicPanel,
@@ -905,16 +938,18 @@ function StudioTimelineImpl({
                     key={track}
                     onPointerDown={track > 0 ? (e) => startTrackDrag(e, track) : undefined}
                     title={track > 0 ? t('panels.dragReorderTrackStacking') : undefined}
-                    className={`flex items-center gap-1.5 px-2.5 text-[11px] ${track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
+                    className={`flex items-center gap-1 px-2 text-[11px] ${track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
                     style={{ height: rowH(track), marginTop: track === 0 ? 0 : ROW_GAP, transform: dragging ? `translateY(${trackDrag!.dy}px)` : undefined }}
                   >
                     <Icon size={13} className={meta.dot} />
+                    {k === 'video' && onToggleVideoMute && <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />}
                   </div>
                 );
               })}
               {musicLane && (
-                <div className="flex items-center gap-1.5 px-2.5 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: ROW_GAP }}>
+                <div className="flex items-center gap-1 px-2 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: ROW_GAP }}>
                   <Music size={13} className="text-accent" />
+                  {onToggleAudioMute && <MuteToggle muted={!!audioMuted} onToggle={onToggleAudioMute} />}
                 </div>
               )}
             </div>
