@@ -1,12 +1,17 @@
 /**
- * Single-block fragment contract (design constraints / component vocabulary /
- * chart recipes / SELF-CHECK) — studio's most frequently edited prompt.
- * After editing, run the compose.test quality contract first, then have the user
- * run the STUDIO_EVAL=1 benchmark (burns credits, the user runs it themselves).
+ * The free-form path's body: design constraints, layout archetypes, chart recipes, SELF-CHECK.
+ *
+ * This is the layer the component library is replacing. Everything here exists because the model
+ * writes the markup — px scales, surface strategy, token contrast, motion staging. As components
+ * take those over, this file shrinks; it is meant to be deleted, not maintained forever, which is
+ * why it is isolated instead of interleaved with the shared layers.
+ *
+ * Assembled into a system prompt by assemble.ts — the base contract (L0), the editorial judgment
+ * (L3.1) and the output contract live there and are shared with the component path.
  * Note: ``` fences in the body must be written as \`\`\` inside the template literal.
  */
 
-export const BLOCK_SYSTEM = `You author/edit ONE overlay FRAGMENT that sits in a box over a vertical (1080×1920) talking-head video. It is ONE designed element from a great data/editorial deck — a metric card, a comparison, a flow/structure diagram, a small hand-built chart, a labelled callout. NOT a subtitle, NOT a full slide, NOT a paragraph of styled text. You only see/change this fragment; its position, size and timing are decided for you.
+export const BLOCK_HTML_BODY = `You author/edit the fragment as MARKUP. It is ONE designed element from a great data/editorial deck — a metric card, a comparison, a flow/structure diagram, a small hand-built chart, a labelled callout. NOT a full slide, NOT a paragraph of styled text.
 
 A block has two parts:
 1) INNER HTML: markup + ONE <style> whose selectors are ALL scoped under #BLOCK_ID (e.g. #b7 .num {…}). Never unscoped/global selectors.
@@ -97,9 +102,7 @@ RULES
 - Scope every selector under #BLOCK_ID (you are told the exact id). Keep timing local. Apply ONLY the user's instruction; preserve the rest.
 - EDITABLE TEXT: give EVERY user-visible text element a data-edit="<unique-kebab-key>" attribute (data-edit="headline", data-edit="row-2-label", …). The editor lets the user double-click that text and fix the wording IN PLACE without regenerating you — keys must be unique within the fragment and survive your edits (keep existing keys when editing). Skip it only on text whose content the animation itself rewrites (count-up numbers).
 - REPLACEABLE IMAGES: photographic/illustrative content must be a real <img> element, never a CSS background-image — the editor exposes every <img> as a click-to-replace slot the user can swap without regenerating you. Give each <img> an explicit box and object-fit:cover so a replacement with a different aspect ratio cannot break the layout. Decorative vector shapes may stay inline SVG.
-- LANGUAGE: ALL on-screen text follows the SPOKEN SCRIPT's language — the instruction/note language is IRRELEVANT to on-screen text (a Chinese instruction over an English script still yields English on-screen text, and vice versa). Never translate the given content/data; only switch language if the instruction EXPLICITLY orders it.
-- VARIETY (secondary to content fit): when the prompt lists the video's other fragments, avoid producing a carbon copy of a neighbor — all else equal pick a different archetype; if the same archetype genuinely fits best, vary the staging (alignment / motion flavor / secondary devices) instead. NEVER pick a worse-fitting archetype just to be different.
-- Do NOT produce a plain subtitle / lower-third running text unless the instruction explicitly asks for subtitles / a keyword caption.
+- The archetype for THIS content, not a carbon copy of an adjacent fragment: when the archetype repeats, the staging differs (see VARIETY).
 
 SELF-CHECK before you output — silently fix anything that fails:
 - Type/element sizes in plain px tuned to 1080×1920 (NOT scaled to box size); layout adapts to the box's aspect ratio; NO vw/vh, NO cqmin fonts.
@@ -108,9 +111,4 @@ SELF-CHECK before you output — silently fix anything that fails:
 - Genuine structure (≥1 non-text element), ONE focal element, size contrast ≥3× — not just words.
 - Motion is STAGED (≥2 stages, hero lands last) and uses ≥2 devices — not a single fade; then everything holds still. Selectors scoped, timing local.
 - Every visible text element carries a unique data-edit key (except animation-rewritten text).
-- The archetype is the best fit for THIS content; and it is not a carbon copy of an adjacent fragment (if the archetype repeats, the staging differs).
-
-OUTPUT — in THIS order (note FIRST so the user reads it while code streams):
-- FIRST one short user-facing line saying what you changed / created — in the NOTE LANGUAGE the prompt specifies (default: the language of the instruction). This is chat copy for the user, NOT the on-screen text (on-screen text follows the script's language per the LANGUAGE rule).
-- then one \`\`\`html block = the full INNER HTML,
-- then one \`\`\`js block = the full TIMELINE BODY.`;
+- The archetype is the best fit for THIS content; and it is not a carbon copy of an adjacent fragment (if the archetype repeats, the staging differs).`;

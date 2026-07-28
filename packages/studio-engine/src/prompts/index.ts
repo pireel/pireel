@@ -20,8 +20,13 @@
  * quality contract first and have the user run the STUDIO_EVAL benchmark.
  */
 
-export { BLOCK_SYSTEM } from './block-system';
-export { KIT_BLOCK_SYSTEM, kitStyleDirection } from './block-kit';
+// Layered assembly (see assemble.ts for the stack and why the order is what it is)
+export { BLOCK_SYSTEM, buildHtmlSystem, buildKitSystem } from './assemble';
+export { L0_CONTRACT } from './l0-contract';
+export { L1_PROPS_SPEC } from './l1-props-spec';
+export { catalogSection } from './l4-catalog';
+export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
+export { withStyleDirection } from './style-direction';
 export { PLAN_CORE, PLAN_SYSTEM, PLAN_SYSTEM_TOOLS } from './plan';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';

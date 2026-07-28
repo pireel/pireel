@@ -7,46 +7,68 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildKitPrompt, parseKitResponse } from './compose';
-import { KIT_BLOCK_SYSTEM, kitStyleDirection } from './prompts';
+import { BLOCK_SYSTEM, L0_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem, withStyleDirection } from './prompts';
 import { assembleKitTheme, frameVoice } from './briefs';
 import { components } from '@pireel/studio-kit';
 
 const seed = { id: 'b1', kind: 'custom', innerHtml: '', timelineBody: '' };
+const KIT = buildKitSystem();
 
-describe('KIT_BLOCK_SYSTEM', () => {
-  it('carries every component, derived from the registry', () => {
-    for (const id of Object.keys(components)) expect(KIT_BLOCK_SYSTEM).toContain(`  ${id} — `);
+describe('the layer stack', () => {
+  it('both paths share the base contract and the editorial layer', () => {
+    for (const system of [KIT, buildHtmlSystem()]) {
+      expect(system).toContain(L0_CONTRACT);
+      expect(system).toContain(SPOKEN_EDITORIAL);
+    }
   });
 
+  it('only the capability layer and the output contract differ', () => {
+    expect(KIT).toContain(L1_PROPS_SPEC);
+    expect(buildHtmlSystem()).not.toContain(L1_PROPS_SPEC);
+    expect(KIT).toContain('```json');
+    expect(buildHtmlSystem()).toContain('```html');
+  });
+
+  it('the theme voice goes last, so switching themes invalidates only the tail', () => {
+    const withVoice = buildKitSystem({ voice: 'Cool, precise, conclusion-first.' });
+    expect(withVoice.startsWith(KIT)).toBe(true);
+    expect(withVoice).toContain('Cool, precise, conclusion-first.');
+    expect(withVoice).toContain('never overrides');
+  });
+
+  it('an unknown preset falls back rather than failing generation', () => {
+    expect(buildKitSystem({ presetId: 'no-such-preset' })).toBe(KIT);
+  });
+
+  it('the preset decides the vocabulary', () => {
+    // Pinned via the assembler, not by reading the preset: a preset naming components that never
+    // reach the catalogue would be a silent capability loss.
+    for (const id of Object.keys(components)) expect(KIT).toContain(`  ${id} — `);
+  });
+});
+
+describe('the component path', () => {
   it('states the rules that keep the screen honest', () => {
-    expect(KIT_BLOCK_SYSTEM).toContain('VERBATIM');
-    expect(KIT_BLOCK_SYSTEM).toContain('return null');
-    expect(KIT_BLOCK_SYSTEM).toContain('language of the speech');
+    expect(KIT).toContain('VERBATIM');
+    expect(KIT).toContain('null');
+    expect(KIT).toContain("SPOKEN SCRIPT's language");
   });
 
   it('does not teach markup — that is what the components are for', () => {
     for (const leak of ['px', 'var(--', 'font-size', 'tl.from', 'gsap']) {
-      expect(KIT_BLOCK_SYSTEM, `kit prompt leaks implementation: ${leak}`).not.toContain(leak);
+      expect(KIT, `component prompt leaks implementation: ${leak}`).not.toContain(leak);
     }
   });
 
-  it('is a fraction of the free-form path — the components absorbed the rest', async () => {
-    const { BLOCK_SYSTEM } = await import('./prompts');
-    expect(KIT_BLOCK_SYSTEM.length).toBeLessThan(BLOCK_SYSTEM.length);
+  it('is a fraction of the free-form path — the components absorbed the rest', () => {
+    expect(KIT.length).toBeLessThan(BLOCK_SYSTEM.length);
   });
 });
 
 describe('style direction', () => {
-  it('wraps the voice and subordinates it to the hard rules', () => {
-    const out = kitStyleDirection(KIT_BLOCK_SYSTEM, 'Cool, precise, conclusion-first.');
-    expect(out).toContain('<style_direction>');
-    expect(out).toContain('Cool, precise, conclusion-first.');
-    expect(out).toContain('never overrides');
-  });
-
   it('adds nothing when no theme is attached', () => {
-    expect(kitStyleDirection(KIT_BLOCK_SYSTEM, '')).toBe(KIT_BLOCK_SYSTEM);
-    expect(kitStyleDirection(KIT_BLOCK_SYSTEM, undefined)).toBe(KIT_BLOCK_SYSTEM);
+    expect(withStyleDirection(KIT, '')).toBe(KIT);
+    expect(withStyleDirection(KIT, undefined)).toBe(KIT);
   });
 
   it('an authored voice wins over the playbook lead', () => {
