@@ -862,7 +862,8 @@ function StudioTimelineImpl({
           {/* Left: track labels (icon + name). Sticky fixed column; z must beat all scrolling content (treatment badge z-30 /
               playhead z-30 / marquee & "+" z-40), otherwise on horizontal scroll content slides under it but covers the icons */}
           <div className="bg-panel sticky left-0 z-50 shrink-0" style={{ width: GUTTER }}>
-            <div className="border-line border-b" style={{ height: RULER_H }} />
+            {/* Corner: sticks with the ruler, and opaque so the track icons scroll UNDER it, not into it */}
+            <div className="border-line bg-panel sticky top-0 z-10 border-b" style={{ height: RULER_H }} />
             <div style={{ paddingTop: 0 }}>
               {displayTracks.map((track) => {
                 const k = trackKind(track);
@@ -954,8 +955,10 @@ function StudioTimelineImpl({
             onMouseLeave={() => endScrubRef.current()}
           >
             {/* Ruler (click/drag to seek) + major/minor ticks */}
+            {/* Sticky: with enough tracks the area scrolls vertically, and a ruler that scrolls away takes
+                the one thing every other row is read against with it. */}
             <div
-              className="border-line text-ink-4 relative cursor-ew-resize select-none border-b text-[9px]"
+              className="border-line bg-panel text-ink-4 sticky top-0 z-[45] cursor-ew-resize select-none border-b text-[9px]"
               style={{ height: RULER_H }}
               onClick={(e) => e.stopPropagation()} // dragging the ruler to seek doesn't clear selection
               onPointerDown={(e) => {
