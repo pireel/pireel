@@ -345,6 +345,54 @@ function StudioTimelineImpl({
   const shots = useMemo(() => comp.shots ?? [], [comp.shots]);
   // Scenes' spans on the **edited** timeline (clip source spans joined end to end)
   const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
+  /** Scene-card audio bands, precomputed per shot. These are the timeline's heaviest drawing by far — one
+   *  path with up to WAVE_MAX_BARS sub-paths per card — and they depend only on the cut, the zoom and that
+   *  shot's own audio. Building them inside the render meant every unrelated gesture that re-renders the
+   *  timeline (trimming a lane clip, 60 times a second) rebuilt every card's waveform, which is what makes
+   *  the drag stutter. Nothing here reads the drag state, so this memo survives the whole gesture. */
+  const sceneWaves = useMemo(() => {
+    const out = new Map<string, { body: string; wave: string }>();
+    if (!sourcePeaks?.size) return out;
+    for (let i = 0; i < sceneSpans.length; i++) {
+      const { shot, start, end } = sceneSpans[i]!;
+      const sp = sourcePeaks.get(shot.src ?? 'main');
+      const w = Math.max(8, (end - start) * pps - (i < sceneSpans.length - 1 ? SHOT_GAP : 0));
+      if (!sp || sp.durationSec <= 0 || w < 6) continue;
+      const per = sp.peaks.length / sp.durationSec;
+      const len = Math.max(0.01, shot.srcEnd - shot.srcStart);
+      const faded = !!(shot.audioFadeInSec || shot.audioFadeOutSec);
+      out.set(shot.id, {
+        body: fadeBodyPath(w, SCENE_WAVE_H, shot.audioFadeInSec ?? 0, shot.audioFadeOutSec ?? 0, len),
+        wave: waveBars(
+          sp.peaks,
+          Math.floor(shot.srcStart * per),
+          Math.ceil(shot.srcEnd * per),
+          w,
+          SCENE_WAVE_H,
+          shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0),
+          // shot fades shape the band exactly as they shape a lane clip's wave
+          faded ? (f) => shotFadeAt(shot, f * len, len) : undefined,
+        ),
+      });
+    }
+    return out;
+  }, [sceneSpans, sourcePeaks, pps]);
+  /** One lane clip's two paths (tapered body + waveform). Same reason as the scene bands: during a gesture
+   *  only the clip under the pointer actually changes shape, so every other chip reuses its memoized paths. */
+  const laneBand = useCallback(
+    (clip: AudioClip) => {
+      const w = audioClipWindow(clip, dur);
+      const span = Math.max(0.05, w.end - w.start);
+      const contentW = span * pps;
+      const d = audioClipDefaults(clip);
+      const peaks = clip.sig ? audioPeaks?.get(clip.sig) : undefined;
+      return {
+        body: fadeBodyPath(contentW, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span),
+        wave: peaks && peaks.length > 1 ? audioWaveBars(peaks, clip, d, contentW, span) : null,
+      };
+    },
+    [dur, pps, audioPeaks],
+  );
   // Filmstrip tiles (like a mainstream editor): square tiles (width=height, object-cover crop), grid anchored on **source time** —
   // each card just "windows" (stripTiles) the continuous strip; after split/trim each segment continues the original strip, never re-laying-out trailing segments
   // Card = thumbnails on top, the footage's own audio strip beneath them (never overlaid — a wave drawn on
@@ -739,7 +787,9 @@ function StudioTimelineImpl({
   const slotTop = (slot: number) => (slot === 0 ? 0 : H0 + ROW_GAP + (slot - 1) * (ROW_H + ROW_GAP));
   const tracksH = slotTop(displayTracks.length - 1) + (displayTracks.length > 1 ? ROW_H : H0);
   // Music lane: a dedicated bottom row — shown when clips exist, or as a highlighted drop target while an audio asset is being dragged
-  const audioClips = comp.audioTracks ?? [];
+  // stable identity: `?? []` alone would hand the memo below a fresh array on every render
+  const audioClips = useMemo(() => comp.audioTracks ?? [], [comp.audioTracks]);
+  const laneWaves = useMemo(() => new Map(audioClips.map((c) => [c.id, laneBand(c)])), [audioClips, laneBand]);
   const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
   // Live gesture on a music chip: kept LOCAL so a drag re-renders only this component — writing comp per
   // pointer frame re-rendered the whole workbench and re-specced the audio engine (that was the stutter),
@@ -1181,10 +1231,8 @@ function StudioTimelineImpl({
                           {/* The video's OWN audio, along the card's bottom edge: same dB scale as the music
                               lane, shifted by this shot's level so muting or ducking a shot shows here too. */}
                           {(() => {
-                            const sp = sourcePeaks?.get(shot.src ?? 'main');
-                            if (!sp || sp.durationSec <= 0 || w < 6) return null;
-                            const per = sp.peaks.length / sp.durationSec;
-                            const dbShift = shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0);
+                            const band = sceneWaves.get(shot.id);
+                            if (!band) return null;
                             return (
                               <svg
                                 className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent/25' : 'text-accent/60'}`}
@@ -1195,23 +1243,9 @@ function StudioTimelineImpl({
                               >
                                 {/* same blue as the music lane, and the backing tapers with the fades exactly
                                     like a lane clip's body — the band IS the shot's audio, shape included */}
+                                <path d={band.body} className="fill-accent/8" />
                                 <path
-                                  d={fadeBodyPath(w, SCENE_WAVE_H, shot.audioFadeInSec ?? 0, shot.audioFadeOutSec ?? 0, Math.max(0.01, shot.srcEnd - shot.srcStart))}
-                                  className="fill-accent/8"
-                                />
-                                <path
-                                  d={waveBars(
-                                    sp.peaks,
-                                    Math.floor(shot.srcStart * per),
-                                    Math.ceil(shot.srcEnd * per),
-                                    w,
-                                    SCENE_WAVE_H,
-                                    dbShift,
-                                    // shot fades shape the band exactly as they shape a lane clip's wave
-                                    shot.audioFadeInSec || shot.audioFadeOutSec
-                                      ? (f) => shotFadeAt(shot, f * Math.max(0.01, shot.srcEnd - shot.srcStart), Math.max(0.01, shot.srcEnd - shot.srcStart))
-                                      : undefined,
-                                  )}
+                                  d={band.wave}
                                   fill="currentColor"
                                 />
                               </svg>
@@ -1524,8 +1558,9 @@ function StudioTimelineImpl({
                     const width = Math.max(14, x(Math.max(0.05, end - w.start))); // visible box (clipped at the timeline end)
                     const selected = selectedAudioId === clip.id;
                     const d = audioClipDefaults(clip);
-                    const peaks = clip.sig ? audioPeaks?.get(clip.sig) : undefined;
                     const span = Math.max(0.05, w.end - w.start);
+                    // only the clip under the pointer is reshaped mid-gesture; the rest keep their memoized paths
+                    const band = audioDrag?.id === base.id ? laneBand(clip) : (laneWaves.get(base.id) ?? laneBand(clip));
                     const knobs = width > 56; // narrow chips have no room for knees (drag the panel sliders instead)
                     // Gestures paint through the DOM and commit ONCE on release: a state write per pointer
                     // frame re-rendered the whole timeline (and re-specced the audio engine), which is what
@@ -1594,9 +1629,9 @@ function StudioTimelineImpl({
                           aria-hidden
                         >
                           {/* body background tapering along the fade, then the wave on top of it */}
-                          <path d={fadeBodyPath(contentW, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span)} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
+                          <path d={band.body} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
                           {/* Muted keeps its shape but loses its colour — the clip is still there to reason about, it just makes no sound */}
-                          {peaks && peaks.length > 1 && <path d={audioWaveBars(peaks, clip, d, contentW, span)} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
+                          {band.wave && <path d={band.wave} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
                         </svg>
                         {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
                             trim the wave is nudged the other way so the audio stays pinned to the timeline —
