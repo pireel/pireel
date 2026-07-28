@@ -60,7 +60,7 @@ export const PANELS_EN: Record<string, string> = {
   'panels.framingName': 'Framing: {name}',
   'panels.framingSize': 'Framing size',
   'panels.fullClip': 'full clip',
-  'panels.generateAssetsImageVideo': 'Generate assets (image/video/element)',
+  'panels.generateAssetsImageVideo': 'Generate assets (image/video/element/audio)',
   'panels.generating': 'Generating…',
   'panels.generatingImage': 'Generating image',
   'panels.generatingVideo': 'Generating video',

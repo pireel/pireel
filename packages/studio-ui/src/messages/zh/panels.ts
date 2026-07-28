@@ -60,7 +60,7 @@ export const PANELS_ZH: Record<string, string> = {
   'panels.framingName': '取景:{name}',
   'panels.framingSize': '取景大小',
   'panels.fullClip': '整段',
-  'panels.generateAssetsImageVideo': '生成素材(图片/视频/组件)',
+  'panels.generateAssetsImageVideo': '生成素材(图片/视频/组件/音频)',
   'panels.generating': '生成中…',
   'panels.generatingImage': '生成图片中',
   'panels.generatingVideo': '生成视频中',
