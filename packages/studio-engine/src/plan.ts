@@ -3,10 +3,15 @@
  *
  * 2026-06 rewrite: from "per-sentence acting" to "LLM segments into scenes". The agent reads
  * the full script (+ picture hints) and merges sentences into N scenes; each scene = a sentence
- * range (= semantics-driven cut point) + framing + one design-graphic brief (chosen from the full
- * component vocabulary: metric/comparison/pipeline/structure/kpi/chart/timeline/loop/callout/list/
- * title + real data pulled from the script). Design graphics are primary (most scenes have one);
- * captions/effects default off, purely optional. build-draft cuts shots per scene + drops picture placeholders.
+ * range (= semantics-driven cut point) + framing + one design-graphic brief with real data pulled
+ * from the script. Design graphics are primary (most scenes have one); captions/effects default
+ * off, purely optional. build-draft cuts shots per scene + drops picture placeholders.
+ *
+ * A scene does NOT name a component. This stage is the only one that sees the whole script, so it
+ * owns what a beat IS and how much weight it carries; which component renders it depends on the
+ * box, the surviving on-screen duration and the theme's stagings — none of which exist yet here.
+ * Naming a component from this side was two models deciding the same thing, the second with less
+ * to go on.
  */
 
 import { PLAN_SYSTEM, PLAN_SYSTEM_TOOLS, planWithActiveTheme } from './prompts';
@@ -23,33 +28,6 @@ interface ChatCapable {
 export type Framing = 'full' | 'punch-in' | 'corner' | 'split';
 export const FRAMINGS: Framing[] = ['full', 'punch-in', 'corner', 'split'];
 
-/** Design-graphic component types (aligned with compose.ts BLOCK_SYSTEM's component vocabulary). */
-export type GraphicComponent =
-  | 'metric'
-  | 'comparison'
-  | 'pipeline'
-  | 'structure'
-  | 'kpi'
-  | 'chart'
-  | 'timeline'
-  | 'loop'
-  | 'callout'
-  | 'list'
-  | 'title';
-export const GRAPHIC_COMPONENTS: GraphicComponent[] = [
-  'metric',
-  'comparison',
-  'pipeline',
-  'structure',
-  'kpi',
-  'chart',
-  'timeline',
-  'loop',
-  'callout',
-  'list',
-  'title',
-];
-
 /** Graphic size tiers (LLM picks by narrative weight): badge=small transition tag · card=normal (default) · banner=full-width strip · poster=hero moment.
  *  build-draft sizes the actual box within the geometry safe zone per tier — cures "every graphic the same size". */
 export type GraphicSize = 'badge' | 'card' | 'banner' | 'poster';
@@ -57,8 +35,8 @@ export const GRAPHIC_SIZES: GraphicSize[] = ['badge', 'card', 'banner', 'poster'
 
 /** The design graphic a scene produces: chosen component + design brief + real data pulled from the narration. */
 export interface SceneGraphic {
-  component: GraphicComponent;
-  /** What this segment shows and how it's laid out (focal component + structure). */
+  /** What this beat shows and how it reads. NOT which component renders it — the graphics layer
+   *  picks that, because only it knows the box, the on-screen duration and the theme's stagings. */
   brief: string;
   /** Real numbers / points / keywords (pulled verbatim from these sentences, comma- or newline-separated). */
   data?: string;
@@ -221,14 +199,11 @@ export function buildPlanPrompt(args: {
 function coerceGraphic(g: unknown): SceneGraphic | undefined {
   if (!g || typeof g !== 'object') return undefined;
   const o = g as Record<string, unknown>;
-  const component = GRAPHIC_COMPONENTS.includes(o.component as GraphicComponent)
-    ? (o.component as GraphicComponent)
-    : 'callout';
   const brief = typeof o.brief === 'string' ? o.brief.trim() : '';
   if (!brief) return undefined; // a graphic with no brief is meaningless
   const data = typeof o.data === 'string' && o.data.trim() ? o.data.trim() : undefined;
   const size = GRAPHIC_SIZES.includes(o.size as GraphicSize) ? (o.size as GraphicSize) : undefined;
-  return { component, brief, ...(data ? { data } : {}), ...(size ? { size } : {}) };
+  return { brief, ...(data ? { data } : {}), ...(size ? { size } : {}) };
 }
 
 function coerceScene(s: unknown, sentenceCount: number): Scene | null {

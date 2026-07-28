@@ -490,7 +490,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (plan?.scenes.length) {
       out.push('', `# scenes (${plan.scenes.length})`);
       plan.scenes.forEach((s) => {
-        const g = s.graphic ? ` · ${s.graphic.component}:${s.graphic.data ?? s.graphic.brief}` : '';
+        const g = s.graphic ? ` · ${s.graphic.data ?? s.graphic.brief}` : '';
         const e = s.emphasis?.length ? ` · emphasis:${s.emphasis.join(' ')}` : '';
         out.push(`[${s.from}-${s.to}] ${s.framing}${g}${e}`);
       });

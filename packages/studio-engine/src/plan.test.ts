@@ -8,8 +8,8 @@ describe('parsePlan(场景化 storyboard)', () => {
       JSON.stringify({
         title: { text: '标题', durationSec: 3 },
         scenes: [
-          { from: 0, to: 1, framing: 'corner', graphic: { component: 'metric', brief: '完播率大数字', data: '87%' } },
-          { from: 2, to: 2, framing: 'full', graphic: { component: 'callout', brief: '收尾金句' } },
+          { from: 0, to: 1, framing: 'corner', graphic: { brief: '完播率大数字', data: '87%' } },
+          { from: 2, to: 2, framing: 'full', graphic: { brief: '收尾金句' } },
         ],
         outro: { text: '关注我', durationSec: 2 },
       }) +
@@ -17,7 +17,7 @@ describe('parsePlan(场景化 storyboard)', () => {
     const plan = parsePlan(text, 3);
     expect(plan.scenes).toHaveLength(2);
     expect(plan.scenes[0]).toMatchObject({ from: 0, to: 1, framing: 'corner' });
-    expect(plan.scenes[0]!.graphic).toEqual({ component: 'metric', brief: '完播率大数字', data: '87%' });
+    expect(plan.scenes[0]!.graphic).toEqual({ brief: '完播率大数字', data: '87%' });
     expect(plan.scenes[1]!.framing).toBe('full');
     expect(plan.title?.text).toBe('标题');
     expect(plan.outro?.text).toBe('关注我');
@@ -42,7 +42,7 @@ describe('parsePlan(场景化 storyboard)', () => {
       JSON.stringify({
         scenes: [
           { from: 0, to: 3, framing: 'full' },
-          { from: 1, to: 2, framing: 'corner', graphic: { component: 'metric', brief: '完播率', data: '87%' } }, // 完全被 [0,3] 吞
+          { from: 1, to: 2, framing: 'corner', graphic: { brief: '完播率', data: '87%' } }, // 完全被 [0,3] 吞
           { from: 4, to: 5, framing: 'split' },
         ],
       }) +
@@ -114,7 +114,7 @@ describe('assemblePlan(工具环 pieces → DraftPlan)', () => {
     const plan = assemblePlan(
       {
         scenes: [
-          { from: 3, to: 5, framing: 'corner', graphic: { component: 'chart', brief: 'b' } },
+          { from: 3, to: 5, framing: 'corner', graphic: { brief: 'b' } },
           { from: 0, to: 2, framing: 'full' },
         ],
         title: { text: '钩子' },
@@ -193,7 +193,7 @@ describe('插入段平权分镜(统一叙事流 → 装配层分解)', () => {
   it('全局行号场景分解:主场景重映射本地索引,插入段场景归 clip', () => {
     const plan = parsePlan(
       JSON.stringify({
-        scenes: [scene(0, 1), scene(2, 3, { framing: 'corner', graphic: { component: 'metric', brief: '算力x3' } }), scene(4, 4)],
+        scenes: [scene(0, 1), scene(2, 3, { framing: 'corner', graphic: { brief: '算力x3' } }), scene(4, 4)],
       }),
       rows,
     );
@@ -201,19 +201,18 @@ describe('插入段平权分镜(统一叙事流 → 装配层分解)', () => {
     expect(plan.inserts).toHaveLength(1);
     expect(plan.inserts![0]!.clip).toBe(1);
     expect(plan.inserts![0]!.scenes[0]).toMatchObject({ from: 0, to: 1, framing: 'corner' });
-    expect(plan.inserts![0]!.scenes[0]!.graphic?.component).toBe('metric');
   });
 
   it('LLM 违规跨源的场景按源界拆分:首片保留图形,后续片回 full 无图', () => {
     const plan = parsePlan(
-      JSON.stringify({ scenes: [scene(0, 4, { framing: 'split', graphic: { component: 'callout', brief: '点题' } })] }),
+      JSON.stringify({ scenes: [scene(0, 4, { framing: 'split', graphic: { brief: '点题' } })] }),
       rows,
     );
     expect(plan.scenes).toEqual([
       expect.objectContaining({ from: 0, to: 1, framing: 'split' }),
       expect.objectContaining({ from: 2, to: 2, framing: 'full' }),
     ]);
-    expect(plan.scenes[0]!.graphic?.component).toBe('callout');
+    expect(plan.scenes[0]!.graphic?.brief).toBe('点题');
     expect(plan.scenes[1]!.graphic).toBeUndefined();
     expect(plan.inserts![0]!.scenes[0]).toMatchObject({ from: 0, to: 1, framing: 'full' });
   });

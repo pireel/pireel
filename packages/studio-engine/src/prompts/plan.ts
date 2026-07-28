@@ -12,12 +12,8 @@ SEGMENT INTO SCENES (this IS the storyboard — do NOT go one-scene-per-sentence
 
 GIVE EACH SCENE A DESIGNED GRAPHIC (the whole point of this product)
 - DEFAULT = every scene gets a "graphic" that VISUALIZES its idea using real content from the script. Only OMIT "graphic" for a pure connective/transition line, or when the footage is already a screen recording/slide.
-- Pick the component that fits the MEANING (vary them; don't repeat one every scene):
-  · metric — one headline number. · comparison — A vs B / before↔after. · kpi — several numbers together.
-  · chart — a trend / share / distribution (bar / line / donut). · pipeline — ordered steps or a flow.
-  · structure — parts-of-a-whole / hierarchy. · timeline — a sequence over time. · loop — a cycle.
-  · list — a few parallel points (use sparingly). · callout — a punchline / quote. · title — opener / section / closer only.
-- "brief" = a short design brief for the fragment (focal element + layout). "data" = the ACTUAL figures/items/words copied from those sentences — NEVER invent numbers. If a sentence has no hard data, use callout / metric / structure, not a fake chart.
+- "brief" = what this beat SHOWS, in one line: the fact or claim to be visualized and what makes it read (the one number, the two sides being weighed, the ordered steps, the line worth quoting). Say what it is, NOT which component to build — the graphics step chooses that with the actual box, duration and theme in hand.
+- "data" = the ACTUAL figures/items/words copied from those sentences — NEVER invent numbers. A beat with no hard data still gets a graphic (a claim, a verdict, a name); it just carries words instead of figures.
 - "size" = the graphic's VISUAL WEIGHT — match it to the beat's narrative weight, and VARY it across the video (seven same-size cards read as one template repeated):
   · badge — a passing fact/verdict: small chip, minimal chrome. · card — the solid default.
   · banner — a full-width strip (fits timeline / pipeline / kpi row). · poster — THE hero moment: takes over the freed space at editorial scale; use 1–2 times per video, pair with corner/split framing.
@@ -27,7 +23,7 @@ FRAMING (how the speaker sits so the graphic has room)
 - corner = shrink the speaker into a corner, the graphic takes the freed space. · split = speaker one half, graphic the other.
 - DEFAULT TO FULL. A talking-head video lives on the speaker — shrinking them aside is a BIG editorial move, not a rhythm device. Use corner/split ONLY when the graphic genuinely needs a LARGE dedicated area: type at editorial/poster scale, an image/screenshot/demo, or a dense chart/table that cannot read as an overlay — typically just the 1–2 poster moments. When in doubt, stay full.
 - corner/split exist to MAKE ROOM for such a graphic: a scene with NO "graphic" must use full or punch-in — never shrink the speaker beside an empty area.
-- ORIENTATION picks WHICH big-area move exists: corner frees a top/bottom band — the move for a PORTRAIT canvas; split frees a left/right half — the move for a LANDSCAPE canvas. On a portrait canvas NEVER pick split (side-by-side halves of a narrow frame squeeze the speaker into a sliver); on a landscape canvas NEVER pick corner (stacked flat strips of a short frame). full / punch-in fit both orientations.
+- corner and split are the SAME decision — "make room" — and the CANVAS picks which one you get: a portrait frame gets corner (a freed top/bottom band), a landscape frame gets split (a freed left/right half). You never have to match them to the aspect; choose either when the graphic needs room. full / punch-in fit both orientations.
 - A framing state must HOLD ≥1s: never plan a scene shorter than ~1s with its own framing — rapid push-in/out reads as flicker. Fold micro-beats into the neighboring scene instead. (The renderer executes whatever is set — this restraint lives here, at planning time.)
 
 RULES
@@ -46,8 +42,7 @@ Return ONE \`\`\`json block with EXACTLY this shape:
       "from": 0, "to": 1,
       "framing": "full | punch-in | corner | split",
       "graphic": {
-        "component": "metric | comparison | pipeline | structure | kpi | chart | timeline | loop | callout | list | title",
-        "brief": "<what this fragment shows + how it is laid out (focal element + structure) — in the SCRIPT's language>",
+        "brief": "<what this beat shows, in one line — in the SCRIPT's language>",
         "data": "<the REAL numbers / items / keywords copied verbatim from THESE sentences>",
         "size": "badge | card | banner | poster"
       },
