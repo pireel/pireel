@@ -2864,7 +2864,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const { generateElementStandalone, insertGeneratedElement, bumpBlockLayer, togglePersonLayer, saveBlockAsElement, syncBlockContent, syncBusyId, mentionAsset } = useElementOps({
     playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
     setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
-    composeBlockChecked, openChat,
+    composeBlockChecked, insertKitBlock: insertTemplateBlock, openChat,
   });
   // Stage box-drag handlers (edge/corner/grip/rotate, ghost semantics) — see use-box-drag.ts.
   const { edgeDrag, scaleDrag, gripDrag, rotateDrag } = useBoxDrag({

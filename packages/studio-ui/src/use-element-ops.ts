@@ -19,6 +19,7 @@ import {
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
+import { kitElement } from '@pireel/studio-engine/kit-templates';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { addElementEntry } from './element-history';
@@ -45,7 +46,11 @@ export interface ElementOpsDeps {
   composeBlockChecked: (
     seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string },
     instruction: string,
-  ) => Promise<{ innerHtml: string; timelineBody: string; note: string }>;
+    onDelta?: (raw: string) => void,
+    opts?: { kit?: boolean; current?: { component: string; props: Record<string, unknown> } | null },
+  ) => Promise<{ innerHtml: string; timelineBody: string; note: string; kit?: { component: string; props: Record<string, unknown> }; declined?: boolean }>;
+  /** Insert a kit component block directly (props-driven, no measurement) — the workbench's insertTemplateBlock. */
+  insertKitBlock: (templateId: string, props?: Record<string, unknown>) => void;
   openChat: () => void;
 }
 
@@ -53,9 +58,13 @@ export function useElementOps(deps: ElementOpsDeps) {
   const {
     playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
     setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
-    composeBlockChecked, openChat,
+    composeBlockChecked, insertKitBlock, openChat,
   } = deps;
-  /** Generate a standalone component (composeBlockChecked, not added to the video; only added via "insert" on a history card). */
+  /** Generate a standalone component (composeBlockChecked, not added to the video; only added via "insert" on a history card).
+   *  Same routing as add_block: themed → HTML in the theme's language; themeless → kit first, and
+   *  the model itself decides per the description — a component fits (props), nothing fits
+   *  ({"custom": true} falls through to HTML inside the checked composer), or a deliberate null,
+   *  which an explicit description never deserves → retry as HTML. */
   const generateElementStandalone = async (prompt: string, base?: GenElementResult): Promise<GenElementResult> => {
     // Draft iteration: a "reference" already-generated component enters the seed as the existing implementation, the instruction = edit on top of it
     const seed = base
@@ -68,7 +77,15 @@ export function useElementOps(deps: ElementOpsDeps) {
     const instruction = base
       ? `Edit this element's current implementation as requested (keep everything not mentioned as-is): ${prompt}`
       : `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${prompt}`;
-    const parsed = await composeBlockChecked(seed, instruction);
+    const kitOpts = compRef.current.frameId ? undefined : { kit: true, ...(base?.kit ? { current: base.kit } : {}) };
+    let parsed = await composeBlockChecked(seed, instruction, undefined, kitOpts);
+    if (parsed.declined) parsed = await composeBlockChecked(seed, instruction); // explicit ask never maps to "nothing to show"
+    if (parsed.kit) {
+      // Library card preview = the derived render at a standard landscape reference (same as the
+      // assets-panel component cards); insertion uses the props, never this markup.
+      const pv = kitElement(parsed.kit.component, seed.id, parsed.kit.props, { w: 1920, h: 1080 });
+      return { seedId: seed.id, innerHtml: pv.innerHtml, timelineBody: pv.timelineBody, label: prompt.slice(0, 12), designW: 1920, designH: 1080, kit: parsed.kit };
+    }
     return { seedId: seed.id, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, label: prompt.slice(0, 12) };
   };
   /** History card "insert": re-scope the id then land at the playhead (the same asset can be inserted multiple times, selectors don't collide).
@@ -193,6 +210,12 @@ export function useElementOps(deps: ElementOpsDeps) {
     }
   };
   const insertGeneratedElement = (el: GenElementResult, prompt: string, atSec?: number) => {
+    // Kit elements skip the whole HTML insertion pipeline (offscreen measurement, cq-ization,
+    // token baking): the block stores props and the component computes sizes from its real box.
+    if (el.kit) {
+      insertKitBlock(`kit:${el.kit.component}`, el.kit.props);
+      return;
+    }
     // Reshape locally once, shared by both branches: inner container %-binding + font cq-ization (when backfilling into a component card, content also adapts to the card's box)
     const dW = el.designW ?? compRef.current.width;
     const dH = el.designH ?? compRef.current.height;
