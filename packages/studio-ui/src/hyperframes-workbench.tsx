@@ -1995,8 +1995,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         if (choice) return { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, note, kit: choice };
         // A deliberate null is an ANSWER — surface it and let the caller decide what a veto means.
         if (declined) return { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody, note, declined: true };
-        // Anything else is a hiccup, not an opinion: fall through to the free-form path for this
-        // block instead of failing it (the lint loop below still guards that output).
+        // {"custom": true} — the moment deserves a graphic no component carries (built-ins are a
+        // library, not a cage): fall through to the free-form designer. Un-parseable output takes
+        // the same road as a plain hiccup. The lint loop below guards both.
       }
       const raw = await composeBlockRaw(seed, instruction, onDelta);
       let parsed = parseBlockResponse(raw, { innerHtml: seed.innerHtml, timelineBody: seed.timelineBody });
