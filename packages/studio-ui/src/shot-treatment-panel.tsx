@@ -77,6 +77,24 @@ function TreatmentPreview({ t }: { t: ShotTreatment }) {
         </>
       );
       break;
+    case 'split-t':
+      inner = (
+        <>
+          {vid(2, 2, 92, 45)}
+          {bust(48, 32, 3.2)}
+          {bars(14, 60, 72)}
+        </>
+      );
+      break;
+    case 'split-b':
+      inner = (
+        <>
+          {bars(14, 14, 72)}
+          {vid(2, 51, 92, 45)}
+          {bust(48, 81, 3.2)}
+        </>
+      );
+      break;
     default:
       // None (no framing): empty frame + slash marker
       inner = <line x1="14" y1="82" x2="82" y2="14" stroke="currentColor" strokeOpacity="0.45" strokeWidth="3" strokeLinecap="round" />;

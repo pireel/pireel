@@ -35,7 +35,7 @@ export interface StudioToolDef {
   chatOnly?: boolean;
 }
 
-const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r'] as const;
+const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
 
 /** Helper: build an object schema. */
 function obj(
@@ -395,7 +395,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_treatment.label',
     description:
-      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r (video takes the left/right half, the other half left for blocks). ORIENTATION RULE (canvas size is in <composition_state>): on a PORTRAIT canvas never use split-l/split-r (use corner-* to free a top/bottom band); on a LANDSCAPE canvas never use corner-* (use split-l/r to free a side half). Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
+      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b) — left/right would squeeze the speaker into a sliver; a LANDSCAPE canvas splits left/right (split-l/split-r) — top/bottom would leave two flat strips. Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
     inputSchema: obj(
       {
         shotId: { type: 'string' },

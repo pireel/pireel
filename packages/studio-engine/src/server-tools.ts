@@ -106,7 +106,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'compose_context',
 ]);
 
-const TREATMENTS = new Set(['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r']);
+const TREATMENTS = new Set(['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b']);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
 // desegmentCues here = the browser's on-load reverse migration (workbench applies it to asrRef): transcripts stored by

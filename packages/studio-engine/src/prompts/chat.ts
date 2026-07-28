@@ -48,7 +48,7 @@ export interface ShotSnap {
 }
 export interface CompositionSnap {
   durationSec?: number;
-  /** Canvas size (follows the source footage) — orientation gates the framing vocabulary (portrait→corner, landscape→split). */
+  /** Canvas size (follows the source footage) — split axis follows the canvas (portrait → top/bottom, landscape → left/right). */
   width?: number;
   height?: number;
   theme?: string;
@@ -167,7 +167,7 @@ export function buildSituation(body: ChatSituation): string {
   const lines: string[] = [];
   const canvas =
     typeof c.width === 'number' && typeof c.height === 'number' && c.width > 0 && c.height > 0
-      ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? 'landscape — big-area framing is split-l/r, never corner' : 'portrait — big-area framing is corner-br/tl, never split'}).`
+      ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? 'landscape — halves are split-l/r' : 'portrait — halves are split-t/b'}).`
       : '';
   lines.push(`Edited duration: ${n(c.durationSec)}s. Theme: ${c.theme ?? 'general'}.${canvas}`);
 

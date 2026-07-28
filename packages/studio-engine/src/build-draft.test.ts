@@ -87,43 +87,47 @@ describe('layoutFromPlan(场景化分镜:按场景切镜 + 待配图占位;gener
     expect(c.shots![1]).toMatchObject({ srcStart: 2, srcEnd: 6, treatment: 'corner-br' });
   });
 
-  // 画布朝向决定「腾地方」是哪一种,不是模型说了算:竖屏只可能缩角(腾出上下一大块),
-  // 横屏只可能左右分半。竖屏切左右会把人挤成一条,横屏切上下只剩两条扁带。
-  // 这条以前只写在规划提示词里,模型吐错就照做;现在非法组合在代码里根本表达不出来。
-  it('朝向门控:竖屏画布上 corner/split 都落成缩角,永不出现左右分', () => {
-    const gapped: AsrSegment[] = [
-      { start: 2, end: 4, text: '第一句' },
-      { start: 4.7, end: 6, text: '第二句' }, // 句间 0.7s 呼吸停顿
-    ];
-    const p: DraftPlan = {
-      scenes: [
-        { from: 0, to: 0, framing: 'corner', graphic: { brief: 'A' } },
-        { from: 1, to: 1, framing: 'split', graphic: { brief: 'B', data: '87%' } },
-      ],
-    };
-    const c = layoutFromPlan(p, { video: { ...video, width: 1080, height: 1920 }, sentences: gapped });
+  // 对半分的轴由画布定,不是模型说了算:切长边留下两个能用的半区,切短边只剩窄条
+  // (竖屏左右分把人挤成一条)或扁带(横屏上下分)。这条以前只写在规划提示词里,
+  // 模型吐错就照做;现在非法组合在代码里根本表达不出来。
+  const splitScenes: DraftPlan = {
+    scenes: [
+      { from: 0, to: 0, framing: 'split', graphic: { brief: 'A' } },
+      { from: 1, to: 1, framing: 'corner', graphic: { brief: 'B', data: '87%' } },
+    ],
+  };
+  const gapped: AsrSegment[] = [
+    { start: 2, end: 4, text: '第一句' },
+    { start: 4.7, end: 6, text: '第二句' }, // 句间 0.7s 呼吸停顿
+  ];
+
+  it('分轴门控:竖屏画布切上下,永不出现左右分', () => {
+    const c = layoutFromPlan(splitScenes, { video: { ...video, width: 1080, height: 1920 }, sentences: gapped });
     const treatments = (c.shots ?? []).map((s) => s.treatment);
     expect(treatments.some((t) => t === 'split-l' || t === 'split-r')).toBe(false);
-    // 两个场景都落到同一种取景 → 合成一段,呼吸缝不产生 full 碎镜
-    expect(treatments).toEqual(['full', 'corner-br', 'full']);
-    expect(c.shots![1]).toMatchObject({ srcStart: 2, srcEnd: 6 });
+    expect(treatments).toEqual(['full', 'split-b', 'corner-br', 'full']);
   });
 
-  it('朝向门控:横屏画布上 corner/split 都落成左右分,永不出现缩角', () => {
-    const gapped: AsrSegment[] = [
-      { start: 2, end: 4, text: '第一句' },
-      { start: 4.7, end: 6, text: '第二句' },
-    ];
-    const p: DraftPlan = {
-      scenes: [
-        { from: 0, to: 0, framing: 'corner', graphic: { brief: 'A' } },
-        { from: 1, to: 1, framing: 'split', graphic: { brief: 'B', data: '87%' } },
-      ],
-    };
-    const c = layoutFromPlan(p, { video: { ...video, width: 1920, height: 1080 }, sentences: gapped });
+  it('分轴门控:横屏画布切左右,永不出现上下分', () => {
+    const c = layoutFromPlan(splitScenes, { video: { ...video, width: 1920, height: 1080 }, sentences: gapped });
     const treatments = (c.shots ?? []).map((s) => s.treatment);
-    expect(treatments.some((t) => t === 'corner-tl' || t === 'corner-br')).toBe(false);
-    expect(treatments).toEqual(['full', 'split-r', 'full']);
+    expect(treatments.some((t) => t === 'split-t' || t === 'split-b')).toBe(false);
+    expect(treatments).toEqual(['full', 'split-r', 'corner-br', 'full']);
+  });
+
+  it('竖屏上下分跟着人走:脸在上半就占上半,把下半让给图形', () => {
+    const seg = (person: 'left' | 'center', faceY: number) => ({
+      start: 0,
+      end: 8,
+      label: { content: 'person' as const, person, safe: 'full' as const },
+      geom: { rects: [], face: { x: 0.3, y: faceY, w: 0.4, h: 0.2 } },
+    });
+    const one: DraftPlan = { scenes: [{ from: 0, to: 0, framing: 'split', graphic: { brief: 'A' } }] };
+    const portrait = { ...video, width: 1080, height: 1920 };
+    const top = layoutFromPlan(one, { video: portrait, sentences: gapped.slice(0, 1), visual: { segments: [seg('center', 0.15)], cuts: [] } as never });
+    const bottom = layoutFromPlan(one, { video: portrait, sentences: gapped.slice(0, 1), visual: { segments: [seg('center', 0.62)], cuts: [] } as never });
+    expect((top.shots ?? []).map((s) => s.treatment)).toContain('split-t');
+    expect((bottom.shots ?? []).map((s) => s.treatment)).toContain('split-b');
   });
 
   it('同取景相邻场景带呼吸缝也合并成一段', () => {

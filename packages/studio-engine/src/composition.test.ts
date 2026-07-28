@@ -634,3 +634,22 @@ describe('加粗覆盖(bold:预设起点之上的显式覆盖)', () => {
     expect(assembleHtml(c)).toContain('font-weight:500'); // 显式取消加粗
   });
 });
+
+describe('半分取景的空位框不压视频', () => {
+  // split-b 曾把 l/r 的横轴内缩(0.12)照抄到纵轴上,空位框底边越过视频顶边 4%,
+  // 图形压在人脸上——占位框和视频必须互不相交,四个方向都是。
+  const OCCUPIED: Record<string, { x: number; y: number; w: number; h: number }> = {
+    'split-l': { x: 0, y: 0, w: 0.5, h: 1 },
+    'split-r': { x: 0.5, y: 0, w: 0.5, h: 1 },
+    'split-t': { x: 0, y: 0, w: 1, h: 0.5 },
+    'split-b': { x: 0, y: 0.5, w: 1, h: 0.5 },
+  };
+  for (const [tr, vid] of Object.entries(OCCUPIED)) {
+    it(`${tr}:空位框与视频占用区不相交`, () => {
+      const b = treatmentVacancyBox(tr as never)!;
+      expect(b).toBeTruthy();
+      const overlaps = b.x < vid.x + vid.w && vid.x < b.x + b.w && b.y < vid.y + vid.h && vid.y < b.y + b.h;
+      expect(overlaps, `${tr} 空位框 ${JSON.stringify(b)} 压在视频上`).toBe(false);
+    });
+  }
+});

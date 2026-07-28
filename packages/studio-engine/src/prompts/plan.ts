@@ -20,10 +20,10 @@ GIVE EACH SCENE A DESIGNED GRAPHIC (the whole point of this product)
 
 FRAMING (how the speaker sits so the graphic has room)
 - full = speaker fills the frame, the graphic overlays DIRECTLY on the footage — the DEFAULT home for most graphics (badge / card / banner all read fine as overlays). · punch-in = push in for emphasis.
-- corner = shrink the speaker into a corner, the graphic takes the freed space. · split = speaker one half, graphic the other.
+- corner = shrink the speaker into a corner, the graphic takes the large freed block. · split = speaker one half, graphic the other.
 - DEFAULT TO FULL. A talking-head video lives on the speaker — shrinking them aside is a BIG editorial move, not a rhythm device. Use corner/split ONLY when the graphic genuinely needs a LARGE dedicated area: type at editorial/poster scale, an image/screenshot/demo, or a dense chart/table that cannot read as an overlay — typically just the 1–2 poster moments. When in doubt, stay full.
 - corner/split exist to MAKE ROOM for such a graphic: a scene with NO "graphic" must use full or punch-in — never shrink the speaker beside an empty area.
-- corner and split are the SAME decision — "make room" — and the CANVAS picks which one you get: a portrait frame gets corner (a freed top/bottom band), a landscape frame gets split (a freed left/right half). You never have to match them to the aspect; choose either when the graphic needs room. full / punch-in fit both orientations.
+- Both work on any canvas — you never have to match them to the aspect. The SPLIT AXIS is decided for you: a portrait frame splits top/bottom, a landscape frame splits left/right (halving the short side would leave slivers or flat strips). Just choose corner when a big block suits the graphic and split when an equal half does.
 - A framing state must HOLD ≥1s: never plan a scene shorter than ~1s with its own framing — rapid push-in/out reads as flicker. Fold micro-beats into the neighboring scene instead. (The renderer executes whatever is set — this restraint lives here, at planning time.)
 
 RULES
