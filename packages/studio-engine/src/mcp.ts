@@ -242,7 +242,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'import_media',
       description:
-        "Import LOCAL files into Pireel. TWO STEPS: ① call with NO arguments → returns a short-lived import `token` (30 min); ② run the plugin's import helper (skills/pireel/scripts/import-media.mjs) with `--token <token>` and the file paths — it probes, transcribes and registers everything itself (including the `sig` registration call; you don't). The main VIDEO streams straight into the OPEN studio tab (no cloud upload) — if no tab is open the helper exits saying so: open one via create_browser_handoff and re-run it. Images and b-roll (--broll) need no tab.",
+        "Import LOCAL files into Pireel. TWO STEPS: ① call with NO arguments → returns a short-lived import `token` (30 min); ② run the plugin's import helper (skills/pireel/scripts/import-media.mjs) with `--token <token>` and the file paths — it probes, transcribes and registers everything itself (including the `sig` registration call; you don't). The main VIDEO streams straight into the OPEN studio tab (no cloud upload) — if no tab is open the helper exits saying so: open one via create_browser_handoff and re-run it. Images, audio and b-roll (--broll) need no tab. Audio files (music/SFX) land in the asset library and come back with a url for set_bgm.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
