@@ -373,7 +373,11 @@ export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: numbe
   const s = treatScale(tr, size);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
   const corner = r3(((1 - s) / 2 - 0.02) * 100);
-  const NONE = 'inset(0%)';
+  // Four explicit edges, never the shorthand: GSAP interpolates complex strings by pairing numeric
+  // tokens, so tweening 'inset(0%)' (one token) against a split's four-token inset can't animate —
+  // the transform would glide while the crop snapped. Same token count on every treatment keeps
+  // every framing-to-framing transition tweenable.
+  const NONE = 'inset(0% 0% 0% 0%)';
   // The freed share, and where in it the surviving window starts (o=0 keeps the near edge, 1 the far).
   const gap = 1 - s;
   const o = Math.min(1, Math.max(0, (typeof crop === 'number' ? crop : 50) / 100));
