@@ -409,6 +409,22 @@ export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: numbe
   }
 }
 
+/** Fractional insets of a computed clip-path (0..1 of the element's box). CSS collapses the
+ *  four-value inset we set to shorthand in computed style — 'inset(0% 25%)' — so this expands
+ *  1–4 values by the standard box rules. Non-inset / 'none' → all zero. Producer (shotTransformVars) and parser share this file so the two cannot drift. */
+export function parseClipInset(clipPath: string | undefined): { t: number; r: number; b: number; l: number } {
+  const none = { t: 0, r: 0, b: 0, l: 0 };
+  const m = clipPath ? /inset\(([^)]+)\)/.exec(clipPath) : null;
+  if (!m) return none;
+  const parts = m[1]!.trim().split(/\s+/);
+  const roundIdx = parts.indexOf('round'); // we never emit a corner radius, but don't choke on one
+  const vals = (roundIdx >= 0 ? parts.slice(0, roundIdx) : parts).map((v) => (v.endsWith('%') ? parseFloat(v) / 100 : 0));
+  if (!vals.length || vals.some((v) => !Number.isFinite(v))) return none;
+  const [a, b = a, c = a, d = b] = vals as [number, number?, number?, number?];
+  return { t: a, r: b!, b: c!, l: d! };
+}
+
+
 function shotVars(tr: ShotTreatment, size?: number, crop?: number): string {
   const v = shotTransformVars(tr, size, crop);
   return `{ scale: ${n(v.scale)}, xPercent: ${n(v.xPercent)}, yPercent: ${n(v.yPercent)}, borderRadius: ${n(v.borderRadius)}, clipPath: '${v.clipPath}' }`;

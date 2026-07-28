@@ -35,7 +35,7 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, shotFilterCss, totalDuration } from '@pireel/studio-engine/composition';
+import { type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, parseClipInset, shotFilterCss, totalDuration } from '@pireel/studio-engine/composition';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
@@ -209,11 +209,22 @@ async function rasterize(uri: string): Promise<HTMLImageElement> {
   return img;
 }
 
-function readTransform(win: Window, el: Element | null): { m: DOMMatrix; radius: number } {
-  if (!el) return { m: new DOMMatrix(), radius: 0 };
+function readTransform(win: Window, el: Element | null): { m: DOMMatrix; radius: number; inset: { t: number; r: number; b: number; l: number } } {
+  if (!el) return { m: new DOMMatrix(), radius: 0, inset: { t: 0, r: 0, b: 0, l: 0 } };
   const cs = win.getComputedStyle(el);
   const m = cs.transform && cs.transform !== 'none' ? new DOMMatrix(cs.transform) : new DOMMatrix();
-  return { m, radius: parseFloat(cs.borderTopLeftRadius) || 0 };
+  // clip-path carries the crop for fill-the-half splits (transform is only the park position
+  // there) — reading transform alone painted the full frame shifted, cropping nothing.
+  return { m, radius: parseFloat(cs.borderTopLeftRadius) || 0, inset: parseClipInset(cs.clipPath) };
+}
+
+/** The element-local rect that survives transform + clip — clip-path lives in the element's own
+ *  coordinate system, so this rect is built in W×H space and clipped AFTER the matrix applies,
+ *  matching CSS order. Shared by the export loop and the still-frame capture. */
+function framedClipPath(W: number, H: number, vs: { radius: number; inset: { t: number; r: number; b: number; l: number } }): Path2D {
+  const path = new Path2D();
+  path.roundRect(W * vs.inset.l, H * vs.inset.t, W * (1 - vs.inset.l - vs.inset.r), H * (1 - vs.inset.t - vs.inset.b), vs.radius);
+  return path;
 }
 
 /* ============================ Main export flow ============================ */
@@ -312,9 +323,7 @@ export async function captureCompositionFrame(opts: {
       ctx.translate(W / 2, H / 2);
       ctx.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
       ctx.translate(-W / 2, -H / 2);
-      const path = new Path2D();
-      path.roundRect(0, 0, W, H, vs.radius);
-      ctx.clip(path);
+      ctx.clip(framedClipPath(W, H, vs));
       sample.draw(ctx, (W - rig.dw) / 2, (H - rig.dh) / 2, rig.dw, rig.dh);
       ctx.restore();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -590,8 +599,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         tc.translate(W / 2, H / 2);
         tc.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
         tc.translate(-W / 2, -H / 2);
-        const path = new Path2D();
-        path.roundRect(0, 0, W, H, vs.radius);
+        const path = framedClipPath(W, H, vs);
         if (vs.m.a < 0.999) {
           // Shadow only shows when framing is scaled down: fill a shadowed base first, then clip and draw the frame
           tc.shadowColor = 'rgba(0,0,0,0.45)';
