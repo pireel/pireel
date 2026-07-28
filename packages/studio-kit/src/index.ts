@@ -15,9 +15,6 @@
  */
 
 import type { RenderCtx, RenderResult } from './contract';
-import { renderBlueprint, type Blueprint } from './blueprint';
-import { surfaceCss, type SurfaceProps } from './surface';
-import { typeScale } from './sizing';
 import { metricSchema, renderMetric } from './components/metric';
 import { calloutSchema, renderCallout } from './components/callout';
 import { lowerThirdSchema, renderLowerThird } from './components/lower-third';
@@ -32,10 +29,7 @@ export { THEME_TOKENS, type ThemeToken, esc } from './contract';
 export { defineSchema, en, num, bool, text, reqText, color, rows, shownWhen, type PropsOf, type Schema, type Field } from './schema';
 export { typeScale, fitDown, isCjk, type TypeScale } from './sizing';
 export * as motion from './motion';
-export { renderBlueprint, type Blueprint, type MotionStep } from './blueprint';
 export { catalogText, surfaceText, type CatalogDef } from './catalog';
-export { themeVars, themeBlueprints, type Theme, type Palette } from './theme';
-export { themes } from './themes/index';
 export { SURFACE_FIELDS, SURFACE_SWATCHES, surfaceCss, radiusCss, hasPanel, type SurfaceProps } from './surface';
 export { metricSchema, renderMetric, type MetricProps } from './components/metric';
 export { calloutSchema, renderCallout, type CalloutProps } from './components/callout';
@@ -126,17 +120,6 @@ export type ComponentId = keyof typeof components;
 export function render(component: ComponentId | (string & {}), id: string, props: unknown, ctx: RenderCtx): RenderResult {
   const def = (components as Record<string, ComponentDef>)[component];
   if (!def) throw new Error(`studio-kit: unknown component "${component}"`);
-  const bp = ctx.blueprint as Blueprint | undefined;
-  if (bp && bp.component === component && typeof bp.html === 'string') {
-    // Theme staging: props are still parsed by the component's own schema (so a blueprint can
-    // never receive a value the component wouldn't accept), then arranged by the blueprint.
-    // The blueprint owns the surface — a staging that paints its own plate (a bordered panel, a
-    // taped card) must not also receive the generic one underneath it.
-    const parsed = def.parse ? def.parse(props) : (props as Record<string, unknown>);
-    const s = typeScale(ctx);
-    const out = renderBlueprint(bp, id, parsed as Record<string, unknown>, s, '');
-    return { html: out.html, timeline: out.timeline };
-  }
   return def.render(id, props, ctx);
 }
 

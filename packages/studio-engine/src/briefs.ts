@@ -24,31 +24,6 @@ import { type ThemeId, getTheme, themeForLlm } from './theme';
 export interface FrameContent {
   title: string;
   body: string;
-  /** Short style direction for the component path (authored in the frame's frontmatter). */
-  voice?: string;
-}
-
-/**
- * The frame's voice — what it is for and how it sounds, for a model that CHOOSES components
- * rather than writing markup.
- *
- * The playbook body cannot serve this path: most of it is px ranges and CSS motifs marked
- * "reuse verbatim", written to teach a model to hand-build HTML. Feeding that to a model that
- * only fills props invites it to try. Until frames carry an authored `voice`, the body's lead
- * prose is used — the paragraphs before the first `##` are exactly the aesthetic statement,
- * with none of the implementation.
- */
-export function frameVoice(frame: FrameContent): string {
-  if (frame.voice?.trim()) return frame.voice.trim();
-  const body = frame.body.replace(/^#\s+.*$/m, '').trim(); // drop the H1 title line
-  const lead = (body.split(/\n\s*\n/)[0] ?? '').trim(); // first paragraph = the aesthetic statement
-  // Inline code spans are token names and declarations. Drop the ones that are pure implementation
-  // (`--accent`, `background:var(--paper)`) and unwrap the rest, so the voice reads as intent.
-  return lead
-    .replace(/`([^`]*)`/g, (_, inner: string) => (/^--|[:();{}]/.test(inner) ? '' : inner))
-    .replace(/ {2,}/g, ' ')
-    .trim()
-    .slice(0, 900);
 }
 
 /** compose's ACTIVE THEME text (single source shared by the compose route and BYO brief):
@@ -61,13 +36,6 @@ export function assembleComposeTheme(themeId?: string, palette?: Record<string, 
   return theme;
 }
 
-/** The kit path's whole theme injection: the frame's voice, nothing else. No token table (the
- *  palette reaches components through CSS variables, not through the model), no structural brief
- *  (the components are the structure). */
-export function assembleKitTheme(frame?: FrameContent | null): string | undefined {
-  if (!frame) return undefined;
-  return `The project's theme is "${frame.title}".\n\n${frameVoice(frame)}`;
-}
 
 export interface ComposeBriefInput {
   block: BlockEdit;

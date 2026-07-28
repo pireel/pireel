@@ -106,10 +106,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dia
 import { GenChatPanel, type GenElementResult } from './gen-chat-panel';
 import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
 import { KitPropsPanel } from './kit-props-panel';
-// Side effect: registers each frame's stagings with the engine. The hosted shell reaches frames
-// via API and never imports the frames vite entry — without this, a block's blueprintId resolved
-// to nothing in the browser and stagings silently rendered as built-in variants.
-import '@pireel/studio-frames/blueprints/index';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { AssetsPanel, type GenType, type PanelDragAsset } from './assets-panel';
 import { addElementEntry } from './element-history';
@@ -2374,7 +2370,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     else if (floatWinRef.current === 'kitProps') setFloatWin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
-  const insertTemplateBlock = (templateId: string, kitProps?: Record<string, unknown>, staging?: string) => {
+  const insertTemplateBlock = (templateId: string, kitProps?: Record<string, unknown>) => {
     pushUndoSnapshot();
     const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
     let base = newBlock(templateId, { startSec });
@@ -2384,7 +2380,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Props tuned in the preview lightbox win over the samples; duration matches the preview
       base = {
         ...base,
-        slots: { ...base.slots, props: kitProps ?? kitSampleProps(templateId.slice(4)), ...(staging ? { blueprintId: staging } : {}) },
+        slots: { ...base.slots, props: kitProps ?? kitSampleProps(templateId.slice(4)) },
         box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 },
         durationSec: KIT_INSERT_DURATION,
       };
@@ -4322,7 +4318,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               comp={comp}
               onInsert={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
               onInsertElement={insertGeneratedElement}
-              onInsertKit={(cid, props, staging) => insertTemplateBlock(`kit:${cid}`, props, staging)}
+              onInsertKit={(cid, props) => insertTemplateBlock(`kit:${cid}`, props)}
               onDragAsset={setDragAsset}
               onOpenGen={(t, anchor) => {
                 setGenType(t);
@@ -4473,17 +4469,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       block={b}
                       onPatch={(props) => {
                         setComp((c) => ({ ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, slots: { ...x.slots, props } } : x)) }));
-                      }}
-                      onSetStaging={(blueprintId) => {
-                        pushUndoSnapshot();
-                        setComp((c) => ({
-                          ...c,
-                          blocks: c.blocks.map((x) => {
-                            if (x.id !== b.id) return x;
-                            const { blueprintId: _old, ...rest } = x.slots as Record<string, unknown>;
-                            return { ...x, slots: { ...rest, ...(blueprintId ? { blueprintId } : {}) } };
-                          }),
-                        }));
                       }}
                     />
                   );

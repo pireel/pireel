@@ -6,23 +6,7 @@
  * catalogue cannot promise.
  */
 
-import { type Blueprint, catalogText, components, surfaceText } from '@pireel/studio-kit';
-
-/** Theme stagings offered on top of the built-in variants. NOT part of catalogSection: stagings
- *  come and go with the frame, and frame-derived text belongs at the TAIL of the assembled system
- *  (with the voice), so a theme switch invalidates only the cached prefix's tail — parked inside
- *  L4 it invalidated everything from the catalogue down. */
-export function stagingSection(blueprints: Blueprint[], componentIds: string[]): string {
-  const usable = blueprints.filter((b) => componentIds.includes(b.component));
-  if (!usable.length) return '';
-  const lines = usable.map((b) => `    ${b.id} — ${b.component}: ${b.name}`).join('\n');
-  return `STAGINGS FROM THE PROJECT'S THEME (optional; same props, drawn in the theme's own hand)
-${lines}
-  Add "staging": "<id>" beside the component to use one. It must belong to the component you chose,
-  and it paints its own surface — the SURFACE props are ignored when you pick one.
-  Prefer a staging when one fits — it is what makes this project look like itself rather than like
-  every other project. Omit it when none suits the content.`;
-}
+import { catalogText, components, surfaceText } from '@pireel/studio-kit';
 
 /** The catalogue section for a preset's component list. Unknown ids are skipped rather than
  *  failing: a preset naming a component that has since been removed still generates. */

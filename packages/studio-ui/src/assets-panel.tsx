@@ -168,7 +168,7 @@ export function AssetsPanel({
   onInsertElement: (el: GenElementResult, prompt: string) => void;
   /** Insert a kit component as a props-driven block; props override the sample defaults
    *  (the preview lightbox lets you tune them before inserting). */
-  onInsertKit?: (component: string, props?: Record<string, unknown>, staging?: string) => void;
+  onInsertKit?: (component: string, props?: Record<string, unknown>) => void;
   /** Drag out an asset (asset on dragstart, null on dragend) — workbench uses this to overlay a drop layer on stage/timeline. */
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
@@ -456,9 +456,9 @@ export function AssetsPanel({
     }
   };
 
-  const insertOf = (it: LibraryItem, kitProps?: Record<string, unknown>, staging?: string) => {
+  const insertOf = (it: LibraryItem, kitProps?: Record<string, unknown>) => {
     if (it.kit) {
-      onInsertKit?.(it.kit, kitProps, staging);
+      onInsertKit?.(it.kit, kitProps);
       return;
     }
     if (it.kind === 'element') {
@@ -679,8 +679,8 @@ export function AssetsPanel({
           item={preview}
           comp={comp}
           onClose={() => setPreview(null)}
-          onInsert={(kitProps, staging) => {
-            insertOf(preview, kitProps, staging);
+          onInsert={(kitProps) => {
+            insertOf(preview, kitProps);
             setPreview(null);
           }}
         />
@@ -700,27 +700,21 @@ function AssetLightbox({
   item: LibraryItem;
   comp: Composition;
   onClose: () => void;
-  /** Kit items pass the props (and staging) tuned in the lightbox; everything else inserts as-is. */
-  onInsert: (kitProps?: Record<string, unknown>, staging?: string) => void;
+  /** Kit items pass the props tuned in the lightbox; everything else inserts as-is. */
+  onInsert: (kitProps?: Record<string, unknown>) => void;
 }) {
   // Kit preview is a real kit block on the same render path as the canvas — what you tune here is
   // exactly what lands. Edits live in this state only: the library entry is never touched.
   const [draft, setDraft] = useState<Record<string, unknown>>(() => (item.kit ? kitSampleProps(item.kit) : {}));
-  // The theme's staging for this component — tried here exactly like a prop: preview shows it,
-  // insert carries it, the library entry is never touched.
-  const [draftStaging, setDraftStaging] = useState<string | undefined>(undefined);
   const [replayKey, setReplayKey] = useState(0);
-  useEffect(() => {
-    setDraft(item.kit ? kitSampleProps(item.kit) : {});
-    setDraftStaging(undefined);
-  }, [item.id, item.kit]);
+  useEffect(() => setDraft(item.kit ? kitSampleProps(item.kit) : {}), [item.id, item.kit]);
   const kitBlock = useMemo(
     () =>
       item.kit
         ? {
             id: `lb_${item.kit}`,
             templateId: `kit:${item.kit}`,
-            slots: { props: draft, ...(draftStaging ? { blueprintId: draftStaging } : {}) },
+            slots: { props: draft },
             startSec: 0,
             durationSec: KIT_INSERT_DURATION,
             trackIndex: 2,
@@ -728,7 +722,7 @@ function AssetLightbox({
             label: item.label,
           }
         : null,
-    [item.kit, item.label, draft, draftStaging],
+    [item.kit, item.label, draft],
   );
   // Elements get a local iframe live preview, available immediately (no network load), so skip the ready placeholder
   const [ready, setReady] = useState(item.kind === 'element');
@@ -794,7 +788,7 @@ function AssetLightbox({
           onClick={(e) => e.stopPropagation()}
           className="bg-panel cursor-default overflow-y-auto rounded-lg shadow-2xl"
         >
-          <KitPropsPanel block={kitBlock} onPatch={setDraft} onSetStaging={setDraftStaging} />
+          <KitPropsPanel block={kitBlock} onPatch={setDraft} />
         </div>
       )}
       </div>
@@ -815,7 +809,7 @@ function AssetLightbox({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onInsert(kitBlock ? draft : undefined, kitBlock ? draftStaging : undefined);
+            onInsert(kitBlock ? draft : undefined);
           }}
           className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
         >

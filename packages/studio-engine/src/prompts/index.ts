@@ -27,7 +27,6 @@ export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotComm
 export { L1_PROPS_SPEC } from './l1-props-spec';
 export { catalogSection } from './l4-catalog';
 export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
-export { withStyleDirection } from './style-direction';
 export { PLAN_CORE, PLAN_SYSTEM, PLAN_SYSTEM_TOOLS } from './plan';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';

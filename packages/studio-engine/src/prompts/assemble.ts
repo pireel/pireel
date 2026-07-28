@@ -18,29 +18,27 @@
 import { BLOCK_HTML_BODY } from './block-system';
 import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
-import { catalogSection, stagingSection } from './l4-catalog';
-import { frameBlueprints } from '../blueprint-registry';
+import { catalogSection } from './l4-catalog';
 import { getPreset } from './presets';
-import { withStyleDirection } from './style-direction';
 
 /** Path-specific output contract — the only part of the stack that knows what the answer looks like. */
 const KIT_OUTPUT = `OUTPUT
 After the note line, ONE \`\`\`json fence:
-{"component": "<id>", "staging": "<id>"?, "props": { … }}   — or  null  when this moment deserves
-no graphic. Only keys listed for that component; anything else is dropped.`;
+{"component": "<id>", "props": { … }}   — or  null  when this moment deserves no graphic.
+Only keys listed for that component; anything else is dropped.`;
 
 const HTML_OUTPUT = `OUTPUT
 After the note line, in THIS order:
 - one \`\`\`html block = the full INNER HTML,
 - then one \`\`\`js block = the full TIMELINE BODY.`;
 
-/** The component path's system prompt. Everything frame-derived — the theme's stagings and its
- *  voice — appends AFTER the stable stack, so switching themes invalidates only the tail. */
-export function buildKitSystem(opts?: { presetId?: string; voice?: string; frameId?: string }): string {
+/** The component path's system prompt — the THEMELESS path by design. A themed project generates
+ *  HTML instead: the theme is a prose description for the model (its character, palette, layout
+ *  language), and the model builds themed markup from it plus the component norms — see
+ *  buildHtmlSystem + withActiveTheme, which carry the frame playbook. Components stay unthemed. */
+export function buildKitSystem(opts?: { presetId?: string }): string {
   const preset = getPreset(opts?.presetId);
-  const base = [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
-  const stagings = stagingSection(frameBlueprints(opts?.frameId), preset.components);
-  return withStyleDirection(stagings ? `${base}\n\n${stagings}` : base, opts?.voice);
+  return [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
 }
 
 /** The free-form path's system prompt. Same base contract and L3.1 as the component path — only
