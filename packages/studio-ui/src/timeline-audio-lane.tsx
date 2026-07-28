@@ -21,7 +21,6 @@ import {
   audioClipDefaults,
   audioClipWindow,
   audioTrimPatch,
-  fadeShape,
 } from '@pireel/studio-engine/composition';
 import { AUDIO_ROW_H } from './timeline-utils';
 import { fadeBodyPath, waveBars } from './timeline-wave';
@@ -39,18 +38,14 @@ const KNEE_SIZE = 10;
 /** Knees stay this far inside the clip so they never hide under the trim handles or get clipped. */
 const KNEE_EDGE_INSET = 10;
 
-function audioWaveBars(peaks: Float32Array, clip: AudioClip, d: ReturnType<typeof audioClipDefaults>, widthPx: number, spanSec: number): string {
-  const dur = clip.durationSec ?? 0;
-  const lo = dur > 0 ? Math.floor((d.inSec / dur) * peaks.length) : 0;
-  const hi = dur > 0 && Number.isFinite(d.outSec) ? Math.ceil((d.outSec / dur) * peaks.length) : peaks.length;
-  return waveBars(peaks, lo, hi, widthPx, CHIP_BODY_H, d.volumeDb, (f) => {
-    // fade envelope at this bar's moment — the same curve the gain applies
-    const tLocal = f * spanSec;
-    let fade = 1;
-    if (d.fadeInSec > 0) fade *= fadeShape(tLocal / d.fadeInSec);
-    if (d.fadeOutSec > 0) fade *= fadeShape((spanSec - tLocal) / d.fadeOutSec);
-    return fade;
-  });
+/** The clip's ENTIRE media as one path, drawn in peak-index coordinates rather than pixels: the svg's
+ *  viewBox stretches it to whatever width the zoom asks for, so this string survives zooming, trimming and
+ *  moving untouched. Only the peaks themselves and the clip's level change it — a trim changes which part
+ *  of it is visible, which is a crop, not a redraw. Resolution is capped generously because this is built
+ *  once per clip, not per frame. */
+const WAVE_UNITS_MAX = 4000;
+function clipWavePath(peaks: Float32Array, volumeDb: number): string {
+  return waveBars(peaks, 0, peaks.length, peaks.length, CHIP_BODY_H, volumeDb, undefined, WAVE_UNITS_MAX);
 }
 
 /** Where a fade knob sits horizontally (body px), clamped so it stays grabbable inside the clip. */
@@ -89,23 +84,15 @@ function AudioLaneImpl({ clips, dur, pps, top, peaks, selectedId, onSelect, onMo
    *  from base + patch, and the commit lands once on release. */
   const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
   const px = useCallback((s: number) => s * pps, [pps]);
-  /** One clip's two paths (tapered body + waveform). Only the clip being dragged actually changes shape,
-   *  so every other chip reuses the memoized result instead of rebuilding a few thousand path segments. */
-  const laneBand = useCallback(
-    (clip: AudioClip) => {
-      const w = audioClipWindow(clip, dur);
-      const span = Math.max(0.05, w.end - w.start);
-      const contentW = span * pps;
-      const d = audioClipDefaults(clip);
-      const p = clip.sig ? peaks?.get(clip.sig) : undefined;
-      return {
-        body: fadeBodyPath(contentW, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span),
-        wave: p && p.length > 1 ? audioWaveBars(p, clip, d, contentW, span) : null,
-      };
-    },
-    [dur, pps, peaks],
-  );
-  const laneWaves = useMemo(() => new Map(clips.map((c) => [c.id, laneBand(c)])), [clips, laneBand]);
+  /** One static path per clip, rebuilt only when its peaks or its level change. */
+  const waves = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const c of clips) {
+      const p = c.sig ? peaks?.get(c.sig) : undefined;
+      if (p && p.length > 1) out.set(c.id, clipWavePath(p, audioClipDefaults(c).volumeDb));
+    }
+    return out;
+  }, [clips, peaks]);
   return (
     <div className="absolute right-0 left-0" style={{ top, height: AUDIO_ROW_H }}>
       {clips.map((base) => {
@@ -119,9 +106,21 @@ function AudioLaneImpl({ clips, dur, pps, top, peaks, selectedId, onSelect, onMo
         const selected = selectedId === clip.id;
         const d = audioClipDefaults(clip);
         const span = Math.max(0.05, w.end - w.start);
-        // only the clip under the pointer is reshaped mid-gesture; the rest keep their memoized paths
-        const band = audioDrag?.id === base.id ? laneBand(clip) : (laneWaves.get(base.id) ?? laneBand(clip));
         const knobs = width > 56; // narrow chips have no room for knees (drag the panel sliders instead)
+        // The wave is drawn ONCE for the whole media and then cropped: the svg spans the full source at the
+        // current zoom, sits at a negative offset for the in-point, and the chip's overflow hides the rest.
+        // Trimming therefore moves three numbers — no path is rebuilt, which is the whole point of drawing
+        // it in media coordinates. (Unknown media length = nothing to crop; fall back to the visible box.)
+        const wave = waves.get(base.id);
+        const mediaSec = clip.durationSec != null ? clip.durationSec / d.speed : null;
+        const fullW = mediaSec != null ? px(mediaSec) : contentW;
+        const offsetPx = mediaSec != null ? px(d.inSec / d.speed) : 0;
+        // Fade silhouette lives in the same viewBox space as the wave (peak indices when there is a wave,
+        // pixels otherwise), and it IS small — a dozen points per ramp — so rebuilding it per frame is free.
+        const units = wave ? (peaks?.get(clip.sig ?? '')?.length ?? contentW) : fullW;
+        const uPerPx = units / Math.max(1, fullW);
+        const silhouette = fadeBodyPath(contentW * uPerPx, CHIP_BODY_H, d.fadeInSec, d.fadeOutSec, span);
+        const maskId = `audfade-${clip.id}`;
         // A gesture renders from local state and commits ONCE on release: writing comp per pointer frame
         // re-rendered the whole workbench and re-specced the audio engine (that was the stutter), while
         // painting the chip through the DOM fought React for the same left/width props (that was the "not
@@ -178,19 +177,27 @@ function AudioLaneImpl({ clips, dur, pps, top, peaks, selectedId, onSelect, onMo
                 <span className="text-ink-3 bg-panel/70 shrink-0 rounded px-1 text-[9px] leading-[12px] tabular-nums">{d.speed.toFixed(2).replace(/0$/, '')}×</span>
               )}
             </div>
-            {/* Body svg is 1:1 with pixels (no viewBox stretching, so nothing gets squashed) and
-                spans the clip's TRUE content width, so the chip crops it: dragging an edge reveals
-                or hides the wave instead of rescaling it. */}
+            {/* Body: the full media at the current zoom, slid left by the in-point so the chip's overflow
+                crops it. The fade shapes the wave by CLIPPING it to the tapered silhouette — same edge the
+                gain follows — instead of being baked into the bar heights, so the bars stay static. */}
             <svg
-              className="pointer-events-none absolute left-0"
-              style={{ top: CHIP_LABEL_H, width: contentW, height: CHIP_BODY_H }}
-              viewBox={`0 0 ${Math.round(contentW)} ${CHIP_BODY_H}`}
+              className="pointer-events-none absolute"
+              style={{ top: CHIP_LABEL_H, left: -offsetPx, width: fullW, height: CHIP_BODY_H }}
+              viewBox={`0 0 ${Math.round(units)} ${CHIP_BODY_H}`}
+              preserveAspectRatio="none"
               aria-hidden
             >
-              {/* body background tapering along the fade, then the wave on top of it */}
-              <path d={band.body} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
-              {/* Muted keeps its shape but loses its colour — the clip is still there to reason about, it just makes no sound */}
-              {band.wave && <path d={band.wave} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
+              <defs>
+                <clipPath id={maskId}>
+                  <path d={silhouette} transform={`translate(${(offsetPx * uPerPx).toFixed(2)},0)`} />
+                </clipPath>
+              </defs>
+              <g clipPath={`url(#${maskId})`}>
+                {/* body background (the silhouette itself), then the wave on top of it */}
+                <path d={silhouette} transform={`translate(${(offsetPx * uPerPx).toFixed(2)},0)`} className={selected ? 'text-accent/18' : 'text-accent/10'} fill="currentColor" />
+                {/* Muted keeps its shape but loses its colour — the clip is still there to reason about, it just makes no sound */}
+                {wave && <path d={wave} className={clip.muted ? 'text-ink-4/40' : 'text-accent/60'} fill="currentColor" />}
+              </g>
             </svg>
             {/* Trim handles: the edge follows the pointer 1:1, painted through the DOM. On a left
                 trim the wave is nudged the other way so the audio stays pinned to the timeline —
