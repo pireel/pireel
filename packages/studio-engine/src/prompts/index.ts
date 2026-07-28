@@ -32,7 +32,7 @@ export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';
 export { withActiveTheme, planWithActiveTheme } from './active-theme';
 // Tool contracts (schema + English description; server attaches streamText / client executes via onToolCall)
-export * from './agent-tools';
+export * from './l0-agent-tools';
 export { AROLL_GUIDE } from './aroll-guide';
 // instructions + description override table for external agents (MCP)
 export { MCP_INSTRUCTIONS, MCP_DESCRIPTION_OVERRIDES, PIREEL_SKILL_VERSION } from './mcp';

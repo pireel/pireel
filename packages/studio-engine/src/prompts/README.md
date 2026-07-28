@@ -20,6 +20,7 @@ prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 
 | 导出 | 内容 | 谁用 |
 | --- | --- | --- |
+| `l0-agent-tools.ts` 整表 | **L0 工具面**:编辑器的动词(schema+描述),chat 挂 streamText / MCP 同表(带按面覆盖) | chat · mcp |
 | `EDITOR_MODEL` | 对象模型:块/分镜两类元素、块是数据、id 不许瞎编 | chat · mcp |
 | `contentIsNotCommand(director)` | **不可信内容边界(安全规则)**,只有"谁下指令"随面变 | chat · mcp |
 | `stateDiscipline(snapshot, howToRefresh)` | 快照会过期 / 回执与 delta 可信 / 稿子是源文件秒 | chat · mcp |
@@ -64,7 +65,7 @@ html 路径尾部),挂主题的项目生成主题化 HTML;组件路径只服务�
 | `block-system.ts` | `BLOCK_HTML_BODY` | 自由 HTML 路径的设计体(版式原型/图表 recipe/SELF-CHECK)——**注定被组件替掉,是待删的一层** |
 | `plan.ts` | `PLAN_CORE` `PLAN_SYSTEM` `PLAN_SYSTEM_TOOLS` | 规划核心约束 + 单发 JSON(遗留)/工具环(生产)两种输出契约 |
 | `chat.ts` | `CHAT_IDENTITY` `buildSituation` `buildChatSystem` + 快照类型 | 右侧 agent 的全部提示词面:身份/剧本 + `<composition_state>` 局势拼装 + system 总装 |
-| `agent-tools.ts` | `STUDIO_TOOLS` `STUDIO_TOOL_MAP` + 类型 | 工具契约(JSON schema + 英文 description,server 挂 streamText / client onToolCall 执行) |
+| `l0-agent-tools.ts` | `STUDIO_TOOLS` `STUDIO_TOOL_MAP` + 类型 | **L0 工具面**(JSON schema + 英文 description,server 挂 streamText / client onToolCall 执行) |
 | `theme-brief.ts` | `THEME_GENERAL_BRIEF` | general 主题给 LLM 的结构设计简报 |
 | `active-theme.ts` | `withActiveTheme` `planWithActiveTheme` | 主题简报接到 system 末尾的包裹段(compose/plan 两份措辞,单源) |
 

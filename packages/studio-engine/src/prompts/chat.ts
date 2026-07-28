@@ -1,7 +1,7 @@
 /**
  * Chat prompt surface for the side-panel agent: identity/script (CHAT_IDENTITY,
  * static) + <composition_state> situation assembly (buildSituation) + system
- * assembly (buildChatSystem). Tool contracts live in ./agent-tools.
+ * assembly (buildChatSystem). Tool contracts live in ./l0-agent-tools (the L0 tool surface).
  *
  * Cache architecture (paired with propose.ts's cache_control breakpoints): the
  * system is fully static — the situation snapshot does NOT go into system. The

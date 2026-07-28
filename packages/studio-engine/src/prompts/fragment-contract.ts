@@ -2,7 +2,7 @@
  * The base of the BLOCK-GENERATION stack — what the model is making, and what it may never do.
  *
  * Not the editor's base contract. The object model, the tool surface, the state representation
- * and the time domain live on the agent side (chat.ts, agent-tools.ts, mcp.ts), each describing
+ * and the time domain live on the agent side (chat.ts, l0-agent-tools.ts, mcp.ts), each describing
  * the editor in its own words; extracting a real global layer out of those is a separate job.
  * This file is the base of one stack, and naming it so keeps that debt visible.
  *
