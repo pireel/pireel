@@ -51,7 +51,7 @@ describe('the component path', () => {
   it('states the rules that keep the screen honest', () => {
     expect(KIT).toContain('VERBATIM');
     expect(KIT).toContain('null');
-    expect(KIT).toContain("SPOKEN SCRIPT's language");
+    expect(KIT).toContain("VIDEO's spoken language");
   });
 
   it('does not teach markup — that is what the components are for', () => {
