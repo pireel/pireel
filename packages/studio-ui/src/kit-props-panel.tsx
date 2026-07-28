@@ -8,7 +8,8 @@
  */
 
 import { useMemo } from 'react';
-import { kitComponents, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
+import { kitComponents, kitSurfaceFields, kitSurfaceSwatches } from '@pireel/studio-engine/kit-templates';
+import { frameBlueprints } from '@pireel/studio-engine/blueprint-registry';
 import type { Block } from '@pireel/studio-engine/composition';
 import { t } from './i18n';
 
@@ -34,12 +35,21 @@ function fieldLabel(key: string): string {
 export function KitPropsPanel({
   block,
   onPatch,
+  frameId,
+  onSetStaging,
 }: {
   block: Block;
   /** Full next props object (caller owns comp update + undo). */
   onPatch: (props: Record<string, unknown>) => void;
+  /** Attached theme — its stagings for this component become a picker row. Absent = row hidden. */
+  frameId?: string;
+  /** Switch the block's staging (undefined = the component's built-in variant). The row renders
+   *  only when this is provided AND the theme actually stages this component. */
+  onSetStaging?: (blueprintId: string | undefined) => void;
 }) {
   const cid = block.templateId.slice('kit:'.length);
+  const stagings = useMemo(() => frameBlueprints(frameId, cid), [frameId, cid]);
+  const currentStaging = typeof (block.slots as { blueprintId?: unknown }).blueprintId === 'string' ? String((block.slots as { blueprintId?: unknown }).blueprintId) : undefined;
   const def = (kitComponents as Record<string, { jsonSchema: Record<string, unknown>; defaults: Record<string, unknown> }>)[cid];
   const current = useMemo(
     () => ({ ...(def?.defaults ?? {}), ...((block.slots as { props?: Record<string, unknown> }).props ?? {}) }),
@@ -50,8 +60,11 @@ export function KitPropsPanel({
   // would stringify and destroy the data on first keystroke. Content for those is edited on the
   // canvas or via the agent until a row editor exists.
   const fields = Object.entries((def.jsonSchema as { properties?: Record<string, FieldSchema> }).properties ?? {}).filter(
-    ([, f]) =>
+    ([key, f]) =>
       f.type !== 'array' &&
+      // While a staging is active it paints its own surface — the surface knobs would do nothing,
+      // so they step aside (values are kept; they return when the staging comes off).
+      !(currentStaging && key in kitSurfaceFields) &&
       // Dependency declared by the schema, not by this panel — a new component that declares one
       // hides correctly with no change here. The value is kept, just not shown.
       (!f.showWhen || f.showWhen.in.includes(String(current[f.showWhen.field] ?? ''))),
@@ -64,6 +77,34 @@ export function KitPropsPanel({
 
   return (
     <div className="flex w-60 flex-col gap-2.5 p-3">
+      {onSetStaging && stagings.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <span className="text-ink-4 text-[10px]">{t('kitProp.staging')}</span>
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              onClick={() => onSetStaging(undefined)}
+              className={`rounded border px-1.5 py-0.5 text-[10.5px] transition-colors ${
+                !currentStaging ? 'border-accent text-accent bg-accent/5' : 'border-line text-ink-3 hover:text-ink'
+              }`}
+            >
+              {t('kitProp.stagingBuiltIn')}
+            </button>
+            {stagings.map((bp) => (
+              <button
+                key={bp.id}
+                type="button"
+                onClick={() => onSetStaging(bp.id)}
+                className={`rounded border px-1.5 py-0.5 text-[10.5px] transition-colors ${
+                  currentStaging === bp.id ? 'border-accent text-accent bg-accent/5' : 'border-line text-ink-3 hover:text-ink'
+                }`}
+              >
+                {bp.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {fields.map(([key, f]) => {
         const v = current[key];
         if (Array.isArray(f.enum)) {

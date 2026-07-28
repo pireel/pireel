@@ -1,6 +1,8 @@
 export const PANELS_EN: Record<string, string> = {
   'kitProp.customColor': 'Custom colour',
   'kitProp.opacity': 'Opacity',
+  'kitProp.staging': 'Staging',
+  'kitProp.stagingBuiltIn': 'Built-in',
   'kitProp.surface': 'Surface',
   'kitProp.surfaceColor': 'Surface colour',
   'kitProp.border': 'Border',
