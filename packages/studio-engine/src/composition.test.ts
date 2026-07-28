@@ -21,6 +21,7 @@ import {
   videoFrameTimelineBody,
   treatmentVacancyBox,
   shotTransformVars,
+  parseClipInset,
 } from './composition';
 
 function sampleComp(): Composition {
@@ -675,5 +676,35 @@ describe('取景 clipPath 可插值(所有取景同 token 数)', () => {
       const clip = shotTransformVars(tr).clipPath;
       expect(clip.match(/[\d.]+%/g), `${tr} → ${clip}`).toHaveLength(4);
     }
+  });
+});
+
+describe('parseClipInset(导出侧读回取景裁切)', () => {
+  // 导出 bug 的根:readTransform 只读 transform,铺满半分的裁切在 clip-path 里 —— 整幅平移、
+  // 没裁,看起来"只切了四分之一"。producer(shotTransformVars)与 parser 同仓互钉。
+  it('往返:每种取景 emit 的 clipPath 解析回一致的 inset 分量', () => {
+    const ALL = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+    for (const tr of ALL) {
+      for (const crop of [undefined, 0, 30, 100]) {
+        const clip = shotTransformVars(tr, undefined, crop).clipPath;
+        const ins = parseClipInset(clip);
+        const nums = clip.match(/[\d.]+/g)!.map(Number);
+        expect([ins.t * 100, ins.r * 100, ins.b * 100, ins.l * 100].map((v) => Math.round(v * 10) / 10)).toEqual(nums);
+      }
+    }
+  });
+
+  it('computed style 的缩写折叠(1/2/3 值)按 CSS 盒规则展开', () => {
+    // Chromium 会把我们写的 4 值 inset 折叠:'inset(0% 25% 0% 25%)' → 'inset(0% 25%)'
+    expect(parseClipInset('inset(25%)')).toEqual({ t: 0.25, r: 0.25, b: 0.25, l: 0.25 });
+    expect(parseClipInset('inset(0% 25%)')).toEqual({ t: 0, r: 0.25, b: 0, l: 0.25 });
+    expect(parseClipInset('inset(10% 20% 30%)')).toEqual({ t: 0.1, r: 0.2, b: 0.3, l: 0.2 });
+    expect(parseClipInset('inset(25% 0% 25% 0%)')).toEqual({ t: 0.25, r: 0, b: 0.25, l: 0 });
+  });
+
+  it('none / 空 / 带 round 的形态不炸,none 归零', () => {
+    expect(parseClipInset('none')).toEqual({ t: 0, r: 0, b: 0, l: 0 });
+    expect(parseClipInset(undefined)).toEqual({ t: 0, r: 0, b: 0, l: 0 });
+    expect(parseClipInset('inset(10% 20% round 8px)')).toEqual({ t: 0.1, r: 0.2, b: 0.1, l: 0.2 });
   });
 });
