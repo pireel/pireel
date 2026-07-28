@@ -25,7 +25,7 @@ import {
 } from './composition';
 import { t } from './i18n';
 import { getTheme } from './theme';
-import type { DraftPlan, Framing, GraphicComponent, GraphicSize, Scene, SceneGraphic } from './plan';
+import type { DraftPlan, Framing, GraphicSize, Scene, SceneGraphic } from './plan';
 import { type AsrSegment, captionBlocksFromAsr } from './build-blocks';
 import type { VisualTimeline } from './visual-types';
 
@@ -172,7 +172,7 @@ export function layoutFromPlan(
     // Recorded per **scene interval** (not a single point) — a scene with source cuts splits into multiple shots, and the whole
     // span must hold the framing; otherwise it snaps back to full mid-way while the graphic still hangs on and covers the face.
     // Hard constraint (restraint enforced in the layout layer; the prompt only handles the LLM side): scene < 1s gets no framing.
-    const raw = screen ? 'full' : framingToTreatment(scene.framing, vis);
+    const raw = screen ? 'full' : framingToTreatment(scene.framing, vis, { w: c.width, h: c.height });
     const treatment = stop - start >= MIN_FRAMING_HOLD_SEC ? raw : 'full';
 
     // Graphic placeholder (screencast scenes get no overlaid graphic; theme graphics come first). Shot boundaries use no transition (jump cut);
@@ -263,15 +263,29 @@ export function contentCuts(visual: VisualTimeline | undefined, cuts: number[]):
 
 /* ============================ Framing / placement ============================ */
 
-/** Framing → concrete ShotTreatment (corner/half direction follows the person's side, keeping the person in place and freeing the other side for the graphic). */
-function framingToTreatment(framing: Framing, vis: VisSeg | null): ShotTreatment {
+/**
+ * Framing → concrete ShotTreatment.
+ *
+ * Two independent inputs, and they were being confused:
+ *  - THE CANVAS decides WHICH room-making move exists. corner frees a top/bottom band, which only
+ *    works on a portrait frame; split frees a left/right half, which only works on a landscape one.
+ *    Splitting a portrait frame squeezes the speaker into a sliver; stacking a landscape one leaves
+ *    two flat strips. So the model's corner/split choice means "make room" and the aspect picks how.
+ *  - THE PERSON decides the DIRECTION within that move, keeping them where they already are and
+ *    freeing the other side for the graphic.
+ *
+ * Stated this way the illegal combination cannot be produced at all, rather than being a rule the
+ * planning prompt is asked to respect.
+ */
+function framingToTreatment(framing: Framing, vis: VisSeg | null, canvas: { w: number; h: number }): ShotTreatment {
   switch (framing) {
     case 'punch-in':
       return 'punch-in';
     case 'corner':
-      return vis?.label.person === 'left' ? 'corner-tl' : 'corner-br';
-    case 'split':
-      return vis?.label.person === 'left' ? 'split-l' : 'split-r';
+    case 'split': {
+      const onLeft = vis?.label.person === 'left';
+      return canvas.h > canvas.w ? (onLeft ? 'corner-tl' : 'corner-br') : onLeft ? 'split-l' : 'split-r';
+    }
     default:
       return 'full';
   }
@@ -419,21 +433,6 @@ export function layoutInsertWindow(args: {
   return { shots, blocks };
 }
 
-// Prompt-side annotation for the compose brief (machine-facing → English, per the prompt-language rule)
-const COMPONENT_LABEL: Record<GraphicComponent, string> = {
-  metric: 'big-number stat card',
-  comparison: 'side-by-side comparison card',
-  pipeline: 'flow diagram',
-  structure: 'structure diagram',
-  kpi: 'KPI grid',
-  chart: 'chart card',
-  timeline: 'timeline',
-  loop: 'loop diagram',
-  callout: 'callout banner',
-  list: 'bullet list',
-  title: 'title card',
-};
-
 const SIZE_INTENT: Record<GraphicSize, string> = {
   badge: 'compact badge — one fact, minimal chrome, no filler',
   card: 'standard mid-size fragment',
@@ -448,7 +447,9 @@ function graphicInstruction(g: SceneGraphic, backdrop?: string): string {
   const data = g.data ? `\nREAL DATA (use these values verbatim from the script; do NOT invent numbers): ${g.data}` : '';
   const size = `\nSIZE INTENT: ${SIZE_INTENT[g.size ?? 'card']}.`;
   const bd = backdrop ? `\n${backdrop}` : '';
-  return `Create ONE designed graphic fragment — component: ${g.component} (${COMPONENT_LABEL[g.component]}). Not a subtitle, not plain styled text; it needs real structure. Design brief: ${g.brief}${data}${size}${bd}`;
+  // No component named here on purpose — the graphics layer picks it from the brief and the data,
+  // with the box and the theme's stagings in hand. See the note at the top of plan.ts.
+  return `Create ONE designed graphic for this beat. Not a subtitle, not plain styled text; it needs real structure. What it shows: ${g.brief}${data}${size}${bd}`;
 }
 
 /** Short label text for the placeholder block. */
