@@ -24,6 +24,9 @@ import {
   dbToGain,
   patchShotAudio,
   shotFadeAt,
+  shotsContiguous,
+  segmentFadeFn,
+  SPLICE_FADE_SEC,
   shotGain,
   shotGainAt,
   type VideoShot,
@@ -684,6 +687,26 @@ describe('分镜声音(volumeDb/audioMuted)', () => {
     expect(shotGainAt(patchShotAudio(quiet, { mute: true }), 5, 10)).toBe(0);
     expect(patchShotAudio(s, { fadeInSec: 99 }).audioFadeInSec).toBe(10);
     expect(patchShotAudio(faded, { fadeInSec: 0 }).audioFadeInSec).toBeUndefined(); // 归零=摘字段
+  });
+
+  it('接缝微淡化:只在真接缝上加,连续切分不加,并与分镜自身淡化相乘', () => {
+    const s = shot();
+    const len = 10;
+    // 连续:上一镜的 srcEnd 正好是本镜的 srcStart(只分镜没删东西)→ 不是接缝
+    expect(shotsContiguous({ src: undefined, srcEnd: 4 }, { src: undefined, srcStart: 4 })).toBe(true);
+    expect(shotsContiguous({ src: undefined, srcEnd: 4 }, { src: undefined, srcStart: 6.5 })).toBe(false);
+    expect(shotsContiguous({ src: 'a', srcEnd: 4 }, { src: undefined, srcStart: 4 })).toBe(false); // 换源必是接缝
+    expect(segmentFadeFn(s, len, false, false)).toBeNull(); // 无淡化无接缝 = 直通,导出保持原样透传
+    const spliced = segmentFadeFn(s, len, true, true)!;
+    expect(spliced(0)).toBe(0);
+    expect(spliced(SPLICE_FADE_SEC / 2)).toBeCloseTo(0.5, 5);
+    expect(spliced(SPLICE_FADE_SEC)).toBe(1);
+    expect(spliced(0.5)).toBe(1); // 12ms 之外完全不影响电平,不会听成淡入
+    expect(spliced(len)).toBe(0);
+    // 与分镜自身的淡入相乘,不是二选一
+    const both = segmentFadeFn(patchShotAudio(s, { fadeInSec: 2 }), len, true, false)!;
+    expect(both(1)).toBeCloseTo(0.5, 5); // 自身淡入中点 × 微淡化已完成
+    expect(both(0)).toBe(0);
   });
 
   it('patchShotAudio:mute 独立于 volumeDb——静音再取消,原音量还在', () => {

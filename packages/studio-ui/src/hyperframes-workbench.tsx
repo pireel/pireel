@@ -672,6 +672,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       eng.setSource(s.src, f ?? (s.src.startsWith('blob:') ? null : s.src));
     }
     eng.setSegments(
+      // Seam micro-fades (segmentFadeFn) are deliberately NOT applied here: they are 12 ms long and preview
+      // rides el.volume off the rAF clock (~16 ms/tick), so it could neither render them nor benefit — the
+      // splice click is per-sample and only the export mixer works at that resolution. Preview carries the
+      // shot's own fades, which are seconds long and land accurately.
       shots.map((s) => ({
         key: s.src ?? 'main',
         elKey: s.src ? `clip_${s.id}` : 'main',
