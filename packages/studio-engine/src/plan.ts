@@ -35,6 +35,11 @@ export const GRAPHIC_SIZES: GraphicSize[] = ['badge', 'card', 'banner', 'poster'
 
 /** The design graphic a scene produces: chosen component + design brief + real data pulled from the narration. */
 export interface SceneGraphic {
+  /** ANCHOR move: last sentence row (inclusive) the graphic stays on screen through — beyond its
+   *  own scene, across framing changes (blocks live on their own tracks, so duration is free).
+   *  The layout forces an anchored graphic down to badge scale: anything larger held across a
+   *  framing change would bury the speaker. */
+  holdTo?: number;
   /** What this beat shows and how it reads. NOT which component renders it — the graphics layer
    *  picks that, because only it knows the box, the on-screen duration and the theme's stagings. */
   brief: string;
@@ -222,7 +227,8 @@ function coerceGraphic(g: unknown): SceneGraphic | undefined {
   if (!brief) return undefined; // a graphic with no brief is meaningless
   const data = typeof o.data === 'string' && o.data.trim() ? o.data.trim() : undefined;
   const size = GRAPHIC_SIZES.includes(o.size as GraphicSize) ? (o.size as GraphicSize) : undefined;
-  return { brief, ...(data ? { data } : {}), ...(size ? { size } : {}) };
+  const holdTo = typeof o.holdTo === 'number' && Number.isFinite(o.holdTo) ? Math.round(o.holdTo) : undefined;
+  return { brief, ...(data ? { data } : {}), ...(size ? { size } : {}), ...(holdTo !== undefined ? { holdTo } : {}) };
 }
 
 function coerceScene(s: unknown, sentenceCount: number): Scene | null {
@@ -410,9 +416,17 @@ export function assemblePlan(
         const src = rows[a]!.src;
         let b = a;
         while (b + 1 <= sc.to && rows[b + 1]!.src === src) b += 1;
-        const piece: Scene = first
+        let piece: Scene = first
           ? { ...sc, from: rows[a]!.local, to: rows[b]!.local }
           : { from: rows[a]!.local, to: rows[b]!.local, framing: 'full' };
+        if (piece.graphic?.holdTo !== undefined) {
+          // holdTo arrived in GLOBAL row numbers; clamp it into this piece's source segment and
+          // remap to local — an anchor never outlives its own source (the footage changes there).
+          const hLimit = (() => { let e = b; while (e + 1 < rows.length && rows[e + 1]!.src === src) e += 1; return e; })();
+          const h = Math.min(Math.max(piece.graphic.holdTo, sc.to), hLimit);
+          const { holdTo: _h, ...g } = piece.graphic;
+          piece = { ...piece, graphic: { ...g, ...(rows[h]!.local > piece.to ? { holdTo: rows[h]!.local } : {}) } };
+        }
         if (src === 'main') mainScenes.push(piece);
         else byClip.set(src, [...(byClip.get(src) ?? []), piece]);
         first = false;

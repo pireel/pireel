@@ -54,7 +54,8 @@ Return ONE \`\`\`json block with EXACTLY this shape:
       "graphic": {
         "brief": "<what this beat shows, in one line — in the SCRIPT's language>",
         "data": "<the REAL numbers / items / keywords copied verbatim from THESE sentences>",
-        "size": "badge | card | banner | poster"
+        "size": "badge | card | banner | poster",
+        "holdTo": "<ANCHOR move only: last row index the graphic stays on screen through>"
       },
       "emphasis": ["<0-2 keywords, optional>"]
     }
