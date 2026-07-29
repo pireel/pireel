@@ -364,3 +364,27 @@ export function tightenCutRanges(
     .map((r) => ({ from: r.from + half, to: r.to - half }))
     .filter((r) => r.to - r.from >= minCut);
 }
+
+/** One removed interval as recorded DURING a back-to-front multi-cut (positions are pre-removal
+ *  edited seconds at the moment that cut was applied), plus an optional transcript snippet. */
+export interface CutSeamEntry {
+  at: number;
+  len: number;
+  text?: string;
+}
+
+/**
+ * Final seam positions after a back-to-front multi-cut. Ranges are removed in descending order so
+ * each recorded position is exact at its own removal — but every EARLIER cut applied afterwards
+ * shifts it left by that cut's length. The receipt must speak the final timeline (the one the user
+ * scrubs), so: seam = recorded position − total length of removed intervals earlier in the timeline.
+ */
+export function finalizeCutSeams(entries: CutSeamEntry[]): { atSec: number; removedSec: number; text?: string }[] {
+  return entries
+    .map((e) => ({
+      atSec: Math.round((e.at - entries.reduce((a, o) => a + (o.at < e.at ? o.len : 0), 0)) * 10) / 10,
+      removedSec: Math.round(e.len * 10) / 10,
+      ...(e.text ? { text: e.text } : {}),
+    }))
+    .sort((a, b) => a.atSec - b.atSec);
+}

@@ -5,6 +5,7 @@ import {
   deleteClipById,
   editedDuration,
   editedToSrc,
+  finalizeCutSeams,
   removeEditedInterval,
   removeSrcRanges,
   restoreSrcRange,
@@ -328,5 +329,25 @@ describe('多源主轨:源域运算只匹配本源(inSource 谓词)', () => {
     expect(ids.indexOf('x')).toBe(ids.indexOf('a') + 1); // X 紧跟 a,没被甩尾
     expect(ids).toContain('new'); // 新镜插进主源序列
     expect(ids[ids.length - 1]).not.toBe('x'); // 兜底"挂末尾"分支没被误触发
+  });
+});
+
+describe('finalizeCutSeams(多段剪切的缝位回执)', () => {
+  // 剪口播回执要说"最终时间轴"的话:多段从后往前删,每段记录的是它删除当刻的位置,
+  // 之后应用的更早剪切会把它左移——不换算,chat 列表点击定位就会落在错的地方。
+  it('后段缝位左移 = 减去时间轴上更早剪掉的总长', () => {
+    // 处理顺序(降序):先删 [20,22),再删 [5,7.5) → 20s 处的缝最终在 20-2.5=17.5
+    const out = finalizeCutSeams([
+      { at: 20, len: 2 },
+      { at: 5, len: 2.5, text: '嗯这个' },
+    ]);
+    expect(out).toEqual([
+      { atSec: 5, removedSec: 2.5, text: '嗯这个' },
+      { atSec: 17.5, removedSec: 2 },
+    ]);
+  });
+
+  it('单段不位移,秒数四舍五入到 0.1', () => {
+    expect(finalizeCutSeams([{ at: 3.14159, len: 0.87 }])).toEqual([{ atSec: 3.1, removedSec: 0.9 }]);
   });
 });

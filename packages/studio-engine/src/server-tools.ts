@@ -58,7 +58,7 @@ import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
-import { deleteClipById, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
+import { type CutSeamEntry, deleteClipById, finalizeCutSeams, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
@@ -465,19 +465,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const shots = shotsOf(p);
       if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
       // cut_narration takes source seconds (ranges), convert to edited seconds first; cut_range is already edited seconds
-      let ranges: { from: number; to: number }[];
+      let ranges: { from: number; to: number; text?: string }[];
+      let kg = NaN;
       if (tool === 'cut_narration') {
         const raw = Array.isArray(input.ranges) ? input.ranges : [];
         // Pause tightening: keepGapSec margins shrink on the SOURCE clock, same math as the browser runner
-        const kg = Number(input.keepGapSec);
+        kg = Number(input.keepGapSec);
         const srcRanges = raw
           .map((r) => {
             const o = (r ?? {}) as Record<string, unknown>;
             return { from: Number(o.fromSec), to: Number(o.toSec) };
           })
           .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
+        // Transcript snippet per cut: the receipt list names what each cut removed (no words = dead air)
+        const words = asAsr(p.context.asr).flatMap((s) => s.words ?? []);
+        const snippetOf = (from: number, to: number): string | undefined => {
+          const inside = words.filter((w) => w.start >= from - 0.02 && w.end <= to + 0.02).map((w) => w.text.trim());
+          if (!inside.length) return undefined;
+          const joined = inside.join('');
+          return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
+        };
         ranges = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
-          .map((r) => ({ from: srcToEditedLoose(shots, r.from, inNarrationSource), to: srcToEditedLoose(shots, r.to, inNarrationSource) }))
+          .map((r) => ({ from: srcToEditedLoose(shots, r.from, inNarrationSource), to: srcToEditedLoose(shots, r.to, inNarrationSource), text: snippetOf(r.from, r.to) }))
           .filter((r) => r.to - r.from > 0.05)
           .sort((a, b) => b.from - a.from);
       } else {
@@ -489,18 +498,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!ranges.length) return { result: { ok: false, error: 'ranges empty/invalid, or these ranges no longer exist in the edited video' } };
       let curShots = shots;
       let blocks = c.blocks;
-      let removedCount = 0;
+      const seams: CutSeamEntry[] = [];
       for (const e of ranges) {
         const rr = removeEditedRange(curShots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
         if (!rr.removed) continue;
         curShots = rr.clips;
         blocks = removeEditedInterval(blocks, rr.removed[0], rr.removed[1]);
-        removedCount++;
+        seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
       }
-      if (!removedCount) return { result: { ok: false, error: 'cannot remove these ranges (they may cover the entire video)' } };
+      if (!seams.length) return { result: { ok: false, error: 'cannot remove these ranges (they may cover the entire video)' } };
       const relaid = relayCaptionLayer(blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+      // The receipt speaks ACTUAL seconds removed (post-margin) — the agent quotes these, not its own gap arithmetic
+      const cuts = finalizeCutSeams(seams);
+      const removedTotalSec = Math.round(cuts.reduce((a, x) => a + x.removedSec, 0) * 10) / 10;
       return {
-        result: { ok: true, summary: tool === 'cut_narration' ? `Cut ${removedCount} segments by transcript` : 'Removed the specified range' },
+        result: {
+          ok: true,
+          summary:
+            tool === 'cut_narration'
+              ? `Cut ${cuts.length} spots by transcript, ${removedTotalSec.toFixed(1)}s actually removed${Number.isFinite(kg) && kg > 0 ? ` (kept ${kg}s of air per seam)` : ''}`
+              : 'Removed the specified range',
+          ...(tool === 'cut_narration' ? { data: { cuts, removedTotalSec, ...(Number.isFinite(kg) && kg > 0 ? { keepGapSec: kg } : {}) } } : {}),
+        },
         comp: { ...c, shots: curShots, blocks: relaid },
       };
     }

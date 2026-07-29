@@ -41,7 +41,7 @@ import {
   totalDuration,
   zoneOf,
 } from '@pireel/studio-engine/composition';
-import { removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
+import { type CutSeamEntry, finalizeCutSeams, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
@@ -787,29 +787,46 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 return { from: Number(o.fromSec), to: Number(o.toSec) };
               })
               .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
+            // Transcript snippet per cut (words fully inside the source range): the receipt list names WHAT
+            // each cut removed — a range with no words is dead air, and the list says so instead of quoting air.
+            const snippetOf = (from: number, to: number): string | undefined => {
+              const words = (asrRef.current ?? []).flatMap((s) => s.words ?? []);
+              const inside = words.filter((w) => w.start >= from - 0.02 && w.end <= to + 0.02).map((w) => w.text.trim());
+              if (!inside.length) return undefined;
+              const joined = inside.join('');
+              return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
+            };
             const edited = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
-              .map((r) => ({ from: srcToEditedLoose(shots0, r.from, inNarrationSource), to: srcToEditedLoose(shots0, r.to, inNarrationSource) }))
+              .map((r) => ({ from: srcToEditedLoose(shots0, r.from, inNarrationSource), to: srcToEditedLoose(shots0, r.to, inNarrationSource), text: snippetOf(r.from, r.to) }))
               .filter((r) => r.to - r.from > 0.05)
               .sort((a, b) => b.from - a.from);
             if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
             let shots = shots0;
             let blocks = c.blocks;
-            let removedCount = 0;
+            const seams: CutSeamEntry[] = [];
             let firstCut = Infinity;
             for (const e of edited) {
               const rr = removeEditedRange(shots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
               if (!rr.removed) continue;
               shots = rr.clips;
               blocks = removeEditedInterval(blocks, rr.removed[0], rr.removed[1]);
-              removedCount++;
+              seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
               firstCut = Math.min(firstCut, rr.removed[0]);
             }
-            if (!removedCount) return { ok: false, error: t('workbench.thoseRangesDeletedThey') };
+            if (!seams.length) return { ok: false, error: t('workbench.thoseRangesDeletedThey') };
             const relaid = relayCaptionLayer(blocks, shots, asrRef.current); // captions follow the narration: deleted words drop out automatically
             setComp((cur) => ({ ...cur, shots, blocks: relaid }));
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
-            return withDelta({ ok: true, summary: t('workbench.deletedNRangesPer', { n: removedCount }) });
+            // The receipt speaks ACTUAL seconds (post-margin, what really left the timeline) — the agent's own
+            // gap arithmetic (raw gap sizes) is what produced "cut 2.7s" while the panel said 2.4s.
+            const cuts = finalizeCutSeams(seams);
+            const removedTotalSec = Math.round(cuts.reduce((a, x) => a + x.removedSec, 0) * 10) / 10;
+            const summary =
+              Number.isFinite(kg) && kg > 0
+                ? t('workbench.cutNarrationRemovedKeep', { n: cuts.length, sec: removedTotalSec.toFixed(1), kg: String(kg) })
+                : t('workbench.cutNarrationRemoved', { n: cuts.length, sec: removedTotalSec.toFixed(1) });
+            return withDelta({ ok: true, summary, data: { cuts, removedTotalSec, ...(Number.isFinite(kg) && kg > 0 ? { keepGapSec: kg } : {}) } });
           }
           case 'undo': {
             // No rollback while generating: after a snapshot restores the old comp, a running worker still writes its result back, scrambling state
