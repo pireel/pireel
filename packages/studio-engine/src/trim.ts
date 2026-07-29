@@ -378,31 +378,45 @@ export function aliveDurWhere(clips: { srcStart: number; srcEnd: number }[], pre
  * a pristine script is blind: it re-issues the same ranges and reports numbers the editor can't
  * show). Rows keep their stable source timestamps for addressing; these marks carry what happened:
  *  - prefix: '[REMOVED] ' when a sentence no longer survives, '[partly cut, X.Xs kept] ' when part does;
- *  - gapNote: dead air ≥0.8s after the row, with its tightened state — the agent reads gaps from
- *    here instead of doing its own row arithmetic, and never re-cuts one already marked.
- * Empty clips (virgin timeline, no shots yet) = no marks: nothing has been edited.
+ *  - gapNote: dead air ≥0.8s, with its tightened state — the agent reads gaps from here instead of
+ *    doing its own row arithmetic, and never re-cuts one already marked. Covers BOTH the gap after
+ *    the row AND pauses INSIDE it (a speaker's mid-sentence stall is dead air too; the sentence
+ *    timestamps can't locate it, so each note carries its exact source range — without this the
+ *    agent can only see inter-sentence gaps and declares inner pauses uncuttable, which is false).
+ *    Inner pauses need TRUE word timestamps (estimated ones interpolate and would invent gaps).
+ * Empty clips (virgin timeline, no shots yet) = gap positions still noted, no cut state.
  */
 export function narrationRowMarks(
-  segs: { start: number; end: number }[],
+  segs: { start: number; end: number; words?: { start: number; end: number }[] }[],
   clips: { srcStart: number; srcEnd: number }[],
   pred: (c: never) => boolean,
 ): { prefix: string; gapNote: string }[] {
-  if (!clips.length) return segs.map(() => ({ prefix: '', gapNote: '' }));
   const r1 = (x: number) => Math.round(x * 10) / 10;
+  const edited = clips.length > 0;
+  const gapState = (a: number, b: number): string => {
+    if (!edited) return '';
+    const kept = aliveDurWhere(clips, pred, a, b);
+    return kept < 0.8 ? ` — CUT, ${r1(kept)}s kept` : '';
+  };
   return segs.map((seg, i) => {
-    const alive = aliveDurWhere(clips, pred, seg.start, seg.end);
+    const alive = edited ? aliveDurWhere(clips, pred, seg.start, seg.end) : seg.end - seg.start;
     const dur = seg.end - seg.start;
     const prefix = alive < 0.05 ? '[REMOVED] ' : dur - alive > 0.3 ? `[partly cut, ${r1(alive)}s kept] ` : '';
-    let gapNote = '';
+    const notes: string[] = [];
+    const words = seg.words;
+    if (words?.length) {
+      for (let k = 0; k < words.length - 1; k++) {
+        const a = words[k]!.end;
+        const b = words[k + 1]!.start;
+        if (b - a >= 0.8) notes.push(`${r1(b - a)}s pause inside at ${r1(a)}–${r1(b)}s${gapState(a, b)}`);
+      }
+    }
     const next = segs[i + 1];
     if (next) {
       const raw = next.start - seg.end;
-      if (raw >= 0.8) {
-        const gapAlive = aliveDurWhere(clips, pred, seg.end, next.start);
-        gapNote = gapAlive < 0.8 ? ` (+${r1(raw)}s gap after — CUT, ${r1(gapAlive)}s kept)` : ` (+${r1(raw)}s gap after)`;
-      }
+      if (raw >= 0.8) notes.push(`+${r1(raw)}s gap after${gapState(seg.end, next.start)}`);
     }
-    return { prefix, gapNote };
+    return { prefix, gapNote: notes.length ? ` (${notes.join('; ')})` : '' };
   });
 }
 

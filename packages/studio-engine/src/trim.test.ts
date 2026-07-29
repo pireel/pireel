@@ -383,8 +383,30 @@ describe('narrationRowMarks(read_script 的现状标注)', () => {
     expect(m[2]!.prefix).toBe('[REMOVED] ');
   });
 
-  it('空 shots(处女时间轴)= 零标注,而不是全灭', () => {
+  it('空 shots(处女时间轴)= 间隙位置照标(无剪切状态),句子不标死', () => {
     const m = narrationRowMarks(segs, [], pred as never);
-    expect(m.every((x) => x.prefix === '' && x.gapNote === '')).toBe(true);
+    expect(m.every((x) => x.prefix === '')).toBe(true); // 不许把没剪过的句子标成 REMOVED
+    expect(m[0]!.gapNote).toBe(' (+2.7s gap after)'); // 停顿盘点在剪之前就可用
+  });
+
+  it('句内停顿(词级时间戳)标注精确源区间,可与句后间隙并列;收紧后翻 CUT', () => {
+    // 真机事故:模型称句内停顿 cut_narration 处理不了、要用 cut_range 瞎摸——根因是句级
+    // 时间戳定位不了句中,读稿必须把词间 ≥0.8s 的停顿连同 a–b 源区间一起交出去。
+    const withWords = [
+      { start: 35.6, end: 45.1, words: [
+        { start: 35.6, end: 37.9 },  // “还有一个包包”
+        { start: 39.5, end: 45.1 },  // “一个水杯…” — 中间停 1.6s
+      ] },
+      { start: 47.4, end: 52 },      // 句后间隙 2.3s
+    ];
+    const virgin = narrationRowMarks(withWords, [], pred as never);
+    expect(virgin[0]!.gapNote).toBe(' (1.6s pause inside at 37.9–39.5s; +2.3s gap after)');
+    // 收紧句内停顿(两头各留 0.2s)后:句内翻 CUT,句子整体标部分剪
+    const shots = [
+      { srcStart: 35.6, srcEnd: 38.1 },
+      { srcStart: 39.3, srcEnd: 52 },
+    ];
+    const cut = narrationRowMarks(withWords, shots, pred as never);
+    expect(cut[0]!.gapNote).toBe(' (1.6s pause inside at 37.9–39.5s — CUT, 0.4s kept; +2.3s gap after)');
   });
 });
