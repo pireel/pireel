@@ -408,7 +408,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_treatment.label',
     description:
-      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split PREFER split-b — video in the bottom half, graphic in the top; pick split-t only when the speaker already sits in the upper half. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
+      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split USE split-b — video in the bottom half, graphic in the top (the split band re-frames around the speaker, so their position in the frame does not matter); split-t only on explicit user request. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
     inputSchema: obj(
       {
         shotId: { type: 'string' },

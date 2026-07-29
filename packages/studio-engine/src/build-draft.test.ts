@@ -115,7 +115,7 @@ describe('layoutFromPlan(场景化分镜:按场景切镜 + 待配图占位;gener
     expect(treatments).toEqual(['full', 'split-r', 'corner-br', 'full']);
   });
 
-  it('竖屏上下分跟着人走:脸在上半就占上半,把下半让给图形', () => {
+  it('竖屏上下分一律 split-b(分屏会对人重新取窗,人脸位置无关):图形在上、视频在下', () => {
     const seg = (person: 'left' | 'center', faceY: number) => ({
       start: 0,
       end: 8,
@@ -124,10 +124,10 @@ describe('layoutFromPlan(场景化分镜:按场景切镜 + 待配图占位;gener
     });
     const one: DraftPlan = { scenes: [{ from: 0, to: 0, framing: 'split', graphic: { brief: 'A' } }] };
     const portrait = { ...video, width: 1080, height: 1920 };
-    const top = layoutFromPlan(one, { video: portrait, sentences: gapped.slice(0, 1), visual: { segments: [seg('center', 0.15)], cuts: [] } as never });
-    const bottom = layoutFromPlan(one, { video: portrait, sentences: gapped.slice(0, 1), visual: { segments: [seg('center', 0.62)], cuts: [] } as never });
-    expect((top.shots ?? []).map((s) => s.treatment)).toContain('split-t');
-    expect((bottom.shots ?? []).map((s) => s.treatment)).toContain('split-b');
+    const faceHigh = layoutFromPlan(one, { video: portrait, sentences: gapped.slice(0, 1), visual: { segments: [seg('center', 0.15)], cuts: [] } as never });
+    const faceLow = layoutFromPlan(one, { video: portrait, sentences: gapped.slice(0, 1), visual: { segments: [seg('center', 0.62)], cuts: [] } as never });
+    expect((faceHigh.shots ?? []).map((s) => s.treatment)).toContain('split-b');
+    expect((faceLow.shots ?? []).map((s) => s.treatment)).toContain('split-b');
   });
 
   it('同取景相邻场景带呼吸缝也合并成一段', () => {
