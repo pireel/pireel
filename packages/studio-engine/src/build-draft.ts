@@ -280,8 +280,9 @@ export function contentCuts(visual: VisualTimeline | undefined, cuts: number[]):
  *    short side leaves slivers (l/r on portrait) or flat strips (t/b on landscape). So a portrait
  *    frame splits top/bottom and a landscape frame splits left/right — the illegal pairing cannot
  *    be expressed here, rather than being a rule the planning prompt is asked to respect.
- *  - THE PERSON picks the DIRECTION within the move: keep them where they already are, and free
- *    the other side for the graphic. Sideways from the person label, vertically from the face box.
+ *  - THE PERSON picks the DIRECTION for sideways moves only (corner / split-l/r): keep them on
+ *    the side they already occupy, free the other for the graphic. Vertical splits don't care —
+ *    the band re-frames around the speaker, so portrait split is always video-bottom (split-b).
  */
 function framingToTreatment(framing: Framing, vis: VisSeg | null, canvas: { w: number; h: number }): ShotTreatment {
   const onLeft = vis?.label.person === 'left';
@@ -292,10 +293,9 @@ function framingToTreatment(framing: Framing, vis: VisSeg | null, canvas: { w: n
       return onLeft ? 'corner-tl' : 'corner-br';
     case 'split': {
       if (canvas.w >= canvas.h) return onLeft ? 'split-l' : 'split-r';
-      // Portrait: keep the speaker in the half their face already occupies. No face box → bottom,
-      // matching the sideways default (the video takes the second half, the graphic the first).
-      const faceY = vis?.geom?.face ? vis.geom.face.y + vis.geom.face.h / 2 : 1;
-      return faceY < 0.5 ? 'split-t' : 'split-b';
+      // Portrait: video always takes the BOTTOM half — the split band re-frames around the
+      // speaker anyway, so their face position is irrelevant; the graphic reads first up top.
+      return 'split-b';
     }
     default:
       return 'full';
