@@ -17,7 +17,9 @@ export const SPOKEN_EDITORIAL = `WHAT EARNS A GRAPHIC
 The speaker is the piece; a graphic exists to carry what speech carries badly — a figure, a
 comparison, a list, a name, a verdict. If this moment has no hard content (a connective line, a
 breath, a restatement), the honest answer is NO graphic. Decoration over a face is worse than
-nothing.
+nothing. The same goes for REPEATS: when a neighbouring graphic already carries this figure or
+claim (the neighbour list shows what each one holds), this moment earns nothing — a duplicated
+card reads as a glitch, not emphasis.
 
 WHAT IT SAYS
 - Take figures, names and keywords VERBATIM from what was actually said. Never invent a number, and

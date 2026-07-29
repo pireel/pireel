@@ -188,7 +188,10 @@ export function layoutFromPlan(
         // Within the safe base, carve the actual box by plan's size tier — size set by narrative weight, no longer uniform.
         const vac = treatmentVacancyBox(treatment);
         const base = vac ?? graphicBoxFromGeometry(opts.visual, start, stop);
-        const box = graphicBoxForSize(base, scene.graphic.size);
+        // Corner hands the graphic the WHOLE freed block: shrinking the speaker aside to then
+        // float a small card in the emptiness reads as a mistake — the freed area IS the layout.
+        // Splits keep the size carve (a card centred in a clean half reads fine).
+        const box = treatment.startsWith('corner') ? base : graphicBoxForSize(base, scene.graphic.size);
         put(placeholder(graphicInstruction(scene.graphic, backdropNote(treatment, vis)), box, gStart, gDur, graphicGist(scene.graphic)));
         placedGraphic = true;
       }

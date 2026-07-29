@@ -198,7 +198,7 @@ export function buildPlanPrompt(args: {
   return [
     args.topic ? `Topic hint: ${args.topic}` : '',
     args.canvas
-      ? `Canvas: ${Math.round(args.canvas.width)}×${Math.round(args.canvas.height)} (${args.canvas.width >= args.canvas.height ? 'LANDSCAPE' : 'PORTRAIT'} — the split axis follows the canvas automatically; choose corner or split freely).`
+      ? `Canvas: ${Math.round(args.canvas.width)}×${Math.round(args.canvas.height)} (${args.canvas.width >= args.canvas.height ? 'LANDSCAPE — for big-area moments prefer corner first, split second' : 'PORTRAIT — for big-area moments prefer split (top/bottom) first, corner second'}; the split axis follows the canvas automatically).`
       : '',
     (() => {
       const band = planSceneBand(args.videoDurationSec);
