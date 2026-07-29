@@ -18,7 +18,7 @@
 import { BLOCK_HTML_BODY } from './block-system';
 import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
-import { catalogSection } from './l4-catalog';
+import { catalogSection, componentNormsSection } from './l4-catalog';
 import { getPreset } from './presets';
 
 /** Path-specific output contract — the only part of the stack that knows what the answer looks like. */
@@ -50,7 +50,9 @@ export function buildKitSystem(opts?: { presetId?: string }): string {
  *  the capability layer and the output contract differ, which is the whole claim of the stack. */
 export function buildHtmlSystem(opts?: { presetId?: string }): string {
   const preset = getPreset(opts?.presetId);
-  return [FRAGMENT_CONTRACT, BLOCK_HTML_BODY, preset.editorial, HTML_OUTPUT].join('\n\n');
+  // The house component types ride in DERIVED — the themed path and the component path speak the
+  // same vocabulary from the same schemas (a theme restyles these types, it doesn't rename them).
+  return [FRAGMENT_CONTRACT, BLOCK_HTML_BODY, componentNormsSection(preset.components), preset.editorial, HTML_OUTPUT].join('\n\n');
 }
 
 /** The default free-form system (spoken preset) — the theme brief is appended by withActiveTheme,
