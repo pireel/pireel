@@ -193,10 +193,11 @@ function offlineTranscript(p: ServerToolProject): string {
   const parts: string[] = [];
   // Same derived-current-truth marks as the browser transcript — the two surfaces must tell one story
   const main = asAsr(p.context.asr);
-  const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src);
-  const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks[i]!.prefix}${s.text}${marks[i]!.gapNote}`;
+  const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src, p.comp.video?.durationSec ?? p.videoDurationSec ?? undefined);
+  const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${s.text}${marks.rows[i]!.gapNote}`;
+  const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
   parts.push(
-    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover BOTH kinds: "+Xs gap after" (between sentences) and "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range — cut them with cut_narration exactly like gaps). Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${main.map(mainRow).join('\n')}`,
+    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,
   );
   const bySrc = new Map<string, string[]>();
   for (const s of p.comp.shots ?? []) {
