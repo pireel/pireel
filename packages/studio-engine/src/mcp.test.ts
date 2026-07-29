@@ -10,6 +10,7 @@ import {
 
 function deps(overrides: Partial<McpDeps> = {}): McpDeps {
   return {
+    skillVersion: '2099-01-01.1',
     callBridge: vi.fn(async () => ({ ok: true, summary: 'done' })),
     listFrames: vi.fn(() => [{ id: 'f1', title: 'F1', summary: 's' }]),
     readFrame: vi.fn((id: string) => ({ ok: true, summary: id, data: { playbook: 'PB' } })),
