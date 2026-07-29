@@ -6,6 +6,7 @@ import {
   editedDuration,
   editedToSrc,
   finalizeCutSeams,
+  narrationRowMarks,
   removeEditedInterval,
   removeSrcRanges,
   restoreSrcRange,
@@ -349,5 +350,41 @@ describe('finalizeCutSeams(多段剪切的缝位回执)', () => {
 
   it('单段不位移,秒数四舍五入到 0.1', () => {
     expect(finalizeCutSeams([{ at: 3.14159, len: 0.87 }])).toEqual([{ atSec: 3.1, removedSec: 0.9 }]);
+  });
+});
+
+describe('narrationRowMarks(read_script 的现状标注)', () => {
+  // agent 之眼必须读现状:剪完再读若仍是原始源表,agent 会盲发同一批 ranges、
+  // 汇报编辑器对不上的数字(真机事故)。行保稳定源时间戳,标注携带编辑状态。
+  const segs = [
+    { start: 0, end: 9 },     // 存活
+    { start: 11.7, end: 12.4 }, // 句0→1 间隙 2.7s
+    { start: 15.1, end: 15.9 }, // 句1→2 间隙 2.7s
+  ];
+  const pred = (c: { src?: string }) => !c.src;
+
+  it('未剪:无前缀,≥0.8s 的句间隙标原始时长', () => {
+    const shots = [{ srcStart: 0, srcEnd: 20 }];
+    const m = narrationRowMarks(segs, shots, pred as never);
+    expect(m[0]).toEqual({ prefix: '', gapNote: ' (+2.7s gap after)' });
+    expect(m[2]!.gapNote).toBe(''); // 尾行无后隙
+  });
+
+  it('收紧过的间隙标 CUT + 留白量;整句剪光标 REMOVED;部分剪标 kept', () => {
+    // 剪掉 [9.2,11.5](两头各留 0.2s)+ 整删句2 + 句0 尾巴删 2s
+    const shots = [
+      { srcStart: 0, srcEnd: 7 },
+      { srcStart: 9, srcEnd: 9.2 },
+      { srcStart: 11.5, srcEnd: 15.1 },
+    ];
+    const m = narrationRowMarks(segs, shots, pred as never);
+    expect(m[0]!.prefix).toBe('[partly cut, 7s kept] ');
+    expect(m[0]!.gapNote).toBe(' (+2.7s gap after — CUT, 0.4s kept)');
+    expect(m[2]!.prefix).toBe('[REMOVED] ');
+  });
+
+  it('空 shots(处女时间轴)= 零标注,而不是全灭', () => {
+    const m = narrationRowMarks(segs, [], pred as never);
+    expect(m.every((x) => x.prefix === '' && x.gapNote === '')).toBe(true);
   });
 });

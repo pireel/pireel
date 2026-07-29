@@ -76,6 +76,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.cutNarrationRemoved': '已按口播稿剪了 {n} 处,共 {sec} 秒',
   'workbench.cutNarrationRemovedKeep': '已剪 {n} 处停顿,共压掉 {sec} 秒(每处留 {kg} 秒呼吸)',
   'workbench.deletedNScenes': '已删除 {n} 个场景',
+  'workbench.nothingUndoCloudEmpty': '没有可撤销的改动(云端历史也是空的)',
+  'workbench.undidCloudVersion': '内存里无可撤销,已回退到云端历史上一版(时长 {sec} 秒);状态已变,请重读后再继续',
   'workbench.deletedScene': '已删除这个场景',
   'workbench.deleteElement': '删除组件',
   'workbench.deleteImage': '删除图片',

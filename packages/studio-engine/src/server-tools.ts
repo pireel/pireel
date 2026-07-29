@@ -10,7 +10,9 @@
  * read script, snapshot. Does NOT cover browser-only tools: extract_asr,
  * analyze_visual (video bytes not in the cloud), capture_frame, add_block/
  * edit_block/add_graphics (our own LLM generation, browser drives compose),
- * lay_out (needs restoreDraftContext's media restore), focus_element/undo (pure UI state).
+ * lay_out (needs restoreDraftContext's media restore), focus_element (pure UI state).
+ * undo IS offline-capable, but lives in the ROUTE (it walks the cloud history ring —
+ * DB territory, and this module stays pure).
  *
  * Pure-module discipline: zero react/browser/DB deps — loading/persistence is the
  * route's job; this just takes data and returns data, directly pinnable by vitest.
@@ -58,7 +60,7 @@ import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
-import { type CutSeamEntry, deleteClipById, finalizeCutSeams, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
+import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
@@ -189,8 +191,12 @@ function offlineTranscript(p: ServerToolProject): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
   const row = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`;
   const parts: string[] = [];
+  // Same derived-current-truth marks as the browser transcript — the two surfaces must tell one story
+  const main = asAsr(p.context.asr);
+  const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src);
+  const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks[i]!.prefix}${s.text}${marks[i]!.gapNote}`;
   parts.push(
-    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock):\n${asAsr(p.context.asr).map(row).join('\n')}`,
+    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it; "(+Xs gap after)" rows are the dead air, read gaps from these notes instead of computing them, and skip ones already marked CUT):\n${main.map(mainRow).join('\n')}`,
   );
   const bySrc = new Map<string, string[]>();
   for (const s of p.comp.shots ?? []) {

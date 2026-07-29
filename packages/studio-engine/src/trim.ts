@@ -365,6 +365,47 @@ export function tightenCutRanges(
     .filter((r) => r.to - r.from >= minCut);
 }
 
+/** Seconds of a source-clock range [s,e] surviving the current edit, summed over clips matching `pred`. */
+export function aliveDurWhere(clips: { srcStart: number; srcEnd: number }[], pred: (c: never) => boolean, s: number, e: number): number {
+  let d = 0;
+  for (const c of clips) if (pred(c as never)) d += Math.max(0, Math.min(c.srcEnd, e) - Math.max(c.srcStart, s));
+  return d;
+}
+
+/**
+ * Per-row edit-state marks for the narration transcript — the transcript the agent reads must be
+ * the CURRENT truth, not the immutable source table (an agent that re-reads after cutting and sees
+ * a pristine script is blind: it re-issues the same ranges and reports numbers the editor can't
+ * show). Rows keep their stable source timestamps for addressing; these marks carry what happened:
+ *  - prefix: '[REMOVED] ' when a sentence no longer survives, '[partly cut, X.Xs kept] ' when part does;
+ *  - gapNote: dead air ≥0.8s after the row, with its tightened state — the agent reads gaps from
+ *    here instead of doing its own row arithmetic, and never re-cuts one already marked.
+ * Empty clips (virgin timeline, no shots yet) = no marks: nothing has been edited.
+ */
+export function narrationRowMarks(
+  segs: { start: number; end: number }[],
+  clips: { srcStart: number; srcEnd: number }[],
+  pred: (c: never) => boolean,
+): { prefix: string; gapNote: string }[] {
+  if (!clips.length) return segs.map(() => ({ prefix: '', gapNote: '' }));
+  const r1 = (x: number) => Math.round(x * 10) / 10;
+  return segs.map((seg, i) => {
+    const alive = aliveDurWhere(clips, pred, seg.start, seg.end);
+    const dur = seg.end - seg.start;
+    const prefix = alive < 0.05 ? '[REMOVED] ' : dur - alive > 0.3 ? `[partly cut, ${r1(alive)}s kept] ` : '';
+    let gapNote = '';
+    const next = segs[i + 1];
+    if (next) {
+      const raw = next.start - seg.end;
+      if (raw >= 0.8) {
+        const gapAlive = aliveDurWhere(clips, pred, seg.end, next.start);
+        gapNote = gapAlive < 0.8 ? ` (+${r1(raw)}s gap after — CUT, ${r1(gapAlive)}s kept)` : ` (+${r1(raw)}s gap after)`;
+      }
+    }
+    return { prefix, gapNote };
+  });
+}
+
 /** One removed interval as recorded DURING a back-to-front multi-cut (positions are pre-removal
  *  edited seconds at the moment that cut was applied), plus an optional transcript snippet. */
 export interface CutSeamEntry {

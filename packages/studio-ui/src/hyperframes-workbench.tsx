@@ -3011,6 +3011,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setComp, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, relayCaptionLayer, stepAsr,
   });
   const agentToolCtx: AgentToolCtx = {
+    projectId,
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo,
