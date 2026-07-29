@@ -742,6 +742,32 @@ export function zoneOf(box: NormBox): string {
 const PLACE_MARGIN = 0.03;
 const round4 = (v: number) => Math.round(v * 10000) / 10000;
 
+/** Framing context for place_block receipts: corner/split spans overlapping the block's time
+ *  window, phrased as where the video sits vs where the freed area is. Deliberately a receipt
+ *  hint, not a remap — placement stays a pure canvas-space function; the agent re-aims when its
+ *  target region turns out to be the video band. */
+export function placementFramingNotes(shots: VideoShot[], startSec: number, durationSec: number): string[] {
+  const BAND: Partial<Record<NonNullable<VideoShot['treatment']>, [video: string, free: string]>> = {
+    'split-t': ['top half', 'bottom half'],
+    'split-b': ['bottom half', 'top half'],
+    'split-l': ['left half', 'right half'],
+    'split-r': ['right half', 'left half'],
+    'corner-br': ['bottom-right corner', 'top area'],
+    'corner-tl': ['top-left corner', 'bottom area'],
+  };
+  const from = startSec;
+  const to = startSec + Math.max(0, durationSec);
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const notes: string[] = [];
+  for (const sp of spans(shots)) {
+    if (sp.editedEnd <= from || sp.editedStart >= to) continue;
+    const band = BAND[(sp.clip as VideoShot).treatment ?? 'full'];
+    if (!band) continue;
+    notes.push(`${r1(sp.editedStart)}–${r1(sp.editedEnd)}s runs ${(sp.clip as VideoShot).treatment}: video holds the ${band[0]}, the free area is the ${band[1]}`);
+  }
+  return notes;
+}
+
 /** Compute a block's new screen placement (normalized canvas space, shared by the browser runner and the offline executor).
  *  Position comes from ONE of: anchor / xPct+yPct / dxPct+dyPct; `scale` composes with any of them. The box is clamped fully
  *  on-canvas. Move shifts box + contentBox together (crop relationship preserved, same as the drag handle); scale mirrors the
