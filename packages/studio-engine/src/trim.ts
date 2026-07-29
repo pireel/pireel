@@ -372,25 +372,64 @@ export function aliveDurWhere(clips: { srcStart: number; srcEnd: number }[], pre
   return d;
 }
 
+/** One dead-air region in the narration. `after` = the row it follows (-1 = recording head);
+ *  `wi` present = a pause INSIDE row `after`, sitting after that word. Edges (pre-roll head /
+ *  post-roll tail) are tagged — cut policy treats them asymmetrically. */
+export interface NarrationGap {
+  after: number;
+  wi?: number;
+  a: number;
+  b: number;
+  edge?: 'head' | 'tail';
+}
+
+/**
+ * The ONE dead-air inventory for the narration — the script panel, the browser transcript and the
+ * offline transcript all enumerate silence through here. Two implementations of "where is the dead
+ * air" is exactly how the agent and the panel end up disagreeing about the same recording.
+ * Inter-sentence gaps, mid-sentence stalls (TRUE word timestamps only — estimated ones interpolate
+ * and would invent gaps), the pre-roll head, and — when the recording length is known — the
+ * post-roll tail; everything at `minPauseSec` (0.8s: shorter is speech rhythm, not dead air).
+ */
+export function narrationGaps(
+  segs: { start: number; end: number; words?: { start: number; end: number }[] }[],
+  videoDurationSec?: number,
+  minPauseSec = 0.8,
+): NarrationGap[] {
+  if (!segs.length) return [];
+  const out: NarrationGap[] = [];
+  const add = (g: NarrationGap) => {
+    if (g.b - g.a >= minPauseSec) out.push(g);
+  };
+  add({ after: -1, a: 0, b: segs[0]!.start, edge: 'head' });
+  segs.forEach((seg, i) => {
+    const words = seg.words;
+    if (words?.length) for (let k = 0; k < words.length - 1; k++) add({ after: i, wi: k, a: words[k]!.end, b: words[k + 1]!.start });
+    if (i < segs.length - 1) add({ after: i, a: seg.end, b: segs[i + 1]!.start });
+  });
+  if (videoDurationSec != null && videoDurationSec > 0) add({ after: segs.length - 1, a: segs[segs.length - 1]!.end, b: videoDurationSec, edge: 'tail' });
+  return out;
+}
+
 /**
  * Per-row edit-state marks for the narration transcript — the transcript the agent reads must be
  * the CURRENT truth, not the immutable source table (an agent that re-reads after cutting and sees
  * a pristine script is blind: it re-issues the same ranges and reports numbers the editor can't
  * show). Rows keep their stable source timestamps for addressing; these marks carry what happened:
  *  - prefix: '[REMOVED] ' when a sentence no longer survives, '[partly cut, X.Xs kept] ' when part does;
- *  - gapNote: dead air ≥0.8s, with its tightened state — the agent reads gaps from here instead of
- *    doing its own row arithmetic, and never re-cuts one already marked. Covers BOTH the gap after
- *    the row AND pauses INSIDE it (a speaker's mid-sentence stall is dead air too; the sentence
- *    timestamps can't locate it, so each note carries its exact source range — without this the
- *    agent can only see inter-sentence gaps and declares inner pauses uncuttable, which is false).
- *    Inner pauses need TRUE word timestamps (estimated ones interpolate and would invent gaps).
+ *  - gapNote: dead air from the narrationGaps inventory, with its tightened state — the agent reads
+ *    dead air from here instead of doing its own row arithmetic, and never re-cuts one already
+ *    marked. Inner pauses carry their exact source range (sentence timestamps can't locate them).
+ *  - head/tail: the recording's pre-roll and post-roll silence as their own lines — without them
+ *    the agent can see every gap except the two the cleanup guide tells it to check first.
  * Empty clips (virgin timeline, no shots yet) = gap positions still noted, no cut state.
  */
 export function narrationRowMarks(
   segs: { start: number; end: number; words?: { start: number; end: number }[] }[],
   clips: { srcStart: number; srcEnd: number }[],
   pred: (c: never) => boolean,
-): { prefix: string; gapNote: string }[] {
+  videoDurationSec?: number,
+): { rows: { prefix: string; gapNote: string }[]; head: string; tail: string } {
   const r1 = (x: number) => Math.round(x * 10) / 10;
   const edited = clips.length > 0;
   const gapState = (a: number, b: number): string => {
@@ -398,26 +437,29 @@ export function narrationRowMarks(
     const kept = aliveDurWhere(clips, pred, a, b);
     return kept < 0.8 ? ` — CUT, ${r1(kept)}s kept` : '';
   };
-  return segs.map((seg, i) => {
+  const noteOf = (g: NarrationGap): string =>
+    g.edge
+      ? `(+${r1(g.b - g.a)}s dead air at the ${g.edge}, ${r1(g.a)}–${r1(g.b)}s${gapState(g.a, g.b)})`
+      : g.wi != null
+        ? `${r1(g.b - g.a)}s pause inside at ${r1(g.a)}–${r1(g.b)}s${gapState(g.a, g.b)}`
+        : `+${r1(g.b - g.a)}s gap after${gapState(g.a, g.b)}`;
+  const gaps = narrationGaps(segs, videoDurationSec);
+  const byRow = new Map<number, string[]>();
+  let head = '';
+  let tail = '';
+  for (const g of gaps) {
+    if (g.edge === 'head') head = noteOf(g);
+    else if (g.edge === 'tail') tail = noteOf(g);
+    else byRow.set(g.after, [...(byRow.get(g.after) ?? []), noteOf(g)]);
+  }
+  const rows = segs.map((seg, i) => {
     const alive = edited ? aliveDurWhere(clips, pred, seg.start, seg.end) : seg.end - seg.start;
     const dur = seg.end - seg.start;
     const prefix = alive < 0.05 ? '[REMOVED] ' : dur - alive > 0.3 ? `[partly cut, ${r1(alive)}s kept] ` : '';
-    const notes: string[] = [];
-    const words = seg.words;
-    if (words?.length) {
-      for (let k = 0; k < words.length - 1; k++) {
-        const a = words[k]!.end;
-        const b = words[k + 1]!.start;
-        if (b - a >= 0.8) notes.push(`${r1(b - a)}s pause inside at ${r1(a)}–${r1(b)}s${gapState(a, b)}`);
-      }
-    }
-    const next = segs[i + 1];
-    if (next) {
-      const raw = next.start - seg.end;
-      if (raw >= 0.8) notes.push(`+${r1(raw)}s gap after${gapState(seg.end, next.start)}`);
-    }
-    return { prefix, gapNote: notes.length ? ` (${notes.join('; ')})` : '' };
+    const notes = byRow.get(i);
+    return { prefix, gapNote: notes?.length ? ` (${notes.join('; ')})` : '' };
   });
+  return { rows, head, tail };
 }
 
 /** One removed interval as recorded DURING a back-to-front multi-cut (positions are pre-removal

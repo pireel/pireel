@@ -6,6 +6,7 @@ import {
   editedDuration,
   editedToSrc,
   finalizeCutSeams,
+  narrationGaps,
   narrationRowMarks,
   removeEditedInterval,
   removeSrcRanges,
@@ -366,8 +367,9 @@ describe('narrationRowMarks(read_script 的现状标注)', () => {
   it('未剪:无前缀,≥0.8s 的句间隙标原始时长', () => {
     const shots = [{ srcStart: 0, srcEnd: 20 }];
     const m = narrationRowMarks(segs, shots, pred as never);
-    expect(m[0]).toEqual({ prefix: '', gapNote: ' (+2.7s gap after)' });
-    expect(m[2]!.gapNote).toBe(''); // 尾行无后隙
+    expect(m.rows[0]).toEqual({ prefix: '', gapNote: ' (+2.7s gap after)' });
+    expect(m.rows[2]!.gapNote).toBe(''); // 尾行无后隙(时长未知,不产 tail)
+    expect(m.tail).toBe('');
   });
 
   it('收紧过的间隙标 CUT + 留白量;整句剪光标 REMOVED;部分剪标 kept', () => {
@@ -378,15 +380,15 @@ describe('narrationRowMarks(read_script 的现状标注)', () => {
       { srcStart: 11.5, srcEnd: 15.1 },
     ];
     const m = narrationRowMarks(segs, shots, pred as never);
-    expect(m[0]!.prefix).toBe('[partly cut, 7s kept] ');
-    expect(m[0]!.gapNote).toBe(' (+2.7s gap after — CUT, 0.4s kept)');
-    expect(m[2]!.prefix).toBe('[REMOVED] ');
+    expect(m.rows[0]!.prefix).toBe('[partly cut, 7s kept] ');
+    expect(m.rows[0]!.gapNote).toBe(' (+2.7s gap after — CUT, 0.4s kept)');
+    expect(m.rows[2]!.prefix).toBe('[REMOVED] ');
   });
 
   it('空 shots(处女时间轴)= 间隙位置照标(无剪切状态),句子不标死', () => {
     const m = narrationRowMarks(segs, [], pred as never);
-    expect(m.every((x) => x.prefix === '')).toBe(true); // 不许把没剪过的句子标成 REMOVED
-    expect(m[0]!.gapNote).toBe(' (+2.7s gap after)'); // 停顿盘点在剪之前就可用
+    expect(m.rows.every((x) => x.prefix === '')).toBe(true); // 不许把没剪过的句子标成 REMOVED
+    expect(m.rows[0]!.gapNote).toBe(' (+2.7s gap after)'); // 停顿盘点在剪之前就可用
   });
 
   it('句内停顿(词级时间戳)标注精确源区间,可与句后间隙并列;收紧后翻 CUT', () => {
@@ -400,13 +402,26 @@ describe('narrationRowMarks(read_script 的现状标注)', () => {
       { start: 47.4, end: 52 },      // 句后间隙 2.3s
     ];
     const virgin = narrationRowMarks(withWords, [], pred as never);
-    expect(virgin[0]!.gapNote).toBe(' (1.6s pause inside at 37.9–39.5s; +2.3s gap after)');
+    expect(virgin.rows[0]!.gapNote).toBe(' (1.6s pause inside at 37.9–39.5s; +2.3s gap after)');
     // 收紧句内停顿(两头各留 0.2s)后:句内翻 CUT,句子整体标部分剪
     const shots = [
       { srcStart: 35.6, srcEnd: 38.1 },
       { srcStart: 39.3, srcEnd: 52 },
     ];
     const cut = narrationRowMarks(withWords, shots, pred as never);
-    expect(cut[0]!.gapNote).toBe(' (1.6s pause inside at 37.9–39.5s — CUT, 0.4s kept; +2.3s gap after)');
+    expect(cut.rows[0]!.gapNote).toBe(' (1.6s pause inside at 37.9–39.5s — CUT, 0.4s kept; +2.3s gap after)');
+  });
+
+  it('头尾死气独立成行:头=0→首句,尾要有片长才产;与面板同一份盘点(narrationGaps)', () => {
+    // 指南让 agent 第一件事查 pre/post-roll,但此前标注只有句间/句内——看得见所有间隙,
+    // 唯独看不见指南点名的那两处。头尾走同一 CUT 语义。
+    const late = [{ start: 2.1, end: 9 }, { start: 11.7, end: 12.4 }];
+    const m = narrationRowMarks(late, [], pred as never, 15);
+    expect(m.head).toBe('(+2.1s dead air at the head, 0–2.1s)');
+    expect(m.tail).toBe('(+2.6s dead air at the tail, 12.4–15s)');
+    const g = narrationGaps(late, 15);
+    expect(g.filter((x) => x.edge).length).toBe(2); // 面板消费的同一枚举
+    const cutHead = narrationRowMarks(late, [{ srcStart: 2, srcEnd: 15 }], pred as never, 15);
+    expect(cutHead.head).toBe('(+2.1s dead air at the head, 0–2.1s — CUT, 0.1s kept)');
   });
 });

@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Scissors, ScrollText } from 'lucide-react';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { VideoShot } from '@pireel/studio-engine/composition';
-import { srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
+import { narrationGaps, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { t } from './i18n';
 
@@ -122,32 +122,25 @@ export function ScriptPanel({
   const gaps = useMemo(() => {
     if (!sents.length || videoDurationSec <= 0) return [] as Gap[];
     const out: Gap[] = [];
-    const add = (g: { after: number; wi?: number; a: number; b: number; edge?: 'head' | 'tail' }) => {
-      if (g.b - g.a < MIN_PAUSE_SEC) return;
-      // Interior pauses go through the SAME margin math the agent's cut_narration uses (one source of truth
-      // for "how much air survives a tightening"); head/tail are asymmetric — cleared up to the speech guard.
+    // Enumeration is the SHARED inventory (narrationGaps — same one the agent's transcript notes read
+    // from; two lists of "where is the dead air" is how chat and this panel end up disagreeing).
+    // This panel only adds its CUT POLICY on top: interior pauses go through the same margin math the
+    // agent's cut_narration uses; head/tail are asymmetric — cleared up to the speech guard.
+    for (const g of narrationGaps(sents, videoDurationSec, MIN_PAUSE_SEC)) {
       const [from, to] = g.edge
         ? [g.edge === 'head' ? g.a : g.a + EDGE_PAD_SEC, g.edge === 'tail' ? g.b : g.b - EDGE_PAD_SEC]
         : (() => {
             const r = tightenCutRanges([{ from: g.a, to: g.b }], KEEP_AIR_SEC, 0.05)[0];
             return r ? [r.from, r.to] : [0, 0];
           })();
-      if (to - from < 0.05) return;
+      if (to - from < 0.05) continue;
       // "Deleted" is a verdict on surviving AIR, not on whether OUR margin range is dead: the agent's
       // cut_narration keeps its own keepGapSec (0.15–0.6) and a calmer margin than ours used to leave
       // slivers alive inside our range — the pause was genuinely tightened but never got its strike.
       // If what survives the raw gap is less than dead-air threshold, it's breathing room now → struck.
       const aliveDur = srcAliveDur(shots, null, g.a, g.b);
       out.push({ after: g.after, wi: g.wi, range: [from, to], alive: aliveDur >= MIN_PAUSE_SEC, rawDur: g.b - g.a, aliveDur });
-    };
-    add({ after: -1, a: 0, b: sents[0]!.start, edge: 'head' });
-    sents.forEach((seg, i) => {
-      // Inside the sentence: consecutive word boundaries (true timestamps only)
-      const words = seg.words;
-      if (words?.length) for (let k = 0; k < words.length - 1; k++) add({ after: i, wi: k, a: words[k]!.end, b: words[k + 1]!.start });
-      if (i < sents.length - 1) add({ after: i, a: seg.end, b: sents[i + 1]!.start });
-    });
-    add({ after: sents.length - 1, a: sents[sents.length - 1]!.end, b: videoDurationSec, edge: 'tail' });
+    }
     return out;
   }, [sents, videoDurationSec, shots]);
   const silences = useMemo(() => gaps.filter((g) => g.alive), [gaps]);

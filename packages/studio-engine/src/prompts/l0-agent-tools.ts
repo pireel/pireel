@@ -109,7 +109,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks plus dead-air notes for BOTH inter-sentence gaps (\"+Xs gap after\") and mid-sentence stalls (\"Xs pause inside at a–bs\", with the exact source range), each flipping to CUT once tightened — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read dead air from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
+      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks plus dead-air notes for ALL of it — inter-sentence gaps (\"+Xs gap after\"), mid-sentence stalls (\"Xs pause inside at a–bs\", with the exact source range) and the recording's pre/post-roll (\"dead air at the head/tail\") — each flipping to CUT once tightened — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read dead air from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
     inputSchema: obj({}, []),
   },
   {
