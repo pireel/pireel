@@ -304,7 +304,7 @@ export function useAgentContext(deps: AgentContextDeps) {
         const sentences = planCtx[k]?.sentences;
         let sliced: { shots: VideoShot[]; blocks: Block[] } | null = null;
         if (planned?.scenes.length && sentences?.length) {
-          sliced = layoutInsertWindow({ win: { start: at, end: at + len }, clip: sp.clip, sentences, scenes: planned.scenes, layout });
+          sliced = layoutInsertWindow({ win: { start: at, end: at + len }, clip: sp.clip, sentences, scenes: planned.scenes, layout, canvas: { w: draft.width, h: draft.height } });
         }
         if (sliced) {
           shots2 = [...shots2.slice(0, idx), ...sliced.shots, ...shots2.slice(idx + 1)]; // replace the whole clip just inserted

@@ -375,8 +375,10 @@ export function layoutInsertWindow(args: {
   sentences: { index: number; start: number; end: number; text: string }[];
   scenes: Scene[];
   layout?: { box: Box; hasFace?: boolean };
+  /** Canvas size — picks the split axis (same rule as the main path). Missing → portrait assumed. */
+  canvas?: { w: number; h: number };
 }): { shots: VideoShot[]; blocks: Block[] } | null {
-  const { win, clip, sentences, scenes, layout } = args;
+  const { win, clip, sentences, scenes, layout, canvas } = args;
   if (!scenes.length || !sentences.length) return null;
   const clamp = (t: number) => Math.max(clip.srcStart, Math.min(clip.srcEnd, t));
   const sAt = (i: number) => sentences[Math.max(0, Math.min(sentences.length - 1, i))]!;
@@ -389,7 +391,10 @@ export function layoutInsertWindow(args: {
       case 'corner':
         return personLeft ? 'corner-tl' : 'corner-br';
       case 'split':
-        return personLeft ? 'split-l' : 'split-r';
+        // Split axis follows the canvas (same rule as framingToTreatment): landscape frees the
+        // side the person is not on; portrait is always split-b (video bottom, graphic top) —
+        // l/r on a portrait canvas is the illegal sliver pairing.
+        return canvas && canvas.w >= canvas.h ? (personLeft ? 'split-l' : 'split-r') : 'split-b';
       default:
         return 'full';
     }
