@@ -49,8 +49,9 @@ export interface McpBridgeResult {
 }
 
 export interface McpDeps {
-  /** Skill baseline announced in initialize.instructions (`YYYY-MM-DD.rev`). The hosting route
-   *  derives it from the shipped skill's SKILL.md footer — the single source of the version. */
+  /** Skill baseline announced in initialize.instructions — an opaque release tag (clients
+   *  update on mismatch, not ordering; each release must announce a distinct string). The
+   *  hosting route derives it from the shipped skill's VERSION file — the single source. */
   skillVersion: string;
   /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
