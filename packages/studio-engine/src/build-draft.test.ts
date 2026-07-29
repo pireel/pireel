@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { dropPlaceholdersInWindows, graphicBoxForSize, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from './build-draft';
-import { blockKind } from './composition';
+import { blockKind, treatmentVacancyBox } from './composition';
 import type { DraftPlan } from './plan';
 import type { AsrSegment } from './build-blocks';
 
@@ -426,5 +426,23 @@ describe('layoutInsertWindow(插入段平权分镜:按自己的场景切镜/取�
   it('没场景/没句子 → null(调用方退回整段一拍)', () => {
     expect(layoutInsertWindow({ win: { start: 0, end: 12 }, clip, sentences, scenes: [] })).toBeNull();
     expect(layoutInsertWindow({ win: { start: 0, end: 12 }, clip, sentences: [], scenes: [{ from: 0, to: 0, framing: 'full' }] })).toBeNull();
+  });
+});
+
+describe('缩角场景把腾出的整块交给图形(不在空区里飘小卡)', () => {
+  it('corner + size:card → 占位框 = 完整空位框,不做 card 裁切', () => {
+    const p: DraftPlan = { scenes: [{ from: 0, to: 1, framing: 'corner', graphic: { brief: 'A', data: '87%', size: 'card' } }] };
+    const c = layoutFromPlan(p, { video, sentences });
+    const ph = phs(c)[0]!;
+    const vac = treatmentVacancyBox('corner-br')!;
+    expect(ph.box).toEqual(vac); // 整块,而不是 clamp 到 0.42 高的居中卡
+  });
+  it('split 保持按 size 裁切(半区里的居中卡是合理形态)', () => {
+    const gapped: AsrSegment[] = [{ start: 2, end: 6, text: '一句' }];
+    const p: DraftPlan = { scenes: [{ from: 0, to: 0, framing: 'split', graphic: { brief: 'A', size: 'badge' } }] };
+    const c = layoutFromPlan(p, { video: { ...video, width: 1080, height: 1920 }, sentences: gapped });
+    const ph = phs(c)[0]!;
+    const vac = treatmentVacancyBox('split-b')!;
+    expect(ph.box!.w).toBeLessThan(vac.w); // badge 裁切仍然生效(缩角才交整块)
   });
 });

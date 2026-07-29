@@ -258,3 +258,11 @@ describe('planSceneBand(节奏公式:从 3-8s hold 规则推出的场景数带)'
     expect(p).toContain('healthy band 7–15');
   });
 });
+
+describe('取景优先级随画布进请求(口播实测定的规矩)', () => {
+  it('竖屏:上下切优先于缩角;横屏:缩角优先于左右切', () => {
+    const args = { sentences: [{ index: 0, text: 'hi', start: 0, end: 5 }], videoDurationSec: 5 };
+    expect(buildPlanPrompt({ ...args, canvas: { width: 1080, height: 1920 } })).toContain('prefer split (top/bottom) first, corner second');
+    expect(buildPlanPrompt({ ...args, canvas: { width: 1920, height: 1080 } })).toContain('prefer corner first, split second');
+  });
+});

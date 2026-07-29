@@ -14,6 +14,7 @@ GIVE EACH SCENE A DESIGNED GRAPHIC (the whole point of this product)
 - DEFAULT = every scene gets a "graphic" that VISUALIZES its idea using real content from the script. Only OMIT "graphic" for a pure connective/transition line, or when the footage is already a screen recording/slide.
 - "brief" = what this beat SHOWS, in one line: the fact or claim to be visualized and what makes it read (the one number, the two sides being weighed, the ordered steps, the line worth quoting). Say what it is, NOT which component to build — the graphics step chooses that with the actual box, duration and theme in hand.
 - "data" = the ACTUAL figures/items/words copied from those sentences — NEVER invent numbers. A beat with no hard data still gets a graphic (a claim, a verdict, a name); it just carries words instead of figures.
+- ONE graphic per fact: a figure or claim that already has its scene gets NO second card when the speech circles back to it — repeat mentions belong to the existing graphic's hold, or carry a DIFFERENT fact. Two scenes must never show the same data.
 - "size" = the graphic's VISUAL WEIGHT — match it to the beat's narrative weight, and VARY it across the video (seven same-size cards read as one template repeated):
   · badge — a passing fact/verdict: small chip, minimal chrome. · card — the solid default.
   · banner — a full-width strip (fits timeline / pipeline / kpi row). · poster — THE hero moment: takes over the freed space at editorial scale; use 1–2 times per video, pair with corner/split framing.
@@ -23,7 +24,8 @@ FRAMING (how the speaker sits so the graphic has room)
 - corner = shrink the speaker into a corner, the graphic takes the large freed block. · split = speaker one half, graphic the other.
 - DEFAULT TO FULL. A talking-head video lives on the speaker — shrinking them aside is a BIG editorial move, not a rhythm device. Use corner/split ONLY when the graphic genuinely needs a LARGE dedicated area: type at editorial/poster scale, an image/screenshot/demo, or a dense chart/table that cannot read as an overlay — typically just the 1–2 poster moments. When in doubt, stay full.
 - corner/split exist to MAKE ROOM for such a graphic: a scene with NO "graphic" must use full or punch-in — never shrink the speaker beside an empty area.
-- Both work on any canvas — you never have to match them to the aspect. The SPLIT AXIS is decided for you: a portrait frame splits top/bottom, a landscape frame splits left/right (halving the short side would leave slivers or flat strips). Just choose corner when a big block suits the graphic and split when an equal half does.
+- Both work on any canvas and the SPLIT AXIS is decided for you (a portrait frame splits top/bottom, a landscape one left/right). PREFERENCE follows the canvas: on a PORTRAIT canvas reach for split first, corner second; on a LANDSCAPE canvas reach for corner first, split second — the request states which canvas you have.
+- corner hands the graphic the WHOLE freed block at poster scale (the layout fills it — no smaller card floats in it), so choose corner only when the content deserves that scale.
 - A framing state must HOLD ≥1s: never plan a scene shorter than ~1s with its own framing — rapid push-in/out reads as flicker. Fold micro-beats into the neighboring scene instead. (The renderer executes whatever is set — this restraint lives here, at planning time.)
 
 RULES
