@@ -423,6 +423,16 @@ describe('layoutInsertWindow(插入段平权分镜:按自己的场景切镜/取�
     })!;
     expect(r.shots.every((x) => x.treatment === 'full')).toBe(true);
   });
+  it('split 轴随画布:竖屏(含缺省)一律 split-b,横屏才按人的方位取 l/r', () => {
+    const scenes = [{ from: 0, to: 2, framing: 'split' as const, graphic: { brief: '价格对比' } }];
+    const personRight = { box: { x: 0.05, y: 0.4, w: 0.4, h: 0.4 }, hasFace: true }; // 安全区在左 → 人在右
+    const portrait = layoutInsertWindow({ win: { start: 20, end: 32 }, clip, sentences, scenes, layout: personRight, canvas: { w: 1080, h: 1920 } })!;
+    expect(portrait.shots[0]!.treatment).toBe('split-b');
+    const noCanvas = layoutInsertWindow({ win: { start: 20, end: 32 }, clip, sentences, scenes, layout: personRight })!;
+    expect(noCanvas.shots[0]!.treatment).toBe('split-b');
+    const landscape = layoutInsertWindow({ win: { start: 20, end: 32 }, clip, sentences, scenes, layout: personRight, canvas: { w: 1920, h: 1080 } })!;
+    expect(landscape.shots[0]!.treatment).toBe('split-r');
+  });
   it('没场景/没句子 → null(调用方退回整段一拍)', () => {
     expect(layoutInsertWindow({ win: { start: 0, end: 12 }, clip, sentences, scenes: [] })).toBeNull();
     expect(layoutInsertWindow({ win: { start: 0, end: 12 }, clip, sentences: [], scenes: [{ from: 0, to: 0, framing: 'full' }] })).toBeNull();
