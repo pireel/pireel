@@ -196,7 +196,7 @@ function offlineTranscript(p: ServerToolProject): string {
   const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src);
   const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks[i]!.prefix}${s.text}${marks[i]!.gapNote}`;
   parts.push(
-    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it; "(+Xs gap after)" rows are the dead air, read gaps from these notes instead of computing them, and skip ones already marked CUT):\n${main.map(mainRow).join('\n')}`,
+    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover BOTH kinds: "+Xs gap after" (between sentences) and "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range — cut them with cut_narration exactly like gaps). Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${main.map(mainRow).join('\n')}`,
   );
   const bySrc = new Map<string, string[]>();
   for (const s of p.comp.shots ?? []) {

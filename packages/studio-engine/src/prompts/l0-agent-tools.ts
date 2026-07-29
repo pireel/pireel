@@ -109,7 +109,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks and \"(+Xs gap after)\" dead-air notes (with CUT status once tightened) — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read gaps from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
+      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks plus dead-air notes for BOTH inter-sentence gaps (\"+Xs gap after\") and mid-sentence stalls (\"Xs pause inside at a–bs\", with the exact source range), each flipping to CUT once tightened — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read dead air from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
     inputSchema: obj({}, []),
   },
   {
@@ -546,7 +546,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.cut_narration.label',
     description:
-      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. For a PAUSE-TIGHTENING pass (dead air between sentences), pass the FULL gap ranges plus `keepGapSec` — the tool leaves that much breathing room at each seam; never do the margin arithmetic yourself. The receipt returns data.cuts (final-timeline seam positions + seconds ACTUALLY removed after margins) — quote THOSE numbers to the user, never your own gap arithmetic. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
+      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. For a PAUSE-TIGHTENING pass (dead air between sentences AND mid-sentence stalls — read_script notes both, inner pauses with their exact source range), pass the FULL noted ranges plus `keepGapSec` — the tool leaves that much breathing room at each seam; never do the margin arithmetic yourself. The receipt returns data.cuts (final-timeline seam positions + seconds ACTUALLY removed after margins) — quote THOSE numbers to the user, never your own gap arithmetic. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
     inputSchema: obj(
       {
         ranges: {
