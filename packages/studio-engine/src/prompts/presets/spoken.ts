@@ -44,10 +44,11 @@ duration at presenter rhythm, each item landing when its content is spoken. Non-
 gets one calm reveal near the start, then holds still.
 
 NAMED MOVES
-The brief may name an editing move — HANDOFF (build the compact echo, badge-small), BUILD (reveals
-ride the spoken beats, one item each), SETUP→PAYOFF (this graphic is the question or the answer —
-tease small, land big), PUNCH, CHAPTER (a small indexed section marker). A named move is the
-brief's intent: execute the pattern, don't reinterpret it.`;
+The brief may name an editing move — HANDOFF (build the compact echo, badge-small), ANCHOR (this
+graphic outlives its scene: keep it badge-small and self-contained), BUILD (reveals ride the
+spoken beats, one item each), SETUP→PAYOFF (this graphic is the question or the answer — tease
+small, land big), PUNCH, CHAPTER (a small indexed section marker). A named move is the brief's
+intent: execute the pattern, don't reinterpret it.`;
 
 export interface Preset {
   id: string;

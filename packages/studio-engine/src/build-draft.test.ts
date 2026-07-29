@@ -446,3 +446,28 @@ describe('缩角场景把腾出的整块交给图形(不在空区里飘小卡)',
     expect(ph.box!.w).toBeLessThan(vac.w); // badge 裁切仍然生效(缩角才交整块)
   });
 });
+
+describe('ANCHOR:图形跨场景常驻(holdTo),结构性防滥用', () => {
+  const three: AsrSegment[] = [
+    { start: 2, end: 4, text: '第一句' },
+    { start: 4, end: 6, text: '第二句' },
+    { start: 6, end: 8, text: '第三句' },
+  ];
+  it('holdTo 延长图形时长到目标句尾;box 被强制压成 badge(跨取景不压人)', () => {
+    const p: DraftPlan = {
+      scenes: [
+        { from: 0, to: 0, framing: 'full', graphic: { brief: 'A', data: '87%', size: 'poster', holdTo: 2 } },
+        { from: 1, to: 2, framing: 'corner', graphic: { brief: 'B' } },
+      ],
+    };
+    const c = layoutFromPlan(p, { video, sentences: three });
+    const anchor = phs(c).find((b) => placeholderSpec(b).includes('87%'))!;
+    expect(anchor.startSec + anchor.durationSec).toBeCloseTo(8, 5); // 常驻到第三句尾
+    expect(anchor.box!.w).toBeLessThan(0.5); // poster 被压成 badge——结构守卫,不靠提示词自觉
+  });
+  it('无 holdTo 行为不变(可选增量字段)', () => {
+    const p: DraftPlan = { scenes: [{ from: 0, to: 0, framing: 'full', graphic: { brief: 'A' } }] };
+    const c = layoutFromPlan(p, { video, sentences: three });
+    expect(phs(c)[0]!.startSec + phs(c)[0]!.durationSec).toBeCloseTo(4, 5);
+  });
+});

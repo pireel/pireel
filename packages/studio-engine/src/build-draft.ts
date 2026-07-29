@@ -188,11 +188,17 @@ export function layoutFromPlan(
         // Within the safe base, carve the actual box by plan's size tier — size set by narrative weight, no longer uniform.
         const vac = treatmentVacancyBox(treatment);
         const base = vac ?? graphicBoxFromGeometry(opts.visual, start, stop);
+        // ANCHOR: the graphic outlives its scene (blocks live on their own tracks — duration is
+        // free), riding across whatever framing follows. Structural guard, not prompt-side: an
+        // anchored graphic is FORCED to badge scale, because any larger box chosen against this
+        // scene's framing would bury the speaker once the framing changes under it.
+        const holdStop = scene.graphic.holdTo !== undefined && scene.graphic.holdTo > scene.to ? sEnd(scene.graphic.holdTo) : stop;
+        const anchored = holdStop > stop + 0.05;
         // Corner hands the graphic the WHOLE freed block: shrinking the speaker aside to then
         // float a small card in the emptiness reads as a mistake — the freed area IS the layout.
         // Splits keep the size carve (a card centred in a clean half reads fine).
-        const box = treatment.startsWith('corner') ? base : graphicBoxForSize(base, scene.graphic.size);
-        put(placeholder(graphicInstruction(scene.graphic, backdropNote(treatment, vis)), box, gStart, gDur, graphicGist(scene.graphic)));
+        const box = anchored ? graphicBoxForSize(base, 'badge') : treatment.startsWith('corner') ? base : graphicBoxForSize(base, scene.graphic.size);
+        put(placeholder(graphicInstruction(scene.graphic, backdropNote(treatment, vis)), box, gStart, (anchored ? holdStop : stop) - gStart, graphicGist(scene.graphic)));
         placedGraphic = true;
       }
     }

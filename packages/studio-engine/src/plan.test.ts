@@ -282,3 +282,27 @@ describe('剪辑手法词汇表(命名=压缩,只收管线真能执行的)', () 
     expect(PLAN_SYSTEM).toContain("never force one where the content doesn't call for it");
   });
 });
+
+describe('holdTo 经统一行号重映射(ANCHOR 不越源界)', () => {
+  const rows = [
+    { src: 'main' as const, local: 0, start: 0, end: 2, text: '第一句' },
+    { src: 'main' as const, local: 1, start: 2, end: 4, text: '第二句' },
+    { src: 1, local: 0, start: 1, end: 5, text: '插入片段句' },
+    { src: 'main' as const, local: 2, start: 4, end: 6, text: '第三句' },
+  ];
+  it('holdTo 全局行号→本地句号;越过源界被夹回本源段末', () => {
+    // 场景 0 覆盖全局行 0,holdTo=3(全局)想跨过插入段——夹回主源段末(全局行 1 → 本地 1)
+    const plan = parsePlan(
+      JSON.stringify({ scenes: [{ from: 0, to: 0, framing: 'full', graphic: { brief: 'A', holdTo: 3 } }, { from: 1, to: 3, framing: 'full' }] }),
+      rows,
+    );
+    expect(plan.scenes[0]!.graphic!.holdTo).toBe(1); // 本地句号 1 = 主源段内能到的最远处
+  });
+  it('holdTo 不超出本场景时被丢弃(无意义的常驻)', () => {
+    const plan = parsePlan(
+      JSON.stringify({ scenes: [{ from: 0, to: 1, framing: 'full', graphic: { brief: 'A', holdTo: 1 } }, { from: 2, to: 3, framing: 'full' }] }),
+      rows,
+    );
+    expect(plan.scenes[0]!.graphic!.holdTo).toBeUndefined();
+  });
+});
