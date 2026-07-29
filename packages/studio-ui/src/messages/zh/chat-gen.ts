@@ -1,6 +1,8 @@
 export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.abstractFluid': '抽象流体',
   'chatGen.aiEdit': 'AI 改',
+  'chatGen.cutRowLocate': '点击定位到这处剪切',
+  'chatGen.cutRowSilence': '(空白)',
   'chatGen.aiEditing': 'AI 修改中…',
   'chatGen.alreadyNewConversation': '已是新对话',
   'chatGen.alsoDragOntoCanvas': '也可拖到画面 / 时间轴插入',

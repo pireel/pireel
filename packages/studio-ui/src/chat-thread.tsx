@@ -299,7 +299,9 @@ export function ChatThread({
                             </Reasoning>
                           );
                         }
-                        if (part.type.startsWith('tool-') || part.type === 'dynamic-tool') return renderToolPart(part, key);
+                        if (part.type.startsWith('tool-') || part.type === 'dynamic-tool')
+                          // Locate rides the existing seek tool (playhead + preview follow) — no new channel to the workbench
+                          return renderToolPart(part, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }) });
                         return null;
                       })}
                       {thinking && <ThinkingDots />}

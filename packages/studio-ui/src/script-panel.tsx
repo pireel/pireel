@@ -34,7 +34,7 @@ const FILLER_RE = /^(嗯+|呃+|唔+|诶+|额+|um+|uh+|emm+|hmm+)[,。,.!?!?…]?
 export type SrcRange = [number, number];
 /** One compressible pause. after = the sentence it follows (-1 = before the first); wi set = it sits INSIDE that
  *  sentence, right after word wi. range = the slice actually removed (the kept room tone is outside it). */
-type Gap = { after: number; wi?: number; range: SrcRange; alive: boolean };
+type Gap = { after: number; wi?: number; range: SrcRange; alive: boolean; rawDur: number; aliveDur: number };
 /** Source-tagged cut/restore unit: src=null is the talking-head source, otherwise the inserted source's src key — each source's timeline is independent. */
 export type ScriptCut = { src: string | null; range: SrcRange };
 type Word = { text: string; start: number; end: number };
@@ -46,6 +46,13 @@ const inSrcOf = (src: string | null) => (c: VideoShot) => (c.src ?? null) === sr
 /** Whether a source's src range still has any remnant under the current edit (a fully-cut word/sentence = deleted). */
 function srcRangeAlive(shots: VideoShot[], src: string | null, s: number, e: number): boolean {
   return shots.some((c) => (c.src ?? null) === src && Math.min(c.srcEnd, e) - Math.max(c.srcStart, s) > 0.04);
+}
+
+/** How many seconds of a source range survive the current edit (sum of shot overlaps). */
+function srcAliveDur(shots: VideoShot[], src: string | null, s: number, e: number): number {
+  let d = 0;
+  for (const c of shots) if ((c.src ?? null) === src) d += Math.max(0, Math.min(c.srcEnd, e) - Math.max(c.srcStart, s));
+  return d;
 }
 
 /** One sentence in the script: which source seg belongs to + in-source sentence index + final-cut landing point (sort key; sentences interleave in final-cut order). */
@@ -126,7 +133,12 @@ export function ScriptPanel({
             return r ? [r.from, r.to] : [0, 0];
           })();
       if (to - from < 0.05) return;
-      out.push({ after: g.after, wi: g.wi, range: [from, to], alive: srcRangeAlive(shots, null, from, to) });
+      // "Deleted" is a verdict on surviving AIR, not on whether OUR margin range is dead: the agent's
+      // cut_narration keeps its own keepGapSec (0.15–0.6) and a calmer margin than ours used to leave
+      // slivers alive inside our range — the pause was genuinely tightened but never got its strike.
+      // If what survives the raw gap is less than dead-air threshold, it's breathing room now → struck.
+      const aliveDur = srcAliveDur(shots, null, g.a, g.b);
+      out.push({ after: g.after, wi: g.wi, range: [from, to], alive: aliveDur >= MIN_PAUSE_SEC, rawDur: g.b - g.a, aliveDur });
     };
     add({ after: -1, a: 0, b: sents[0]!.start, edge: 'head' });
     sents.forEach((seg, i) => {
@@ -139,7 +151,9 @@ export function ScriptPanel({
     return out;
   }, [sents, videoDurationSec, shots]);
   const silences = useMemo(() => gaps.filter((g) => g.alive), [gaps]);
-  const silenceTotal = silences.reduce((a, { range: [s, e] }) => a + (e - s), 0);
+  // Honest cuttable total: what actually leaves the timeline (surviving air minus kept room tone),
+  // not the margin range's nominal width — the two differ once a gap has been partially cut.
+  const silenceTotal = silences.reduce((a, g) => a + Math.max(0, g.aliveDur - KEEP_AIR_SEC), 0);
   const gapAfter = useMemo(() => new Map(gaps.filter((g) => g.wi == null).map((g) => [g.after, g])), [gaps]);
   /** Mid-sentence gaps, keyed "sentenceIndex:wordIndex" (the token renders right after that word). */
   const gapInWord = useMemo(() => new Map(gaps.filter((g) => g.wi != null).map((g) => [`${g.after}:${g.wi}`, g])), [gaps]);
@@ -477,9 +491,10 @@ function needsSpace(cur: string, next: string): boolean {
   return /[A-Za-z0-9.,!?;:'")\]%]$/.test(cur) && /^[A-Za-z0-9('"[$]/.test(next);
 }
 
-/** Silence marker: (…9.4s). Present = click to delete; deleted = struck through in the stream, click to restore (same convention as word delete/restore). */
-function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean }; onClick: (e: React.MouseEvent) => void }) {
-  const label = `(…${(gap.range[1] - gap.range[0]).toFixed(1)}s)`;
+/** Silence marker: (…9.4s). Present = click to delete (label = cuttable seconds); deleted = struck through
+ *  in the stream showing the seconds actually removed (matches the agent receipt), click to restore. */
+function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean; rawDur: number; aliveDur: number }; onClick: (e: React.MouseEvent) => void }) {
+  const label = `(…${(gap.alive ? Math.max(0, gap.aliveDur - KEEP_AIR_SEC) : gap.rawDur - gap.aliveDur).toFixed(1)}s)`;
   return (
     <span
       onClick={(e) => {

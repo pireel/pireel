@@ -546,7 +546,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.cut_narration.label',
     description:
-      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. For a PAUSE-TIGHTENING pass (dead air between sentences), pass the FULL gap ranges plus `keepGapSec` — the tool leaves that much breathing room at each seam; never do the margin arithmetic yourself. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
+      'Delete spoken passages BY THE TRANSCRIPT — the remove-what-was-said cut. Pass MAIN-narration SOURCE-second timestamps straight from read_script: the tool converts clocks itself, cuts the footage, compresses overlays and re-lays captions. `ranges` = one or more {fromSec,toSec} removed in ONE call. For a PAUSE-TIGHTENING pass (dead air between sentences), pass the FULL gap ranges plus `keepGapSec` — the tool leaves that much breathing room at each seam; never do the margin arithmetic yourself. The receipt returns data.cuts (final-timeline seam positions + seconds ACTUALLY removed after margins) — quote THOSE numbers to the user, never your own gap arithmetic. MAIN narration only — inserted [clip X] segments run on their own clock: cut those with cut_range or delete_shot.',
     inputSchema: obj(
       {
         ranges: {

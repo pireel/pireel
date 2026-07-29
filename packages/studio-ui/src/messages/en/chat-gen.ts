@@ -1,6 +1,8 @@
 export const CHATGEN_EN: Record<string, string> = {
   'chatGen.abstractFluid': 'Abstract fluid',
   'chatGen.aiEdit': 'AI edit',
+  'chatGen.cutRowLocate': 'Click to locate this cut',
+  'chatGen.cutRowSilence': '(silence)',
   'chatGen.aiEditing': 'AI is editing…',
   'chatGen.alreadyNewConversation': 'Already a new conversation',
   'chatGen.alsoDragOntoCanvas': 'You can also drag it onto the canvas / timeline',

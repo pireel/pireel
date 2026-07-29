@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { STUDIO_TOOL_MAP, type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
 import { useToolProgress } from './tool-progress';
+import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { t } from './i18n';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
@@ -174,9 +175,15 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
   );
 }
 
-export function renderToolPart(part: ToolPartLike, key: string): React.ReactNode {
+export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void }): React.ReactNode {
   const id = toolIdOf(part);
   const def = STUDIO_TOOL_MAP[id];
   if (!def) return null;
+  // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line
+  if (id === 'cut_narration' && part.state === 'output-available') {
+    const rows = cutRowsOf(part.output);
+    const out = part.output as StudioToolResult | undefined;
+    if (rows && out?.ok !== false) return <div key={key}><CutListCard summary={out?.summary ?? ''} rows={rows} onLocate={opts?.onLocate} /></div>;
+  }
   return <div key={key}>{def.kind === 'card' ? <ToolCard def={def} part={part} /> : <ToolBadge def={def} part={part} />}</div>;
 }
