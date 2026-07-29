@@ -8,6 +8,7 @@ import {
   emptyComposition,
   freeTrack,
   isSentenceCaption,
+  placementFramingNotes,
   mediaBlock,
   newBlock,
   renderBlock,
@@ -805,5 +806,27 @@ describe('分镜声音(volumeDb/audioMuted)', () => {
     const back = patchShotAudio(muted, { mute: false });
     expect(back.audioMuted).toBeUndefined();
     expect(shotGain(back)).toBeCloseTo(dbToGain(-12), 5);
+  });
+});
+
+describe('placementFramingNotes(place_block 回执的取景提示)', () => {
+  const shot = (id: string, len: number, treatment: VideoShot['treatment']): VideoShot => ({
+    id, srcStart: 0, srcEnd: len, treatment,
+  });
+
+  it('names the video band and free area for an overlapping split span', () => {
+    const shots = [shot('a', 10, 'full'), shot('b', 10, 'split-t'), shot('c', 10, 'full')];
+    const notes = placementFramingNotes(shots, 12, 5);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('split-t');
+    expect(notes[0]).toContain('video holds the top half');
+    expect(notes[0]).toContain('free area is the bottom half');
+    expect(notes[0]).toContain('10–20s');
+  });
+
+  it('stays silent over full/punch-in spans and non-overlapping windows', () => {
+    const shots = [shot('a', 10, 'full'), shot('b', 10, 'punch-in'), shot('c', 10, 'split-b')];
+    expect(placementFramingNotes(shots, 0, 15)).toHaveLength(0);
+    expect(placementFramingNotes(shots, 25, 100)).toHaveLength(1);
   });
 });

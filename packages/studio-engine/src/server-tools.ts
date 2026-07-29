@@ -30,6 +30,7 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  placementFramingNotes,
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
@@ -286,8 +287,11 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!b.box) return { result: { ok: false, error: 'this block has no screen box (full-canvas element) — cannot reposition' } };
       const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
       if (!next) return { result: { ok: false, error: 'no position (anchor / xPct+yPct / dxPct+dyPct) or scale given' } };
+      // Receipt hint, not a remap: when the block's window overlaps a corner/split span, say where
+      // the video band is so the agent notices before parking a graphic on the speaker.
+      const framing = placementFramingNotes(shotsOf(p), next.startSec, next.durationSec);
       return {
-        result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box } },
+        result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } },
         comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? next : x)) },
       };
     }

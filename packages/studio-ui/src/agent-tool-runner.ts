@@ -31,6 +31,7 @@ import {
   getCaptionPreset,
   isCaptionsOn,
   isSentenceCaption,
+  placementFramingNotes,
   renderBlock,
   resolveCaptionStyle,
   shotFilterCss,
@@ -480,7 +481,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
             if (!next) return { ok: false, error: t('workbench.placeNoDirective') };
             setComp((cc) => ({ ...cc, blocks: cc.blocks.map((x) => (x.id === b.id ? next : x)) }));
-            return { ok: true, summary: t('workbench.placedNameZone', { name: bname(b), zone: zoneOf(next.box!) }), data: { box: next.box } };
+            // Receipt hint (agent-facing, same convention as review_visuals' data.hint): overlapping
+            // corner/split spans → say where the video band is before the agent parks a graphic on it.
+            const framing = placementFramingNotes(ensureShots(c), next.startSec, next.durationSec);
+            return { ok: true, summary: t('workbench.placedNameZone', { name: bname(b), zone: zoneOf(next.box!) }), data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } };
           }
           case 'delete_block': {
             const b = findBlock(input.blockId);

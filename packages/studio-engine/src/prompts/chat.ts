@@ -170,7 +170,7 @@ export function buildSituation(body: ChatSituation): string {
   const lines: string[] = [];
   const canvas =
     typeof c.width === 'number' && typeof c.height === 'number' && c.width > 0 && c.height > 0
-      ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? 'landscape — prefer corner-* for big-area moments, split-l/r second' : 'portrait — prefer split-t/b for big-area moments, corner-* second'}).`
+      ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? 'landscape — prefer corner-* for big-area moments, split-l/r second' : 'portrait — prefer split-b for big-area moments (video bottom, graphic top; split-t only when the speaker already sits in the upper half), corner-* second'}).`
       : '';
   lines.push(`Edited duration: ${n(c.durationSec)}s. Theme: ${c.theme ?? 'general'}.${canvas}`);
 
