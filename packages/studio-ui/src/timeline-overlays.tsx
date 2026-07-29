@@ -13,7 +13,8 @@ import { SHOT_GAP } from './timeline-utils';
 export function PlayheadCursor({ pps }: { pps: number }) {
   const t = usePlayheadT();
   return (
-    <div className="pointer-events-none absolute top-0 bottom-0 left-0 z-30 will-change-transform" style={{ transform: `translateX(${t * pps}px)` }}>
+    // above the sticky ruler (z-45), so the line still reads across it — but under the sticky gutter (z-50)
+    <div className="pointer-events-none absolute top-0 bottom-0 left-0 z-[46] will-change-transform" style={{ transform: `translateX(${t * pps}px)` }}>
       <div className="absolute top-0 bottom-0 -left-px w-0.5 bg-rose" />
       {/* Head marker: down-pointing arrow (border triangle, 8px base aligned with the line) */}
       <div className="absolute top-0 -left-[4px] h-0 w-0 border-x-4 border-t-[6px] border-x-transparent border-t-rose drop-shadow" />

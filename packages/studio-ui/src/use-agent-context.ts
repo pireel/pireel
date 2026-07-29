@@ -13,6 +13,7 @@ import {
   type Block,
   type Composition,
   type VideoShot,
+  audioClipWindow,
   blockKind,
   isCaptionsOn,
   isSentenceCaption,
@@ -120,6 +121,15 @@ export function useAgentContext(deps: AgentContextDeps) {
               return { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } };
             })()
           : {}),
+        ...(c.audioTracks?.length
+        ? {
+            audio: c.audioTracks.map((a) => {
+              const w = audioClipWindow(a, totalDuration(c)); // agents need the span, not just where it starts — "does the bed outrun the video" is unanswerable from startSec alone
+              return { id: a.id, label: a.label, startSec: w.start, endSec: w.end, volumeDb: a.volumeDb, speed: a.speed, muted: a.muted };
+            }),
+          }
+        : {}),
+        ...(c.audioDenoise ? { denoise: { strength: c.audioDenoise.strength } } : {}),
         blocks: c.blocks.map((b) => ({
           id: b.id,
           label: b.label,
@@ -143,6 +153,7 @@ export function useAgentContext(deps: AgentContextDeps) {
             srcEnd: sp.clip.srcEnd,
             treatment: sp.clip.treatment,
             ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
+            ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
           }));
         })(),
       },

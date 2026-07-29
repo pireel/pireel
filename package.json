@@ -17,6 +17,7 @@
     "@base-ui/react": "^1.4.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "@mediapipe/tasks-vision": "^0.10.35",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",

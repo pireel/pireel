@@ -8,6 +8,7 @@
 
 import type { MutableRefObject, SetStateAction } from 'react';
 import {
+  type AudioClip,
   type Block,
   type CaptionStyle,
   type Composition,
@@ -18,7 +19,11 @@ import {
   type VideoShot,
   CAPTION_PRESETS,
   SHOT_TREATMENTS,
+  VOLUME_DB_MAX,
+  VOLUME_DB_MIN,
   applyBlockPlacement,
+  audioClipId,
+  audioTrimPatch,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -30,6 +35,7 @@ import {
   resolveCaptionStyle,
   shotFilterCss,
   shotId,
+  splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
   zoneOf,
@@ -125,6 +131,13 @@ export interface AgentToolCtx {
   resizeCutTransition: (shotId: string, durationSec: number) => void;
   setShotTreatment: (sid: string, treatment: ShotTreatment) => void;
   setShotFilter: (sid: string, f: ShotFilter | null) => void;
+  setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => void;
+  // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
+  audioMount: (file: File, label?: string, opts?: { startSec?: number }) => Promise<string | undefined>;
+  audioPatch: (id: string, patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number; speed?: number; startSec?: number }) => void;
+  audioRemove: (id: string) => void;
+  /** Narration denoise (use-denoise.ts): strength = on/retune, null = off; bakes in the background. */
+  setDenoise: (strength: number | null) => void;
   splitAtPlayhead: () => void;
   trimAtPlayhead: (side: 'left' | 'right') => void;
   deleteShot: (sid: string) => void;
@@ -151,7 +164,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter,
+    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
     splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -587,14 +600,16 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
           case 'list_assets': {
             // Enumerate the user's media library (uploads + agent imports) + this project's video sources —
             // the agent references real urls instead of guessing or asking the user to describe what they have
-            const kindIn = input.kind === 'image' || input.kind === 'video' ? input.kind : 'all';
+            const kindIn = input.kind === 'image' || input.kind === 'video' || input.kind === 'audio' ? input.kind : 'all';
             const limit = Math.min(Math.max(Math.round(Number(input.limit) || 30), 1), 100);
-            const fetchKind = (k: 'image' | 'video') =>
+            const fetchKind = (k: 'image' | 'video' | 'audio') =>
               fetch(`/api/me/materials?tab=global&kind=${k}&limit=${limit}`)
                 .then((r) => (r.ok ? r.json() : null))
                 .then((j: { items?: { id: string; url: string; label: string | null; kind: string; width: number | null; height: number | null; created_at: number }[] } | null) => j?.items ?? [])
                 .catch(() => []);
-            const kinds: ('image' | 'video')[] = kindIn === 'all' ? ['image', 'video'] : [kindIn];
+            // Audio belongs here as much as stills do: set_bgm needs a url, and without this the agent could
+            // only place a bed the user had already pasted into the conversation.
+            const kinds: ('image' | 'video' | 'audio')[] = kindIn === 'all' ? ['image', 'video', 'audio'] : [kindIn];
             const lists = await Promise.all(kinds.map(fetchKind));
             const assets = lists
               .flat()
@@ -911,6 +926,97 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const css = shotFilterCss(f);
             setShotFilter(s.id, css === 'none' ? null : f);
             return { ok: true, summary: css === 'none' ? t('workbench.resetColorGradeShot') : t('workbench.filtersAppliedCss', { css }) };
+          }
+          case 'set_shot_audio': {
+            const shots = c.shots ?? [];
+            const ids = input.all ? new Set(shots.map((s) => s.id)) : new Set((Array.isArray(input.shotIds) ? input.shotIds : []).map(String));
+            if (!ids.size) return { ok: false, error: t('workbench.passShotIdsOrAll') };
+            const hit = shots.filter((s) => ids.has(s.id));
+            if (!hit.length) return { ok: false, error: t('workbench.shotNotFound') };
+            const patch = {
+              ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+              ...(typeof input.mute === 'boolean' ? { mute: input.mute } : {}),
+              ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+              ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
+            };
+            if (!Object.keys(patch).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
+            for (const s of hit) setShotAudio(s.id, patch);
+            const bits = [
+              ...('volumeDb' in patch ? [`${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
+              ...('mute' in patch ? [patch.mute ? t('workbench.audioMuted') : t('workbench.audioUnmuted')] : []),
+            ];
+            return { ok: true, summary: t('workbench.shotAudioSet', { n: hit.length, what: bits.join(' · ') }) };
+          }
+          case 'denoise_audio': {
+            if (input.off === true) {
+              if (!c.audioDenoise) return { ok: false, error: t('workbench.denoiseNotOn') };
+              setDenoise(null);
+              return { ok: true, summary: t('workbench.denoiseTurnedOff') };
+            }
+            if (!videoFileRef.current) return { ok: false, error: t('common.localSourceVideoMissing') };
+            const s = typeof input.strength === 'number' && Number.isFinite(input.strength) ? Math.max(0.05, Math.min(1, input.strength)) : 0.6;
+            setDenoise(s);
+            return { ok: true, summary: t('workbench.denoiseTurnedOn', { pct: Math.round(s * 100) }) };
+          }
+          case 'set_bgm': {
+            const tracks = c.audioTracks ?? [];
+            const trackIdIn = typeof input.trackId === 'string' ? input.trackId : '';
+            const knobs = {
+              ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+              ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+              ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
+              ...(typeof input.speed === 'number' && Number.isFinite(input.speed) ? { speed: input.speed } : {}),
+              ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
+              ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
+            };
+            if (input.off === true) {
+              if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
+              if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { ok: false, error: t('workbench.audioTrackNotFound') };
+              if (trackIdIn) audioRemove(trackIdIn);
+              else for (const x of tracks) audioRemove(x.id);
+              return { ok: true, summary: t('workbench.bgmRemoved') };
+            }
+            const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
+            if (urlIn) {
+              report(t('workbench.fetchingMusicBytes'));
+              const pr = await fetch(`/api/media/fetch?url=${encodeURIComponent(urlIn)}`);
+              if (!pr.ok) return { ok: false, error: t('workbench.musicGenFailed') };
+              const name = (() => {
+                try {
+                  return decodeURIComponent(new URL(urlIn).pathname.split('/').pop() || '') || 'bgm.mp3';
+                } catch {
+                  return 'bgm.mp3';
+                }
+              })();
+              const f = new File([await pr.blob()], name, { type: pr.headers.get('content-type') || 'audio/mpeg' });
+              const newId = await audioMount(f, undefined, typeof knobs.startSec === 'number' ? { startSec: knobs.startSec } : undefined);
+              if (!newId) return { ok: false, error: t('workbench.musicGenFailed') };
+              const { startSec: _s, ...rest } = knobs;
+              if (Object.keys(rest).length) audioPatch(newId, rest);
+              const db = (compRef.current.audioTracks ?? []).find((x) => x.id === newId)?.volumeDb;
+              return { ok: true, summary: t('workbench.bgmMounted', { db: db != null ? String(r1(db)) : String(-18) }), data: { trackId: newId } };
+            }
+            const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
+            if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
+            if (!target) return { ok: false, error: t('workbench.audioTrackNotFound') };
+            // Split changes the track COUNT, so it stands alone rather than combining with the knobs
+            const splitAt = Number(input.splitAtSec);
+            if (Number.isFinite(splitAt)) {
+              const halves = splitAudioClipAt(target, splitAt, audioClipId);
+              if (!halves) return { ok: false, error: t('workbench.movePlayheadToSplitAudio') };
+              setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === target.id ? halves : [x])) }));
+              return { ok: true, summary: t('workbench.bgmSplit'), data: { trackId: halves[0].id, newTrackId: halves[1].id } };
+            }
+            // Edge trims: same math as the lane's own handles (start + source in/out move together)
+            const headSec = Number(input.headSec);
+            const tailSec = Number(input.tailSec);
+            let trimPatch: Partial<AudioClip> = {};
+            if (Number.isFinite(headSec)) trimPatch = { ...trimPatch, ...audioTrimPatch(target, 'left', Math.max(0, headSec)) };
+            if (Number.isFinite(tailSec)) trimPatch = { ...trimPatch, ...audioTrimPatch({ ...target, ...trimPatch }, 'right', Math.max(0, tailSec)) };
+            const trimming = Object.keys(trimPatch).length > 0;
+            if (!Object.keys(knobs).length && !trimming) return { ok: false, error: t('workbench.passAudioKnobs') };
+            audioPatch(target.id, { ...trimPatch, ...knobs });
+            return { ok: true, summary: trimming ? t('workbench.bgmTrimmed') : t('workbench.bgmAdjusted') };
           }
           case 'insert_clip': {
             // Agent inserts B-roll: the bytes must already be in our storage (a helper-uploaded sig / a CDN url of a library / generated video) —

@@ -22,6 +22,16 @@ import {
   treatmentVacancyBox,
   shotTransformVars,
   parseClipInset,
+  VOLUME_DB_MIN,
+  dbToGain,
+  patchShotAudio,
+  shotFadeAt,
+  shotsContiguous,
+  segmentFadeFn,
+  SPLICE_FADE_SEC,
+  shotGain,
+  shotGainAt,
+  type VideoShot,
 } from './composition';
 
 function sampleComp(): Composition {
@@ -715,5 +725,85 @@ describe('parseClipInset(导出侧读回取景裁切)', () => {
     expect(parseClipInset('none')).toEqual({ t: 0, r: 0, b: 0, l: 0 });
     expect(parseClipInset(undefined)).toEqual({ t: 0, r: 0, b: 0, l: 0 });
     expect(parseClipInset('inset(10% 20% round 8px)')).toEqual({ t: 0.1, r: 0.2, b: 0.1, l: 0.2 });
+  });
+});
+
+describe('分镜声音(volumeDb/audioMuted)', () => {
+  const shot = (over: Partial<VideoShot> = {}): VideoShot => ({ id: 's1', srcStart: 0, srcEnd: 5, treatment: 'full', ...over });
+
+  it('dbToGain:0dB=1、-6dB≈0.5、地板 -60 及以下=真 0(不是很小声)', () => {
+    expect(dbToGain(0)).toBe(1);
+    expect(dbToGain(-6)).toBeCloseTo(0.501, 2);
+    expect(dbToGain(VOLUME_DB_MIN)).toBe(0);
+    expect(dbToGain(-120)).toBe(0);
+  });
+
+  it('shotGain:未设=1;muted 压过 volumeDb;预览/导出共用这一份换算', () => {
+    expect(shotGain(shot())).toBe(1);
+    expect(shotGain(shot({ volumeDb: -6 }))).toBeCloseTo(0.501, 2);
+    expect(shotGain(shot({ volumeDb: -6, audioMuted: true }))).toBe(0);
+  });
+
+  it('patchShotAudio:钳位到 [-60,+20];中性值(0dB/未静音)把字段摘掉,没动过的 comp 字节不变', () => {
+    const s = patchShotAudio(shot(), { volumeDb: -18.234 });
+    expect(s.volumeDb).toBe(-18.2);
+    // 分镜与音轨同一把尺子:抬升是真的(录轻了就推上去),预览靠 gain node、导出靠改 PCM
+    const boosted = patchShotAudio(shot(), { volumeDb: 6 });
+    expect(boosted.volumeDb).toBe(6);
+    expect(shotGain(boosted)).toBeCloseTo(1.995, 3);
+    expect(patchShotAudio(shot(), { volumeDb: 99 }).volumeDb).toBe(20);
+    const floor = patchShotAudio(shot(), { volumeDb: -99 });
+    expect(floor.volumeDb).toBe(-60);
+    const neutral = patchShotAudio(shot({ volumeDb: -6, audioMuted: true }), { volumeDb: 0, mute: false });
+    expect('volumeDb' in neutral).toBe(false);
+    expect('audioMuted' in neutral).toBe(false);
+  });
+
+  it('分镜音频淡入淡出:默认无淡化(每个切点都喘气才是错的),设了才走 smoothstep,并夹在 10s 内', () => {
+    const s = shot();
+    expect(shotFadeAt(s, 0, 10)).toBe(1); // 默认 = 硬切
+    const faded = patchShotAudio(s, { fadeInSec: 2, fadeOutSec: 1 });
+    expect(faded.audioFadeInSec).toBe(2);
+    expect(shotFadeAt(faded, 0, 10)).toBe(0);
+    expect(shotFadeAt(faded, 1, 10)).toBe(0.5); // smoothstep 中点
+    expect(shotFadeAt(faded, 5, 10)).toBe(1);
+    expect(shotFadeAt(faded, 9.5, 10)).toBe(0.5); // 尾端 1s 淡出
+    // 整体增益 = 电平 × 淡化;静音压过一切
+    const quiet = patchShotAudio(faded, { volumeDb: -6 });
+    expect(shotGainAt(quiet, 5, 10)).toBeCloseTo(dbToGain(-6), 5);
+    expect(shotGainAt(patchShotAudio(quiet, { mute: true }), 5, 10)).toBe(0);
+    expect(patchShotAudio(s, { fadeInSec: 99 }).audioFadeInSec).toBe(10);
+    expect(patchShotAudio(faded, { fadeInSec: 0 }).audioFadeInSec).toBeUndefined(); // 归零=摘字段
+  });
+
+  it('接缝微淡化:只在真接缝上加,连续切分不加,并与分镜自身淡化相乘', () => {
+    const s = shot();
+    const len = 10;
+    // 连续:上一镜的 srcEnd 正好是本镜的 srcStart(只分镜没删东西)→ 不是接缝
+    expect(shotsContiguous({ src: undefined, srcEnd: 4 }, { src: undefined, srcStart: 4 })).toBe(true);
+    expect(shotsContiguous({ src: undefined, srcEnd: 4 }, { src: undefined, srcStart: 6.5 })).toBe(false);
+    expect(shotsContiguous({ src: 'a', srcEnd: 4 }, { src: undefined, srcStart: 4 })).toBe(false); // 换源必是接缝
+    expect(segmentFadeFn(s, len, false, false)).toBeNull(); // 无淡化无接缝 = 直通,导出保持原样透传
+    const spliced = segmentFadeFn(s, len, true, true)!;
+    expect(spliced(0)).toBe(0);
+    expect(spliced(SPLICE_FADE_SEC / 2)).toBeCloseTo(0.5, 5);
+    expect(spliced(SPLICE_FADE_SEC)).toBe(1);
+    expect(spliced(0.5)).toBe(1); // 12ms 之外完全不影响电平,不会听成淡入
+    expect(spliced(len)).toBe(0);
+    // 与分镜自身的淡入相乘,不是二选一
+    const both = segmentFadeFn(patchShotAudio(s, { fadeInSec: 2 }), len, true, false)!;
+    expect(both(1)).toBeCloseTo(0.5, 5); // 自身淡入中点 × 微淡化已完成
+    expect(both(0)).toBe(0);
+  });
+
+  it('patchShotAudio:mute 独立于 volumeDb——静音再取消,原音量还在', () => {
+    const quiet = patchShotAudio(shot(), { volumeDb: -12 });
+    const muted = patchShotAudio(quiet, { mute: true });
+    expect(muted.audioMuted).toBe(true);
+    expect(muted.volumeDb).toBe(-12);
+    expect(shotGain(muted)).toBe(0);
+    const back = patchShotAudio(muted, { mute: false });
+    expect(back.audioMuted).toBeUndefined();
+    expect(shotGain(back)).toBeCloseTo(dbToGain(-12), 5);
   });
 });

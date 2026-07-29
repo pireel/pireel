@@ -27,7 +27,15 @@ import {
   CAPTION_PRESETS,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
+  VOLUME_DB_MAX,
+  VOLUME_DB_MIN,
   applyBlockPlacement,
+  audioClipId,
+  audioClipWindow,
+  audioTrimPatch,
+  patchAudioClip,
+  patchShotAudio,
+  splitAudioClipAt,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -92,6 +100,8 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'duplicate_block',
   'set_shot_treatment',
   'set_video_filter',
+  'set_shot_audio',
+  'set_bgm',
   'split_shot',
   'trim_shot',
   'delete_shot',
@@ -137,6 +147,15 @@ function offlineState(p: ServerToolProject): string {
       height: c.height,
       theme: c.theme,
       ...(cs ? { captions: { preset: cs.preset, yPct: Math.round(cs.yPct) } } : {}),
+      ...(c.audioTracks?.length
+        ? {
+            audio: c.audioTracks.map((a) => {
+              const w = audioClipWindow(a, totalDuration(c)); // agents need the span, not just where it starts — "does the bed outrun the video" is unanswerable from startSec alone
+              return { id: a.id, label: a.label, startSec: w.start, endSec: w.end, volumeDb: a.volumeDb, speed: a.speed, muted: a.muted };
+            }),
+          }
+        : {}),
+      ...(c.audioDenoise ? { denoise: { strength: c.audioDenoise.strength } } : {}),
       blocks: c.blocks.map((b) => ({
         id: b.id,
         label: b.label,
@@ -155,6 +174,7 @@ function offlineState(p: ServerToolProject): string {
         srcEnd: sp.clip.srcEnd,
         treatment: sp.clip.treatment,
         ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
+        ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
       })),
     },
     pipeline: { asr: !!p.context.asr?.length, plan: !!p.context.plan, visual: false },
@@ -321,6 +341,84 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         result: { ok: true, summary: css === 'none' ? 'Reset color grading for this shot' : `Applied color grading: ${css}` },
         comp: { ...c, shots: next },
       };
+    }
+    case 'set_shot_audio': {
+      const shots = shotsOf(p);
+      if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
+      const ids = input.all ? new Set(shots.map((s) => s.id)) : new Set((Array.isArray(input.shotIds) ? input.shotIds : []).map(String));
+      if (!ids.size) return { result: { ok: false, error: 'pass shotIds or all:true' } };
+      const hit = shots.filter((s) => ids.has(s.id));
+      if (!hit.length) return { result: { ok: false, error: 'shots not found' } };
+      const patch = {
+        ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+        ...(typeof input.mute === 'boolean' ? { mute: input.mute } : {}),
+        ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+        ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
+      };
+      if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass volumeDb / mute / fadeInSec / fadeOutSec' } };
+      const next = shots.map((s) => (ids.has(s.id) ? patchShotAudio(s, patch) : s));
+      const bits = [
+        ...('volumeDb' in patch ? [`volume ${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
+        ...('mute' in patch ? [patch.mute ? 'muted' : 'unmuted'] : []),
+      ];
+      return {
+        result: { ok: true, summary: `Audio on ${hit.length} shot${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
+        comp: { ...c, shots: next },
+      };
+    }
+    case 'set_bgm': {
+      const tracks = c.audioTracks ?? [];
+      const trackIdIn = typeof input.trackId === 'string' ? input.trackId : '';
+      const knobs = {
+        ...(typeof input.volumeDb === 'number' && Number.isFinite(input.volumeDb) ? { volumeDb: input.volumeDb } : {}),
+        ...(typeof input.fadeInSec === 'number' && Number.isFinite(input.fadeInSec) ? { fadeInSec: input.fadeInSec } : {}),
+        ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
+        ...(typeof input.speed === 'number' && Number.isFinite(input.speed) ? { speed: input.speed } : {}),
+        ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
+        ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
+      };
+      if (input.off === true) {
+        if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
+        if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };
+        const next = trackIdIn ? tracks.filter((x) => x.id !== trackIdIn) : [];
+        const { audioTracks: _drop, ...rest } = c;
+        return { result: { ok: true, summary: trackIdIn ? 'Removed the audio track' : 'Removed all audio tracks' }, comp: next.length ? { ...c, audioTracks: next } : rest };
+      }
+      const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
+      if (urlIn) {
+        // Offline add: no loudness measurement without the tab — the clip lands at the default level
+        // (or the explicit volumeDb); honest defaults are fine.
+        const clip = patchAudioClip({ id: audioClipId(), src: urlIn }, knobs);
+        return {
+          result: { ok: true, summary: `Added an audio track (${r1(clip.volumeDb ?? -18)}dB)`, data: { trackId: clip.id } },
+          comp: { ...c, audioTracks: [...tracks, clip] },
+        };
+      }
+      const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
+      if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
+      if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
+      // Split first: it's the one op that changes the track COUNT, so it can't be combined with knobs
+      const splitAt = Number(input.splitAtSec);
+      if (Number.isFinite(splitAt)) {
+        const halves = splitAudioClipAt(target, splitAt, audioClipId);
+        if (!halves) return { result: { ok: false, error: 'that second is outside the track (or too close to an edge to leave two usable halves)' } };
+        return {
+          result: { ok: true, summary: `Split the audio track at ${r1(splitAt)}s`, data: { trackId: halves[0].id, newTrackId: halves[1].id } },
+          comp: { ...c, audioTracks: tracks.flatMap((x) => (x.id === target.id ? halves : [x])) },
+        };
+      }
+      // Edge trims run through the same math as the lane handles (source in/out + start all move together)
+      const head = Number(input.headSec);
+      const tail = Number(input.tailSec);
+      let trimmed = target;
+      if (Number.isFinite(head)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'left', Math.max(0, head)));
+      if (Number.isFinite(tail)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'right', Math.max(0, tail)));
+      const trimming = trimmed !== target;
+      if (!Object.keys(knobs).length && !trimming) {
+        return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec / mute / headSec / tailSec / splitAtSec, or off:true' } };
+      }
+      const next = Object.keys(knobs).length ? patchAudioClip(trimmed, knobs) : trimmed;
+      return { result: { ok: true, summary: trimming ? 'Trimmed the audio track' : 'Adjusted the audio track' }, comp: { ...c, audioTracks: tracks.map((x) => (x.id === target.id ? next : x)) } };
     }
     case 'split_shot': {
       const shots = shotsOf(p);

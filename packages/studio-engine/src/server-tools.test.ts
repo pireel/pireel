@@ -145,6 +145,80 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(videoFrameTimelineBody(r2.comp!.shots!)).not.toContain('filter:'); // 全片无调色=一行不出
     expect(runServerTool('set_video_filter', { shotId: 'nope', brightness: 1.1 }, proj()).result.ok).toBe(false);
   });
+  it('set_shot_audio:批量音量/静音——钳位 [-60,0]、中性摘字段、快照带 [muted]/[vol] 标记', () => {
+    const r = runServerTool('set_shot_audio', { shotIds: ['s1'], volumeDb: -18 }, proj());
+    expect(r.result.ok).toBe(true);
+    const s1 = r.comp!.shots!.find((s) => s.id === 's1')!;
+    expect(s1.volumeDb).toBe(-18);
+    // all:true + mute:静音不吃掉已设音量
+    const r2 = runServerTool('set_shot_audio', { all: true, mute: true }, proj({ comp: r.comp }));
+    expect(r2.comp!.shots!.every((s) => s.audioMuted)).toBe(true);
+    expect(r2.comp!.shots!.find((s) => s.id === 's1')!.volumeDb).toBe(-18);
+    // 快照能看见声音态(muted 优先展示)
+    const snap = runServerTool('get_state', {}, proj({ comp: r2.comp }));
+    expect(snap.result.state).toContain('[muted]');
+    // 归中性:字段摘干净
+    const r3 = runServerTool('set_shot_audio', { all: true, volumeDb: 0, mute: false }, proj({ comp: r2.comp }));
+    expect(r3.comp!.shots!.every((s) => !('volumeDb' in s) && !('audioMuted' in s))).toBe(true);
+    // 空目标/空补丁拒绝
+    expect(runServerTool('set_shot_audio', {}, proj()).result.ok).toBe(false);
+    expect(runServerTool('set_shot_audio', { all: true }, proj()).result.ok).toBe(false);
+  });
+  it('set_bgm:加轨(默认档位摘字段/回执带 trackId)、按 trackId 调、多轨必须点名、off 删一条或全删', () => {
+    const r = runServerTool('set_bgm', { url: 'https://cdn.pireel.com/bgm.mp3', startSec: 12 }, proj());
+    expect(r.result.ok).toBe(true);
+    const id1 = (r.result.data as { trackId: string }).trackId;
+    const t1 = r.comp!.audioTracks![0]!;
+    expect(t1).toEqual({ id: id1, src: 'https://cdn.pireel.com/bgm.mp3', startSec: 12 }); // -18dB/淡入淡出/1x 全默认=不落字段
+    const snap = runServerTool('get_state', {}, proj({ comp: r.comp }));
+    expect(snap.result.state).toContain('Audio tracks');
+    expect(snap.result.state).toContain(`@${id1}`);
+    // 单轨时可省 trackId
+    const r2 = runServerTool('set_bgm', { volumeDb: -24, speed: 1.5, fadeOutSec: 3 }, proj({ comp: r.comp }));
+    expect(r2.comp!.audioTracks![0]).toMatchObject({ volumeDb: -24, speed: 1.5, fadeOutSec: 3 });
+    // 第二条轨:多轨后必须点名
+    const r3 = runServerTool('set_bgm', { url: 'https://cdn.pireel.com/sfx.mp3' }, proj({ comp: r2.comp }));
+    expect(r3.comp!.audioTracks!.length).toBe(2);
+    expect(runServerTool('set_bgm', { volumeDb: -30 }, proj({ comp: r3.comp })).result.ok).toBe(false);
+    const id2 = (r3.result.data as { trackId: string }).trackId;
+    expect(runServerTool('set_bgm', { trackId: id2, volumeDb: -30 }, proj({ comp: r3.comp })).comp!.audioTracks![1]!.volumeDb).toBe(-30);
+    // off:点名删一条 / 不点名全删
+    const r4 = runServerTool('set_bgm', { off: true, trackId: id1 }, proj({ comp: r3.comp }));
+    expect(r4.comp!.audioTracks!.map((x) => x.id)).toEqual([id2]);
+    const r5 = runServerTool('set_bgm', { off: true }, proj({ comp: r3.comp }));
+    expect('audioTracks' in r5.comp!).toBe(false);
+    // 没轨时旋钮/off 都拒绝
+    expect(runServerTool('set_bgm', { off: true }, proj()).result.ok).toBe(false);
+    expect(runServerTool('set_bgm', { volumeDb: -30 }, proj()).result.ok).toBe(false);
+  });
+  it('set_bgm:静音/裁两端/分割——离线执行器与轨道手柄同一套边界数学', () => {
+    // 有 durationSec 才谈得上裁剪(离线加轨拿不到时长,直接给一条已知时长的轨)
+    const base = proj();
+    const clip = { id: 'aud1', src: 'https://cdn.pireel.com/bgm.mp3', durationSec: 60, startSec: 0 };
+    const withClip = { ...base.comp, audioTracks: [clip] };
+    // 静音:落 muted 字段,音量原样留着(解除静音就回来)
+    const m = runServerTool('set_bgm', { mute: true, volumeDb: -12 }, proj({ comp: withClip }));
+    expect(m.comp!.audioTracks![0]).toMatchObject({ muted: true, volumeDb: -12 });
+    expect(runServerTool('set_bgm', { mute: false }, proj({ comp: m.comp })).comp!.audioTracks![0]!.muted).toBeUndefined();
+    // 裁头:起点右移,同时吃掉等量的源内容(音频不跟着滑走)
+    const h = runServerTool('set_bgm', { headSec: 5 }, proj({ comp: withClip }));
+    expect(h.comp!.audioTracks![0]).toMatchObject({ startSec: 5, inSec: 5 });
+    // 裁尾:只改出点,起点不动
+    const tl = runServerTool('set_bgm', { tailSec: 20 }, proj({ comp: withClip }));
+    expect(tl.comp!.audioTracks![0]!.outSec).toBe(20);
+    expect(tl.comp!.audioTracks![0]!.startSec).toBeUndefined();
+    // 分割:一条变两条,接缝处两侧不各来一次默认淡化
+    const sp = runServerTool('set_bgm', { splitAtSec: 25 }, proj({ comp: withClip }));
+    const [head, tail] = sp.comp!.audioTracks!;
+    expect(sp.comp!.audioTracks!.length).toBe(2);
+    expect(head!.outSec).toBe(25);
+    expect(tail!.startSec).toBe(25);
+    expect(head!.fadeOutSec).toBe(0);
+    expect(tail!.fadeInSec).toBe(0);
+    expect((sp.result.data as { newTrackId: string }).newTrackId).toBe(tail!.id);
+    // 轨外的分割点拒绝,不静默产出一条零长轨
+    expect(runServerTool('set_bgm', { splitAtSec: 999 }, proj({ comp: withClip })).result.ok).toBe(false);
+  });
   it('add_transition:内容级切点转场——挂后镜 transIn、prevId 锚前镜;非切点拒绝;none 移除;区内禁分割', () => {
     // proj 的切点在 10s(s1|s2)
     const r = runServerTool('add_transition', { atSec: 10.1, effect: 'crosszoom', durationSec: 2 }, proj());
