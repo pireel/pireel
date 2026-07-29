@@ -334,7 +334,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '▶️',
     label: 'tools.play.label',
     description:
-      "Start playback in the preview. Optional `fromSec` = jump there first; optional `toSec` = auto-pause there. Use a from+to RANGE to SHOW the user a moment you just changed (a couple seconds around a cut seam, a transition, a new element's entry).",
+      "Start playback in the preview. Optional `fromSec` = jump there first; optional `toSec` = auto-pause there. ONLY when the user asks to play or preview something — never auto-play after an edit; playback is the user's to start (receipts already park the playhead at the change).",
     inputSchema: obj(
       {
         fromSec: { type: 'number', description: 'Start playing from here (edited seconds). Omit = current playhead.' },
