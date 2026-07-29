@@ -48,6 +48,25 @@ function srcRangeAlive(shots: VideoShot[], src: string | null, s: number, e: num
   return shots.some((c) => (c.src ?? null) === src && Math.min(c.srcEnd, e) - Math.max(c.srcStart, s) > 0.04);
 }
 
+/** WORD presence = does its MIDPOINT survive — never the >0.04s-overlap test ranges use: ASR word
+ *  timestamps can be shorter than that tolerance (particles often get near-zero spans), and such a
+ *  word can NEVER pass an overlap threshold — it rendered struck through fresh off extraction,
+ *  before any cut existed, reading like a (wrong) automatic filler pre-delete. Strict containment,
+ *  no tolerance: a word-delete cuts [start−0.02, end+0.02], so the midpoint lands dead precisely. */
+function wordAlive(shots: VideoShot[], src: string | null, w: { start: number; end: number }): boolean {
+  const mid = (w.start + w.end) / 2;
+  return shots.some((c) => (c.src ?? null) === src && mid >= c.srcStart && mid <= c.srcEnd);
+}
+
+/** The src range a word delete/restore operates on. Normal words pad ±0.02s; ultra-short words widen
+ *  to ≥0.07s total — the cut pipeline drops segments ≤0.04s as numerical slivers, so a zero-span
+ *  word's ±0.02 range (exactly 0.04s) would be silently ignored: click-delete became a no-op. */
+function wordCutRange(w: { start: number; end: number }): SrcRange {
+  const half = Math.max(0.035, (w.end - w.start) / 2 + 0.02);
+  const mid = (w.start + w.end) / 2;
+  return [Math.max(0, mid - half), mid + half];
+}
+
 /** How many seconds of a source range survive the current edit (sum of shot overlaps). */
 function srcAliveDur(shots: VideoShot[], src: string | null, s: number, e: number): number {
   let d = 0;
@@ -157,8 +176,8 @@ export function ScriptPanel({
     const out: { src: string | null; range: SrcRange; text: string }[] = [];
     for (const it of items) {
       for (const w of it.seg.words ?? []) {
-        if (FILLER_RE.test(w.text.trim()) && w.end - w.start > 0.05 && srcRangeAlive(shots, it.src, w.start, w.end)) {
-          out.push({ src: it.src, range: [Math.max(0, w.start - 0.02), w.end + 0.02], text: w.text.trim() });
+        if (FILLER_RE.test(w.text.trim()) && wordAlive(shots, it.src, w)) {
+          out.push({ src: it.src, range: wordCutRange(w), text: w.text.trim() });
         }
       }
     }
@@ -217,8 +236,8 @@ export function ScriptPanel({
       const ws = Number(el.dataset.ws);
       const we = Number(el.dataset.we);
       const src = el.dataset.src || null;
-      if (!Number.isFinite(ws) || we <= ws) continue;
-      if (srcRangeAlive(shots, src, ws, we)) {
+      if (!Number.isFinite(ws) || we < ws) continue;
+      if (wordAlive(shots, src, { start: ws, end: we })) {
         const g = aliveBySrc.get(src) ?? { lo: Infinity, hi: -Infinity, n: 0 };
         g.lo = Math.min(g.lo, ws);
         g.hi = Math.max(g.hi, we);
@@ -298,7 +317,7 @@ export function ScriptPanel({
         {items.map((it) => (
           <span key={`${it.src ?? 'n'}:${it.si}`}>
             {it.words.map((w, wi) => {
-              const alive = srcRangeAlive(shots, it.src, w.start, w.end);
+              const alive = wordAlive(shots, it.src, w);
               const picked = pop?.kind === 'word' && pop.src === it.src && pop.si === it.si && Math.abs(pop.word.start - w.start) < 1e-3 && Math.abs(pop.word.end - w.end) < 1e-3;
               const pickedDead = pop?.kind === 'deadword' && pop.src === it.src && Math.abs(pop.word.start - w.start) < 1e-3 && Math.abs(pop.word.end - w.end) < 1e-3;
               return (
@@ -358,7 +377,7 @@ export function ScriptPanel({
               <button
                 type="button"
                 onClick={() => {
-                  onCut([{ src: pop.src, range: [Math.max(0, pop.word.start - 0.02), pop.word.end + 0.02] }], t('panels.deletedWord', { word: pop.word.text }));
+                  onCut([{ src: pop.src, range: wordCutRange(pop.word) }], t('panels.deletedWord', { word: pop.word.text }));
                   setPop(null);
                 }}
                 className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]"
@@ -409,7 +428,7 @@ export function ScriptPanel({
             <button
               type="button"
               onClick={() => {
-                onRestore([{ src: pop.src, range: [Math.max(0, pop.word.start - 0.02), pop.word.end + 0.02] }], t('panels.restoredWord', { word: pop.word.text }));
+                onRestore([{ src: pop.src, range: wordCutRange(pop.word) }], t('panels.restoredWord', { word: pop.word.text }));
                 setPop(null);
               }}
               className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]"
