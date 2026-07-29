@@ -212,6 +212,31 @@ export async function serverListProjects(): Promise<StudioProjectMeta[] | null> 
   }
 }
 
+/** List-page rename: title-only differential PUT (absent sections keep their server values).
+ *  Deliberately NOT serverSaveProject — that's the workbench session's stateful diff stack;
+ *  called without a hydrated session it would resend empty sections over the cloud state.
+ *  409 (someone saved meanwhile) retries once against the server's version. Returns false
+ *  when the row doesn't exist yet — the first autosave carries the local title up anyway. */
+export async function serverRenameProject(id: string, title: string, baseVersion: number): Promise<boolean> {
+  const put = (v: number) =>
+    fetch(`/api/studio/projects/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title, baseVersion: v }),
+    });
+  try {
+    let r = await put(baseVersion);
+    if (r.status === 409) {
+      const { project } = (await r.json()) as { project?: StudioProjectDto };
+      if (!project) return false;
+      r = await put(project.version);
+    }
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Fetch a single project in full (open project / cross-device restore). Returns null on 404/failure. */
 export async function serverLoadProject(id: string): Promise<StudioProjectDto | null> {
   try {
