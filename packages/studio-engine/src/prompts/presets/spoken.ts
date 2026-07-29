@@ -41,7 +41,13 @@ TIMING
 You are told how long the graphic is on screen, and — when the speech is aligned — when each thing
 is said. Sequential content (steps, a list, a pipeline, a timeline) reveals ONE BY ONE across that
 duration at presenter rhythm, each item landing when its content is spoken. Non-sequential content
-gets one calm reveal near the start, then holds still.`;
+gets one calm reveal near the start, then holds still.
+
+NAMED MOVES
+The brief may name an editing move — HANDOFF (build the compact echo, badge-small), BUILD (reveals
+ride the spoken beats, one item each), SETUP→PAYOFF (this graphic is the question or the answer —
+tease small, land big), PUNCH, CHAPTER (a small indexed section marker). A named move is the
+brief's intent: execute the pattern, don't reinterpret it.`;
 
 export interface Preset {
   id: string;

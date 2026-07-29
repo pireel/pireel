@@ -152,3 +152,13 @@ describe('两路共享同一份组件词汇(派生,不许各说各话)', () => {
     expect(html).toContain('floor of consistency, not a ceiling'); // 词汇是地板不是天花板
   });
 });
+
+describe('编辑判断认识手法名(brief 点名 → 按模式执行)', () => {
+  it('两条生成路径都带 NAMED MOVES 段', () => {
+    for (const sys of [buildKitSystem(), buildHtmlSystem()]) {
+      expect(sys).toContain('NAMED MOVES');
+      expect(sys).toContain('HANDOFF');
+      expect(sys).toContain("execute the pattern, don't reinterpret it");
+    }
+  });
+});

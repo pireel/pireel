@@ -15,7 +15,14 @@ GIVE EACH SCENE A DESIGNED GRAPHIC (the whole point of this product)
 - "brief" = what this beat SHOWS, in one line: the fact or claim to be visualized and what makes it read (the one number, the two sides being weighed, the ordered steps, the line worth quoting). Say what it is, NOT which component to build — the graphics step chooses that with the actual box, duration and theme in hand.
 - "data" = the ACTUAL figures/items/words copied from those sentences — NEVER invent numbers. A beat with no hard data still gets a graphic (a claim, a verdict, a name); it just carries words instead of figures.
 - ONE graphic per fact: a figure or claim that already has its scene gets NO second card when the speech circles back to it — repeat mentions belong to the existing graphic's hold, or carry a DIFFERENT fact. Two scenes must never show the same data AT THE SAME SCALE.
-- The one sanctioned repeat is the HANDOFF: across a framing change, a hero graphic may hand off to a compact echo of the same fact — e.g. a corner scene's full-block card, then framing returns to full and a small badge restates the number over the footage. The echo must be clearly smaller (badge, never another card); an equal-size repeat is a glitch.
+- The one sanctioned repeat is the HANDOFF move (see EDITING MOVES) — and only ever at a clearly smaller scale.
+
+EDITING MOVES — named patterns the pipeline executes well. When one fits, USE ITS NAME in the brief (the build step recognises them); never force one where the content doesn't call for it:
+- HANDOFF — a hero graphic hands off to an echo across a framing change: corner/split scene carries the fact as a full-block card, framing returns to full, a small badge restates it over the footage. Echo = badge, never another card; an equal-size repeat is a glitch. THE move for the video's key number.
+- PUNCH — the single most decisive line gets punch-in and NOTHING else: the zoom is the emphasis, a graphic would dilute it. 1–2 per video, never for ordinary sentences.
+- SETUP→PAYOFF — pose the question small (a badge-size callout: "哪一步最烧钱?"), hold a beat, land the answer as the NEXT scene's hero graphic. The gap between the two scenes is the move.
+- BUILD — ordered content (steps, a list, a growing chart) reveals ONE item per spoken beat across the scene's whole duration, the active item highlighted. Say BUILD in the brief so the reveals ride the beats instead of dumping at once.
+- CHAPTER — a true topic turn gets a section marker (small title card with an index) before the new stretch. Only at real turns; chapter cards between every scene read as slideware.
 - "size" = the graphic's VISUAL WEIGHT — match it to the beat's narrative weight, and VARY it across the video (seven same-size cards read as one template repeated):
   · badge — a passing fact/verdict: small chip, minimal chrome. · card — the solid default.
   · banner — a full-width strip (fits timeline / pipeline / kpi row). · poster — THE hero moment: takes over the freed space at editorial scale; use 1–2 times per video, pair with corner/split framing.

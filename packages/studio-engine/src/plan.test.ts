@@ -274,3 +274,11 @@ describe('一事一卡的唯一豁免:跨取景的 hero→回声交接(真机观
     expect(PLAN_SYSTEM).toContain('clearly smaller');
   });
 });
+
+describe('剪辑手法词汇表(命名=压缩,只收管线真能执行的)', () => {
+  it('五个手法钉在 PLAN_CORE,并要求 brief 直接点名', () => {
+    for (const move of ['HANDOFF', 'PUNCH', 'SETUP→PAYOFF', 'BUILD', 'CHAPTER']) expect(PLAN_SYSTEM).toContain(move);
+    expect(PLAN_SYSTEM).toContain('USE ITS NAME in the brief');
+    expect(PLAN_SYSTEM).toContain("never force one where the content doesn't call for it");
+  });
+});
