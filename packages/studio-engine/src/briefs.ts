@@ -17,7 +17,7 @@
 
 import { type BlockEdit, type ComposeContext, type KitChoice, BLOCK_SYSTEM, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
 import { type PlanInsert, type PlanSentence, type PlanVisual, buildPlanPrompt } from './plan';
-import { FRAME_PLAYBOOK_PREAMBLE, PLAN_SYSTEM, buildKitSystem } from './prompts';
+import { PLAN_SYSTEM, buildKitSystem } from './prompts';
 import { planWithActiveTheme } from './prompts';
 import { type ThemeId, getTheme, themeForLlm } from './theme';
 import { isComponentId } from '@pireel/studio-kit';
@@ -32,7 +32,7 @@ export interface FrameContent {
 export function assembleComposeTheme(themeId?: string, palette?: Record<string, string>, frame?: FrameContent | null): string {
   let theme = themeForLlm(getTheme(themeId as ThemeId | undefined), palette);
   if (frame) {
-    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this frame conflicts with the generic component styling, archetypes or default taste above, THE FRAME WINS. The engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${FRAME_PLAYBOOK_PREAMBLE}\n\n${frame.body}`;
+    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this frame conflicts with the generic component styling, archetypes or default taste above, THE FRAME WINS. The engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
   }
   return theme;
 }

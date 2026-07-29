@@ -53,7 +53,7 @@ export interface McpDeps {
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
   /** Frame catalog (routing layer = frameRegistry.list()). */
   listFrames: () => { id: string; title: string; summary: string }[];
-  /** Frame playbook body (routing layer = frameRegistry.get + FRAME_PLAYBOOK_PREAMBLE). */
+  /** Frame playbook body (routing layer = frameRegistry.get). */
   readFrame: (frameId: string) => McpBridgeResult;
   /** A-roll editing guide body (routing layer = AROLL_GUIDE). */
   readEditingGuide: () => McpBridgeResult;

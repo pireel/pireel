@@ -103,11 +103,6 @@ export interface ResolvedFrame {
   title: string;
 }
 
-/** Preamble prepended to every read_frame playbook: frame recipe px are for the
- *  1920-wide preview reference; compose is a 1080-wide vertical reference — don't
- *  copy absolute px, sizes follow compose's SIZING table, frame governs
- *  motif/proportion/token. Injected once, applies to all frames. */
-export const FRAME_PLAYBOOK_PREAMBLE = `NOTE ON UNITS: px values in this playbook's motifs and block recipes were written for the frame gallery's 1920px-wide landscape PREVIEW reference. The composing canvas is 1080px wide (vertical) — do NOT copy absolute px into add_block/edit_block/add_graphics instructions. Carry the frame's MOTIFS, PROPORTIONS and voice; let the compose-side SIZING table govern actual px. Token-level rules (palette, radius, shadow, fonts) apply as-is.`;
 
 /* ============================ Identity / script ============================ */
 
