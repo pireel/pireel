@@ -109,7 +109,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Call for content-level requests (locate a sentence, turn a claim into a graphic) when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
+      "Read the full spoken transcript: main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks and \"(+Xs gap after)\" dead-air notes (with CUT status once tightened) — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read gaps from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
     inputSchema: obj({}, []),
   },
   {
@@ -602,7 +602,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '↩️',
     label: 'tools.undo.label',
     description:
-      'Undo the last composition change made through tools (one step per call; a small history is kept). Use when the user rejects a change or asks to roll back. Does not cover manual timeline drags.',
+      'Undo the last composition change (one step per call). Use when the user rejects a change or asks to roll back / re-do something differently — undo first, then redo it the new way; NEVER declare a state unreachable without trying undo. When the session stack is exhausted (page refreshed, device switched), it falls back to the project\'s cloud history and rolls back one saved version (coarser: one autosave step, not one tool step). After ANY undo, re-read state (get_state / read_script) before editing again.',
     inputSchema: obj({}, []),
   },
 

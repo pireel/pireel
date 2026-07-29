@@ -20,7 +20,7 @@ import {
   resolveCaptionStyle,
   totalDuration,
 } from '@pireel/studio-engine/composition';
-import { spans as clipSpans } from '@pireel/studio-engine/trim';
+import { narrationRowMarks, spans as clipSpans } from '@pireel/studio-engine/trim';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { beatsForWindow as beatsForWindowPure, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
@@ -176,7 +176,13 @@ export function useAgentContext(deps: AgentContextDeps) {
     const row = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`;
     const parts: string[] = [];
     const main = asrRef.current ?? [];
-    parts.push(`MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock):\n${main.map(row).join('\n')}`);
+    // Derived CURRENT truth, not the source table: rows carry their edit state (removed/partly cut,
+    // dead-air gaps with tightened status) so a post-cut re-read shows what the editor shows.
+    const marks = narrationRowMarks(main, compRef.current.shots ?? [], (c: { src?: string }) => !c.src);
+    const mainRow = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks[i]!.prefix}${s.text}${marks[i]!.gapNote}`;
+    parts.push(
+      `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it; "(+Xs gap after)" rows are the dead air, read gaps from these notes instead of computing them, and skip ones already marked CUT):\n${main.map(mainRow).join('\n')}`,
+    );
     const bySrc = new Map<string, string[]>();
     for (const s of compRef.current.shots ?? []) {
       if (!s.src) continue;

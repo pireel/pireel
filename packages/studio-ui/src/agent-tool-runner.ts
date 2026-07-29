@@ -74,6 +74,8 @@ export interface AgentToolCtx {
   compRef: MutableRefObject<Composition>;
   setComp: (action: SetStateAction<Composition>) => void;
   ensureShots: (c: Composition) => VideoShot[];
+  /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
+  projectId: string;
   // Selection + playhead
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
@@ -835,7 +837,24 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             // A snapshot left by a tool that didn't change anything (returned failure/no-op) shares the current reference → dedup, doesn't count as a step
             while (stack.length && stack[stack.length - 1] === compRef.current) stack.pop();
             const prev = stack.pop();
-            if (!prev) return { ok: false, error: t('workbench.nothingUndo') };
+            if (!prev) {
+              // In-memory stack exhausted (page refreshed / device switched / long session) → cloud
+              // history ring: pop the newest server-kept version. Granularity is autosave versions,
+              // not keystrokes — the receipt says where we landed and urges a re-read.
+              const pull = studioProviders().historyUndo;
+              if (!pull) return { ok: false, error: t('workbench.nothingUndo') };
+              const entry = await pull(ctx.projectId).catch(() => null);
+              if (!entry) return { ok: false, error: t('workbench.nothingUndoCloudEmpty') };
+              const restored = entry.comp as Composition;
+              redoStackRef.current.push(compRef.current);
+              setComp(restored);
+              setSelectedId(null);
+              setSelectedShotId(null);
+              return withDelta({
+                ok: true,
+                summary: t('workbench.undidCloudVersion', { sec: (Math.round(totalDuration(restored) * 10) / 10).toFixed(1) }),
+              });
+            }
             redoStackRef.current.push(compRef.current); // agent undo also feeds the redo line (redoable via ⇧⌘Z/button)
             setComp(prev);
             setSelectedId(null);

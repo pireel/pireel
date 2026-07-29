@@ -102,6 +102,10 @@ export interface StudioProviders {
   elements?: ElementStore;
   /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
   chatEndpoint?: string;
+  /** Cloud undo fallback: pop the newest entry off the project's server-side history ring and
+   *  return the restored composition (null = ring empty). Absent = in-memory undo only (OSS shell).
+   *  The server marks the restore as consumed — repeated calls walk strictly backward. */
+  historyUndo?: (projectId: string) => Promise<{ comp: unknown; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
   translate?: (rows: { index: number; text: string }[], targetLanguage: string) => Promise<{ index: number; text: string }[]>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;

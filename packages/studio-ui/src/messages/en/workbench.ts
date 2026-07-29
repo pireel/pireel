@@ -76,6 +76,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.cutNarrationRemoved': 'Cut {n} spots per the transcript, {sec}s removed',
   'workbench.cutNarrationRemovedKeep': 'Tightened {n} pauses, {sec}s removed ({kg}s of air kept per seam)',
   'workbench.deletedNScenes': 'Deleted {n} scenes',
+  'workbench.nothingUndoCloudEmpty': 'Nothing to undo (cloud history is empty too)',
+  'workbench.undidCloudVersion': 'In-memory stack empty — rolled back to the previous cloud version ({sec}s). State changed: re-read before editing again',
   'workbench.deletedScene': 'Deleted the scene',
   'workbench.deleteElement': 'Delete element',
   'workbench.deleteImage': 'Delete image',
