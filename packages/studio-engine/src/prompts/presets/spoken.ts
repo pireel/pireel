@@ -19,7 +19,9 @@ comparison, a list, a name, a verdict. If this moment has no hard content (a con
 breath, a restatement), the honest answer is NO graphic. Decoration over a face is worse than
 nothing. The same goes for REPEATS: when a neighbouring graphic already carries this figure or
 claim (the neighbour list shows what each one holds), this moment earns nothing — a duplicated
-card reads as a glitch, not emphasis.
+card reads as a glitch, not emphasis. ONE exception: when the brief itself asks for a compact
+echo of a hero graphic after a framing change, build it small — that handoff is a technique,
+not a repeat.
 
 WHAT IT SAYS
 - Take figures, names and keywords VERBATIM from what was actually said. Never invent a number, and

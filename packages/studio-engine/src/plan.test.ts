@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePlan, unifiedPlanRows , planSceneBand } from './plan';
+import { parsePlan, unifiedPlanRows , planSceneBand, PLAN_SYSTEM } from './plan';
 
 describe('parsePlan(场景化 storyboard)', () => {
   it('解析场景:from/to/framing/graphic(组件+brief+真实数据)+ 标题/片尾', () => {
@@ -264,5 +264,13 @@ describe('取景优先级随画布进请求(口播实测定的规矩)', () => {
     const args = { sentences: [{ index: 0, text: 'hi', start: 0, end: 5 }], videoDurationSec: 5 };
     expect(buildPlanPrompt({ ...args, canvas: { width: 1080, height: 1920 } })).toContain('prefer split (top/bottom) first, corner second');
     expect(buildPlanPrompt({ ...args, canvas: { width: 1920, height: 1080 } })).toContain('prefer corner first, split second');
+  });
+});
+
+describe('一事一卡的唯一豁免:跨取景的 hero→回声交接(真机观感定的)', () => {
+  it('规则钉在 PLAN_CORE:同数据不同尺度的交接被点名允许,等尺度重复仍是 glitch', () => {
+    expect(PLAN_SYSTEM).toContain('AT THE SAME SCALE');
+    expect(PLAN_SYSTEM).toContain('HANDOFF');
+    expect(PLAN_SYSTEM).toContain('clearly smaller');
   });
 });
