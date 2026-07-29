@@ -16,7 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Film, Loader2, Plus } from 'lucide-react';
+import { ArrowLeftRight, Film, Loader2, Music, Plus, Volume2, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
@@ -29,6 +29,7 @@ import {
   totalDuration,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
+import { shotFadeAt } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
@@ -45,6 +46,7 @@ import {
   MIN_PPS,
   PREVIEW_W,
   ROW_GAP,
+  AUDIO_ROW_H,
   ROW_H,
   RULER_H,
   SCENE_H,
@@ -58,15 +60,24 @@ import {
   stripTiles,
 } from './timeline-utils';
 import { ActiveSceneRing, PlayheadCursor } from './timeline-overlays';
+import { AudioLane } from './timeline-audio-lane';
+import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
 
 export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
+
+/** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
+const SCENE_WAVE_H = 18;
 
 interface StudioTimelineProps {
   comp: Composition;
   /** During playback: auto-scroll to follow the playhead when it leaves the viewport (stops if the user scrolls manually, until next play). */
   playing: boolean;
-  /** Locate signal: each increment = scroll the timeline to center on the current playhead (triggered by clicking the transport time readout). */
+  /** Locate signal: each increment = scroll the timeline to the current playhead (transport readout, or a
+   *  jump made from another panel). */
   locateSignal: number;
+  /** With the current signal, only scroll if the playhead is off-screen (a jump from elsewhere, e.g. clicking
+   *  a word in the script) instead of re-centring a view that already shows it. */
+  locateNear?: boolean;
   /** Shot multi-select set (Cmd-click / marquee): highlight + batch delete + playhead ring yields. Single select = a one-element set. */
   selectedShotIds: Set<string>;
   /** Block multi-select set (Cmd-click / marquee, can span multiple element tracks): highlight + batch delete. Single select = a one-element set. */
@@ -110,11 +121,34 @@ interface StudioTimelineProps {
   assetDragging?: boolean;
   /** Dragged asset type. Drop-zone rules: image = main track (5s static-frame clip) + overlay area (picture-in-picture);
    *  video = main track only (whole clip); element = overlay area only (inserted at the drop time, same as image). */
-  assetDragKind?: 'image' | 'video' | 'element' | null;
+  assetDragKind?: 'image' | 'video' | 'audio' | 'element' | null;
   /** Asset (image) dropped on a non-main-track area: report the drop time (sec); workbench inserts an asset block there. */
   onDropAsset?: (t: number) => void;
   /** Asset dropped on the main track: handled as a clip insert (video = whole clip, image = 5s static frame); workbench fetches bytes via insertClipCore. */
   onDropAssetClip?: (t: number) => void;
+  /** Audio asset dropped anywhere on the timeline: add a clip starting at the drop time (music lane). */
+  onDropAssetAudio?: (t: number) => void;
+  /** Music-lane chip dragged horizontally: commit that clip's new start (edited seconds). */
+  onMoveAudio?: (id: string, startSec: number) => void;
+  /** Music-lane edge handle released: commit the trim patch (in/out points, computed by audioTrimPatch). */
+  onTrimAudio?: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => void;
+  /** Music-lane fade knee released: commit that clip's fade length (seconds). */
+  onFadeAudio?: (id: string, edge: 'in' | 'out', sec: number) => void;
+  /** Peak envelopes per clip sig (lane waveform); absent = bytes not mounted, chip draws label-only. */
+  audioPeaks?: Map<string, Float32Array>;
+  /** Peak envelopes per VIDEO source ('main' / insert-clip url): the scene cards draw their own audio. */
+  sourcePeaks?: Map<string, { peaks: Float32Array; durationSec: number }>;
+  /** Track-level mute (the speaker icon in front of each track): silences that whole track — every shot's
+   *  own sound, or every clip on the music lane. A composition decision, so the export honours it. */
+  videoMuted?: boolean;
+  onToggleVideoMute?: () => void;
+  audioMuted?: boolean;
+  onToggleAudioMute?: () => void;
+  /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
+  selectedAudioId?: string | null;
+  onSelectAudio?: (id: string | null) => void;
+  /** Click a chip (no drag): select + open the audio panel. */
+  onOpenMusicPanel?: () => void;
   /** Filmstrips for externally inserted clips (shotId -> frames, t = the clip's own source time). */
   clipStrips?: Record<string, FilmstripFrame[]>;
   /** Shot boundary "+": insert a local video at that edited-time (workbench pops a file picker -> upload -> insert into main track). */
@@ -131,10 +165,34 @@ interface StudioTimelineProps {
  *  state changes in the workbench (export progress / panel switch / generating state) no longer re-render this big tree. comp changes still render as usual. */
 export const StudioTimeline = memo(StudioTimelineImpl);
 
+/** Track mute toggle (track header): the NLE speaker icon, in front of the track it silences. Mute is a
+ *  TRACK property here rather than a per-clip one — "quiet the music while I listen to the cut" is a
+ *  statement about a track, and per-item silencing is already the level slider's bottom stop. */
+function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={muted}
+      title={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
+      aria-label={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
+      onPointerDown={(e) => e.stopPropagation()} // the row itself starts a track drag
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={`hover:bg-panel-2 rounded p-0.5 transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+    >
+      {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+    </button>
+  );
+}
+
 function StudioTimelineImpl({
   comp,
   playing,
   locateSignal,
+  locateNear,
   selectedShotIds,
   selectedBlockIds,
   filmstrip,
@@ -159,6 +217,19 @@ function StudioTimelineImpl({
   assetDragKind,
   onDropAsset,
   onDropAssetClip,
+  onDropAssetAudio,
+  onMoveAudio,
+  onTrimAudio,
+  onFadeAudio,
+  audioPeaks,
+  sourcePeaks,
+  videoMuted,
+  onToggleVideoMute,
+  audioMuted,
+  onToggleAudioMute,
+  selectedAudioId,
+  onSelectAudio,
+  onOpenMusicPanel,
   onInsertClipAt,
   onOpenTransition,
   onResizeTransition,
@@ -170,9 +241,44 @@ function StudioTimelineImpl({
   const shots = useMemo(() => comp.shots ?? [], [comp.shots]);
   // Scenes' spans on the **edited** timeline (clip source spans joined end to end)
   const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
+  /** Scene-card audio bands, precomputed per shot. These are the timeline's heaviest drawing by far — one
+   *  path with up to WAVE_MAX_BARS sub-paths per card — and they depend only on the cut, the zoom and that
+   *  shot's own audio. Building them inside the render meant every unrelated gesture that re-renders the
+   *  timeline (trimming a lane clip, 60 times a second) rebuilt every card's waveform, which is what makes
+   *  the drag stutter. Nothing here reads the drag state, so this memo survives the whole gesture. */
+  const sceneWaves = useMemo(() => {
+    const out = new Map<string, { body: string; wave: string }>();
+    if (!sourcePeaks?.size) return out;
+    for (let i = 0; i < sceneSpans.length; i++) {
+      const { shot, start, end } = sceneSpans[i]!;
+      const sp = sourcePeaks.get(shot.src ?? 'main');
+      const w = Math.max(8, (end - start) * pps - (i < sceneSpans.length - 1 ? SHOT_GAP : 0));
+      if (!sp || sp.durationSec <= 0 || w < 6) continue;
+      const per = sp.peaks.length / sp.durationSec;
+      const len = Math.max(0.01, shot.srcEnd - shot.srcStart);
+      const faded = !!(shot.audioFadeInSec || shot.audioFadeOutSec);
+      out.set(shot.id, {
+        body: fadeBodyPath(w, SCENE_WAVE_H, shot.audioFadeInSec ?? 0, shot.audioFadeOutSec ?? 0, len),
+        wave: waveBars(
+          sp.peaks,
+          Math.floor(shot.srcStart * per),
+          Math.ceil(shot.srcEnd * per),
+          w,
+          SCENE_WAVE_H,
+          shot.audioMuted ? WAVE_FLOOR_DB : (shot.volumeDb ?? 0),
+          // shot fades shape the band exactly as they shape a lane clip's wave
+          faded ? (f) => shotFadeAt(shot, f * len, len) : undefined,
+        ),
+      });
+    }
+    return out;
+  }, [sceneSpans, sourcePeaks, pps]);
   // Filmstrip tiles (like CapCut): square tiles (width=height, object-cover crop), grid anchored on **source time** —
   // each card just "windows" (stripTiles) the continuous strip; after split/trim each segment continues the original strip, never re-laying-out trailing segments
-  const thumbW = SCENE_H - SCENE_PAD_T - SCENE_PAD_B;
+  // Card = thumbnails on top, the footage's own audio strip beneath them (never overlaid — a wave drawn on
+  // the picture is unreadable). Tiles stay square against the film area, so its height drives their width.
+  const filmH = SCENE_H - SCENE_PAD_T - SCENE_PAD_B - SCENE_WAVE_H;
+  const thumbW = filmH;
   const tileDur = thumbW / pps; // source duration one tile covers
   const filmTiles = useMemo(() => stripTiles(filmstrip ?? [], 0, videoDur, tileDur, pps), [filmstrip, videoDur, tileDur, pps]);
 
@@ -277,7 +383,8 @@ function StudioTimelineImpl({
 
   // Content layer's left edge (changes with scroll); recompute each frame while dragging
   const contentLeft = () => contentRef.current?.getBoundingClientRect().left ?? 0;
-  const secAt = (clientX: number) => Math.max(0, Math.min(dur, (clientX - contentLeft()) / pps));
+  // stable identities: the music lane is memoized, and a fresh closure per render would defeat that
+  const secAt = useCallback((clientX: number) => Math.max(0, Math.min(dur, (clientX - (contentRef.current?.getBoundingClientRect().left ?? 0)) / pps)), [dur, pps]);
   /** Shared marquee engine (scene track / element track): anchor in content coordinates (base moves with scroll, x0/y0 stay fixed in content coords),
    *  end point recomputed each frame from base's **live** rect -> supports edge auto-scroll throughout; keeps scrolling via rAF even when the pointer sits still at the edge.
    *  baseRef = coordinate-base DOM; draggedRef = whether it became a drag; onDrag = draw rectangle; onCommit = hit test; onClick = pure click (no drag). */
@@ -362,7 +469,7 @@ function StudioTimelineImpl({
   /** Whether the drop/hover is on the main track (filmstrip / scene card row) — decides "insert clip" vs "insert block at drop point". */
   const onMainTrack = (e: { target: EventTarget | null }) => !!(e.target as Element | null)?.closest?.('[data-main-track]');
   /** Is this type allowed to drop in this area: main track takes image/video (as clips), overlay area takes image/element (as blocks). */
-  const dropAllowed = (clip: boolean) => (clip ? assetDragKind !== 'element' : assetDragKind !== 'video');
+  const dropAllowed = (clip: boolean) => (assetDragKind === 'audio' ? true : clip ? assetDragKind !== 'element' : assetDragKind !== 'video');
   // On drag end (released outside the timeline / cancelled) clear the marker
   useEffect(() => {
     if (!assetDragging) setDropHint(null);
@@ -373,7 +480,7 @@ function StudioTimelineImpl({
   // and at the viewport's left/right edge it keeps auto horizontal-scrolling (same rAF pattern as shot reorder / marquee) —
   // the scroll shifts the content coordinate base, so scrolled frames replay onMove even with the pointer sitting still,
   // which is what lets a playhead/trim drag keep advancing past the visible window. draggingRef makes hover-seek yield.
-  const drag = (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
+  const drag = useCallback((e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
     e.preventDefault();
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); // keep receiving move/up even outside the window
@@ -430,7 +537,7 @@ function StudioTimelineImpl({
     window.addEventListener('pointermove', mv);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
-  };
+  }, []);
 
   // Cmd + wheel zoom (zoom value is controlled by the transport slider)
   useEffect(() => {
@@ -467,6 +574,16 @@ function StudioTimelineImpl({
   useEffect(() => {
     if (playing) followRef.current = true; // playback started: restart following
   }, [playing]);
+  /** Is the playhead inside the visible content area right now? (the sticky gutter covers the left edge,
+   *  so "visible" starts at +GUTTER). Unknown layout counts as visible — never yank the view on a guess. */
+  const playheadOnScreen = useCallback(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content) return true;
+    const contentX = content.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+    const px = contentX + playhead.get() * pps;
+    return px >= el.scrollLeft + GUTTER && px <= el.scrollLeft + el.clientWidth - 8;
+  }, [pps]);
   useEffect(() => {
     if (!playing) return;
     let lastCheck = 0;
@@ -476,28 +593,29 @@ function StudioTimelineImpl({
       const now = performance.now();
       if (now - lastCheck < 250) return;
       lastCheck = now;
-      const el = scrollRef.current;
-      const content = contentRef.current;
-      if (!el || !content) return;
-      const contentX = content.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
-      const px = contentX + playhead.get() * pps;
-      const visLeft = el.scrollLeft + GUTTER; // left is covered by the sticky gutter; visible content starts at +GUTTER
-      const visRight = el.scrollLeft + el.clientWidth;
-      if (px < visLeft || px > visRight - 8) scrollToPlayhead(0.1);
+      if (!playheadOnScreen()) scrollToPlayhead(0.1);
     };
     const unsub = playhead.subscribe(follow);
     follow(); // correct once at play start
     return unsub;
-  }, [playing, pps, scrollToPlayhead]);
-  // Click transport time readout -> center on the playhead (triggered by incrementing locateSignal; skip first mount)
+  }, [playing, scrollToPlayhead, playheadOnScreen]);
+  // Locate the playhead (triggered by incrementing locateSignal; skip first mount). Two flavours: the
+  // transport readout always centres — it's an explicit "where am I" — while a jump made somewhere else
+  // (clicking a word in the script) only scrolls when the playhead would otherwise be off-screen, so the
+  // timeline doesn't lurch under a user who can already see where they landed.
   const scrollToPlayheadRef = useRef(scrollToPlayhead);
   scrollToPlayheadRef.current = scrollToPlayhead;
+  const locateNearRef = useRef(locateNear);
+  locateNearRef.current = locateNear;
+  const onScreenRef = useRef(playheadOnScreen);
+  onScreenRef.current = playheadOnScreen;
   const firstLocateRef = useRef(true);
   useEffect(() => {
     if (firstLocateRef.current) {
       firstLocateRef.current = false;
       return;
     }
+    if (locateNearRef.current && onScreenRef.current()) return;
     scrollToPlayheadRef.current(0.5);
   }, [locateSignal]);
   const lastScrollLeftRef = useRef(0);
@@ -549,6 +667,12 @@ function StudioTimelineImpl({
   };
   const slotTop = (slot: number) => (slot === 0 ? 0 : H0 + ROW_GAP + (slot - 1) * (ROW_H + ROW_GAP));
   const tracksH = slotTop(displayTracks.length - 1) + (displayTracks.length > 1 ? ROW_H : H0);
+  // Music lane: a dedicated bottom row — shown when clips exist, or as a highlighted drop target while an audio asset is being dragged
+  // stable identity: `?? []` alone would hand the memo below a fresh array on every render
+  const audioClips = useMemo(() => comp.audioTracks ?? [], [comp.audioTracks]);
+  const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
+  const musicTop = tracksH + ROW_GAP;
+  const tracksHWithMusic = musicLane ? musicTop + AUDIO_ROW_H : tracksH;
 
   /** Element-track marquee: drag a rectangle over empty element-track space (can span tracks); matched blocks all enter the multi-select set.
    *  Coordinate base tracksRef; x shares the domain of x(start), y that of rowTop. Pure click = clear selection + move playhead to the click point. */
@@ -727,7 +851,8 @@ function StudioTimelineImpl({
                 setDropHint(null);
                 const clip = onMainTrack(e);
                 if (!dropAllowed(clip)) return;
-                if (clip) onDropAssetClip?.(secAt(e.clientX));
+                if (assetDragKind === 'audio') onDropAssetAudio?.(secAt(e.clientX));
+                else if (clip) onDropAssetClip?.(secAt(e.clientX));
                 else onDropAsset?.(secAt(e.clientX));
               }
             : undefined
@@ -737,7 +862,8 @@ function StudioTimelineImpl({
           {/* Left: track labels (icon + name). Sticky fixed column; z must beat all scrolling content (treatment badge z-30 /
               playhead z-30 / marquee & "+" z-40), otherwise on horizontal scroll content slides under it but covers the icons */}
           <div className="bg-panel sticky left-0 z-50 shrink-0" style={{ width: GUTTER }}>
-            <div className="border-line border-b" style={{ height: RULER_H }} />
+            {/* Corner: sticks with the ruler, and opaque so the track icons scroll UNDER it, not into it */}
+            <div className="border-line bg-panel sticky top-0 z-10 border-b" style={{ height: RULER_H }} />
             <div style={{ paddingTop: 0 }}>
               {displayTracks.map((track) => {
                 const k = trackKind(track);
@@ -754,13 +880,20 @@ function StudioTimelineImpl({
                     key={track}
                     onPointerDown={track > 0 ? (e) => startTrackDrag(e, track) : undefined}
                     title={track > 0 ? t('panels.dragReorderTrackStacking') : undefined}
-                    className={`flex items-center gap-1.5 px-2.5 text-[11px] ${track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
+                    className={`flex items-center gap-1 px-2 text-[11px] ${track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
                     style={{ height: rowH(track), marginTop: track === 0 ? 0 : ROW_GAP, transform: dragging ? `translateY(${trackDrag!.dy}px)` : undefined }}
                   >
                     <Icon size={13} className={meta.dot} />
+                    {k === 'video' && onToggleVideoMute && <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />}
                   </div>
                 );
               })}
+              {musicLane && (
+                <div className="flex items-center gap-1 px-2 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: ROW_GAP }}>
+                  <Music size={13} className="text-accent" />
+                  {onToggleAudioMute && <MuteToggle muted={!!audioMuted} onToggle={onToggleAudioMute} />}
+                </div>
+              )}
             </div>
           </div>
 
@@ -822,8 +955,10 @@ function StudioTimelineImpl({
             onMouseLeave={() => endScrubRef.current()}
           >
             {/* Ruler (click/drag to seek) + major/minor ticks */}
+            {/* Sticky: with enough tracks the area scrolls vertically, and a ruler that scrolls away takes
+                the one thing every other row is read against with it. */}
             <div
-              className="border-line text-ink-4 relative cursor-ew-resize select-none border-b text-[9px]"
+              className="border-line bg-panel text-ink-4 sticky top-0 z-[45] cursor-ew-resize select-none border-b text-[9px]"
               style={{ height: RULER_H }}
               onClick={(e) => e.stopPropagation()} // dragging the ruler to seek doesn't clear selection
               onPointerDown={(e) => {
@@ -845,7 +980,7 @@ function StudioTimelineImpl({
             </div>
 
             {/* Track background area (hosts all rows) */}
-            <div ref={tracksRef} className="relative" style={{ height: tracksH }}>
+            <div ref={tracksRef} className="relative" style={{ height: tracksHWithMusic }}>
               {/* Row background */}
               {displayTracks.map((track) => (
                 <div
@@ -959,18 +1094,41 @@ function StudioTimelineImpl({
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 return stripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
-                                  <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
+                                  <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                                 ));
                               })()}
                             </div>
                           ) : (
                             <>
                               {stripTiles(filmstrip ?? [], shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
-                                <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
+                                <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                               ))}
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
                             </>
                           )}
+                          {/* The video's OWN audio, along the card's bottom edge: same dB scale as the music
+                              lane, shifted by this shot's level so muting or ducking a shot shows here too. */}
+                          {(() => {
+                            const band = sceneWaves.get(shot.id);
+                            if (!band) return null;
+                            return (
+                              <svg
+                                className={`pointer-events-none absolute inset-x-0 bottom-0 ${shot.audioMuted ? 'text-accent/25' : 'text-accent/60'}`}
+                                style={{ height: SCENE_WAVE_H }}
+                                viewBox={`0 0 ${Math.round(w)} ${SCENE_WAVE_H}`}
+                                preserveAspectRatio="none"
+                                aria-hidden
+                              >
+                                {/* same blue as the music lane, and the backing tapers with the fades exactly
+                                    like a lane clip's body — the band IS the shot's audio, shape included */}
+                                <path d={band.body} className="fill-accent/8" />
+                                <path
+                                  d={band.wave}
+                                  fill="currentColor"
+                                />
+                              </svg>
+                            );
+                          })()}
                           {/* Index number */}
                           <span className="absolute left-1 top-1 rounded bg-black/55 px-1 text-[9px] font-semibold leading-[14px] text-white">{i + 1}</span>
                         </button>
@@ -978,7 +1136,7 @@ function StudioTimelineImpl({
                         {/* Treatment badge (per shot): click selects the shot -> opens the right-side treatment panel (style cards). Sits at the scene card's bottom-left.
                             Treatment always applies to the whole shot (one shot = one treatment; split to localize), and applies as set — no "merge if dwell is too short"
                             (that restraint is for LLM shot-planning, not for user manual cuts). */}
-                        <div className="absolute z-30" style={{ left: x(start) + 3, bottom: SCENE_PAD_B + 1 }}>
+                        <div className="absolute z-30" style={{ left: x(start) + 3, bottom: SCENE_PAD_B + SCENE_WAVE_H + 2 }}>
                           <button
                             type="button"
                             onPointerDown={(e) => e.stopPropagation()}
@@ -1261,6 +1419,28 @@ function StudioTimelineImpl({
                     </div>
                   </div>
                 ))}
+
+              {/* Music lane (bottom row), in its own component: a move/trim/fade gesture writes a value per
+                  pointer frame, and keeping that state down there is what stops it re-rendering the whole
+                  timeline sixty times a second. */}
+              {musicLane && (
+                <AudioLane
+                  clips={audioClips}
+                  dur={dur}
+                  pps={pps}
+                  top={musicTop}
+                  peaks={audioPeaks}
+                  selectedId={selectedAudioId}
+                  onSelect={onSelectAudio}
+                  onMove={onMoveAudio}
+                  onTrim={onTrimAudio}
+                  onFade={onFadeAudio}
+                  onOpenPanel={onOpenMusicPanel}
+                  secAt={secAt}
+                  snap={snap}
+                  drag={drag}
+                />
+              )}
 
               {/* Snap alignment guide (when a drag hits a cut point / whole second / adjacent block edge / playhead) */}
               {guide != null && (

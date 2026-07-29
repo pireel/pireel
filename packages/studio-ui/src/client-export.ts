@@ -20,6 +20,7 @@
 
 import {
   ALL_FORMATS,
+  AudioSample,
   AudioSampleSink,
   AudioSampleSource,
   BlobSource,
@@ -35,7 +36,9 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, parseClipInset, shotFilterCss, totalDuration } from '@pireel/studio-engine/composition';
+import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, parseClipInset, segmentFadeFn, shotFilterCss, shotGain, shotsContiguous, totalDuration } from '@pireel/studio-engine/composition';
+import { decodeAudioFile } from './audio-decode';
+import { mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
@@ -59,6 +62,10 @@ interface ExpSeg {
   key: string;
   /** Per-shot color grade (CSS filter string; 'none'/absent = no grade) — same shotFilterCss as the preview's #vidEl filter. */
   filter?: string;
+  /** Linear audio gain 0..1 (shotGain of the shot; absent = 1). 0 = the segment contributes no audio samples at all. */
+  gain?: number;
+  /** Segment-local fade factor (segmentFadeFn: shot fades × seam micro-fades); absent = flat. */
+  fadeAt?: (tLocal: number) => number;
 }
 
 export interface SourceRig {
@@ -90,6 +97,26 @@ export async function openSource(file: File, from: number, to: number, W: number
     dw: video.displayWidth * cover,
     dh: video.displayHeight * cover,
   };
+}
+
+/** Rewrite an audio sample's PCM through a gain ENVELOPE (interleaved f32 round-trip; format/rate/channels
+ *  preserved). gainAt takes the sample-relative offset in seconds, so a shot's fades ride inside one sample
+ *  buffer too. Only called when the segment isn't a plain gain-1 passthrough. */
+export function scaleAudioSample(sample: AudioSample, gainAt: (offsetSec: number) => number): AudioSample {
+  const data = new Float32Array(sample.numberOfFrames * sample.numberOfChannels);
+  sample.copyTo(data, { planeIndex: 0, format: 'f32' });
+  const ch = sample.numberOfChannels;
+  for (let f = 0; f < sample.numberOfFrames; f++) {
+    const g = gainAt(f / sample.sampleRate);
+    for (let c = 0; c < ch; c++) data[f * ch + c]! *= g;
+  }
+  return new AudioSample({
+    data,
+    format: 'f32',
+    numberOfChannels: sample.numberOfChannels,
+    sampleRate: sample.sampleRate,
+    timestamp: sample.timestamp,
+  });
 }
 
 /** From the sequential stream, take "the last frame with timestamp ≤ srcT" (same as the spike: webm without cues returns null on random access across large ranges). */
@@ -234,6 +261,11 @@ export interface ClientExportOpts {
   videoFile: File;
   /** Local insert-clip Files (key = blob URL, same source as workbench clipFilesRef). */
   clipFiles: Map<string, File>;
+  /** Audio-track clips + their bytes. Absent/empty = the untouched narration-only audio path. */
+  audio?: { clip: AudioClip; file: File }[] | null;
+  /** Denoise substitution: source key → baked blended audio file. That source's audio track is read
+   *  from this file instead of the source video (video decode untouched) — preview's dub, verbatim. */
+  denoise?: Map<string, File> | null;
   /** Resolution/fps/format (default 1080p·30·MP4). */
   render?: ExportRenderOpts;
   onProgress?: (done: number, total: number) => void;
@@ -378,16 +410,29 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   // Segment table (edited order) + each source's File
   const segs: ExpSeg[] = [];
   const files = new Map<string, File>([['main', videoFile]]);
-  for (const sp of clipSpans(shots)) {
-    const s = sp.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
+  const spans = clipSpans(shots);
+  for (let i = 0; i < spans.length; i++) {
+    const s = spans[i]!.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
     const filterCss = shotFilterCss(s.filter);
     const filter = filterCss === 'none' ? {} : { filter: filterCss };
+    const g = shotGain(s);
+    const gain = g === 1 ? {} : { gain: g };
+    // Same envelope as the preview: own fades × seam micro-fades at edges that meet a non-contiguous neighbour
+    const prev = spans[i - 1]?.clip as typeof s | undefined;
+    const next = spans[i + 1]?.clip as typeof s | undefined;
+    const fadeFn = segmentFadeFn(
+      s,
+      Math.max(0.01, s.srcEnd - s.srcStart),
+      !!prev && !shotsContiguous(prev, s),
+      !!next && !shotsContiguous(s, next),
+    );
+    const fade = fadeFn ? { fadeAt: fadeFn } : {};
     if (!s.src) {
-      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter });
+      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter, ...gain, ...fade });
       continue;
     }
     const key = `clip_${s.id}`;
-    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter });
+    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter, ...gain, ...fade });
     if (!files.has(key)) {
       const local = clipFiles.get(s.src);
       if (local) files.set(key, local);
@@ -407,6 +452,21 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const from = Math.min(...mine.map((s) => s.srcStart));
     const to = Math.max(...mine.map((s) => s.srcEnd));
     rigs.set(key, await openSource(file, from, to, W, H));
+  }
+
+  // Denoise substitution: swap the source's audio track for the baked blend (same source seconds)
+  const dnInputs: Input[] = [];
+  if (opts.denoise) {
+    for (const [key, f] of opts.denoise) {
+      const rig = rigs.get(key);
+      if (!rig) continue;
+      const input = new Input({ source: new BlobSource(f), formats: ALL_FORMATS });
+      const at = await input.getPrimaryAudioTrack();
+      if (at) {
+        rig.audio = at;
+        dnInputs.push(input);
+      } else void input.dispose();
+    }
   }
 
   // Overlay document + asset inlining
@@ -434,7 +494,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const output = new Output({ format: outFormat, target: new BufferTarget() });
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
-    const anyAudio = [...rigs.values()].some((r) => r.audio);
+    const withClips = !!opts.audio?.length;
+    const anyAudio = withClips || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
@@ -683,16 +744,37 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // Audio track: concatenate in edited-segment order (main segment = narration audio, insert clip = its own), re-stamp timestamps
-    if (audioSource) {
+    // Audio track. With audio clips: full mix on the 48k grid (narration resampled + each clip with the
+    // preview's exact envelope) — see export-audio-mix.ts. Without: concatenate in edited-segment order (main segment =
+    // narration audio, insert clip = its own), re-stamp timestamps.
+    // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
+    // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
+    if (audioSource && withClips) {
+      const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
+      for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
+      const clips: { clip: AudioClip; buffer: AudioBuffer }[] = [];
+      for (const a of opts.audio!) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
+      await mixAudioTrack({
+        segs: segs.map((s) => ({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: s.key, gain: s.gain ?? 1, fadeAt: s.fadeAt })),
+        audioTracks,
+        clips,
+        totalSec: durationSec,
+        push: (sample) => audioSource.add(sample).then(() => sample.close()),
+      });
+    } else if (audioSource) {
       let edited = 0;
       for (const s of segs) {
         const rig = rigs.get(s.key);
-        if (rig?.audio) {
+        const gain = s.gain ?? 1;
+        if (rig?.audio && gain > 0) {
           const asink = new AudioSampleSink(rig.audio);
+          const flat = gain === 1 && !s.fadeAt;
           for await (const sample of asink.samples(s.srcStart, s.srcEnd)) {
-            sample.setTimestamp(Math.max(0, edited + (sample.timestamp - s.srcStart)));
-            await audioSource.add(sample);
+            const base = sample.timestamp - s.srcStart; // segment-local seconds at this buffer's start
+            const out = flat ? sample : scaleAudioSample(sample, (off) => gain * (s.fadeAt ? s.fadeAt(base + off) : 1));
+            out.setTimestamp(Math.max(0, edited + (sample.timestamp - s.srcStart)));
+            await audioSource.add(out);
+            if (out !== sample) out.close();
             sample.close();
           }
         }
@@ -709,6 +791,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       rig.pending?.close();
       void rig.input.dispose();
     }
+    for (const input of dnInputs) void input.dispose();
     overlay.dispose();
   }
 }

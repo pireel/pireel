@@ -35,7 +35,7 @@ import { t } from './i18n';
 
 export type { GenElementResult } from './element-history';
 
-type AssetType = 'image' | 'video' | 'element';
+type AssetType = 'image' | 'video' | 'element' | 'audio';
 
 interface Entry {
   id: string;
@@ -67,6 +67,10 @@ export interface GenChatPanelProps {
   generateElement: (prompt: string, base?: GenElementResult) => Promise<GenElementResult>;
   /** Element panel only: insert a base block (block-type registry; the old template panel's entry was folded in here). */
   onInsertTemplate?: (templateId: string) => void;
+  /** Audio panel only: generate one music track (hosted); resolves to the stored url. */
+  generateAudio?: (prompt: string, durationSec: number) => Promise<string>;
+  /** Audio panel only: put a generated track on the music lane at the playhead. */
+  onInsertAudio?: (url: string, label?: string) => void;
 }
 
 /* ---------------- Element history (localStorage; single source in element-history.ts; image/video history lives server-side) ---------------- */
@@ -180,15 +184,17 @@ const TYPE_META: Record<AssetType, { title: string; ph: string; empty: string }>
   image: { title: 'panels.image', ph: 'chatGen.describeImageGenerate', empty: '' },
   video: { title: 'panels.video', ph: 'chatGen.describeShotGenerate', empty: '' },
   element: { title: 'panels.element', ph: 'chatGen.describeOverlayElement', empty: 'chatGen.generatedComponentsStayHere' },
+  audio: { title: 'panels.music', ph: 'panels.musicPromptPlaceholder', empty: '' },
 };
 
-export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, onInsertTemplate }: GenChatPanelProps) {
+export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, onInsertTemplate, generateAudio, onInsertAudio }: GenChatPanelProps) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
   const [loaded, setLoaded] = useState(false); // don't decide the view from empty entries before history loads (avoids "templates→mine" flash)
   const [input, setInput] = useState('');
   const [ratio, setRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
+  const [audioSec, setAudioSec] = useState(60); // music panel only: requested length
   const [count, setCount] = useState(1); // image only
   const shell = useStudioShell();
   const [vidDur, setVidDur] = useState('5'); // video only: duration tier (per model, see videoDurationOptions)
@@ -207,7 +213,10 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
   const [modelId, setModelId] = useState('');
   useEffect(() => {
-    if (type === 'element') return;
+    // element composes locally; audio has no model choice (one tool, tiered by length) — and asking
+    // for a kind the catalog doesn't know returns EVERY model, whose first row then quoted as if the
+    // user were generating an image. That's where the wrong price came from.
+    if (type === 'element' || type === 'audio') return;
     let cancelled = false;
     void fetch(`/api/models?kind=${type}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -242,13 +251,19 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     if (type === 'video') {
       return { duration_sec: vidDur, count: 1, resolution: vidRes, aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
     }
+    if (type === 'audio') return { tier: audioSec < 30 ? 'clip' : 'song' };
     return {};
-  }, [type, ratio, count, vidDur, quality, vidRes, modelId]);
-  // elements: modelId empty → useQuote returns null, no request
-  const quoteCredits = useQuote({ toolId: type === 'video' ? 'video-gen' : 'image-gen', modelId: type === 'element' ? '' : modelId, params: quoteParams });
+  }, [type, ratio, count, vidDur, quality, vidRes, modelId, audioSec]);
+  // elements: modelId empty → useQuote returns null, no request. Audio quotes its own per-call tool,
+  // whose only dimension is which tier the length buys.
+  const quoteCredits = useQuote({
+    toolId: type === 'video' ? 'video-gen' : type === 'audio' ? 'music-gen' : 'image-gen',
+    modelId: type === 'element' || type === 'audio' ? '' : modelId,
+    params: quoteParams,
+  });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   // templates / mine tabs: only image and video panels have a template library (elements use "base blocks", not here)
-  const templates = type === 'element' ? [] : (TEMPLATES_BY_TYPE[type] ?? []);
+  const templates = type === 'element' || type === 'audio' ? [] : (TEMPLATES_BY_TYPE[type] ?? []);
   const [tab, setTab] = useState<'mine' | 'templates'>('mine');
   // remember across sessions whether this panel ever had its own output → get the first frame right (had output → open "mine",
   // otherwise show templates), avoiding the flash of "show templates on empty entries, then switch back to mine once history arrives".
@@ -288,6 +303,11 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         const seen = new Set(cur.map((e) => e.id));
         return [...cur, ...loadElementEntries().filter((e) => !seen.has(e.id))].sort((a, b) => a.createdAt - b.createdAt);
       });
+      setLoaded(true);
+      return;
+    }
+    if (type === 'audio') {
+      // music generation isn't a create-pipeline job (the route answers inline), so there is no history to list
       setLoaded(true);
       return;
     }
@@ -398,6 +418,21 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         }
         return;
       }
+      if (type === 'audio') {
+        const id = `aud_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const createdAt = Date.now();
+        setEntries((cur) => [...cur, { id, type: 'audio', prompt: text, status: 'pending', createdAt }]);
+        setInput('');
+        setBusy(false); // music generation is slow; unlock the input while it runs
+        try {
+          const url = await generateAudio!(text, audioSec);
+          setEntries((cur) => cur.map((e) => (e.id === id ? { ...e, status: 'succeeded' as const, assets: [{ url, key: url, mime: 'audio/mpeg' }] } : e)));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : t('common.generationFailed');
+          setEntries((cur) => cur.map((e) => (e.id === id ? { ...e, status: 'failed' as const, error: msg } : e)));
+        }
+        return;
+      }
       const model = modelId ? { model_id: modelId } : {};
       const params =
         type === 'image'
@@ -415,7 +450,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     } finally {
       setBusy(false);
     }
-  }, [input, busy, type, ratio, count, vidDur, quality, vidRes, refs, baseEl, modelId, generateElement]);
+  }, [input, busy, type, ratio, count, vidDur, quality, vidRes, refs, baseEl, modelId, generateElement, generateAudio, audioSec]);
 
   const meta = TYPE_META[type];
 
@@ -469,6 +504,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
                   onInsertMedia={onInsertMedia}
                   onDragAsset={onDragAsset}
                   onInsertElement={onInsertElement}
+                  onInsertAudio={onInsertAudio}
                   onUseAsBase={type === 'element' ? (el2, p2) => setBaseEl({ el: el2, prompt: p2 }) : undefined}
                   onAddRef={
                     // only image/video panels take asset references: images → reference_images (≤4), videos → reference_videos (≤3);
@@ -549,7 +585,23 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
             className="text-ink placeholder:text-ink-4 max-h-[200px] min-h-[64px] w-full resize-none bg-transparent px-3 pb-1.5 pt-2.5 text-[13px] leading-relaxed outline-none"
           />
           <div className="flex items-center gap-1 px-2 pb-2 pt-1">
-            {type !== 'element' && (
+            {type === 'audio' && (
+              // Reference, not a contract: the model takes it as a wish (see the music route), and it also
+              // decides which tier is bought — under 30s is the cheaper short-clip model.
+              <label className="text-ink-3 flex items-center gap-1.5 text-[11px]" title={t('panels.musicDurationHint')}>
+                {t('panels.musicDurationSec')}
+                <input
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={audioSec}
+                  onChange={(e) => setAudioSec(Math.max(10, Math.min(300, Number(e.target.value) || 60)))}
+                  className="border-line bg-paper text-ink w-14 rounded-md border px-1.5 py-0.5 tabular-nums"
+                  aria-label={t('panels.musicDurationSec')}
+                />
+              </label>
+            )}
+            {type !== 'element' && type !== 'audio' && (
               <>
                 {models.length > 1 && (
                   <select
@@ -771,6 +823,7 @@ function EntryRow({
   onAddRef,
   onUseAsBase,
   onPreview,
+  onInsertAudio,
 }: {
   entry: Entry;
   comp: Composition;
@@ -780,7 +833,7 @@ function EntryRow({
   onUseAsBase?: (el: GenElementResult, prompt: string) => void;
   /** click image / hover preview lens → panel-level lightbox to enlarge */
   onPreview: (a: GenAsset) => void;
-} & Pick<GenChatPanelProps, 'onInsertMedia' | 'onDragAsset' | 'onInsertElement'>) {
+} & Pick<GenChatPanelProps, 'onInsertMedia' | 'onDragAsset' | 'onInsertElement' | 'onInsertAudio'>) {
   return (
     <div className="flex flex-col gap-1.5">
       {/* task-card framing: the prompt is caption text for this generation, not a chat message (each generation is independent, no context) */}
@@ -841,6 +894,14 @@ function EntryRow({
         </div>
       )}
 
+      {e.status === 'succeeded' && e.type === 'audio' && (e.assets?.length ?? 0) > 0 && (
+        <div className="flex flex-col items-start gap-1.5">
+          <audio src={e.assets![0]!.url} controls preload="metadata" className="h-8 w-full max-w-[260px]" />
+          <div className="flex flex-wrap gap-1">
+            <ActionChip icon={Plus} label={t('panels.useAsBgm')} onClick={() => onInsertAudio?.(e.assets![0]!.url, e.prompt.slice(0, 24))} />
+          </div>
+        </div>
+      )}
       {e.status === 'succeeded' && e.type === 'video' && (e.assets?.length ?? 0) > 0 && (
         <div className="flex flex-col items-start gap-1.5">
           <video

@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Plus, RotateCcw, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Music, Pause, Play, Plus, RotateCcw, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
@@ -47,7 +47,7 @@ const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, th
 
 interface LibraryItem {
   id: string;
-  kind: 'image' | 'video' | 'element';
+  kind: 'image' | 'video' | 'audio' | 'element';
   origin: 'upload' | 'gen' | 'preset';
   /** Elements only: preset category (data/structure/…); user elements lack this = "Mine". */
   category?: string;
@@ -69,14 +69,15 @@ interface LibraryItem {
   prompt?: string;
 }
 
-type KindFilter = 'all' | 'image' | 'video' | 'element';
+type KindFilter = 'all' | 'image' | 'video' | 'audio' | 'element';
 
 /** Drag payload from the panel: image/video = MediaRef + dims; element = the element itself (seedId re-scoped on insert). */
 export type PanelDragAsset =
   | (MediaRef & { label?: string; dims?: { w: number; h: number } })
+  | { type: 'audio'; url: string; label?: string }
   | { type: 'element'; element: GenElementResult; prompt: string; label?: string };
 type ViewMode = 'grid' | 'list';
-export type GenType = 'image' | 'video' | 'element';
+export type GenType = 'image' | 'video' | 'element' | 'audio';
 
 const VIEW_KEY = 'studio.assetsPanel.view';
 
@@ -109,12 +110,12 @@ const fileDims = (f: File, kind: 'image' | 'video'): Promise<{ w: number; h: num
   });
 
 function materialToItem(it: MaterialItem): LibraryItem | null {
-  if (it.kind !== 'image' && it.kind !== 'video') return null;
+  if (it.kind !== 'image' && it.kind !== 'video' && it.kind !== 'audio') return null;
   return {
     id: `up:${it.id}`,
     kind: it.kind,
     origin: 'upload',
-    insertUrl: imageThumb(it.url, 'original'),
+    insertUrl: it.kind === 'audio' ? it.url : imageThumb(it.url, 'original'),
     thumbSrc: it.thumb_url ?? (it.kind === 'image' ? it.url : null),
     label: it.label ?? (it.kind === 'video' ? t('panels.untitledVideo') : t('panels.untitledImage')),
     createdAt: it.created_at ?? 0,
@@ -159,6 +160,7 @@ export function AssetsPanel({
   onInsertKit,
   onDragAsset,
   onOpenGen,
+  onUseAudio,
   genRefreshTick = 0,
 }: {
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
@@ -173,10 +175,37 @@ export function AssetsPanel({
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
   onOpenGen: (type: GenType, anchor?: DOMRect) => void;
+  /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). */
+  onUseAudio?: (url: string, label?: string) => void;
   /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
+  // Audio inline preview: one shared element, click toggles (no lightbox for sound)
+  const [audioPlaying, setAudioPlaying] = useState<string | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const toggleAudio = (url: string) => {
+    if (!audioElRef.current) {
+      audioElRef.current = new Audio();
+      audioElRef.current.onended = () => setAudioPlaying(null);
+    }
+    const a = audioElRef.current;
+    if (audioPlaying === url) {
+      a.pause();
+      setAudioPlaying(null);
+      return;
+    }
+    a.src = url;
+    a.play().catch(() => {});
+    setAudioPlaying(url);
+  };
+  useEffect(
+    () => () => {
+      audioElRef.current?.pause();
+      audioElRef.current = null;
+    },
+    [],
+  );
   const [view, setView] = useState<ViewMode>(() =>
     typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid',
   );
@@ -196,14 +225,14 @@ export function AssetsPanel({
   const loadUploads = useCallback((silent = false) => {
     const seq = ++reqSeq.current;
     if (!silent) setLoading(true);
-    const get = (k: 'image' | 'video') =>
+    const get = (k: 'image' | 'video' | 'audio') =>
       fetch(`/api/me/materials?tab=global&kind=${k}&limit=200`)
         .then((r) => (r.ok ? r.json() : null))
         .then((j: { items?: MaterialItem[] } | null) => j?.items ?? [])
         .catch(() => [] as MaterialItem[]);
-    return Promise.all([get('image'), get('video')]).then(([imgs, vids]) => {
+    return Promise.all([get('image'), get('video'), get('audio')]).then(([imgs, vids, auds]) => {
       if (seq !== reqSeq.current) return; // superseded by a newer load
-      setUploads([...imgs, ...vids].map(materialToItem).filter((x): x is LibraryItem => !!x));
+      setUploads([...imgs, ...vids, ...auds].map(materialToItem).filter((x): x is LibraryItem => !!x));
       if (!silent) setLoading(false);
     });
   }, []);
@@ -346,62 +375,88 @@ export function AssetsPanel({
     [gens, kind],
   );
 
+  /** Kind icon + origin label: same badge vocabulary in the card badge and the list row meta line. */
+  const kindIcon = (it: LibraryItem) =>
+    it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : it.kind === 'audio' ? <Music size={9} /> : <ImageIcon size={9} />;
+  const originLabel = (it: LibraryItem) =>
+    it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload');
+  /** Body click: audio toggles inline playback (its "preview"), everything else opens the lightbox. */
+  const activate = (it: LibraryItem) => {
+    if (it.kind === 'audio') {
+      if (it.insertUrl) toggleAudio(it.insertUrl);
+      return;
+    }
+    setPreview(it);
+  };
+  const insertLabel = (it: LibraryItem) => (it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert'));
+
   /** Grid card (shared by masonry / category overview / category detail): click to preview, draggable, hover to insert/delete. */
-  const gridCard = (it: LibraryItem) => (
-    <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 inline-block w-full break-inside-avoid overflow-hidden rounded-md border align-top transition">
-      <button
-        type="button"
-        title={t('panels.previewLabelDragOnto', { label: it.label })}
-        onClick={() => setPreview(it)}
-        {...dragProps(it)}
-        className="block w-full cursor-zoom-in text-left"
-      >
-        {/* Preset card thumbnails are uniformly 16:9 (true ratio would leave big gaps on a vertical canvas); lightbox/insert still use the real canvas */}
-        {it.kind === 'element' ? <ElementTile item={it} comp={it.origin === 'preset' ? presetPreviewComp : comp} /> : <TileThumb item={it} />}
-        <div className="text-ink-3 truncate px-1.5 py-1 text-[10px]">{it.label}</div>
-      </button>
-      {/* Origin badge: only where it disambiguates. Elements live under their own section heading,
-          so a label on every card was pure noise. */}
-      {it.kind !== 'element' && (
-        <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
-          {it.kind === 'video' ? <Clapperboard size={9} /> : <ImageIcon size={9} />}
-          {it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
-        </span>
-      )}
-      {it.deletable && (
+  const gridCard = (it: LibraryItem) => {
+    const audio = it.kind === 'audio';
+    const playing = audio && audioPlaying === it.insertUrl;
+    return (
+      <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 inline-block w-full break-inside-avoid overflow-hidden rounded-md border align-top transition">
         <button
           type="button"
-          title={t('panels.deleteAsset')}
-          aria-label={t('panels.deleteAsset')}
-          onClick={() => void doDelete(it)}
-          className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
+          title={audio ? it.label : t('panels.previewLabelDragOnto', { label: it.label })}
+          aria-label={audio ? (playing ? t('panels.pauseAudio') : t('panels.playAudio')) : undefined}
+          onClick={() => activate(it)}
+          {...dragProps(it)}
+          className={`block w-full text-left ${audio ? 'cursor-pointer' : 'cursor-zoom-in'}`}
         >
-          <Trash2 size={11} />
+          {/* Preset card thumbnails are uniformly 16:9 (true ratio would leave big gaps on a vertical canvas); lightbox/insert still use the real canvas */}
+          {it.kind === 'element' ? (
+            <ElementTile item={it} comp={it.origin === 'preset' ? presetPreviewComp : comp} />
+          ) : audio ? (
+            <AudioTile playing={playing} />
+          ) : (
+            <TileThumb item={it} />
+          )}
+          <div className="text-ink-3 truncate px-1.5 py-1 text-[10px]">{it.label}</div>
         </button>
-      )}
-      <button
-        type="button"
-        title={t('panels.insertOntoCanvas')}
-        onClick={() => insertOf(it)}
-        className="bg-accent absolute bottom-1 right-1 hidden items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
-      >
-        <Plus size={9} /> {t('panels.insert')}
-      </button>
-    </div>
-  );
+        {/* Origin badge: only where it disambiguates. Elements live under their own section heading,
+            so a label on every card was pure noise. */}
+        {it.kind !== 'element' && (
+          <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
+            {kindIcon(it)}
+            {originLabel(it)}
+          </span>
+        )}
+        {it.deletable && (
+          <button
+            type="button"
+            title={t('panels.deleteAsset')}
+            aria-label={t('panels.deleteAsset')}
+            onClick={() => void doDelete(it)}
+            className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
+        <button
+          type="button"
+          title={audio ? t('panels.useAsBgm') : t('panels.insertOntoCanvas')}
+          onClick={() => insertOf(it)}
+          className="bg-accent absolute bottom-1 right-1 hidden items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
+        >
+          <Plus size={9} /> {insertLabel(it)}
+        </button>
+      </div>
+    );
+  };
 
   const doUpload = async () => {
     if (uploading) return;
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*,video/*';
+    input.accept = 'image/*,video/*,audio/*';
     input.onchange = async () => {
       const f = input.files?.[0];
       if (!f) return;
-      const k = f.type.startsWith('video/') ? 'video' : 'image';
+      const k = f.type.startsWith('video/') ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'image';
       setUploading(true);
       try {
-        const dims = await fileDims(f, k); // measured locally, persisted along with the upload
+        const dims = k === 'audio' ? null : await fileDims(f, k); // measured locally, persisted along with the upload
         const { url } = await studioProviders().uploads.upload(f, { contentType: f.type || 'application/octet-stream', filename: f.name });
         await fetch('/api/me/uploads', {
           method: 'POST',
@@ -465,7 +520,11 @@ export function AssetsPanel({
       if (it.element) onInsertElement(it.element, it.prompt ?? it.label);
       return;
     }
-    if (it.insertUrl) onInsert({ type: it.kind, url: it.insertUrl }, it.label, dimsOf(it));
+    if (it.kind === 'audio') {
+      if (it.insertUrl) onUseAudio?.(it.insertUrl, it.label);
+      return;
+    }
+    if (it.insertUrl) onInsert({ type: it.kind as 'image' | 'video', url: it.insertUrl }, it.label, dimsOf(it));
   };
   const dragProps = (it: LibraryItem) => {
     if (it.kit) return {};
@@ -482,6 +541,16 @@ export function AssetsPanel({
       };
     }
     if (!it.insertUrl) return {};
+    if (it.kind === 'audio') {
+      return {
+        draggable: true,
+        onDragStart: (e: React.DragEvent) => {
+          e.dataTransfer.effectAllowed = 'copy';
+          onDragAsset?.({ type: 'audio', url: it.insertUrl!, label: it.label });
+        },
+        onDragEnd: () => onDragAsset?.(null),
+      };
+    }
     return {
       draggable: true,
       onDragStart: (e: React.DragEvent) => {
@@ -493,7 +562,7 @@ export function AssetsPanel({
   };
 
   const openGen = (e: React.MouseEvent<HTMLButtonElement>) =>
-    onOpenGen(kind === 'all' ? 'image' : kind === 'element' ? 'element' : kind, e.currentTarget.getBoundingClientRect());
+    onOpenGen(kind === 'all' ? 'image' : kind, e.currentTarget.getBoundingClientRect());
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -536,6 +605,7 @@ export function AssetsPanel({
                 { v: 'image', label: 'panels.image' },
                 { v: 'video', label: 'panels.video' },
                 { v: 'element', label: 'panels.element' },
+                { v: 'audio', label: 'panels.music' },
               ] as { v: KindFilter; label: string }[]
             ).map((k) => (
               <button
@@ -625,7 +695,8 @@ export function AssetsPanel({
             ))}
           </div>
         ) : view === 'grid' ? (
-          // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns
+          // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns.
+          // Audio rides along as a fixed-ratio card (same card chrome, play/pause tile instead of a thumbnail).
           <div className="columns-2 gap-1.5">{shown.map(gridCard)}</div>
         ) : (
           <div className="divide-line divide-y">
@@ -633,28 +704,29 @@ export function AssetsPanel({
               <div key={it.id} className="hover:bg-panel-2 group flex w-full items-center gap-2 px-3 py-1.5 transition">
                 <button
                   type="button"
-                  title={t('panels.previewLabelDragOnto', { label: it.label })}
-                  onClick={() => setPreview(it)}
+                  title={it.kind === 'audio' ? it.label : t('panels.previewLabelDragOnto', { label: it.label })}
+                  aria-label={it.kind === 'audio' ? (audioPlaying === it.insertUrl ? t('panels.pauseAudio') : t('panels.playAudio')) : undefined}
+                  onClick={() => activate(it)}
                   {...dragProps(it)}
-                  className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-2 text-left"
+                  className={`flex min-w-0 flex-1 items-center gap-2 text-left ${it.kind === 'audio' ? 'cursor-pointer' : 'cursor-zoom-in'}`}
                 >
-                  <RowThumb item={it} />
+                  <RowThumb item={it} playing={it.kind === 'audio' && audioPlaying === it.insertUrl} />
                   <div className="min-w-0 flex-1">
                     <div className="text-ink truncate text-[11px]">{it.label}</div>
                     <div className="text-ink-4 flex items-center gap-1 text-[10px]">
-                      {it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : <ImageIcon size={9} />}
-                      {it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload')}
+                      {kindIcon(it)}
+                      {originLabel(it)}
                       {it.createdAt ? ` · ${new Date(it.createdAt).toLocaleDateString()}` : ''}
                     </div>
                   </div>
                 </button>
                 <button
                   type="button"
-                  title={t('panels.insertOntoCanvas')}
+                  title={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insertOntoCanvas')}
                   onClick={() => insertOf(it)}
                   className="bg-accent hidden shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
                 >
-                  <Plus size={9} /> {t('panels.insert')}
+                  <Plus size={9} /> {insertLabel(it)}
                 </button>
                 {it.deletable && (
                   <button
@@ -951,6 +1023,18 @@ function TileThumb({ item: it }: { item: LibraryItem }) {
   );
 }
 
+/** Audio masonry tile: audio has no picture, so it takes a fixed 16:9 slot (keeps the two columns even)
+ *  with the play/pause state as the whole subject. */
+function AudioTile({ playing }: { playing: boolean }) {
+  return (
+    <div className="bg-panel-2 flex items-center justify-center" style={{ aspectRatio: 16 / 9 }}>
+      <span className={`flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : 'bg-panel text-ink-3'}`}>
+        {playing ? <Pause size={13} /> : <Play size={13} />}
+      </span>
+    </div>
+  );
+}
+
 /** Video masonry card: laid out at true ratio like images (no crop). For entries stored without dims
  *  (generated video / old uploads) → pin the ratio from videoWidth/Height once metadata arrives (vertical
  *  videos no longer hard-cropped to 16:9); before that, 16:9 placeholder with one small jump on arrival
@@ -973,8 +1057,16 @@ function VideoTile({ item: it, ar }: { item: LibraryItem; ar: number | undefined
   );
 }
 
-/** List row thumbnail (small square); elements use an icon placeholder (an iframe shrunk to 36px is pointless). */
-function RowThumb({ item: it }: { item: LibraryItem }) {
+/** List row thumbnail (small square); elements use an icon placeholder (an iframe shrunk to 36px is pointless),
+ *  audio shows its play/pause state in the same square. */
+function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: boolean }) {
+  if (it.kind === 'audio') {
+    return (
+      <div className={`flex size-9 shrink-0 items-center justify-center overflow-hidden rounded ${playing ? 'bg-accent text-white' : 'bg-panel-2 text-ink-3'}`}>
+        {playing ? <Pause size={13} /> : <Play size={13} />}
+      </div>
+    );
+  }
   if (it.kind === 'element') {
     return (
       <div className="bg-panel-2 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded">

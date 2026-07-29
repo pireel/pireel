@@ -6,12 +6,13 @@ import type { FilmstripFrame } from './media';
 export const PREVIEW_W = 108; // hover element preview width
 
 export const ROW_H = 30; // overlay track (element/caption) row height: compact to save space (user's call)
-export const SCENE_H = 78; // track 0 = scene rail, taller to fit scene cards
+export const AUDIO_ROW_H = 44; // music lane: taller than an overlay row — the waveform and the fade knobs need the room
+export const SCENE_H = 92; // track 0 = scene rail: thumbnails + the footage's own audio strip under them
 export const SCENE_PAD_T = 12; // gap above scene card (like CapCut): drag from gap = marquee, from card = reorder; bigger on top for easier hit
 export const SCENE_PAD_B = 8; // gap below scene card
 export const ROW_GAP = 6;
 export const RULER_H = 24;
-export const GUTTER = 40;
+export const GUTTER = 58; // kind icon + the track's mute toggle
 export const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
 export const EDGE_PAD = 12; // breathing room between gutter and content: keeps first block's selection ring (ring-2 outset) and first cut-point "+" half-circle (10px) from being clipped by the sticky gutter
 export const SHOT_GAP = 2; // hairline gap between shot cards (taken off the right edge, left edge stays time-accurate)

@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Undo2, Redo2, Pin, PinOff, SlidersHorizontal } from 'lucide-react';
+  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, Pin, PinOff, SlidersHorizontal } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -54,12 +54,22 @@ import {
   assembleBlockHtml,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
+  audioClipId,
+  audioClipWindow,
+  audioTrimPatch,
+  patchAudioClip,
+  patchShotAudio,
+  segmentFadeFn,
+  shotsContiguous,
   shotFilterCss,
+  shotGain,
+  type AudioClip,
   shotId,
   shotTransformVars,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
   cutTransitions,
+  splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
   treatmentVacancyBox,
@@ -114,6 +124,9 @@ import { CaptionsPanel } from './captions-panel';
 import { FramePanel } from './frame-panel';
 import { PersonFxPanel, type MatteState } from './person-fx-panel';
 import { ShotTreatmentPanel } from './shot-treatment-panel';
+import { MusicPanel } from './music-panel';
+import { useAudioTracks } from './use-audio-tracks';
+import { useDenoise } from './use-denoise';
 import { TransitionPanel } from './transition-panel';
 import { MediaAnimPanel } from './media-anim-panel';
 import { type MatteFrame, MATTE_FPS, computeMatteTrack } from './person-matte';
@@ -142,7 +155,7 @@ const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. 
 // ⚠️ Temporary for testing: fill only the first N images to save LLM calls, rest stay as placeholders — **remove before launch**.
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
-/** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions. */
+/** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions / kit props. */
 type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'kitProps';
 
 
@@ -185,6 +198,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, []);
   const selectedShotIdsRef = useRef<Set<string>>(selectedShotIds);
   selectedShotIdsRef.current = selectedShotIds;
+  // Audio-lane selection (timeline chip ↔ audio settings; Del deletes, and the toolbar's split/trim act on it).
+  // Declared alongside the other selection state so every selection path can clear it — the three are mutually
+  // exclusive: whatever the user picks last owns the toolbar.
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  const selectedAudioIdRef = useRef<string | null>(null);
+  selectedAudioIdRef.current = selectedAudioId;
+  // Picking a component or a shot drops the audio selection (the reverse lives in onSelectAudio, which clears
+  // both sets in the same batch — so this effect sees an empty selection there and leaves the audio alone).
+  useEffect(() => {
+    if (selectedId || selectedShotIds.size) setSelectedAudioId(null);
+  }, [selectedId, selectedShotIds]);
   /** ⌘/Ctrl click: toggle a shot in/out of the multi-select set; anchor follows the last-interacted shot. */
   const toggleShotSelect = useCallback((id: string) => {
     setSelectedId(null);
@@ -352,8 +376,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [clipAsr, setClipAsr] = useState<Record<string, AsrSegment[]>>({});
   const [filmstrip, setFilmstrip] = useState<FilmstripFrame[]>([]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
-  const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead (click the time readout)
-  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
+  const [locateSignal, setLocateSignal] = useState(0); // increment = scroll timeline to the playhead
+  // near=true: only scroll when the playhead would be off-screen (jumps made from another panel), vs the
+  // transport readout, which always centres because that IS the request.
+  const [locateNear, setLocateNear] = useState(false);
+  const locateTimeline = (near = false) => {
+    setLocateNear(near);
+    setLocateSignal((n) => n + 1);
+  };
+  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
   // space; unpinned = floating overlay above the canvas, the stage keeps full width). Both persist.
@@ -621,7 +652,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setCloudMediaRev((v) => v + 1);
     });
   };
-  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef });
+  /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
+  const audioExportRef = useRef<(() => { clip: AudioClip; file: File }[] | null) | null>(null);
+  const denoiseExportRef = useRef<(() => Map<string, File> | null) | null>(null);
+  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
   const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>({
@@ -650,9 +684,34 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const f = clipFilesRef.current.get(s.src);
       eng.setSource(s.src, f ?? (s.src.startsWith('blob:') ? null : s.src));
     }
-    eng.setSegments(shots.map((s) => ({ key: s.src ?? 'main', elKey: s.src ? `clip_${s.id}` : 'main', srcStart: s.srcStart, srcEnd: s.srcEnd })));
+    const shapeChanged = eng.setSegments(
+      // Same envelope the export mixer builds (segmentFadeFn): the shot's own fades × micro-fades on edges
+      // that meet a non-contiguous neighbour. Preview drives it off the rAF clock, so a 30 ms ramp lands as
+      // two or three volume steps rather than a smooth curve — coarse, but it's the same treatment at the
+      // same seams, which is what keeps preview honest about the export.
+      shots.map((s, i) => {
+        const prev = shots[i - 1];
+        const next = shots[i + 1];
+        const fade = segmentFadeFn(
+          s,
+          Math.max(0.01, s.srcEnd - s.srcStart),
+          !!prev && !shotsContiguous(prev, s),
+          !!next && !shotsContiguous(s, next),
+        );
+        return {
+          key: s.src ?? 'main',
+          elKey: s.src ? `clip_${s.id}` : 'main',
+          srcStart: s.srcStart,
+          srcEnd: s.srcEnd,
+          gain: shotGain(s),
+          ...(fade ? { fadeAt: fade } : {}),
+        };
+      }),
+    );
     eng.setTransitions(cutTransitions(comp.shots ?? []).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
-    if (!playingRef.current) eng.refresh();
+    // A level-only respec keeps the frame it already shows — re-pushing one per pointer move while dragging
+    // a volume slider is work nobody can see.
+    if (shapeChanged && !playingRef.current) eng.refresh();
   }, [comp.video, comp.shots]);
   /** Transition pre-bake cache (same idea as Premiere's "render preview"): baked in the background to a webp frame
    *  sequence, decoded to bitmaps only near the window and discarded once past; the signature includes cut/duration/
@@ -1485,6 +1544,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (d.type === 'select') {
         // Clicking a block during playback = wanting to edit it: pause first (clicking blank still only deselects, doesn't interrupt playback)
         if (d.blockId && playingRef.current) setPlaying(false);
+        setSelectedAudioId(null); // a click on the stage is "somewhere else" for the audio lane, hit or miss
         setSelectedId(d.blockId ?? null);
         setCapSelPart(d.part === 'sub' ? 'sub' : 'main'); // caption sub-target: main line / translation line each get their own handles
         setImgSel(null); // if the same click hit an image, the imgSel message right after refills it
@@ -1672,11 +1732,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // the source panel / deselects. All yield when the cursor is in an input/editable area; don't intercept Enter: focus
   // often sits on a toolbar button, and Enter would do "button trigger + block delete" together, making blocks vanish.
   // removeBlock/deleteShot etc. read the latest per-render closures via keysRef.
-  const keysRef = useRef<{ removeBlock: (id: string) => void; deleteBlocks: (ids: Set<string>) => void; deleteShot: (sid: string) => void; deleteShots: (ids: Set<string>) => void; closeCode: () => void; closeFloat: () => void; deleteTransition: () => void; undo: () => void; redo: () => void; floatWin: FloatKind | null }>({
+  const keysRef = useRef<{ removeBlock: (id: string) => void; deleteBlocks: (ids: Set<string>) => void; deleteShot: (sid: string) => void; deleteShots: (ids: Set<string>) => void; removeAudio: (id: string) => void; closeCode: () => void; closeFloat: () => void; deleteTransition: () => void; undo: () => void; redo: () => void; floatWin: FloatKind | null }>({
     removeBlock: () => {},
     deleteBlocks: () => {},
     deleteShot: () => {},
     deleteShots: () => {},
+    removeAudio: () => {},
     closeCode: () => {},
     closeFloat: () => {},
     deleteTransition: () => {},
@@ -1750,6 +1811,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // Transition selected (panel open): delete this transition, not the shot
         e.preventDefault();
         keysRef.current.deleteTransition();
+        return;
+      }
+      if (selectedAudioIdRef.current) {
+        // Music-lane clip selected: Del removes it (audio selection is exclusive with block/shot per click)
+        e.preventDefault();
+        keysRef.current.removeAudio(selectedAudioIdRef.current);
         return;
       }
       const bids = selectedBlockIdsRef.current;
@@ -2093,6 +2160,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const previewShotFilter = (_sid: string, f: ShotFilter) => {
     postPreview({ type: 'hf:shotVars', vars: { filter: shotFilterCss(f) } });
   };
+  /** Per-shot audio commit (volume/mute): the engine-segment effect refeeds gains from comp.shots. */
+  const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => {
+    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? patchShotAudio(s, patch) : s)) }));
+  };
+  /** Track-level mute state (the timeline's speaker icons). A track counts as muted when EVERY item on it
+   *  is — no new field for it: silencing a track is silencing its contents, and per-item mute already
+   *  exists. The toggles live in timelineCbs (stable identity for the memoized timeline). */
+  const videoTrackMuted = (comp.shots ?? []).length > 0 && (comp.shots ?? []).every((s) => s.audioMuted);
+  const audioTrackMuted = (comp.audioTracks ?? []).length > 0 && (comp.audioTracks ?? []).every((c) => c.muted);
+
 
   /** Picked an image/video → write into a media-slot block's media slot. */
   const setBlockMedia = (bid: string, media: MediaRef) =>
@@ -2289,6 +2366,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const a = dragAsset;
     setDragAsset(null);
     if (!a) return;
+    if (a.type === 'audio') {
+      // Audio dropped on the stage: there's no visual placement for sound — mount as the bed from 0
+      void audioOps.mountAudioFromUrl(a.url, a.label);
+      return;
+    }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const nx = (e.clientX - rect.left) / rect.width;
     const ny = (e.clientY - rect.top) / rect.height;
@@ -2472,6 +2554,25 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const ensureShots = (c: Composition): VideoShot[] =>
     c.shots && c.shots.length ? c.shots : c.video ? [{ id: shotId(), srcStart: 0, srcEnd: c.video.durationSec, treatment: 'full' as const }] : [];
 
+  // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
+  // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
+  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
+  audioExportRef.current = audioOps.audioForExport;
+  /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
+  const openAudioTab = () => {
+    setFloatWin(null);
+    setLibTab('audio');
+    setLibCollapsed(false);
+  };
+  // Selected clip removed (undo, agent edit, delete) → drop the dangling selection
+  useEffect(() => {
+    if (selectedAudioId && !(comp.audioTracks ?? []).some((c) => c.id === selectedAudioId)) setSelectedAudioId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.audioTracks]);
+  // Narration denoise (bake/cache/dub/export substitution — see use-denoise.ts)
+  const denoiseOps = useDenoise({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot });
+  denoiseExportRef.current = denoiseOps.denoiseForExport;
+
   /** Editable caption lines for the captions panel, in edited-timeline order across all sources.
    *  Walk the shot spans; a sentence overlapping a span joins at that span's edited time; split shots
    *  sharing a sentence dedupe to the first occurrence. */
@@ -2485,6 +2586,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  if it lands on a boundary and doesn't cut, don't touch the undo/redo stack (clearing the redo line without re-rendering would leave button states stale). */
   const splitAtPlayhead = () => {
     const c = compRef.current;
+    // An audio clip is selected → the toolbar acts on IT (same rule the Del key follows): split it in two
+    // at the playhead, leaving the timeline untouched.
+    const audId = selectedAudioIdRef.current;
+    if (audId) {
+      const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
+      if (!clip) return;
+      const halves = splitAudioClipAt(clip, tRef.current, audioClipId);
+      if (!halves) {
+        toast.error(t('workbench.movePlayheadToSplitAudio'));
+        return;
+      }
+      pushUndoSnapshot();
+      setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === audId ? halves : [x])) }));
+      return;
+    }
     if (!c.video) return;
     const shots = ensureShots(c);
     if (splitBlockedByTransition(shots, tRef.current)) {
@@ -2500,6 +2616,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  shifts left, captions/effect blocks compress along with it. Read compRef (setComp wrapper writes synchronously) — the agent firing multiple trim tools in one round doesn't swallow the previous step. */
   const trimAtPlayhead = (side: 'left' | 'right') => {
     const c = compRef.current;
+    // Audio clip selected → trim ITS edge to the playhead (same math the lane handles use)
+    const audId = selectedAudioIdRef.current;
+    if (audId) {
+      const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
+      if (!clip) return;
+      const w = audioClipWindow(clip, totalDuration(c));
+      if (tRef.current <= w.start + 0.05 || tRef.current >= w.end - 0.05) {
+        toast.error(t('workbench.movePlayheadToTrimAudio'));
+        return;
+      }
+      pushUndoSnapshot();
+      audioOps.patchClip(audId, audioTrimPatch(clip, side, tRef.current));
+      return;
+    }
     if (!c.video) return;
     const shots = ensureShots(c);
     const r = side === 'left' ? trimLeftAtEdited(shots, tRef.current) : trimRightAtEdited(shots, tRef.current);
@@ -2613,6 +2743,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     deleteBlocks,
     deleteShot,
     deleteShots,
+    removeAudio: (id: string) => {
+      audioOps.removeClip(id);
+      setSelectedAudioId(null);
+    },
     closeCode: () => setFloatWin(null),
     closeFloat: () => setFloatWin(null),
     deleteTransition: () => {
@@ -2883,7 +3017,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     pickVideoFile, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
-    resizeCutTransition, setShotTreatment, setShotFilter, splitAtPlayhead, trimAtPlayhead, deleteShot,
+    resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
+    audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
@@ -3042,6 +3177,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setSelectedId(null);
       setSelectedShotIds(new Set());
       setSelectedShotIdRaw(null);
+      setSelectedAudioId(null);
     },
     onOpenShotSettings: openShotSettings,
     onMoveBlock: moveBlock,
@@ -3090,7 +3226,44 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Main-track drop = insert a clip: video as a whole segment, image as a 5s still frame (per user); components aren't clip-ized (the timeline side already intercepts)
       const a = dragAsset;
       setDragAsset(null);
-      if (a && a.type !== 'element') void insertLibraryClipAt(a, t);
+      if (a && a.type !== 'element' && a.type !== 'audio') void insertLibraryClipAt(a, t);
+    },
+    onDropAssetAudio: (t: number) => {
+      // Audio drop (music lane / anywhere audio is allowed): mount as the bed starting at the drop time
+      const a = dragAsset;
+      setDragAsset(null);
+      if (a?.type === 'audio') void audioOps.mountAudioFromUrl(a.url, a.label, { startSec: t });
+    },
+    // Direct-manipulation lane drags commit on every move and stay OUT of the undo stack —
+    // same convention as element move/resize (a snapshot per pointer frame would flood it).
+    onMoveAudio: (id: string, startSec: number) => audioOps.patchClip(id, { startSec }),
+    onTrimAudio: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => audioOps.patchClip(id, patch),
+    onFadeAudio: (id: string, edge: 'in' | 'out', sec: number) =>
+      audioOps.patchClip(id, edge === 'in' ? { fadeInSec: sec } : { fadeOutSec: sec }),
+    onSelectAudio: (id: string | null) => {
+      setSelectedAudioId(id);
+      if (id) {
+        setSelectedId(null);
+        setSelectedShotIds(new Set());
+        setSelectedShotIdRaw(null);
+      }
+    },
+    onOpenMusicPanel: () => openAudioTab(),
+    /** Track mute: toggling preserves every item's level (that's what audioMuted/muted are for), so
+     *  unmuting restores the mix instead of flattening it. One undo step for the whole track. */
+    onToggleVideoMute: () => {
+      const shots = compRef.current.shots ?? [];
+      if (!shots.length) return;
+      const next = !shots.every((s) => s.audioMuted);
+      pushUndoSnapshot();
+      setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => patchShotAudio(s, { mute: next })) }));
+    },
+    onToggleAudioMute: () => {
+      const clips = compRef.current.audioTracks ?? [];
+      if (!clips.length) return;
+      const next = !clips.every((x) => x.muted);
+      pushUndoSnapshot();
+      setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => patchAudioClip(x, { muted: next })) }));
     },
     onReorderTracks: (topToBottom: number[]) => {
       // Timeline overlay tracks top-to-bottom = canvas z high-to-low (NLE convention): re-index z by the new display order.
@@ -4221,6 +4394,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     { v: 'image', label: 'panels.image' },
                     { v: 'video', label: 'panels.video' },
                     { v: 'element', label: 'panels.element' },
+                    { v: 'audio', label: 'panels.music' },
                   ] as { v: GenType; label: string }[]
                 ).map((gt) => (
                   <button
@@ -4246,7 +4420,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         ? t('workbench.assetMotion')
                         : floatWin === 'captions'
                           ? t('panels.captions')
-                          : floatWin === 'shot'
+                            : floatWin === 'shot'
                             ? (() => {
                                 const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);
                                 return t('workbench.cameraFraming') + (i >= 0 ? t('workbench.sceneN', { n: i + 1 }) : '');
@@ -4279,8 +4453,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   { v: 'assets', label: 'workbench.assets' },
                   { v: 'script', label: 'workbench.scriptCut' },
                   { v: 'captions', label: 'panels.captions' },
+                  { v: 'audio', label: 'panels.music' },
                   // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
-                ] as { v: 'assets' | 'frames' | 'script' | 'captions'; label: string }[]
+                ] as { v: 'assets' | 'frames' | 'script' | 'captions' | 'audio'; label: string }[]
               ).map((tab) => (
                 <button
                   key={tab.v}
@@ -4321,6 +4496,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onInsertElement={insertGeneratedElement}
               onInsertKit={(cid, props) => insertTemplateBlock(`kit:${cid}`, props)}
               onDragAsset={setDragAsset}
+              onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
               onOpenGen={(t, anchor) => {
                 setGenType(t);
                 openFloatAt('gen', anchor);
@@ -4345,12 +4521,36 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 videoDurationSec={comp.video?.durationSec ?? 0}
                 extracting={asrBusy}
                 onExtract={() => void extractForScript()}
-                onSeek={(sec) => applyT(Math.max(0, sec))}
+                onSeek={(sec) => {
+                  applyT(Math.max(0, sec));
+                  locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
+                }}
                 onCut={cutSrcRanges}
                 onRestore={restoreSrcRanges}
                 onReplaceWord={replaceScriptWord}
               />
             </div>
+          )}
+          {!floatWin && libTab === 'audio' && (
+            <MusicPanel
+              clips={comp.audioTracks ?? []}
+              selectedId={selectedAudioId}
+              usable={audioOps.clipUsable}
+              onPatch={audioOps.patchClip}
+              soloId={audioOps.soloId}
+              onSolo={audioOps.setSoloId}
+              peakOf={(c) => (c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null)}
+              shots={(comp.shots ?? []).filter((sh) => selectedShotIds.has(sh.id))}
+              onSetShotAudio={(patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => {
+                // Multi-select takes the edit as one action: every selected shot, one undo step
+                const ids = (comp.shots ?? []).filter((sh) => selectedShotIds.has(sh.id)).map((sh) => sh.id);
+                if (!ids.length) return;
+                pushUndoSnapshot();
+                for (const id of ids) setShotAudio(id, patch);
+              }}
+              denoise={{ strength: comp.audioDenoise?.strength ?? null, status: denoiseOps.status, progress: denoiseOps.progress }}
+              onSetDenoise={denoiseOps.setDenoise}
+            />
           )}
           {!floatWin && libTab === 'captions' && (
             <div className="flex min-h-0 flex-1 flex-col">
@@ -4370,6 +4570,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   onMention={mentionAsset}
                   generateElement={generateElementStandalone}
                   onInsertTemplate={insertTemplateBlock}
+                  generateAudio={audioOps.generateAudioAsset}
+                  onInsertAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
                 />
               )}
               {floatWin === 'script' && (
@@ -4380,7 +4582,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   videoDurationSec={comp.video?.durationSec ?? 0}
                   extracting={asrBusy}
                   onExtract={() => void extractForScript()}
-                  onSeek={(sec) => applyT(Math.max(0, sec))}
+                  onSeek={(sec) => {
+                  applyT(Math.max(0, sec));
+                  locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
+                }}
                   onCut={cutSrcRanges}
                   onRestore={restoreSrcRanges}
                   onReplaceWord={replaceScriptWord}
@@ -4432,6 +4637,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     onPreviewTreatCrop={previewShotTreatCrop}
                     onSetFilter={setShotFilter}
                     onPreviewFilter={previewShotFilter}
+                    onSetAudio={setShotAudio}
                   />
                 </div>
               )}
@@ -4520,7 +4726,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setLocateSignal((n) => n + 1)}
+                onClick={() => locateTimeline()}
                 disabled={!hasContent}
                 className="hover:bg-panel-2 shrink-0 rounded px-1 disabled:pointer-events-none"
                 aria-label={t('workbench.scrollPlayhead')}
@@ -4551,7 +4757,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div className="bg-line mx-0.5 h-4 w-px shrink-0" />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon />
                   </button>
                 </TooltipTrigger>
@@ -4559,7 +4765,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="left" />
                   </button>
                 </TooltipTrigger>
@@ -4567,7 +4773,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="right" />
                   </button>
                 </TooltipTrigger>
@@ -4623,6 +4829,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </button>
             </TooltipTrigger>
             <TooltipContent>{t('workbench.cameraFraming')}</TooltipContent>
+          </Tooltip>
+          {/* Audio settings: opens the rail's audio tab (selected clip, or the video's own sound) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={openAudioTab}
+                disabled={!comp.video}
+                aria-label={t('panels.music')}
+                className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === 'audio' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
+              >
+                <Music size={14} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{t('panels.music')}</TooltipContent>
           </Tooltip>
           <div className="flex-1" />
           {/* Timeline zoom: − thin slider + (borderless, vertically centered) */}
@@ -4791,6 +5012,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           comp={comp}
           playing={playing}
           locateSignal={locateSignal}
+          locateNear={locateNear}
           selectedShotIds={selectedShotIds}
           selectedBlockIds={selectedBlockIds}
           filmstrip={filmstrip}
@@ -4798,6 +5020,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           pps={pps}
           assetDragging={!!dragAsset}
           assetDragKind={dragAsset?.type ?? null}
+          selectedAudioId={selectedAudioId}
+          videoMuted={videoTrackMuted}
+          audioMuted={audioTrackMuted}
+          audioPeaks={audioOps.audioPeaks}
+          sourcePeaks={audioOps.sourcePeaks}
           clipPendingAt={clipPending}
           {...timelineCbs}
         />

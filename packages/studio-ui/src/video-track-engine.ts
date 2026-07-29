@@ -25,6 +25,26 @@ export interface EngineSeg {
   elKey: string;
   srcStart: number;
   srcEnd: number;
+  /** Linear audio gain (shotGain of the shot; absent = 1, and >1 is a real boost — see setElGain). Segments of
+   *  the same source share one element, so the value re-applies at every handoff, including the same-source
+   *  roll-through swap that skips activateIdx. */
+  gain?: number;
+  /** Segment-local fade factor (shotFadeAt); absent = no fade. Evaluated per tick, so the level rides the
+   *  curve instead of stepping at the segment's edges. */
+  fadeAt?: (tLocal: number) => number;
+}
+
+/** Audio-clip spec for the preview (declarative; envelope + source-time mapping arrive as closures
+ *  so the engine stays ignorant of the clip model — workbench builds them from the same pure fns as export). */
+export interface EngineAudioClip {
+  id: string;
+  url: string;
+  /** Playback speed (element playbackRate; preservesPitch=false so preview matches the export's resample). */
+  speed: number;
+  /** Full envelope at edited time t (level × fades); 0 outside the clip's window, may exceed 1 (boost). */
+  gainAt: (t: number) => number;
+  /** Edited time → source seconds; null = outside the playable range (element parks paused). */
+  srcTimeAt: (t: number) => number | null;
 }
 
 export interface FrameInfo {
@@ -60,6 +80,24 @@ export class VideoTrackEngine {
   private ghosts = new Map<string, HTMLVideoElement>(); // key `${srcKey}::pre|post`
   private activeGhost: HTMLVideoElement | null = null;
   private ghostFresh = false; // ghost is in place and not seeking (stale frames mid-seek aren't emitted, prevents side-swap flicker)
+  // Audio clips (music lane): one resident <audio> element per clip, volume driven per tick from the
+  // envelope closure. Deliberately loose sync (music has no lip-sync): only correct drift > 0.35s.
+  // Each element is routed through a WebAudio gain node so a clip can be BOOSTED past source level
+  // (element.volume caps at 1). The takeover is permanent per element, so every lane clip goes through
+  // the graph — never half native, half routed. Video elements get the same treatment, but lazily
+  // (setElGain): footage is usually attenuated, and an unnecessary AudioContext is a liability.
+  private audioClips = new Map<string, { el: HTMLAudioElement; spec: EngineAudioClip; gain?: GainNode }>();
+  private actx: AudioContext | null = null;
+  // Narration dub: a processed-audio stand-in (denoise bake) keyed by source. While a dub exists for a
+  // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
+  // matters here, so drift correction is tight (0.08s) against the video element's own clock.
+  private dubs = new Map<string, { el: HTMLAudioElement; url: string }>();
+  // Solo monitoring: while an audio clip is soloed the footage's own sound is silenced in preview only
+  // (see setMonitorMuteVideo) — this never enters the composition and never reaches the export mixer.
+  private monitorMuteVideo = false;
+  // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
+  // (see setElGain). Keyed by element so a recreated element simply gets a fresh chain.
+  private elGains = new WeakMap<HTMLMediaElement, { el: HTMLMediaElement; gain?: GainNode }>();
   // Smooth clock: el.currentTime steps at video frame rate (30fps footage = 33ms jumps), so
   // aligning transition progress / overlays directly to it isn't smooth. During playback, advance
   // by wall clock and pull back when drift from the raw clock exceeds 80ms (seek/handoff self-heal).
@@ -145,7 +183,24 @@ export class VideoTrackEngine {
     this.els.set(key, v);
   }
 
-  setSegments(segs: EngineSeg[]): void {
+  setSegments(segs: EngineSeg[]): boolean {
+    // Level-only respec (a volume/fade edit leaves the cut list identical): keep the clock, the active
+    // index and the decode state exactly as they are and just swap the numbers in. Without this, dragging
+    // a volume slider re-seats the whole segment table on every pointer move — and mid-playback that
+    // means restarting playback per frame.
+    const sameShape =
+      this.segs.length === segs.length &&
+      this.segs.every((s, i) => {
+        const n = segs[i]!;
+        return n.key === s.key && n.elKey === s.elKey && Math.abs(n.srcStart - s.srcStart) < 1e-6 && Math.abs(n.srcEnd - s.srcEnd) < 1e-6;
+      });
+    if (sameShape) {
+      this.segs = segs;
+      const cur = this.segs[this.curIdx];
+      const el = cur && this.els.get(cur.key);
+      if (el && !el.muted) this.setElGain(el, this.segGain(this.curIdx)); // audible immediately, no wait for the next tick
+      return false;
+    }
     this.segs = segs;
     this.starts = [];
     let acc = 0;
@@ -159,15 +214,200 @@ export class VideoTrackEngine {
     // curIdx, and without re-locating it spins dead — restart playback from the current film time
     // (play clamps t, re-finds a playable segment, reschedules rAF)
     if (this.playing) this.play(Math.min(this.tEdited, this.total));
+    return true;
   }
 
   get durationSec(): number {
     return this.total;
   }
 
+  private segGain(i: number, tEdited?: number): number {
+    const seg = this.segs[i];
+    if (!seg) return 1;
+    if (this.monitorMuteVideo) return 0;
+    const base = seg.gain == null ? 1 : Math.max(0, seg.gain); // >1 is a real boost — setElGain routes it
+    if (!seg.fadeAt || base <= 0) return base;
+    const local = (tEdited ?? this.tEdited) - (this.starts[i] ?? 0);
+    return Math.max(0, base * seg.fadeAt(local));
+  }
+
+  /** Monitoring-only footage mute (an audio clip is soloed): silences the video track's own sound in
+   *  PREVIEW without touching the composition — nothing here reaches the export mixer. Applied inside
+   *  segGain, so every writer (activation, roll-through, per-tick fades, dub) picks it up. */
+  setMonitorMuteVideo(on: boolean): void {
+    if (this.monitorMuteVideo === on) return;
+    this.monitorMuteVideo = on;
+    const seg = this.segs[this.curIdx];
+    if (!seg) return;
+    const g = this.segGain(this.curIdx);
+    const el = this.els.get(seg.key);
+    if (el) this.setElGain(el, g); // paused too: no tick would come to apply it
+    const dub = this.dubs.get(seg.key);
+    if (dub) this.setElGain(dub.el, g);
+  }
+
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" ghost frame (frame2). */
   setTransitions(trs: { cut: number; half: number }[]): void {
     this.trs = trs;
+  }
+
+  /** Reconcile the audio-clip set: same-url respec (knob turns) keeps the element — only the closures
+   *  swap, no reload, no playback interruption; removed ids drop their elements. */
+  setAudioClips(specs: EngineAudioClip[]): void {
+    const keep = new Set(specs.map((sp) => sp.id));
+    for (const [id, c] of this.audioClips) {
+      if (!keep.has(id)) {
+        c.gain?.disconnect();
+        c.el.remove();
+        this.audioClips.delete(id);
+      }
+    }
+    for (const spec of specs) {
+      const cur = this.audioClips.get(spec.id);
+      if (!cur) {
+        const a = document.createElement('audio');
+        a.preload = 'auto';
+        a.src = spec.url;
+        a.dataset.hfSrcTag = spec.url;
+        this.ensureHost().appendChild(a);
+        this.audioClips.set(spec.id, { el: a, spec });
+      } else {
+        if (cur.el.dataset.hfSrcTag !== spec.url) {
+          cur.el.src = spec.url;
+          cur.el.dataset.hfSrcTag = spec.url;
+          cur.el.load();
+        }
+        cur.spec = spec;
+      }
+    }
+    this.syncAudioClips(this.tEdited, this.playing, true);
+  }
+
+  /** Mount/swap/remove a source's narration dub (baked processed audio, same source-seconds timeline).
+   *  Same-url is idempotent; url change swaps the element src in place (re-blend after a strength change). */
+  setNarrationDub(key: string, url: string | null): void {
+    const cur = this.dubs.get(key);
+    if (!url) {
+      if (cur) {
+        cur.el.remove();
+        this.dubs.delete(key);
+      }
+      // hand the sound back to the decode element on the next activate/seek
+      if (!this.playing) this.seek(this.tEdited);
+      return;
+    }
+    if (cur?.url === url) return;
+    if (cur) {
+      cur.el.src = url;
+      cur.el.load();
+      cur.url = url;
+    } else {
+      const a = document.createElement('audio');
+      a.preload = 'auto';
+      a.src = url;
+      this.ensureHost().appendChild(a);
+      this.dubs.set(key, { el: a, url });
+    }
+    if (!this.playing) this.seek(this.tEdited); // re-run activation so muting/dub parking take effect
+  }
+
+  /** Dub sync for the active source (called from activate/seek/tick): the video element stays the clock,
+   *  the dub follows in source seconds; corrections only past 0.08s (audible micro-gap, so keep them rare). */
+  private syncDub(key: string, videoEl: HTMLVideoElement, gain: number, wantPlay: boolean): boolean {
+    for (const [k, d] of this.dubs) {
+      if (k !== key && !d.el.paused) d.el.pause();
+    }
+    const dub = this.dubs.get(key);
+    if (!dub) return false;
+    this.setElGain(dub.el, gain);
+    if (!dub.el.seeking && Math.abs(dub.el.currentTime - videoEl.currentTime) > 0.08) {
+      try {
+        dub.el.currentTime = videoEl.currentTime;
+      } catch {
+        /* metadata not ready: next tick retries */
+      }
+    }
+    if (wantPlay && dub.el.paused) dub.el.play().catch(() => {});
+    else if (!wantPlay && !dub.el.paused) dub.el.pause();
+    return true;
+  }
+
+  /** Lazily build (and reuse) an element's WebAudio chain: element → gain → destination. Returns null when
+   *  the browser refuses a context; the caller then degrades to element volume (boosts just won't be
+   *  audible in preview, while export still applies them). */
+  private gainFor(entry: { el: HTMLMediaElement; gain?: GainNode }): GainNode | null {
+    if (entry.gain) return entry.gain;
+    try {
+      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      if (!this.actx) this.actx = new Ctor();
+      const gain = this.actx.createGain();
+      this.actx.createMediaElementSource(entry.el).connect(gain).connect(this.actx.destination);
+      entry.gain = gain;
+      return gain;
+    } catch {
+      return null; // already-taken-over element / autoplay policy: stay on the native path
+    }
+  }
+
+  /** Set a video/dub element's level, boosts included. An element's own volume caps at 1, so anything above
+   *  source level has to go through the graph. The takeover is permanent per element, so it happens lazily —
+   *  a project that never boosts never creates an AudioContext, and therefore can't be silenced by one that
+   *  won't start. Once routed, the node carries every level (never half native, half routed). */
+  private setElGain(el: HTMLMediaElement, g: number): void {
+    let entry = this.elGains.get(el);
+    if (!entry && g > 1) {
+      entry = { el };
+      if (this.gainFor(entry)) this.elGains.set(el, entry);
+      else entry = undefined; // no context: stay native, boost is inaudible here (export still applies it)
+    }
+    if (entry?.gain) {
+      const v = Math.max(0, g);
+      if (entry.gain.gain.value !== v) entry.gain.gain.value = v;
+      if (el.volume !== 1) el.volume = 1;
+      return;
+    }
+    // Write only on change. Every segment now carries a fade envelope (the seam micro-fades), so this runs
+    // every frame of playback — and assigning el.volume is not free: it is a media-element property whose
+    // setter reaches into the platform's audio path. The value is constant outside the ramps.
+    const v = Math.max(0, Math.min(1, g));
+    if (el.volume !== v) el.volume = v;
+  }
+
+  /** Per-tick / on-seek clip sync: volume from the envelope closure, playbackRate = speed with
+   *  preservesPitch OFF (matches the export resample); drift correction only past 0.35s. force = hard seek. */
+  private syncAudioClips(t: number, wantPlay: boolean, force = false): void {
+    if (wantPlay && this.actx?.state === 'suspended') void this.actx.resume(); // play is a user gesture
+    for (const entry of this.audioClips.values()) {
+      const { el, spec } = entry;
+      const srcT = spec.srcTimeAt(t);
+      const gainNode = this.gainFor(entry);
+      const setGain = (g: number) => {
+        if (gainNode) {
+          gainNode.gain.value = Math.max(0, g);
+          el.volume = 1; // the graph carries the level now
+        } else {
+          el.volume = Math.max(0, Math.min(1, g)); // no graph: boosts are inaudible here, export still applies them
+        }
+      };
+      if (srcT == null) {
+        setGain(0);
+        if (!el.paused) el.pause();
+        continue;
+      }
+      setGain(spec.gainAt(t));
+      el.playbackRate = spec.speed;
+      (el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
+      if ((force || Math.abs(el.currentTime - srcT) > 0.35) && !el.seeking) {
+        try {
+          el.currentTime = srcT;
+        } catch {
+          /* metadata not ready: next tick retries */
+        }
+      }
+      if (wantPlay && el.paused) el.play().catch(() => {});
+      else if (!wantPlay && !el.paused) el.pause();
+    }
   }
 
   /** The transition window containing t (with 0.3s warm-up lead) → both-side segment indices; null if the cut doesn't align to a segment boundary. */
@@ -302,7 +542,10 @@ export class VideoTrackEngine {
     } catch {
       /* metadata not ready: the next seek after loadedmetadata covers it */
     }
-    el.muted = !wantPlay; // only the active element makes sound during playback
+    this.setElGain(el, this.segGain(i));
+    // a mounted dub carries this source's sound → the decode element stays muted no matter what
+    const dubbed = this.syncDub(key, el, this.segGain(i), wantPlay);
+    el.muted = dubbed || !wantPlay; // only the active element makes sound during playback
     if (wantPlay) {
       const p = el.play();
       if (p?.catch) p.catch(() => {});
@@ -374,6 +617,7 @@ export class VideoTrackEngine {
     const el = this.els.get(seg.key);
     if (!el) return;
     this.syncGhost(this.tEdited); // scrub into a transition window: ghost seeks along (no play while paused)
+    this.syncAudioClips(this.tEdited, this.playing, true); // park the clips at the new position (aligned resume)
     const gen = ++this.seekGen;
     const push = () => {
       if (gen !== this.seekGen) return;
@@ -401,6 +645,7 @@ export class VideoTrackEngine {
     const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
     if (!inSeg) this.tEdited = this.starts[i]!; // starting play in a dead window: begin at the next playable segment (skip)
     this.activateIdx(i, srcT, true);
+    this.syncAudioClips(this.tEdited, true, true); // hard-align the clips at play start
     if (this.raf) cancelAnimationFrame(this.raf);
     let lastCt = -1;
     let lastCtAt = performance.now();
@@ -443,6 +688,9 @@ export class VideoTrackEngine {
         this.tSmooth = ts;
         this.onTick?.(ts);
         this.syncGhost(ts); // transition ghost time-sync (all auto-paused outside the window)
+        this.syncAudioClips(ts, true);
+        if (this.segs[idx]?.fadeAt && !el.muted) this.setElGain(el, this.segGain(idx, ts)); // shot audio fades ride the clock
+        if (this.dubs.size && this.syncDub(sg.key, el, this.segGain(this.curIdx), true)) el.muted = true;
         this.pushFrame(ts);
         // segment-end detection, three checks: (1) reached segment end; (2) element fires ended;
         // (3) stall backstop — streaming webm duration is estimated via Infinity-seek and may be too
@@ -468,6 +716,7 @@ export class VideoTrackEngine {
               // playing right here — swap the active index without a seek so decode isn't interrupted (forcing
               // an in-place currentTime seek stalls 50–150ms, visible as a "flash/stutter" at the cut)
               this.curIdx = nx;
+              this.setElGain(el, this.segGain(nx)); // roll-through skips activateIdx, but the two shots may carry different gains
             } else {
               this.activateIdx(nx, nxSeg.srcStart, true);
             }
@@ -494,6 +743,8 @@ export class VideoTrackEngine {
       if (!el.paused) el.pause();
     }
     for (const g of this.ghosts.values()) if (!g.paused) g.pause();
+    for (const c of this.audioClips.values()) if (!c.el.paused) c.el.pause();
+    for (const d of this.dubs.values()) if (!d.el.paused) d.el.pause();
   }
 
   /** Re-push the current frame (after a buffer swap the new document's canvas is blank). */
@@ -504,6 +755,15 @@ export class VideoTrackEngine {
 
   dispose(): void {
     this.pause();
+    for (const c of this.audioClips.values()) {
+      c.gain?.disconnect();
+      c.el.remove();
+    }
+    this.audioClips.clear();
+    void this.actx?.close().catch(() => {});
+    this.actx = null;
+    for (const d of this.dubs.values()) d.el.remove();
+    this.dubs.clear();
     for (const el of this.els.values()) el.remove();
     for (const g of this.ghosts.values()) g.remove();
     for (const u of this.urls.values()) URL.revokeObjectURL(u);

@@ -300,10 +300,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🗂️',
     label: 'tools.list_assets.label',
     description:
-      "List the user's reusable media assets (most recent first): uploaded and agent-imported images and video clips, each with a direct url — images go into block HTML (img src), videos insert via insert_clip {url}. Also returns this project's video sources (main + inserted clips, with transcribed state). Call it BEFORE referencing media you haven't seen in this conversation (use my product shot / add that clip I uploaded) instead of guessing urls or asking the user to describe what they have.",
+      "List the user's reusable media assets (most recent first): uploaded and agent-imported images, video clips and audio, each with a direct url — images go into block HTML (img src), videos insert via insert_clip {url}, audio goes on the music lane via set_bgm {url}. Also returns this project's video sources (main + inserted clips, with transcribed state). Call it BEFORE referencing media you haven't seen in this conversation (use my product shot / add that clip I uploaded / put music under this) instead of guessing urls or asking the user to describe what they have.",
     inputSchema: obj(
       {
-        kind: { type: 'string', enum: ['all', 'image', 'video'], description: 'Filter by asset kind (default all).' },
+        kind: { type: 'string', enum: ['all', 'image', 'video', 'audio'], description: 'Filter by asset kind (default all).' },
         limit: { type: 'number', description: 'Max rows per kind (default 30, max 100).' },
       },
       [],
@@ -432,6 +432,65 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         saturate: { type: 'number', description: 'Saturation coefficient, 1 = untouched, 0 = grayscale (clamped 0–3).' },
       },
       ['shotId'],
+    ),
+  },
+  {
+    id: 'set_shot_audio',
+    kind: 'badge',
+    icon: '🔊',
+    label: 'tools.set_shot_audio.label',
+    description:
+      "Set shots' own audio: volumeDb sets the footage's level (0 = source level, -60 = silent, up to +20 to lift a quiet recording), mute true/false hard-silences while remembering the previous volume, fadeInSec/fadeOutSec fade that shot's audio at its own edges (0 = hard cut, ≤10s — use it for the piece's opening/ending, not on every shot). Whole shot, switches at the cut — split_shot first for a partial change. Batch with shotIds or all:true (e.g. quiet every B-roll insert to -18 while narration continues). Omit a field to leave it unchanged.",
+    inputSchema: obj(
+      {
+        shotIds: { type: 'array', items: { type: 'string' }, description: 'Target shot ids (omit when using all).' },
+        all: { type: 'boolean', description: 'true = apply to every shot.' },
+        volumeDb: { type: 'number', description: 'dB, clamped -60..+20; 0 resets to source level, -60 = silent.' },
+        mute: { type: 'boolean', description: 'Hard-silence toggle (independent of volumeDb).' },
+        fadeInSec: { type: 'number', description: "Fade this shot's audio in over N seconds (0 = none)." },
+        fadeOutSec: { type: 'number', description: "Fade this shot's audio out over N seconds (0 = none)." },
+      },
+      [],
+    ),
+  },
+  {
+    id: 'denoise_audio',
+    kind: 'badge',
+    icon: '🎙️',
+    label: 'tools.denoise_audio.label',
+    description:
+      'Remove background noise from the MAIN narration (on-device speech-denoise model, bakes in the background — takes a moment on long videos). strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
+    inputSchema: obj(
+      {
+        strength: { type: 'number', description: 'Blend 0..1 (default 0.6). Re-tuning is fast — inference is cached per source.' },
+        off: { type: 'boolean', description: 'true = turn denoise off.' },
+      },
+      [],
+    ),
+  },
+  {
+    id: 'set_bgm',
+    kind: 'badge',
+    icon: '🎵',
+    label: 'tools.set_bgm.label',
+    description:
+      "Audio tracks on the music lane (plain clips: no looping, no auto-ducking; overlapping clips sum). Add: pass url (audio on Pireel storage / a generated track) + optional startSec — the initial level auto-balances against the measured narration loudness; the receipt returns trackId. Adjust: pass trackId (or omit when exactly one track exists) + any of volumeDb (-60..+20; 0 = source level, -60 = silent), fadeInSec, fadeOutSec (≤10s each), speed (0.5..2, pitch shifts), startSec, mute. Shorten a track: headSec/tailSec move that EDGE to a timeline second, dropping the audio outside it (a bed that outruns the video: pass tailSec = the video's duration). splitAtSec cuts one track into two independent ones at that second — the way to give the halves different levels or drop the middle. Remove: off:true with trackId (or without = remove all). Current tracks show in the snapshot; users' own uploads appear in list_assets.",
+    inputSchema: obj(
+      {
+        url: { type: 'string', description: 'Audio url to ADD as a new track. Omit to adjust an existing one.' },
+        trackId: { type: 'string', description: 'Target track id (from the snapshot / add receipt).' },
+        startSec: { type: 'number', description: 'Position on the edited timeline (seconds).' },
+        volumeDb: { type: 'number', description: 'Level dB, clamped -60..+20 (0 = source level, -60 = silent). Omit on add = auto level from loudness measurement.' },
+        fadeInSec: { type: 'number' },
+        fadeOutSec: { type: 'number' },
+        speed: { type: 'number', description: 'Playback-rate multiplier 0.5..2 (changes pitch on purpose — matches export).' },
+        mute: { type: 'boolean', description: 'Silence the track while keeping it (and its level) in place.' },
+        headSec: { type: 'number', description: 'Move the track\'s START to this edited-timeline second, trimming the audio before it.' },
+        tailSec: { type: 'number', description: 'Move the track\'s END to this edited-timeline second, trimming the audio after it.' },
+        splitAtSec: { type: 'number', description: 'Split the track in two at this edited-timeline second (returns the new track id).' },
+        off: { type: 'boolean', description: 'true = remove the track (all tracks when trackId omitted).' },
+      },
+      [],
     ),
   },
   {

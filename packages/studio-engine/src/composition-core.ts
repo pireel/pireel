@@ -134,6 +134,18 @@ export interface VideoShot extends Clip {
    *  prevId anchors to the previous shot — if either neighbor is deleted/replaced (id no longer adjacent), the transition auto-invalidates (cutTransitions
    *  filters it, no need to clean up in every edit path). Duration capped by MAX_TRANSITION_SEC, then clamped by both neighboring shot lengths. */
   transIn?: CutTransition;
+  /** Shot audio level in dB (absent/0 = source level untouched, VOLUME_DB_MIN = silent). Attenuate-only for now:
+   *  preview drives the decode element's own volume (0..1), so a boost above source level can't be previewed honestly —
+   *  the ceiling stays 0 dB until a WebAudio mix stage exists on both ends. Whole shot, flat (no keyframes): shots are
+   *  transcript slices, so "volume changes mid-shot" is expressed by splitting, same as framing/grade. */
+  volumeDb?: number;
+  /** Hard-silence this shot's own audio (independent of volumeDb, so unmuting restores the prior level). */
+  audioMuted?: boolean;
+  /** Fade the shot's own audio in/out at ITS edges, seconds (absent = 0, i.e. a hard start/stop — the
+   *  default has to be no fade, or every cut in a narration would breathe). Shaped by fadeShape, same as
+   *  the audio lane; preview and export both evaluate shotGainAt. */
+  audioFadeInSec?: number;
+  audioFadeOutSec?: number;
 }
 
 /** Cut transition: the handoff effect between two shots' content. Effect set = 10 picks from the gl-transitions gallery (id matches upstream shader name,
@@ -219,6 +231,100 @@ export function shotFilterCss(f?: ShotFilter): string {
   return parts.length ? parts.join(' ') : 'none';
 }
 
+/** THE audio level scale — one range for every sound in the composition (shots and lane clips alike), shared by
+ *  the panel slider, the agent tools, preview and export. VOLUME_DB_MIN is -inf (true silence); above 0 dB is a
+ *  real boost, which preview delivers by routing that element through a WebAudio gain node (an element's own
+ *  volume caps at 1) and export delivers by scaling PCM. */
+export const VOLUME_DB_MIN = -60;
+export const VOLUME_DB_MAX = 20;
+/** Longest a shot's own audio fade may be. */
+export const SHOT_FADE_MAX_SEC = 10;
+
+/** dB → linear gain; at/below VOLUME_DB_MIN snaps to true 0 (not just very quiet). */
+export function dbToGain(db: number): number {
+  if (db <= VOLUME_DB_MIN) return 0;
+  return Math.pow(10, db / 20); // may exceed 1: boosts are real, and each surface knows how to deliver one
+}
+
+/** Effective linear gain of a shot's own audio (1 = untouched, 0 = silent), before its fades. */
+export function shotGain(s: Pick<VideoShot, 'volumeDb' | 'audioMuted'>): number {
+  if (s.audioMuted) return 0;
+  return s.volumeDb == null ? 1 : dbToGain(s.volumeDb);
+}
+
+/** Smoothstep, the shape every fade in the project uses (audio lane and shot audio alike). */
+export function fadeShape(t: number): number {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
+
+/** A shot's fade factor at tLocal seconds into a segment of length lenSec (1 = untouched). */
+export function shotFadeAt(s: Pick<VideoShot, 'audioFadeInSec' | 'audioFadeOutSec'>, tLocal: number, lenSec: number): number {
+  let f = 1;
+  if (s.audioFadeInSec) f *= fadeShape(tLocal / s.audioFadeInSec);
+  if (s.audioFadeOutSec) f *= fadeShape((lenSec - tLocal) / s.audioFadeOutSec);
+  return f;
+}
+
+/** Splice micro-fade (sec). Butt-joining two points of a recording that weren't adjacent leaves a waveform
+ *  discontinuity — the noise floor jumps mid-cycle and the ear hears a click, even when both sides sound fine.
+ *  A fade on each spliced edge removes it. 30 ms is still far too short to read as a fade, and unlike a
+ *  shorter one it survives the preview's rAF-clock volume writes (~16 ms/tick) as an actual ramp rather than
+ *  a single stray sample — which is what lets preview and export share the treatment. */
+export const SPLICE_FADE_SEC = 0.03;
+
+/** Does a's tail flow straight into b's head? (a split that removed nothing — same source, same instant.)
+ *  Such a boundary is not a splice: the waveform is continuous across it and needs no micro-fade. */
+export function shotsContiguous(a: Pick<VideoShot, 'src' | 'srcEnd'>, b: Pick<VideoShot, 'src' | 'srcStart'>): boolean {
+  return (a.src ?? null) === (b.src ?? null) && Math.abs(a.srcEnd - b.srcStart) < 1e-3;
+}
+
+/** Micro-fade factor for a segment whose head/tail edges are splices (1 = untouched). */
+export function spliceFadeAt(tLocal: number, lenSec: number, headSpliced: boolean, tailSpliced: boolean): number {
+  const d = Math.min(SPLICE_FADE_SEC, lenSec / 2); // a segment shorter than two micro-fades just fades through
+  let f = 1;
+  if (headSpliced && d > 0) f *= fadeShape(tLocal / d);
+  if (tailSpliced && d > 0) f *= fadeShape((lenSec - tLocal) / d);
+  return f;
+}
+
+/** The complete per-segment audio envelope: the shot's own fades × the seam micro-fades. Returns null when the
+ *  segment needs no envelope at all, so preview and export can keep their untouched-passthrough fast paths. */
+export function segmentFadeFn(
+  s: Pick<VideoShot, 'audioFadeInSec' | 'audioFadeOutSec'>,
+  lenSec: number,
+  headSpliced: boolean,
+  tailSpliced: boolean,
+): ((tLocal: number) => number) | null {
+  const own = !!(s.audioFadeInSec || s.audioFadeOutSec);
+  if (!own && !headSpliced && !tailSpliced) return null;
+  return (tLocal: number) => (own ? shotFadeAt(s, tLocal, lenSec) : 1) * spliceFadeAt(tLocal, lenSec, headSpliced, tailSpliced);
+}
+
+/** Full gain of a shot's audio at tLocal into the segment: level × fades. Preview and export share it. */
+export function shotGainAt(s: Pick<VideoShot, 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'>, tLocal: number, lenSec: number): number {
+  const g = shotGain(s);
+  return g <= 0 ? 0 : g * shotFadeAt(s, tLocal, lenSec);
+}
+
+/** Apply an audio patch to one shot: clamps volumeDb into [VOLUME_DB_MIN, VOLUME_DB_MAX], drops fields at their
+ *  neutral value (0 dB / unmuted) so untouched comps stay byte-identical. Shared by the panel and both tool executors. */
+export function patchShotAudio<T extends VideoShot>(s: T, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }): T {
+  const { volumeDb: _v, audioMuted: _m, audioFadeInSec: _fi, audioFadeOutSec: _fo, ...rest } = s;
+  const db = patch.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb)) : s.volumeDb;
+  const muted = patch.mute != null ? patch.mute : s.audioMuted;
+  const fade = (v: number | undefined) => (v == null ? undefined : Math.round(Math.max(0, Math.min(SHOT_FADE_MAX_SEC, v)) * 10) / 10);
+  const fi = patch.fadeInSec != null ? fade(patch.fadeInSec) : s.audioFadeInSec;
+  const fo = patch.fadeOutSec != null ? fade(patch.fadeOutSec) : s.audioFadeOutSec;
+  return {
+    ...(rest as T),
+    ...(db != null && db !== 0 ? { volumeDb: Math.round(db * 10) / 10 } : {}),
+    ...(muted ? { audioMuted: true } : {}),
+    ...(fi ? { audioFadeInSec: fi } : {}),
+    ...(fo ? { audioFadeOutSec: fo } : {}),
+  };
+}
+
 export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
   { id: 'full', name: 'common.none' },
   { id: 'punch-in', name: 'common.zoomIn' },
@@ -288,6 +394,11 @@ export interface Composition {
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
+  /** Audio tracks on the music lane (plain NLE clips: position/level/fades/speed, no loop, sounds sum). See bgm.ts. */
+  audioTracks?: import('./audio-tracks').AudioClip[];
+  /** Narration denoise (MAIN source; baked in the browser — the wet file is cached, strength is a
+   *  bake-time dry/wet blend so preview and export play one identical blended file). 0 < strength ≤ 1. */
+  audioDenoise?: { strength: number };
 }
 
 /** Person-effect config (global style; matte on/off is per-segment, see VideoShot.personMatte).

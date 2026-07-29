@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import type { ShotFilter, ShotTreatment, VideoShot } from '@pireel/studio-engine/composition';
 import { SHOT_TREATMENTS, TREAT_SIZE_DEFAULT } from '@pireel/studio-engine/composition';
+import { AudioLevel } from './audio-level';
 import { t } from './i18n';
 
 /** One framing effect card: 1:1 frame filling the card, silhouette + image/text placeholder bars positioned by type (label sits below the card). */
@@ -126,6 +127,7 @@ export function ShotTreatmentPanel({
   onPreviewTreatCrop,
   onSetFilter,
   onPreviewFilter,
+  onSetAudio,
 }: {
   shot: VideoShot;
   onSetTreatment: (shotId: string, t: ShotTreatment) => void;
@@ -138,6 +140,8 @@ export function ShotTreatmentPanel({
   /** Commit per-shot grading (null = reset all); live preview via onPreviewFilter while dragging. */
   onSetFilter: (shotId: string, f: ShotFilter | null) => void;
   onPreviewFilter: (shotId: string, f: ShotFilter) => void;
+  /** Per-shot audio level (dB). Muting is a TRACK action and lives on the timeline's track header. */
+  onSetAudio: (shotId: string, patch: { volumeDb?: number; mute?: boolean }) => void;
 }) {
   // Size slider: local value + live iframe preview while dragging (zero setState); commits to comp on release / after keyboard adjust
   const committedSize = shot.treatSize ?? TREAT_SIZE_DEFAULT[shot.treatment];
@@ -167,6 +171,7 @@ export function ShotTreatmentPanel({
     if (dragFilter) onSetFilter(shot.id, filterNeutral ? null : dragFilter);
     setDragFilter(null);
   };
+  const muted = !!shot.audioMuted;
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Title (framing · scene N)/close live in the floating-window header; only a one-line hint here */}
@@ -286,6 +291,14 @@ export function ShotTreatmentPanel({
               </div>
             );
           })}
+        </section>
+
+        {/* Sound (whole shot, this segment's own audio): the SAME level control the audio panel uses —
+            one slider, one dB scale, one implementation. Muting is per track, up on the timeline. */}
+        <section className="flex flex-col gap-1.5">
+          <div className="text-ink font-medium">{t('panels.sound')}</div>
+          <AudioLevel db={shot.volumeDb ?? 0} disabled={muted} onChange={(db) => onSetAudio(shot.id, { volumeDb: db })} />
+          {muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
         </section>
       </div>
     </div>

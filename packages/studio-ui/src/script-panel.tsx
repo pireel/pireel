@@ -2,10 +2,11 @@
 
 /**
  * Right-rail script panel (Descript-style transcript-driven editing): the whole script is a word-level plain-text stream —
- * click a word to pop up "delete / replace"; drag-select multiple words = batch delete; inter-sentence silence is inlined
- * as a (…9.4s) marker you can click to delete. Deleting words/silence = deleting the corresponding video range (source
- * time -> current-edit mapping lives in workbench cutSrcRanges).
- * Top batch actions: one-click delete silence, delete filler words (uh/um…, requires true word-level timestamps).
+ * click a word to pop up "delete / replace"; drag-select multiple words = batch delete; a pause (between sentences or
+ * inside one) is inlined as a (…9.4s) marker you can click to shorten. Clicking either a word or a marker also moves the
+ * playhead there and brings that moment into view on the timeline. Deleting words/pauses = deleting the corresponding
+ * video range (source time -> current-edit mapping lives in workbench cutSrcRanges).
+ * Top batch actions: one-click pause trim, delete filler words (uh/um…, requires true word-level timestamps).
  * The panel only computes, it doesn't cut — cut/replace go through callbacks (workbench centralizes undo snapshot / block compaction / caption sync).
  */
 
@@ -13,18 +14,27 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Scissors, ScrollText } from 'lucide-react';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { VideoShot } from '@pireel/studio-engine/composition';
-import { srcToEditedLoose } from '@pireel/studio-engine/trim';
+import { srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { t } from './i18n';
 
-/** Inter-sentence silence threshold (sec): pauses shorter than this are normal breathing, not "silence". */
-const MIN_SILENCE_SEC = 0.8;
-/** Buffer left on each side when cutting silence (sec): cutting flush would eat the trailing sound. */
-const CUT_PAD_SEC = 0.12;
+/** A pause counts as dead air from this length up (sec); shorter than this is breathing, leave it alone. */
+const MIN_PAUSE_SEC = 0.8;
+/** Air LEFT IN PLACE when a pause is compressed (sec) — pauses are shortened, never removed outright.
+ *  The residue is the recording's own room tone at that exact moment, and keeping it is what holds the noise
+ *  floor continuous: cut a pause to nothing and the background hiss vanishes and snaps back, which the ear
+ *  reads as a glitch even though every word survived. Split evenly across the two sides of the cut. */
+const KEEP_AIR_SEC = 0.3;
+/** Head and tail have no seam to protect (nothing precedes/follows), so they're cleared outright — this is
+ *  just the guard on the speech side, so cutting flush doesn't clip the first attack / last tail. */
+const EDGE_PAD_SEC = 0.12;
 /** Filler words (whole-word match, conservative list — words like "那个/就是" often carry real meaning, leave them). */
 const FILLER_RE = /^(嗯+|呃+|唔+|诶+|额+|um+|uh+|emm+|hmm+)[,。,.!?!?…]?$/i;
 
 export type SrcRange = [number, number];
+/** One compressible pause. after = the sentence it follows (-1 = before the first); wi set = it sits INSIDE that
+ *  sentence, right after word wi. range = the slice actually removed (the kept room tone is outside it). */
+type Gap = { after: number; wi?: number; range: SrcRange; alive: boolean };
 /** Source-tagged cut/restore unit: src=null is the talking-head source, otherwise the inserted source's src key — each source's timeline is independent. */
 export type ScriptCut = { src: string | null; range: SrcRange };
 type Word = { text: string; start: number; end: number };
@@ -96,25 +106,43 @@ export function ScriptPanel({
   }, [sents, clipSentences, shots]);
   const hasTrueWords = items.some((it) => it.seg.words?.length);
 
-  // Silence = a no-speech region between sentences (including head/tail) still ≥ threshold after padding. Deleted ones
-  // stay in the stream struck through (same convention as deleted words), they don't vanish. Only the talking-head source
-  // counts (an inserted source's silent stretches are the footage itself, not "silence" to batch-cut)
+  // Dead air = a no-speech region ≥ MIN_PAUSE_SEC, either between sentences or between two words inside one
+  // (a long mid-sentence pause is dead air too — ASR just happened not to break the sentence there; that one
+  // needs true word timestamps, estimated ones interpolate and would invent gaps). Head/tail are cleared
+  // outright, everything in between keeps KEEP_AIR_SEC of room tone. Compressed ones stay in the stream struck
+  // through (same convention as deleted words). Only the talking-head source counts — an inserted source's
+  // silent stretches are the footage itself, not dead air to batch-cut.
   const gaps = useMemo(() => {
-    if (!sents.length || videoDurationSec <= 0) return [] as { after: number; range: SrcRange; alive: boolean }[];
-    const out: { after: number; range: SrcRange; alive: boolean }[] = [];
-    const bounds: { after: number; a: number; b: number }[] = [{ after: -1, a: 0, b: sents[0]!.start }];
-    for (let i = 0; i < sents.length - 1; i++) bounds.push({ after: i, a: sents[i]!.end, b: sents[i + 1]!.start });
-    bounds.push({ after: sents.length - 1, a: sents[sents.length - 1]!.end, b: videoDurationSec });
-    for (const { after, a, b } of bounds) {
-      const from = a + CUT_PAD_SEC;
-      const to = b - CUT_PAD_SEC;
-      if (to - from >= MIN_SILENCE_SEC) out.push({ after, range: [from, to], alive: srcRangeAlive(shots, null, from, to) });
-    }
+    if (!sents.length || videoDurationSec <= 0) return [] as Gap[];
+    const out: Gap[] = [];
+    const add = (g: { after: number; wi?: number; a: number; b: number; edge?: 'head' | 'tail' }) => {
+      if (g.b - g.a < MIN_PAUSE_SEC) return;
+      // Interior pauses go through the SAME margin math the agent's cut_narration uses (one source of truth
+      // for "how much air survives a tightening"); head/tail are asymmetric — cleared up to the speech guard.
+      const [from, to] = g.edge
+        ? [g.edge === 'head' ? g.a : g.a + EDGE_PAD_SEC, g.edge === 'tail' ? g.b : g.b - EDGE_PAD_SEC]
+        : (() => {
+            const r = tightenCutRanges([{ from: g.a, to: g.b }], KEEP_AIR_SEC, 0.05)[0];
+            return r ? [r.from, r.to] : [0, 0];
+          })();
+      if (to - from < 0.05) return;
+      out.push({ after: g.after, wi: g.wi, range: [from, to], alive: srcRangeAlive(shots, null, from, to) });
+    };
+    add({ after: -1, a: 0, b: sents[0]!.start, edge: 'head' });
+    sents.forEach((seg, i) => {
+      // Inside the sentence: consecutive word boundaries (true timestamps only)
+      const words = seg.words;
+      if (words?.length) for (let k = 0; k < words.length - 1; k++) add({ after: i, wi: k, a: words[k]!.end, b: words[k + 1]!.start });
+      if (i < sents.length - 1) add({ after: i, a: seg.end, b: sents[i + 1]!.start });
+    });
+    add({ after: sents.length - 1, a: sents[sents.length - 1]!.end, b: videoDurationSec, edge: 'tail' });
     return out;
   }, [sents, videoDurationSec, shots]);
   const silences = useMemo(() => gaps.filter((g) => g.alive), [gaps]);
   const silenceTotal = silences.reduce((a, { range: [s, e] }) => a + (e - s), 0);
-  const gapAfter = useMemo(() => new Map(gaps.map((g) => [g.after, g])), [gaps]);
+  const gapAfter = useMemo(() => new Map(gaps.filter((g) => g.wi == null).map((g) => [g.after, g])), [gaps]);
+  /** Mid-sentence gaps, keyed "sentenceIndex:wordIndex" (the token renders right after that word). */
+  const gapInWord = useMemo(() => new Map(gaps.filter((g) => g.wi != null).map((g) => [`${g.after}:${g.wi}`, g])), [gaps]);
 
   // Filler words: require true word-level timestamps (won't auto-batch-cut on estimated times; manual click-delete is the user's own call). All sources participate
   const fillers = useMemo(() => {
@@ -158,6 +186,14 @@ export function ScriptPanel({
     setReplaceMode(false);
     setReplacing(word.text);
     onSeek(srcToEditedLoose(shots, word.start, inSrcOf(it.src)));
+  };
+
+  /** Pause marker click: pop delete/restore AND move the playhead there, same as clicking a word — a marker
+   *  is a position in the video too. A compressed-away pause has no edited time of its own; the loose
+   *  mapping lands on the seam it left behind, which is the moment worth looking at. */
+  const openGapPop = (e: React.MouseEvent, g: Gap) => {
+    setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) });
+    onSeek(srcToEditedLoose(shots, g.range[0], inSrcOf(null)));
   };
 
   /** Drag multi-select: on mouseup, gather the words the selection covers — present ones can be batch-deleted, deleted ones
@@ -231,7 +267,6 @@ export function ScriptPanel({
           type="button"
           disabled={!silences.length}
           onClick={() => onCut(silences.map((g) => ({ src: null, range: g.range })), t('panels.deletedNSilencesSec', { n: silences.length, sec: silenceTotal.toFixed(1) }))}
-          title={silences.length ? t('panels.deleteSpeechFreeGaps', { sec: MIN_SILENCE_SEC }) : t('panels.noSilencesDelete')}
           className="border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40"
         >
           <Scissors size={11} /> {silences.length ? t('panels.cutSilencesNSec', { n: silences.length, sec: silenceTotal.toFixed(1) }) : t('panels.cutSilences')}
@@ -251,13 +286,7 @@ export function ScriptPanel({
           Never scrolls horizontally: add spaces between Latin words for line-break opportunities, break-words as a fallback for over-long tokens (URLs/long numbers) */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words px-3 py-2.5 text-[13px] leading-[1.9]" onMouseUp={onMouseUp}>
         {gapAfter.has(-1) && (
-          <GapToken
-            gap={gapAfter.get(-1)!}
-            onClick={(e) => {
-              const g = gapAfter.get(-1)!;
-              setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) });
-            }}
-          />
+          <GapToken gap={gapAfter.get(-1)!} onClick={(e) => openGapPop(e, gapAfter.get(-1)!)} />
         )}
         {items.map((it) => (
           <span key={`${it.src ?? 'n'}:${it.si}`}>
@@ -291,16 +320,20 @@ export function ScriptPanel({
                 </span>
               );
             })
-              // Add spaces at Latin word boundaries: no whitespace between adjacent spans = an English sentence becomes one unbreakable long string (ugly, and forces horizontal scroll)
-              .flatMap((node, wi, arr) => (wi < arr.length - 1 && needsSpace(it.words[wi]!.text, it.words[wi + 1]!.text) ? [node, ' '] : [node]))}
+              // A mid-sentence pause marker takes the boundary's place; otherwise add spaces at Latin word boundaries
+              // (no whitespace between adjacent spans = an English sentence becomes one unbreakable long string,
+              // ugly, and forces horizontal scroll)
+              .flatMap((node, wi, arr) => {
+                const g = it.src === null ? gapInWord.get(`${it.si}:${wi}`) : undefined;
+                if (g)
+                  return [
+                    node,
+                    <GapToken key={`g${wi}`} gap={g} onClick={(e) => openGapPop(e, g)} />,
+                  ];
+                return wi < arr.length - 1 && needsSpace(it.words[wi]!.text, it.words[wi + 1]!.text) ? [node, ' '] : [node];
+              })}
             {it.src === null && gapAfter.has(it.si) && (
-              <GapToken
-                gap={gapAfter.get(it.si)!}
-                onClick={(e) => {
-                  const g = gapAfter.get(it.si)!;
-                  setPop({ kind: g.alive ? 'gap' : 'deadgap', range: g.range, ...localXY(e.clientX, e.clientY + 14) });
-                }}
-              />
+              <GapToken gap={gapAfter.get(it.si)!} onClick={(e) => openGapPop(e, gapAfter.get(it.si)!)} />
             )}{' '}
           </span>
         ))}
