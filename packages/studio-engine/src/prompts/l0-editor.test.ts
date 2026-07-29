@@ -6,7 +6,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
-import { CHAT_IDENTITY, MCP_INSTRUCTIONS, SPOKEN_EDITORIAL, buildKitSystem } from './index';
+import { CHAT_IDENTITY, SPOKEN_EDITORIAL, buildKitSystem, mcpInstructions } from './index';
+
+// The version is injected by the hosting route (single source = the skill's SKILL.md footer);
+// any well-formed value produces the full instruction text these tests pin.
+const MCP_INSTRUCTIONS = mcpInstructions('2099-01-01.1');
 
 describe('every surface stands on L0', () => {
   it('the in-app agent and the external agent describe the same editor', () => {

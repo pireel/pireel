@@ -35,4 +35,4 @@ export { withActiveTheme, planWithActiveTheme } from './active-theme';
 export * from './l0-agent-tools';
 export { AROLL_GUIDE } from './aroll-guide';
 // instructions + description override table for external agents (MCP)
-export { MCP_INSTRUCTIONS, MCP_DESCRIPTION_OVERRIDES, PIREEL_SKILL_VERSION } from './mcp';
+export { mcpInstructions, MCP_DESCRIPTION_OVERRIDES } from './mcp';

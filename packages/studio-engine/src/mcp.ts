@@ -18,7 +18,7 @@
  * the DO — that's the routing layer's job, injected via McpDeps so vitest can pin the contract directly.
  */
 
-import { MCP_DESCRIPTION_OVERRIDES, MCP_INSTRUCTIONS, STUDIO_TOOLS, STUDIO_TOOL_MAP } from './prompts';
+import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
 
 /* ============================ JSON-RPC shapes ============================ */
 
@@ -49,6 +49,9 @@ export interface McpBridgeResult {
 }
 
 export interface McpDeps {
+  /** Skill baseline announced in initialize.instructions (`YYYY-MM-DD.rev`). The hosting route
+   *  derives it from the shipped skill's SKILL.md footer — the single source of the version. */
+  skillVersion: string;
   /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
   /** Frame catalog (routing layer = frameRegistry.list()). */
@@ -402,7 +405,7 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         protocolVersion: typeof requested === 'string' ? requested : MCP_PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo: MCP_SERVER_INFO,
-        instructions: MCP_INSTRUCTIONS,
+        instructions: mcpInstructions(deps.skillVersion),
       });
     }
     case 'ping':

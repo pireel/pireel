@@ -22,15 +22,14 @@
 import { EDITOR_MODEL, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
 import { CAPTION_CATALOG_BLOCK } from './chat';
 
-/** Current pireel skill baseline version: `YYYY-MM-DD.rev` — the `.rev` counter makes
- *  same-day releases distinguishable (a bare date failed exactly that way: several releases
- *  shipped on 2026-07-21, all announcing "2026-07-21", so installed older same-day builds
- *  handshook as "up to date"). Bump this AND SKILL.md's "Skill version" together on EVERY
- *  pireel-agent skill release — skill-version.test.ts pins the two equal, and the server
- *  announces it via initialize.instructions for the agent's update handshake. */
-export const PIREEL_SKILL_VERSION = '2026-07-29.1';
-
-export const MCP_INSTRUCTIONS = `You are connected to Pireel Studio. Your tools edit the composition LIVE in the user's open studio browser tab: storyboard the video track, lay designed graphic fragments over it, manage subtitles, and cut the footage by its spoken transcript.
+/** MCP initialize.instructions. `skillVersion` is the pireel skill baseline the server
+ *  announces for the agent's update handshake, in `YYYY-MM-DD.rev` form (the `.rev` counter
+ *  makes same-day releases distinguishable — a bare date failed exactly that way: several
+ *  releases shipped on 2026-07-21, all announcing "2026-07-21", so installed older same-day
+ *  builds handshook as "up to date"). The version is NOT defined here: the skill folder's
+ *  SKILL.md footer is the single source, and the hosting route derives the value from it at
+ *  build time — this package only states where it is spoken. */
+export const mcpInstructions = (skillVersion: string): string => `You are connected to Pireel Studio. Your tools edit the composition LIVE in the user's open studio browser tab: storyboard the video track, lay designed graphic fragments over it, manage subtitles, and cut the footage by its spoken transcript.
 
 ${EDITOR_MODEL}
 
@@ -65,7 +64,7 @@ LANGUAGE (Pireel is international)
 - ${ON_SCREEN_LANGUAGE}
 
 SKILL FRESHNESS
-- This server's current pireel skill baseline is ${PIREEL_SKILL_VERSION} (format YYYY-MM-DD.rev: compare the date, then the numeric .rev; a bare date counts as .0). If the pireel skill you loaded shows an older "Skill version" than this, UPDATE IT YOURSELF before continuing: run \`npx skills update pireel\` (fallback: \`npx skills add pireel/pireel-agent\`) — your host's command-approval flow is the user's consent, don't bounce this to them as a question — then RE-READ the updated skill files (they may cover the very flow you're about to run). Only if the command is unavailable or denied, mention the update once and continue with what you have. If yours matches or is newer, say nothing.${CAPTION_CATALOG_BLOCK}`;
+- This server's current pireel skill baseline is ${skillVersion} (format YYYY-MM-DD.rev: compare the date, then the numeric .rev; a bare date counts as .0). If the pireel skill you loaded shows an older "Skill version" than this, UPDATE IT YOURSELF before continuing: run \`npx skills update pireel\` (fallback: \`npx skills add pireel/pireel-agent\`) — your host's command-approval flow is the user's consent, don't bounce this to them as a question — then RE-READ the updated skill files (they may cover the very flow you're about to run). Only if the command is unavailable or denied, mention the update once and continue with what you have. If yours matches or is newer, say nothing.${CAPTION_CATALOG_BLOCK}`;
 
 const CREDITS_WARNING = '[Runs on Pireel\'s own LLM and CHARGES the account\'s credits — prefer the BYO flow';
 
