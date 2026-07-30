@@ -246,9 +246,10 @@ export function restoreSrcRange<T extends Clip>(
   inSource: InSource<T> = () => true,
 ): T[] {
   // Multi-source: restore runs only among THIS source's clips (sort/merge/insert all use this source's srcStart
-  // semantics); other-source clips are lifted out first, each remembering its predecessor (anchored by srcStart
-  // value — a predecessor's srcStart never changes during restore: merging only extends its srcEnd or lowers a
-  // successor's srcStart), then reattached after their original predecessor when done.
+  // semantics); other-source clips are lifted out first, each remembering its predecessor's srcStart, then
+  // reattached after the restored clip whose range still covers that srcStart. Merging can move a predecessor's
+  // srcStart down (next-merge) as well as its srcEnd up (prev-merge), but its original srcStart always stays
+  // inside its range, and in-source ranges never overlap, so containment identifies the predecessor uniquely.
   const foreign = clips.filter((c) => !inSource(c));
   if (foreign.length) {
     const anchors: { clip: T; afterSrcStart: number | null }[] = [];
@@ -265,7 +266,7 @@ export function restoreSrcRange<T extends Clip>(
     for (const a of anchors) if (a.afterSrcStart == null) out.push(a.clip);
     for (const c of restored) {
       out.push(c);
-      for (const a of anchors) if (a.afterSrcStart != null && Math.abs(a.afterSrcStart - c.srcStart) < 1e-6) out.push(a.clip);
+      for (const a of anchors) if (a.afterSrcStart != null && a.afterSrcStart >= c.srcStart - 1e-6 && a.afterSrcStart < c.srcEnd - 1e-6) out.push(a.clip);
     }
     // predecessor unexpectedly gone (theoretically impossible, restore deletes no clips): fall back to appending at the end, lose nothing
     for (const a of anchors) if (!out.includes(a.clip)) out.push(a.clip);

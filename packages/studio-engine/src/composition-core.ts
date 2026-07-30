@@ -427,7 +427,8 @@ export function shotId(): string {
 
 /** Auto-slice by shot (sentence): cut at each sentence start → continuous clips covering [0, video end], default fullscreen framing. */
 export function shotsFromSentences(sentences: { start: number }[], videoDurationSec: number): VideoShot[] {
-  const cuts = [...new Set(sentences.map((s) => Math.max(0, Math.round(s.start * 10) / 10)))].sort((a, b) => a - b);
+  // clamp into [0, videoDurationSec]: ASR sentence starts can land past the container duration
+  const cuts = [...new Set(sentences.map((s) => Math.min(videoDurationSec, Math.max(0, Math.round(s.start * 10) / 10))))].sort((a, b) => a - b);
   if (!cuts.length || cuts[0]! > 0) cuts.unshift(0); // first segment starts at 0
   const shots: VideoShot[] = [];
   for (let i = 0; i < cuts.length; i++) {
