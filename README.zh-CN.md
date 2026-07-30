@@ -4,7 +4,7 @@
 
 **一款面向口播视频的开源、无后端 AI 视频编辑器。**
 
-[English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 导入视频片段后，画布会随素材呈现——编辑、分镜设计、
 视觉图形、动态字幕、主题、实时预览、时间线和导出
@@ -64,23 +64,23 @@ pnpm dev
 
 ## 无需后端即可使用的功能
 
-- **本地编辑**：口播视频轨道、内容块、字幕、时间线和实时
+- **本地编辑**：口播视频轨道、元素、字幕、时间线和实时
   预览——全部在客户端完成。
 - **客户端导出**：基于 WebCodecs（Chromium）的所见即所得导出。
-- **画框主题**：完整目录由 `@pireel/studio-frames` 提供。
+- **主题**：完整目录由 `@pireel/studio-frames` 提供。
 - **本地上传**：由磁盘支持的开发路由（`/local-assets`）用于存储
   按内容寻址的文件，是托管上传 Provider 在本地的对应实现。
 
 ## 需要 Provider 的功能
 
-生成能力（内容块编排、旁白规划、转录、云媒体
+生成能力（元素生成、口播稿规划、转录、云媒体
 库、跨设备同步、图像/视频生成）通过
 `StudioProviders` 注入。shell 注册了 `unavailableProviders()`，因此在完成接入前，
 这些路径会失败并显示提示。可以通过两种方式启用：
 
 1. 在
-   [`apps/studio-oss/src/providers.ts`](apps/studio-oss/src/providers.ts) 中**注入自己的 Provider**——其中包含五个
-   小型接口（composer / planner / transcriber / vault / projects），可将它们
+   [`apps/studio-oss/src/providers.ts`](apps/studio-oss/src/providers.ts) 中**注入自己的 Provider**——其中包含六个
+   小型接口（composer / planner / transcriber / vault / projects / uploads），可将它们
    指向任意后端或本地模型。
 2. **自带 Agent**：编辑器设计为由外部
    Agent 通过 MCP 驱动。请参阅
@@ -93,7 +93,7 @@ pnpm dev
 apps/studio-oss/        # 挂载编辑器的最简 Vite shell
 packages/studio-ui/     # 编辑器 UI（工作台、面板、时间线、客户端导出）
 packages/studio-engine/ # 编排核心、Brief、提示词和视频编辑工具
-packages/studio-frames/ # 画框主题（设计系统）和内容
+packages/studio-frames/ # 主题（设计系统）和内容
 packages/ui/            # 共享基础组件、品牌标识和主题 Token
 ```
 
