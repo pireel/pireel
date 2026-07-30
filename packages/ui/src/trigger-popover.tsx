@@ -80,6 +80,10 @@ export interface TriggerPopoverProps<T> {
    *  The component closes the popover right after calling onPick — the caller doesn't need to close it. */
   onPick: (item: T) => void;
 
+  /** Key (itemKey) of the item that is currently "selected" in the caller's state (e.g. the attached theme).
+   *  On open, the highlight starts on it and the list scrolls it into view (centered) instead of starting at the top. */
+  initialActiveKey?: string | null;
+
   /** Called when the popover closes (fires on toggle / Esc / click-outside / after select). The caller uses
    *  it to restore focus + caret back to the editor. */
   onClose?: () => void;
@@ -115,6 +119,7 @@ function TriggerPopoverImpl<T>(
     emptyMatched,
     renderItem,
     onPick,
+    initialActiveKey,
     onClose,
     className,
   } = props;
@@ -175,6 +180,20 @@ function TriggerPopoverImpl<T>(
     [tabs, onClose],
   );
 
+  /** Open-time highlight: land on the caller's currently-selected item (initialActiveKey) and center it,
+   *  so a long list (e.g. the theme catalog) opens at the selection instead of the top. Falls back to 0. */
+  const applyInitialActive = useCallback(() => {
+    const idx = initialActiveKey ? items.findIndex((it) => itemKey(it) === initialActiveKey) : -1;
+    setActiveIdx(idx >= 0 ? idx : 0);
+    if (idx > 0) {
+      // After the popover paints: scroll the highlighted row to the middle of the list viewport
+      setTimeout(() => {
+        const active = popoverRef.current?.querySelector('[data-trigger-list] [data-active]') as HTMLElement | null;
+        active?.scrollIntoView({ block: 'center' });
+      }, 0);
+    }
+  }, [initialActiveKey, items, itemKey]);
+
   /** Search backward from the caret for the nearest trigger char, returning the query between it and the caret.
    *  Returns null = "should close the popover" — trigger isn't in the current text node / contains a space / is broken up by other chars. */
   const readQuery = useCallback((): string | null => {
@@ -228,7 +247,7 @@ function TriggerPopoverImpl<T>(
         if (a) {
           setAnchor(a);
           setQuery('');
-          setActiveIdx(0); // each re-trigger starts from the top, no leftover selection
+          applyInitialActive(); // start on the caller's selected item if any, else the top
           setActiveTab(tabs?.[0]?.key ?? '');
         }
       }, 0);
@@ -293,12 +312,12 @@ function TriggerPopoverImpl<T>(
         setAnchor({ left: rect.left, top: rect.top, bottom: rect.bottom });
         setQuery('');
         setManualMode(true);
-        setActiveIdx(0);
+        applyInitialActive(); // start on the caller's selected item if any, else the top
         // Focus the search box on the next frame so the user can type to filter right away
         setTimeout(() => searchInputRef.current?.focus(), 0);
       },
     }),
-    [editorRef, close],
+    [editorRef, close, applyInitialActive],
   );
 
   // global keydown：↑↓ Enter Esc
@@ -402,7 +421,9 @@ function TriggerPopoverImpl<T>(
         position: 'fixed',
         left: anchor.left,
         top: anchor.top,
-        zIndex: 50,
+        // Above the timeline chrome (sticky gutter / playhead / drag ghost are z-50 and later in the DOM),
+        // below the fullscreen lightbox layer (z-[100]) — they never show together anyway.
+        zIndex: 90,
         // The list itself is max-h-[60vh]; cap the whole thing to the viewport height as a backstop, working with the layout-effect clamping
         maxHeight: 'calc(100vh - 16px)',
         maxWidth: 'calc(100vw - 16px)',

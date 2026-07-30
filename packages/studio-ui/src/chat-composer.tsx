@@ -372,6 +372,7 @@ export function Composer({
         className="w-[360px]"
         emptyOriginal={<div className="text-ink-3 px-2 py-3 text-center text-[12px]">{t('chatGen.loadingThemes')}</div>}
         onPick={pickFrame}
+        initialActiveKey={frame?.id ?? null}
         renderItem={(s, { active, pick, setActive }) => (
           <FrameOptionRow item={s} locale={locale} selected={frame?.id === s.id} active={active} pick={pick} setActive={setActive} />
         )}
