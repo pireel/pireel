@@ -13,5 +13,8 @@
   "sideEffects": false,
   "dependencies": {
     "@pireel/studio-engine": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^8.0.16"
   }
 }
