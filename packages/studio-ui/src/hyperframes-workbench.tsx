@@ -585,8 +585,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Push only to the active buffer (ImageBitmap transferred once); when the background buffer debuts, the bufs.active effect refreshes to backfill the frame
       // frame2 = the "other side" shadow frame within a transition window (true dual-stream: before cut = B's lead-in, after cut = A's tail)
       const w = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      if (!w) {
+        // No target window (iframe torn down mid-decode): close instead of leaking the bitmaps
+        frame.close();
+        frame2?.close();
+        return;
+      }
       try {
-        w?.postMessage(
+        w.postMessage(
           { type: 'hf:frame', frame, ...(frame2 ? { frame2 } : {}), t: info.t, elKey: info.elKey, srcT: info.srcT },
           '*',
           frame2 ? [frame, frame2] : [frame],
