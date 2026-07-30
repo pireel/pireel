@@ -13,6 +13,7 @@ import { ImagePlus, Loader2, X } from 'lucide-react';
 import type { Composition, PersonFx } from '@pireel/studio-engine/composition';
 import { imageThumb } from '@pireel/ui/image-url';
 import { toast } from '@pireel/ui/toast';
+import { Switch } from '@pireel/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 import { uploadImageFile } from './media';
 import { t } from './i18n';
@@ -125,19 +126,12 @@ export function PersonFxPanel({
           <section className="flex flex-col gap-1.5">
             <label className="flex cursor-pointer items-center justify-between">
               <span className="text-ink font-medium">{t('panels.smartCutout')}</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={!!selectedShotMatte}
+              <Switch
+                checked={!!selectedShotMatte}
                 aria-label={t('panels.smartCutoutToggle')}
                 disabled={selectedShotMatte === null}
-                onClick={() => onToggleShotMatte(!selectedShotMatte)}
-                className={`relative h-[18px] w-8 rounded-full transition disabled:opacity-40 ${selectedShotMatte ? 'bg-accent' : 'bg-line-2'}`}
-              >
-                <span
-                  className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-all ${selectedShotMatte ? 'left-[16px]' : 'left-[2px]'}`}
-                />
-              </button>
+                onCheckedChange={onToggleShotMatte}
+              />
             </label>
             <div className="text-ink-4 text-[10.5px]">
               {selectedShotMatte === null ? t('panels.selectShotTimelineFirst') : t('panels.appliesOnlySelectedShot')}
@@ -178,19 +172,14 @@ export function PersonFxPanel({
                   <section className="flex flex-col gap-1.5">
                     <label className="flex cursor-pointer items-center justify-between">
                       <span className="text-ink font-medium">{t('panels.personTop')}</span>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={!!fx.personFront}
+                      <Switch
+                        checked={!!fx.personFront}
                         aria-label={t('panels.personTopToggle')}
                         disabled={!anyMatte}
-                        onClick={() => commit({ ...fx, personFront: !fx.personFront || undefined })}
-                        className={`relative h-[18px] w-8 rounded-full transition ${fx.personFront ? 'bg-accent' : 'bg-line-2'}`}
-                      >
-                        <span
-                          className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-all ${fx.personFront ? 'left-[16px]' : 'left-[2px]'}`}
-                        />
-                      </button>
+                        onCheckedChange={(checked) =>
+                          commit({ ...fx, personFront: checked || undefined })
+                        }
+                      />
                     </label>
                     <div className="text-ink-4 text-[10.5px]">{t('panels.personSitsAboveAll')}</div>
                   </section>

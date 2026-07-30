@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
+import { Switch } from '@pireel/ui/switch';
 import { t } from './i18n';
 import {
   type CaptionPreset,
@@ -532,18 +533,12 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
 /** Tiny on/off switch (captions layer toggle at the front of the main row — mirrors the translation row's language dropdown slot, keeping the two rows aligned). */
 function MiniSwitch({ on, title, onChange }: { on: boolean; title: string; onChange: (v: boolean) => void }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
+    <Switch
+      checked={on}
       title={title}
-      onClick={() => onChange(!on)}
-      className="flex h-7 shrink-0 items-center"
-    >
-      <span className={`relative h-[18px] w-[30px] rounded-full transition-colors ${on ? 'bg-accent' : 'bg-ink/20'}`}>
-        <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-all ${on ? 'left-[14px]' : 'left-[2px]'}`} />
-      </span>
-    </button>
+      onCheckedChange={onChange}
+      className="mx-px"
+    />
   );
 }
 

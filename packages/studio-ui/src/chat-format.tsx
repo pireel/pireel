@@ -2,7 +2,7 @@
 
 /** Shared presentation helpers for the studio chat: ids, element pills, avatar, thinking dots. */
 
-import { PiGlyph } from '@pireel/ui/brand-mark';
+import { BrandMark } from '@pireel/ui/brand-mark';
 import { t } from './i18n';
 import type { StudioElementRef } from './studio-chat';
 
@@ -22,16 +22,18 @@ export const elementIcon = (el: { kind: string; isShot: boolean }) =>
   el.isShot ? '🎬' : (ELEMENT_ICON[el.kind] ?? '✦');
 
 export function PiAvatar({ thinking = false, size = 22 }: { thinking?: boolean; size?: number }) {
-  const glyph = Math.round(size * 0.56);
+  const glyph = Math.round(size * 0.72);
   return (
     <span
-      className="bg-lime-soft text-lime-ink relative flex shrink-0 items-center justify-center rounded-full"
+      className="bg-panel-2 relative flex shrink-0 items-center justify-center rounded-full"
       style={{ width: size, height: size }}
       aria-hidden
     >
-      <svg viewBox="0 0 100 100" width={glyph} height={glyph} className={thinking ? 'animate-pulse' : undefined}>
-        <PiGlyph stroke="currentColor" strokeWidth={16} />
-      </svg>
+      <BrandMark
+        size={glyph}
+        variant="chromatic"
+        className={thinking ? 'animate-pulse' : undefined}
+      />
     </span>
   );
 }

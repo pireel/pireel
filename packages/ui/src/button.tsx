@@ -4,20 +4,20 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from './cn';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-[background-color,border-color,color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:ring-offset-1 active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
   {
     variants: {
       variant: {
         // brand
-        default: 'border border-line-2 bg-panel hover:bg-panel-2 text-ink',
-        primary: 'bg-ink text-white border border-ink hover:bg-black',
-        accent: 'bg-accent text-white border border-accent hover:brightness-110',
-        lime: 'bg-lime text-[#1F2A00] border border-lime hover:brightness-95',
+        default: 'border border-line-2 bg-panel text-ink shadow-sm hover:border-line-2 hover:bg-panel-2',
+        primary: 'border border-ink bg-ink text-white shadow-sm hover:opacity-90',
+        accent: 'border border-accent bg-accent text-white shadow-sm hover:brightness-95',
+        lime: 'border border-lime bg-lime text-[#1F2A00] hover:brightness-95',
         ghost: 'bg-transparent hover:bg-panel-2 text-ink',
         // shadcn compat
-        destructive: 'bg-rose text-white border border-rose hover:brightness-110',
+        destructive: 'border border-rose bg-rose text-white hover:brightness-95',
         outline: 'border border-line-2 bg-transparent hover:bg-panel-2 text-ink',
-        secondary: 'bg-panel-2 text-ink border border-line hover:bg-panel',
+        secondary: 'border border-line bg-panel-2 text-ink hover:border-line-2 hover:bg-panel',
         link: 'text-accent underline-offset-4 hover:underline bg-transparent',
       },
       size: {

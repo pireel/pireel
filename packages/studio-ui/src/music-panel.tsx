@@ -16,6 +16,7 @@
 
 import { Music } from 'lucide-react';
 import { AUDIO_DEFAULT_DB, AUDIO_FADE_MAX_SEC, AUDIO_SPEED_MAX, AUDIO_SPEED_MIN, SHOT_FADE_MAX_SEC, type AudioClip, type VideoShot, audioClipDefaults } from '@pireel/studio-engine/composition';
+import { Switch } from '@pireel/ui/switch';
 import { AudioLevel } from './audio-level';
 import { t } from './i18n';
 
@@ -123,16 +124,11 @@ export function MusicPanel({
                 which is a question about a clip, not about a track. Mute is per track, up on the timeline. */}
             <div className="flex items-center justify-between">
               <span className="text-ink-3">{t('panels.soloListen')}</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={soloId === sel.id}
+              <Switch
+                checked={soloId === sel.id}
                 aria-label={t('panels.soloListen')}
-                onClick={() => onSolo(soloId === sel.id ? null : sel.id)}
-                className={`h-4.5 w-8 rounded-full p-0.5 transition ${soloId === sel.id ? 'bg-accent' : 'bg-ink-4/30'}`}
-              >
-                <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${soloId === sel.id ? 'translate-x-3.5' : ''}`} />
-              </button>
+                onCheckedChange={(checked) => onSolo(checked ? sel.id : null)}
+              />
             </div>
             {soloId === sel.id && <div className="text-ink-4 text-[10.5px]">{t('panels.soloListenHint')}</div>}
             {/* Effective values (fades are clamped so the two never overlap) — showing the raw stored number
@@ -148,16 +144,11 @@ export function MusicPanel({
         <section className="border-line flex flex-col gap-2 border-t pt-3">
           <div className="flex items-center justify-between">
             <span className="text-ink-3">{t('panels.denoiseNarration')}</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={denoise.strength != null}
+            <Switch
+              checked={denoise.strength != null}
               aria-label={t('panels.denoiseNarration')}
-              onClick={() => onSetDenoise(denoise.strength != null ? null : 0.6)}
-              className={`h-4.5 w-8 rounded-full p-0.5 transition ${denoise.strength != null ? 'bg-accent' : 'bg-ink-4/30'}`}
-            >
-              <span className={`block h-3.5 w-3.5 rounded-full bg-white transition ${denoise.strength != null ? 'translate-x-3.5' : ''}`} />
-            </button>
+              onCheckedChange={(checked) => onSetDenoise(checked ? 0.6 : null)}
+            />
           </div>
           {denoise.strength != null && (
             <>

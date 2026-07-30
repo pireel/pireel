@@ -5,8 +5,9 @@ interface Props {
   /**
    * - `dark`: ink glyph, no background — for light surfaces.
    * - `light`: white glyph on ink background — for dark surfaces / favicons.
+   * - `chromatic`: Pireel's lime / orange / ink mark — reserved for product identity moments.
    */
-  variant?: 'dark' | 'light';
+  variant?: 'dark' | 'light' | 'chromatic';
   className?: string;
 }
 
@@ -128,9 +129,7 @@ export function AnimatedBrandMark({
 /**
  * Pireel brand mark — π glyph with Douyin-style chromatic offset.
  * Main glyph flanked by lime (up-left) and accent-2 orange (down-right)
- * ghost copies so the symbol appears to have a color-channel shift at its
- * edges. The old "P" mark is retired, the glyph is now π; the chromatic-offset technique is kept
- * (the visual language of video culture).
+ * ghost copies so the symbol appears to have a color-channel shift at its edges.
  */
 export function BrandMark({
   size = 28,
@@ -141,6 +140,8 @@ export function BrandMark({
   const shift = 1.8;
   const radius = 22;
   const mainColor = variant === 'light' ? '#ffffff' : '#17181b';
+  const leadingColor = '#c4f24c';
+  const trailingColor = '#e85a2a';
 
   return (
     <svg
@@ -154,10 +155,10 @@ export function BrandMark({
         <rect width="100" height="100" rx={radius} ry={radius} fill="#17181b" />
       )}
       <g transform={`translate(${-shift} ${-shift})`}>
-        <PiGlyph stroke="#c4f24c" />
+        <PiGlyph stroke={leadingColor} />
       </g>
       <g transform={`translate(${shift} ${shift})`}>
-        <PiGlyph stroke="#e85a2a" />
+        <PiGlyph stroke={trailingColor} />
       </g>
       <PiGlyph stroke={mainColor} />
     </svg>
