@@ -450,15 +450,32 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
         </span>
         <ChevronDown size={11} className="text-ink-4 shrink-0" />
       </button>
-      <button
-        type="button"
-        title={t('captions.fontSize')}
-        onClick={() => setPop(pop === 'size' ? null : 'size')}
-        className={`hover:border-accent flex h-7 shrink-0 items-center gap-0.5 rounded-md border px-1.5 ${pop === 'size' ? 'border-accent' : 'border-line'}`}
-      >
-        <span className="text-ink-3 font-mono text-[10.5px] tabular-nums">{fs}</span>
-        <ChevronDown size={11} className="text-ink-4" />
-      </button>
+      {/* 字号按钮在行中段:菜单锚它自己(嵌套 relative),不能挂行容器的 right-0——那会贴到行尾颜色按钮底下 */}
+      <div className="relative shrink-0">
+        <button
+          type="button"
+          title={t('captions.fontSize')}
+          onClick={() => setPop(pop === 'size' ? null : 'size')}
+          className={`hover:border-accent flex h-7 shrink-0 items-center gap-0.5 rounded-md border px-1.5 ${pop === 'size' ? 'border-accent' : 'border-line'}`}
+        >
+          <span className="text-ink-3 font-mono text-[10.5px] tabular-nums">{fs}</span>
+          <ChevronDown size={11} className="text-ink-4" />
+        </button>
+        {pop === 'size' && (
+          <div className="border-line bg-panel absolute left-1/2 top-full z-30 mt-1 max-h-56 w-20 -translate-x-1/2 overflow-auto rounded-lg border p-1 shadow-xl">
+            {sizeOpts.map((px) => (
+              <button
+                key={px}
+                type="button"
+                onClick={() => { setPop(null); onPatch({ scale: Math.round((px / BASE_CAPTION_FONT_PX) * 100) / 100 }); }}
+                className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
+              >
+                {px} {px === fs && <Check size={10} className="text-accent" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <button
         type="button"
         title={t('captions.bold')}
@@ -486,20 +503,6 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
       </button>
       {pop === 'preset' && (
         <PresetPop current={style.preset} onPick={(id) => { setPop(null); onPreset(id); }} />
-      )}
-      {pop === 'size' && (
-        <div className="border-line bg-panel absolute right-0 top-full z-30 mt-1 max-h-56 w-20 overflow-auto rounded-lg border p-1 shadow-xl">
-          {sizeOpts.map((px) => (
-            <button
-              key={px}
-              type="button"
-              onClick={() => { setPop(null); onPatch({ scale: Math.round((px / BASE_CAPTION_FONT_PX) * 100) / 100 }); }}
-              className={`flex w-full items-center justify-center gap-1 rounded px-2 py-1 font-mono text-[11px] tabular-nums ${px === fs ? 'text-ink bg-panel-2/60' : 'text-ink-3 hover:bg-panel-2/60'}`}
-            >
-              {px} {px === fs && <Check size={10} className="text-accent" />}
-            </button>
-          ))}
-        </div>
       )}
       {pop === 'color' && (
         <SwatchPop
@@ -696,11 +699,11 @@ function PresetCard({ preset, active, onPick }: { preset: CaptionPreset; active:
         <PresetSample p={preset} />
       </div>
       {active ? (
-        <span className="bg-accent absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white">
+        <span className="bg-accent text-accent-foreground absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium">
           <Check size={10} /> {t('captions.inUse')}
         </span>
       ) : (
-        <span className="bg-accent absolute right-1.5 top-1.5 hidden rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:block">
+        <span className="bg-accent text-accent-foreground absolute right-1.5 top-1.5 hidden rounded px-1.5 py-0.5 text-[10px] font-medium group-hover:block">
           {t('captions.use')}
         </span>
       )}
