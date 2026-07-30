@@ -364,6 +364,16 @@ describe('视频分镜片段 shots', () => {
     expect(shots.every((s) => s.treatment === 'full')).toBe(true);
   });
 
+  it('shotsFromSentences:切点越过视频末端时夹取,editedDuration 不超视频时长', () => {
+    // ASR 句子起点常落在容器时长之外几百毫秒
+    const shots = shotsFromSentences([{ start: 0 }, { start: 5 }, { start: 61 }], 60);
+    expect(shots.map((s) => [s.srcStart, s.srcEnd])).toEqual([
+      [0, 5],
+      [5, 60],
+    ]);
+    expect(shots.every((s) => s.srcEnd <= 60)).toBe(true);
+  });
+
   it('videoFrameTimelineBody:首片 set,之后每段按成片起点一条过渡', () => {
     const body = videoFrameTimelineBody([
       { id: 'a', srcStart: 0, srcEnd: 3, treatment: 'full' },

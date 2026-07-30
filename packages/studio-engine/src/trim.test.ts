@@ -332,6 +332,15 @@ describe('多源主轨:源域运算只匹配本源(inSource 谓词)', () => {
     expect(ids).toContain('new'); // 新镜插进主源序列
     expect(ids[ids.length - 1]).not.toBe('x'); // 兜底"挂末尾"分支没被误触发
   });
+
+  it('restoreSrcRange:缺口贴后继(next-merge 压低前驱 srcStart)时,插入段仍锚在原前驱之后', () => {
+    // 主 [5,10)·插入X·主 [20,25);恢复 [2,5) 贴 a 的开头 → a.srcStart 5→2,锚点值变了,靠区间包含仍命中
+    const cut: MShot[] = [m('a', 5, 10), clip('x', 0, 4), m('b', 20, 25)];
+    const out = restoreSrcRange(cut, 2, 5, (a, b) => m('new', a, b), () => true, inMain);
+    expect(out.map((c) => c.id)).toEqual(['a', 'x', 'b']); // X 不被甩到片尾
+    expect(out[0]!.srcStart).toBeCloseTo(2);
+    expect(out[0]!.srcEnd).toBeCloseTo(10);
+  });
 });
 
 describe('finalizeCutSeams(多段剪切的缝位回执)', () => {
