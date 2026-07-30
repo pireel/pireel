@@ -22,6 +22,13 @@
   --color-line-2: rgba(20, 22, 30, 0.1);
   --color-accent: #3f4be8;
   --color-accent-2: #e85a2a;
+  /* Dedicated switch pairs keep checked and unchecked states legible in both themes. */
+  --color-switch-on: #3f4be8;
+  --color-switch-off: #e2e2dd;
+  --color-switch-thumb-on: #ffffff;
+  --color-switch-thumb-off: #ffffff;
+  --color-switch-border: #d2d2cd;
+  --color-switch-focus: #3f4be8;
   --color-lime: #c4f24c;
   --color-lime-soft: #f0fbc7;
   --color-lime-ink: #58760f;
@@ -102,6 +109,12 @@
   --color-ink-4: #63676f;
   --color-line: rgba(235, 238, 245, 0.08);
   --color-line-2: rgba(235, 238, 245, 0.14);
+  --color-switch-on: #3f4be8;
+  --color-switch-off: #2b2e35;
+  --color-switch-thumb-on: #ffffff;
+  --color-switch-thumb-off: #8f939d;
+  --color-switch-border: #3b3e45;
+  --color-switch-focus: #737bf2;
   --color-lime-soft: #2b3610;
   --color-lime-ink: #c4f24c;
   --shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -138,12 +151,22 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   body {
     font-size: 14px;
   }
   a { color: inherit; text-decoration: none; }
-  button { font-family: inherit; cursor: pointer; }
+  button,
+  input,
+  textarea,
+  select { font: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  ::selection {
+    color: var(--color-ink);
+    background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  }
 
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: #d8d8d3; border-radius: 99px; border: 2px solid var(--color-bg); }
@@ -172,7 +195,7 @@
   min-width: 240px;
   max-width: 360px;
   padding: 10px 32px 10px 14px;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #fff;
   border: 1px solid #ececE8;
   box-shadow: 0 12px 32px rgba(20, 22, 30, 0.12), 0 1px 3px rgba(20, 22, 30, 0.05);
