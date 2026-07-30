@@ -168,9 +168,6 @@
     background: color-mix(in srgb, var(--color-accent) 22%, transparent);
   }
 
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-thumb { background: #d8d8d3; border-radius: 99px; border: 2px solid var(--color-bg); }
-  ::-webkit-scrollbar-track { background: transparent; }
 }
 
 @layer utilities {
