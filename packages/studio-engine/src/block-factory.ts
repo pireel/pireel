@@ -24,17 +24,24 @@ import { t } from './i18n';
 const UNFROZEN_TEMPLATES = new Set(['caption', 'transition', 'media']);
 export const blockFreezesVars = (templateId: string): boolean => !UNFROZEN_TEMPLATES.has(templateId);
 
-/** Insertion-time look freeze: stamp the composition's CURRENT effective tokens onto every eligible
- *  block that doesn't carry them yet (see Block.vars). Idempotent, and returns the SAME reference
- *  when there is nothing to stamp — safe to run on every write. Both write funnels call this
- *  (workbench setComp on the client, runServerTool offline), so a block acquires its frozen look the
- *  moment it enters a composition: at insertion for new blocks, at first contact for legacy data —
- *  in both cases with the palette it is currently rendered under, i.e. zero visual change. */
+/** Preset components are THEMELESS by decree (user-set): a kit instance or a preset-library element
+ *  freezes at the NEUTRAL general tokens — the exact look of its library card — never the project's
+ *  palette. Themes relate to components only as references the LLM reads during generation; they do
+ *  not restyle the components themselves. */
+const isPresetComponent = (b: Block): boolean => b.templateId.startsWith('kit:') || !!(b.slots as { presetId?: unknown }).presetId;
+
+/** Insertion-time look freeze: stamp effective tokens onto every eligible block that doesn't carry
+ *  them yet (see Block.vars) — preset components get the neutral general set, everything else the
+ *  composition's current theme+palette. Idempotent, and returns the SAME reference when there is
+ *  nothing to stamp — safe to run on every write. Both write funnels call this (workbench setComp on
+ *  the client, runServerTool offline), so a block acquires its frozen look the moment it enters a
+ *  composition — at insertion for new blocks, at first contact for legacy data. */
 export function freezeBlockVars(comp: Composition): Composition {
   const missing = (b: Block) => !b.vars && blockFreezesVars(b.templateId);
   if (!comp.blocks.some(missing)) return comp;
-  const vars = effectiveThemeVars(getTheme(comp.theme), comp.palette);
-  return { ...comp, blocks: comp.blocks.map((b) => (missing(b) ? { ...b, vars } : b)) };
+  const themed = effectiveThemeVars(getTheme(comp.theme), comp.palette);
+  const neutral = effectiveThemeVars(getTheme('general'));
+  return { ...comp, blocks: comp.blocks.map((b) => (missing(b) ? { ...b, vars: isPresetComponent(b) ? neutral : themed } : b)) };
 }
 
 /* ============================ Block factory ============================ */

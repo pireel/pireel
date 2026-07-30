@@ -240,9 +240,12 @@ export function useElementOps(deps: ElementOpsDeps) {
         : { x: win.x + geom.box.x * win.w, y: win.y + geom.box.y * win.h, w: geom.box.w * win.w, h: geom.box.h * win.h };
     }
     // Independence baking: theme components carry data-hf-baked (theme tokens travel with them); other components snapshot
-    // the current theme's tokens into the block scope here — swapping themes / editing other components after insert doesn't affect it (user-defined independence semantics)
+    // tokens into the block scope here — swapping themes / editing other components after insert doesn't affect it (user-defined
+    // independence semantics). Preset-library elements bake the NEUTRAL general tokens (presets are themeless by decree — they
+    // land exactly as their library card shows); AI-generated elements bake the project's current theme+palette they were made under.
     if (!geom.innerHtml.includes('data-hf-baked')) {
-      geom.innerHtml += `\n<style data-hf-baked>#${el.seedId}{${themeVarsCss(getTheme(compRef.current.theme), compRef.current.palette)}}</style>`;
+      const bakeVars = el.presetId ? themeVarsCss(getTheme('general')) : themeVarsCss(getTheme(compRef.current.theme), compRef.current.palette);
+      geom.innerHtml += `\n<style data-hf-baked>#${el.seedId}{${bakeVars}}</style>`;
     }
     const targetId = elementTargetRef.current;
     const tb = targetId ? compRef.current.blocks.find((b) => b.id === targetId) : null;

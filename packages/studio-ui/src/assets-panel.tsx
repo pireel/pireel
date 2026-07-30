@@ -329,6 +329,10 @@ export function AssetsPanel({
   // is unaffected by the project theme or other elements (independence).
   // Kit components: the abstraction of the theme elements — insert = a props-driven block
   // (templateId 'kit:*'), preview = a defaults+sample render with the general theme baked.
+  // INVARIANT (user decree): preset components are THEMELESS. This neutral preview IS the final
+  // look — insertion freezes the same neutral tokens (freezeBlockVars), the project palette never
+  // touches them. Do NOT "fix" the preview to follow the project theme; themes meet components
+  // only as LLM references during generation.
   const kitGroup = useMemo(() => {
     const vars = themeVarsCss(getTheme('general'));
     return {
