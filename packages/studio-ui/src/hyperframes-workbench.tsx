@@ -389,8 +389,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
   // space; unpinned = floating overlay above the canvas, the stage keeps full width). Both persist.
   const [railW, setRailW] = useState(() => {
-    const v = typeof window !== 'undefined' ? Number(window.localStorage.getItem('studio-rail-w')) : 0;
-    return Number.isFinite(v) && v >= 260 && v <= 560 ? v : 320;
+    if (typeof window === 'undefined') return 320;
+    const v = Number(window.localStorage.getItem('studio-rail-w'));
+    if (Number.isFinite(v) && v >= 260 && v <= 786) return v;
+    // No stored width → derive from the screen: fit a whole number of fixed 120px asset-card
+    // columns (~22vw budget, 2–6 cols) so the grid lands flush with no leftover strip.
+    // 130 = card 120 + gap 10; 16 = the grid's p-2 content padding.
+    const cols = Math.max(2, Math.min(6, Math.floor((window.innerWidth * 0.22 - 6) / 130)));
+    return 16 + cols * 120 + (cols - 1) * 10;
   });
   const [railPinned, setRailPinned] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem('studio-rail-pin') !== '0' : true));
   useEffect(() => {
@@ -4358,7 +4364,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           className={`border-line flex shrink-0 flex-col border-l ${libCollapsed ? 'hidden' : ''} ${railPinned ? 'relative' : 'bg-bg absolute inset-y-0 right-0 z-40 shadow-2xl'}`}
           style={libCollapsed ? undefined : { width: railW }}
         >
-          {/* Drag the left edge to resize (260–560, persisted) */}
+          {/* Drag the left edge to resize (260–786 = up to six 120px card columns flush, persisted) */}
           <div
             onPointerDown={(e) => {
               e.preventDefault();
@@ -4368,7 +4374,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               let last: PointerEvent | null = null;
               const flush = () => {
                 raf = 0;
-                if (last) setRailW(Math.max(260, Math.min(560, w0 + (sx - last.clientX))));
+                if (last) setRailW(Math.max(260, Math.min(786, w0 + (sx - last.clientX))));
               };
               const mv = (ev: PointerEvent) => {
                 if (ev.buttons === 0) {

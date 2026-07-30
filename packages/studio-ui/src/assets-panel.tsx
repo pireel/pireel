@@ -390,12 +390,12 @@ export function AssetsPanel({
   };
   const insertLabel = (it: LibraryItem) => (it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert'));
 
-  /** Grid card (shared by masonry / category overview / category detail): click to preview, draggable, hover to insert/delete. */
+  /** Grid card (shared by the grid / category overview / category detail): 120×68-base thumb, click to preview, draggable, hover shows insert (+) / delete. */
   const gridCard = (it: LibraryItem) => {
     const audio = it.kind === 'audio';
     const playing = audio && audioPlaying === it.insertUrl;
     return (
-      <div key={it.id} className="border-line hover:border-accent group relative mb-1.5 inline-block w-full break-inside-avoid overflow-hidden rounded-md border align-top transition">
+      <div key={it.id} className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border transition">
         <button
           type="button"
           title={audio ? it.label : t('panels.previewLabelDragOnto', { label: it.label })}
@@ -408,38 +408,33 @@ export function AssetsPanel({
           {it.kind === 'element' ? (
             <ElementTile item={it} comp={it.origin === 'preset' ? presetPreviewComp : comp} />
           ) : audio ? (
-            <AudioTile playing={playing} />
+            <AudioTile playing={playing} url={it.insertUrl} />
           ) : (
             <TileThumb item={it} />
           )}
-          <div className="text-ink-3 truncate px-1.5 py-1 text-[10px]">{it.label}</div>
+          <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{it.label}</div>
         </button>
-        {/* Origin badge: only where it disambiguates. Elements live under their own section heading,
-            so a label on every card was pure noise. */}
-        {it.kind !== 'element' && (
-          <span className="pointer-events-none absolute left-1 top-1 flex items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] text-white">
-            {kindIcon(it)}
-            {originLabel(it)}
-          </span>
-        )}
+        {/* Hover chrome sits inside the thumb area (label strip is h-6 below): delete top-left, insert "+" bottom-right.
+            Video/audio keep the top-right corner for the duration badge (rendered by the tile itself). */}
         {it.deletable && (
           <button
             type="button"
             title={t('panels.deleteAsset')}
             aria-label={t('panels.deleteAsset')}
             onClick={() => void doDelete(it)}
-            className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
+            className="absolute left-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
           >
             <Trash2 size={11} />
           </button>
         )}
         <button
           type="button"
-          title={audio ? t('panels.useAsBgm') : t('panels.insertOntoCanvas')}
+          title={insertLabel(it)}
+          aria-label={insertLabel(it)}
           onClick={() => insertOf(it)}
-          className="bg-accent absolute bottom-1 right-1 hidden items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
+          className="bg-accent absolute bottom-7 right-1 hidden h-5 w-5 items-center justify-center rounded text-white group-hover:inline-flex"
         >
-          <Plus size={9} /> {insertLabel(it)}
+          <Plus size={12} />
         </button>
       </div>
     );
@@ -674,9 +669,10 @@ export function AssetsPanel({
               t('panels.noMatchingAssetsTry')
             )}
           </div>
-        ) : kind === 'element' && !q.trim() ? (
+        ) : kind === 'element' && !q.trim() && view === 'grid' ? (
           // Elements laid out flat: "Mine" then the component library, every card visible — the
           // library is small enough to browse in one pass, and a click-through level only hid it.
+          // List view falls through to the shared row list below (kit items are already in `shown`).
           <div className="space-y-3.5">
             {[{ id: 'mine', title: t('common.mine'), items: mineItems }, kitGroup].map((g) => (
               <section key={g.id}>
@@ -689,15 +685,15 @@ export function AssetsPanel({
                     {t('panels.selectElementCanvasSave')}
                   </div>
                 ) : (
-                  <div className="columns-2 gap-1.5">{g.items.map(gridCard)}</div>
+                  <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">{g.items.map(gridCard)}</div>
                 )}
               </section>
             ))}
           </div>
         ) : view === 'grid' ? (
-          // Masonry: CSS columns, cards laid out by true aspect ratio, two staggered columns.
-          // Audio rides along as a fixed-ratio card (same card chrome, play/pause tile instead of a thumbnail).
-          <div className="columns-2 gap-1.5">{shown.map(gridCard)}</div>
+          // Uniform grid: fixed 120×68 cards (the rail's DEFAULT width is computed to fit whole
+          // columns); thumbnails letterbox non-16:9 media centered and fully visible.
+          <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">{shown.map(gridCard)}</div>
         ) : (
           <div className="divide-line divide-y">
             {shown.map((it) => (
@@ -893,7 +889,7 @@ function AssetLightbox({
 }
 
 /** Element card live preview: same render as the gen panel (freeze on the stable frame after entrance, loops only on hover).
- *  Column width follows masonry (~145px); feed the measured container width to BlockPreviewFrame to avoid horizontal overflow. */
+ *  Cards are a fixed 120×68, so the tile is hard-sized to match (no responsive measuring). */
 function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
   const el = item.element!;
   // Static HTML output: no GSAP (from-animations don't apply = frozen end state), zero iframe,
@@ -902,8 +898,8 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
   // to scale and center the piece in the card.
   const holderRef = useRef<HTMLDivElement | null>(null);
   const [fit, setFit] = useState<{ scale: number; dx: number; dy: number } | null>(null);
-  const TILE_W = 144;
-  const TILE_H = Math.round((144 * 9) / 16);
+  const TILE_W = 120;
+  const TILE_H = 68;
   useEffect(() => {
     const holder = holderRef.current;
     if (!holder) return;
@@ -936,7 +932,6 @@ function ElementTile({ item, comp }: { item: LibraryItem; comp: Composition }) {
     const bh = y1 - y0 + pad * 2;
     const scale = Math.min((TILE_W * 0.9) / bw, (TILE_H * 0.9) / bh);
     setFit({ scale, dx: TILE_W / 2 - (bx + bw / 2) * scale, dy: TILE_H / 2 - (by + bh / 2) * scale });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item.id]);
   return (
     <div className="w-full overflow-hidden">
@@ -999,61 +994,84 @@ function LightboxElement({ item, comp }: { item: LibraryItem; comp: Composition 
   return <BlockPreviewFrame comp={pc} block={previewBlock} width={width} animate />;
 }
 
-/** Masonry thumbnail: laid out at true aspect ratio (no crop); generated video has no extracted frame → <video> metadata first frame fills in. */
+const fmtDur = (s: number) => {
+  const v = Math.round(s);
+  return `${Math.floor(v / 60)}:${String(v % 60).padStart(2, '0')}`;
+};
+
+/** Duration chip in the thumb's top-right corner (video/audio). The API stores no duration, so
+ *  it arrives from client-side metadata and stays hidden until known. */
+function DurBadge({ sec }: { sec: number | null }) {
+  if (sec == null || !Number.isFinite(sec) || sec <= 0) return null;
+  return (
+    <span className="pointer-events-none absolute right-1 top-1 rounded bg-black/55 px-1 py-0.5 text-[9px] tabular-nums text-white">{fmtDur(sec)}</span>
+  );
+}
+
+/** Grid thumbnail: uniform 120×68 16:9 slot; non-16:9 media is letterboxed — centered and fully
+ *  visible (object-contain), never cropped. Generated video has no extracted frame → <video> metadata first frame fills in. */
 function TileThumb({ item: it }: { item: LibraryItem }) {
-  const ar = arOf(it);
+  if (it.kind === 'video') {
+    return <VideoTile item={it} />;
+  }
   if (it.thumbSrc) {
     return (
-      <img
-        src={imageThumb(it.thumbSrc, 'strip')}
-        alt={it.label}
-        style={ar ? { aspectRatio: ar } : undefined}
-        className="block w-full object-cover"
-        loading="lazy"
-      />
+      <div className="bg-panel-2 aspect-video w-full overflow-hidden">
+        <img src={imageThumb(it.thumbSrc, 'strip')} alt={it.label} className="h-full w-full object-contain" loading="lazy" />
+      </div>
     );
   }
-  if (it.kind === 'video') {
-    return <VideoTile item={it} ar={ar} />;
-  }
   return (
-    <div className="bg-panel-2 flex items-center justify-center" style={{ aspectRatio: ar ?? 16 / 9 }}>
+    <div className="bg-panel-2 flex aspect-video items-center justify-center">
       <ImageIcon size={20} className="text-ink-4" />
     </div>
   );
 }
 
-/** Audio masonry tile: audio has no picture, so it takes a fixed 16:9 slot (keeps the two columns even)
- *  with the play/pause state as the whole subject. */
-function AudioTile({ playing }: { playing: boolean }) {
+/** Video tile: poster frame (or metadata first frame) letterboxed in the 16:9 slot + duration badge.
+ *  Even when a poster image exists, a metadata-only <video> is the duration source. */
+function VideoTile({ item: it }: { item: LibraryItem }) {
+  const [dur, setDur] = useState<number | null>(null);
   return (
-    <div className="bg-panel-2 flex items-center justify-center" style={{ aspectRatio: 16 / 9 }}>
-      <span className={`flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : 'bg-panel text-ink-3'}`}>
-        {playing ? <Pause size={13} /> : <Play size={13} />}
-      </span>
+    <div className="bg-panel-2 relative aspect-video w-full overflow-hidden">
+      {it.thumbSrc ? (
+        <img src={imageThumb(it.thumbSrc, 'strip')} alt={it.label} className="h-full w-full object-contain" loading="lazy" />
+      ) : null}
+      <video
+        src={it.insertUrl}
+        preload="metadata"
+        muted
+        playsInline
+        onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
+        className={it.thumbSrc ? 'hidden' : 'h-full w-full object-contain'}
+      />
+      <DurBadge sec={dur} />
     </div>
   );
 }
 
-/** Video masonry card: laid out at true ratio like images (no crop). For entries stored without dims
- *  (generated video / old uploads) → pin the ratio from videoWidth/Height once metadata arrives (vertical
- *  videos no longer hard-cropped to 16:9); before that, 16:9 placeholder with one small jump on arrival
- *  (preload=metadata is fast, acceptable). */
-function VideoTile({ item: it, ar }: { item: LibraryItem; ar: number | undefined }) {
-  const [metaAr, setMetaAr] = useState<number | null>(null);
+/** Audio grid tile: audio has no picture, so it takes the same 16:9 slot with the play/pause state
+ *  as the whole subject; duration is read from an off-DOM metadata-only Audio element. */
+function AudioTile({ playing, url }: { playing: boolean; url?: string }) {
+  const [dur, setDur] = useState<number | null>(null);
+  useEffect(() => {
+    if (!url) return;
+    const a = new Audio();
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => setDur(a.duration);
+    a.src = url;
+    return () => {
+      a.onloadedmetadata = null;
+      a.removeAttribute('src');
+    };
+  }, [url]);
   return (
-    <video
-      src={it.insertUrl}
-      preload="metadata"
-      muted
-      playsInline
-      onLoadedMetadata={(e) => {
-        const v = e.currentTarget;
-        if (!ar && v.videoWidth > 0 && v.videoHeight > 0) setMetaAr(v.videoWidth / v.videoHeight);
-      }}
-      className="block w-full object-cover"
-      style={{ aspectRatio: ar ?? metaAr ?? 16 / 9 }}
-    />
+    <div className="bg-panel-2 relative flex aspect-video items-center justify-center">
+      <span className={`flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : 'bg-panel text-ink-3'}`}>
+        {playing ? <Pause size={13} /> : <Play size={13} />}
+      </span>
+      <DurBadge sec={dur} />
+    </div>
   );
 }
 
