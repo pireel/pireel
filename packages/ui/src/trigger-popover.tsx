@@ -180,19 +180,33 @@ function TriggerPopoverImpl<T>(
     [tabs, onClose],
   );
 
-  /** Open-time highlight: land on the caller's currently-selected item (initialActiveKey) and center it,
-   *  so a long list (e.g. the theme catalog) opens at the selection instead of the top. Falls back to 0. */
+  /** Open-time highlight: land on the caller's currently-selected item (initialActiveKey), so a long
+   *  list (e.g. the theme catalog) opens at the selection instead of the top. Falls back to 0. The
+   *  matching scroll happens pre-paint in the open-centering layout effect below. */
   const applyInitialActive = useCallback(() => {
     const idx = initialActiveKey ? items.findIndex((it) => itemKey(it) === initialActiveKey) : -1;
     setActiveIdx(idx >= 0 ? idx : 0);
-    if (idx > 0) {
-      // After the popover paints: scroll the highlighted row to the middle of the list viewport
-      setTimeout(() => {
-        const active = popoverRef.current?.querySelector('[data-trigger-list] [data-active]') as HTMLElement | null;
-        active?.scrollIntoView({ block: 'center' });
-      }, 0);
-    }
   }, [initialActiveKey, items, itemKey]);
+
+  // Pre-paint centering on open: scroll the highlighted row to the middle of the list BEFORE the first
+  // paint, so the popover appears already positioned (scrolling after paint reads as a visible jump).
+  // Touches only the list's own scrollTop — scrollIntoView would also scroll ancestors (the chat thread
+  // behind a non-portaled popover) and judder the page.
+  const openedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!anchor) {
+      openedRef.current = false;
+      return;
+    }
+    if (openedRef.current) return; // only on the open transition, not on later filter/hover renders
+    openedRef.current = true;
+    const list = popoverRef.current?.querySelector('[data-trigger-list]') as HTMLElement | null;
+    const active = list?.querySelector('[data-active]') as HTMLElement | null;
+    if (!list || !active) return;
+    const lr = list.getBoundingClientRect();
+    const ar = active.getBoundingClientRect();
+    list.scrollTop += ar.top - lr.top - (lr.height - ar.height) / 2;
+  }, [anchor]);
 
   /** Search backward from the caret for the nearest trigger char, returning the query between it and the caret.
    *  Returns null = "should close the popover" — trigger isn't in the current text node / contains a space / is broken up by other chars. */
