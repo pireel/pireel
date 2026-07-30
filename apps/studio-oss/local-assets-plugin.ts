@@ -120,10 +120,12 @@ export function localAssets(): Plugin {
     {
       const del = /^\/api\/me\/uploads\/([^/?]+)$/.exec(url.split('?')[0]!);
       if (del && req.method === 'DELETE') {
-        void readIndex().then(async (rows) => {
-          await writeIndex(rows.filter((r) => r.id !== decodeURIComponent(del[1]!)));
-          json(res, { ok: true }); // 只删记录不删字节(内容寻址可能被多处引用)
-        });
+        void readIndex()
+          .then(async (rows) => {
+            await writeIndex(rows.filter((r) => r.id !== decodeURIComponent(del[1]!)));
+            json(res, { ok: true }); // 只删记录不删字节(内容寻址可能被多处引用)
+          })
+          .catch(() => json(res, { error: 'delete_failed' }, 500));
         return;
       }
     }

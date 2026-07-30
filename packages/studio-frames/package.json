@@ -7,6 +7,7 @@
   "license": "AGPL-3.0-only",
   "exports": {
     "./locales": "./src/locales/index.ts",
+    "./overlay-elements": "./src/overlay-elements/index.ts",
     "./*": "./src/*.ts"
   },
   "sideEffects": false,

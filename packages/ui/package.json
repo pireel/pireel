@@ -7,7 +7,10 @@
   "license": "MIT",
   "exports": {
     "./theme.css": "./src/theme.css",
-    "./*": "./src/*.ts",
+    "./cn": "./src/cn.ts",
+    "./image-url": "./src/image-url.ts",
+    "./use-quote": "./src/use-quote.ts",
+    "./*": "./src/*.tsx",
     "./ai-elements/*": "./src/ai-elements/*.tsx"
   },
   "sideEffects": false,
