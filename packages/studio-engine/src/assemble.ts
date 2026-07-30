@@ -3,7 +3,7 @@
  * Depends on the template registry being ready — always go through the './composition' barrel externally (it imports './templates' first).
  */
 
-import { getTheme, themeVarsCss } from './theme';
+import { getTheme, themeVarsCss, varsDeclCss } from './theme';
 import { editedDuration } from './trim';
 import {
   type Block,
@@ -448,6 +448,11 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
       `data-width="${W}" data-height="${H}"`;
+    // Frozen look (Block.vars): the block's insertion-time tokens, scoped to it, override #root's live
+    // theme vars — a later theme mount recolors #root (and future blocks) but never this one. Emitted
+    // inside the container so the in-place patch channel (hf:blockAdd/hf:blockHtml) carries it too.
+    // The user's explicit bg/border stay on inline style, which beats this rule.
+    const varsTag = b.vars ? `<style>#${b.id}{${varsDeclCss(b.vars)}}</style>\n` : '';
     let html: string;
     if (b.box) {
       // box block = two layers: the container is the crop window (overflow:hidden, dragging edges/corners only moves the window), the content layer
@@ -457,14 +462,14 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
       const pos = `left:${pct(b.box.x)};top:${pct(b.box.y)};width:${pct(b.box.w)};height:${pct(b.box.h)};`;
       const rel = `left:${pct((cb.x - b.box.x) / b.box.w)};top:${pct((cb.y - b.box.y) / b.box.h)};width:${pct(cb.w / b.box.w)};height:${pct(cb.h / b.box.h)};`;
       html =
-        `<div class="comp" ${attrs} style="position:absolute;${pos}overflow:hidden;${frame.join('')}">\n` +
+        `<div class="comp" ${attrs} style="position:absolute;${pos}overflow:hidden;${frame.join('')}">\n${varsTag}` +
         `<div data-hf-content style="position:absolute;${rel}${bgCss}${scaleCss}${fit}">\n${innerHtml}\n</div>\n</div>`;
     } else {
       // Full-canvas block (caption layer, etc.): a single flat layer, no crop/scale semantics.
       // The sentence-caption container doesn't take clicks (pointer-events:none, .cap-line is auto): the container is inset:0 spanning
       // the whole canvas, and if it took clicks, clicking any blank area while captions are on-screen would hit it — "click blank to select a shot" would break entirely
       const pe = isSentenceCaption(b) ? 'pointer-events:none;' : '';
-      html = `<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${innerHtml}\n</div>`;
+      html = `<div class="comp" ${attrs} style="position:absolute;inset:0;${pe}${bgCss}${frame.join('')}${scaleCss}${fit}">\n${varsTag}${innerHtml}\n</div>`;
     }
     return { html, timelineBody };
 }

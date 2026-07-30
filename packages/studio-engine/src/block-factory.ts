@@ -6,6 +6,7 @@
 
 import {
   type Block,
+  type Composition,
   type FxWord,
   type NormBox,
   type Slots,
@@ -13,7 +14,28 @@ import {
   getTemplate,
   span2,
 } from './composition-core';
+import { effectiveThemeVars, getTheme } from './theme';
 import { t } from './i18n';
+
+/* ============================ Frozen look (Block.vars) ============================ */
+
+/** Block kinds whose look freezes at insertion. Captions follow the global caption style,
+ *  transitions are legacy render-only, media has no themed chrome — those keep tracking #root. */
+const UNFROZEN_TEMPLATES = new Set(['caption', 'transition', 'media']);
+export const blockFreezesVars = (templateId: string): boolean => !UNFROZEN_TEMPLATES.has(templateId);
+
+/** Insertion-time look freeze: stamp the composition's CURRENT effective tokens onto every eligible
+ *  block that doesn't carry them yet (see Block.vars). Idempotent, and returns the SAME reference
+ *  when there is nothing to stamp — safe to run on every write. Both write funnels call this
+ *  (workbench setComp on the client, runServerTool offline), so a block acquires its frozen look the
+ *  moment it enters a composition: at insertion for new blocks, at first contact for legacy data —
+ *  in both cases with the palette it is currently rendered under, i.e. zero visual change. */
+export function freezeBlockVars(comp: Composition): Composition {
+  const missing = (b: Block) => !b.vars && blockFreezesVars(b.templateId);
+  if (!comp.blocks.some(missing)) return comp;
+  const vars = effectiveThemeVars(getTheme(comp.theme), comp.palette);
+  return { ...comp, blocks: comp.blocks.map((b) => (missing(b) ? { ...b, vars } : b)) };
+}
 
 /* ============================ Block factory ============================ */
 

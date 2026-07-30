@@ -69,6 +69,7 @@ import {
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
   cutTransitions,
+  freezeBlockVars,
   splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
@@ -170,7 +171,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // compRef is always current so a later write doesn't clobber an earlier one.
   const compRef = useRef<Composition>(starter);
   const setComp = useCallback((action: React.SetStateAction<Composition>) => {
-    const next = typeof action === 'function' ? (action as (c: Composition) => Composition)(compRef.current) : action;
+    // freezeBlockVars: every block entering the composition gets its current effective tokens stamped
+    // on (insertion-time look freeze — later theme mounts restyle only new blocks). Single client
+    // funnel: agent tools, panels, pipelines and cloud loads all pass through here. No-op (same ref)
+    // once everything is stamped.
+    const next = freezeBlockVars(typeof action === 'function' ? (action as (c: Composition) => Composition)(compRef.current) : action);
     compRef.current = next;
     _setComp(next);
   }, []);

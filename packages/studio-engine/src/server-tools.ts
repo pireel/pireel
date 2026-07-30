@@ -43,6 +43,7 @@ import {
   blockKind,
   compReceiptDelta,
   freeTrack,
+  freezeBlockVars,
   getCaptionPreset,
   isCaptionsOn,
   isSentenceCaption,
@@ -226,6 +227,9 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
     const delta = compReceiptDelta(p.comp, out.comp);
     if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
   }
+  // Insertion-time look freeze — the offline twin of the workbench setComp funnel (see freezeBlockVars):
+  // blocks added or first touched here get the current effective tokens stamped on before persisting.
+  if (out.comp) out.comp = freezeBlockVars(out.comp);
   return out;
 }
 
