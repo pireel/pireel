@@ -7,8 +7,8 @@
  * or from providers you inject here.
  *
  * To wire your own backend, replace `unavailableProviders()` with a StudioProviders
- * implementation — see `StudioProviders` in @pireel/studio-engine/providers for the
- * five capability contracts (composer / planner / transcriber / vault / projects).
+ * implementation; see `StudioProviders` in @pireel/studio-engine/providers for the
+ * six capability contracts (composer / planner / transcriber / vault / projects / uploads).
  */
 
 import { setStudioProviders, unavailableProviders } from '@pireel/studio-engine/providers';
@@ -49,6 +49,7 @@ setFrameCatalogSource(async () =>
       iconKey: null, // cover art lives on the hosted CDN; the emoji fallback keeps this shell self-contained
       showcase: f.showcase,
       palette: f.palette ?? null,
+      personFx: f.personFx ?? null,
     };
   }),
 );
