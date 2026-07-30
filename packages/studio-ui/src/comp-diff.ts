@@ -6,8 +6,10 @@
 
 import type { Block, Composition } from '@pireel/studio-engine/composition';
 
-/** Only the theme-mount surface (frameId/palette) changed: skip the rebuild — already-inserted components have their
- *  tokens fully baked and independent, so the stage shouldn't fully refresh on a theme swap (per user); the new palette takes effect on the next natural rebuild (stage background / AI generation). */
+/** Only the theme-mount surface (frameId/palette) changed: skip the rebuild and hot-patch #root's vars.
+ *  Already-inserted components carry their frozen insertion-time tokens (Block.vars, #id-scoped above
+ *  #root), so a theme swap genuinely never restyles them — on this fast path AND on every later rebuild.
+ *  Only the stage background and future generations pick up the new palette. */
 export function themeMountOnlyChange(a: Composition | null, b: Composition): boolean {
   if (!a) return false;
   if (Object.is(a.palette, b.palette) && Object.is(a.frameId, b.frameId)) return false;

@@ -77,6 +77,14 @@ export interface Block {
   /** Block-level override relative to the person-matte layer: 'front' = above the person, 'behind' = under the person.
    *  Default = follow global personFx.personFront (with person-on-top, all blocks go behind the person). No-op when matte pipeline is off. */
   personLayer?: 'front' | 'behind';
+  /** Frozen design tokens (the FULL effective set — theme defaults + palette — stamped at insertion):
+   *  the block keeps the look it was created under, so mounting a different theme later restyles only
+   *  NEW blocks, never this one (one video can mix themes across its sections). Rendered as a
+   *  #blockId-scoped override above #root's live tokens; the user's explicit bg/border still win
+   *  (inline style beats the scoped rule). Absent only on legacy data in flight — both write funnels
+   *  (workbench setComp / offline runServerTool) stamp it on contact via freezeBlockVars. Captions,
+   *  transitions and media blocks stay unstamped: they follow global styling by design. */
+  vars?: Record<string, string>;
   /** User-facing label. */
   label?: string;
 }

@@ -86,21 +86,33 @@ function withAlpha(color: string, alphaHex: string): string {
   return color;
 }
 
-/** Theme vars (+ optional derived override) → declaration string injected onto
- *  #root. Derived comes last, overriding defaults. Card colors (panel/panel-2)
+/** Merged effective vars (theme defaults + derived/frame palette layered on top) — the live #root
+ *  token set, and the exact value set a block freezes at insertion (Block.vars). */
+export function effectiveThemeVars(theme: Theme, palette?: Record<string, string>): Record<string, string> {
+  return { ...theme.vars, ...(palette ?? {}) };
+}
+
+/** One vars map → CSS custom-property declaration string. Card colors (panel/panel-2)
  *  get a uniform 90% opacity: components sit over the video, and a fully-opaque
  *  card blots out the footage (user's call: all theme backgrounds carry alpha by
  *  default). paper is left alone — it's both the canvas base and, in some
  *  dialects, the reversed-out text color (color:var(--paper)); adding alpha would
- *  wash the text out. */
-export function themeVarsCss(theme: Theme, palette?: Record<string, string>): string {
-  const all = { ...theme.vars, ...(palette ?? {}) };
+ *  wash the text out. Shared by the #root injection and per-block frozen-vars scopes,
+ *  so a freshly frozen block is byte-identical to what #root was serving it. */
+export function varsDeclCss(vars: Record<string, string>): string {
+  const all = { ...vars };
   for (const k of ['panel', 'panel-2']) {
     if (all[k]) all[k] = withAlpha(all[k], 'e6');
   }
   return Object.entries(all)
     .map(([k, v]) => `--${k}: ${v};`)
     .join(' ');
+}
+
+/** Theme vars (+ optional derived override) → declaration string injected onto
+ *  #root. Derived comes last, overriding defaults. */
+export function themeVarsCss(theme: Theme, palette?: Record<string, string>): string {
+  return varsDeclCss(effectiveThemeVars(theme, palette));
 }
 
 /** Theme → full brief for the LLM: brief (structural constraints) + an
