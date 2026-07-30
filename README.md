@@ -4,7 +4,7 @@
 
 **An open-source, backend-free AI video editor for talking-head video.**
 
-[English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 Import a clip and the canvas follows your footage — editing, storyboarding,
 designed graphics, kinetic captions, themes, live preview, timeline and export
