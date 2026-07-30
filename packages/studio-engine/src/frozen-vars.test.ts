@@ -34,6 +34,17 @@ describe('freezeBlockVars (stamping funnel)', () => {
     expect(themed.blocks[0]!.vars!.accent).toBe('#111111');
   });
 
+  it('preset components are themeless: kit instances and preset-library elements freeze at the NEUTRAL general tokens, never the project palette', () => {
+    const kit = { id: 'k1', templateId: 'kit:metric', slots: { props: {} }, startSec: 0, durationSec: 3, trackIndex: 2 };
+    const preset = { id: 'p1', templateId: 'custom', slots: { innerHtml: '<div></div>', timelineBody: '', presetId: 'pe_num' }, startSec: 0, durationSec: 3, trackIndex: 2 };
+    const c = freezeBlockVars(comp({ blocks: [kit, preset, cst()], palette: { accent: '#123456', paper: '#000000' } }));
+    for (const b of [c.blocks[0]!, c.blocks[1]!]) {
+      expect(b.vars).toEqual(effectiveThemeVars(GENERAL_THEME)); // neutral — library card look
+      expect(b.vars!.accent).toBe(GENERAL_THEME.vars.accent);
+    }
+    expect(c.blocks[2]!.vars!.accent).toBe('#123456'); // non-preset custom block still freezes the project palette
+  });
+
   it('skips captions/transitions/media (they follow global styling), and is a same-reference no-op when clean', () => {
     expect(blockFreezesVars('caption')).toBe(false);
     expect(blockFreezesVars('transition')).toBe(false);
