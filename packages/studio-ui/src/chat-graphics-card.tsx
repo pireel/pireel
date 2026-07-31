@@ -35,7 +35,13 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
   const single = (v: unknown) => (typeof v === 'string' && v ? [deAt(v)] : null);
   // Batch tools carry ids in the receipt/progress; single-component tools (edit/duplicate/add) name
   // their target in the input — the chain covers both from the moment the call starts.
-  const ids = arr(outData?.blocks) ?? single(outData?.blockId) ?? prog?.blockIds ?? arr(inp?.blockIds) ?? single(inp?.blockId) ?? [];
+  const resolved = arr(outData?.blocks) ?? single(outData?.blockId) ?? prog?.blockIds ?? arr(inp?.blockIds) ?? single(inp?.blockId) ?? [];
+  // Sticky: at completion there is a frame where progress is already cleared but the receipt hasn't
+  // applied yet — without this the ids collapse to empty and the strip flickers to nothing (the
+  // "gone until refresh" report). A batch's ids never change once known, so remembering them is safe.
+  const stickyRef = useRef<string[]>([]);
+  if (resolved.length) stickyRef.current = resolved;
+  const ids = resolved.length ? resolved : stickyRef.current;
   const comp = getComp();
   const blocks = ids.flatMap((id) => {
     const b = comp.blocks.find((x) => x.id === id);
