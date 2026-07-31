@@ -720,6 +720,45 @@ export function isSentenceCaption(block: Block): boolean {
   return blockKind(block) === 'caption' && !block.box;
 }
 
+/** One same-window box collision the lay_out/add_graphics receipts surface to the agent. */
+export interface BlockOverlapWarning {
+  a: string;
+  b: string;
+  /** Midpoint of the shared time window (edited seconds) — where to look / re-review. */
+  atSec: number;
+  /** Intersection area over the SMALLER box's area (0..1) — 0.5 = half the smaller card is covered. */
+  coverage: number;
+}
+
+/** Deterministic same-window overlap check, reported in the lay_out / add_graphics receipts.
+ *  The agent's visual review samples atSecs it picks itself, so a colliding pair in an
+ *  unsampled window ships silently (real incident: two closing cards stacked at the tail) —
+ *  this closes that hole with zero LLM cost. Pairs of boxed overlay blocks (captions follow
+ *  the global layer and transitions are render-only — both skipped) whose time windows share
+ *  ≥0.3s while one box covers ≥25% of the smaller one. Capped at 8 rows. */
+export function blockOverlapWarnings(blocks: Block[]): BlockOverlapWarning[] {
+  const boxed = blocks.filter((b) => b.box && !isSentenceCaption(b) && b.templateId !== 'transition');
+  const out: BlockOverlapWarning[] = [];
+  for (let i = 0; i < boxed.length && out.length < 8; i++) {
+    for (let j = i + 1; j < boxed.length && out.length < 8; j++) {
+      const A = boxed[i]!;
+      const B = boxed[j]!;
+      const t0 = Math.max(A.startSec, B.startSec);
+      const t1 = Math.min(A.startSec + A.durationSec, B.startSec + B.durationSec);
+      if (t1 - t0 < 0.3) continue;
+      const a = A.box!;
+      const b = B.box!;
+      const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      if (w <= 0 || h <= 0) continue;
+      const coverage = (w * h) / Math.max(1e-6, Math.min(a.w * a.h, b.w * b.h));
+      if (coverage < 0.25) continue;
+      out.push({ a: A.id, b: B.id, atSec: Math.round(((t0 + t1) / 2) * 10) / 10, coverage: Math.round(coverage * 100) / 100 });
+    }
+  }
+  return out;
+}
+
 /* ============================ Agent screen placement (place_block) ============================ */
 
 /** Canvas regions the agent can snap a block into (3×3 grid, safe margin). */

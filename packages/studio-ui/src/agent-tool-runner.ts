@@ -35,6 +35,7 @@ import {
   renderBlock,
   resolveCaptionStyle,
   shotFilterCss,
+  blockOverlapWarnings,
   shotId,
   splitAudioClipAt,
   splitBlockedByTransition,
@@ -341,6 +342,9 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               setSelectedShotId(null);
               applyT(0);
               const slots = draft.blocks.filter(isPlaceholder).length;
+              // Deterministic collision receipt: the visual review samples only the atSecs the agent
+              // picks, so a colliding pair in an unsampled window ships silently — report it as data.
+              const overlaps = blockOverlapWarnings(draft.blocks);
               // Don't resend the situation snapshot within the round: the new structure's ids come with the receipt, so later add_graphics/focus can target precisely
               return {
                 ok: true,
@@ -350,6 +354,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 data: {
                   shots: (draft.shots ?? []).map((s, i) => ({ id: s.id, index: i + 1, srcStart: s.srcStart, srcEnd: s.srcEnd, treatment: s.treatment })),
                   placeholderBlocks: draft.blocks.filter(isPlaceholder).map((b) => ({ id: b.id, label: b.label })),
+                  ...(overlaps.length ? { overlaps, overlapHint: 'these block pairs share a time window and their boxes collide — separate them (place_block) and re-review those atSecs' } : {}),
                 },
               };
             } finally {
@@ -448,12 +453,16 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               };
               await Promise.all(Array.from({ length: Math.min(CONCURRENCY, slots.length) }, worker));
               const okCount = slots.length - failed - skipped;
+              // Same deterministic collision receipt as lay_out (boxes can also collide when refilling
+              // into an already-busy composition) — computed on the final state after all fills landed.
+              const overlaps = blockOverlapWarnings(compRef.current.blocks);
               return {
                 ok: okCount > 0 || skipped > 0,
                 summary:
                   t('workbench.filledNDesignGraphics', { n: okCount }) +
                   (skipped ? t('workbench.nSlotsSkippedNothingToSay', { n: skipped }) : '') +
                   (failed ? t('workbench.nFailedPlaceholdersRemain', { n: failed }) : ''),
+                ...(overlaps.length ? { data: { overlaps, overlapHint: 'these block pairs share a time window and their boxes collide — separate them (place_block) and re-review those atSecs' } } : {}),
                 ...(okCount === 0 && skipped === 0 ? { error: t('workbench.allGraphicsFailedTry') } : {}),
               };
             } finally {

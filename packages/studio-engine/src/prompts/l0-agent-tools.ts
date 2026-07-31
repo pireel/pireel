@@ -286,10 +286,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "REVIEW the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures the composed frame at each atSec and reports REAL visual problems as data — overlays covering the speaker, blocks colliding, elements cut off at the edge, unreadable contrast, clutter. Call it after a batch of graphics lands (add_graphics / lay_out / theme change) with each new block's mid moment (max 6), then FIX what it reports (position → place_block, styling/contrast → edit_block) before wrapping up. Skip it for single small edits. Uses hosted vision (small fee per frame).",
+      "REVIEW the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures the composed frame at each atSec and reports REAL visual problems as data — overlays covering the speaker, blocks colliding, elements cut off at the edge, unreadable contrast, clutter. Call it after a batch of graphics lands (add_graphics / lay_out / theme change) with each new block's mid moment (max 6). Your atSecs MUST cover every moment where several overlay blocks are on screen together — concurrent blocks are where collisions happen, and an unsampled window ships unseen. Then FIX what it reports (position → place_block, styling/contrast → edit_block) before wrapping up. Skip it for single small edits. Uses hosted vision (small fee per frame).",
     inputSchema: obj(
       {
-        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline moments to review — typically each new block's midpoint (max 6)." },
+        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline moments to review — each new block's midpoint, and always any moment where multiple blocks share the screen (max 6)." },
       },
       ['atSecs'],
     ),
