@@ -27,6 +27,7 @@ export function BlockPreviewFrame({
   comp,
   block,
   width,
+  height,
   animate = false,
   replayKey,
   ground = 'checker',
@@ -36,6 +37,9 @@ export function BlockPreviewFrame({
   comp: Composition;
   block: Block;
   width: number;
+  /** Fixed card height; omitted = derived from the canvas aspect. With a fixed height the canvas
+   *  (or the focus piece) is contain-fit and centered — used by fixed-height cards like the chat preview. */
+  height?: number;
   /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
   ground?: 'stage' | 'checker';
   /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
@@ -88,11 +92,12 @@ export function BlockPreviewFrame({
   }, [block, docKey]);
   // In checker mode the component doesn't fill the cell: inset and centered so the checkerboard shows around it (filling would hide the "transparency is visible" cue)
   const inset = ground === 'checker' ? 0.86 : 1;
-  const h = Math.round(comp.height * (width / comp.width));
+  const h = height ?? Math.round(comp.height * (width / comp.width));
   // focus framing: pick scale from the piece's bounding box, align piece center to card center — list cards show the "piece itself", not the whole canvas
-  const scale = focus ? Math.min((width * inset) / focus.w, (h * inset) / focus.h) : (width / comp.width) * inset;
-  const padX = focus ? Math.round(width / 2 - (focus.x + focus.w / 2) * scale) : Math.round((width * (1 - inset)) / 2);
-  const padY = focus ? Math.round(h / 2 - (focus.y + focus.h / 2) * scale) : Math.round((h * (1 - inset)) / 2);
+  // (contain-fit min() reduces to the old width-driven scale when h is aspect-derived)
+  const scale = focus ? Math.min((width * inset) / focus.w, (h * inset) / focus.h) : Math.min(width / comp.width, h / comp.height) * inset;
+  const padX = focus ? Math.round(width / 2 - (focus.x + focus.w / 2) * scale) : Math.round((width - comp.width * scale) / 2);
+  const padY = focus ? Math.round(h / 2 - (focus.y + focus.h / 2) * scale) : Math.round((h - comp.height * scale) / 2);
   // The sandboxed iframe (opaque origin) can't reach __hfPreview, so hover play control goes through postMessage
   const setLoop = (on: boolean, once = false) => iframeRef.current?.contentWindow?.postMessage({ type: 'hf-loop', on, once }, '*');
   // Replay on demand. Skips the initial mount (the doc already opens on the stable frame) and

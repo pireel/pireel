@@ -30,6 +30,7 @@ import {
 import { X, Sparkles, MessageSquarePlus, History } from 'lucide-react';
 import type { UIMessage } from 'ai';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
+import type { Composition } from '@pireel/studio-engine/composition';
 import { useFrameCatalog } from './use-frame-catalog';
 import { mid } from './chat-format';
 import { ChatThread } from './chat-thread';
@@ -86,6 +87,9 @@ export interface StudioChatProps {
   getBody: () => Record<string, unknown>;
   /** Currently @-mentionable elements. */
   elements: StudioElementRef[];
+  /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
+   *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
+  getComp?: () => Composition;
   /** Session persistence key (per project: studio:chat:v1:<projectId>, sessions belong to a project). */
   storageKey: string;
   /** Fired after threads are written to localStorage (the workbench uses it to sync sessions to the cloud too). */
@@ -101,7 +105,7 @@ export interface StudioChatProps {
  *  props have stable identity (guaranteed on the workbench side: runTool via useStableCallbacks, getBody useCallback([]),
  *  elements memoized by content key). */
 export const StudioChat = memo(
-  forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat({ runTool, getBody, elements, onFrameApplied, storageKey, onThreadsChange, onClose }, ref) {
+  forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat({ runTool, getBody, elements, getComp, onFrameApplied, storageKey, onThreadsChange, onClose }, ref) {
   const [threads, setThreads] = useState<StoredThread[]>([]);
   const onThreadsChangeRef = useRef(onThreadsChange);
   onThreadsChangeRef.current = onThreadsChange;
@@ -232,6 +236,7 @@ export const StudioChat = memo(
         runTool={runTool}
         getBody={getBody}
         elements={elements}
+        getComp={getComp}
         onSnapshot={onSnapshot}
         handleRef={innerRef}
       />

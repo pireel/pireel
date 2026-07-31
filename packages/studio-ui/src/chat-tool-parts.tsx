@@ -5,8 +5,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
 import { STUDIO_TOOL_MAP, type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
+import type { Composition } from '@pireel/studio-engine/composition';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
+import { GraphicsPreviewBody } from './chat-graphics-card';
 import { t } from './i18n';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
@@ -96,7 +98,7 @@ function ToolBadge({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
  * running = spinner + elapsed/remaining + stage text (stream note > progress text > busyText) + progress bar
  * (with frac: determinate, ETA extrapolated by rate; without: indeterminate slider + historical EMA for ETA).
  */
-function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
+function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode }) {
   const st = toolStatus(part);
   const running = st.kind === 'running';
   const prog = useToolProgress(def.id);
@@ -160,6 +162,8 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
           {live?.text || (def.busyText ? t(def.busyText) : t('chatGen.running'))}
         </div>
       )}
+      {/* Tool-specific extra body (e.g. the add_graphics live preview strip) */}
+      {children}
       {/* Progress bar: determinate with frac; indeterminate slider without (always something moving) */}
       {running &&
         (live?.frac != null ? (
@@ -175,7 +179,7 @@ function ToolCard({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
   );
 }
 
-export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void }): React.ReactNode {
+export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition }): React.ReactNode {
   const id = toolIdOf(part);
   const def = STUDIO_TOOL_MAP[id];
   if (!def) return null;
@@ -184,6 +188,16 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     const rows = cutRowsOf(part.output);
     const out = part.output as StudioToolResult | undefined;
     if (rows && out?.ok !== false) return <div key={key}><CutListCard summary={out?.summary ?? ''} rows={rows} onLocate={opts?.onLocate} /></div>;
+  }
+  // Graphics get a live preview strip in the card: paged, lazy (current page only), skeleton while generating
+  if (id === 'add_graphics' && opts?.getComp) {
+    return (
+      <div key={key}>
+        <ToolCard def={def} part={part}>
+          <GraphicsPreviewBody part={part} getComp={opts.getComp} />
+        </ToolCard>
+      </div>
+    );
   }
   return <div key={key}>{def.kind === 'card' ? <ToolCard def={def} part={part} /> : <ToolBadge def={def} part={part} />}</div>;
 }

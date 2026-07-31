@@ -19,6 +19,8 @@ export interface ToolProgress {
   text: string;
   /** 0..1 progress; draws a bar when present */
   frac?: number;
+  /** Blocks this run is producing (add_graphics): the chat card previews them live while generating */
+  blockIds?: string[];
 }
 
 let map: Record<string, ToolProgress> = {};
