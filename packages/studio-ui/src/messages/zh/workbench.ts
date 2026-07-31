@@ -220,7 +220,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.noGraphicPlaceholdersCut': '没有待生成的组件占位(先分镜)',
   'workbench.noSpeechDetectedTry': '没有识别到人声,换条带口播的视频试试',
   'workbench.noSuchCaptionPreset': '没有这个字幕预设:{preset}',
-  'workbench.noSuchFrameId': '没有这个 frame:{id}(id 见 <frame_catalog>)',
+  'workbench.noSuchFrameId': '没有这个主题:{id}(id 见 <frame_catalog>)',
   'workbench.nothingRedo': '没有可重做的改动',
   'workbench.nothingSetGiveLeast': '没说要设什么:preset / yPct / scale 至少给一个',
   'workbench.nothingUndo': '没有可撤销的改动',
