@@ -152,7 +152,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       'ILLUSTRATE: fill placeholder slots from lay_out with DESIGNED fragments (card / chart / flow-or-structure diagram / KPI / callout), generated concurrently with live progress. Auto-runs lay_out first if there are no placeholders yet. Use after lay_out, when the user asks for the graphics to be drawn, or for a fresh full-draft run lay_out then add_graphics. Optional `blockIds` = only (re)illustrate these placeholder blocks (marked [placeholder] in <composition_state>); omit to fill ALL pending placeholders.',
     inputSchema: obj(
       {
-        blockIds: { type: 'array', items: { type: 'string' }, description: 'Optional: placeholder block ids to (re)illustrate — use the ids from the LATEST lay_out receipt (a fresh lay_out renumbers slots). Omit (or send an empty array) for all pending.' },
+        blockIds: { type: 'array', items: { type: 'string' }, description: 'Optional: block ids to generate — pending placeholders AND/OR already-filled components (filled ones are REGENERATED in place; use this when the user wants existing components redone). Use ids from the LATEST lay_out receipt or <composition_state> (a fresh lay_out renumbers slots). Omit (or send an empty array) to fill all pending placeholders only.' },
       },
       [],
     ),
