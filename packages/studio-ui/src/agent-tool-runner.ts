@@ -172,6 +172,18 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
     splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
+      // Models mirror the chat's @id pill syntax into tool args ("blockIds":["@media55_…"]) — the id
+      // lookup then misses and the first call of a batch reliably fails. Strip a leading @ from every
+      // id-shaped field up front (fresh copy, the message part keeps what the model actually sent).
+      {
+        const deAt = (v: unknown): unknown =>
+          typeof v === 'string' && v.startsWith('@') ? v.slice(1) : Array.isArray(v) ? v.map((x) => (typeof x === 'string' && x.startsWith('@') ? x.slice(1) : x)) : v;
+        const idKeys = ['blockId', 'blockIds', 'id', 'ids', 'shotId', 'shotIds'] as const;
+        if (idKeys.some((k) => k in input)) {
+          input = { ...input };
+          for (const k of idKeys) if (k in input) input[k] = deAt(input[k]);
+        }
+      }
       const c = compRef.current;
       const r1 = (x: unknown) => Math.round(Number(x) * 10) / 10;
       const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);

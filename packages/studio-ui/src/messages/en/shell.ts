@@ -11,5 +11,5 @@ export const SHELL_EN: Record<string, string> = {
   'shell.rename': 'Rename',
   'shell.syncFailed': 'Sync failed',
   'shell.translationFailed': 'Translation failed',
-  'shell.uploadVideoAiCuts': 'Upload a video — AI cuts shots, adds visuals and captions, then export right in the browser',
+  'shell.uploadVideoAiCuts': 'Upload a video — AI cuts shots, adds components and captions, then export right in the browser',
 };
