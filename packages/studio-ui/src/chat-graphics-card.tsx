@@ -10,7 +10,7 @@
  * - LLM-generated markup previews ONLY through the BlockPreviewFrame sandbox (trust boundary).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Composition } from '@pireel/studio-engine/composition';
 import { isPlaceholder } from '@pireel/studio-engine/build-draft';
@@ -48,16 +48,20 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
     return b ? [b] : [];
   });
   const [page, setPage] = useState(0);
-  // Card width tracks the chat column (user-resizable panel)
-  const wrapRef = useRef<HTMLDivElement>(null);
+  // Card width tracks the chat column (user-resizable panel). Callback ref, NOT an effect: this
+  // component returns null on the first render (ids not resolved yet), so an effect keyed to mount
+  // would attach the observer to a null ref and never re-run once the strip finally renders — w
+  // stayed 0 forever and the preview never painted live (only a fresh mount after refresh worked).
+  // The callback ref fires whenever the measured node actually attaches, however late.
   const [w, setW] = useState(0);
-  useEffect(() => {
-    const el = wrapRef.current;
+  const roRef = useRef<ResizeObserver | null>(null);
+  const measureRef = useCallback((el: HTMLDivElement | null) => {
+    roRef.current?.disconnect();
     if (!el) return;
     const ro = new ResizeObserver(() => setW(el.clientWidth));
     ro.observe(el);
     setW(el.clientWidth);
-    return () => ro.disconnect();
+    roRef.current = ro;
   }, []);
 
   if (!blocks.length) return null;
@@ -70,7 +74,7 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
     : undefined;
 
   return (
-    <div ref={wrapRef} className="border-line/70 border-t">
+    <div ref={measureRef} className="border-line/70 border-t">
       {w > 0 &&
         (pending ? (
           /* Skeleton: the slot exists but its design hasn't landed yet */
