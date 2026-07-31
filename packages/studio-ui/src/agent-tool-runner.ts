@@ -598,7 +598,9 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               }
               report(t('workbench.reviewJudging'));
               const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }) });
-              const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
+              // scene = per-frame one-line description from the vision pass: issues alone can't answer
+              // "what does this moment look like", which this tool also serves
+              const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; scene?: string; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
               if (!rr.ok || !j.frames) return { ok: false, error: t('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
               const total = j.frames.reduce((a, f) => a + f.issues.length, 0);
               return {

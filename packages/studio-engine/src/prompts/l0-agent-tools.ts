@@ -129,7 +129,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.analyze_visual.label',
     description:
-      'Analyze the footage LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content) so graphics avoid the speaker. Slow (runs frame-by-frame in the browser) — shows a live progress + ETA. No input. Cached per file.',
+      'Analyze the footage LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content) so graphics avoid the speaker. A one-time whole-footage pass producing LAYOUT DATA — it does NOT let you see any frame; to actually look at a specific moment (or answer what a moment looks like), call review_visuals with that atSec instead. Slow (runs frame-by-frame in the browser) — shows a live progress + ETA. No input. Cached per file.',
     inputSchema: obj({}, []),
   },
   {
@@ -286,7 +286,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "REVIEW the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures the composed frame at each atSec and reports REAL visual problems as data — overlays covering the speaker, blocks colliding, elements cut off at the edge, unreadable contrast, clutter. Call it after a batch of graphics lands (add_graphics / lay_out / theme change) with each new block's mid moment (max 6). Your atSecs MUST cover every moment where several overlay blocks are on screen together — concurrent blocks are where collisions happen, and an unsampled window ships unseen. Then FIX what it reports (position → place_block, styling/contrast → edit_block) before wrapping up. Skip it for single small edits. Uses hosted vision (small fee per frame).",
+      "LOOK at the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures the composed frame at each atSec and returns, per frame, a one-line scene description plus REAL visual problems as data — overlays covering the speaker, blocks colliding, elements cut off at the edge, unreadable contrast, clutter. Two jobs: ① QA after a batch of graphics lands (add_graphics / lay_out / theme change) with each new block's mid moment (max 6) — your atSecs MUST cover every moment where several overlay blocks are on screen together (concurrent blocks are where collisions happen, and an unsampled window ships unseen), then FIX what it reports (position → place_block, styling/contrast → edit_block) before wrapping up; ② whenever you need to know what a moment actually looks like (e.g. the user asks about the frame at some second) — answer from the returned scene, never from imagination. Skip it for single small edits. Uses hosted vision (small fee per frame).",
     inputSchema: obj(
       {
         atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline moments to review — each new block's midpoint, and always any moment where multiple blocks share the screen (max 6)." },
