@@ -161,7 +161,7 @@ export interface AgentToolCtx {
   chatRef: MutableRefObject<StudioChatHandle | null>;
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>): Promise<StudioToolResult> {
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<StudioToolResult> {
   const {
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
@@ -179,6 +179,20 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
       const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
       // Pipeline tools: push friendly progress to this tool's card (matched by toolId), cleared on finish
       const report = (text: string, frac?: number) => setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}) });
+      // Cooperative stop (chat stop button): long tools honor the signal at SAFE boundaries only —
+      // atomic mutations always land whole. Shared dedup'd pipelines (ASR / visual analysis) are
+      // never cancelled: race() just stops WAITING for them, they keep running in the background
+      // and cache their result for the next call. A stopped tool throws AbortError with a
+      // localized message; the chat layer turns it into an output-error receipt.
+      const signal = opts?.signal;
+      const stopped = () => !!signal?.aborted;
+      const abortErr = () => new DOMException(t('workbench.stoppedByUser'), 'AbortError');
+      const race = <T,>(p: Promise<T>): Promise<T> =>
+        signal
+          ? signal.aborted
+            ? Promise.reject(abortErr())
+            : Promise.race([p, new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(abortErr()), { once: true }))])
+          : p;
       // Footage edits ripple the timeline (blocks shift/trim/drop silently, captions relay) — attach the actual
       // before/after diff as data.delta so receipts stay honest and the agent doesn't re-read state between its own edits
       const withDelta = (res: StudioToolResult): StudioToolResult => {
@@ -205,7 +219,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
           case 'extract_asr': {
             if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
-              const segs = await stepAsr(report);
+              const segs = await race(stepAsr(report));
               if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
               // Transcribe inserted clips too — the agent's script must include them (otherwise in the one-click-render chat
               // it only saw the main-video script, and answering "what did the inserted clip say" needs a later read; user hit this)
@@ -262,7 +276,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
           case 'analyze_visual': {
             if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
-              const vis = await stepVisual(report);
+              const vis = await race(stepVisual(report));
               return vis
                 ? { ok: true, summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }) }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
@@ -328,15 +342,16 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             const v = currentVideo();
             if (!v || !videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
-              const segs = await stepAsr(report);
+              const segs = await race(stepAsr(report));
               if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
               // Planning ‖ visual analysis in parallel (visual is the long pole, progress driven by it)
-              const [plan, vis] = await Promise.all([stepPlan(report), stepVisual(report)]);
+              const [plan, vis] = await race(Promise.all([stepPlan(report), stepVisual(report)]));
               report(t('workbench.cuttingShots'));
               const draft = await restoreDraftContext(
                 layoutFromPlan(plan, { video: v, sentences: segs, ...(vis ? { cuts: vis.cuts, visual: vis } : {}) }),
                 vis,
               );
+              if (stopped()) throw abortErr(); // stop before the write: analyses stay cached, the storyboard is not applied
               setComp(draft);
               setSelectedId(null);
               setSelectedShotId(null);
@@ -370,15 +385,16 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               if (!compRef.current.blocks.some(isPlaceholder)) {
                 report(t('workbench.cuttingShotsFirst'));
                 const v = currentVideo();
-                const segs = await stepAsr(report);
+                const segs = await race(stepAsr(report));
                 if (!v || !segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
-                const [plan, vis] = await Promise.all([stepPlan(report), stepVisual(report)]);
+                const [plan, vis] = await race(Promise.all([stepPlan(report), stepVisual(report)]));
                 // Same backfill as lay_out: preserve design state + reinsert inserted clips (this path was a simplified duplicate before,
                 // so saying "add graphics" right after inserting a clip would drop the whole inserted clip)
                 const draft = await restoreDraftContext(
                   layoutFromPlan(plan, { video: v, sentences: segs, ...(vis ? { cuts: vis.cuts, visual: vis } : {}) }),
                   vis,
                 );
+                if (stopped()) throw abortErr(); // same as lay_out: don't apply the storyboard after a stop
                 setComp(draft);
               }
               let allSlots = compRef.current.blocks.filter(isPlaceholder);
@@ -438,6 +454,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               };
               const worker = async () => {
                 for (;;) {
+                  if (stopped()) return; // block boundary = safe stop point; the in-flight fill lands whole
                   const slot = queue.shift();
                   if (!slot) return;
                   try {
@@ -452,6 +469,13 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 }
               };
               await Promise.all(Array.from({ length: Math.min(CONCURRENCY, slots.length) }, worker));
+              // Stopped mid-batch: report the honest partial state — what landed stays, the rest are
+              // still placeholders the next round can fill. Zero landed = plain stop receipt.
+              if (stopped()) {
+                const filled = done - failed - skipped;
+                if (filled <= 0) throw abortErr();
+                return withDelta({ ok: true, summary: t('workbench.graphicsStoppedPartial', { done: filled, total: slots.length }) });
+              }
               const okCount = slots.length - failed - skipped;
               // Same deterministic collision receipt as lay_out (boxes can also collide when refilling
               // into an already-busy composition) — computed on the final state after all fills landed.
@@ -587,6 +611,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             try {
               const frames: { atSec: number; image_base64: string; expected: string }[] = [];
               for (let i = 0; i < ats.length; i++) {
+                if (stopped()) throw abortErr(); // frame boundary — captures are per-call work, safe to drop
                 const at = ats[i]!;
                 report(t('workbench.reviewingFrameN', { i: i + 1, n: ats.length }));
                 const shot = await captureCompositionFrame({ comp: c, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at, burnLabel: `${r1(at)}s`, maxDim: 720 });
@@ -597,7 +622,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 frames.push({ atSec: at, image_base64: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1), expected });
               }
               report(t('workbench.reviewJudging'));
-              const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }) });
+              const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }), ...(signal ? { signal } : {}) });
               // scene = per-frame one-line description from the vision pass: issues alone can't answer
               // "what does this moment look like", which this tool also serves
               const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; scene?: string; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
@@ -609,6 +634,8 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 data: { frames: j.frames, ...(total ? { hint: 'fix real issues (position → place_block, styling/contrast → edit_block), then re-check the affected moment' } : {}) },
               };
             } catch (e) {
+              // A user stop is not a review failure — rethrow with the localized stop message
+              if (e instanceof DOMException && e.name === 'AbortError') throw abortErr();
               return { ok: false, error: t('workbench.reviewFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
             } finally {
               clearToolProgress(toolId);

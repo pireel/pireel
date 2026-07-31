@@ -286,6 +286,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.savedAsElementAssets': '已存为组件(素材库 · 组件)',
   'workbench.scaleProportionally': '等比缩放',
   'workbench.sceneN': ' · 场景 {n}',
+  'workbench.stoppedByUser': '已停止',
+  'workbench.graphicsStoppedPartial': '已停止:图形完成 {done}/{total}',
   'workbench.reviewedClean': '已查看 {n} 帧,画面无异常',
   'workbench.reviewedIssues': '已查看 {n} 帧,发现 {m} 处画面问题',
   'workbench.reviewFailedMessage': '视觉复检失败:{message}',
