@@ -119,6 +119,39 @@ export function ChatThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === 'streaming' || status === 'submitted';
+  // Safety net for a dropped continuation: the SDK is supposed to fire the follow-up request from
+  // inside addToolOutput (sendAutomaticallyWhen), but that trigger can be missed — observed in the
+  // wild: tool output landed, status idle, and no request ever went out, so the turn died on the
+  // tool card with the model never voicing the result. When status settles on 'ready' with the last
+  // assistant message still ending in completed tool calls, fire the send ourselves — once per
+  // completion state (keyed by message id + part count), after a grace delay re-checking status so
+  // the SDK's own trigger always wins (no double request), and never on first mount (opening an old
+  // session that happens to end on a tool card must not start a paid request by itself; dedicated
+  // ref — mountedRef above is already true by the time this later-defined effect first runs).
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const autoResumedRef = useRef('');
+  const resumeArmedRef = useRef(false);
+  useEffect(() => {
+    if (!resumeArmedRef.current) {
+      resumeArmedRef.current = true;
+      return;
+    }
+    if (status !== 'ready') return;
+    const timer = setTimeout(() => {
+      if (statusRef.current !== 'ready') return; // the SDK sent its own follow-up meanwhile
+      const msgs = messagesRef.current;
+      const last = msgs[msgs.length - 1];
+      if (!last || last.role !== 'assistant') return;
+      if (!lastAssistantMessageIsCompleteWithToolCalls({ messages: msgs })) return;
+      const key = `${last.id}:${last.parts.length}`;
+      if (autoResumedRef.current === key) return;
+      autoResumedRef.current = key;
+      void sendMessage();
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, messages]);
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(() => onSnapshot(messagesRef.current, frameRef.current), 2000);
