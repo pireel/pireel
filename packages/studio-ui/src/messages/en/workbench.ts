@@ -280,6 +280,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.retrievingVideoFromCloud': 'Retrieving the video from the cloud…',
   'workbench.runAsrFirst': 'Run extract_asr first (the plan anchors to sentence indexes)',
   'workbench.runVisualBriefFirst': 'Run visual_brief first to get sampled frames (or analysis is already available — no submission needed)',
+  'workbench.stoppedByUser': 'Stopped',
+  'workbench.graphicsStoppedPartial': 'Stopped: {done}/{total} graphics filled',
   'workbench.reviewedClean': 'Viewed {n} frames — no visual issues found',
   'workbench.reviewedIssues': 'Viewed {n} frames — {m} visual issues found',
   'workbench.reviewFailedMessage': 'Visual check failed: {message}',

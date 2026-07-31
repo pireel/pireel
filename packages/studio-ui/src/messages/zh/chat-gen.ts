@@ -99,6 +99,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.somethingWentWrongMsg': '出错了:{msg}',
   'chatGen.starting': '启动中…',
   'chatGen.stop': '停止',
+  'chatGen.stopped': '已停止',
   'chatGen.streetStroll': '街头漫步',
   'chatGen.studioGenerations': 'Studio 生成',
   'chatGen.templateBlockHint': '模板块({id}):应用后转为自定义组件,不再跟随模板',

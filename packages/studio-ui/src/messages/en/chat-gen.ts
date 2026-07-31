@@ -99,6 +99,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.somethingWentWrongMsg': 'Something went wrong: {msg}',
   'chatGen.starting': 'Starting…',
   'chatGen.stop': 'Stop',
+  'chatGen.stopped': 'Stopped',
   'chatGen.streetStroll': 'Street stroll',
   'chatGen.studioGenerations': 'Studio generations',
   'chatGen.templateBlockHint': 'Template block ({id}): applying converts it to a custom element that no longer follows the template',

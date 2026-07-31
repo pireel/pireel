@@ -54,6 +54,11 @@ export function ChatThread({
 }) {
   const runToolRef = useRef(runTool);
   runToolRef.current = runTool;
+  // Stop plumbing: aborting the stream alone isn't enough — the stream loop awaits onToolCall, so a
+  // running tool must be told to stand down too. The user-stopped flag keeps the continuation
+  // safety net from resurrecting a turn the user just killed.
+  const toolAbortRef = useRef<AbortController | null>(null);
+  const userStoppedRef = useRef(false);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -88,17 +93,24 @@ export function ChatThread({
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
+      // their safe boundaries instead of holding the turn hostage until they finish
+      const ctrl = new AbortController();
+      toolAbortRef.current = ctrl;
       try {
-        const out = await runToolRef.current(id, (toolCall.input ?? {}) as Record<string, unknown>);
+        const out = await runToolRef.current(id, (toolCall.input ?? {}) as Record<string, unknown>, { signal: ctrl.signal });
         if (out.ok) addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output: out });
         else addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, state: 'output-error', errorText: out.error ?? t('chatGen.executionFailed') });
       } catch (e) {
+        const isStop = e instanceof DOMException && e.name === 'AbortError';
         addToolOutput({
           tool: id,
           toolCallId: toolCall.toolCallId,
           state: 'output-error',
-          errorText: e instanceof Error ? e.message : String(e),
+          errorText: isStop ? e.message || t('chatGen.stopped') : e instanceof Error ? e.message : String(e),
         });
+      } finally {
+        if (toolAbortRef.current === ctrl) toolAbortRef.current = null;
       }
     },
   });
@@ -140,6 +152,7 @@ export function ChatThread({
     if (status !== 'ready') return;
     const timer = setTimeout(() => {
       if (statusRef.current !== 'ready') return; // the SDK sent its own follow-up meanwhile
+      if (userStoppedRef.current) return; // the user killed this turn — don't resurrect it
       const msgs = messagesRef.current;
       const last = msgs[msgs.length - 1];
       if (!last || last.role !== 'assistant') return;
@@ -196,11 +209,20 @@ export function ChatThread({
     (text: string) => {
       const t = text.trim();
       if (!t || status === 'streaming' || status === 'submitted') return;
+      userStoppedRef.current = false; // a new message re-arms the continuation safety net
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       void sendMessage({ text: t, metadata: { situation: buildSituation(getBodyRef.current() as ChatSituation) } });
     },
     [sendMessage, status],
   );
+
+  // Stop = abort the running tool (it stands down at its next safe boundary) + kill the stream.
+  // Order matters: flag first so neither the SDK tail check nor our safety net restarts the turn.
+  const handleStop = useCallback(() => {
+    userStoppedRef.current = true;
+    toolAbortRef.current?.abort();
+    void stop();
+  }, [stop]);
 
   // Quick prompts: fill into the composer instead of sending directly (user can reword / add @ references before sending)
   const fillComposer = useCallback((text: string) => {
@@ -385,7 +407,7 @@ export function ChatThread({
           onPickFrame={applyFrame}
           onRemoveFrame={() => setFrame(null)}
           onSubmit={run}
-          onStop={stop}
+          onStop={handleStop}
           methodsRef={composerRef}
         />
       </div>
