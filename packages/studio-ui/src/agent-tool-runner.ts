@@ -1171,6 +1171,9 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
           case 'attach_frame': {
             // Agent recommends / user names → mount a frame: go through chat's attachFrame (tag + subsequent requests carry frameId),
             // then onFrameApplied lands palette+frameId into comp. Next round <frame_attached> prompts it to read_frame.
+            // Gate before tagging the session: onFrameApplied refuses mid-generation, and a tagged
+            // session with an unapplied comp would disagree about the active theme.
+            if (genIdsRef.current.size) return { ok: false, error: t('workbench.elementGeneratingThemeAfter') };
             const fid = typeof input.frame_id === 'string' ? input.frame_id : '';
             const f = frameCatalogRef.current.find((x) => x.id === fid);
             if (!f) return { ok: false, error: t('workbench.noSuchFrameId', { id: fid }) };

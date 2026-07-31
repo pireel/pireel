@@ -98,6 +98,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.elementGeneratingEditWould': 'This element is generating — your edit would be overwritten. Wait for it to finish',
   'workbench.elementGeneratingRedoAfter': 'An element is generating — redo after it finishes',
   'workbench.elementGeneratingUndoAfter': 'An element is generating — undo after it finishes',
+  'workbench.elementGeneratingThemeAfter': 'Components are still generating — switch the theme after they finish',
   'workbench.elementInserted': 'Element inserted',
   'workbench.elementNoFillableText': 'This element has no fillable text slots',
   'workbench.elementNotFound': 'Element not found',
