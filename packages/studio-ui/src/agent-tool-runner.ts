@@ -414,7 +414,14 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               // An EMPTY array means "all" (models regularly send [] instead of omitting the field) — never treat it as a filter.
               const wantList = Array.isArray(input.blockIds) ? (input.blockIds as unknown[]).map(String) : null;
               const wantIds = wantList?.length ? new Set(wantList) : null;
-              if (wantIds) allSlots = allSlots.filter((b) => wantIds.has(b.id));
+              if (wantIds) {
+                // Explicit ids may also name FILLED components → regenerate them in place. What "redo"
+                // covers is the model's call (user intent lives there); the tool only makes it expressible.
+                const regen = compRef.current.blocks.filter(
+                  (b) => wantIds.has(b.id) && !isPlaceholder(b) && (b.templateId === 'custom' || b.templateId.startsWith('kit:')),
+                );
+                allSlots = [...allSlots.filter((b) => wantIds.has(b.id)), ...regen];
+              }
               if (!allSlots.length) {
                 if (wantIds) {
                   // Stale ids (a fresh lay_out renumbers the slots): name the CURRENT pending ids in the
@@ -465,21 +472,31 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
                 // Themed projects generate HTML: the theme is a prose description the model builds
                 // from (playbook via frameId), not a skin on the JSON components. Kit = themeless.
+                // Regenerating a filled component whose original spec is gone (legacy fills dropped it):
+                // redesign from the beats instead — content is in them, the old design is being replaced.
+                const spec =
+                  placeholderSpec(slot) ||
+                  'Redesign the overlay component for this moment from the narration beats — the previous design is being replaced, take a fresh angle.';
                 // race: a stop mustn't wait out a 10s+ compose — the late result is discarded and the
                 // slot stays a placeholder (nothing lands after the user pressed stop)
-                const parsed = await race(composeBlockChecked(seed, placeholderSpec(slot), undefined, compRef.current.frameId ? undefined : { kit: true }));
+                const parsed = await race(composeBlockChecked(seed, spec, undefined, compRef.current.frameId ? undefined : { kit: true }));
                 if (stopped()) return;
                 if (parsed.declined) {
                   // compose's veto over the plan: with the actual sentences in hand, this moment has
-                  // nothing a graphic can say — remove the slot rather than leaving an empty shell
-                  // in the composition forever.
+                  // nothing a graphic can say — remove the empty shell rather than leaving it in the
+                  // composition forever. A REGEN veto keeps the existing component instead: never
+                  // delete user-visible work because a redo pass found nothing better to say.
                   skipped += 1;
-                  setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => b.id !== slot.id) }));
+                  if (isPlaceholder(slot)) setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => b.id !== slot.id) }));
                   return;
                 }
+                // Keep the original spec in slots across the fill (composedBlockFields replaces slots
+                // wholesale): a later "redo this component" regenerates from the same design intent.
+                const fields = composedBlockFields(parsed);
+                const keepSpec = placeholderSpec(slot);
                 setComp((cc) => ({
                   ...cc,
-                  blocks: cc.blocks.map((b) => (b.id === slot.id ? { ...b, ...composedBlockFields(parsed) } : b)),
+                  blocks: cc.blocks.map((b) => (b.id === slot.id ? { ...b, ...fields, slots: { ...fields.slots, ...(keepSpec ? { spec: keepSpec } : {}) } } : b)),
                 }));
               };
               const worker = async () => {
