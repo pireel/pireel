@@ -450,7 +450,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
                 // Themed projects generate HTML: the theme is a prose description the model builds
                 // from (playbook via frameId), not a skin on the JSON components. Kit = themeless.
-                const parsed = await composeBlockChecked(seed, placeholderSpec(slot), undefined, compRef.current.frameId ? undefined : { kit: true });
+                // race: a stop mustn't wait out a 10s+ compose — the late result is discarded and the
+                // slot stays a placeholder (nothing lands after the user pressed stop)
+                const parsed = await race(composeBlockChecked(seed, placeholderSpec(slot), undefined, compRef.current.frameId ? undefined : { kit: true }));
+                if (stopped()) return;
                 if (parsed.declined) {
                   // compose's veto over the plan: with the actual sentences in hand, this moment has
                   // nothing a graphic can say — remove the slot rather than leaving an empty shell
