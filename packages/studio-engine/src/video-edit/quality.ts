@@ -80,24 +80,28 @@ export async function assessClip(
         i++;
         continue;
       }
-      sample.draw(ctx, 0, 0, w, h);
-      const data = ctx.getImageData(0, 0, w, h).data;
-      const gray = toGray(data, w, h);
+      // try/finally: the mid-frame thumb awaits convertToBlob before close — a throw must not leak the sample.
+      try {
+        sample.draw(ctx, 0, 0, w, h);
+        const data = ctx.getImageData(0, 0, w, h).data;
+        const gray = toGray(data, w, h);
 
-      const { mean, variance } = lumaStats(gray);
-      if (mean < BLACK_LUMA && variance < BLACK_VAR) blackCount++;
-      blurs.push(laplacianVariance(gray, w, h));
+        const { mean, variance } = lumaStats(gray);
+        if (mean < BLACK_LUMA && variance < BLACK_VAR) blackCount++;
+        blurs.push(laplacianVariance(gray, w, h));
 
-      if (prevGray) {
-        maxMotion = Math.max(maxMotion, frameDiff(prevGray, gray));
+        if (prevGray) {
+          maxMotion = Math.max(maxMotion, frameDiff(prevGray, gray));
+        }
+        prevGray = gray;
+
+        if (i === midIdx) {
+          aHash = averageHash(data, w, h);
+          thumbBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.78 });
+        }
+      } finally {
+        sample.close();
       }
-      prevGray = gray;
-
-      if (i === midIdx) {
-        aHash = averageHash(data, w, h);
-        thumbBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.78 });
-      }
-      sample.close();
       i++;
     }
 

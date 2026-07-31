@@ -51,15 +51,19 @@ export async function detectScenes(
       idx++;
       opts.onProgress?.(idx / timestamps.length);
       if (!sample) continue;
-      sample.draw(ctx, 0, 0, size, size);
-      const imageData = ctx.getImageData(0, 0, size, size);
-      const curr = rgbaToHsv(imageData.data);
-      if (prev) {
-        const score = hsvFrameScore(prev, curr);
-        if (score > threshold) cuts.push({ timestamp: sample.timestamp - t0, score });
+      // try/finally: any throw in the per-frame analysis must not leak the sample.
+      try {
+        sample.draw(ctx, 0, 0, size, size);
+        const imageData = ctx.getImageData(0, 0, size, size);
+        const curr = rgbaToHsv(imageData.data);
+        if (prev) {
+          const score = hsvFrameScore(prev, curr);
+          if (score > threshold) cuts.push({ timestamp: sample.timestamp - t0, score });
+        }
+        prev = curr;
+      } finally {
+        sample.close();
       }
-      prev = curr;
-      sample.close();
     }
     return cuts;
   } finally {
