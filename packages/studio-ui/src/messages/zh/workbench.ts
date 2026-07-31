@@ -98,6 +98,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.elementGeneratingEditWould': '组件正在生成，改动会被生成结果覆盖——等生成完成再改',
   'workbench.elementGeneratingRedoAfter': '有组件正在生成,等完成再重做',
   'workbench.elementGeneratingUndoAfter': '有组件正在生成,等完成再撤销',
+  'workbench.elementGeneratingThemeAfter': '有组件正在生成,等完成再换主题',
   'workbench.elementInserted': '已插入组件',
   'workbench.elementNoFillableText': '这个组件没有可填充的文字槽',
   'workbench.elementNotFound': '找不到这个组件',

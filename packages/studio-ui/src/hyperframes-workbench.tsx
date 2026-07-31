@@ -2531,6 +2531,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const onFrameApplied = useCallback((af: AttachedFrame) => {
     const f = frameCatalogRef.current.find((x) => x.id === af.id);
     if (!f) return;
+    // No theme switch while components are generating: each fill reads frameId when it starts, so a
+    // mid-batch switch splits one batch across two themes (and two compose paths) — a dirty batch
+    // that "insert freezes vars" then locks in. Same gate family as undo/redo-while-generating.
+    if (genIdsRef.current.size) {
+      toast.error(t('workbench.elementGeneratingThemeAfter'));
+      return;
+    }
     // Land palette + frameId together: palette drives the token layer, frameId gives compose the design-language brief
     setComp((c) => ({ ...c, frameId: f.id, ...(f.palette ? { palette: f.palette } : {}) }));
     // The theme declared a person recommendation (sticker theme: cut out the subject and add a sticker outline) → land it into comp.personFx too,
