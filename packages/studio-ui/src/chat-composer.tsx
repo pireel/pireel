@@ -299,10 +299,12 @@ export function Composer({
             >
               <AtSign className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
-            {/* Theme button: attached state = button itself highlights (no longer stuffs a tag into the input); tap the same item in the picker to remove */}
+            {/* Theme button: attached state = button itself highlights (no longer stuffs a tag into the input); tap the same item in the picker to remove.
+                Disabled while the turn is running — a mid-generation theme switch would split the batch across two themes (the tool/apply gates stay as backstops). */}
             <button
               type="button"
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${
+              disabled={isBusy}
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-30 ${
                 frame ? 'bg-accent/15 text-accent hover:bg-accent/25' : 'text-ink-3 hover:bg-line hover:text-ink'
               }`}
               onClick={(e) => framePopoverRef.current?.open(e.currentTarget)}
