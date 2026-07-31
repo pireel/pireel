@@ -2969,6 +2969,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     videoFileRef, clipAsrRef, clipFilesRef, clipAsrBusyRef, clipAsrFailRef, insertedClipsForPlanRef,
     setClipAsr, matteFileForShot,
   });
+  // Live comp accessor for chat receipt previews: stable identity (StudioChat is memo'd), reads the ref —
+  // the chat card re-renders off the tool-progress store, not off comp state.
+  const getChatComp = useCallback(() => compRef.current, [compRef]);
 
   /** Client-side execution of a tool call: mutate Composition state / call compose to generate a block.
    *  Not memoized — StudioChat holds the latest reference via ref, rebuilt each frame to guarantee reading the latest state/closures. */
@@ -3570,6 +3573,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               ref={chatRef}
               runTool={chatCbs.runTool}
               getBody={getChatBody}
+              getComp={getChatComp}
               elements={chatElements}
               onFrameApplied={onFrameApplied}
               storageKey={chatKeyFor(projectId)}

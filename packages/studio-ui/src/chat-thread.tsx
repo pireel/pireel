@@ -37,6 +37,7 @@ export function ChatThread({
   onFrameApplied,
   runTool,
   getBody,
+  getComp,
   elements,
   onSnapshot,
   handleRef,
@@ -48,6 +49,7 @@ export function ChatThread({
   onFrameApplied?: (frame: AttachedFrame) => void;
   runTool: StudioChatProps['runTool'];
   getBody: StudioChatProps['getBody'];
+  getComp?: StudioChatProps['getComp'];
   elements: StudioElementRef[];
   onSnapshot: (messages: UIMessage[], frame: AttachedFrame | null) => void;
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
@@ -360,7 +362,7 @@ export function ChatThread({
                         }
                         if (part.type.startsWith('tool-') || part.type === 'dynamic-tool')
                           // Locate rides the existing seek tool (playhead + preview follow) — no new channel to the workbench
-                          return renderToolPart(part, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }) });
+                          return renderToolPart(part, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }), getComp });
                         return null;
                       })}
                       {thinking && <ThinkingDots />}

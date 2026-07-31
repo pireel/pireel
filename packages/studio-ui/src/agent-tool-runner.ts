@@ -178,7 +178,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
       const findShot = (id: unknown) => (c.shots ?? []).find((s) => s.id === id);
       const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
       // Pipeline tools: push friendly progress to this tool's card (matched by toolId), cleared on finish
-      const report = (text: string, frac?: number) => setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}) });
+      const report = (text: string, frac?: number, extra?: { blockIds?: string[] }) => setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}), ...(extra ?? {}) });
       // Cooperative stop (chat stop button): long tools honor the signal at SAFE boundaries only —
       // atomic mutations always land whole. Shared dedup'd pipelines (ASR / visual analysis) are
       // never cancelled: race() just stops WAITING for them, they keep running in the background
@@ -439,7 +439,10 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               const roster = graphicsRoster();
               // Warm up insert-source transcripts: an insert-window placeholder's beats need its own source's sentences (a cold cache = missing beats)
               if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
-              report(t('workbench.graphics0Total', { total: slots.length }), 0);
+              // blockIds ride along on every progress update (the store replaces entries wholesale):
+              // the chat card uses them to preview the batch live while it generates
+              const slotIds = slots.map((s) => s.id);
+              report(t('workbench.graphics0Total', { total: slots.length }), 0, { blockIds: slotIds });
               const fillOne = async (slot: Block) => {
                 const boxPx = slot.box
                   ? { w: Math.round(slot.box.w * compRef.current.width), h: Math.round(slot.box.h * compRef.current.height) }
@@ -480,7 +483,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                   }
                   markGenerating([slot.id], false); // unlock on result, don't wait for the whole batch
                   done += 1;
-                  report(t('workbench.graphicsDoneTotalLabel', { done, total: slots.length, label: (slot.label ?? '').slice(0, 12) }), done / slots.length);
+                  report(t('workbench.graphicsDoneTotalLabel', { done, total: slots.length, label: (slot.label ?? '').slice(0, 12) }), done / slots.length, { blockIds: slotIds });
                 }
               };
               await Promise.all(Array.from({ length: Math.min(CONCURRENCY, slots.length) }, worker));
@@ -489,7 +492,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               if (stopped()) {
                 const filled = done - failed - skipped;
                 if (filled <= 0) throw abortErr();
-                return withDelta({ ok: true, summary: t('workbench.graphicsStoppedPartial', { done: filled, total: slots.length }) });
+                return withDelta({ ok: true, summary: t('workbench.graphicsStoppedPartial', { done: filled, total: slots.length }), data: { blocks: slotIds } });
               }
               const okCount = slots.length - failed - skipped;
               // Same deterministic collision receipt as lay_out (boxes can also collide when refilling
@@ -501,7 +504,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                   t('workbench.filledNDesignGraphics', { n: okCount }) +
                   (skipped ? t('workbench.nSlotsSkippedNothingToSay', { n: skipped }) : '') +
                   (failed ? t('workbench.nFailedPlaceholdersRemain', { n: failed }) : ''),
-                ...(overlaps.length ? { data: { overlaps, overlapHint: 'these block pairs share a time window and their boxes collide — separate them (place_block) and re-review those atSecs' } } : {}),
+                data: { blocks: slotIds, ...(overlaps.length ? { overlaps, overlapHint: 'these block pairs share a time window and their boxes collide — separate them (place_block) and re-review those atSecs' } : {}) },
                 ...(okCount === 0 && skipped === 0 ? { error: t('workbench.allGraphicsFailedTry') } : {}),
               };
             } finally {

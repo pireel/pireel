@@ -14,6 +14,7 @@
     "./chat-composer": "./src/chat-composer.tsx",
     "./chat-cut-list": "./src/chat-cut-list.tsx",
     "./chat-format": "./src/chat-format.tsx",
+    "./chat-graphics-card": "./src/chat-graphics-card.tsx",
     "./chat-thread": "./src/chat-thread.tsx",
     "./chat-tool-parts": "./src/chat-tool-parts.tsx",
     "./code-editor": "./src/code-editor.tsx",
