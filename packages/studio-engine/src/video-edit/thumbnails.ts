@@ -41,16 +41,21 @@ async function extractFromSource(
     const out: Thumbnail[] = [];
     for await (const sample of sink.samplesAtTimestamps(timestamps.map((t) => t + t0))) {
       if (!sample) continue;
-      sample.draw(ctx, 0, 0, targetW, targetH);
-      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
-      const thumb: Thumbnail = {
-        timestamp: sample.timestamp - t0,
-        url: URL.createObjectURL(blob),
-        blob,
-      };
-      out.push(thumb);
-      opts.onThumb?.(thumb);
-      sample.close();
+      // try/finally: convertToBlob awaits between draw and close — a throw there (or in onThumb)
+      // must not leak the sample ("VideoSample was garbage collected without being closed").
+      try {
+        sample.draw(ctx, 0, 0, targetW, targetH);
+        const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+        const thumb: Thumbnail = {
+          timestamp: sample.timestamp - t0,
+          url: URL.createObjectURL(blob),
+          blob,
+        };
+        out.push(thumb);
+        opts.onThumb?.(thumb);
+      } finally {
+        sample.close();
+      }
     }
     return out;
   } finally {

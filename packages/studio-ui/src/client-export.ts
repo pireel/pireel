@@ -380,6 +380,10 @@ export async function captureCompositionFrame(opts: {
     if (rig) {
       rig.cur?.close();
       rig.pending?.close();
+      // Return the abandoned iterator so mediabunny's generator finally can close its
+      // decode-ahead samples (same as retireVideoStream; skipping this leaks VideoSamples
+      // to GC — "VideoSample was garbage collected without being closed" warnings).
+      void rig.it?.return?.(undefined);
       void rig.input.dispose();
     }
     overlay.dispose();
