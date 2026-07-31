@@ -12,7 +12,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.apply': '应用',
   'chatGen.askAiEditSource': '让 AI 改这段源码,例如「数字换金色,入场更快」',
   'chatGen.aspectRatio': '比例',
-  'chatGen.autoCreateHint': '一键成片,分镜、配图、字幕一步到位',
+  'chatGen.autoCreateHint': '一键成片,分镜、组件、字幕一步到位',
   'chatGen.backlitSilhouette': '逆光剪影',
   'chatGen.basedOn': '基于:{name}',
   'chatGen.bRoll': '空镜',

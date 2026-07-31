@@ -11,5 +11,5 @@ export const SHELL_ZH: Record<string, string> = {
   'shell.rename': '重命名',
   'shell.syncFailed': '同步失败',
   'shell.translationFailed': '翻译失败',
-  'shell.uploadVideoAiCuts': '上传一条视频，AI 分镜、配图、加字幕，浏览器里直接导出成片',
+  'shell.uploadVideoAiCuts': '上传一条视频，AI 分镜、生成组件、加字幕，浏览器里直接导出成片',
 };

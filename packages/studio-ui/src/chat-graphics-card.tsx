@@ -28,8 +28,11 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
   const out = part.output as StudioToolResult | undefined;
   const outData = out?.data as { blocks?: unknown; blockId?: unknown } | undefined;
   const inp = part.input as { blockId?: unknown; blockIds?: unknown } | undefined;
-  const arr = (v: unknown) => (Array.isArray(v) && v.length ? v.map(String) : null);
-  const single = (v: unknown) => (typeof v === 'string' && v ? [v] : null);
+  // Message parts keep what the model actually sent, which may carry the chat's @id pill prefix —
+  // strip it here like the tool runner does, or an @-called tool renders no preview.
+  const deAt = (s: string) => (s.startsWith('@') ? s.slice(1) : s);
+  const arr = (v: unknown) => (Array.isArray(v) && v.length ? v.map((x) => deAt(String(x))) : null);
+  const single = (v: unknown) => (typeof v === 'string' && v ? [deAt(v)] : null);
   // Batch tools carry ids in the receipt/progress; single-component tools (edit/duplicate/add) name
   // their target in the input — the chain covers both from the moment the call starts.
   const ids = arr(outData?.blocks) ?? single(outData?.blockId) ?? prog?.blockIds ?? arr(inp?.blockIds) ?? single(inp?.blockId) ?? [];

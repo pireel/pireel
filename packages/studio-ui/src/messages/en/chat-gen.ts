@@ -12,7 +12,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.apply': 'Apply',
   'chatGen.askAiEditSource': 'Ask AI to edit this source, e.g. "make the number gold, faster entrance"',
   'chatGen.aspectRatio': 'Aspect ratio',
-  'chatGen.autoCreateHint': 'Auto create — shots, graphics and captions in one go',
+  'chatGen.autoCreateHint': 'Auto create — shots, components and captions in one go',
   'chatGen.backlitSilhouette': 'Backlit silhouette',
   'chatGen.basedOn': 'Based on: {name}',
   'chatGen.bRoll': 'B-roll',
