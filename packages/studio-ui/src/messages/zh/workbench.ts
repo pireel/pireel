@@ -313,6 +313,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.source': '源码',
   'workbench.sourceLabel': '源码 · {label}',
   'workbench.specifiedBlocksNotGraphic': '指定的块不是待配图占位',
+  'workbench.specifiedBlocksNotGraphicPending': '指定的块不是待配图占位;当前待配图:{ids}',
   'workbench.split': '分割',
   'workbench.splitPlayhead': '已在播放头剪开',
   'workbench.startExport': '开始导出',
