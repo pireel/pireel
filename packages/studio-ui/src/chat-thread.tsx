@@ -90,7 +90,11 @@ export function ChatThread({
     id: threadId,
     messages: initialMessages,
     transport,
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    // Gate the SDK's OWN continuation triggers on the user-stopped flag too: after a stop, the tool
+    // receipt lands via a queued addToolOutput job that often runs AFTER the stream has unwound to
+    // 'ready' — the SDK's internal check then fires a fresh request and the turn the user just
+    // killed marches on. sendAutomaticallyWhen is consulted by every trigger, so this gates them all.
+    sendAutomaticallyWhen: (args) => !userStoppedRef.current && lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
