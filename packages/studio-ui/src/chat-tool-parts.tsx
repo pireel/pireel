@@ -47,6 +47,9 @@ export interface ToolPartLike {
   toolName?: string;
 }
 
+/** Tools whose receipt shows the component(s) they produced/changed as a live preview strip. */
+const PREVIEW_TOOLS = new Set(['add_graphics', 'add_block', 'edit_block', 'duplicate_block']);
+
 function toolIdOf(part: ToolPartLike): string {
   if (part.type === 'dynamic-tool') return part.toolName ?? '';
   return part.type.startsWith('tool-') ? part.type.slice(5) : part.type;
@@ -63,7 +66,7 @@ export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'er
   return { kind: 'running', text: t('chatGen.running') };
 }
 
-function ToolBadge({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
+function ToolBadge({ def, part, children }: { def: StudioToolDef; part: ToolPartLike; children?: React.ReactNode }) {
   const st = toolStatus(part);
   const prog = useToolProgress(def.id);
   const live = st.kind === 'running' ? prog?.text ?? null : null;
@@ -89,6 +92,8 @@ function ToolBadge({ def, part }: { def: StudioToolDef; part: ToolPartLike }) {
           {text}
         </div>
       )}
+      {/* Tool-specific extra body (e.g. the duplicate-component preview strip) */}
+      {children}
     </div>
   );
 }
@@ -189,15 +194,20 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     const out = part.output as StudioToolResult | undefined;
     if (rows && out?.ok !== false) return <div key={key}><CutListCard summary={out?.summary ?? ''} rows={rows} onLocate={opts?.onLocate} /></div>;
   }
-  // Graphics get a live preview strip in the card: paged, lazy (current page only), skeleton while generating
-  if (id === 'add_graphics' && opts?.getComp) {
-    return (
-      <div key={key}>
+  // Component-producing tools get a live preview strip: paged, lazy (current page only), skeleton while generating
+  const preview =
+    PREVIEW_TOOLS.has(id) && opts?.getComp ? <GraphicsPreviewBody toolId={id} part={part} getComp={opts.getComp} /> : null;
+  return (
+    <div key={key}>
+      {def.kind === 'card' ? (
         <ToolCard def={def} part={part}>
-          <GraphicsPreviewBody part={part} getComp={opts.getComp} />
+          {preview}
         </ToolCard>
-      </div>
-    );
-  }
-  return <div key={key}>{def.kind === 'card' ? <ToolCard def={def} part={part} /> : <ToolBadge def={def} part={part} />}</div>;
+      ) : (
+        <ToolBadge def={def} part={part}>
+          {preview}
+        </ToolBadge>
+      )}
+    </div>
+  );
 }

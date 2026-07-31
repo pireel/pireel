@@ -20,15 +20,19 @@ import { useToolProgress } from './tool-progress';
 import type { ToolPartLike } from './chat-tool-parts';
 import { t } from './i18n';
 
-export function GraphicsPreviewBody({ part, getComp }: { part: ToolPartLike; getComp: () => Composition }) {
+export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string; part: ToolPartLike; getComp: () => Composition }) {
   // Progress subscription doubles as the live re-render source: each landed fill reports progress,
   // which re-renders this card, which re-reads the comp — no comp→chat prop link needed (chat is
   // deliberately memo-isolated from workbench re-renders).
-  const prog = useToolProgress('add_graphics');
+  const prog = useToolProgress(toolId);
   const out = part.output as StudioToolResult | undefined;
-  const outData = out?.data as { blocks?: unknown } | undefined;
-  const outIds = Array.isArray(outData?.blocks) ? outData.blocks.map(String) : null;
-  const ids = outIds ?? prog?.blockIds ?? [];
+  const outData = out?.data as { blocks?: unknown; blockId?: unknown } | undefined;
+  const inp = part.input as { blockId?: unknown; blockIds?: unknown } | undefined;
+  const arr = (v: unknown) => (Array.isArray(v) && v.length ? v.map(String) : null);
+  const single = (v: unknown) => (typeof v === 'string' && v ? [v] : null);
+  // Batch tools carry ids in the receipt/progress; single-component tools (edit/duplicate/add) name
+  // their target in the input — the chain covers both from the moment the call starts.
+  const ids = arr(outData?.blocks) ?? single(outData?.blockId) ?? prog?.blockIds ?? arr(inp?.blockIds) ?? single(inp?.blockId) ?? [];
   const comp = getComp();
   const blocks = ids.flatMap((id) => {
     const b = comp.blocks.find((x) => x.id === id);
