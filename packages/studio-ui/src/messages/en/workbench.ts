@@ -313,6 +313,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.source': 'Source',
   'workbench.sourceLabel': 'Source · {label}',
   'workbench.specifiedBlocksNotGraphic': 'The specified blocks are not graphic placeholders',
+  'workbench.specifiedBlocksNotGraphicPending': 'The specified blocks are not pending placeholders; currently pending: {ids}',
   'workbench.split': 'Split',
   'workbench.splitPlayhead': 'Split at the playhead',
   'workbench.startExport': 'Start export',

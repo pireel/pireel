@@ -398,11 +398,23 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 setComp(draft);
               }
               let allSlots = compRef.current.blocks.filter(isPlaceholder);
-              // Optional blockIds: only (re)fill the specified placeholders (the agent's "redo the 3rd one" doesn't run everything)
-              const wantIds = Array.isArray(input.blockIds) ? new Set((input.blockIds as unknown[]).map(String)) : null;
+              // Optional blockIds: only (re)fill the specified placeholders (the agent's "redo the 3rd one" doesn't run everything).
+              // An EMPTY array means "all" (models regularly send [] instead of omitting the field) — never treat it as a filter.
+              const wantList = Array.isArray(input.blockIds) ? (input.blockIds as unknown[]).map(String) : null;
+              const wantIds = wantList?.length ? new Set(wantList) : null;
               if (wantIds) allSlots = allSlots.filter((b) => wantIds.has(b.id));
               if (!allSlots.length) {
-                if (wantIds) return { ok: false, error: t('workbench.specifiedBlocksNotGraphic') };
+                if (wantIds) {
+                  // Stale ids (a fresh lay_out renumbers the slots): name the CURRENT pending ids in the
+                  // receipt so the model can retarget instead of declaring the state out of sync and giving up
+                  const pending = compRef.current.blocks.filter(isPlaceholder).map((b) => b.id);
+                  return {
+                    ok: false,
+                    error: pending.length
+                      ? t('workbench.specifiedBlocksNotGraphicPending', { ids: pending.join(', ') })
+                      : t('workbench.specifiedBlocksNotGraphic'),
+                  };
+                }
                 // Shots ran but not a single placeholder landed → be honest: the plan didn't produce fillable graphics, it's not a "do the layout first" case
                 const p = planRef.current;
                 return {
