@@ -79,7 +79,7 @@ export interface StudioChatHandle {
 
 export interface StudioChatProps {
   /** Client-side tool executor: mutates Composition state / calls compose to generate blocks, returns a summary. */
-  runTool: (toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal }) => Promise<StudioToolResult>;
+  runTool: (toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }) => Promise<StudioToolResult>;
   /** Callback when a frame is attached (both panel "use" and the theme button): the workbench uses it to apply the theme palette to comp. */
   onFrameApplied?: (frame: AttachedFrame) => void;
   /** The situation read at send time (composition snapshot/selection/playhead/pipeline): buildSituation

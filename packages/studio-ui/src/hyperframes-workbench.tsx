@@ -3050,7 +3050,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
-  const runStudioTool = (toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal }) => runAgentStudioTool(agentToolCtx, toolId, input, opts);
+  const runStudioTool = (toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }) => runAgentStudioTool(agentToolCtx, toolId, input, opts);
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   const runExternalTool = (tool: string, input: Record<string, unknown>) => runAgentExternalTool(agentToolCtx, tool, input);
 
