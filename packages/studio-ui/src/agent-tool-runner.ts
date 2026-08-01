@@ -979,11 +979,11 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             if (!compRef.current.video?.url) return { ok: false, error: t('common.uploadBeforeExport') };
             const job = agentExportRef.current;
             if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
-            // Ask before defaulting: with no resolution/fps/format and no confirmation, return
-            // source- and platform-tuned recommendations for the agent to put to the user (in chat,
-            // or in the external MCP client) — export starts only once a choice or confirm arrives.
-            const gaveOpts = input.resolution != null || input.fps != null || input.format != null;
-            if (!gaveOpts && input.confirmed !== true) {
+            // Mandatory two-step handshake so the user actually chooses. confirmed:true is the ONLY
+            // thing that starts an export — passing resolution/fps/format WITHOUT it still returns
+            // recommendations (agents otherwise guess a "recommended" default and export unasked,
+            // which is exactly what this prevents). The chosen values ride along with confirmed:true.
+            if (input.confirmed !== true) {
               const rec = exportRecommendations(compRef.current);
               return {
                 ok: true,
@@ -991,7 +991,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 data: {
                   status: 'needs_options',
                   ...rec,
-                  ask: 'Ask the user which resolution / fps / format to export, using these platform recommendations. Then call export_video again with the chosen values (or confirmed:true to accept the source-quality default).',
+                  ask: 'Put these options to the user with ask_user (one option per recommendation) and let them pick. Do NOT choose for them. Then call export_video again with the chosen resolution/fps/format AND confirmed:true.',
                 },
               };
             }
