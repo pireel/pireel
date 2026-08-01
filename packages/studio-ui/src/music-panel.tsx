@@ -140,8 +140,11 @@ export function MusicPanel({
           </section>
         )}
 
-        {/* Narration denoise (main source): bake-based — inference once per source, strength re-blends in seconds */}
+        {/* Global settings (no selection needed): the audio tab is a first-level nav item, so this
+            section keeps it useful even with nothing selected. Narration denoise (main source):
+            bake-based — inference once per source, strength re-blends in seconds */}
         <section className="border-line flex flex-col gap-2 border-t pt-3">
+          <div className="text-ink font-medium">{t('panels.globalAudio')}</div>
           <div className="flex items-center justify-between">
             <span className="text-ink-3">{t('panels.denoiseNarration')}</span>
             <Switch

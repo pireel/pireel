@@ -52,9 +52,11 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var frozen = null, frozenCut = null, ghostWarned = false;
   var mkStage = function () { var s = document.createElement('canvas'); s.width = W; s.height = H; return s; };
   var stageLive = mkStage(), stageGhost = mkStage();
+  // fit = CONTAIN (per user): a source whose aspect differs from the canvas letterboxes inside it,
+  // never crops — the canvas ratio is a project decision (first-inserted source / ratio picker).
   var cover = function (stage, bmp) {
     var g = stage.getContext('2d');
-    var k = Math.max(W / bmp.width, H / bmp.height), dw = bmp.width * k, dh = bmp.height * k;
+    var k = Math.min(W / bmp.width, H / bmp.height), dw = bmp.width * k, dh = bmp.height * k;
     g.clearRect(0, 0, W, H);
     g.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
     return stage;
@@ -64,7 +66,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var SG = function () { if (stagedGhostVer !== ghostVer) { cover(stageGhost, ghostBmp); stagedGhostVer = ghostVer; } return stageGhost; };
   var drawPlain = function (bmp) {
     if (!bmp) return;
-    var k = Math.max(W / bmp.width, H / bmp.height), dw = bmp.width * k, dh = bmp.height * k;
+    var k = Math.min(W / bmp.width, H / bmp.height), dw = bmp.width * k, dh = bmp.height * k;
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
   };
@@ -318,9 +320,9 @@ const PERSON_CUT_SHIM = `(function(){
     // background-replace layer follows the mask: only lit on segments that have a mask (export / no parent / matting-off segments all hidden, fall back to original frame)
     if (bgEl) bgEl.style.display = mask ? 'block' : 'none';
     if (!mask) return;
-    // mask aspect ratio = source frame; the on-canvas frame is already cover-fit, so align the mask with the same cover mapping
+    // mask aspect ratio = source frame; the on-canvas frame is contain-fit, so align the mask with the same contain mapping
     var vw = fi.w || W, vh = fi.h || H;
-    var k = Math.max(W / vw, H / vh), dw = vw * k, dh = vh * k, dx = (W - dw) / 2, dy = (H - dh) / 2;
+    var k = Math.min(W / vw, H / vh), dw = vw * k, dh = vh * k, dx = (W - dw) / 2, dy = (H - dh) / 2;
     pctx.clearRect(0, 0, W, H);
     pctx.drawImage(v, 0, 0); // video frame taken straight from the #vidEl canvas (already cover-composited)
     pctx.globalCompositeOperation = 'destination-in';
@@ -477,12 +479,14 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   const body: string[] = [];
   const scripts: string[] = [];
 
-  if (comp.video) {
+  if (comp.video || comp.shots?.length) {
     // Video track = a single <canvas> (canvas render mode, per the user's decision): decode/clock/audio all in the parent-layer engine
     // (video-track-engine), frames drawn as they're pushed via hf:frame. Document rebuild no longer recreates the decoder → the root cause of the whole
     // "decode zombie" class of problems is removed. The id stays vidEl: framing keyframe / shotVars / personCut selectors need zero changes.
+    // Equal-footing: comp.video is just the first-loaded source — a clips-only comp (external inserts,
+    // no "main") still gets the canvas; only a truly source-less comp skips it.
     const hasShots = !!(comp.shots && comp.shots.length);
-    const editedDur = hasShots ? editedDuration(comp.shots!) : comp.video.durationSec;
+    const editedDur = hasShots ? editedDuration(comp.shots!) : comp.video!.durationSec;
     body.push(
       `<canvas id="vidEl" data-composition-id="vid" width="${n(comp.width)}" height="${n(comp.height)}" data-start="0" data-duration="${n(editedDur)}" data-track-index="0" ` +
         `style="position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;box-shadow:0 30px 90px rgba(0,0,0,0.45);"></canvas>`,

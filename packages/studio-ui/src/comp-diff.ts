@@ -57,6 +57,33 @@ export function shotFramingOnlyChange(a: Composition | null, b: Composition): bo
   return true;
 }
 
+/** Only the canvas size (width/height) changed — a discrete action (ratio picker), so the rebuild
+ *  should run with ZERO debounce; the 300ms debounce exists for per-frame streams like box drags. */
+export function canvasSizeOnlyChange(a: Composition | null, b: Composition): boolean {
+  if (!a || a === b) return false;
+  if (a.width === b.width && a.height === b.height) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Composition>;
+  for (const k of keys) {
+    if (k === 'width' || k === 'height') continue;
+    if (!Object.is(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+/** Shot COUNT changed (split / delete / insert) — always a discrete click, so the rebuild runs with
+ *  ZERO debounce. Length-equal shot edits (transition-handle drags stream per frame) stay debounced.
+ *  Blocks shift alongside cuts and the FIRST insert may also set the canvas size — both ignored here. */
+export function shotCountChange(a: Composition | null, b: Composition): boolean {
+  if (!a || a === b) return false;
+  if ((a.shots?.length ?? 0) === (b.shots?.length ?? 0)) return false;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Composition>;
+  for (const k of keys) {
+    if (k === 'shots' || k === 'blocks' || k === 'width' || k === 'height') continue;
+    if (!Object.is(a[k], b[k])) return false;
+  }
+  return true;
+}
+
 /** Only the caption position (xPct/yPct) changed: can skip the rebuild (hf:capStyle already wrote it directly, the re-baked value is identical). */
 export function capPosOnlyChange(a: Composition | null, b: Composition): boolean {
   if (!a || !sameExceptCapStyle(a, b)) return false;

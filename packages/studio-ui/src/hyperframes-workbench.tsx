@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  VideoOff, FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, Pin, PinOff, SlidersHorizontal } from 'lucide-react';
+  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, Pin, PinOff, SlidersHorizontal, LayoutGrid, Scissors, Captions } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -86,7 +86,7 @@ import { playhead } from './playhead';
 import { type AsrSegment, captionBlocksFromAsr, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
-import { loadLocalVideo, saveLocalVideo } from './local-media';
+import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
@@ -125,6 +125,7 @@ import { FramePanel } from './frame-panel';
 import { PersonFxPanel, type MatteState } from './person-fx-panel';
 import { ShotTreatmentPanel } from './shot-treatment-panel';
 import { MusicPanel } from './music-panel';
+import { AvatarPanel } from './avatar-panel';
 import { useAudioTracks } from './use-audio-tracks';
 import { useDenoise } from './use-denoise';
 import { TransitionPanel } from './transition-panel';
@@ -138,7 +139,7 @@ import { useAgentBridge } from './use-agent-bridge';
 import { type VisualLabel, type VisualPrep, type VisualTimeline, analyzeVisual, clearVisualCache, finishVisualAnalysis, insertedClipSafeZone, prepareVisualAnalysis } from './visual';
 import { type SafeZone, detectFrameAt, geomNote } from './geometry';
 import { REF_WIDTH, normalizeDims, personFxFromFrame, shotSpan, syncVacancyPartner } from './workbench-utils';
-import { blockPatchableChange, capPosOnlyChange, sameExceptCapStyle, shiftBox, shotFramingOnlyChange, themeMountOnlyChange } from './comp-diff';
+import { shotCountChange, canvasSizeOnlyChange, blockPatchableChange, capPosOnlyChange, sameExceptCapStyle, shiftBox, shotFramingOnlyChange, themeMountOnlyChange } from './comp-diff';
 import { BoxEditOverlay, CaptionEditOverlay } from './edit-overlays';
 import { BracketCutIcon, CardShapeControls, ExportOptRow, TimeReadout } from './workbench-controls';
 import { type AgentToolCtx, runStudioTool as runAgentStudioTool, runExternalTool as runAgentExternalTool } from './agent-tool-runner';
@@ -151,6 +152,7 @@ import { useScriptCut } from './use-script-cut';
 
 
 const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
+const RAIL_NAV_W = 48; // vertical primary-nav strip on the rail's outer edge; railW measures the CONTENT column only
 const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. custom block HTML)
 // ⚠️ Temporary for testing: fill only the first N images to save LLM calls, rest stay as placeholders — **remove before launch**.
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
@@ -384,7 +386,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setLocateNear(near);
     setLocateSignal((n) => n + 1);
   };
-  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio'>('assets'); // library rail tab (assets / script-cut / captions; themes hidden)
+  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio' | 'avatar'>('assets'); // rail primary-nav tab (assets / script-cut / captions / audio / avatar; themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
   // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
   // space; unpinned = floating overlay above the canvas, the stage keeps full width). Both persist.
@@ -455,14 +457,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [liveGeom, setLiveGeom] = useState<SafeZone | null>(null); // live single-frame detection (measure whichever frame you scrub to)
 
   const duration = totalDuration(comp);
-  const hasContent = !!comp.video || comp.blocks.length > 0; // empty canvas (no video, no blocks) isn't playable
-  // Preview box: keep canvas aspect, fill the parent as much as possible (measure parent size → uniform scale)
-  const fit =
-    area.w > 0 && area.h > 0
-      ? Math.min(area.w / comp.width, area.h / comp.height)
-      : PREVIEW_FALLBACK_W / comp.width;
-  const fitRef = useRef(fit); // used in the (mounted-once) message handler to convert comp px → stage px
-  fitRef.current = fit;
+  const hasVideoTrack = !!comp.video || !!comp.shots?.length; // equal-footing: clips-only comps have a video track
+  const hasContent = hasVideoTrack || comp.blocks.length > 0; // empty canvas (no sources, no blocks) isn't playable
+  // Canvas ratio: seeded by the FIRST inserted source (insertClipCore), overridable here; other
+  // sources contain-fit into it (frame shim letterboxes, never crops).
+  const CANVAS_RATIOS = [
+    { id: '9:16', w: 1080, h: 1920 },
+    { id: '16:9', w: 1920, h: 1080 },
+    { id: '1:1', w: 1080, h: 1080 },
+    { id: '3:4', w: 1080, h: 1440 },
+    { id: '4:3', w: 1440, h: 1080 },
+  ] as const;
+  const currentRatioId = CANVAS_RATIOS.find((r) => Math.abs(r.w / r.h - comp.width / comp.height) < 0.02)?.id;
+  const [ratioOpen, setRatioOpen] = useState(false);
+  const applyCanvasRatio = (w: number, h: number) => {
+    setRatioOpen(false);
+    if (Math.abs(w / h - comp.width / comp.height) < 0.02) return;
+    pushUndoSnapshot();
+    setComp((c) => ({ ...c, width: w, height: h }));
+  };
+  // Preview box scale: computed after `bufs` below (stage geometry follows the ACTIVE doc's canvas
+  // dims, not the live comp — a ratio switch must change shape atomically WITH the buffer swap,
+  // otherwise the old content flashes stretched into the new shape for the rebuild window).
   /** Floating toolbar positioning — single source of truth, shared by drag-follow (direct DOM writes) and React
    *  render; the two must produce identical numbers to avoid jumps. Pure follow, no clamping (edge-docking feel was
    *  rejected); avoiding truncation is structural: the toolbar mounts outside the stage's clipping layer. */
@@ -471,8 +487,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const H = compRef.current.height * fitRef.current;
     return { left: box ? (box.x + box.w / 2) * W : W / 2, top: box ? box.y * H - 40 : 8 };
   }, []);
-  const boxW = Math.round(comp.width * fit);
-  const boxH = Math.round(comp.height * fit);
   // Debug overlay: geometry (face/safe-zone) of the frame segment at the playhead; normalized coords overlaid as % on the preview (= full-canvas scale)
   const geomSeg =
     showGeom && visual
@@ -540,13 +554,25 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Preview double-buffering: after a comp change the new doc loads in a **background iframe** (inject video/seek/
   // restore selection); it swaps atomically only when ready, keeping the old frame visible to the last moment —
   // eliminates the full-reload white flash (especially visible when a run of images completes).
-  const [bufs, setBufs] = useState<{ docs: [string, string]; active: 0 | 1 }>(() => ({
+  const [bufs, setBufs] = useState<{ docs: [string, string]; dims: [{ w: number; h: number }, { w: number; h: number }]; active: 0 | 1 }>(() => ({
     docs: [injectPreviewRuntime(assembleHtml(starter)), ''],
+    dims: [
+      { w: starter.width, h: starter.height },
+      { w: starter.width, h: starter.height },
+    ],
     active: 0,
   }));
   const bufsRef = useRef(bufs);
   bufsRef.current = bufs;
   const iframesRef = useRef<(HTMLIFrameElement | null)[]>([null, null]);
+  // Stage geometry = the ACTIVE buffer's canvas (see the note at the old fit site above)
+  const activeDims = bufs.dims[bufs.active];
+  const fit =
+    area.w > 0 && area.h > 0 ? Math.min(area.w / activeDims.w, area.h / activeDims.h) : PREVIEW_FALLBACK_W / activeDims.w;
+  const fitRef = useRef(fit); // used in the (mounted-once) message handler to convert comp px → stage px
+  fitRef.current = fit;
+  const boxW = Math.round(activeDims.w * fit);
+  const boxH = Math.round(activeDims.h * fit);
   const previewAreaRef = useRef<HTMLDivElement | null>(null);
   const tRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
@@ -579,7 +605,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Source video bytes unavailable on this device (OPFS miss + no cloud copy — browser switch or
    *  cleared storage). The stage still renders and cloud-backed content (captions/blocks) stays
    *  editable; a placeholder in the preview tells the user to re-pick the original file. */
-  const [mediaMissing, setMediaMissing] = useState(false);
+  // Per-asset missing-source architecture: there is NO project-level missing state — each asset
+  // (panel card / timeline strip) reflects its own source's reachability. Only the sig anchor needs
+  // hygiene: when nothing references the main source anymore, drop it (autosave would otherwise
+  // re-persist a stale anchor forever).
+  useEffect(() => {
+    if (videoSigRef.current && !videoFile && !comp.video && !(comp.shots ?? []).some((s) => !s.src)) videoSigRef.current = null;
+  }, [comp.video, comp.shots, videoFile]);
   const objectUrlRef = useRef<string | null>(null); // current blob: preview URL, revoked on swap/unmount
   // Person matte: when enabled, the fully-budgeted mask track (source-time indexed, webp-compressed in memory; invalidated on video swap)
   // Parent-side video track engine (canvas render mode): decode/clock/audio stay resident, frames pushed to the iframe canvas
@@ -690,7 +722,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   useEffect(() => {
     const eng = videoEngineRef.current;
     if (!eng) return;
-    const shots = comp.video ? (comp.shots?.length ? comp.shots : [{ id: 'all', src: undefined, srcStart: 0, srcEnd: comp.video.durationSec, treatment: 'full' as const }]) : [];
+    // Equal-footing: real shots always feed the engine, main source or not (a clips-only comp must
+    // render); the implicit whole-video single clip is only for a loaded main with no cuts yet.
+    const shots = comp.shots?.length
+      ? comp.shots
+      : comp.video
+        ? [{ id: 'all', src: undefined, srcStart: 0, srcEnd: comp.video.durationSec, treatment: 'full' as const }]
+        : [];
     for (const s of shots) {
       if (!s.src) continue;
       const f = clipFilesRef.current.get(s.src);
@@ -885,6 +923,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // debounce is only for per-frame setComp streams like box drag. Font-ready tick = structural change (re-measure
     // and re-segment), doesn't take the skip path.
     const fontsChanged = builtFontsTickRef.current !== fontsTick;
+    const sizeOnly = canvasSizeOnlyChange(lastBuiltCompRef.current, comp);
+    const cutOnly = shotCountChange(lastBuiltCompRef.current, comp);
     const capOnly = sameExceptCapStyle(lastBuiltCompRef.current, comp);
     const framingOnly = shotFramingOnlyChange(lastBuiltCompRef.current, comp);
     const patchable = blockPatchableChange(lastBuiltCompRef.current, comp);
@@ -926,7 +966,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // Structural in-place patches (node add/replace): person-matte splits blocks around the matte
         // canvas (index math breaks), and mass additions (lay_out) are better served by one rebuild.
         const structuralN = patchable.added.length + patchable.pairs.filter((p) => p.replace || (p.slots && !echo.has(p.b.id))).length;
-        const fxSplit = !!comp.video && (comp.shots ?? []).some((sh) => sh.personMatte);
+        const fxSplit = hasVideoTrack && (comp.shots ?? []).some((sh) => sh.personMatte);
         if (structuralN === 0 || (!fxSplit && patchable.added.length <= 8)) {
           // Same comp variant the doc was assembled from (image thumbs, fitScale reset) — patched bytes must match a rebuild
           const pcomp = previewCompOf(comp);
@@ -1018,9 +1058,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const back = s.active === 0 ? 1 : 0;
         const docs = [...s.docs] as [string, string];
         docs[back] = doc;
-        return { docs, active: s.active };
+        const dims = [...s.dims] as [{ w: number; h: number }, { w: number; h: number }];
+        dims[back] = { w: comp.width, h: comp.height };
+        return { docs, dims, active: s.active };
       });
-    }, fontsChanged || capOnly || framingOnly || patchable ? 0 : 300);
+    }, fontsChanged || sizeOnly || cutOnly || capOnly || framingOnly || patchable ? 0 : 300);
     return () => clearTimeout(id);
   }, [comp, fontsTick]);
 
@@ -1468,7 +1510,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               if (s.docs[idx] !== doc) return s;
               const docs = [...s.docs] as [string, string];
               docs[s.active === idx ? (idx === 0 ? 1 : 0) : s.active] = '';
-              return { docs, active: idx };
+              return { ...s, docs, active: idx };
             });
             // Replay the alignment now that the pong PROVED this doc listens: the load-time hf:seek can hit a
             // deaf half-loaded doc (the known pit) and vanish — a paused boot then leaves caption timelines at
@@ -1894,7 +1936,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /* ---------- Pick a local video (no upload, blob preview) + ASR ---------- */
   /** opts.asSig: a cloud-fetched File has a changed name/mtime so fileSig won't match the original sig — substitute the
    *  original sig, otherwise the draft-reconnect check fails and it's wiped as a "new project" (OPFS persistence/cloud backup also use the original sig). */
-  async function pickVideoFile(file: File, opts?: { asSig?: string }) {
+  async function pickVideoFile(file: File, opts?: { asSig?: string; reconnect?: boolean }) {
     if (!file.type.startsWith('video/') && !/\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
       toast.error(t('workbench.chooseVideoFile'));
       return;
@@ -1909,7 +1951,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       objectUrlRef.current = url;
       setVideoFile(file);
       videoSigRef.current = sig;
-      setMediaMissing(false);
+
       void saveLocalVideo(file, sig); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
       // Main video stays LOCAL (no auto R2 backup) — kept off deliberately; cross-device video
       // persistence is reserved for a future paid feature. Same-device reconnect uses OPFS above.
@@ -1921,7 +1963,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // NOT on a same-video draft-restore reconnect: cloud hydration (hydrateContextRefs) already put the
       // transcript/plan back, and wiping here left the captions/script panels empty while the timeline
       // showed captions — the products belong to this very video, keep them (user hit this).
-      const sameVideoRestore = !!(pr && pr.videoSig && sig === pr.videoSig);
+      // reconnect: per-asset restore of the main source mid-session — same preserve semantics as a draft reconnect
+      const sameVideoRestore = !!(pr && pr.videoSig && sig === pr.videoSig) || !!opts?.reconnect;
       if (!sameVideoRestore) {
         setAsrSentences(null);
         setPlan(null);
@@ -1931,7 +1974,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         visualRef.current = null;
       }
       resetExport();
-      if (pr && pr.videoSig && sig === pr.videoSig) {
+      if (sameVideoRestore) {
         // Draft restore: re-picked the same original video — only reconnect the video, keep restored blocks/shots
         pendingRestoreRef.current = null;
         setComp((c) => ({ ...c, video: { url, durationSec: dur }, width: dims.width, height: dims.height }));
@@ -2697,6 +2740,89 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     applyT(Number.isFinite(firstStart) ? firstStart : 0);
     toast.success(t('workbench.deletedNScenes', { n: targets.length }));
   };
+  /** Delete a SOURCE from the track (assets-panel delete): every shot cut from that source goes, overlay
+   *  blocks compress per removed span (same math as multi-delete). Equal-footing: the first-loaded source
+   *  gets no special treatment (src = null addresses it, even when its bytes are missing and comp.video
+   *  is already null). One undo snapshot; blob URLs stay alive, so undo restores a playable track for
+   *  this session (only the OPFS bytes are gone for good). */
+  const deleteAssetSource = (src: string | null) => {
+    const c = compRef.current;
+    const isMain = src == null || c.video?.url === src;
+    const shots = ensureShots(c);
+    const spans = clipSpans(shots)
+      .filter((sp) => (isMain ? !sp.clip.src : sp.clip.src === src))
+      .sort((a, b) => b.editedStart - a.editedStart); // end first: earlier spans' coords stay valid
+    if (spans.length === 0 && !isMain) return;
+    pushUndoSnapshot();
+    let cur = shots;
+    let blocks = c.blocks;
+    let firstStart = spans.length ? spans[spans.length - 1]!.editedStart : 0;
+    for (const sp of spans) {
+      const r = deleteClipById(cur, sp.clip.id);
+      if (r.removed) {
+        cur = r.clips;
+        blocks = removeEditedInterval(blocks, r.removed[0], r.removed[1]);
+      } else {
+        // Engine's keep-one guard fired: this span IS the whole remaining track — empty it outright
+        blocks = removeEditedInterval(blocks, 0, sp.clip.srcEnd - sp.clip.srcStart);
+        cur = [];
+      }
+    }
+    setComp((x) => ({ ...x, shots: cur, blocks, ...(isMain ? { video: null } : {}) }));
+    // Drop the source's cloud byte-rendezvous index too — otherwise the next boot resurrects the
+    // deleted source from the R2 vault (loadLocalVideo miss → vault hit → source re-appears).
+    const deadSigs = new Set(spans.map((sp) => sp.clip.srcSig).filter(Boolean) as string[]);
+    if (cloudMediaRef.current.clips && deadSigs.size) {
+      cloudMediaRef.current = {
+        ...cloudMediaRef.current,
+        clips: Object.fromEntries(Object.entries(cloudMediaRef.current.clips).filter(([k]) => !deadSigs.has(k))),
+      };
+    }
+    if (isMain) {
+      setVideoFile(null);
+      videoSigRef.current = null;
+      if (cloudMediaRef.current.video) cloudMediaRef.current = { ...cloudMediaRef.current, video: undefined };
+    }
+    setSelectedShotId(null);
+    setSelectedShotIds(new Set());
+    applyT(Math.max(0, firstStart));
+  };
+  /** Per-asset source liveness: are this source's bytes reachable in THIS session? Main = the loaded
+   *  File; local clips = the held File map; remote URLs count as live (fetchable). Drives the panel's
+   *  restore-card variant and the timeline's missing-source strip. */
+  const srcLive = (src: string) =>
+    src === compRef.current.video?.url ? !!videoFileRef.current : !src.startsWith('blob:') || clipFilesRef.current.has(src);
+  /** Per-asset reconnect (user gesture): handle/OPFS first (may prompt for permission), then the R2
+   *  vault, then a manual re-pick verified against the sig. src = null targets the main source. */
+  const reconnectSource = async (src: string | null, sig?: string | null) => {
+    let f = sig ? await loadLocalVideo(sig) : null;
+    if (!f && sig) {
+      const vaulted = src == null ? cloudMediaRef.current.video?.sig === sig : !!cloudMediaRef.current.clips?.[sig];
+      if (vaulted) {
+        const cf = await studioProviders().vault.fetch(sig);
+        if (cf) f = alignFileToSig(cf, sig); // vault files carry their own name/mtime — realign or the identity drifts
+      }
+    }
+    if (!f) {
+      f = await pickFile('video/*');
+      if (!f) return;
+      if (sig && fileSig(f) !== sig) {
+        toast.error(t('workbench.checksumMismatch'));
+        return;
+      }
+    }
+    if (src == null) {
+      void pickVideoFile(f, { ...(sig ? { asSig: sig } : {}), reconnect: true });
+      return;
+    }
+    const sg = sig ?? fileSig(f);
+    backupMediaToCloud(f, sg, 'clip');
+    const url = URL.createObjectURL(f);
+    clipFilesRef.current.set(url, f);
+    void saveLocalVideo(f, sg).catch(() => {});
+    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((x) => (x.src === src ? { ...x, src: url, srcSig: sg } : x)) }));
+    toast.success(t('workbench.bRollReconnected'));
+  };
   /** Bulk-delete multiple component blocks (⌘ multi-select/marquee). The caption layer (pure computed product) and generating blocks are skipped; one undo snapshot. */
   const deleteBlocks = (ids: Set<string>) => {
     const targets = compRef.current.blocks.filter((b) => ids.has(b.id) && !isSentenceCaption(b) && !genIdsRef.current.has(b.id));
@@ -3077,7 +3203,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const c = compRef.current;
     if (!projectId) return null;
     const hasContent = c.blocks.length > 0 || (c.shots?.length ?? 0) > 0;
-    if (!hasContent) {
+    // Boot-empty stays chat-only (never blank the cloud from a just-opened tab), but a canvas the
+    // user EMPTIED this session (content seen earlier, edits removed it) must persist as empty —
+    // otherwise a refresh resurrects the deleted sources from the last non-empty cloud comp.
+    if (!hasContent && !everCanvasContentRef.current) {
       // Chat is independent of canvas content: a consultation-only session still syncs its threads
       // (chat-only payload — the comp section is NOT sent, so an empty canvas can never clobber a
       // cloud comp; the server seeds an empty comp on first insert). No threads either → nothing to save.
@@ -3297,11 +3426,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // OPFS local library hit → the main video auto-reconnects (via the existing pendingRestore check); inserted clips revive by srcSig.
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
-    setMediaMissing(false);
+    // The main-source anchor only counts when the draft's comp actually REFERENCES a main source:
+    // src-less shots, or an uncut whole-main comp (no shots but a recorded main duration). A stale
+    // anchor on a clips-only/emptied comp must be ignored — honoring it would resurrect a deleted
+    // main video at every boot (duplicate asset card, the 成片-720p case) and re-persist itself
+    // forever via autosave. Ignored here = autosave rewrites videoSig:null = self-heals.
+    const wantsMain = (d.comp.shots ?? []).some((s) => !s.src) || (!(d.comp.shots ?? []).length && d.videoDurationSec != null);
     // Keep the sig anchor even before (or without) the bytes: autosave reads videoSigRef, and
     // writing videoSig:null to the cloud row while the media is missing would destroy the
     // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
-    if (d.videoSig) videoSigRef.current = d.videoSig;
+    if (d.videoSig && wantsMain) videoSigRef.current = d.videoSig;
     setComp(() => ({ ...d.comp, video: null }));
     // Local-draft transcript hydration (fill gaps only — in-memory state is fresher): captions are
     // derived from the transcript, so a zero-backend/offline reopen needs it from the draft.
@@ -3314,7 +3448,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       clipAsrRef.current = dc.clipAsr;
       setClipAsr(dc.clipAsr);
     }
-    if (d.videoSig) {
+    if (d.videoSig && wantsMain) {
       void loadLocalVideo(d.videoSig).then(async (f) => {
         if (f && pendingRestoreRef.current === d) {
           void pickVideoFile(f, { asSig: d.videoSig! });
@@ -3330,10 +3464,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             return;
           }
         }
-        // Bytes unavailable on this device (browser switch / cleared storage): enter the persistent
-        // missing-media state — the stage keeps rendering captions/blocks (all cloud-backed), with a
-        // placeholder telling the user the source file is gone and how to reconnect it.
-        setMediaMissing(true);
+        // Bytes unavailable on this device (browser switch / cleared storage): nothing global to
+        // flip — missing sources are per-asset now (panel restore card + timeline missing strip);
+        // the sig anchor stays so reconnect/autosave keep working.
       });
     }
     void recoverLocalClips(d.comp.shots ?? []);
@@ -3446,6 +3579,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // "Canvas had content this session" — buildCloudPayload uses it to tell boot-empty (chat-only,
+  // never blank the cloud) from user-emptied (must persist the emptiness). Set by restore or edits.
+  const everCanvasContentRef = useRef(false);
+  useEffect(() => {
+    if (comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0) everCanvasContentRef.current = true;
+  }, [comp]);
 
   // Cloud sync (debounced): coalesce one PUT 1.2s after comp or the session changes. The cloud-authoritative write-back —
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).
@@ -3595,6 +3735,36 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             No overflow-hidden: the floating toolbar must follow a component past the stage edge without being clipped (frame clipping is on the inner stage layer) */}
         <div ref={previewAreaRef} className="bg-panel-2 relative flex min-h-0 min-w-0 flex-1 items-center justify-center p-3">
+          {/* Canvas-ratio picker (bottom-right): the ratio is a project decision — seeded by the first
+              inserted source, switchable here; sources contain-fit so switching never crops content. */}
+          {hasVideoTrack && (
+            <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
+              {ratioOpen && (
+                <div className="border-line bg-panel absolute bottom-8 right-0 flex flex-col overflow-hidden rounded-md border shadow-lg">
+                  {CANVAS_RATIOS.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => applyCanvasRatio(r.w, r.h)}
+                      className={`px-3 py-1.5 text-left text-[11.5px] transition ${
+                        currentRatioId === r.id ? 'bg-panel-2 text-ink font-medium' : 'text-ink-3 hover:bg-panel-2 hover:text-ink'
+                      }`}
+                    >
+                      {r.id}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setRatioOpen((v) => !v)}
+                title={t('workbench.canvasRatio')}
+                className="border-line bg-panel/90 text-ink-2 hover:text-ink inline-flex h-[24px] items-center gap-1 rounded-md border px-2 text-[11px] backdrop-blur"
+              >
+                {currentRatioId ?? t('workbench.ratioCustom')}
+              </button>
+            </div>
+          )}
           {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):
               top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button), top-right = expand assets.
               Icon-only (per user): no text floating over the frame — the label lives in title/aria. */}
@@ -3620,7 +3790,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <ChevronsLeft size={14} />
             </button>
           )}
-          {!comp.video && !mediaMissing ? (
+          {!hasVideoTrack ? (
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -3640,7 +3810,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <div ref={stageBoxRef} data-cap-keep className="relative" style={{ width: boxW, height: boxH }}>
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
                   so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
-              <div className="absolute inset-0 overflow-hidden rounded-xl shadow-xl ring-1 ring-black/20">
+              <div className="absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20">
                 {/* Double-buffered iframes: load in the background then swap, eliminating the reload white flash.
                     Trust boundary: LLM-generated block HTML/scripts run in a sandbox (opaque origin), can't reach the main app's DOM/localStorage/cookies;
                     local blob videos aren't readable → onBufLoad hands the File in to build its own URL; the control protocol is all postMessage. */}
@@ -3663,8 +3833,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       position: 'absolute',
                       left: 0,
                       top: 0,
-                      width: comp.width,
-                      height: comp.height,
+                      width: bufs.dims[i].w,
+                      height: bufs.dims[i].h,
                       border: 0,
                       transform: `scale(${fit})`,
                       transformOrigin: 'top left',
@@ -3676,27 +3846,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     }}
                   />
                 ))}
-                {/* Missing-media placeholder (mainstream-editor-style): the source bytes aren't on this device, but
-                    everything cloud-backed (captions/blocks/timeline) keeps rendering underneath and stays
-                    editable — this only explains the black video layer and offers the reconnect. */}
-                {mediaMissing && !comp.video && (
-                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50">
-                    <div className="flex max-w-xs flex-col items-center gap-2 px-6 text-center">
-                      <VideoOff size={26} className="text-white/75" />
-                      <div className="text-[13px] font-medium text-white">{t('workbench.originalVideoFileMissing')}</div>
-                      <div className="text-[11.5px] leading-relaxed text-white/70">
-                        {t('workbench.storageMissingHint')}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="mt-1 rounded-md bg-white px-3 py-1.5 text-[12px] font-medium text-black hover:bg-white/90"
-                      >
-                        {t('workbench.reSelectOriginalVideo')}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* Missing sources are per-asset (panel restore card + timeline missing strip) — no full-stage mask. */}
               </div>
               {/* Insert landing skeleton: draw a dashed box + spinner where the component will appear, dissolves when the rebuild settles (more prominent than the top pill) */}
               {pendingInsert && rebuilding && (
@@ -4090,7 +4240,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         )}
                       </>
                     )}
-                    {comp.video && (
+                    {hasVideoTrack && (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
@@ -4356,13 +4506,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           )}
         </div>
 
-        {/* Asset rail: two tabs — assets (image/video/component/upload aggregated, with source badges) / themes; width 320 aligned to the theme card CARD_W.
+        {/* Library rail: content column + a vertical primary-nav strip on the outer edge
+            (assets / script-cut / captions / audio / avatar). railW = CONTENT width; the nav strip
+            adds RAIL_NAV_W on top so the asset grid's whole-column math stays intact.
             Collapsible to free up the frame: the whole column stays mounted as hidden (preserving filters/scroll/generation polling), the expand button floats top-right on the preview.
-            When a tool panel (floatWin) is open it **docks and takes the whole column** (per user: not a new tab): the tabs header is replaced by
-            the panel title header, the asset list is hidden but keeps state, closing the panel returns to the tabs */}
+            When a tool panel (floatWin) is open it **docks and takes the whole content column** (per user: not a new tab):
+            a panel title header appears, the asset list is hidden but keeps state; the nav strip stays visible and
+            clicking any nav item closes the panel and returns to that tab. */}
         <div
           className={`border-line flex shrink-0 flex-col border-l ${libCollapsed ? 'hidden' : ''} ${railPinned ? 'relative' : 'bg-bg absolute inset-y-0 right-0 z-40 shadow-2xl'}`}
-          style={libCollapsed ? undefined : { width: railW }}
+          style={libCollapsed ? undefined : { width: railW + RAIL_NAV_W }}
         >
           {/* Drag the left edge to resize (260–786 = up to six 120px card columns flush, persisted) */}
           <div
@@ -4398,7 +4551,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             title={t('workbench.dragResizePanel')}
             className="hover:bg-accent/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors"
           />
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {floatWin ? (
             <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
               {floatWin === 'gen' ? (
@@ -4459,53 +4613,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <X size={14} />
               </button>
             </div>
-          ) : (
-            <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
-              {(
-                [
-                  { v: 'assets', label: 'workbench.assets' },
-                  { v: 'script', label: 'workbench.scriptCut' },
-                  { v: 'captions', label: 'panels.captions' },
-                  { v: 'audio', label: 'panels.music' },
-                  // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
-                ] as { v: 'assets' | 'frames' | 'script' | 'captions' | 'audio'; label: string }[]
-              ).map((tab) => (
-                <button
-                  key={tab.v}
-                  type="button"
-                  onClick={() => setLibTab(tab.v)}
-                  className={`rounded-md px-2.5 py-1 text-[12px] transition ${
-                    libTab === tab.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
-                  }`}
-                >
-                  {t(tab.label)}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setRailPinned((p) => !p)}
-                title={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
-                aria-label={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
-                className="text-ink-4 hover:text-ink ml-auto rounded p-1"
-              >
-                {railPinned ? <PinOff size={13} /> : <Pin size={13} />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLibCollapsedManual(true)}
-                title={t('workbench.collapseAssetsBar')}
-                aria-label={t('workbench.collapseAssetsBar')}
-                className="text-ink-4 hover:text-ink rounded p-1"
-              >
-                <ChevronsRight size={14} />
-              </button>
-            </div>
-          )}
+          ) : null}
           {/* Assets stay mounted (hidden when switched away / covered by a panel, preserving polling/scroll position); themes mount on demand (don't run the cover wall in the background) */}
           <div className={!floatWin && libTab === 'assets' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
             <AssetsPanel
               comp={comp}
+              projectId={projectId}
+              videoSig={videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null)}
+              onDeleteAsset={deleteAssetSource}
+              isSrcLive={srcLive}
+              onReconnectSource={(src, sig) => void reconnectSource(src, sig)}
               onInsert={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
+              onInsertClip={(a) => void insertLibraryClipAt(a, tRef.current)}
               onInsertElement={insertGeneratedElement}
               onInsertKit={(cid, props) => insertTemplateBlock(`kit:${cid}`, props)}
               onDragAsset={setDragAsset}
@@ -4570,6 +4689,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
             </div>
           )}
+          {!floatWin && libTab === 'avatar' && <AvatarPanel />}
           {floatWin && (
             <div className="flex min-h-0 flex-1">
               {floatWin === 'gen' && (
@@ -4715,6 +4835,58 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </div>
           )}
           </div>
+          {/* Primary nav strip: always visible (floatWin covers only the content column). Clicking a
+              tab closes any docked tool panel — the nav is the one stable way back. Pin/collapse live
+              at the strip's bottom since the tabs header row is gone. */}
+          <div className="border-line flex shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-l px-1 py-2" style={{ width: RAIL_NAV_W }}>
+            {(
+              [
+                { v: 'assets', icon: LayoutGrid, label: 'workbench.assets' },
+                { v: 'script', icon: Scissors, label: 'workbench.scriptCut' },
+                { v: 'captions', icon: Captions, label: 'panels.captions' },
+                { v: 'audio', icon: Music, label: 'panels.music' },
+                { v: 'avatar', icon: UserRound, label: 'workbench.avatar' },
+                // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
+              ] as { v: 'assets' | 'script' | 'captions' | 'audio' | 'avatar'; icon: typeof LayoutGrid; label: string }[]
+            ).map((n) => (
+              <button
+                key={n.v}
+                type="button"
+                onClick={() => {
+                  setFloatWin(null);
+                  setLibTab(n.v);
+                }}
+                aria-label={t(n.label)}
+                className={`flex w-full flex-col items-center gap-1 rounded-md py-1.5 transition ${
+                  !floatWin && libTab === n.v ? 'bg-panel-2 text-ink' : 'text-ink-4 hover:text-ink-2'
+                }`}
+              >
+                <n.icon size={15} />
+                <span className="max-w-full truncate px-0.5 text-[9px] leading-none">{t(n.label)}</span>
+              </button>
+            ))}
+            <div className="mt-auto flex w-full flex-col items-center gap-0.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setRailPinned((p) => !p)}
+                title={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
+                aria-label={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
+                className="text-ink-4 hover:text-ink flex w-full items-center justify-center rounded-md py-1.5"
+              >
+                {railPinned ? <PinOff size={13} /> : <Pin size={13} />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setLibCollapsedManual(true)}
+                title={t('workbench.collapseAssetsBar')}
+                aria-label={t('workbench.collapseAssetsBar')}
+                className="text-ink-4 hover:text-ink flex w-full items-center justify-center rounded-md py-1.5"
+              >
+                <ChevronsRight size={14} />
+              </button>
+            </div>
+          </div>
+          </div>
         </div>
         </div>
 
@@ -4770,7 +4942,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div className="bg-line mx-0.5 h-4 w-px shrink-0" />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={splitAtPlayhead} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={splitAtPlayhead} disabled={!hasVideoTrack && !selectedAudioId} aria-label={t('workbench.split')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon />
                   </button>
                 </TooltipTrigger>
@@ -4778,7 +4950,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('left')} disabled={!hasVideoTrack && !selectedAudioId} aria-label={t('workbench.trimLeft')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="left" />
                   </button>
                 </TooltipTrigger>
@@ -4786,7 +4958,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!comp.video && !selectedAudioId} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
+                  <button type="button" onClick={() => trimAtPlayhead('right')} disabled={!hasVideoTrack && !selectedAudioId} aria-label={t('workbench.trimRight')} className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40">
                     <BracketCutIcon dashed="right" />
                   </button>
                 </TooltipTrigger>
@@ -4819,7 +4991,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={(e) => (floatWin === 'person' ? setFloatWin(null) : openFloatAt('person', e.currentTarget.getBoundingClientRect()))}
-                disabled={!comp.video || !selectedShotId}
+                disabled={!hasVideoTrack || !selectedShotId}
                 aria-label={t('workbench.portrait')}
                 className={`ml-1 rounded p-1 disabled:opacity-40 ${floatWin === 'person' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
@@ -4834,7 +5006,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={(e) => selectedShotId && (floatWin === 'shot' ? setFloatWin(null) : openFloatAt('shot', e.currentTarget.getBoundingClientRect()))}
-                disabled={!comp.video || !selectedShotId}
+                disabled={!hasVideoTrack || !selectedShotId}
                 aria-label={t('workbench.cameraFraming')}
                 className={`rounded p-1 disabled:opacity-40 ${floatWin === 'shot' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
@@ -4849,7 +5021,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={openAudioTab}
-                disabled={!comp.video}
+                disabled={!hasVideoTrack}
                 aria-label={t('panels.music')}
                 className={`rounded p-1 disabled:opacity-40 ${!floatWin && libTab === 'audio' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
@@ -4917,7 +5089,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={() => setExportOpen(true)}
-                disabled={exporting || publishing || !comp.video}
+                disabled={exporting || publishing || !hasVideoTrack}
                 className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
               >
                 {exporting || publishing ? <Loader2 size={14} className="animate-spin" /> : <FileVideo size={14} />}{' '}
@@ -5030,6 +5202,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           selectedBlockIds={selectedBlockIds}
           filmstrip={filmstrip}
           clipStrips={clipStrips}
+          mainLive={!!videoFile}
+          srcLive={srcLive}
           pps={pps}
           assetDragging={!!dragAsset}
           assetDragKind={dragAsset?.type ?? null}

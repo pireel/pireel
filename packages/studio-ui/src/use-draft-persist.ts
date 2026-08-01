@@ -369,9 +369,14 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
 export function useDraftAutosave(comp: Composition, videoSig: string | null, projectId: string, coverThumbRef?: MutableRefObject<string | null>, contextOf?: () => StudioDraft['context']) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  // Boot-empty must not clobber a real draft, but "the user emptied a loaded project" is a legit
+  // final state that MUST persist — otherwise a refresh resurrects the last non-empty draft.
+  // "Emptied" = this hook saw content earlier in the session and now it's gone.
+  const everContent = useRef(false);
   useEffect(() => {
     const hasContent = comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0;
-    if (!hasContent || !projectId) return;
+    if (hasContent) everContent.current = true;
+    if ((!hasContent && !everContent.current) || !projectId) return;
     if (timer.current) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       try {
