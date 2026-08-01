@@ -119,6 +119,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.exportingPct': 'Exporting {pct}%',
   'workbench.exportingPctShort': 'Exporting {pct}%',
   'workbench.exportStartedLocalClient': 'Export started (local client render, about 1x video length)',
+  'workbench.exportNeedsChoice': 'Pick the export specs first: resolution / fps / format (recommendations from the source video and each platform)',
   'workbench.externalAgentLabel': 'External agent · {label}',
   'workbench.externalAgentLabelFailed': 'External agent · {label} failed: {error}',
   'workbench.externalAgentLabelSummary': 'External agent · {label}: {summary}',

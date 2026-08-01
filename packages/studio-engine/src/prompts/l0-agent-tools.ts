@@ -614,12 +614,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.export_video.label',
     description:
-      "Start exporting the final video. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Defaults: 1080p / 30fps / mp4. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
+      "Export the final video. FIRST call it with NO resolution/fps/format: it returns source- and platform-tuned recommendations (小红书 / 抖音·TikTok / YouTube / source-quality) as `data.options` — present those and ask the user which to use, do NOT silently default. THEN call it again with the chosen `resolution`/`fps`/`format` (or `confirmed:true` to accept the source-quality default) to actually start. It renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
     inputSchema: obj(
       {
-        resolution: { type: 'number', description: 'Output height: 2160/1440/1080/720/540 (default 1080).' },
-        fps: { type: 'number', description: '24/30/60 (default 30).' },
-        format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Container (default mp4).' },
+        resolution: { type: 'number', description: 'Output SHORT-SIDE pixels: 2160/1440/1080/720/540. Take it from the chosen recommendation (a portrait 1080×1920 video at 1080p = 1080 here).' },
+        fps: { type: 'number', description: '24/30/60.' },
+        format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Container.' },
+        confirmed: { type: 'boolean', description: 'Set true to start the export at the source-quality default when the user does not want to pick resolution/fps/format. Any explicit resolution/fps/format also starts it.' },
         sink_url: { type: 'string', description: 'Loopback receiver URL from the export-sink helper (scripts/export-sink.mjs) — the finished file is PUT there instead of a browser download. Use when driving a headless/embedded browser.' },
       },
       [],

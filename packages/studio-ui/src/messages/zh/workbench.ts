@@ -119,6 +119,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.exportingPct': '导出中 {pct}%',
   'workbench.exportingPctShort': '导出 {pct}%',
   'workbench.exportStartedLocalClient': '开始导出(本地客户端合成,约 1x 片长)',
+  'workbench.exportNeedsChoice': '先选导出规格:分辨率 / 帧率 / 格式(已按原视频和各平台给出建议)',
   'workbench.externalAgentLabel': '外部 agent · {label}',
   'workbench.externalAgentLabelFailed': '外部 agent · {label} 失败:{error}',
   'workbench.externalAgentLabelSummary': '外部 agent · {label}:{summary}',
