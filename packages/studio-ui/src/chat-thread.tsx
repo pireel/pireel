@@ -13,7 +13,6 @@ import {
 import { Conversation, ConversationContent, ConversationEmptyState, ConversationScrollButton } from '@pireel/ui/ai-elements/conversation';
 import { Suggestion } from '@pireel/ui/ai-elements/suggestion';
 import { Message, MessageContent, MessageResponse } from '@pireel/ui/ai-elements/message';
-import { Reasoning, ReasoningContent, ReasoningTrigger } from '@pireel/ui/ai-elements/reasoning';
 import { type ChatSituation, buildSituation } from '@pireel/studio-engine/prompts';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { FrameCatalogItem } from './use-frame-catalog';
@@ -329,9 +328,9 @@ export function ChatThread({
               const lastToolRunning =
                 !!lastPart && (lastPart.type.startsWith('tool-') || lastPart.type === 'dynamic-tool') && toolStatus(lastPart).kind === 'running';
               const lastTextLive = !!lastPart && lastPart.type === 'text' && !!(lastPart as { text?: string }).text;
-              // A live reasoning panel already signals activity — no extra thinking dots under it
-              const lastReasoningLive = !!lastPart && lastPart.type === 'reasoning' && !!(lastPart as { text?: string }).text;
-              const thinking = m.role === 'assistant' && isLast && busy && !lastToolRunning && !lastTextLive && !lastReasoningLive;
+              // Reasoning parts are hidden (leaked-internals feel) — a streaming reasoning phase must
+              // therefore SHOW the dots, or the model looks dead while it thinks.
+              const thinking = m.role === 'assistant' && isLast && busy && !lastToolRunning && !lastTextLive;
               return (
                 <Message key={m.id} from={m.role}>
                   <div className="flex items-start gap-2">
@@ -354,23 +353,10 @@ export function ChatThread({
                             </MessageContent>
                           );
                         }
-                        if (part.type === 'reasoning') {
-                          // Reasoning-model thinking stream: rendered live (otherwise the whole
-                          // thinking phase is dead air — the stream is flowing but nothing paints)
-                          const text = (part as { text?: string }).text ?? '';
-                          if (!text.trim()) return null;
-                          const streaming = (part as { state?: 'streaming' | 'done' }).state === 'streaming';
-                          return (
-                            <Reasoning key={key} isStreaming={streaming}>
-                              <ReasoningTrigger>
-                                {streaming ? t('chatGen.reasoningLive') : t('chatGen.reasoningDone')}
-                              </ReasoningTrigger>
-                              <ReasoningContent>
-                                <MessageResponse className="text-xs leading-relaxed">{text}</MessageResponse>
-                              </ReasoningContent>
-                            </Reasoning>
-                          );
-                        }
+                        // Reasoning parts are NOT rendered (user decision: no thinking process in the
+                        // chat, it reads as leaked internals). The thinking phase still shows activity
+                        // via the ThinkingDots below — live reasoning counts as "thinking", not output.
+                        if (part.type === 'reasoning') return null;
                         if (part.type.startsWith('tool-') || part.type === 'dynamic-tool')
                           // Locate rides the existing seek tool (playhead + preview follow) — no new channel to the workbench
                           return renderToolPart(part, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }), getComp });
