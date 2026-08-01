@@ -10,6 +10,7 @@ import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { GraphicsPreviewBody } from './chat-graphics-card';
 import { AskUserCard } from './chat-ask-card';
+import { ExportSettingsCard } from './chat-export-card';
 import { t } from './i18n';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
@@ -191,6 +192,8 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   if (!def) return null;
   // ask_user: a structured question with clickable option chips (its own card, not the generic one)
   if (id === 'ask_user') return <div key={key}><AskUserCard part={part} /></div>;
+  // export_video: parks on an integrated settings card (presets + resolution/fps/format), then shows the started confirmation
+  if (id === 'export_video' && part.state !== 'output-error') return <div key={key}><ExportSettingsCard part={part} /></div>;
   // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line
   if (id === 'cut_narration' && part.state === 'output-available') {
     const rows = cutRowsOf(part.output);
