@@ -606,6 +606,34 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({}, []),
   },
 
+  /* ---------- ask the user a structured question (chat surface only) ---------- */
+  {
+    id: 'ask_user',
+    kind: 'card',
+    icon: '💬',
+    label: 'tools.ask_user.label',
+    chatOnly: true,
+    description:
+      "Ask the user a question with a small set of concrete OPTIONS, rendered as clickable choices — use this instead of typing the question in prose whenever the next step needs a decision the user should make (export resolution/fps/format, which theme, portrait vs landscape, which of several directions). Each option needs a short `label` plus a one-line `description` of what it means / the trade-off. The chosen label(s) come back in `data.selected`; act on them. Don't use it for open-ended input or things you can reasonably decide yourself — only for a genuine pick between a few named choices.",
+    inputSchema: obj(
+      {
+        question: { type: 'string', description: "The question, in the user's language." },
+        options: {
+          type: 'array',
+          description: '2–4 choices.',
+          items: obj(
+            {
+              label: { type: 'string', description: 'Short choice label (shown on the chip, and returned as the answer).' },
+              description: { type: 'string', description: 'One line: what this choice means or its trade-off.' },
+            },
+            ['label'],
+          ),
+        },
+        multiSelect: { type: 'boolean', description: 'Allow picking more than one (default false = single choice).' },
+      },
+      ['question', 'options'],
+    ),
+  },
   /* ---------- export (local client-side compositing, card · slow) ---------- */
   {
     id: 'export_video',
@@ -614,7 +642,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.export_video.label',
     description:
-      "Export the final video. FIRST call it with NO resolution/fps/format: it returns source- and platform-tuned recommendations (小红书 / 抖音·TikTok / YouTube / source-quality) as `data.options` — present those and ask the user which to use, do NOT silently default. THEN call it again with the chosen `resolution`/`fps`/`format` (or `confirmed:true` to accept the source-quality default) to actually start. It renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
+      "Export the final video. FIRST call it with NO resolution/fps/format: it returns source- and platform-tuned recommendations (Xiaohongshu / Douyin·TikTok / YouTube / source-quality) as `data.options` — put them to the user via ask_user (one option per recommendation), do NOT silently default. THEN call it again with the chosen `resolution`/`fps`/`format` (or `confirmed:true` to accept the source-quality default) to actually start. It renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
     inputSchema: obj(
       {
         resolution: { type: 'number', description: 'Output SHORT-SIDE pixels: 2160/1440/1080/720/540. Take it from the chosen recommendation (a portrait 1080×1920 video at 1080p = 1080 here).' },

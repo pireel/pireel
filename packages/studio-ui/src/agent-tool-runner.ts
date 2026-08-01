@@ -48,6 +48,7 @@ import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
+import { registerAsk } from './ask-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
@@ -214,7 +215,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
         return delta ? { ...res, data: { ...((res.data as Record<string, unknown> | undefined) ?? {}), delta } } : res;
       };
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
-      const READONLY_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export']);
+      const READONLY_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
       if (!READONLY_TOOLS.has(toolId)) {
         const targetIds = [input.blockId, ...(Array.isArray(input.blockIds) ? (input.blockIds as unknown[]) : [])].filter(
@@ -946,6 +947,31 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             setSelectedId(null);
             setSelectedShotId(null);
             return withDelta({ ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') });
+          }
+          case 'ask_user': {
+            // Structured question with clickable options, rendered in the chat card. The tool parks
+            // here until the user clicks (or the stop button aborts) — the answer flows back as data.
+            const question = typeof input.question === 'string' ? input.question.slice(0, 500) : '';
+            const options = (Array.isArray(input.options) ? (input.options as unknown[]) : [])
+              .map((o) => {
+                const oo = o as { label?: unknown; description?: unknown };
+                return { label: String(oo?.label ?? '').slice(0, 80), description: typeof oo?.description === 'string' ? oo.description.slice(0, 200) : '' };
+              })
+              .filter((o) => o.label);
+            if (!question || options.length < 2) return { ok: false, error: t('workbench.askNeedsQuestionOptions') };
+            const selection = await new Promise<string[] | null>((resolve) => {
+              const unregister = registerAsk((sel) => resolve(sel));
+              if (signal) signal.addEventListener('abort', () => { unregister(); resolve(null); }, { once: true });
+            });
+            if (selection == null) throw abortErr();
+            const labels = new Set(options.map((o) => o.label));
+            const chosen = selection.filter((s) => labels.has(s));
+            if (!chosen.length) return { ok: false, error: t('workbench.askNoValidChoice') };
+            return {
+              ok: true,
+              summary: t('workbench.askAnswered', { answer: chosen.join(', ') }),
+              data: { selected: chosen, multiSelect: input.multiSelect === true },
+            };
           }
           case 'export_video': {
             // Default local export (per user, same path in the OSS shell): the bridge drives this tab to run client-side compositing (WebCodecs),
