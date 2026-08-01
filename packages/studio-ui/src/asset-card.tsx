@@ -53,7 +53,7 @@ export type PanelMediaAsset = MediaRef & { label?: string; dims?: { w: number; h
 
 export type PanelDragAsset =
   | PanelMediaAsset
-  | { type: 'audio'; url: string; label?: string }
+  | { type: 'audio'; url: string; label?: string; sig?: string | null }
   | { type: 'element'; element: GenElementResult; prompt: string; label?: string };
 
 export const arOf = (it: LibraryItem): number | undefined =>
@@ -87,7 +87,7 @@ export function dragPropsFor(it: LibraryItem, onDragAsset?: (asset: PanelDragAss
       draggable: true,
       onDragStart: (e: React.DragEvent) => {
         e.dataTransfer.effectAllowed = 'copy';
-        onDragAsset?.({ type: 'audio', url: it.insertUrl!, label: it.label });
+        onDragAsset?.({ type: 'audio', url: it.insertUrl!, label: it.label, sig: it.sig });
       },
       onDragEnd: () => onDragAsset?.(null),
     };

@@ -157,8 +157,8 @@ export function MyAssetsPanel({
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Click-insert default: MAIN TRACK at the playhead (drag is what targets the stage/other lanes). */
   onInsertClip?: (asset: PanelMediaAsset) => void;
-  /** Audio asset's primary action: mount on the music lane (workbench → use-bgm). */
-  onUseAudio?: (url: string, label?: string) => void;
+  /** Audio asset's primary action: mount on the music lane (workbench → use-bgm). sig = local byte identity. */
+  onUseAudio?: (url: string, label?: string, sig?: string | null) => void;
   onDragAsset?: (asset: PanelDragAsset | null) => void;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
@@ -419,7 +419,7 @@ export function MyAssetsPanel({
   const insertOf = (it: LibraryItem) => {
     if (!it.insertUrl) return;
     if (it.kind === 'audio') {
-      onUseAudio?.(it.insertUrl, it.label);
+      onUseAudio?.(it.insertUrl, it.label, it.sig);
       return;
     }
     if (onInsertClip) onInsertClip(mediaOf(it));

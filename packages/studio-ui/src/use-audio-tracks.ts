@@ -143,11 +143,19 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     return clip.id;
   };
 
-  /** Mount from an asset URL (assets-panel "use as BGM" / timeline drop): fetch bytes through the
-   *  same-origin proxy, then the exact upload path (loudness auto-level included). */
-  const mountAudioFromUrl = async (url: string, label?: string, opts?: { startSec?: number }) => {
-    const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`);
-    if (!r.ok) {
+  /** Mount from an asset URL (assets-panel "use as BGM" / timeline drop), then the exact upload path
+   *  (loudness auto-level included). Byte lanes, best first: a known sig reads the on-device file
+   *  (handle/OPFS — identity preserved, zero fetch); blob: URLs fetch directly (they are document-
+   *  local, the server proxy can never resolve them); remote URLs go through the same-origin proxy. */
+  const mountAudioFromUrl = async (url: string, label?: string, opts?: { startSec?: number; sig?: string | null }) => {
+    if (opts?.sig) {
+      const f = await loadLocalVideo(opts.sig);
+      if (f) return mountAudioFile(f, label, opts);
+    }
+    const r = url.startsWith('blob:')
+      ? await fetch(url).catch(() => null)
+      : await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`).catch(() => null);
+    if (!r?.ok) {
       toast.error(t('workbench.musicGenFailed'));
       return;
     }

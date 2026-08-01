@@ -3374,7 +3374,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Audio drop (music lane / anywhere audio is allowed): mount as the bed starting at the drop time
       const a = dragAsset;
       setDragAsset(null);
-      if (a?.type === 'audio') void audioOps.mountAudioFromUrl(a.url, a.label, { startSec: t });
+      if (a?.type === 'audio') void audioOps.mountAudioFromUrl(a.url, a.label, { startSec: t, sig: a.sig });
     },
     // Direct-manipulation lane drags commit on every move and stay OUT of the undo stack —
     // same convention as element move/resize (a snapshot per pointer frame would flood it).
@@ -4628,7 +4628,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onInsertElement={insertGeneratedElement}
               onInsertKit={(cid, props) => insertTemplateBlock(`kit:${cid}`, props)}
               onDragAsset={setDragAsset}
-              onUseAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
+              onUseAudio={(url, label, sig) => void audioOps.mountAudioFromUrl(url, label, { sig }).then((id) => id && setSelectedAudioId(id))}
               onOpenGen={(t, anchor) => {
                 setGenType(t);
                 openFloatAt('gen', anchor);

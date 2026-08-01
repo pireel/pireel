@@ -66,8 +66,8 @@ export function AssetsPanel({
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
   onOpenGen: (type: GenType, anchor?: DOMRect) => void;
-  /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). */
-  onUseAudio?: (url: string, label?: string) => void;
+  /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). sig = local byte identity. */
+  onUseAudio?: (url: string, label?: string, sig?: string | null) => void;
   /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
