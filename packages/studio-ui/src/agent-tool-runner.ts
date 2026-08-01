@@ -48,8 +48,7 @@ import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
-import { registerAsk } from './ask-store';
-import { registerExportChoice } from './export-store';
+import { parkInteraction } from './interaction-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
@@ -960,10 +959,11 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
               })
               .filter((o) => o.label);
             if (!question || options.length < 2) return { ok: false, error: t('workbench.askNeedsQuestionOptions') };
-            const selection = await new Promise<string[] | null>((resolve) => {
-              const unregister = registerAsk((sel) => resolve(sel));
-              if (signal) signal.addEventListener('abort', () => { unregister(); resolve(null); }, { once: true });
-            });
+            const selection = await parkInteraction<{ question: string; options: typeof options; multi: boolean }, string[]>(
+              'ask',
+              { question, options, multi: input.multiSelect === true },
+              { signal },
+            );
             if (selection == null) throw abortErr();
             const labels = new Set(options.map((o) => o.label));
             const chosen = selection.filter((s) => labels.has(s));
@@ -987,10 +987,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             let chosen: { resolution: unknown; fps: unknown; format: unknown } = { resolution: input.resolution, fps: input.fps, format: input.format };
             if (input.confirmed !== true) {
               const rec = exportRecommendations(compRef.current);
-              const picked = await new Promise<{ resolution: number; fps: number; format: 'mp4' | 'webm' | 'mov' } | null>((resolve) => {
-                const unregister = registerExportChoice(rec, (c) => resolve(c));
-                if (signal) signal.addEventListener('abort', () => { unregister(); resolve(null); }, { once: true });
-              });
+              const picked = await parkInteraction<typeof rec, { resolution: number; fps: number; format: 'mp4' | 'webm' | 'mov' }>('export', rec, { signal });
               if (picked == null) throw abortErr();
               chosen = picked;
             }
