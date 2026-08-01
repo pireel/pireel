@@ -47,6 +47,7 @@ import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
+import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
@@ -952,6 +953,22 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             if (!compRef.current.video?.url) return { ok: false, error: t('common.uploadBeforeExport') };
             const job = agentExportRef.current;
             if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
+            // Ask before defaulting: with no resolution/fps/format and no confirmation, return
+            // source- and platform-tuned recommendations for the agent to put to the user (in chat,
+            // or in the external MCP client) — export starts only once a choice or confirm arrives.
+            const gaveOpts = input.resolution != null || input.fps != null || input.format != null;
+            if (!gaveOpts && input.confirmed !== true) {
+              const rec = exportRecommendations(compRef.current);
+              return {
+                ok: true,
+                summary: t('workbench.exportNeedsChoice'),
+                data: {
+                  status: 'needs_options',
+                  ...rec,
+                  ask: 'Ask the user which resolution / fps / format to export, using these platform recommendations. Then call export_video again with the chosen values (or confirmed:true to accept the source-quality default).',
+                },
+              };
+            }
             const opts = {
               res: [2160, 1440, 1080, 720, 540].includes(Number(input.resolution)) ? (Number(input.resolution) as 2160 | 1440 | 1080 | 720 | 540) : (1080 as const),
               fps: [24, 30, 60].includes(Number(input.fps)) ? (Number(input.fps) as 24 | 30 | 60) : (30 as const),
