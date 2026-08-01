@@ -381,10 +381,12 @@ export function MyAssetsPanel({
     await addEntries(await Promise.all(handles.map(async (h) => ({ file: await h.getFile(), handle: h }))));
   };
 
-  /** Folder import: authorize a directory (Chromium), import its top-level media files — each file
-   *  gets its own native handle, so persistence/restore work exactly like single-file imports.
-   *  Fallback elsewhere: <input webkitdirectory> (files only, OPFS copies). */
+  /** Folder import: authorize a directory (Chromium), import its media files RECURSIVELY (depth-
+   *  capped, hidden dirs skipped; the per-pick cap is the real bound) — each file gets its own
+   *  native handle, so persistence/restore work exactly like single-file imports. Fallback
+   *  elsewhere: <input webkitdirectory> (full tree, files only, OPFS copies). */
   const FOLDER_CAP = 50;
+  const FOLDER_DEPTH = 4;
   const pickFolder = async () => {
     const picker = (window as { showDirectoryPicker?: (o?: { mode?: 'read' }) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
     if (!picker) {
@@ -398,14 +400,21 @@ export function MyAssetsPanel({
       return; // cancelled
     }
     const entries: { file: File; handle?: FileSystemFileHandle }[] = [];
-    try {
-      const iter = (dir as unknown as { values: () => AsyncIterable<FileSystemFileHandle & { kind: string }> }).values();
+    const walk = async (d: FileSystemDirectoryHandle, depth: number): Promise<void> => {
+      const iter = (d as unknown as { values: () => AsyncIterable<(FileSystemFileHandle | FileSystemDirectoryHandle) & { kind: string; name: string }> }).values();
       for await (const h of iter) {
-        if (h.kind !== 'file') continue;
-        const f = await h.getFile().catch(() => null);
-        if (f && kindOf(f)) entries.push({ file: f, handle: h });
-        if (entries.length >= FOLDER_CAP) break;
+        if (entries.length >= FOLDER_CAP) return;
+        if (h.name.startsWith('.')) continue; // hidden dirs/files (.git, .DS_Store …)
+        if (h.kind === 'directory') {
+          if (depth < FOLDER_DEPTH) await walk(h as FileSystemDirectoryHandle, depth + 1);
+          continue;
+        }
+        const f = await (h as FileSystemFileHandle).getFile().catch(() => null);
+        if (f && kindOf(f)) entries.push({ file: f, handle: h as FileSystemFileHandle });
       }
+    };
+    try {
+      await walk(dir, 0);
     } catch {
       /* iteration failed: import whatever was collected */
     }
