@@ -50,7 +50,7 @@ function Seg<T extends number | string>({ value, options, onChange, fmt }: { val
 
 export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
   const rec = usePendingExport();
-  const active = (part.state === 'input-available' || part.state === 'input-streaming') && !!rec;
+  const active = part.state === 'input-available' || part.state === 'input-streaming';
 
   // Started (output-available): static confirmation of the chosen specs
   if (part.state === 'output-available') {
@@ -67,12 +67,16 @@ export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
       </div>
     );
   }
-  if (!active || !rec) return null;
+  if (!active) return null;
 
-  return <Picker defaultRes={nativeTier(rec.source.shortSide)} />;
+  // NEVER render null while awaiting: an invisible card + a parked turn reads as "no reply at all"
+  // (real incident). Before the resolver registers (or if the tool call was dropped by the stream),
+  // show the controls with Export disabled; key remounts the picker with the right default once the
+  // recommendations land.
+  return <Picker key={rec ? 'ready' : 'wait'} defaultRes={rec ? nativeTier(rec.source.shortSide) : 1080} ready={!!rec} />;
 }
 
-function Picker({ defaultRes }: { defaultRes: number }) {
+function Picker({ defaultRes, ready }: { defaultRes: number; ready: boolean }) {
   const [res, setRes] = useState<number>(defaultRes);
   const [fps, setFps] = useState<number>(30);
   const [format, setFormat] = useState<'mp4' | 'webm' | 'mov'>('mp4');
@@ -99,8 +103,9 @@ function Picker({ defaultRes }: { defaultRes: number }) {
           </span>
           <button
             type="button"
+            disabled={!ready}
             onClick={() => resolveExportChoice({ resolution: res, fps, format })}
-            className="bg-ink rounded-md px-3 py-1 text-[12px] text-white hover:bg-black"
+            className="bg-ink rounded-md px-3 py-1 text-[12px] text-white hover:bg-black disabled:opacity-30"
           >
             {t('workbench.exportStart')}
           </button>
