@@ -49,6 +49,7 @@ import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } f
 import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { registerAsk } from './ask-store';
+import { registerExportChoice } from './export-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
@@ -979,26 +980,24 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             if (!compRef.current.video?.url) return { ok: false, error: t('common.uploadBeforeExport') };
             const job = agentExportRef.current;
             if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
-            // Mandatory two-step handshake so the user actually chooses. confirmed:true is the ONLY
-            // thing that starts an export — passing resolution/fps/format WITHOUT it still returns
-            // recommendations (agents otherwise guess a "recommended" default and export unasked,
-            // which is exactly what this prevents). The chosen values ride along with confirmed:true.
+            // The specs are the user's to choose. Unless confirmed:true (the user already named them),
+            // PARK on the export-settings card: it shows platform presets + resolution/fps/format
+            // controls, and resolves this call once the user hits Export. Prevents both the silent
+            // default and the agent guessing specs — the export can't start without a real choice.
+            let chosen: { resolution: unknown; fps: unknown; format: unknown } = { resolution: input.resolution, fps: input.fps, format: input.format };
             if (input.confirmed !== true) {
               const rec = exportRecommendations(compRef.current);
-              return {
-                ok: true,
-                summary: t('workbench.exportNeedsChoice'),
-                data: {
-                  status: 'needs_options',
-                  ...rec,
-                  ask: 'Put these options to the user with ask_user (one option per recommendation) and let them pick. Do NOT choose for them. Then call export_video again with the chosen resolution/fps/format AND confirmed:true.',
-                },
-              };
+              const picked = await new Promise<{ resolution: number; fps: number; format: 'mp4' | 'webm' | 'mov' } | null>((resolve) => {
+                const unregister = registerExportChoice(rec, (c) => resolve(c));
+                if (signal) signal.addEventListener('abort', () => { unregister(); resolve(null); }, { once: true });
+              });
+              if (picked == null) throw abortErr();
+              chosen = picked;
             }
             const opts = {
-              res: [2160, 1440, 1080, 720, 540].includes(Number(input.resolution)) ? (Number(input.resolution) as 2160 | 1440 | 1080 | 720 | 540) : (1080 as const),
-              fps: [24, 30, 60].includes(Number(input.fps)) ? (Number(input.fps) as 24 | 30 | 60) : (30 as const),
-              format: input.format === 'webm' || input.format === 'mov' ? (input.format as 'webm' | 'mov') : ('mp4' as const),
+              res: [2160, 1440, 1080, 720, 540].includes(Number(chosen.resolution)) ? (Number(chosen.resolution) as 2160 | 1440 | 1080 | 720 | 540) : (1080 as const),
+              fps: [24, 30, 60].includes(Number(chosen.fps)) ? (Number(chosen.fps) as 24 | 30 | 60) : (30 as const),
+              format: chosen.format === 'webm' || chosen.format === 'mov' ? (chosen.format as 'webm' | 'mov') : ('mp4' as const),
             };
             // Local sink (export-sink helper): the reliable delivery path for agent-driven
             // browsers, which discard page downloads. Loopback-only — the sink's whole point
