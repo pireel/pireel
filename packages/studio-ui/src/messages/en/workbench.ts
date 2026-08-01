@@ -65,6 +65,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.localAssetUnreachable': 'Local file unavailable — it may have moved or the cache was cleared; re-import it',
   'workbench.srcMissing': 'Source missing',
   'workbench.canvasRatio': 'Canvas ratio',
+  'workbench.localVideoUseTrack': 'Drop local videos on the timeline — stage picture-in-picture does not support local video files yet',
   'workbench.ratioCustom': 'Custom',
   'workbench.couldNotGenerateCaptions': 'Could not generate captions (the transcript may be empty)',
   'workbench.couldNotGetSource': 'Could not get the source file for this clip — cutout unavailable',

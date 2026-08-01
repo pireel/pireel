@@ -65,6 +65,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.localAssetUnreachable': '本地素材不可用,文件可能已移动或缓存被清,重新导入即可',
   'workbench.srcMissing': '源文件缺失',
   'workbench.canvasRatio': '画布比例',
+  'workbench.localVideoUseTrack': '本地视频请拖到时间轴插入;画布画中画暂不支持本地视频文件',
   'workbench.ratioCustom': '自定义',
   'workbench.couldNotGenerateCaptions': '没能生成字幕(口播稿可能是空的)',
   'workbench.couldNotGetSource': '取不到该片段的源文件,无法抠像',

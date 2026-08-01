@@ -2349,7 +2349,32 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  Measure image/video aspect ratio first, then land the block to scale — the loading placeholder is the right size from the start, no default-box-then-jump.
    *  knownDims: caller already knows the natural size (e.g. the upload masonry already has it) → use it directly, skipping the measure step.
    *  atSec: landing time when dropped on the timeline (default = playhead). */
-  const insertPanelMedia = async (media: MediaRef, label?: string, atSec?: number, knownDims?: { w: number; h: number }) => {
+  /** Media entering an overlay BLOCK: the sandboxed preview doc (opaque origin) cannot resolve the
+   *  parent's blob: URLs — and blob refs die on refresh anyway. Local IMAGES bake into a bounded
+   *  data URI (≤1600px webp): self-contained in comp, so preview/export/cloud/other devices all
+   *  just work. Local VIDEOS can't (size): null = caller aborts and points at the timeline. */
+  const stageMediaOf = async (media: MediaRef): Promise<MediaRef | null> => {
+    if (!media.url.startsWith('blob:')) return media;
+    if (media.type === 'video') {
+      toast.info(t('workbench.localVideoUseTrack'));
+      return null;
+    }
+    try {
+      const bmp = await createImageBitmap(await (await fetch(media.url)).blob());
+      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(bmp.width * k));
+      cv.height = Math.max(1, Math.round(bmp.height * k));
+      cv.getContext('2d')!.drawImage(bmp, 0, 0, cv.width, cv.height);
+      bmp.close();
+      return { ...media, url: cv.toDataURL('image/webp', 0.85) };
+    } catch {
+      return media; // degrade to the original URL — no worse than before
+    }
+  };
+  const insertPanelMedia = async (mediaIn: MediaRef, label?: string, atSec?: number, knownDims?: { w: number; h: number }) => {
+    const media = await stageMediaOf(mediaIn);
+    if (!media) return;
     const startSec = Math.max(0, Math.round((atSec ?? tRef.current) * 10) / 10);
     const dur = media.type === 'video' ? 5 : 3;
     const dims = knownDims ?? (await mediaDims(media)); // use ready dimensions if available, else measure (1.5s fallback null → default box)
@@ -2447,7 +2472,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (hit) {
       if (genLockToast(hit.id)) return;
       pushUndoSnapshot();
-      setBlockMedia(hit.id, { type: a.type, url: a.url });
+      const fillMedia = await stageMediaOf({ type: a.type, url: a.url });
+      if (!fillMedia) return;
+      setBlockMedia(hit.id, fillMedia);
       setMediaBusyPhase(hit.id, 'swap');
       setSelectedShotId(null);
       setSelectedId(hit.id);
@@ -2459,8 +2486,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const dur = a.type === 'video' ? 5 : 3;
     const dims = a.dims ?? (await mediaDims({ type: a.type, url: a.url })); // if the drag carried dimensions, skip measuring
     pushUndoSnapshot();
+    const dropMedia = await stageMediaOf({ type: a.type, url: a.url });
+    if (!dropMedia) return;
     const base = mediaBlock({ startSec, durationSec: dur, box: mediaBoxFor(dims, { x: nx, y: ny }), trackIndex: freeTrack(compRef.current.blocks, startSec, dur), label: a.label });
-    const nb: Block = { ...base, slots: { media: { type: a.type, url: a.url } } };
+    const nb: Block = { ...base, slots: { media: dropMedia } };
     setComp((c) => ({ ...c, blocks: [...c.blocks, nb] }));
     setMediaBusyPhase(nb.id, 'swap');
     setSelectedShotId(null);
