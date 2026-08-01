@@ -104,7 +104,7 @@ export function ChatThread({
       const ctrl = new AbortController();
       toolAbortRef.current = ctrl;
       try {
-        const out = await runToolRef.current(id, (toolCall.input ?? {}) as Record<string, unknown>, { signal: ctrl.signal });
+        const out = await runToolRef.current(id, (toolCall.input ?? {}) as Record<string, unknown>, { signal: ctrl.signal, surface: 'chat' });
         if (out.ok) addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output: out });
         else addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, state: 'output-error', errorText: out.error ?? t('chatGen.executionFailed') });
       } catch (e) {
@@ -310,6 +310,16 @@ export function ChatThread({
           ) : (
             messages.map((m, mi) => {
               const parts = (m.parts ?? []) as ToolPartLike[];
+              // Collapse consecutive track_export polls (only step-starts between them): render just
+              // the last of each run — a polling agent otherwise buries the conversation in a column
+              // of identical progress badges. Polls separated by real text keep rendering.
+              const collapsed = new Set<number>();
+              for (let i = 0; i < parts.length; i++) {
+                if (parts[i]!.type !== 'tool-track_export') continue;
+                let j = i + 1;
+                while (j < parts.length && parts[j]!.type === 'step-start') j++;
+                if (j < parts.length && parts[j]!.type === 'tool-track_export') collapsed.add(i);
+              }
               // Dead-zone detection: stream still running, but the last visible part is neither a "running tool" (its card animates itself)
               // nor "growing text" (the tokens are their own feedback) → show thinking dots, don't let the view freeze
               const busy = status === 'submitted' || status === 'streaming';
@@ -330,6 +340,7 @@ export function ChatThread({
                       {parts.map((part, idx) => {
                         const key = `${m.id}-${idx}`;
                         if (part.type === 'step-start') return null;
+                        if (collapsed.has(idx)) return null;
                         if (part.type === 'text') {
                           const text = (part as { text?: string }).text ?? '';
                           if (!text) return null;

@@ -642,12 +642,12 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.export_video.label',
     description:
-      "Export the final video. Call with NO arguments — an export-settings card (resolution/fps/format) parks inline and the call completes once the user hits Export. Only when the user's message already named the specs, call with those `resolution`/`fps`/`format` AND `confirmed:true` to skip the card. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded. Poll track_export for progress and the final filename; the tab must stay open until done. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
+      "Export the final video. In the studio chat this ALWAYS opens an inline export-settings card and completes when the user hits Export — any `resolution`/`fps`/`format` you pass merely prefills the card (there is no way to skip it; the user's click is the start signal). Calling via MCP instead (no chat card exists there): the first call returns recommendations in `data`; ask the user in your own UI, then call again with the chosen specs AND `confirmed:true`. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded; the tab must stay open until done. In the studio chat do NOT poll after starting (the UI shows live progress and the download lands automatically — end your turn; check track_export only if the user asks). Poll track_export every ~15s only when driving via MCP. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
     inputSchema: obj(
       {
-        resolution: { type: 'number', description: 'Output SHORT-SIDE pixels: 2160/1440/1080/720/540. Take it from the chosen recommendation (a portrait 1080×1920 video at 1080p = 1080 here).' },
-        fps: { type: 'number', description: '24/30/60.' },
-        format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Container.' },
+        resolution: { type: 'number', description: 'Output SHORT-SIDE pixels: 2160 (=4K) / 1440 (=2K) / 1080 / 720 / 540. Pass it whenever the user named a resolution ("export in 4K" → 2160) — it arrives preselected in the card.' },
+        fps: { type: 'number', description: '24/30/60. Pass it whenever the user named a frame rate — it arrives preselected in the card.' },
+        format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Container. Pass it whenever the user named a format — it arrives preselected in the card.' },
         confirmed: { type: 'boolean', description: 'Set true to start the export at the source-quality default when the user does not want to pick resolution/fps/format. Any explicit resolution/fps/format also starts it.' },
         sink_url: { type: 'string', description: 'Loopback receiver URL from the export-sink helper (scripts/export-sink.mjs) — the finished file is PUT there instead of a browser download. Use when driving a headless/embedded browser.' },
       },

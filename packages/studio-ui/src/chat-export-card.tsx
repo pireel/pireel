@@ -50,7 +50,7 @@ function Seg<T extends number | string>({ value, options, onChange, fmt }: { val
 }
 
 export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
-  const rec = usePendingInteraction<ExportRecommendations>('export');
+  const rec = usePendingInteraction<ExportRecommendations & { prefill?: { resolution?: number; fps?: number; format?: 'mp4' | 'webm' | 'mov' } }>('export');
   const active = part.state === 'input-available' || part.state === 'input-streaming';
 
   // Started (output-available): static confirmation of the chosen specs
@@ -73,14 +73,22 @@ export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
   // NEVER render null while awaiting: an invisible card + a parked turn reads as "no reply at all"
   // (real incident). Before the resolver registers (or if the tool call was dropped by the stream),
   // show the controls with Export disabled; key remounts the picker with the right default once the
-  // recommendations land.
-  return <Picker key={rec ? 'ready' : 'wait'} defaultRes={rec ? nativeTier(rec.source.shortSide) : 1080} ready={!!rec} />;
+  // recommendations land. Model-passed specs arrive as prefill — defaults only, the user still clicks.
+  return (
+    <Picker
+      key={rec ? 'ready' : 'wait'}
+      defaultRes={rec?.prefill?.resolution ?? (rec ? nativeTier(rec.source.shortSide) : 1080)}
+      defaultFps={rec?.prefill?.fps ?? 30}
+      defaultFormat={rec?.prefill?.format ?? 'mp4'}
+      ready={!!rec}
+    />
+  );
 }
 
-function Picker({ defaultRes, ready }: { defaultRes: number; ready: boolean }) {
+function Picker({ defaultRes, defaultFps, defaultFormat, ready }: { defaultRes: number; defaultFps: number; defaultFormat: 'mp4' | 'webm' | 'mov'; ready: boolean }) {
   const [res, setRes] = useState<number>(defaultRes);
-  const [fps, setFps] = useState<number>(30);
-  const [format, setFormat] = useState<'mp4' | 'webm' | 'mov'>('mp4');
+  const [fps, setFps] = useState<number>(defaultFps);
+  const [format, setFormat] = useState<'mp4' | 'webm' | 'mov'>(defaultFormat);
 
   return (
     <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">

@@ -163,7 +163,7 @@ export interface AgentToolCtx {
   chatRef: MutableRefObject<StudioChatHandle | null>;
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal }): Promise<StudioToolResult> {
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
@@ -199,6 +199,11 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
       // and cache their result for the next call. A stopped tool throws AbortError with a
       // localized message; the chat layer turns it into an output-error receipt.
       const signal = opts?.signal;
+      // Which surface is driving: 'chat' renders parked interaction cards in the stream; 'bridge'
+      // (external MCP agents) has NO chat card to render — parking there would hang forever, so
+      // bridge takes the data-return path. Default is 'bridge' (the non-hanging behavior); the chat
+      // thread declares itself explicitly.
+      const surface = opts?.surface ?? 'bridge';
       const stopped = () => !!signal?.aborted;
       const abortErr = () => new DOMException(t('workbench.stoppedByUser'), 'AbortError');
       const race = <T,>(p: Promise<T>): Promise<T> =>
@@ -958,6 +963,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
                 return { label: String(oo?.label ?? '').slice(0, 80), description: typeof oo?.description === 'string' ? oo.description.slice(0, 200) : '' };
               })
               .filter((o) => o.label);
+            if (surface !== 'chat') return { ok: false, error: 'ask_user is chat-surface only — ask in your own UI instead' };
             if (!question || options.length < 2) return { ok: false, error: t('workbench.askNeedsQuestionOptions') };
             const selection = await parkInteraction<{ question: string; options: typeof options; multi: boolean }, string[]>(
               'ask',
@@ -980,16 +986,39 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             if (!compRef.current.video?.url) return { ok: false, error: t('common.uploadBeforeExport') };
             const job = agentExportRef.current;
             if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
-            // The specs are the user's to choose. Unless confirmed:true (the user already named them),
-            // PARK on the export-settings card: it shows platform presets + resolution/fps/format
-            // controls, and resolves this call once the user hits Export. Prevents both the silent
-            // default and the agent guessing specs — the export can't start without a real choice.
+            // The specs are the user's to choose — enforced by the FRAMEWORK, not the prompt.
+            // Chat surface: ALWAYS park on the settings card; whatever the model passed (specs,
+            // confirmed) only PREFILLS the controls — the user's Export click is the only start
+            // signal, so the model cannot bypass the card (it tried: repeated "导出" was taken as
+            // confirmation and self-confirmed straight past the card).
+            // Bridge surface (external MCP agent, no chat card exists): data-return handshake —
+            // recommendations unless confirmed:true, the agent asks in its own UI.
             let chosen: { resolution: unknown; fps: unknown; format: unknown } = { resolution: input.resolution, fps: input.fps, format: input.format };
-            if (input.confirmed !== true) {
+            if (surface === 'chat') {
               const rec = exportRecommendations(compRef.current);
-              const picked = await parkInteraction<typeof rec, { resolution: number; fps: number; format: 'mp4' | 'webm' | 'mov' }>('export', rec, { signal });
+              const prefill = {
+                ...(typeof input.resolution === 'number' ? { resolution: input.resolution } : {}),
+                ...(typeof input.fps === 'number' ? { fps: input.fps } : {}),
+                ...(input.format === 'mp4' || input.format === 'webm' || input.format === 'mov' ? { format: input.format } : {}),
+              };
+              const picked = await parkInteraction<typeof rec & { prefill?: typeof prefill }, { resolution: number; fps: number; format: 'mp4' | 'webm' | 'mov' }>(
+                'export',
+                { ...rec, prefill },
+                { signal },
+              );
               if (picked == null) throw abortErr();
               chosen = picked;
+            } else if (input.confirmed !== true) {
+              const rec = exportRecommendations(compRef.current);
+              return {
+                ok: true,
+                summary: t('workbench.exportSettings'),
+                data: {
+                  status: 'needs_options',
+                  ...rec,
+                  ask: 'Ask the user which resolution / fps / format to export (use these recommendations), then call export_video again with the chosen values AND confirmed:true.',
+                },
+              };
             }
             const opts = {
               res: [2160, 1440, 1080, 720, 540].includes(Number(chosen.resolution)) ? (Number(chosen.resolution) as 2160 | 1440 | 1080 | 720 | 540) : (1080 as const),
@@ -1020,7 +1049,18 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             return {
               ok: true,
               summary: t('workbench.exportStartedLocalClient'),
-              data: { status: 'running', options: opts, ...(sinkUrl ? { delivery: 'local_sink' } : {}), hint: 'poll track_export every ~15s; keep this studio tab open' },
+              data: {
+                status: 'running',
+                options: opts,
+                ...(sinkUrl ? { delivery: 'local_sink' } : {}),
+                // Chat: the studio UI shows live progress and the file downloads automatically — an
+                // agent polling loop just buries the conversation in receipts. Bridge: the external
+                // agent has no other window into progress, polling is the designed channel.
+                hint:
+                  surface === 'chat'
+                    ? "the export runs in the background: the studio UI shows live progress, and when done the file lands in the BROWSER'S DOWNLOADS automatically. Wrap up in one sentence saying exactly that, then end your turn. Do NOT poll track_export on your own (only if the user asks later), do NOT promise to report back or announce a file path (you will not be running when it finishes), and do NOT offer to stop or restart the export (you have no tool for that — cancelling is a studio UI button)."
+                    : 'poll track_export every ~15s; keep this studio tab open',
+              },
             };
           }
           case 'track_export': {
