@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, Image as ImageIcon, Loader2, Music, Trash2, Upload } from 'lucide-react';
+import { Clapperboard, FolderOpen, Image as ImageIcon, Loader2, Music, Trash2, Upload } from 'lucide-react';
 import { toast } from '@pireel/ui/toast';
 import { confirm } from '@pireel/ui/confirm';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
@@ -170,6 +170,7 @@ export function MyAssetsPanel({
   const [preview, setPreview] = useState<LibraryItem | null>(null);
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   /** THE registry writer: ref mirror → storage → state, in that order, outside any React updater
    *  (updaters must stay pure). Nobody else touches storage. */
@@ -380,6 +381,42 @@ export function MyAssetsPanel({
     await addEntries(await Promise.all(handles.map(async (h) => ({ file: await h.getFile(), handle: h }))));
   };
 
+  /** Folder import: authorize a directory (Chromium), import its top-level media files — each file
+   *  gets its own native handle, so persistence/restore work exactly like single-file imports.
+   *  Fallback elsewhere: <input webkitdirectory> (files only, OPFS copies). */
+  const FOLDER_CAP = 50;
+  const pickFolder = async () => {
+    const picker = (window as { showDirectoryPicker?: (o?: { mode?: 'read' }) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
+    if (!picker) {
+      folderInputRef.current?.click();
+      return;
+    }
+    let dir: FileSystemDirectoryHandle;
+    try {
+      dir = await picker({ mode: 'read' });
+    } catch {
+      return; // cancelled
+    }
+    const entries: { file: File; handle?: FileSystemFileHandle }[] = [];
+    try {
+      const iter = (dir as unknown as { values: () => AsyncIterable<FileSystemFileHandle & { kind: string }> }).values();
+      for await (const h of iter) {
+        if (h.kind !== 'file') continue;
+        const f = await h.getFile().catch(() => null);
+        if (f && kindOf(f)) entries.push({ file: f, handle: h });
+        if (entries.length >= FOLDER_CAP) break;
+      }
+    } catch {
+      /* iteration failed: import whatever was collected */
+    }
+    if (!entries.length) {
+      toast.info(t('panels.folderNoMedia'));
+      return;
+    }
+    if (entries.length >= FOLDER_CAP) toast.info(t('panels.folderCapped', { n: FOLDER_CAP }));
+    await addEntries(entries);
+  };
+
   /** Click-to-restore (user gesture): the handle may prompt for permission here. */
   const reconnect = async (e: RegEntry) => {
     const f = await loadLocalVideo(e.sig);
@@ -486,6 +523,18 @@ export function MyAssetsPanel({
               {t('panels.upload')}
             </button>
           )}
+          {hasAny && (
+            <button
+              type="button"
+              onClick={() => void pickFolder()}
+              disabled={importing}
+              title={t('panels.importFolder')}
+              aria-label={t('panels.importFolder')}
+              className="border-line text-ink-2 hover:text-ink inline-flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-md border disabled:opacity-40"
+            >
+              <FolderOpen size={12} />
+            </button>
+          )}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-2">
@@ -500,6 +549,23 @@ export function MyAssetsPanel({
             {importing ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
             <div className="text-[11.5px]">{t('panels.upload')}</div>
             <div className="text-ink-4 text-[10.5px]">{t('panels.localOnlyHint')}</div>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                void pickFolder();
+              }}
+              onKeyDown={(ev) => {
+                if (ev.key === 'Enter') {
+                  ev.stopPropagation();
+                  void pickFolder();
+                }
+              }}
+              className="text-ink-3 hover:text-ink mt-1 inline-flex items-center gap-1 text-[10.5px] underline-offset-2 hover:underline"
+            >
+              <FolderOpen size={11} /> {t('panels.importFolder')}
+            </span>
           </button>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
@@ -556,6 +622,21 @@ export function MyAssetsPanel({
           multiple
           className="hidden"
           onChange={(e) => void addEntries(Array.from(e.target.files ?? []).map((file) => ({ file })))}
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          {...({ webkitdirectory: '' } as Record<string, string>)}
+          onChange={(e) =>
+            void addEntries(
+              Array.from(e.target.files ?? [])
+                .filter((f) => kindOf(f))
+                .slice(0, FOLDER_CAP)
+                .map((file) => ({ file })),
+            )
+          }
         />
       </div>
       {preview && (
