@@ -11,7 +11,8 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
-import { resolveExportChoice, usePendingExport } from './export-store';
+import type { ExportRecommendations } from '@pireel/studio-engine/export-options';
+import { resolveInteraction, usePendingInteraction } from './interaction-store';
 import type { ToolPartLike } from './chat-tool-parts';
 import { t } from './i18n';
 
@@ -49,7 +50,7 @@ function Seg<T extends number | string>({ value, options, onChange, fmt }: { val
 }
 
 export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
-  const rec = usePendingExport();
+  const rec = usePendingInteraction<ExportRecommendations>('export');
   const active = part.state === 'input-available' || part.state === 'input-streaming';
 
   // Started (output-available): static confirmation of the chosen specs
@@ -104,7 +105,7 @@ function Picker({ defaultRes, ready }: { defaultRes: number; ready: boolean }) {
           <button
             type="button"
             disabled={!ready}
-            onClick={() => resolveExportChoice({ resolution: res, fps, format })}
+            onClick={() => resolveInteraction({ resolution: res, fps, format })}
             className="bg-ink rounded-md px-3 py-1 text-[12px] text-white hover:bg-black disabled:opacity-30"
           >
             {t('workbench.exportStart')}

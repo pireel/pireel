@@ -12,7 +12,7 @@
 import { useState } from 'react';
 import { Check } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
-import { answerCurrentAsk, useHasPendingAsk } from './ask-store';
+import { resolveInteraction, usePendingInteraction } from './interaction-store';
 import type { ToolPartLike } from './chat-tool-parts';
 import { t } from './i18n';
 
@@ -37,7 +37,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
   const answered = part.state === 'output-available';
   const errored = part.state === 'output-error';
   const active = part.state === 'input-available' || part.state === 'input-streaming';
-  const hasPending = useHasPendingAsk();
+  const hasPending = usePendingInteraction('ask') !== null;
   const live = active && hasPending;
 
   // Chosen labels from the receipt (answered) so the card reads correctly after the turn / on restore
@@ -51,7 +51,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const submit = (labels: string[]) => {
     if (!live || !labels.length) return;
-    answerCurrentAsk(labels);
+    resolveInteraction(labels);
   };
   const onChip = (label: string) => {
     if (!live) return;
