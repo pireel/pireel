@@ -184,7 +184,7 @@ function VideoTile({ item: it }: { item: LibraryItem }) {
 
 /** Audio grid tile: audio has no picture, so it takes the same 16:9 slot with the play/pause state
  *  as the whole subject; duration is read from an off-DOM metadata-only Audio element. */
-export function AudioTile({ playing, url }: { playing: boolean; url?: string }) {
+export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: string; coverSrc?: string | null }) {
   const [dur, setDur] = useState<number | null>(null);
   useEffect(() => {
     if (!url) return;
@@ -198,8 +198,9 @@ export function AudioTile({ playing, url }: { playing: boolean; url?: string }) 
     };
   }, [url]);
   return (
-    <div className="bg-panel-2 relative flex aspect-video items-center justify-center">
-      <span className={`flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : 'bg-panel text-ink-3'}`}>
+    <div className="bg-panel-2 relative flex aspect-video items-center justify-center overflow-hidden">
+      {coverSrc && <img src={coverSrc} alt="" className="absolute inset-0 h-full w-full object-cover" loading="lazy" />}
+      <span className={`relative flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : coverSrc ? 'bg-black/50 text-white' : 'bg-panel text-ink-3'}`}>
         {playing ? <Pause size={13} /> : <Play size={13} />}
       </span>
       <DurBadge sec={dur} />
@@ -350,7 +351,7 @@ export function AssetCard({
         {it.kind === 'element' ? (
           <ElementTile item={it} />
         ) : audio ? (
-          <AudioTile playing={playing} url={it.insertUrl} />
+          <AudioTile playing={playing} url={it.insertUrl} coverSrc={it.thumbSrc} />
         ) : (
           <TileThumb item={it} />
         )}

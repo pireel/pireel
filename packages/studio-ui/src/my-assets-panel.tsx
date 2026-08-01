@@ -35,7 +35,7 @@ import {
   dragPropsFor,
   useAudioPreview,
 } from './asset-card';
-import { fileSig } from './media';
+import { audioCoverUrl, fileSig } from './media';
 import { deleteLocalVideo, loadLocalVideo, saveLocalVideo } from './local-media';
 import { t } from './i18n';
 
@@ -164,6 +164,8 @@ export function MyAssetsPanel({
   const [kind, setKind] = useState<KindFilter>('all');
   const [reg, setReg] = useState<RegEntry[]>(() => readReg(projectId));
   const [links, setLinks] = useState<ReadonlyMap<string, string>>(new Map());
+  /** sig → embedded cover art object URL (audio only) — derived whenever the File is in hand. */
+  const [covers, setCovers] = useState<ReadonlyMap<string, string>>(new Map());
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
@@ -186,6 +188,10 @@ export function MyAssetsPanel({
   };
 
   const link = (sig: string, url: string) => setLinks((prev) => new Map(prev).set(sig, url));
+  const noteCover = (sig: string, f: File, k: LocalKind) => {
+    if (k !== 'audio') return;
+    void audioCoverUrl(f).then((u) => u && setCovers((prev) => new Map(prev).set(sig, u)));
+  };
   const unlink = (sig: string) =>
     setLinks((prev) => {
       const url = prev.get(sig);
@@ -208,7 +214,10 @@ export function MyAssetsPanel({
       for (const e of entries) {
         const f = await loadLocalVideo(e.sig);
         if (dead) return;
-        if (f) link(e.sig, URL.createObjectURL(f));
+        if (f) {
+          link(e.sig, URL.createObjectURL(f));
+          noteCover(e.sig, f, e.kind ?? 'video');
+        }
       }
     })();
     return () => {
@@ -297,7 +306,7 @@ export function MyAssetsPanel({
           kind: e.kind ?? 'video',
           origin: 'upload',
           insertUrl: url,
-          thumbSrc: (e.kind ?? 'video') === 'image' ? url : null,
+          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.sig) ?? null) : null),
           label: e.label,
           createdAt: e.createdAt,
           width: e.w ?? null,
@@ -308,7 +317,7 @@ export function MyAssetsPanel({
       else if (!trackSrcBySig.has(e.sig)) restore.push(e); // on-track: the track card presents it (incl. its missing state)
     }
     return { liveImports: live, restoreCards: restore };
-  }, [reg, links, trackSrcBySig]);
+  }, [reg, links, covers, trackSrcBySig]);
 
   const kindShows = (k: LocalKind) => kind === 'all' || kind === k;
   const hasAny = liveImports.length > 0 || trackCards.length > 0 || restoreCards.length > 0;
@@ -338,6 +347,7 @@ export function MyAssetsPanel({
           ...r.filter((x) => x.sig !== sig),
         ]);
         link(sig, url);
+        noteCover(sig, f, k);
       }
     } finally {
       setImporting(false);
@@ -378,6 +388,7 @@ export function MyAssetsPanel({
       return;
     }
     link(e.sig, URL.createObjectURL(f));
+    noteCover(e.sig, f, e.kind ?? 'video');
   };
 
   // ---- remove ----------------------------------------------------------------------------------
@@ -389,6 +400,14 @@ export function MyAssetsPanel({
     void deleteLocalVideo(sig).catch(() => {});
     updateReg((r) => r.filter((x) => x.sig !== sig));
     unlink(sig);
+    setCovers((prev) => {
+      const u = prev.get(sig);
+      if (!u) return prev;
+      URL.revokeObjectURL(u);
+      const next = new Map(prev);
+      next.delete(sig);
+      return next;
+    });
   };
 
   /** Card delete: confirm, then track surgery for track members (src !== undefined; null = main —

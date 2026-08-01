@@ -1829,7 +1829,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (e.key === ' ') {
         // Focus often sits on a button, so bare Space would re-trigger it — hijack uniformly to play/pause
         const c = compRef.current;
-        if (!c.video && c.blocks.length === 0) return;
+        if (!c.video && !c.shots?.length && c.blocks.length === 0) return;
         e.preventDefault();
         setPlaying((p) => !p);
         return;
