@@ -26,7 +26,7 @@ describe('exportRecommendations', () => {
     expect(by.youtube.resolution).toBe(2160);
     expect(by.xiaohongshu.resolution).toBe(1080);
     // vertical-first platforms warn about a landscape cut
-    expect(by.xiaohongshu.note).toContain('竖屏为主');
+    expect(by.xiaohongshu.note).toContain('vertical-first');
   });
 
   it('never recommends a resolution above the native short side (720p source)', () => {

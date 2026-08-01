@@ -41,7 +41,7 @@ export interface ExportRecommendations {
 }
 
 /**
- * Build export recommendations for a composition. Vertical platforms (小红书 / 抖音 / TikTok) recommend
+ * Build export recommendations for a composition. Vertical platforms (Xiaohongshu / Douyin / TikTok) recommend
  * 1080p vertical; YouTube scales with the footage (landscape up to 2160). Every option is capped to
  * the native short side. Notes flag orientation mismatch (a landscape cut on a vertical-first feed).
  */
@@ -55,39 +55,33 @@ export function exportRecommendations(comp: Composition): ExportRecommendations 
   const cap = (v: number): Tier => tierAtOrBelow(Math.min(v, shortSide));
   const vertical = orientation !== 'landscape';
   // Vertical-first feeds: a landscape cut still exports, but it letterboxes / gets less reach there.
-  const orient = (native: boolean) =>
-    native
-      ? vertical
-        ? '竖屏适配，正好'
-        : '横屏适配，正好'
-      : vertical
-        ? ''
-        : '注意：该平台以竖屏为主，横屏视频曝光可能受限';
+  // Notes are English tool-data the agent relays — it re-expresses them in the user's language.
+  const mismatch = !vertical ? ' — heads up: this feed is vertical-first, a landscape cut may get less reach' : '';
 
   const options: ExportOption[] = [
     {
       id: 'source',
-      platform: '原画质',
+      platform: 'Source quality',
       resolution: nativeTier,
       fps: 30,
       format: 'mp4',
-      note: `贴合原视频 ${width}×${height}，不放大不损失`,
+      note: `matches the source ${width}×${height}, no upscaling or loss`,
     },
     {
       id: 'xiaohongshu',
-      platform: '小红书',
+      platform: 'Xiaohongshu',
       resolution: cap(1080),
       fps: 30,
       format: 'mp4',
-      note: ['竖屏信息流，1080p 足够、文件小加载快', orient(vertical)].filter(Boolean).join('；'),
+      note: `vertical feed, 1080p is plenty and keeps the file small${mismatch}`,
     },
     {
       id: 'douyin_tiktok',
-      platform: '抖音 / TikTok',
+      platform: 'Douyin / TikTok',
       resolution: cap(1080),
       fps: 30,
       format: 'mp4',
-      note: ['竖屏 9:16 标准；画面运动快可选 60fps', orient(vertical)].filter(Boolean).join('；'),
+      note: `standard 9:16 vertical; pick 60fps for fast motion${mismatch}`,
     },
     {
       id: 'youtube',
@@ -96,8 +90,8 @@ export function exportRecommendations(comp: Composition): ExportRecommendations 
       fps: 30,
       format: 'mp4',
       note: vertical
-        ? 'Shorts 竖屏 1080p；横屏长视频可上 1080p/4K、支持 60fps'
-        : `横屏首选，${cap(2160) >= 1440 ? '可上 1440p/4K' : '1080p'}、支持 60fps`,
+        ? 'Shorts at 1080p vertical; a landscape long-form cut can go 1080p/4K and supports 60fps'
+        : `landscape-first, ${cap(2160) >= 1440 ? 'up to 1440p/4K' : '1080p'}, supports 60fps`,
     },
   ];
 
