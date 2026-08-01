@@ -9,6 +9,7 @@ import type { Composition } from '@pireel/studio-engine/composition';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { GraphicsPreviewBody } from './chat-graphics-card';
+import { AskUserCard } from './chat-ask-card';
 import { t } from './i18n';
 
 /* ============================ Tool-duration memory (for ETA) ============================ */
@@ -188,6 +189,8 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   const id = toolIdOf(part);
   const def = STUDIO_TOOL_MAP[id];
   if (!def) return null;
+  // ask_user: a structured question with clickable option chips (its own card, not the generic one)
+  if (id === 'ask_user') return <div key={key}><AskUserCard part={part} /></div>;
   // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line
   if (id === 'cut_narration' && part.state === 'output-available') {
     const rows = cutRowsOf(part.output);
