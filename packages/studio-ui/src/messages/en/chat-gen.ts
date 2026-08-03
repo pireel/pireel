@@ -39,6 +39,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.elapsedRemaining': '{a}s · ~{b}s left',
   'chatGen.emptyStateIntro': 'Upload a video and click "Auto create" to cut shots and add design graphics automatically — or just say what to add or change, using @ to point at an element or shot.',
   'chatGen.executionFailed': 'Execution failed',
+  'chatGen.executionBudgetExhausted': 'This turn reached its execution budget. I stopped before another edit; send “continue” to start a fresh bounded turn.',
   'chatGen.expand': 'Expand',
   'chatGen.failed': 'Failed',
   'chatGen.fillEdit': 'Fill in & edit',

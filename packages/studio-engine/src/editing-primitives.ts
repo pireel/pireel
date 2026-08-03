@@ -15,9 +15,12 @@ import {
   type VideoShot,
   SHOT_TREATMENTS,
   patchShotFraming,
+  shotId,
+  splitBlockedByTransition,
   treatmentVacancyBox,
 } from './composition-core';
-import { spans as clipSpans } from './trim';
+import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
+import { spans as clipSpans, splitAtEdited } from './trim';
 
 export const CANVAS_PRESETS = ['portrait', 'landscape', 'square'] as const;
 export type CanvasPreset = (typeof CANVAS_PRESETS)[number];
@@ -173,6 +176,32 @@ export function applyShotFramingInput(
       };
     }),
   };
+}
+
+export interface SplitShotsResult {
+  shots: VideoShot[];
+  atSecs: number[];
+}
+
+/** Batch one or many timeline subdivisions into a single pure mutation. Points are resolved against
+ * the successively split local clone, but no partial result escapes if a later point is invalid. */
+export function splitShotsAtEditedPoints(shots: VideoShot[], atSecs: readonly unknown[]): SplitShotsResult | { error: string } {
+  if (!atSecs.length) return { error: 'pass atSec or atSecs' };
+  if (atSecs.length > STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall) {
+    return { error: `split_shot supports at most ${STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall} points per call` };
+  }
+  if (atSecs.some((at) => !finite(at))) return { error: 'every split point must be a finite number' };
+  const points = [...new Set(atSecs as number[])].sort((a, b) => a - b);
+  let next = shots;
+  for (const at of points) {
+    if (splitBlockedByTransition(next, at)) {
+      return { error: `cannot split at ${r4(at)}s because it is inside a transition region` };
+    }
+    const result = splitAtEdited(next, at, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
+    if (result.clips === next) return { error: `cannot split at ${r4(at)}s (too close to an edge or already on a boundary)` };
+    next = result.clips;
+  }
+  return { shots: next, atSecs: points };
 }
 
 export interface LayoutInput {

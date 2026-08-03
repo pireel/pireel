@@ -205,6 +205,23 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r2 = runServerTool('split_shot', { atSec: 5 }, proj());
     expect(r2.result.ok).toBe(true);
     expect(r2.comp!.shots).toHaveLength(3);
+
+    const batch = runServerTool('split_shot', { atSecs: [2, 5, 15], purpose: 'editing' }, proj());
+    expect(batch.result.ok).toBe(true);
+    expect(batch.result.summary).toContain('3 timeline points');
+    expect(batch.comp!.shots).toHaveLength(5);
+    expect((batch.result.data as { delta: { shotsAdded: string[] } }).delta.shotsAdded).toHaveLength(3);
+
+    const offlineFraming = runServerTool('split_shot', { atSecs: [2, 5], purpose: 'framing' }, proj());
+    expect(offlineFraming.result.ok).toBe(false);
+    expect(offlineFraming.result.error).toContain('open Studio tab');
+    expect(offlineFraming.comp).toBeUndefined();
+
+    const atomicFailure = runServerTool('split_shot', { atSecs: [2, 10] }, proj());
+    expect(atomicFailure.result.ok).toBe(false);
+    expect(atomicFailure.comp).toBeUndefined();
+    expect(proj().comp.shots).toHaveLength(2);
+    expect(runServerTool('split_shot', { atSec: 2, atSecs: [4] }, proj()).result.ok).toBe(false);
   });
   it('set_captions:有云端转写才能开;submit_plan 落 context 不落 comp', () => {
     const r = runServerTool('set_captions', { preset: 'ln-clean' }, proj());

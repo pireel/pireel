@@ -10,6 +10,7 @@ import {
   THEME_GENERAL_BRIEF,
   buildChatSystem,
   buildSituation,
+  mcpInstructions,
   planWithActiveTheme,
   withActiveTheme,
 } from './index';
@@ -80,6 +81,23 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     const visual = STUDIO_TOOLS.find((tool) => tool.id === 'analyze_visual')!;
     expect(visual.description).toContain('subjectTracks');
     expect(visual.description).toContain('already clustered locally');
+  });
+  it('批量切分带 framing 目的,稳定人物区间内由运行时拒绝冗余切点', () => {
+    const split = STUDIO_TOOLS.find((tool) => tool.id === 'split_shot')!;
+    const schema = split.inputSchema as { properties: Record<string, unknown> };
+    expect(schema.properties).toHaveProperty('atSecs');
+    expect(schema.properties).toHaveProperty('purpose');
+    expect(split.description).toContain('ONE atSecs[] call');
+    expect(CHAT_IDENTITY).toContain('purpose:"framing"');
+    expect(CHAT_IDENTITY).toContain('<execution_budget>');
+  });
+  it('MCP 与内置 Agent 共享批处理规则，并由外部 host 追踪单任务预算', () => {
+    const instructions = mcpInstructions('test-version');
+    expect(instructions).toContain('EXECUTION BUDGET');
+    expect(instructions).toContain('24 Pireel tool calls');
+    expect(instructions).toContain('12 plan/act cycles');
+    expect(instructions).toContain('ONE split_shot {atSecs:[...],purpose:"framing"}');
+    expect(instructions).toContain('ONE set_shot_framing {updates:[...]}');
   });
   it('成品画面复检先本地去重，并允许显式逐帧云端检查', () => {
     const review = STUDIO_TOOLS.find((tool) => tool.id === 'review_visuals')!;

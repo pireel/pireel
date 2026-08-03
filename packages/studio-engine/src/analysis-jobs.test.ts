@@ -95,6 +95,18 @@ describe('analysis job state machine', () => {
     expect(retried.input).toEqual({ fromSec: 2, toSec: 8 });
     expect(retried.error).toBeUndefined();
   });
+
+  it('rejects proposal fan-out that bypasses vectorized atomic tools', () => {
+    const running = startAnalysisJob(baseJob());
+    expect(() =>
+      completeAnalysisJob(running, {
+        operations: [
+          { tool: 'set_shot_framing', input: { shotId: 's1', scale: 2 } },
+          { tool: 'set_shot_framing', input: { shotId: 's2', scale: 2 } },
+        ],
+      }),
+    ).toThrow(/batch every shot/);
+  });
 });
 
 describe('edit proposal evaluation', () => {

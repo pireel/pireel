@@ -585,8 +585,15 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✂️',
     label: 'tools.split_shot.label',
     description:
-      'Split the video at a point into two shots (content unchanged). `atSec` = where to cut (edited timeline seconds); omit to use the playhead.',
-    inputSchema: obj({ atSec: { type: 'number' } }, []),
+      'Split the video into independently editable shots without removing content. Use atSec for one edited-timeline point, or collect 2–24 points into ONE atSecs[] call (one transaction/card/undo); never emit one call per point. For aspect/crop work pass purpose="framing": when local visual analysis shows the subject remains stable across a requested point, the split is rejected instead of creating redundant shots. Omit time only for one manual playhead split. Do not mix atSec and atSecs.',
+    inputSchema: obj(
+      {
+        atSec: { type: 'number', description: 'One edited-timeline split point.' },
+        atSecs: { type: 'array', minItems: 1, maxItems: 24, items: { type: 'number' }, description: 'Batch of edited-timeline split points.' },
+        purpose: { type: 'string', enum: ['editing', 'framing'], description: 'Use framing for canvas/crop reframing so stable-subject guards apply.' },
+      },
+      [],
+    ),
   },
   {
     id: 'trim_shot',

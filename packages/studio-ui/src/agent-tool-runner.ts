@@ -46,7 +46,7 @@ import {
   wordRanges,
   wordRangesToEdited,
   splitAudioClipAt,
-  splitBlockedByTransition,
+  splitShotsAtEditedPoints,
   totalDuration,
   validateComposition,
   zoneOf,
@@ -62,8 +62,14 @@ import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
+import {
+  STUDIO_AGENT_EXECUTION_LIMITS,
+  reviewMomentKey,
+  selectReviewMoments,
+} from '@pireel/studio-engine/agent-execution-budget';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
-import { visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
+import { rejectStableFramingSplits, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
@@ -78,6 +84,22 @@ import type { StudioChatHandle } from './studio-chat';
 
 const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo'));
+const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
+
+function reviewMomentAttempts(compRef: object, compositionHash: string): Map<number, number> {
+  let byComposition = reviewAttemptsByComposition.get(compRef);
+  if (!byComposition) {
+    byComposition = new Map();
+    reviewAttemptsByComposition.set(compRef, byComposition);
+  }
+  let attempts = byComposition.get(compositionHash);
+  if (!attempts) {
+    if (byComposition.size >= 20) byComposition.delete(byComposition.keys().next().value!);
+    attempts = new Map();
+    byComposition.set(compositionHash, attempts);
+  }
+  return attempts;
+}
 
 /** Progress reporter fed to pipeline steps: pushes friendly text (and optional 0–1 fraction) to the tool's chat card. */
 type Report = (text: string, frac?: number) => void;
@@ -186,7 +208,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
     noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
-    splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
+    trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
       // Models mirror the chat's @id pill syntax into tool args ("blockIds":["@media55_…"]) — the id
@@ -701,7 +723,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const atsIn = Array.isArray(input.atSecs) ? (input.atSecs as unknown[]).map(Number).filter(Number.isFinite) : [];
             if (!atsIn.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
             const dur = totalDuration(c);
-            const ats = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 18);
+            const requestedAts = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 18);
+            const compHash = compositionRevision(c).compositionHash;
+            const momentAttempts = reviewMomentAttempts(compRef, compHash);
+            const { allowedAtSecs: ats, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
+            if (!ats.length) {
+              return {
+                ok: false,
+                error: t('workbench.reviewBudgetUnchanged'),
+                data: { repeatedAtSecs, limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
+              };
+            }
             try {
               const candidates: {
                 atSec: number;
@@ -741,9 +773,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 expected: representative.expected,
               }));
               const localComparison = {
-                requestedFrames: candidates.length,
+                requestedFrames: requestedAts.length,
+                capturedFrames: candidates.length,
                 cloudReviewedFrames: frames.length,
                 skippedAsSimilar: candidates.length - frames.length,
+                skippedAsRepeated: repeatedAtSecs.length,
+                ...(repeatedAtSecs.length ? { repeatedAtSecs } : {}),
                 groups: groups
                   .filter((group) => group.similar.length > 0)
                   .map((group) => ({
@@ -758,10 +793,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; scene?: string; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
               if (!rr.ok || !j.frames) return { ok: false, error: t('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
               const total = j.frames.reduce((a, f) => a + f.issues.length, 0);
-              const summary = localComparison.skippedAsSimilar > 0
+              for (const at of ats) {
+                const key = reviewMomentKey(at);
+                momentAttempts!.set(key, (momentAttempts!.get(key) ?? 0) + 1);
+              }
+              const summary = localComparison.skippedAsSimilar > 0 || localComparison.skippedAsRepeated > 0
                 ? total
-                  ? t('workbench.reviewedDedupIssues', { requested: localComparison.requestedFrames, reviewed: localComparison.cloudReviewedFrames, m: total })
-                  : t('workbench.reviewedDedupClean', { requested: localComparison.requestedFrames, reviewed: localComparison.cloudReviewedFrames })
+                  ? t('workbench.reviewedDedupIssues', { requested: localComparison.capturedFrames, reviewed: localComparison.cloudReviewedFrames, m: total })
+                  : t('workbench.reviewedDedupClean', { requested: localComparison.capturedFrames, reviewed: localComparison.cloudReviewedFrames })
                 : total
                   ? t('workbench.reviewedIssues', { n: j.frames.length, m: total })
                   : t('workbench.reviewedClean', { n: j.frames.length });
@@ -1247,13 +1286,43 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'split_shot': {
             if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
-            if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
-            if (splitBlockedByTransition(ensureShots(compRef.current), tRef.current)) {
-              return { ok: false, error: t('workbench.cannotSplitInTransition') };
+            if ('atSecs' in input && 'atSec' in input) return { ok: false, error: 'use either atSec or atSecs, not both' };
+            const purpose = input.purpose == null ? 'editing' : String(input.purpose);
+            if (purpose !== 'editing' && purpose !== 'framing') return { ok: false, error: `invalid split purpose: ${purpose}` };
+            const points = Array.isArray(input.atSecs)
+              ? input.atSecs
+              : typeof input.atSec === 'number' && Number.isFinite(input.atSec)
+                ? [input.atSec]
+                : [tRef.current];
+            const shots = ensureShots(c);
+            if (purpose === 'framing' && visualRef.current) {
+              const rejected = rejectStableFramingSplits(
+                shots,
+                visualRef.current,
+                points.filter((point): point is number => typeof point === 'number' && Number.isFinite(point)),
+              );
+              if (rejected.length) {
+                const first = rejected[0]!;
+                return {
+                  ok: false,
+                  error: t('workbench.framingSplitStable', {
+                    at: r1(first.atSec),
+                    from: r1(first.stableSourceRange[0]),
+                    to: r1(first.stableSourceRange[1]),
+                  }),
+                  data: { rejected },
+                };
+              }
             }
-            splitAtPlayhead();
-            // The setComp wrapper writes compRef synchronously, so reading here already gets the post-split segment table
-            return withDelta({ ok: true, summary: t('workbench.splitPlayhead'), data: { shotIds: (compRef.current.shots ?? []).map((s) => s.id) } });
+            const split = splitShotsAtEditedPoints(shots, points);
+            if ('error' in split) return { ok: false, error: split.error };
+            setComp({ ...c, shots: split.shots });
+            applyT(split.atSecs[split.atSecs.length - 1]!);
+            return withDelta({
+              ok: true,
+              summary: split.atSecs.length === 1 ? t('workbench.splitPlayhead') : t('workbench.splitNPoints', { n: split.atSecs.length }),
+              data: { atSecs: split.atSecs, shotIds: split.shots.map((shot) => shot.id) },
+            });
           }
           case 'trim_shot': {
             if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
@@ -1741,6 +1810,14 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
       case 'capture_frame': {
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : tRef.current;
+        const momentAttempts = reviewMomentAttempts(compRef, compositionRevision(c2).compositionHash);
+        if (!selectReviewMoments([at], momentAttempts).allowedAtSecs.length) {
+          return {
+            ok: false,
+            error: t('workbench.reviewBudgetUnchanged'),
+            data: { repeatedAtSecs: [at], limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
+          };
+        }
         try {
           const label = `${Math.round(at * 10) / 10}s`;
           const shot = await captureCompositionFrame({ comp: c2, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at, burnLabel: label });
@@ -1756,6 +1833,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
             captionsOn: c2.blocks.some(isSentenceCaption),
           };
+          const key = reviewMomentKey(at);
+          momentAttempts.set(key, (momentAttempts.get(key) ?? 0) + 1);
           return {
             ok: true,
             summary: t('workbench.capturedFrameSecS', { sec: Math.round(at * 10) / 10 }),

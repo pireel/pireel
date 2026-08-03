@@ -170,7 +170,8 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     expect(result.isError).toBe(false);
     expect(result.content[0]!.type).toBe('image');
     expect(result.content[0]!.data).toBe('AAAA');
-    expect(new Set(buildMcpTools().map((t) => t.name)).has('capture_frame')).toBe(true);
+    const capture = buildMcpTools().find((t) => t.name === 'capture_frame')!;
+    expect(capture.description).toContain('at most twice');
   });
   it('MCP instructions 教 BYO 主路径', async () => {
     const r = await handleMcpRequest({ id: 19, method: 'initialize' }, deps());

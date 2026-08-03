@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { visualTimelineForAgent, type VisualTimeline } from './visual-types';
+import { rejectStableFramingSplits, visualTimelineForAgent, type VisualTimeline } from './visual-types';
+import type { VideoShot } from './composition';
 
 describe('visualTimelineForAgent', () => {
   it('returns source observations without prescribing edits', () => {
@@ -85,5 +86,25 @@ describe('visualTimelineForAgent', () => {
     expect(summary.subjectTracks[0]).toMatchObject({ startSec: 0, endSec: 2, samples: 2 });
     expect(summary.subjectTracks[0]!.subject).toMatchObject({ x: 0.31, y: 0.105, w: 0.3, h: 0.695, anchorX: 0.46, anchorY: 0.452 });
     expect(summary.subjectTracks[1]).toMatchObject({ startSec: 2, endSec: 3, samples: 1 });
+  });
+
+  it('rejects framing-only cuts inside a stable main-source track but not inserted footage', () => {
+    const timeline: VisualTimeline = {
+      cuts: [3, 6],
+      segments: [
+        {
+          start: 0,
+          end: 10,
+          label: { content: 'talkinghead', person: 'center', safe: 'right', hasText: false, desc: 'Speaker' },
+          geom: { subject: { x: 0.3, y: 0.1, w: 0.3, h: 0.7 }, face: null, rects: [] },
+        },
+      ],
+    };
+    const main: VideoShot[] = [{ id: 's1', srcStart: 0, srcEnd: 10, treatment: 'full' }];
+    expect(rejectStableFramingSplits(main, timeline, [0.5, 5, 9.5])).toEqual([
+      { atSec: 5, sourceSec: 5, stableSourceRange: [0, 10], suggestedAtSecs: [] },
+    ]);
+    const inserted: VideoShot[] = [{ ...main[0]!, src: 'https://cdn.example/clip.mp4' }];
+    expect(rejectStableFramingSplits(inserted, timeline, [5])).toEqual([]);
   });
 });

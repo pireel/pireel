@@ -56,8 +56,8 @@ import {
   zoneOf,
   shotFilterCss,
   shotId,
+  splitShotsAtEditedPoints,
   patchShotFraming,
-  splitBlockedByTransition,
   totalDuration,
   validateComposition,
 } from './composition';
@@ -66,7 +66,7 @@ import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
-import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedInterval, removeEditedRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
+import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
@@ -522,14 +522,36 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'split_shot': {
       const shots = shotsOf(p);
       if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
-      const at = Number(input.atSec);
-      if (!Number.isFinite(at)) return { result: { ok: false, error: 'offline mode needs atSec (no playhead)' } };
-      if (splitBlockedByTransition(shots, at)) {
-        return { result: { ok: false, error: 'this point is inside a transition region and cannot be split — first remove the transition with add_transition {atSec, effect:"none"}' } };
+      if ('atSecs' in input && 'atSec' in input) return { result: { ok: false, error: 'use either atSec or atSecs, not both' } };
+      const purpose = input.purpose == null ? 'editing' : String(input.purpose);
+      if (purpose !== 'editing' && purpose !== 'framing') return { result: { ok: false, error: `invalid split purpose: ${purpose}` } };
+      // subjectTracks are deliberately local (video analysis is browser-side and is not persisted in
+      // cloud project context). Fail closed instead of letting an offline MCP agent create framing cuts
+      // without the same stable-subject guard used by the live Agent surface.
+      if (purpose === 'framing') {
+        return {
+          result: {
+            ok: false,
+            error: 'framing split requires an open Studio tab with local visual analysis; open the project, run visual_brief/analyze_visual, then retry',
+          },
+        };
       }
-      const r = splitAtEdited(shots, at, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-      if (!r.removed && r.clips === shots) return { result: { ok: false, error: 'cannot cut at this time (too close to an edge or on a boundary)' } };
-      return { result: { ok: true, summary: `Split at ${r1(at)}s`, data: { shotIds: r.clips.map((s) => s.id) } }, comp: { ...c, shots: r.clips } };
+      const points = Array.isArray(input.atSecs)
+        ? input.atSecs
+        : typeof input.atSec === 'number' && Number.isFinite(input.atSec)
+          ? [input.atSec]
+          : [];
+      if (!points.length) return { result: { ok: false, error: 'offline mode needs atSec or atSecs (no playhead)' } };
+      const split = splitShotsAtEditedPoints(shots, points);
+      if ('error' in split) return { result: { ok: false, error: split.error } };
+      return {
+        result: {
+          ok: true,
+          summary: split.atSecs.length === 1 ? `Split at ${r1(split.atSecs[0]!)}s` : `Split at ${split.atSecs.length} timeline points`,
+          data: { atSecs: split.atSecs, shotIds: split.shots.map((shot) => shot.id) },
+        },
+        comp: { ...c, shots: split.shots },
+      };
     }
     case 'trim_shot': {
       const shots = shotsOf(p);

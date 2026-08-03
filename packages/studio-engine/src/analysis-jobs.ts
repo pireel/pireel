@@ -7,6 +7,7 @@
  */
 
 import type { Composition } from './composition-core';
+import { validateStudioProposalBudget } from './agent-execution-budget';
 import { validateComposition } from './editing-primitives';
 import { compReceiptDelta, type ReceiptDelta } from './receipt-delta';
 import { canonicalJson, hashSection } from './stable-json';
@@ -220,6 +221,8 @@ export function completeAnalysisJob(
   requireStatus(job, ['running'], 'complete');
   if (job.cancelRequested) throw new Error('complete rejected: cancellation requested');
   if (!draft.operations.length) throw new Error('complete requires at least one proposal operation');
+  const budget = validateStudioProposalBudget(draft.operations);
+  if (!budget.ok) throw new Error(`proposal budget exceeded: ${budget.error}`);
   const now = options.now ?? Date.now();
   const proposal: EditProposal = {
     id: options.proposalId ?? defaultId('prop'),

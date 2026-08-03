@@ -39,6 +39,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.elapsedRemaining': '已 {a}s · 约剩 {b}s',
   'chatGen.emptyStateIntro': '上传视频后点「一键成片」,自动分镜、生成组件;也可以直接说要加什么、怎么改,@ 指定某个组件或分镜。',
   'chatGen.executionFailed': '执行失败',
+  'chatGen.executionBudgetExhausted': '本轮已达到执行预算,已在下一次编辑前停止。发送「继续」即可开启新一轮受控执行。',
   'chatGen.expand': '展开',
   'chatGen.failed': '失败',
   'chatGen.fillEdit': '填入并编辑',

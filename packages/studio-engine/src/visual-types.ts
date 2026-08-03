@@ -5,6 +5,8 @@
  */
 
 import type { NRect, SafeZone } from './geometry-math';
+import type { VideoShot } from './composition-core';
+import { editedToSrc, spans as clipSpans } from './trim';
 
 /** Palette derived from footage base colors (CSS var overrides). */
 export type DerivedPalette = Record<string, string>;
@@ -198,6 +200,50 @@ function stableSubjectTracks(segments: VisualSegment[]): AgentSubjectTrack[] {
       ...(track.safeAreas?.length ? { safeAreas: track.safeAreas.map(agentRect) } : {}),
     };
   });
+}
+
+export interface FramingSplitRejection {
+  atSec: number;
+  sourceSec: number;
+  stableSourceRange: [number, number];
+  suggestedAtSecs: number[];
+}
+
+/** A framing-purpose split inside a stable local subject track adds no new framing information.
+ * Keep this as an observation guard: non-framing edits and footage without subject evidence remain
+ * untouched, while the LLM still decides what framing to apply at actual track boundaries. */
+export function rejectStableFramingSplits(
+  shots: VideoShot[],
+  timeline: VisualTimeline,
+  atSecs: readonly number[],
+  marginSec = 0.75,
+): FramingSplitRejection[] {
+  const tracks = stableSubjectTracks(timeline.segments);
+  const spans = clipSpans(shots);
+  const rejected: FramingSplitRejection[] = [];
+  for (const atSec of atSecs) {
+    const hit = editedToSrc(shots, atSec);
+    if (!hit) continue;
+    const shot = shots[hit.index];
+    // The cached visual timeline describes the main source only; inserted sources need their own
+    // observations and must not be rejected using numerically coincident source seconds.
+    if (!shot || shot.src) continue;
+    const stable = tracks.find(
+      (track) => hit.src > track.startSec + marginSec && hit.src < track.endSec - marginSec,
+    );
+    if (!stable) continue;
+    const span = spans[hit.index]!;
+    const suggestedAtSecs = [stable.startSec, stable.endSec]
+      .filter((sourceSec) => sourceSec > shot.srcStart + 0.05 && sourceSec < shot.srcEnd - 0.05)
+      .map((sourceSec) => round3(span.editedStart + sourceSec - shot.srcStart));
+    rejected.push({
+      atSec: round3(atSec),
+      sourceSec: round3(hit.src),
+      stableSourceRange: [stable.startSec, stable.endSec],
+      suggestedAtSecs,
+    });
+  }
+  return rejected;
 }
 
 /** Compact perception output for an agent. This deliberately contains observations, not edit

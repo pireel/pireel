@@ -14,6 +14,7 @@ import { Conversation, ConversationContent, ConversationEmptyState, Conversation
 import { Suggestion } from '@pireel/ui/ai-elements/suggestion';
 import { Message, MessageContent, MessageResponse } from '@pireel/ui/ai-elements/message';
 import { type ChatSituation, buildSituation } from '@pireel/studio-engine/prompts';
+import { STUDIO_AGENT_EXECUTION_LIMITS, studioAgentTurnUsage } from '@pireel/studio-engine/agent-execution-budget';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import { mid, PiAvatar, ThinkingDots, renderTextWithElementPills } from './chat-format';
@@ -55,6 +56,7 @@ export function ChatThread({
 }) {
   const runToolRef = useRef(runTool);
   runToolRef.current = runTool;
+  const toolCallsUsedRef = useRef(studioAgentTurnUsage(initialMessages).toolCalls);
   // Stop plumbing: aborting the stream alone isn't enough — the stream loop awaits onToolCall, so a
   // running tool must be told to stand down too. The user-stopped flag keeps the continuation
   // safety net from resurrecting a turn the user just killed.
@@ -98,6 +100,16 @@ export function ChatThread({
     sendAutomaticallyWhen: (args) => !userStoppedRef.current && lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      if (toolCallsUsedRef.current >= STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn) {
+        addToolOutput({
+          tool: id,
+          toolCallId: toolCall.toolCallId,
+          state: 'output-error',
+          errorText: t('chatGen.executionBudgetExhausted'),
+        });
+        return;
+      }
+      toolCallsUsedRef.current += 1;
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
@@ -215,6 +227,7 @@ export function ChatThread({
       const t = text.trim();
       if (!t || status === 'streaming' || status === 'submitted') return;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
+      toolCallsUsedRef.current = 0;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       void sendMessage({ text: t, metadata: { situation: buildSituation(getBodyRef.current() as ChatSituation) } });
     },
