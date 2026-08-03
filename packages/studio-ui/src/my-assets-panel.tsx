@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, FolderOpen, Image as ImageIcon, Loader2, MoreHorizontal, Music, Search, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
+import { Check, Clapperboard, FolderOpen, Image as ImageIcon, Loader2, MoreHorizontal, Music, Search, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { toast } from '@pireel/ui/toast';
 import { confirm } from '@pireel/ui/confirm';
 import {
@@ -79,6 +79,7 @@ const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: 'video', label: 'panels.video' },
   { value: 'audio', label: 'panels.music' },
 ];
+const LOCAL_FILTER_ITEM_CLASS = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
 
 /** File System Access picker (Chromium) — typed minimally; absence = fall back to <input type=file>. */
 type ShowOpenFilePicker = (opts?: {
@@ -779,8 +780,9 @@ export function MyAssetsPanel({
             <DropdownMenuContent align="start" sideOffset={5} className="min-w-[128px]">
               <DropdownMenuRadioGroup value={kind} onValueChange={(value) => setKind(value as KindFilter)}>
                 {KIND_FILTERS.map((option) => (
-                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                  <DropdownMenuRadioItem key={option.value} value={option.value} className={LOCAL_FILTER_ITEM_CLASS}>
                     {t(option.label)}
+                    {kind === option.value && <Check size={10} className="ml-auto shrink-0" />}
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
