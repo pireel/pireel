@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Element library (generated overlay HTML blocks) — **cloud is source of truth + localStorage
- * cache** (moved to cloud 2026-07-18 for cross-project/cross-device reuse; previously pure
- * localStorage, so clearing the cache / switching devices lost everything).
+ * Project element history/library (generated overlay HTML blocks) — **cloud is source of truth +
+ * project-scoped localStorage cache**. A project's entries recover across devices but never leak
+ * into another project's generation history.
  * Read = sync read from cache (panel opens instantly), syncElementEntries pulls the cloud and
  * merges back; write = cache + fire-and-forget push to cloud (providers.elements; OSS shell
  * defaults to local-only, same behavior as before cloud).
@@ -36,8 +36,10 @@ export interface ElementEntry {
   element: GenElementResult;
 }
 
-const ELS_KEY = 'studio:gen-elements:v1';
+const ELS_KEY_PREFIX = 'studio:gen-elements:v2:';
 const ELS_CAP = 60;
+
+const cacheKey = (projectId: string) => `${ELS_KEY_PREFIX}${projectId}`;
 
 interface RawEntry {
   id?: string;
@@ -48,9 +50,9 @@ interface RawEntry {
   element?: GenElementResult;
 }
 
-export function loadElementEntries(): ElementEntry[] {
+export function loadElementEntries(projectId: string): ElementEntry[] {
   try {
-    const raw = JSON.parse(window.localStorage.getItem(ELS_KEY) ?? '[]') as RawEntry[];
+    const raw = JSON.parse(window.localStorage.getItem(cacheKey(projectId)) ?? '[]') as RawEntry[];
     if (!Array.isArray(raw)) return [];
     return raw
       .filter((e) => e.element && (e.type === undefined || e.type === 'element') && (e.status === undefined || e.status === 'succeeded'))
@@ -61,11 +63,11 @@ export function loadElementEntries(): ElementEntry[] {
   }
 }
 
-export function saveElementEntries(entries: ElementEntry[]): void {
+export function saveElementEntries(projectId: string, entries: ElementEntry[]): void {
   try {
     // Store in the same shape as gen-panel history (with type/status, so old readers stay compatible)
     const done = entries.slice(-ELS_CAP).map((e) => ({ ...e, type: 'element', status: 'succeeded' }));
-    window.localStorage.setItem(ELS_KEY, JSON.stringify(done));
+    window.localStorage.setItem(cacheKey(projectId), JSON.stringify(done));
   } catch {
     /* Ignore quota / private mode */
   }
@@ -74,36 +76,36 @@ export function saveElementEntries(entries: ElementEntry[]): void {
 const toWire = (e: ElementEntry): StoredElement => ({ id: e.id, prompt: e.prompt, label: e.element.label, createdAt: e.createdAt, element: e.element });
 
 /** Push a single entry to cloud (fire-and-forget; OSS shell has no provider = no-op). */
-export function pushElementToCloud(e: ElementEntry): void {
-  void studioProviders().elements?.save(toWire(e)).catch(() => {});
+export function pushElementToCloud(projectId: string, e: ElementEntry): void {
+  void studioProviders().elements?.save(projectId, toWire(e)).catch(() => {});
 }
 
 /** Cloud sync: cloud is source of truth; local-only entries (added offline / history from before
  *  cloud) are backfilled up; the merged result is written back to cache and returned (ascending by
  *  time, matching cache order). Returns null if no provider / fetch fails (use the cache). */
-export async function syncElementEntries(): Promise<ElementEntry[] | null> {
+export async function syncElementEntries(projectId: string): Promise<ElementEntry[] | null> {
   const store = studioProviders().elements;
   if (!store) return null;
-  const cloud = await store.list().catch(() => null);
+  const cloud = await store.list(projectId).catch(() => null);
   if (!cloud) return null;
   const cloudEntries: ElementEntry[] = cloud
     .filter((c) => c.element && typeof c.element.innerHtml === 'string')
     .map((c) => ({ id: c.id, prompt: c.prompt, createdAt: c.createdAt, element: c.element }));
   const cloudIds = new Set(cloudEntries.map((e) => e.id));
-  const localOnly = loadElementEntries().filter((e) => !cloudIds.has(e.id));
-  for (const e of localOnly) pushElementToCloud(e); // one-time backfill: don't lose local history from before cloud
+  const localOnly = loadElementEntries(projectId).filter((e) => !cloudIds.has(e.id));
+  for (const e of localOnly) pushElementToCloud(projectId, e); // one-time backfill for this project's local cache
   const merged = [...cloudEntries, ...localOnly].sort((a, b) => a.createdAt - b.createdAt);
-  saveElementEntries(merged);
+  saveElementEntries(projectId, merged);
   return merged.slice(-ELS_CAP);
 }
 
 /** Save a canvas element back to the library (floating toolbar "Save as element"): append one (same id overwrites), evict the oldest past cap. */
-export function addElementEntry(entry: ElementEntry): void {
-  saveElementEntries([...loadElementEntries().filter((e) => e.id !== entry.id), entry]);
-  pushElementToCloud(entry);
+export function addElementEntry(projectId: string, entry: ElementEntry): void {
+  saveElementEntries(projectId, [...loadElementEntries(projectId).filter((e) => e.id !== entry.id), entry]);
+  pushElementToCloud(projectId, entry);
 }
 
-export function removeElementEntry(id: string): void {
-  saveElementEntries(loadElementEntries().filter((e) => e.id !== id));
-  void studioProviders().elements?.remove(id).catch(() => {});
+export function removeElementEntry(projectId: string, id: string): void {
+  saveElementEntries(projectId, loadElementEntries(projectId).filter((e) => e.id !== id));
+  void studioProviders().elements?.remove(projectId, id).catch(() => {});
 }

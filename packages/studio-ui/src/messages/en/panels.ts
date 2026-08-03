@@ -120,6 +120,7 @@ export const PANELS_EN: Record<string, string> = {
   'panels.generating': 'Generating…',
   'panels.generatingImage': 'Generating image',
   'panels.generatingVideo': 'Generating video',
+  'panels.generatingAudio': 'Generating audio',
   'panels.globalAudio': 'Global settings',
   'panels.glitchColorFringing': 'Glitch with color fringing',
   'panels.hardCutDefault': 'Hard cut (default)',

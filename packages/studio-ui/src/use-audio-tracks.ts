@@ -26,9 +26,11 @@ import { decodeAudioFile, decodeVideoAudio } from './audio-decode';
 import { bgmAutoVolumeDb, measureBufferLoudnessDb } from './loudness';
 import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
+import { getStudioSpaceId } from './gen-api';
 import { t } from './i18n';
 
 export interface AudioTracksDeps {
+  projectId: string;
   comp: Composition;
   compRef: MutableRefObject<Composition>;
   setComp: (action: SetStateAction<Composition>) => void;
@@ -45,7 +47,7 @@ export interface AudioTracksDeps {
 }
 
 export function useAudioTracks(deps: AudioTracksDeps) {
-  const { comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
+  const { projectId, comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
   /** Mounted bytes per clip sig (blob src dies on refresh; the File here is the live handle). */
   const audioFilesRef = useRef<Map<string, File>>(new Map());
   const [audioFileRev, setAudioFileRev] = useState(0);
@@ -299,20 +301,21 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     return out.length ? out : null;
   };
 
-  /** Hosted music generation. Returns the stored url and leaves it in the assets library (the route
-   *  registers it) — placing it on the lane is a separate, explicit action, exactly like a generated image. */
-  const generateAudioAsset = async (prompt: string, durationSec: number): Promise<string> => {
+  /** Hosted music generation. Returns the project-history id + stored url; placing it on the lane
+   *  remains a separate explicit action, exactly like a generated image. */
+  const generateAudioAsset = async (prompt: string, durationSec: number): Promise<{ id: string; url: string }> => {
+    const spaceId = await getStudioSpaceId(projectId);
     const r = await fetch('/api/studio/music', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, duration_sec: durationSec }),
+      body: JSON.stringify({ prompt, duration_sec: durationSec, space_id: spaceId }),
     });
     if (!r.ok) {
       const msg = (await r.json().catch(() => null)) as { error?: string } | null;
       throw new Error(msg?.error || t('workbench.musicGenFailed'));
     }
-    const { url } = (await r.json()) as { url: string };
-    return url;
+    const { id, url } = (await r.json()) as { id: string; url: string };
+    return { id, url };
   };
 
   /** True peak per clip sig (linear 0..1), for the panel's clipping warning — computed off the same peak

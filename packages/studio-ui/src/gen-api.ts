@@ -4,16 +4,19 @@
  * Client API layer for the Studio right-rail image/video generation panels.
  *
  * Reuses /create's unified generation infra: POST /api/create (tool_id picks the tool, billing, async
- * atlas) + GET /api/create/:id to poll one item's status. A creation must hang off a space — studio
- * doesn't create projects, so it uses one lazily-created dedicated space (id in localStorage; on
- * account change / deletion, clear the cache and recreate once).
+ * atlas) + GET /api/create/:id to poll one item's status. A creation must hang off a space — each
+ * Studio project resolves one stable server-side space, with localStorage only as a per-project
+ * cache. Another browser resolves the same space from the project id, so history never becomes
+ * user-global and remains recoverable across devices.
  * Assets are stored as bare R2 keys; display uses the imageThumb preset; inserting into a composition uses the 'original' full URL.
  */
 
 import { imageThumb } from '@pireel/ui/image-url';
 import { t } from './i18n';
 
-const SPACE_LS_KEY = 'pireel.studio.gen-space';
+const SPACE_LS_PREFIX = 'pireel.studio.gen-space:v3:';
+
+const spaceCacheKey = (projectId: string) => `${SPACE_LS_PREFIX}${projectId}`;
 
 export interface GenAsset {
   /** Bare key or full URL (verbatim from output_data.assets[].url) */
@@ -39,32 +42,30 @@ export type StartResult =
   | { ok: false; kind: 'credits'; need: number; balance: number }
   | { ok: false; kind: 'error'; message: string };
 
-function clearSpaceCache() {
+function clearSpaceCache(projectId: string) {
   try {
-    localStorage.removeItem(SPACE_LS_KEY);
+    localStorage.removeItem(spaceCacheKey(projectId));
   } catch {
     /* Ignore under SSR/private mode */
   }
 }
 
-/** Studio's dedicated generation space: cached in localStorage, created if absent. */
-export async function getStudioSpaceId(): Promise<string> {
+/** Current project's dedicated generation space: cached locally, resolved idempotently by the server. */
+export async function getStudioSpaceId(projectId: string): Promise<string> {
   try {
-    const v = localStorage.getItem(SPACE_LS_KEY);
+    const v = localStorage.getItem(spaceCacheKey(projectId));
     if (v) return v;
   } catch {
     /* ignore */
   }
-  const r = await fetch('/api/create/spaces', {
+  const r = await fetch(`/api/studio/projects/${encodeURIComponent(projectId)}/gen-space`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: t('chatGen.studioGenerations') }),
   });
   const j = (await r.json().catch(() => null)) as { space?: { id?: string } } | null;
   const id = j?.space?.id;
   if (!r.ok || !id) throw new Error('space_create_failed');
   try {
-    localStorage.setItem(SPACE_LS_KEY, id);
+    localStorage.setItem(spaceCacheKey(projectId), id);
   } catch {
     /* ignore */
   }
@@ -73,13 +74,14 @@ export async function getStudioSpaceId(): Promise<string> {
 
 /** Start one generation. 402 insufficient credits becomes its own kind; on invalid space (account change/deletion) clear the cache and retry once. */
 export async function startGeneration(
+  projectId: string,
   toolId: 'image-gen' | 'video-gen',
   params: Record<string, unknown>,
 ): Promise<StartResult> {
   for (let attempt = 0; attempt < 2; attempt++) {
     let spaceId: string;
     try {
-      spaceId = await getStudioSpaceId();
+      spaceId = await getStudioSpaceId(projectId);
     } catch {
       return { ok: false, kind: 'error', message: t('common.generationSpaceFailed') };
     }
@@ -97,7 +99,7 @@ export async function startGeneration(
     if (!r.ok || !j?.ok || !j.id) {
       // 4xx and not yet retried → most likely an invalid space; clear the cache, get a new space, and retry
       if (attempt === 0 && (r.status === 400 || r.status === 404)) {
-        clearSpaceCache();
+        clearSpaceCache(projectId);
         continue;
       }
       return { ok: false, kind: 'error', message: typeof j?.error === 'string' ? j.error : t('chatGen.generationRequestFailedStatus', { status: r.status }) };
@@ -145,18 +147,18 @@ export async function pollCreation(id: string): Promise<GenJob | null> {
   return toJob({ ...j, id });
 }
 
-/** Fetch the studio space's generation history (including pending — resume polling on mount). No space ever created = no history. */
-export async function listStudioGens(type: 'image' | 'video', limit = 30): Promise<GenJob[]> {
-  let spaceId: string | null = null;
+/** Fetch this project's generation history (including pending — resume polling on mount). */
+export async function listStudioGens(projectId: string, type: 'image' | 'video' | 'audio', limit = 30): Promise<GenJob[]> {
+  let spaceId: string;
   try {
-    spaceId = localStorage.getItem(SPACE_LS_KEY);
+    spaceId = await getStudioSpaceId(projectId);
   } catch {
-    /* ignore */
+    return [];
   }
-  if (!spaceId) return [];
-  const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${type}&limit=${limit}`);
+  const creationType = type === 'audio' ? 'bgm' : type;
+  const r = await fetch(`/api/create/list?space_id=${encodeURIComponent(spaceId)}&type=${creationType}&limit=${limit}`);
   if (!r.ok) {
-    if (r.status === 400 || r.status === 404) clearSpaceCache();
+    if (r.status === 400 || r.status === 404) clearSpaceCache(projectId);
     return [];
   }
   const j = (await r.json().catch(() => null)) as { items?: RawCreation[] } | null;

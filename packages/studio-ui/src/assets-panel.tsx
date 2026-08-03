@@ -41,14 +41,14 @@ export function AssetsPanel({
   onInsertElement,
   onInsertKit,
   onDragAsset,
-  onOpenGen,
+  onOpenGeneration,
   onUseAudio,
   genRefreshTick = 0,
 }: {
   /** Element live preview needs theme/canvas (BlockPreviewFrame). */
   comp: Composition;
   /** Scopes "My"'s local-import registry (imports persist per project across refreshes). */
-  projectId?: string;
+  projectId: string;
   /** Cloud-synced metadata only; MyAssetsPanel merges it with this browser's local registry. */
   localAssetIndex?: LocalAssetIndexEntry[];
   /** Wait until cloud/local project hydration finishes before publishing this browser's merged index. */
@@ -73,8 +73,8 @@ export function AssetsPanel({
   onInsertKit?: (component: string, props?: Record<string, unknown>) => void;
   /** Drag out an asset (asset on dragstart, null on dragend) — workbench uses this to overlay a drop layer on stage/timeline. */
   onDragAsset?: (asset: PanelDragAsset | null) => void;
-  /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
-  onOpenGen: (type: GenType, anchor?: DOMRect) => void;
+  /** Open generation, optionally seeding a Remix template into its composer. */
+  onOpenGeneration?: (type?: GenType, prompt?: string) => void;
   /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). sig = local byte identity. */
   onUseAudio?: (url: string, label?: string, sig?: string | null) => void;
   /** Bumped when the generate popover closes → refetch gen history/elements. */
@@ -140,18 +140,25 @@ export function AssetsPanel({
       </div>
       {officialMounted && (
         <div className={scope === 'official' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-          <OfficialAssetsPanel comp={comp} onInsert={onInsert} onInsertKit={onInsertKit} onDragAsset={onDragAsset} onUseAudio={onUseAudio} />
+          <OfficialAssetsPanel
+            comp={comp}
+            onInsert={onInsert}
+            onInsertKit={onInsertKit}
+            onDragAsset={onDragAsset}
+            onOpenGeneration={onOpenGeneration}
+            onUseAudio={onUseAudio}
+          />
         </div>
       )}
       {cloudMounted && (
         <div className={scope === 'cloud' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
           <CloudAssetsPanel
             comp={comp}
+            projectId={projectId}
             onInsert={onInsert}
             onInsertClip={onInsertClip}
             onInsertElement={onInsertElement}
             onDragAsset={onDragAsset}
-            onOpenGen={onOpenGen}
             onUseAudio={onUseAudio}
             genRefreshTick={genRefreshTick}
           />

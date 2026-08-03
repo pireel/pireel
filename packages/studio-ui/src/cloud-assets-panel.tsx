@@ -1,24 +1,31 @@
 'use client';
 
 /**
- * Cloud assets — the user's personal CLOUD library: uploads (/api/me/materials) + generated
- * images/videos (/api/create studio space history) + saved elements (element-history), merged
- * into one reverse-chronological grid distinguished by origin. Pending gens hold a placeholder
- * at the top and turn into assets in place after 4s polling.
+ * Cloud assets — personal uploads (/api/me/materials) + the current project's generated
+ * images/videos/audio (/api/create project space history) + project components
+ * (element-history), merged into one reverse-chronological grid distinguished by origin.
+ * Pending gens hold a placeholder at the top and turn into assets in place after 4s polling.
  *
  * Official/curated content (kit components, stickers, BGM) lives in OfficialAssetsPanel;
  * the current project's local, never-uploaded media lives in MyAssetsPanel.
  *
- * Generation isn't a separate panel — the header has one "Generate" entry (the popover
- * lives in workbench, raised via onOpenGen); closing it bumps genRefreshTick to refetch.
+ * Generation has its own primary-nav panel in the workbench. Generated results still appear
+ * here as cloud assets; leaving the generation panel bumps genRefreshTick to refetch them.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, Image as ImageIcon, LayoutGrid, List, Loader2, Music, Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
+import { Check, Loader2, Search, SlidersHorizontal, Upload } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { toast } from '@pireel/ui/toast';
 import { confirm } from '@pireel/ui/confirm';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@pireel/ui/dropdown-menu';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { type GenJob, listStudioGens, pollCreation } from './gen-api';
 import { type ElementEntry, type GenElementResult, loadElementEntries, removeElementEntry, syncElementEntries } from './element-history';
@@ -28,12 +35,10 @@ import {
   type LibraryItem,
   type PanelDragAsset,
   type PanelMediaAsset,
-  RowThumb,
   dimsOf,
   dragPropsFor,
   useAudioPreview,
 } from './asset-card';
-import type { GenType } from './assets-panel';
 import { t } from './i18n';
 
 interface MaterialItem {
@@ -49,9 +54,14 @@ interface MaterialItem {
 }
 
 type KindFilter = 'all' | 'image' | 'video' | 'audio' | 'element';
-type ViewMode = 'grid' | 'list';
-
-const VIEW_KEY = 'studio.assetsPanel.view';
+const KIND_FILTERS: { value: KindFilter; label: string }[] = [
+  { value: 'all', label: 'panels.all' },
+  { value: 'image', label: 'panels.image' },
+  { value: 'video', label: 'panels.video' },
+  { value: 'element', label: 'panels.element' },
+  { value: 'audio', label: 'panels.music' },
+];
+const CLOUD_FILTER_ITEM_CLASS = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
 
 /** Measure a local file's natural dims before upload (instant, no network) → persist so the grid/insert can reuse. */
 const fileDims = (f: File, kind: 'image' | 'video'): Promise<{ w: number; h: number } | null> =>
@@ -93,7 +103,7 @@ function materialToItem(it: MaterialItem): LibraryItem | null {
   };
 }
 
-function genToItems(job: GenJob, kind: 'image' | 'video'): LibraryItem[] {
+function genToItems(job: GenJob, kind: 'image' | 'video' | 'audio'): LibraryItem[] {
   if (job.status !== 'succeeded') return [];
   return job.assets.map((a, i) => ({
     id: `gen:${job.id}:${i}`,
@@ -101,7 +111,7 @@ function genToItems(job: GenJob, kind: 'image' | 'video'): LibraryItem[] {
     origin: 'gen' as const,
     insertUrl: a.url, // gen-api already returns a full-res direct URL
     thumbSrc: kind === 'image' ? a.key : null, // generated video has no extracted frame; thumbnail uses <video> first frame
-    label: job.prompt.slice(0, 60) || (kind === 'video' ? t('common.videoGeneration') : t('common.imageGeneration')),
+    label: job.prompt.slice(0, 60) || (kind === 'video' ? t('common.videoGeneration') : kind === 'audio' ? t('panels.music') : t('common.imageGeneration')),
     createdAt: job.createdAt,
     deletable: false,
   }));
@@ -122,16 +132,18 @@ function elementToItem(e: ElementEntry): LibraryItem {
 
 export function CloudAssetsPanel({
   comp,
+  projectId,
   onInsert,
   onInsertClip,
   onInsertElement,
   onDragAsset,
-  onOpenGen,
   onUseAudio,
   genRefreshTick = 0,
 }: {
   /** Element lightbox live preview needs theme/canvas (BlockPreviewFrame). */
   comp: Composition;
+  /** Generated assets and components are isolated to this Studio project. */
+  projectId: string;
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Click-insert default for image/video: MAIN TRACK at the playhead (drag targets the stage). */
   onInsertClip?: (asset: PanelMediaAsset) => void;
@@ -139,8 +151,6 @@ export function CloudAssetsPanel({
   onInsertElement: (el: GenElementResult, prompt: string) => void;
   /** Drag out an asset (asset on dragstart, null on dragend) — workbench uses this to overlay a drop layer on stage/timeline. */
   onDragAsset?: (asset: PanelDragAsset | null) => void;
-  /** Open the generate popover (owned by workbench; anchor = trigger button rect, popover pops out nearby). */
-  onOpenGen: (type: GenType, anchor?: DOMRect) => void;
   /** Audio asset's primary action: mount as the background-music bed (workbench → use-bgm). */
   onUseAudio?: (url: string, label?: string) => void;
   /** Bumped when the generate popover closes → refetch gen history/elements. */
@@ -148,14 +158,11 @@ export function CloudAssetsPanel({
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
-  const [view, setView] = useState<ViewMode>(() =>
-    typeof window !== 'undefined' && window.localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid',
-  );
   const [q, setQ] = useState('');
   const [uploads, setUploads] = useState<LibraryItem[]>([]);
   const [gens, setGens] = useState<GenJob[]>([]); // image+video stored together, tagged by kind when itemized
   const [elements, setElements] = useState<ElementEntry[]>([]);
-  const genKindRef = useRef<Map<string, 'image' | 'video'>>(new Map());
+  const genKindRef = useRef<Map<string, 'image' | 'video' | 'audio'>>(new Map());
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
@@ -204,21 +211,24 @@ export function CloudAssetsPanel({
   // for instant open, then fetch and merge cloud (cloud wins; local-only entries backfill to cloud, see element-history)
   useEffect(() => {
     let gone = false;
-    setElements(loadElementEntries());
-    void syncElementEntries().then((merged) => {
+    genKindRef.current.clear();
+    setGens([]);
+    setElements(loadElementEntries(projectId));
+    void syncElementEntries(projectId).then((merged) => {
       if (merged && !gone) setElements(merged);
     });
-    void Promise.all([listStudioGens('image').catch(() => []), listStudioGens('video').catch(() => [])]).then(
-      ([imgs, vids]) => {
+    void Promise.all([listStudioGens(projectId, 'image').catch(() => []), listStudioGens(projectId, 'video').catch(() => []), listStudioGens(projectId, 'audio').catch(() => [])]).then(
+      ([imgs, vids, auds]) => {
         for (const j of imgs) genKindRef.current.set(j.id, 'image');
         for (const j of vids) genKindRef.current.set(j.id, 'video');
-        setGens([...imgs, ...vids]);
+        for (const j of auds) genKindRef.current.set(j.id, 'audio');
+        setGens([...imgs, ...vids, ...auds]);
       },
     );
     return () => {
       gone = true;
     };
-  }, [genRefreshTick]);
+  }, [genRefreshTick, projectId]);
 
   const gensRef = useRef(gens);
   gensRef.current = gens;
@@ -245,17 +255,6 @@ export function CloudAssetsPanel({
     };
   }, [gens]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const switchView = (v: ViewMode) => {
-    setView(v);
-    scrollRef.current?.scrollTo(0, 0); // the two views have different row heights, so old scrollTop lands randomly
-    try {
-      window.localStorage.setItem(VIEW_KEY, v);
-    } catch {
-      /* private mode can't write; ignore */
-    }
-  };
-
   const items = useMemo(() => {
     const genItems = gens.flatMap((j) => {
       const k = genKindRef.current.get(j.id);
@@ -279,11 +278,6 @@ export function CloudAssetsPanel({
     [gens, kind],
   );
 
-  /** Kind icon + origin label: same badge vocabulary in the list row meta line. */
-  const kindIcon = (it: LibraryItem) =>
-    it.kind === 'video' ? <Clapperboard size={9} /> : it.kind === 'element' ? <Sparkles size={9} /> : it.kind === 'audio' ? <Music size={9} /> : <ImageIcon size={9} />;
-  const originLabel = (it: LibraryItem) =>
-    it.kind === 'element' ? t('panels.element') : it.origin === 'gen' ? t('common.generate') : t('panels.upload');
   /** Body click: audio toggles inline playback (its "preview"), everything else opens the lightbox. */
   const activate = (it: LibraryItem) => {
     if (it.kind === 'audio') {
@@ -334,8 +328,8 @@ export function CloudAssetsPanel({
         confirmLabel: t('tools.delete_block.label'),
       });
       if (!ok) return;
-      removeElementEntry(it.id.slice(3)); // strip 'el:' prefix
-      setElements(loadElementEntries());
+      removeElementEntry(projectId, it.id.slice(3)); // strip 'el:' prefix
+      setElements(loadElementEntries(projectId));
       toast.success(t('panels.deleted'));
       return;
     }
@@ -388,98 +382,77 @@ export function CloudAssetsPanel({
     />
   );
 
-  const openGen = (e: React.MouseEvent<HTMLButtonElement>) =>
-    onOpenGen(kind === 'all' ? 'image' : kind, e.currentTarget.getBoundingClientRect());
-
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="border-line border-b px-2.5 py-2">
+      <div className="border-line border-b px-2.5 py-1.5">
         <div className="flex items-center gap-1.5">
-          <div className="border-line bg-panel focus-within:border-ink-4 flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 py-1">
-            <Search size={12} className="text-ink-4 shrink-0" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                title={t('panels.filterAssets')}
+                aria-label={t('panels.filterAssets')}
+                className={`border-line hover:text-ink inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${
+                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2 text-ink'
+                }`}
+              >
+                <SlidersHorizontal size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" sideOffset={5} className="min-w-[128px]">
+              <DropdownMenuRadioGroup value={kind} onValueChange={(value) => setKind(value as KindFilter)}>
+                {KIND_FILTERS.map((option) => (
+                  <DropdownMenuRadioItem key={option.value} value={option.value} className={CLOUD_FILTER_ITEM_CLASS}>
+                    {t(option.label)}
+                    {kind === option.value && <Check size={10} className="ml-auto shrink-0" />}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <label className="border-line bg-panel-2 focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
+            <Search size={11} className="text-ink-4 pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2" />
             <input
+              type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={t('panels.searchAssets')}
               aria-label={t('panels.searchAssetsLabel')}
-              className="text-ink placeholder:text-ink-4 min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+              className="text-ink placeholder:text-ink-4 h-[24px] w-full bg-transparent pl-5.5 pr-1.5 text-[11px] outline-none"
             />
-          </div>
+          </label>
+
           <button
             type="button"
             onClick={() => void doUpload()}
             disabled={uploading}
             title={t('panels.uploadAsset')}
             aria-label={t('panels.uploadAsset')}
-            className="border-line text-ink-2 hover:text-ink inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md border disabled:opacity-40"
+            className="border-line text-ink-2 hover:text-ink inline-flex h-[24px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-[11px] disabled:opacity-40"
           >
-            {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+            {t('panels.upload')}
           </button>
-          <button
-            type="button"
-            onClick={openGen}
-            title={t('panels.generateAssetsImageVideo')}
-            className="bg-ink text-bg inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium hover:opacity-90"
-          >
-            <Sparkles size={11} /> {t('common.generate')}
-          </button>
-        </div>
-        <div className="mt-1.5 flex items-center justify-between">
-          <div className="flex gap-1">
-            {(
-              [
-                { v: 'all', label: 'panels.all' },
-                { v: 'image', label: 'panels.image' },
-                { v: 'video', label: 'panels.video' },
-                { v: 'element', label: 'panels.element' },
-                { v: 'audio', label: 'panels.music' },
-              ] as { v: KindFilter; label: string }[]
-            ).map((k) => (
-              <button
-                key={k.v}
-                type="button"
-                onClick={() => setKind(k.v)}
-                className={`rounded-md px-2 py-0.5 text-[11px] transition ${
-                  kind === k.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
-                }`}
-              >
-                {t(k.label)}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-0.5">
-            {(
-              [
-                { v: 'grid', icon: LayoutGrid, title: 'panels.cardView' },
-                { v: 'list', icon: List, title: 'panels.listView' },
-              ] as { v: ViewMode; icon: typeof LayoutGrid; title: string }[]
-            ).map((m) => (
-              <button
-                key={m.v}
-                type="button"
-                title={t(m.title)}
-                aria-label={t(m.title)}
-                onClick={() => switchView(m.v)}
-                className={`rounded p-1 transition ${view === m.v ? 'bg-panel-2 text-ink' : 'text-ink-4 hover:text-ink-2'}`}
-              >
-                <m.icon size={13} />
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 
-      {/* Grid view has content padding; list view is full-bleed with padding inside each row */}
-      <div ref={scrollRef} className={`min-h-0 flex-1 overflow-auto ${view === 'grid' ? 'p-2' : ''}`}>
+      <div className="min-h-0 flex-1 overflow-auto p-2">
         {/* Pending gens: placeholder card pinned to top, turns into an asset in place when ready */}
         {pendingJobs.length > 0 && (
-          <div className={view === 'grid' ? 'mb-1.5 space-y-1.5' : 'space-y-0'}>
+          <div className="mb-1.5 space-y-1.5">
             {pendingJobs.map((g) => (
-              <div key={g.id} className={`border-line flex items-center gap-2 border ${view === 'grid' ? 'rounded-md p-2' : 'border-x-0 border-t-0 px-3 py-2'}`}>
+              <div key={g.id} className="border-line flex items-center gap-2 rounded-md border p-2">
                 <Loader2 size={13} className="text-ink-4 shrink-0 animate-spin" />
                 <div className="min-w-0 flex-1">
                   <div className="text-ink-3 truncate text-[11px]">{g.prompt || t('panels.generating')}</div>
-                  <div className="text-ink-4 text-[10px]">{(genKindRef.current.get(g.id) ?? 'image') === 'video' ? t('panels.generatingVideo') : t('panels.generatingImage')}</div>
+                  <div className="text-ink-4 text-[10px]">
+                    {(genKindRef.current.get(g.id) ?? 'image') === 'video'
+                      ? t('panels.generatingVideo')
+                      : (genKindRef.current.get(g.id) ?? 'image') === 'audio'
+                        ? t('panels.generatingAudio')
+                        : t('panels.generatingImage')}
+                  </div>
                 </div>
               </div>
             ))}
@@ -501,54 +474,10 @@ export function CloudAssetsPanel({
               t('panels.noMatchingAssetsTry')
             )}
           </div>
-        ) : view === 'grid' ? (
+        ) : (
           // Uniform grid: fixed 120×68 cards (the rail's DEFAULT width is computed to fit whole
           // columns); thumbnails letterbox non-16:9 media centered and fully visible.
           <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">{shown.map(gridCard)}</div>
-        ) : (
-          <div className="divide-line divide-y">
-            {shown.map((it) => (
-              <div key={it.id} className="hover:bg-panel-2 group flex w-full items-center gap-2 px-3 py-1.5 transition">
-                <button
-                  type="button"
-                  title={it.kind === 'audio' ? it.label : t('panels.previewLabelDragOnto', { label: it.label })}
-                  aria-label={it.kind === 'audio' ? (audioPlaying === it.insertUrl ? t('panels.pauseAudio') : t('panels.playAudio')) : undefined}
-                  onClick={() => activate(it)}
-                  {...dragPropsFor(it, onDragAsset)}
-                  className={`flex min-w-0 flex-1 items-center gap-2 text-left ${it.kind === 'audio' ? 'cursor-pointer' : 'cursor-zoom-in'}`}
-                >
-                  <RowThumb item={it} playing={it.kind === 'audio' && audioPlaying === it.insertUrl} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-ink truncate text-[11px]">{it.label}</div>
-                    <div className="text-ink-4 flex items-center gap-1 text-[10px]">
-                      {kindIcon(it)}
-                      {originLabel(it)}
-                      {it.createdAt ? ` · ${new Date(it.createdAt).toLocaleDateString()}` : ''}
-                    </div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  title={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insertOntoCanvas')}
-                  onClick={() => insertOf(it)}
-                  className="bg-accent hidden shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-white group-hover:inline-flex"
-                >
-                  <Plus size={9} /> {insertLabel(it)}
-                </button>
-                {it.deletable && (
-                  <button
-                    type="button"
-                    title={t('panels.deleteAsset')}
-                    aria-label={t('panels.deleteAsset')}
-                    onClick={() => void doDelete(it)}
-                    className="text-ink-4 hidden shrink-0 items-center rounded p-1 hover:bg-red-600 hover:text-white group-hover:inline-flex"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
         )}
       </div>
 

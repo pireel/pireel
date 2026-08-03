@@ -2,7 +2,7 @@
 
 /**
  * Official assets — curated content shared by every account, in three sections:
- *  - Components: the kit library (props-driven overlay blocks baked into the engine).
+ *  - Components: the kit library plus the same reusable presets that seed component Remix.
  *  - Stickers: transparent images from the official manifest (bare keys via imageThumb).
  *  - BGM: licensed music beds from the manifest, rendered as rows (audio has no picture;
  *    a row carries play/duration/use-as-BGM better than a card).
@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Loader2, Music, Pause, Play, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Loader2, Music, Pause, Play, Plus, Search, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import {
   DropdownMenu,
@@ -26,6 +26,8 @@ import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
 import { kitSampleProps } from './kit-ui';
+import { ELEMENT_TEMPLATES, localizedTemplatePrompt } from './gen-templates';
+import { ElementTemplateCard } from './gen-templates/element-card';
 import {
   AssetCard,
   AssetLightbox,
@@ -37,59 +39,12 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { studioLocale, t } from './i18n';
-
-interface OfficialCategory {
-  id: string;
-  label: string;
-  labelEn: string;
-  count: number;
-}
-
-interface OfficialSticker {
-  id: string;
-  /** Bare storage key — display always goes through imageThumb. */
-  key: string;
-  label?: string;
-  category: string;
-  categoryLabel: string;
-  categoryLabelEn: string;
-  source: string;
-  license: string;
-  format: 'png' | 'svg';
-  tags?: string[];
-  width?: number;
-  height?: number;
-}
-interface OfficialBgm {
-  id: string;
-  url: string;
-  coverKey: string;
-  label: string;
-  artist: string;
-  category: string;
-  categoryLabel: string;
-  categoryLabelEn: string;
-  moods: string[];
-  useCases: string[];
-  energy: string;
-  narrationFit: string;
-  loopHint: boolean;
-  source: string;
-  license: string;
-  durationSec?: number;
-}
-
-interface OfficialAssetsResponse {
-  stickers?: OfficialSticker[];
-  bgm?: OfficialBgm[];
-  stickerCategories?: OfficialCategory[];
-  bgmCategories?: OfficialCategory[];
-  summary?: { deferredAnimatedStickers?: number };
-}
+import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory, OfficialSticker } from './official-assets-types';
 
 type OfficialCategorySection = 'stickers' | 'audio';
 type OfficialSection = 'all' | 'components' | OfficialCategorySection;
 type OfficialDetail = { section: OfficialCategorySection; categoryId: string; label: string };
+type OfficialGenerationType = 'image' | 'video' | 'element' | 'audio';
 
 const GROUP_GRID_PREVIEW = 8;
 const GROUP_GRID_TWO_ROWS_PX = 196;
@@ -101,6 +56,7 @@ export function OfficialAssetsPanel({
   onInsert,
   onInsertKit,
   onDragAsset,
+  onOpenGeneration,
   onUseAudio,
 }: {
   /** Lightbox live preview needs a canvas; kit previews always use the static 16:9 one. */
@@ -109,6 +65,8 @@ export function OfficialAssetsPanel({
   /** Insert a kit component as a props-driven block; props override the sample defaults. */
   onInsertKit?: (component: string, props?: Record<string, unknown>) => void;
   onDragAsset?: (asset: PanelDragAsset | null) => void;
+  /** Open generation, optionally seeding a Remix template into its composer. */
+  onOpenGeneration?: (type?: OfficialGenerationType, prompt?: string) => void;
   onUseAudio?: (url: string, label?: string) => void;
 }) {
   // null = still loading (route fetch in flight); [] = loaded and empty → "coming soon"
@@ -138,10 +96,12 @@ export function OfficialAssetsPanel({
   const bgm = catalog === null ? null : (catalog.bgm ?? []);
   const stickerCategories = (catalog?.stickerCategories ?? []).filter((category) => !HIDDEN_STICKER_CATEGORY_IDS.has(category.id));
   const bgmCategories = catalog?.bgmCategories ?? [];
+  const locale = studioLocale();
 
   // Kit components: same overlay structure × the general theme's skin — theme tokens are baked
   // into innerHtml at block scope (data-hf-baked), so preview/insert/theme-swap all look identical.
   const kitItems = useMemo(() => {
+    void locale; // t() reads the injected locale; keep the memo synchronized when it changes.
     const vars = themeVarsCss(getTheme('general'));
     return Object.keys(kitComponents).map((cid): LibraryItem => {
       const seedId = `kitprev_${cid.replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -160,11 +120,18 @@ export function OfficialAssetsPanel({
         element: { seedId, innerHtml: `${r.innerHtml}\n<style data-hf-baked>#${seedId}{${vars}}</style>`, timelineBody: r.timelineBody, label, designW: 1920, designH: 1080 },
       };
     });
-  }, []);
+  }, [locale]);
 
   const needle = query.trim().toLocaleLowerCase();
   const includesQuery = (values: (string | undefined)[]) => !needle || values.some((value) => value?.toLocaleLowerCase().includes(needle));
-  const visibleKitItems = kitItems.filter((item) => includesQuery([item.label]));
+  const visibleComponentItems = kitItems.filter((item) => includesQuery([item.label, item.prompt, item.category]));
+  const visibleComponentTemplates = ELEMENT_TEMPLATES.filter((template) =>
+    includesQuery([
+      template.title ? t(template.title) : undefined,
+      localizedTemplatePrompt(template, locale),
+      template.category,
+    ]),
+  );
   const filteredStickers = (stickers ?? []).filter((item) =>
     includesQuery([item.label, item.categoryLabel, item.categoryLabelEn, item.source, item.license, ...(item.tags ?? [])]),
   );
@@ -223,7 +190,7 @@ export function OfficialAssetsPanel({
     if (it.insertUrl) onInsert({ type: 'image', url: it.insertUrl }, it.label, dimsOf(it));
   };
 
-  const english = !studioLocale().toLowerCase().startsWith('zh');
+  const english = !locale.toLowerCase().startsWith('zh');
   const categoryTitle = (category: OfficialCategory) => (english ? category.labelEn : category.label);
   const openDetail = (section: OfficialCategorySection, label: string, categoryId: string) => {
     setActiveSection(section);
@@ -290,6 +257,18 @@ export function OfficialAssetsPanel({
     const items = (previewOnly ? rows.slice(0, GROUP_GRID_PREVIEW) : rows).map(toStickerItem);
     return kitGrid(items, previewOnly);
   };
+
+  const componentTemplateGrid = (
+    <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
+      {visibleComponentTemplates.map((template) => (
+        <ElementTemplateCard
+          key={template.id}
+          template={template}
+          onUse={(prompt) => onOpenGeneration?.('element', prompt)}
+        />
+      ))}
+    </div>
+  );
 
   const audioRows = (rows: OfficialBgm[], previewOnly = false) => (
     <div className="divide-line divide-y">
@@ -360,7 +339,15 @@ export function OfficialAssetsPanel({
       {t('panels.noMatchingAssetsTry')}
     </div>
   );
-  const componentsOverview = visibleKitItems.length === 0 ? noMatches : kitGrid(visibleKitItems);
+  const componentsOverview =
+    visibleComponentItems.length === 0 && visibleComponentTemplates.length === 0 ? (
+      noMatches
+    ) : (
+      <div className="flex flex-col gap-2.5">
+        {visibleComponentItems.length > 0 && kitGrid(visibleComponentItems)}
+        {visibleComponentTemplates.length > 0 && componentTemplateGrid}
+      </div>
+    );
   const stickersOverview =
     stickers == null
       ? loadingBox
@@ -475,6 +462,17 @@ export function OfficialAssetsPanel({
             className="text-ink placeholder:text-ink-4 h-[24px] w-full bg-transparent pl-6 pr-2 text-[11px] outline-none"
           />
         </label>
+        {onOpenGeneration && (
+          <button
+            type="button"
+            onClick={() => onOpenGeneration('image')}
+            title={t('workbench.aiGenerate')}
+            aria-label={t('workbench.aiGenerate')}
+            className="border-line text-ink-2 hover:text-ink inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] transition"
+          >
+            <Sparkles size={11} /> {t('workbench.aiGenerate')}
+          </button>
+        )}
       </div>
       <div className={`min-h-0 flex-1 overflow-auto px-2 pb-2 ${detail ? '' : 'pt-2'}`}>
         {detail && (

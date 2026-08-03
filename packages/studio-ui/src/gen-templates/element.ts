@@ -1,0 +1,103 @@
+import type { GenTemplate } from './types';
+
+/** Reusable starting briefs for generated overlay components. The copy stays generic so users can
+ * replace the sample subject after it lands in the composer; the generator supplies the visual
+ * treatment from the current project theme. */
+export const ELEMENT_TEMPLATES: GenTemplate[] = [
+  {
+    id: 'el-big-number',
+    category: 'presets.data',
+    title: 'common.bigNumber',
+    presetId: 'pe_num',
+    prompt: 'Create an animated metric card with one very large number, a short label above it, and one concise comparison note below. Use a bold presentation-style warm-yellow surface, near-black condensed typography, and one coral circular accent. Make the number the clear focal point and keep the layout readable over video.',
+    promptI18n: { zh: '生成一个动态数据指标组件：用一个超大数字作为视觉焦点，上方放简短标签，下方放一句精炼的对比说明。采用醒目的 PPT 式暖黄色底、近黑色紧凑字体和一个珊瑚色圆形装饰，整体要醒目、易读，并适合视频画面。' },
+  },
+  {
+    id: 'el-comparison',
+    category: 'presets.data',
+    title: 'presets.comparison',
+    presetId: 'pe_cmp',
+    prompt: 'Create a clean side-by-side comparison component for option A versus option B. Use a warm-cream presentation surface, a coral card for A, a cobalt-blue card for B, and a small black VS medallion between them. Give each side a short heading, one key value, and one line of explanation, with the recommended side visually emphasized.',
+    promptI18n: { zh: '生成一个清晰的左右对比组件，对比方案 A 与方案 B。采用暖米色 PPT 式底板，A 使用珊瑚红卡片，B 使用钴蓝卡片，中间放一个黑色 VS 圆章。两侧各包含短标题、核心数值和一行说明，并突出推荐方案。' },
+  },
+  {
+    id: 'el-progress-ring',
+    category: 'presets.data',
+    title: 'presets.progressRing',
+    presetId: 'pe_ring',
+    prompt: 'Create an animated circular progress component on a deep-navy presentation card, using an acid-lime progress ring and crisp white typography. Show the percentage in the center, add a short label beside or underneath it, and use a smooth count-up entrance suitable for a talking-head video.',
+    promptI18n: { zh: '生成一个深海军蓝 PPT 式卡片上的动态环形进度组件，使用酸性荧光绿圆环和清晰白字。中央显示百分比，旁边或下方放简短标签，入场时数字平滑递增、圆环同步绘制，适合口播视频。' },
+  },
+  {
+    id: 'el-bar-chart',
+    category: 'presets.data',
+    title: 'presets.barChart',
+    presetId: 'pe_bars',
+    prompt: 'Create a compact animated bar-chart component on a warm-cream presentation surface with a soft white chart inset. Use a playful but orderly mix of sunflower yellow, cobalt, and coral bars, with coral reserved for the leading value. Reveal the bars in sequence and keep labels large enough for video.',
+    promptI18n: { zh: '生成一个暖米色 PPT 式底板上的紧凑动态图表组件，内部使用柔和白色图表卡片。条形采用向日葵黄、钴蓝和珊瑚红的明快组合，最高值用珊瑚红突出；条形依次出现，文字要适合视频观看。' },
+  },
+  {
+    id: 'el-bullet-list',
+    category: 'presets.structure',
+    title: 'common.bulletList',
+    presetId: 'pe_list',
+    prompt: 'Create an animated key-points component on a vivid cobalt-blue presentation card. Add a small acid-lime title label and three stacked translucent-blue rows with coral, yellow, and lime number accents. Bring the points in one by one and keep the composition compact enough to sit beside a speaker.',
+    promptI18n: { zh: '生成一个亮钴蓝 PPT 式卡片上的动态要点列表，加入酸性绿小标题标签，以及三条半透明蓝色横行，编号分别用珊瑚红、黄色和酸性绿强调。要点逐条入场，版式保持紧凑，能够放在人物旁边。' },
+  },
+  {
+    id: 'el-three-steps',
+    category: 'presets.structure',
+    title: 'presets.threeStepFlow',
+    presetId: 'pe_steps',
+    prompt: 'Create a three-step process component on a saturated coral presentation surface. Use three warm-cream vertical cards with oversized black step numbers, short action labels, and minimal directional rhythm. Animate the flow from step one to step three.',
+    promptI18n: { zh: '生成一个高饱和珊瑚红 PPT 式底板上的三步流程组件，使用三张暖米色竖向卡片、超大黑色步骤编号和简短动作标题，通过简洁的方向节奏串联。动画从第一步依次推进到第三步。' },
+  },
+  {
+    id: 'el-timeline',
+    category: 'presets.structure',
+    title: 'presets.timeline',
+    presetId: 'pe_tline',
+    prompt: 'Create a horizontal timeline component on a near-black presentation card. Use a fine light-gray line with three bright milestone dots alternating acid-lime and coral, plus compact white time labels. Reveal the line first, then animate milestones in chronological order.',
+    promptI18n: { zh: '生成一个近黑色 PPT 式卡片上的横向时间轴，使用细浅灰线和三个明亮节点，节点在酸性绿与珊瑚红之间交替，并配紧凑白色时间标签。先绘制时间线，再按时间顺序依次展示节点。' },
+  },
+  {
+    id: 'el-quote',
+    category: 'presets.emphasis',
+    title: 'presets.quote',
+    presetId: 'pe_quote',
+    prompt: 'Create an editorial quote card on a warm-coral presentation surface, with an oversized sunflower-yellow quotation mark, bold near-black type, and a small tracked attribution line. Use restrained motion and make the quote readable at a glance.',
+    promptI18n: { zh: '生成一个暖珊瑚色 PPT 式底板上的编辑感金句卡片，使用超大向日葵黄引号、近黑色粗体文字和一行小号宽字距署名。动效克制，让观众能一眼读完核心内容。' },
+  },
+  {
+    id: 'el-callout',
+    category: 'presets.emphasis',
+    title: 'presets.callout',
+    presetId: 'pe_callout',
+    prompt: 'Create a compact transparent-background callout for one important warning or insight. Style it like a bright-yellow ticket with a thick near-black outline, hard offset shadow, circular black icon, bold heading, and one supporting sentence. Use a quick attention-grabbing entrance without looping.',
+    promptI18n: { zh: '生成一个透明背景的紧凑重点标注组件，用于提示一条重要警告或洞察。造型像亮黄色票签，配粗黑描边、硬朗错位阴影、黑色圆形图标、粗体标题和一句补充说明；快速醒目入场但不要循环播放。' },
+  },
+  {
+    id: 'el-keyword',
+    category: 'presets.emphasis',
+    title: 'presets.keywordSlam',
+    presetId: 'pe_slam',
+    prompt: 'Create a transparent-background kinetic keyword component using two offset sticker blocks: a large hot-pink keyword with white type and black hard shadow, followed by a smaller acid-lime explanation label. Use strong scale and position motion, keep it punchy, and finish in under one second.',
+    promptI18n: { zh: '生成一个透明背景的动势关键词组件，使用两块错位贴纸：主关键词为亮粉色底、白字和黑色硬阴影，补充说明为较小的酸性绿标签。通过明显缩放与位移动画入场，保持冲击力并在一秒内完成。' },
+  },
+  {
+    id: 'el-chapter',
+    category: 'common.title',
+    title: 'presets.chapter',
+    presetId: 'pe_chap',
+    prompt: 'Create a bold presentation-style chapter marker on an acid-lime surface. Use an oversized deep-navy section number, a compact navy title block separated by a fine rule, and a short subtitle. Keep it clean enough to work as a transition in portrait or landscape video.',
+    promptI18n: { zh: '生成一个酸性绿 PPT 式底板上的醒目章节标记，使用超大深海军蓝章节编号、由细线分隔的紧凑深蓝标题区，以及一行短副标题。保持干净，能够作为横版或竖版视频的章节转场。' },
+  },
+  {
+    id: 'el-comment',
+    category: 'presets.social',
+    title: 'presets.commentBubble',
+    presetId: 'pe_cmt',
+    prompt: 'Create a social comment component on a pale-sky-blue presentation surface, with two offset bubbles: one white and one cobalt blue. Use coral and acid-lime avatar circles, compact usernames, short comments, and subtle reaction counts. Animate the bubbles like new comments appearing in sequence.',
+    promptI18n: { zh: '生成一个淡天蓝 PPT 式底板上的社交评论组件，使用两条错位气泡，一条白色、一条钴蓝；头像圆分别使用珊瑚红和酸性绿，并包含紧凑用户名、短评论和弱化互动数量。气泡像新评论一样依次弹出。' },
+  },
+];

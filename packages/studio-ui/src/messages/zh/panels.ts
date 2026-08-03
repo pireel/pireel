@@ -120,6 +120,7 @@ export const PANELS_ZH: Record<string, string> = {
   'panels.generating': '生成中…',
   'panels.generatingImage': '生成图片中',
   'panels.generatingVideo': '生成视频中',
+  'panels.generatingAudio': '生成音频中',
   'panels.globalAudio': '全局设置',
   'panels.glitchColorFringing': '故障色散',
   'panels.hardCutDefault': '跳切(默认)',

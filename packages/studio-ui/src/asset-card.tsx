@@ -210,7 +210,7 @@ export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: 
 
 /** Element card live preview: same render as the gen panel (freeze on the stable frame after entrance, loops only on hover).
  *  Cards are a fixed 120×68, so the tile is hard-sized to match (no responsive measuring). */
-export function ElementTile({ item }: { item: LibraryItem }) {
+export function ElementTile({ item, width = 120, height = 68 }: { item: LibraryItem; width?: number; height?: number }) {
   const el = item.element!;
   // Static HTML output: no GSAP (from-animations don't apply = frozen end state), zero iframe,
   // zero rasterization; the #seedId selector scope lands directly in the main document without leaking styles
@@ -218,8 +218,6 @@ export function ElementTile({ item }: { item: LibraryItem }) {
   // to scale and center the piece in the card.
   const holderRef = useRef<HTMLDivElement | null>(null);
   const [fit, setFit] = useState<{ scale: number; dx: number; dy: number } | null>(null);
-  const TILE_W = 120;
-  const TILE_H = 68;
   useEffect(() => {
     const holder = holderRef.current;
     if (!holder) return;
@@ -242,7 +240,7 @@ export function ElementTile({ item }: { item: LibraryItem }) {
       if (r.bottom > y1) y1 = r.bottom;
     }
     if (!Number.isFinite(x0) || x1 - x0 < 8) {
-      setFit({ scale: TILE_W / 1920, dx: 0, dy: (TILE_H - 1080 * (TILE_W / 1920)) / 2 });
+      setFit({ scale: width / 1920, dx: 0, dy: (height - 1080 * (width / 1920)) / 2 });
       return;
     }
     const pad = 24;
@@ -250,16 +248,16 @@ export function ElementTile({ item }: { item: LibraryItem }) {
     const by = y0 - base.top - pad;
     const bw = x1 - x0 + pad * 2;
     const bh = y1 - y0 + pad * 2;
-    const scale = Math.min((TILE_W * 0.9) / bw, (TILE_H * 0.9) / bh);
-    setFit({ scale, dx: TILE_W / 2 - (bx + bw / 2) * scale, dy: TILE_H / 2 - (by + bh / 2) * scale });
-  }, [item.id]);
+    const scale = Math.min((width * 0.9) / bw, (height * 0.9) / bh);
+    setFit({ scale, dx: width / 2 - (bx + bw / 2) * scale, dy: height / 2 - (by + bh / 2) * scale });
+  }, [item.id, width, height]);
   return (
     <div className="w-full overflow-hidden">
       <div
         className="relative overflow-hidden"
         style={{
-          width: TILE_W,
-          height: TILE_H,
+          width,
+          height,
           backgroundColor: '#ffffff',
           backgroundImage:
             'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',

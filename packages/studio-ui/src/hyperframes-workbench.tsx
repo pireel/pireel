@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, Pin, PinOff, SlidersHorizontal, LayoutGrid, Scissors, Captions } from 'lucide-react';
+  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, SlidersHorizontal, LayoutGrid, Scissors, Captions } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -157,8 +157,8 @@ const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. 
 // ⚠️ Temporary for testing: fill only the first N images to save LLM calls, rest stay as placeholders — **remove before launch**.
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
-/** Tool panel kinds (single instance, mutually exclusive, docked as a column in the asset rail): gen / smart-cut / person / framing / code / media-anim / transition / captions / kit props. */
-type FloatKind = 'gen' | 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'kitProps';
+/** Contextual tool panels (single instance, mutually exclusive, docked over the rail content). Generation is a primary-nav tab. */
+type FloatKind = 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'kitProps';
 
 
 export function HyperframesWorkbench({ projectId, agentView = false }: { projectId: string; agentView?: boolean }) {
@@ -386,10 +386,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setLocateNear(near);
     setLocateSignal((n) => n + 1);
   };
-  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio' | 'avatar'>('assets'); // rail primary-nav tab (assets / script-cut / captions / audio / avatar; themes hidden)
+  const [libTab, setLibTab] = useState<'assets' | 'frames' | 'script' | 'captions' | 'audio' | 'gen' | 'avatar'>('assets'); // rail primary-nav tab (themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
-  // Asset rail geometry: drag-resizable width + pin mode (pinned = docked column taking layout
-  // space; unpinned = floating overlay above the canvas, the stage keeps full width). Both persist.
+  // Asset rail geometry: the expanded content width is drag-resizable and persists. Collapsing
+  // keeps the primary-nav strip docked so navigation and the expand control stay in one place.
   const [railW, setRailW] = useState(() => {
     if (typeof window === 'undefined') return 320;
     const v = Number(window.localStorage.getItem('studio-rail-w'));
@@ -400,15 +400,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const cols = Math.max(2, Math.min(6, Math.floor((window.innerWidth * 0.22 - 6) / 130)));
     return 16 + cols * 120 + (cols - 1) * 10;
   });
-  const [railPinned, setRailPinned] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem('studio-rail-pin') !== '0' : true));
   useEffect(() => {
     try {
       window.localStorage.setItem('studio-rail-w', String(railW));
-      window.localStorage.setItem('studio-rail-pin', railPinned ? '1' : '0');
     } catch {
       /* private mode: geometry just resets next session */
     }
-  }, [railW, railPinned]);
+  }, [railW]);
   const railAutoCollapsedRef = useRef(false); // our small-screen auto-collapse (vs the user's manual one — only ours auto-reopens)
   /** Manual collapse/expand: overrides any pending small-screen auto state. */
   const setLibCollapsedManual = (v: boolean) => {
@@ -442,13 +440,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // only appears when chat is hidden. Agent view collapses by default: the main conversation lives in the external
   // agent (Codex), the built-in chat on the right just takes up space
   const [panelOpen, setPanelOpen] = useState(!agentView);
-  // Tool panels (gen/smart-cut/person/framing/code/anim/transition): **dock into the asset rail column, full area**
+  // Contextual tool panels (smart-cut/person/framing/code/anim/transition): **dock into the asset rail column, full area**
   // (per user: not a new tab, takes the whole column; if the rail is collapsed, expand it first, and collapse back
   // when a panel-triggered expansion closes). **Single instance** — opening another replaces the current one
   // (setFloatWin handles the exit settlement uniformly).
   const [floatWin, setFloatWinRaw] = useState<FloatKind | null>(null);
   const floatWinRef = useRef<FloatKind | null>(null);
   const [genType, setGenType] = useState<GenType>('image'); // current tab inside the gen panel
+  const [genSeedPrompt, setGenSeedPrompt] = useState<{ type: GenType; prompt: string; revision: number } | null>(null);
+  const genSeedRevisionRef = useRef(0);
   const [genRefreshTick, setGenRefreshTick] = useState(0);
   /** The rail was "auto-expanded just to dock a panel" — collapse it back after the panel closes (leave user-expanded ones alone). */
   const libAutoExpandedRef = useRef(false);
@@ -1307,8 +1307,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       blocks: cc.blocks.map((x) => (x.id === orig.id ? { ...x, templateId: orig.templateId, slots: orig.slots } : x)),
     }));
   };
-  /** The single entry for tool panels: open/switch/close all go through here — leaving code settles the draft first,
-   *  leaving gen tells the asset library to refetch. Docking semantics: a panel takes the whole rail column — expand
+  /** The single entry for contextual tool panels: open/switch/close all go through here — leaving code settles the draft first.
+   *  Docking semantics: a panel takes the whole rail column — expand
    *  if collapsed; auto-collapse on close if it was expanded only for the panel. */
   const setFloatWin = (next: FloatKind | null) => {
     const prev = floatWinRef.current;
@@ -1317,7 +1317,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       revertCodeDraft();
       stopCodeLoop();
     }
-    if (prev === 'gen') setGenRefreshTick((n) => n + 1);
     if (next && !prev && libCollapsed) {
       libAutoExpandedRef.current = true;
       setLibCollapsed(false);
@@ -1338,6 +1337,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  panel is a persistent region, not a popover) — toggling is on the trigger button itself. */
   const openFloatAt = (kind: FloatKind, _anchor?: DOMRect | null) => {
     setFloatWin(kind);
+  };
+  const openGeneration = (type: GenType = 'image', prompt?: string) => {
+    setGenType(type);
+    setGenSeedPrompt(prompt ? { type, prompt, revision: ++genSeedRevisionRef.current } : null);
+    setFloatWin(null);
+    setLibTab('gen');
+    if (libCollapsed) setLibCollapsedManual(false);
   };
   // The person panel depends on a selected shot (its entry is disabled without one): if the selection is lost while open → just close it
   useEffect(() => {
@@ -2542,8 +2548,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const elementTargetRef = useRef<string | null>(null);
   const aiFillBlock = (id: string) => {
     elementTargetRef.current = id;
-    setGenType('element');
-    setFloatWin('gen');
+    openGeneration('element');
     toast.info(t('workbench.afterGeneratingClickInsert'));
   };
   /** Template panel → insert a new block of that template at the playhead (default slot data, edit text after). */
@@ -2658,7 +2663,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
-  const audioOps = useAudioTracks({ comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
+  const audioOps = useAudioTracks({ projectId, comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
   audioExportRef.current = audioOps.audioForExport;
   /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
   const openAudioTab = () => {
@@ -3177,7 +3182,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   });
   // Element generation / block element ops (gen panel, floating toolbar) — see use-element-ops.ts.
   const { generateElementStandalone, insertGeneratedElement, bumpBlockLayer, togglePersonLayer, saveBlockAsElement, syncBlockContent, syncBusyId, mentionAsset } = useElementOps({
-    playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
+    projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
     setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
     composeBlockChecked, insertKitBlock: insertTemplateBlock, openChat,
   });
@@ -3862,7 +3867,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </div>
           )}
           {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):
-              top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button), top-right = expand assets.
+              top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button).
               Icon-only (per user): no text floating over the frame — the label lives in title/aria. */}
           {!panelOpen && (
             <button
@@ -3873,17 +3878,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               className="bg-ink text-bg absolute left-3 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md shadow-sm hover:opacity-90"
             >
               <MessageSquare size={14} />
-            </button>
-          )}
-          {libCollapsed && (
-            <button
-              type="button"
-              onClick={() => setLibCollapsedManual(false)}
-              title={t('workbench.expandAssetsBar')}
-              aria-label={t('workbench.expandAssetsBar')}
-              className="border-line bg-panel text-ink-3 hover:text-ink absolute right-3 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-md border shadow-sm"
-            >
-              <ChevronsLeft size={14} />
             </button>
           )}
           {!hasVideoTrack ? (
@@ -4605,100 +4599,80 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         {/* Library rail: content column + a vertical primary-nav strip on the outer edge
             (assets / script-cut / captions / audio / avatar). railW = CONTENT width; the nav strip
             adds RAIL_NAV_W on top so the asset grid's whole-column math stays intact.
-            Collapsible to free up the frame: the whole column stays mounted as hidden (preserving filters/scroll/generation polling), the expand button floats top-right on the preview.
+            Collapsible to free up the frame: the content column stays mounted as hidden (preserving filters/scroll/generation polling), while the primary nav remains visible.
             When a tool panel (floatWin) is open it **docks and takes the whole content column** (per user: not a new tab):
             a panel title header appears, the asset list is hidden but keeps state; the nav strip stays visible and
             clicking any nav item closes the panel and returns to that tab. */}
         <div
-          className={`border-line flex shrink-0 flex-col border-l ${libCollapsed ? 'hidden' : ''} ${railPinned ? 'relative' : 'bg-bg absolute inset-y-0 right-0 z-40 shadow-2xl'}`}
-          style={libCollapsed ? undefined : { width: railW + RAIL_NAV_W }}
+          className="border-line relative flex shrink-0 flex-col border-l"
+          style={{ width: libCollapsed ? RAIL_NAV_W : railW + RAIL_NAV_W }}
         >
           {/* Drag the left edge to resize (260–786 = up to six 120px card columns flush, persisted) */}
-          <div
-            onPointerDown={(e) => {
-              e.preventDefault();
-              const sx = e.clientX;
-              const w0 = railW;
-              let raf = 0;
-              let last: PointerEvent | null = null;
-              const flush = () => {
-                raf = 0;
-                if (last) setRailW(Math.max(260, Math.min(786, w0 + (sx - last.clientX))));
-              };
-              const mv = (ev: PointerEvent) => {
-                if (ev.buttons === 0) {
-                  up();
-                  return;
-                }
-                last = ev;
-                if (!raf) raf = requestAnimationFrame(flush);
-              };
-              const up = () => {
-                if (raf) cancelAnimationFrame(raf);
-                flush();
-                window.removeEventListener('pointermove', mv);
-                window.removeEventListener('pointerup', up);
-                window.removeEventListener('pointercancel', up);
-              };
-              window.addEventListener('pointermove', mv);
-              window.addEventListener('pointerup', up);
-              window.addEventListener('pointercancel', up);
-            }}
-            title={t('workbench.dragResizePanel')}
-            className="hover:bg-accent/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors"
-          />
+          {!libCollapsed && (
+            <div
+              onPointerDown={(e) => {
+                e.preventDefault();
+                const sx = e.clientX;
+                const w0 = railW;
+                let raf = 0;
+                let last: PointerEvent | null = null;
+                const flush = () => {
+                  raf = 0;
+                  if (last) setRailW(Math.max(260, Math.min(786, w0 + (sx - last.clientX))));
+                };
+                const mv = (ev: PointerEvent) => {
+                  if (ev.buttons === 0) {
+                    up();
+                    return;
+                  }
+                  last = ev;
+                  if (!raf) raf = requestAnimationFrame(flush);
+                };
+                const up = () => {
+                  if (raf) cancelAnimationFrame(raf);
+                  flush();
+                  window.removeEventListener('pointermove', mv);
+                  window.removeEventListener('pointerup', up);
+                  window.removeEventListener('pointercancel', up);
+                };
+                window.addEventListener('pointermove', mv);
+                window.addEventListener('pointerup', up);
+                window.addEventListener('pointercancel', up);
+              }}
+              title={t('workbench.dragResizePanel')}
+              className="hover:bg-accent/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors"
+            />
+          )}
           <div className="flex min-h-0 flex-1">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className={`${libCollapsed ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-1 flex-col`}>
           {floatWin ? (
             <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
-              {floatWin === 'gen' ? (
-                (
-                  [
-                    { v: 'image', label: 'panels.image' },
-                    { v: 'video', label: 'panels.video' },
-                    { v: 'element', label: 'panels.element' },
-                    { v: 'audio', label: 'panels.music' },
-                  ] as { v: GenType; label: string }[]
-                ).map((gt) => (
-                  <button
-                    key={gt.v}
-                    type="button"
-                    onClick={() => setGenType(gt.v)}
-                    className={`rounded-md px-2.5 py-1 text-[12px] transition ${
-                      genType === gt.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
-                    }`}
-                  >
-                    {t(gt.label)}
-                  </button>
-                ))
-              ) : (
-                <span className="text-ink truncate px-1 text-[12px] font-medium">
-                  {floatWin === 'script'
-                    ? t('workbench.smartScriptCut')
-                    : floatWin === 'kitProps'
-                    ? t('workbench.kitProps')
-                    : floatWin === 'person'
-                      ? t('workbench.portrait')
-                      : floatWin === 'anim'
-                        ? t('workbench.assetMotion')
-                        : floatWin === 'captions'
-                          ? t('panels.captions')
-                            : floatWin === 'shot'
+              <span className="text-ink truncate px-1 text-[12px] font-medium">
+                {floatWin === 'script'
+                  ? t('workbench.smartScriptCut')
+                  : floatWin === 'kitProps'
+                  ? t('workbench.kitProps')
+                  : floatWin === 'person'
+                    ? t('workbench.portrait')
+                    : floatWin === 'anim'
+                      ? t('workbench.assetMotion')
+                      : floatWin === 'captions'
+                        ? t('panels.captions')
+                          : floatWin === 'shot'
+                          ? (() => {
+                              const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);
+                              return t('workbench.cameraFraming') + (i >= 0 ? t('workbench.sceneN', { n: i + 1 }) : '');
+                            })()
+                          : floatWin === 'transition'
                             ? (() => {
-                                const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);
-                                return t('workbench.cameraFraming') + (i >= 0 ? t('workbench.sceneN', { n: i + 1 }) : '');
+                                const i = transitionCut == null ? -1 : clipSpans(comp.shots ?? []).findIndex((sp) => Math.abs(sp.editedEnd - transitionCut) < 0.05);
+                                return t('tools.add_transition.label') + (i >= 0 ? t('workbench.betweenScenes', { a: i + 1, b: i + 2 }) : '');
                               })()
-                            : floatWin === 'transition'
-                              ? (() => {
-                                  const i = transitionCut == null ? -1 : clipSpans(comp.shots ?? []).findIndex((sp) => Math.abs(sp.editedEnd - transitionCut) < 0.05);
-                                  return t('tools.add_transition.label') + (i >= 0 ? t('workbench.betweenScenes', { a: i + 1, b: i + 2 }) : '');
-                                })()
-                              : (() => {
-                                  const cb = codeBlockId ? comp.blocks.find((x) => x.id === codeBlockId) : null;
-                                  return t('workbench.sourceLabel', { label: cb?.label || codeBlockId || '' });
-                                })()}
-                </span>
-              )}
+                            : (() => {
+                                const cb = codeBlockId ? comp.blocks.find((x) => x.id === codeBlockId) : null;
+                                return t('workbench.sourceLabel', { label: cb?.label || codeBlockId || '' });
+                              })()}
+              </span>
               <button
                 type="button"
                 onClick={() => setFloatWin(null)}
@@ -4727,11 +4701,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onInsertElement={insertGeneratedElement}
               onInsertKit={(cid, props) => insertTemplateBlock(`kit:${cid}`, props)}
               onDragAsset={setDragAsset}
+              onOpenGeneration={(type, prompt) => openGeneration(type, prompt)}
               onUseAudio={(url, label, sig) => void audioOps.mountAudioFromUrl(url, label, { sig }).then((id) => id && setSelectedAudioId(id))}
-              onOpenGen={(t, anchor) => {
-                setGenType(t);
-                openFloatAt('gen', anchor);
-              }}
               genRefreshTick={genRefreshTick}
             />
           </div>
@@ -4788,24 +4759,54 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <div data-cap-keep className="contents"><CaptionsPanel {...captionsPanelProps()} /></div>
             </div>
           )}
-          {!floatWin && libTab === 'avatar' && <AvatarPanel />}
-          {floatWin && (
-            <div className="flex min-h-0 flex-1">
-              {floatWin === 'gen' && (
+          {!floatWin && libTab === 'gen' && (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
+                {(
+                  [
+                    { v: 'image', label: 'panels.image' },
+                    { v: 'video', label: 'panels.video' },
+                    { v: 'element', label: 'panels.element' },
+                    { v: 'audio', label: 'panels.music' },
+                  ] as { v: GenType; label: string }[]
+                ).map((gt) => (
+                  <button
+                    key={gt.v}
+                    type="button"
+                    onClick={() => {
+                      setGenSeedPrompt(null);
+                      setGenType(gt.v);
+                    }}
+                    className={`rounded-md px-2.5 py-1 text-[12px] transition ${
+                      genType === gt.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
+                    }`}
+                  >
+                    {t(gt.label)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex min-h-0 flex-1">
                 <GenChatPanel
                   key={genType}
+                  projectId={projectId}
                   type={genType}
+                  seedPrompt={genSeedPrompt?.type === genType ? genSeedPrompt : undefined}
                   comp={comp}
                   onInsertMedia={(m, l, d) => void insertPanelMedia(m, l, undefined, d)}
+                  onDragAsset={setDragAsset}
                   onSetMainVideo={setMainVideoFromUrl}
                   onInsertElement={insertGeneratedElement}
                   onMention={mentionAsset}
                   generateElement={generateElementStandalone}
-                  onInsertTemplate={insertTemplateBlock}
                   generateAudio={audioOps.generateAudioAsset}
                   onInsertAudio={(url, label) => void audioOps.mountAudioFromUrl(url, label).then((id) => id && setSelectedAudioId(id))}
                 />
-              )}
+              </div>
+            </div>
+          )}
+          {!floatWin && libTab === 'avatar' && <AvatarPanel />}
+          {floatWin && (
+            <div className="flex min-h-0 flex-1">
               {floatWin === 'script' && (
                 <ScriptPanel
                   sentences={asrSentences}
@@ -4934,26 +4935,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </div>
           )}
           </div>
-          {/* Primary nav strip: always visible (floatWin covers only the content column). Clicking a
-              tab closes any docked tool panel — the nav is the one stable way back. Pin/collapse live
-              at the strip's bottom since the tabs header row is gone. */}
-          <div className="border-line flex shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-l px-1 py-2" style={{ width: RAIL_NAV_W }}>
+          {/* Primary nav strip: always visible, including while the content column is collapsed.
+              Clicking a tab closes any docked tool panel; collapse/expand stays at the strip's bottom. */}
+          <div className={`border-line flex shrink-0 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2 ${libCollapsed ? '' : 'border-l'}`} style={{ width: RAIL_NAV_W }}>
             {(
               [
                 { v: 'assets', icon: LayoutGrid, label: 'workbench.assets' },
                 { v: 'script', icon: Scissors, label: 'workbench.scriptCut' },
                 { v: 'captions', icon: Captions, label: 'panels.captions' },
                 { v: 'audio', icon: Music, label: 'panels.music' },
+                { v: 'gen', icon: Sparkles, label: 'common.generate' },
                 { v: 'avatar', icon: UserRound, label: 'workbench.avatar' },
                 // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
-              ] as { v: 'assets' | 'script' | 'captions' | 'audio' | 'avatar'; icon: typeof LayoutGrid; label: string }[]
+              ] as { v: 'assets' | 'script' | 'captions' | 'audio' | 'gen' | 'avatar'; icon: typeof LayoutGrid; label: string }[]
             ).map((n) => (
               <button
                 key={n.v}
                 type="button"
                 onClick={() => {
+                  if (libTab === 'gen' && n.v !== 'gen') setGenRefreshTick((value) => value + 1);
                   setFloatWin(null);
                   setLibTab(n.v);
+                  if (libCollapsed) setLibCollapsedManual(false);
                 }}
                 aria-label={t(n.label)}
                 className={`flex w-full flex-col items-center gap-1 rounded-md py-1.5 transition ${
@@ -4967,21 +4970,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <div className="mt-auto flex w-full flex-col items-center gap-0.5 pt-2">
               <button
                 type="button"
-                onClick={() => setRailPinned((p) => !p)}
-                title={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
-                aria-label={t(railPinned ? 'workbench.unpinAssetsBar' : 'workbench.pinAssetsBar')}
+                onClick={() => setLibCollapsedManual(!libCollapsed)}
+                title={t(libCollapsed ? 'workbench.expandAssetsBar' : 'workbench.collapseAssetsBar')}
+                aria-label={t(libCollapsed ? 'workbench.expandAssetsBar' : 'workbench.collapseAssetsBar')}
                 className="text-ink-4 hover:text-ink flex w-full items-center justify-center rounded-md py-1.5"
               >
-                {railPinned ? <PinOff size={13} /> : <Pin size={13} />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLibCollapsedManual(true)}
-                title={t('workbench.collapseAssetsBar')}
-                aria-label={t('workbench.collapseAssetsBar')}
-                className="text-ink-4 hover:text-ink flex w-full items-center justify-center rounded-md py-1.5"
-              >
-                <ChevronsRight size={14} />
+                {libCollapsed ? <ChevronsLeft size={14} /> : <ChevronsRight size={14} />}
               </button>
             </div>
           </div>
