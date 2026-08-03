@@ -7,6 +7,7 @@
  */
 
 import type { MutableRefObject, SetStateAction } from 'react';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import {
   type AudioClip,
   type Block,
@@ -57,6 +58,7 @@ import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf 
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { fileSig } from './media';
 import { saveLocalVideo } from './local-media';
+import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import type { FrameCatalogItem } from './use-frame-catalog';
@@ -102,6 +104,9 @@ export interface AgentToolCtx {
   setClipAsr: (v: Record<string, AsrSegment[]>) => void;
   currentVideo: () => { url: string; durationSec: number; width: number; height: number } | null;
   pickVideoFile: (file: File, opts?: { asSig?: string }) => Promise<void>;
+  /** Unified metadata index writer: browser picker and Skill loopback imports share the same cards,
+   * cloud sync, deletion and recovery guidance. File bytes never ride this callback. */
+  registerLocalAsset: (entry: LocalAssetIndexEntry) => void;
   ensureClipTranscripts: () => Promise<void>;
   transcriptForAgent: () => string;
   // Draft pipeline (ASR / plan / visual)
@@ -164,7 +169,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
   const {
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
-    markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
+    markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
     noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
@@ -221,22 +226,24 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             return { ok: true, summary: t('workbench.readTranscript'), data: { transcript: transcriptForAgent() } };
           }
           case 'load_local_source': {
-            // Agent local-import fast path: pull the video bytes straight from the import helper's
-            // on-machine HTTP server (no cloud round-trip), seed the OPFS library by sig, and set it
-            // as the main video. Receipt is English (bridge-internal, relayed to the helper/agent).
+            // Agent local-import adapter: permission/materialization differs from a browser picker,
+            // but both converge on the same import session (classification → OPFS → cloud-safe index).
+            // Receipt is English because it is bridge-internal and relayed back to the helper/agent.
             const url = typeof input.localUrl === 'string' ? input.localUrl : '';
             const sig = typeof input.sig === 'string' ? input.sig : '';
             if (!url || !sig) return { ok: false, error: 'localUrl and sig required' };
             try {
-              const resp = await fetch(url);
-              if (!resp.ok) return { ok: false, error: `local fetch failed: HTTP ${resp.status}` };
-              const blob = await resp.blob();
               const name = typeof input.filename === 'string' && input.filename ? input.filename : 'import.mp4';
-              const file = new File([blob], name, {
-                type: blob.type?.startsWith('video/') ? blob.type : 'video/mp4',
-              });
-              await saveLocalVideo(file, sig);
-              await pickVideoFile(file, { asSig: sig });
+              const session = await runLocalImportSession([
+                { type: 'skill-loopback', localUrl: url, sig, filename: name, fallbackType: 'video/mp4' },
+              ]);
+              const imported = session.imported[0];
+              if (!imported) return { ok: false, error: session.rejected[0]?.error ?? 'local source import failed' };
+              if (imported.kind !== 'video') return { ok: false, error: 'main source must be a video' };
+              const width = typeof input.width === 'number' && Number.isFinite(input.width) ? input.width : null;
+              const height = typeof input.height === 'number' && Number.isFinite(input.height) ? input.height : null;
+              registerLocalAsset(localAssetIndexEntry(imported, { width, height }));
+              await pickVideoFile(imported.file, { asSig: sig });
               // Seed the transcript the helper already produced (pickVideoFile cleared it) so the
               // agent's read_script/cut_narration work without re-running ASR in the browser.
               const segs = Array.isArray(input.transcript) ? (input.transcript as AsrSegment[]) : [];
@@ -248,6 +255,56 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             } catch (e) {
               return { ok: false, error: `local source load failed: ${e instanceof Error ? e.message : String(e)}` };
             }
+          }
+          case 'load_local_assets': {
+            // Folder/batch counterpart of load_local_source. It deliberately stops at the asset
+            // library: importing music/images/clips must not replace the project's main footage.
+            const rows = Array.isArray(input.entries) ? input.entries.slice(0, 50) : [];
+            const sources = rows.flatMap((value) => {
+              if (!value || typeof value !== 'object') return [];
+              const row = value as Record<string, unknown>;
+              const localUrl = typeof row.localUrl === 'string' ? row.localUrl : '';
+              const sig = typeof row.sig === 'string' ? row.sig : '';
+              const filename = typeof row.filename === 'string' ? row.filename : '';
+              if (!localUrl || !sig || !filename) return [];
+              const rawFolder = row.folder;
+              const folder =
+                rawFolder &&
+                typeof rawFolder === 'object' &&
+                typeof (rawFolder as Record<string, unknown>).id === 'string' &&
+                typeof (rawFolder as Record<string, unknown>).name === 'string' &&
+                typeof (rawFolder as Record<string, unknown>).path === 'string'
+                  ? {
+                      id: (rawFolder as Record<string, string>).id,
+                      name: (rawFolder as Record<string, string>).name,
+                      path: (rawFolder as Record<string, string>).path,
+                    }
+                  : undefined;
+              return [
+                {
+                  type: 'skill-loopback' as const,
+                  localUrl,
+                  sig,
+                  filename,
+                  fallbackType: typeof row.mime === 'string' ? row.mime : 'application/octet-stream',
+                  ...(folder ? { folder } : {}),
+                },
+              ];
+            });
+            if (!sources.length) return { ok: false, error: 'local asset entries required' };
+            const session = await runLocalImportSession(sources);
+            for (const asset of session.imported) registerLocalAsset(localAssetIndexEntry(asset));
+            if (!session.imported.length) {
+              return { ok: false, error: session.rejected[0]?.error ?? 'local asset import failed' };
+            }
+            return {
+              ok: true,
+              summary: `imported ${session.imported.length} local assets${session.rejected.length ? ` · ${session.rejected.length} failed` : ''}`,
+              data: {
+                imported: session.imported.map((asset) => ({ sig: asset.sig, label: asset.label, kind: asset.kind })),
+                rejected: session.rejected.map((item) => item.error),
+              },
+            };
           }
           case 'analyze_narration': {
             if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };

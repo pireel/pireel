@@ -21,10 +21,19 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Clapperboard, FolderOpen, Image as ImageIcon, Loader2, Music, Trash2, Upload } from 'lucide-react';
+import { Clapperboard, FolderOpen, Image as ImageIcon, Loader2, MoreHorizontal, Music, Search, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { toast } from '@pireel/ui/toast';
 import { confirm } from '@pireel/ui/confirm';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@pireel/ui/dropdown-menu';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import {
   AssetCard,
   AssetLightbox,
@@ -36,10 +45,40 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { audioCoverUrl, fileSig } from './media';
-import { deleteLocalVideo, loadLocalVideo, saveLocalVideo } from './local-media';
+import {
+  deleteLocalFolderHandle,
+  deleteLocalVideo,
+  getLocalFolderHandle,
+  loadLocalFolderFile,
+  loadLocalVideo,
+  requestLocalFolderAccess,
+  saveLocalFolderHandle,
+} from './local-media';
+import {
+  localAssetIndexEntry,
+  localAssetKindOf,
+  loopbackImportUrl,
+  runLocalImportSession,
+  type BrowserLocalImportSource,
+  type LocalAssetKind,
+} from './local-import-session';
+import {
+  folderImportTriggerProps,
+  groupFolderRestoreEntries,
+  pendingLocalAssetEntries,
+  reconcileLocalAssetRegistry,
+  triggerFolderInput,
+  type FolderRestoreGroup,
+} from './local-asset-folders';
 import { t } from './i18n';
 
 type KindFilter = 'all' | 'image' | 'video' | 'audio';
+const KIND_FILTERS: { value: KindFilter; label: string }[] = [
+  { value: 'all', label: 'panels.all' },
+  { value: 'image', label: 'panels.image' },
+  { value: 'video', label: 'panels.video' },
+  { value: 'audio', label: 'panels.music' },
+];
 
 /** File System Access picker (Chromium) — typed minimally; absence = fall back to <input type=file>. */
 type ShowOpenFilePicker = (opts?: {
@@ -47,39 +86,62 @@ type ShowOpenFilePicker = (opts?: {
   types?: { description?: string; accept: Record<string, string[]> }[];
 }) => Promise<FileSystemFileHandle[]>;
 
-type LocalKind = 'video' | 'image' | 'audio';
-const EXT_KIND: [RegExp, LocalKind][] = [
-  [/\.(mp4|mov|webm|m4v|mkv|avi)$/i, 'video'],
-  [/\.(jpe?g|png|webp|gif|avif|bmp)$/i, 'image'],
-  [/\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i, 'audio'],
+const MEDIA_PICKER_TYPES = [
+  { description: 'Media', accept: {
+    'video/*': ['.mp4', '.mov', '.webm', '.m4v', '.mkv'],
+    'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'],
+    'audio/*': ['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'],
+  } },
 ];
-/** MIME first, extension fallback: the OS hands over an EMPTY type for plenty of real files (.mov
- *  is the notorious one) — the main-video picker has always had this fallback, imports get it too. */
-const kindOf = (f: File): LocalKind | null => {
-  for (const k of ['video', 'image', 'audio'] as const) if (f.type.startsWith(`${k}/`)) return k;
-  for (const [re, k] of EXT_KIND) if (re.test(f.name)) return k;
-  return null;
-};
+
+type LocalKind = LocalAssetKind;
 
 /** srcSig = name:size:lastModified — recover the filename part (it may itself contain colons). */
 const sigName = (sig: string) => sig.split(':').slice(0, -2).join(':') || sig;
 
 /** One import-registry entry: WHICH file (identity + display facts), never bytes. */
-interface RegEntry {
-  sig: string;
-  label: string;
-  /** Absent on legacy entries = video. */
-  kind?: LocalKind;
-  w?: number | null;
-  h?: number | null;
-  createdAt: number;
-}
+type RegEntry = LocalAssetIndexEntry;
+type AddEntry = Omit<BrowserLocalImportSource, 'type'>;
+const newFolderId = () => globalThis.crypto?.randomUUID?.() ?? `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const regKey = (pid: string) => `studio.localAssets.${pid}`;
+const normalizeReg = (value: unknown): RegEntry[] => {
+  if (!Array.isArray(value)) return [];
+  const out: RegEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const e = raw as Partial<RegEntry>;
+    if (typeof e.sig !== 'string' || !e.sig || seen.has(e.sig)) continue;
+    const kind = e.kind === 'image' || e.kind === 'audio' || e.kind === 'video' ? e.kind : undefined;
+    const rawFolder = e.folder;
+    const folder =
+      rawFolder &&
+      typeof rawFolder.id === 'string' &&
+      rawFolder.id &&
+      typeof rawFolder.name === 'string' &&
+      rawFolder.name &&
+      typeof rawFolder.path === 'string' &&
+      rawFolder.path
+        ? { id: rawFolder.id, name: rawFolder.name, path: rawFolder.path }
+        : undefined;
+    seen.add(e.sig);
+    out.push({
+      sig: e.sig,
+      label: typeof e.label === 'string' && e.label ? e.label : sigName(e.sig),
+      ...(kind ? { kind } : {}),
+      ...(typeof e.w === 'number' || e.w === null ? { w: e.w } : {}),
+      ...(typeof e.h === 'number' || e.h === null ? { h: e.h } : {}),
+      ...(folder ? { folder } : {}),
+      createdAt: typeof e.createdAt === 'number' && Number.isFinite(e.createdAt) ? e.createdAt : 0,
+    });
+  }
+  return out;
+};
+const sameReg = (a: RegEntry[], b: RegEntry[]) => JSON.stringify(a) === JSON.stringify(b);
 const readReg = (pid?: string): RegEntry[] => {
   if (!pid || typeof window === 'undefined') return [];
   try {
-    const v = JSON.parse(window.localStorage.getItem(regKey(pid)) ?? '[]') as RegEntry[];
-    return Array.isArray(v) ? v : [];
+    return normalizeReg(JSON.parse(window.localStorage.getItem(regKey(pid)) ?? '[]'));
   } catch {
     return [];
   }
@@ -96,6 +158,31 @@ function RestoreTile({ label, kind = 'video', onRestore, onDelete }: { label: st
           <span className="text-ink-4 text-[10px]">{t('panels.localReconnect')}</span>
         </div>
         <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{label}</div>
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        title={t('panels.deleteAsset')}
+        aria-label={t('panels.deleteAsset')}
+        className="absolute left-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
+      >
+        <Trash2 size={11} />
+      </button>
+    </div>
+  );
+}
+
+/** One restore affordance per imported folder, regardless of how many indexed files are missing. */
+function FolderRestoreTile({ name, count, busy, onRestore, onDelete }: { name: string; count: number; busy: boolean; onRestore: () => void; onDelete: () => void }) {
+  return (
+    <div className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border border-dashed transition">
+      <button type="button" disabled={busy} onClick={onRestore} title={t('panels.restoreFolder')} className="block w-full text-left disabled:opacity-60">
+        <div className="bg-panel-2 flex aspect-video flex-col items-center justify-center gap-1">
+          {busy ? <Loader2 size={17} className="text-ink-4 animate-spin" /> : <FolderOpen size={17} className="text-ink-4" />}
+          <span className="text-ink-4 text-[10px]">{t('panels.restoreFolder')}</span>
+          <span className="text-ink-4 text-[9px]">{t('panels.folderAssetCount', { n: count })}</span>
+        </div>
+        <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{name}</div>
       </button>
       <button
         type="button"
@@ -132,6 +219,9 @@ const mediaDims = (url: string, kind: LocalKind): Promise<{ w: number; h: number
 export function MyAssetsPanel({
   comp,
   projectId,
+  cloudRegistry,
+  registrySyncReady,
+  onRegistryChange,
   videoSig,
   onDeleteAsset,
   isSrcLive,
@@ -145,6 +235,10 @@ export function MyAssetsPanel({
   comp: Composition;
   /** Scopes the import registry (imports persist per project across refreshes). */
   projectId?: string;
+  /** Metadata-only registry hydrated from the project cloud context; bytes never ride this prop. */
+  cloudRegistry?: LocalAssetIndexEntry[];
+  registrySyncReady?: boolean;
+  onRegistryChange?: (entries: LocalAssetIndexEntry[]) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — labels it by filename + keys its eviction. */
   videoSig?: string | null;
   /** Delete a source from the TRACK too (workbench-side comp surgery: every shot cut from it goes). null = the main source. */
@@ -162,15 +256,35 @@ export function MyAssetsPanel({
   onDragAsset?: (asset: PanelDragAsset | null) => void;
 }) {
   const [kind, setKind] = useState<KindFilter>('all');
+  const [query, setQuery] = useState('');
   const [reg, setReg] = useState<RegEntry[]>(() => readReg(projectId));
   const [links, setLinks] = useState<ReadonlyMap<string, string>>(new Map());
+  const linksRef = useRef<ReadonlyMap<string, string>>(new Map());
   /** sig → embedded cover art object URL (audio only) — derived whenever the File is in hand. */
   const [covers, setCovers] = useState<ReadonlyMap<string, string>>(new Map());
   const [importing, setImporting] = useState(false);
+  const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
+  const [serviceManifestUrl, setServiceManifestUrl] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.hash.slice(1)).get('local-import');
+  });
   const { playingUrl: audioPlaying, toggle: toggleAudio } = useAudioPreview();
   const inputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+  const restoreFolderInputRef = useRef<HTMLInputElement>(null);
+  const restoreTargetRef = useRef<RegEntry | null>(null);
+  const restoreFolderTargetRef = useRef<FolderRestoreGroup | null>(null);
+  const loadedProjectRef = useRef<string | undefined>(undefined);
+  const normalizedCloudRegistry = useMemo(() => normalizeReg(cloudRegistry), [cloudRegistry]);
+  const cloudRegistryKnown = cloudRegistry !== undefined;
+
+  useEffect(() => {
+    const sync = () => setServiceManifestUrl(new URLSearchParams(window.location.hash.slice(1)).get('local-import'));
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
 
   /** THE registry writer: ref mirror → storage → state, in that order, outside any React updater
    *  (updaters must stay pure). Nobody else touches storage. */
@@ -186,34 +300,64 @@ export function MyAssetsPanel({
       }
     }
     setReg(next);
+    if (registrySyncReady) onRegistryChange?.(next);
   };
 
-  const link = (sig: string, url: string) => setLinks((prev) => new Map(prev).set(sig, url));
+  const link = (sig: string, url: string) => {
+    const previous = linksRef.current.get(sig);
+    if (previous && previous !== url) URL.revokeObjectURL(previous);
+    const next = new Map(linksRef.current).set(sig, url);
+    linksRef.current = next;
+    setLinks(next);
+  };
   const noteCover = (sig: string, f: File, k: LocalKind) => {
     if (k !== 'audio') return;
     void audioCoverUrl(f).then((u) => u && setCovers((prev) => new Map(prev).set(sig, u)));
   };
-  const unlink = (sig: string) =>
-    setLinks((prev) => {
-      const url = prev.get(sig);
-      if (!url) return prev;
-      URL.revokeObjectURL(url);
-      const next = new Map(prev);
-      next.delete(sig);
-      return next;
-    });
+  const unlink = (sig: string) => {
+    const url = linksRef.current.get(sig);
+    if (!url) return;
+    URL.revokeObjectURL(url);
+    const next = new Map(linksRef.current);
+    next.delete(sig);
+    linksRef.current = next;
+    setLinks(next);
+  };
 
-  // Refresh rehydrate: try every registry entry once (non-gesture — permission-pending handles
-  // simply stay unlinked and render as restore cards). blob URL over the File is a reference, not a copy.
+  // Refresh/cloud rehydrate: local cache is an offline bootstrap only. Once project hydration has
+  // confirmed a cloud index, that exact list wins so cross-browser deletions stay deleted. Then
+  // retry every entry that still lacks a live link; no bytes cross this boundary.
   useEffect(() => {
     let dead = false;
-    const entries = readReg(projectId);
-    regRef.current = entries;
-    setReg(entries);
-    setLinks(new Map());
+    const projectChanged = loadedProjectRef.current !== projectId;
+    loadedProjectRef.current = projectId;
+    const previous = projectChanged ? [] : regRef.current;
+    const entries = reconcileLocalAssetRegistry(
+      projectChanged ? readReg(projectId) : previous,
+      cloudRegistryKnown ? normalizedCloudRegistry : undefined,
+      Boolean(registrySyncReady),
+    );
+    if (projectChanged || !sameReg(entries, previous)) {
+      regRef.current = entries;
+      setReg(entries);
+      if (projectId) {
+        try {
+          window.localStorage.setItem(regKey(projectId), JSON.stringify(entries));
+        } catch {
+          /* local cache unavailable; the cloud index still survives */
+        }
+      }
+    }
+    if (projectChanged) {
+      for (const url of linksRef.current.values()) URL.revokeObjectURL(url);
+      linksRef.current = new Map();
+      setLinks(linksRef.current);
+    }
     void (async () => {
-      for (const e of entries) {
-        const f = await loadLocalVideo(e.sig);
+      for (const e of pendingLocalAssetEntries(entries, new Set(linksRef.current.keys()))) {
+        const direct = await loadLocalVideo(e.sig);
+        const fromFolder = !direct && e.folder ? await loadLocalFolderFile(e.folder.id, e.folder.path, e.sig) : null;
+        const f = direct ?? fromFolder?.file ?? null;
         if (dead) return;
         if (f) {
           link(e.sig, URL.createObjectURL(f));
@@ -224,7 +368,14 @@ export function MyAssetsPanel({
     return () => {
       dead = true;
     };
-  }, [projectId]);
+  }, [projectId, normalizedCloudRegistry, cloudRegistryKnown, registrySyncReady]);
+
+  // A legacy/offline project with no cloud index can seed it from the browser cache after hydration.
+  // A known cloud index is never republished from localStorage; the rehydrate effect adopted it.
+  useEffect(() => {
+    if (!registrySyncReady || cloudRegistryKnown) return;
+    onRegistryChange?.(regRef.current);
+  }, [projectId, registrySyncReady, cloudRegistryKnown, onRegistryChange]);
 
   // ---- derived ---------------------------------------------------------------------------------
 
@@ -294,8 +445,7 @@ export function MyAssetsPanel({
   }, [trackCards]);
   /** Imports, split by whether their bytes are reachable right now. THE IMPORT CARD REPRESENTS the
    *  asset even when it's on the track (an inserted image must stay an image card — the derived 5s
-   *  still is an implementation detail); the matching track card is hidden instead. Restore cards
-   *  only show for sigs the track doesn't already present. */
+   *  still is an implementation detail); the matching track card is hidden instead. */
   const { liveImports, restoreCards } = useMemo(() => {
     const live: LibraryItem[] = [];
     const restore: RegEntry[] = [];
@@ -315,40 +465,45 @@ export function MyAssetsPanel({
           deletable: true,
           sig: e.sig,
         });
-      else if (!trackSrcBySig.has(e.sig)) restore.push(e); // on-track: the track card presents it (incl. its missing state)
+      else restore.push(e);
     }
     return { liveImports: live, restoreCards: restore };
-  }, [reg, links, covers, trackSrcBySig]);
+  }, [reg, links, covers]);
 
   const kindShows = (k: LocalKind) => kind === 'all' || kind === k;
   const hasAny = liveImports.length > 0 || trackCards.length > 0 || restoreCards.length > 0;
+  const needle = query.trim().toLocaleLowerCase();
+  const matchesQuery = (label: string) => !needle || label.toLocaleLowerCase().includes(needle);
+  const registrySigs = useMemo(() => new Set(reg.map((e) => e.sig)), [reg]);
+  const folderRestoreGroups = useMemo(() => groupFolderRestoreEntries(restoreCards), [restoreCards]);
+  const visibleImports = liveImports.filter((it) => kindShows(it.kind as LocalKind) && matchesQuery(it.label));
+  const visibleTrackCards = kindShows('video')
+    ? trackCards.filter((c) => !(c.it.sig && registrySigs.has(c.it.sig)) && matchesQuery(c.it.label))
+    : [];
+  const visibleFolderRestoreGroups = folderRestoreGroups.filter((group) =>
+    group.entries.some((e) => kindShows(e.kind ?? 'video') && matchesQuery(e.label)),
+  );
+  const visibleRestoreCards = restoreCards.filter((e) => !e.folder && kindShows(e.kind ?? 'video') && matchesQuery(e.label));
+  const hasVisible =
+    visibleImports.length > 0 || visibleTrackCards.length > 0 || visibleFolderRestoreGroups.length > 0 || visibleRestoreCards.length > 0;
 
   // ---- add -------------------------------------------------------------------------------------
 
-  const addEntries = async (entries: { file: File; handle?: FileSystemFileHandle }[]) => {
+  const addEntries = async (entries: AddEntry[]) => {
     if (!entries.length || importing) return;
     setImporting(true);
     try {
-      for (const { file: f, handle } of entries) {
-        const k = kindOf(f);
-        if (!k) {
-          toast.error(t('panels.localVideoOnly'));
-          continue;
-        }
-        const sig = fileSig(f);
-        const url = URL.createObjectURL(f);
-        const dims = await mediaDims(url, k);
-        // Handle present (Chromium picker) = zero-copy: only the handle is persisted, reads come
-        // straight from disk. Handle-less (input fallback) = byte copy into the OPFS library.
-        // AWAITED: an insert right after import must find the sig lane warm — a miss silently
-        // degrades it to the fetch lane, which used to mint a second identity (duplicate cards).
-        await saveLocalVideo(f, sig, handle).catch(() => {});
+      const session = await runLocalImportSession(entries.map((entry) => ({ type: 'browser' as const, ...entry })));
+      if (session.rejected.length) toast.error(t('panels.localVideoOnly'));
+      for (const asset of session.imported) {
+        const url = URL.createObjectURL(asset.file);
+        const dims = await mediaDims(url, asset.kind);
         updateReg((r) => [
-          { sig, label: f.name, kind: k, w: dims?.w ?? null, h: dims?.h ?? null, createdAt: Date.now() },
-          ...r.filter((x) => x.sig !== sig),
+          localAssetIndexEntry(asset, { width: dims?.w, height: dims?.h }),
+          ...r.filter((x) => x.sig !== asset.sig),
         ]);
-        link(sig, url);
-        noteCover(sig, f, k);
+        link(asset.sig, url);
+        noteCover(asset.sig, asset.file, asset.kind);
       }
     } finally {
       setImporting(false);
@@ -356,7 +511,7 @@ export function MyAssetsPanel({
     }
   };
 
-  /** Import: native picker first (handle = read the user's folder in place, no copy); <input> fallback elsewhere. */
+  /** Import: native picker first (handle + bounded OPFS fallback); <input> fallback elsewhere. */
   const pickImport = async () => {
     const picker = (window as { showOpenFilePicker?: ShowOpenFilePicker }).showOpenFilePicker;
     if (!picker) {
@@ -367,13 +522,7 @@ export function MyAssetsPanel({
     try {
       handles = await picker({
         multiple: true,
-        types: [
-          { description: 'Media', accept: {
-            'video/*': ['.mp4', '.mov', '.webm', '.m4v', '.mkv'],
-            'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'],
-            'audio/*': ['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'],
-          } },
-        ],
+        types: MEDIA_PICKER_TYPES,
       });
     } catch {
       return; // cancelled (or picker unavailable in this context)
@@ -381,60 +530,164 @@ export function MyAssetsPanel({
     await addEntries(await Promise.all(handles.map(async (h) => ({ file: await h.getFile(), handle: h }))));
   };
 
-  /** Folder import: authorize a directory (Chromium), import its media files RECURSIVELY (depth-
-   *  capped, hidden dirs skipped; the per-pick cap is the real bound) — each file gets its own
-   *  native handle, so persistence/restore work exactly like single-file imports. Fallback
-   *  elsewhere: <input webkitdirectory> (full tree, files only, OPFS copies). */
+  /** Folder import goes through webkitdirectory on every browser. Some embedded Chromium shells
+   *  expose showDirectoryPicker but never complete its native dialog, while their ordinary file-
+   *  chooser bridge works. The cloud index still records one logical folder plus relative paths. */
   const FOLDER_CAP = 50;
-  const FOLDER_DEPTH = 4;
-  const pickFolder = async () => {
-    const picker = (window as { showDirectoryPicker?: (o?: { mode?: 'read' }) => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker;
-    if (!picker) {
-      folderInputRef.current?.click();
+  const pickFolder = () => triggerFolderInput(folderInputRef.current);
+
+  /** Skill/service handoff entry point. The manifest capability rides in the URL fragment (never
+   * sent as a referrer); the signed-in page submits it through the same API → bridge path as the
+   * headless helper, so this is also a real end-to-end diagnostic surface. */
+  const importFromLocalService = async () => {
+    const manifestUrl = serviceManifestUrl ? loopbackImportUrl(serviceManifestUrl) : null;
+    if (!manifestUrl || importing) {
+      toast.error(t('panels.localServiceInvalid'));
       return;
     }
-    let dir: FileSystemDirectoryHandle;
+    setImporting(true);
     try {
-      dir = await picker({ mode: 'read' });
-    } catch {
-      return; // cancelled
+      const manifestResponse = await fetch(manifestUrl, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      if (!manifestResponse.ok) throw new Error(`manifest HTTP ${manifestResponse.status}`);
+      const manifest = (await manifestResponse.json()) as { entries?: unknown[] };
+      if (!Array.isArray(manifest.entries) || !manifest.entries.length) throw new Error('manifest has no entries');
+      const response = await fetch('/api/studio/media', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'register-local-assets', entries: manifest.entries }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; data?: { imported?: unknown[] } };
+      if (!response.ok || !result.ok) throw new Error(result.error ?? `import HTTP ${response.status}`);
+      toast.success(t('panels.localServiceImported', { n: result.data?.imported?.length ?? manifest.entries.length }));
+      history.replaceState(null, '', `${location.pathname}${location.search}`);
+      setServiceManifestUrl(null);
+    } catch (error) {
+      toast.error(t('panels.localServiceFailed', { error: error instanceof Error ? error.message : String(error) }));
+    } finally {
+      setImporting(false);
     }
-    const entries: { file: File; handle?: FileSystemFileHandle }[] = [];
-    const walk = async (d: FileSystemDirectoryHandle, depth: number): Promise<void> => {
-      const iter = (d as unknown as { values: () => AsyncIterable<(FileSystemFileHandle | FileSystemDirectoryHandle) & { kind: string; name: string }> }).values();
-      for await (const h of iter) {
-        if (entries.length >= FOLDER_CAP) return;
-        if (h.name.startsWith('.')) continue; // hidden dirs/files (.git, .DS_Store …)
-        if (h.kind === 'directory') {
-          if (depth < FOLDER_DEPTH) await walk(h as FileSystemDirectoryHandle, depth + 1);
-          continue;
-        }
-        const f = await (h as FileSystemFileHandle).getFile().catch(() => null);
-        if (f && kindOf(f)) entries.push({ file: f, handle: h as FileSystemFileHandle });
+  };
+
+  const finishReconnect = async (e: RegEntry, f: File, handle?: FileSystemFileHandle) => {
+    if (fileSig(f) !== e.sig) {
+      toast.error(t('workbench.checksumMismatch'));
+      return false;
+    }
+    const session = await runLocalImportSession([{ type: 'browser', file: f, handle, folder: e.folder }]);
+    const asset = session.imported[0];
+    if (!asset) return false;
+    link(e.sig, URL.createObjectURL(asset.file));
+    noteCover(e.sig, asset.file, asset.kind);
+    if (trackSrcBySig.has(e.sig)) onReconnectSource?.(trackSrcBySig.get(e.sig) ?? null, e.sig);
+    return true;
+  };
+
+  const reportFolderRestore = (restored: number, total: number) => {
+    if (restored === total) toast.success(t('panels.folderRestoreDone', { n: restored }));
+    else if (restored > 0) toast.info(t('panels.folderRestorePartial', { restored, total }));
+    else toast.error(t('panels.folderRestoreNone'));
+  };
+
+  const restoreFolderFromFiles = async (group: FolderRestoreGroup, files: File[]) => {
+    setRestoringFolderId(group.folder.id);
+    try {
+      const byPath = new Map<string, File>();
+      for (const file of files) {
+        const parts = file.webkitRelativePath.split('/').filter(Boolean);
+        byPath.set(parts.length > 1 ? parts.slice(1).join('/') : file.name, file);
       }
-    };
-    try {
-      await walk(dir, 0);
-    } catch {
-      /* iteration failed: import whatever was collected */
+      let restored = 0;
+      for (const e of group.entries) {
+        const file = e.folder ? byPath.get(e.folder.path) : undefined;
+        if (file && fileSig(file) === e.sig && (await finishReconnect(e, file))) restored += 1;
+      }
+      reportFolderRestore(restored, group.entries.length);
+    } finally {
+      setRestoringFolderId(null);
     }
-    if (!entries.length) {
+  };
+
+  const restoreFolderFromHandle = async (group: FolderRestoreGroup, dir: FileSystemDirectoryHandle): Promise<number> => {
+    await saveLocalFolderHandle(group.folder.id, dir).catch(() => {});
+    let restored = 0;
+    for (const entry of group.entries) {
+      if (!entry.folder) continue;
+      const found = await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig, dir);
+      if (found && (await finishReconnect(entry, found.file, found.handle))) restored += 1;
+    }
+    return restored;
+  };
+
+  /** Restore an existing saved root handle first. If it is absent/denied/stale, reselect the folder
+   *  once through the portable directory input and reconnect every indexed child as one group. */
+  const reconnectFolder = async (group: FolderRestoreGroup) => {
+    const previous = await getLocalFolderHandle(group.folder.id);
+    if (previous) {
+      setRestoringFolderId(group.folder.id);
+      try {
+        if (await requestLocalFolderAccess(previous)) {
+          const restored = await restoreFolderFromHandle(group, previous);
+          if (restored > 0) {
+            reportFolderRestore(restored, group.entries.length);
+            return;
+          }
+        }
+      } finally {
+        setRestoringFolderId(null);
+      }
+    }
+    restoreFolderTargetRef.current = group;
+    triggerFolderInput(restoreFolderInputRef.current);
+  };
+
+  const importFolderInputFiles = async (files: File[]) => {
+    const supported = files.filter((file) => localAssetKindOf(file)).slice(0, FOLDER_CAP);
+    if (!supported.length) {
       toast.info(t('panels.folderNoMedia'));
       return;
     }
-    if (entries.length >= FOLDER_CAP) toast.info(t('panels.folderCapped', { n: FOLDER_CAP }));
-    await addEntries(entries);
+    if (files.filter((file) => localAssetKindOf(file)).length > FOLDER_CAP) toast.info(t('panels.folderCapped', { n: FOLDER_CAP }));
+    const folderId = newFolderId();
+    const firstParts = supported[0]!.webkitRelativePath.split('/').filter(Boolean);
+    const folderName = firstParts.length > 1 ? firstParts[0]! : supported[0]!.name;
+    await addEntries(
+      supported.map((file) => {
+        const parts = file.webkitRelativePath.split('/').filter(Boolean);
+        return {
+          file,
+          folder: {
+            id: folderId,
+            name: folderName,
+            path: parts.length > 1 ? parts.slice(1).join('/') : file.name,
+          },
+        };
+      }),
+    );
   };
 
-  /** Click-to-restore (user gesture): the handle may prompt for permission here. */
+  /** Click-to-restore (user gesture): existing handle/OPFS first; on a new browser, open a real file
+   *  picker and verify the selected file against the cloud-synced sig before reconnecting it. */
   const reconnect = async (e: RegEntry) => {
-    const f = await loadLocalVideo(e.sig);
-    if (!f) {
-      toast.error(t('panels.localReconnectFailed'));
+    const cached = await loadLocalVideo(e.sig);
+    if (cached) {
+      await finishReconnect(e, cached);
       return;
     }
-    link(e.sig, URL.createObjectURL(f));
-    noteCover(e.sig, f, e.kind ?? 'video');
+    const picker = (window as { showOpenFilePicker?: ShowOpenFilePicker }).showOpenFilePicker;
+    if (!picker) {
+      restoreTargetRef.current = e;
+      restoreInputRef.current?.click();
+      return;
+    }
+    let handles: FileSystemFileHandle[];
+    try {
+      handles = await picker({ multiple: false, types: MEDIA_PICKER_TYPES });
+    } catch {
+      return;
+    }
+    const handle = handles[0];
+    if (!handle) return;
+    await finishReconnect(e, await handle.getFile(), handle);
   };
 
   // ---- remove ----------------------------------------------------------------------------------
@@ -443,6 +696,10 @@ export function MyAssetsPanel({
    *  eviction; other projects referencing the same file degrade to re-import/cloud), registry
    *  entry, and the live link (blob revoked). Deleted assets never resurface as restore cards. */
   const evict = (sig: string) => {
+    const entry = regRef.current.find((e) => e.sig === sig);
+    if (entry?.folder && regRef.current.filter((e) => e.folder?.id === entry.folder?.id).length === 1) {
+      void deleteLocalFolderHandle(entry.folder.id).catch(() => {});
+    }
     void deleteLocalVideo(sig).catch(() => {});
     updateReg((r) => r.filter((x) => x.sig !== sig));
     unlink(sig);
@@ -454,6 +711,11 @@ export function MyAssetsPanel({
       next.delete(sig);
       return next;
     });
+  };
+
+  const evictRestoreEntry = (entry: RegEntry) => {
+    if (trackSrcBySig.has(entry.sig)) onDeleteAsset?.(trackSrcBySig.get(entry.sig) ?? null);
+    evict(entry.sig);
   };
 
   /** Card delete: confirm, then track surgery for track members (src !== undefined; null = main —
@@ -500,87 +762,101 @@ export function MyAssetsPanel({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <div className="border-line border-b px-2.5 py-1.5">
-        <div className="flex items-center gap-1">
-          {(
-            [
-              { v: 'all', label: 'panels.all' },
-              { v: 'image', label: 'panels.image' },
-              { v: 'video', label: 'panels.video' },
-              { v: 'audio', label: 'panels.music' },
-            ] as { v: KindFilter; label: string }[]
-          ).map((k) => (
-            <button
-              key={k.v}
-              type="button"
-              onClick={() => setKind(k.v)}
-              className={`rounded-md px-2 py-0.5 text-[11px] transition ${
-                kind === k.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
-              }`}
-            >
-              {t(k.label)}
-            </button>
-          ))}
-          {hasAny && (
+        <div className="flex items-center gap-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                title={t('panels.filterAssets')}
+                aria-label={t('panels.filterAssets')}
+                className={`border-line hover:text-ink inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${
+                  kind === 'all' ? 'text-ink-3' : 'bg-panel-2 text-ink'
+                }`}
+              >
+                <SlidersHorizontal size={12} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" sideOffset={5} className="min-w-[128px]">
+              <DropdownMenuRadioGroup value={kind} onValueChange={(value) => setKind(value as KindFilter)}>
+                {KIND_FILTERS.map((option) => (
+                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                    {t(option.label)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <label className="border-line bg-panel-2 focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
+            <Search size={11} className="text-ink-4 pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t('panels.searchAssets')}
+              aria-label={t('panels.searchAssetsLabel')}
+              className="text-ink placeholder:text-ink-4 h-[24px] w-full bg-transparent pl-5.5 pr-1.5 text-[11px] outline-none"
+            />
+          </label>
+
+          <div className="flex shrink-0 items-center">
             <button
               type="button"
               onClick={() => void pickImport()}
               disabled={importing}
               title={t('panels.localOnlyHint')}
-              className="border-line text-ink-2 hover:text-ink ml-auto inline-flex h-[24px] shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40"
+              className="border-line text-ink-2 hover:text-ink inline-flex h-[24px] shrink-0 items-center gap-1 whitespace-nowrap rounded-l-md border px-2 text-[11px] disabled:opacity-40"
             >
               {importing ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-              {t('panels.upload')}
+              {t('panels.import')}
             </button>
-          )}
-          {hasAny && (
-            <button
-              type="button"
-              onClick={() => void pickFolder()}
-              disabled={importing}
-              title={t('panels.importFolder')}
-              aria-label={t('panels.importFolder')}
-              className="border-line text-ink-2 hover:text-ink inline-flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-md border disabled:opacity-40"
-            >
-              <FolderOpen size={12} />
-            </button>
-          )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  disabled={importing}
+                  title={t('panels.moreImportOptions')}
+                  aria-label={t('panels.moreImportOptions')}
+                  className="border-line text-ink-3 hover:text-ink -ml-px inline-flex h-[24px] w-[25px] shrink-0 items-center justify-center rounded-r-md border disabled:opacity-40"
+                >
+                  <MoreHorizontal size={12} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={5} className="min-w-[132px]">
+                <DropdownMenuItem {...folderImportTriggerProps(() => void pickFolder())}>
+                  <FolderOpen size={13} /> {t('panels.importFolder')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-2">
-        {!hasAny ? (
-          // Empty project: one full-width import card carries the whole panel
+      {serviceManifestUrl ? (
+        <div className="border-accent/30 bg-accent/5 border-b px-2.5 py-2">
           <button
             type="button"
-            onClick={() => void pickImport()}
+            data-testid="import-local-service"
             disabled={importing}
-            className="border-line hover:border-accent text-ink-4 hover:text-ink-2 flex w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed py-10 transition disabled:opacity-40"
+            onClick={() => void importFromLocalService()}
+            className="bg-accent text-accent-foreground inline-flex h-7 w-full items-center justify-center gap-1.5 rounded-md px-2 text-[11px] font-medium disabled:opacity-50"
           >
-            {importing ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-            <div className="text-[11.5px]">{t('panels.upload')}</div>
-            <div className="text-ink-4 text-[10.5px]">{t('panels.localOnlyHint')}</div>
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(ev) => {
-                ev.stopPropagation();
-                void pickFolder();
-              }}
-              onKeyDown={(ev) => {
-                if (ev.key === 'Enter') {
-                  ev.stopPropagation();
-                  void pickFolder();
-                }
-              }}
-              className="text-ink-3 hover:text-ink mt-1 inline-flex items-center gap-1 text-[10.5px] underline-offset-2 hover:underline"
-            >
-              <FolderOpen size={11} /> {t('panels.importFolder')}
-            </span>
+            {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            {t('panels.importFromLocalService')}
           </button>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-auto p-2">
+        {!hasAny ? (
+          <div className="border-line text-ink-4 flex w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed py-10">
+            <Upload size={18} />
+            <div className="text-[11.5px]">{t('panels.noLocalAssets')}</div>
+            <div className="text-ink-4 text-[10.5px]">{t('panels.localOnlyHint')}</div>
+          </div>
+        ) : !hasVisible ? (
+          <div className="text-ink-4 flex h-24 items-center justify-center px-4 text-center text-[11px]">{t('panels.noMatchingAssetsTry')}</div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
-            {liveImports
-              .filter((it) => kindShows(it.kind as LocalKind))
-              .map((it) => (
+            {visibleImports.map((it) => (
                 <AssetCard
                   key={it.id}
                   item={it}
@@ -592,10 +868,7 @@ export function MyAssetsPanel({
                   insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
                 />
               ))}
-            {kindShows('video') &&
-              trackCards
-                .filter((c) => !(c.it.sig && links.has(c.it.sig))) // a live import card represents this asset
-                .map((c) =>
+            {visibleTrackCards.map((c) =>
                 c.live ? (
                   <AssetCard
                     key={c.it.id}
@@ -616,11 +889,25 @@ export function MyAssetsPanel({
                   />
                 ),
               )}
+            {visibleFolderRestoreGroups.map((group) => (
+              <FolderRestoreTile
+                key={`restore-folder:${group.folder.id}`}
+                name={group.folder.name}
+                count={group.entries.length}
+                busy={restoringFolderId === group.folder.id}
+                onRestore={() => void reconnectFolder(group)}
+                onDelete={() => group.entries.forEach(evictRestoreEntry)}
+              />
+            ))}
             {/* Registry entries whose bytes need a re-grant gesture (or are gone): click restores access in place */}
-            {restoreCards
-              .filter((e) => kindShows(e.kind ?? 'video'))
-              .map((e) => (
-                <RestoreTile key={`restore:${e.sig}`} label={e.label} kind={e.kind ?? 'video'} onRestore={() => void reconnect(e)} onDelete={() => evict(e.sig)} />
+            {visibleRestoreCards.map((e) => (
+                <RestoreTile
+                  key={`restore:${e.sig}`}
+                  label={e.label}
+                  kind={e.kind ?? 'video'}
+                  onRestore={() => void reconnect(e)}
+                  onDelete={() => evictRestoreEntry(e)}
+                />
               ))}
           </div>
         )}
@@ -638,14 +925,38 @@ export function MyAssetsPanel({
           multiple
           className="hidden"
           {...({ webkitdirectory: '' } as Record<string, string>)}
-          onChange={(e) =>
-            void addEntries(
-              Array.from(e.target.files ?? [])
-                .filter((f) => kindOf(f))
-                .slice(0, FOLDER_CAP)
-                .map((file) => ({ file })),
-            )
-          }
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void importFolderInputFiles(files);
+          }}
+        />
+        <input
+          ref={restoreInputRef}
+          type="file"
+          accept="video/*,image/*,audio/*"
+          className="hidden"
+          onChange={(event) => {
+            const target = restoreTargetRef.current;
+            const file = event.target.files?.[0];
+            restoreTargetRef.current = null;
+            event.target.value = '';
+            if (target && file) void finishReconnect(target, file);
+          }}
+        />
+        <input
+          ref={restoreFolderInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          {...({ webkitdirectory: '' } as Record<string, string>)}
+          onChange={(event) => {
+            const target = restoreFolderTargetRef.current;
+            const files = Array.from(event.target.files ?? []);
+            restoreFolderTargetRef.current = null;
+            event.target.value = '';
+            if (target && files.length) void restoreFolderFromFiles(target, files);
+          }}
         />
       </div>
       {preview && (

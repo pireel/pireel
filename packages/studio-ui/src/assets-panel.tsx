@@ -12,6 +12,7 @@
 
 import { useState } from 'react';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import type { GenElementResult } from './element-history';
 import type { PanelDragAsset, PanelMediaAsset } from './asset-card';
 import { MyAssetsPanel } from './my-assets-panel';
@@ -28,6 +29,9 @@ type Scope = 'mine' | 'official' | 'cloud';
 export function AssetsPanel({
   comp,
   projectId,
+  localAssetIndex,
+  localAssetIndexSyncReady,
+  onLocalAssetIndexChange,
   videoSig,
   onDeleteAsset,
   isSrcLive,
@@ -45,6 +49,11 @@ export function AssetsPanel({
   comp: Composition;
   /** Scopes "My"'s local-import registry (imports persist per project across refreshes). */
   projectId?: string;
+  /** Cloud-synced metadata only; MyAssetsPanel merges it with this browser's local registry. */
+  localAssetIndex?: LocalAssetIndexEntry[];
+  /** Wait until cloud/local project hydration finishes before publishing this browser's merged index. */
+  localAssetIndexSyncReady?: boolean;
+  onLocalAssetIndexChange?: (entries: LocalAssetIndexEntry[]) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — "My" labels it by filename. */
   videoSig?: string | null;
   /** Delete a local source from the TRACK too (every shot cut from it) — workbench-side comp surgery. null = main. */
@@ -116,6 +125,9 @@ export function AssetsPanel({
         <MyAssetsPanel
           comp={comp}
           projectId={projectId}
+          cloudRegistry={localAssetIndex}
+          registrySyncReady={localAssetIndexSyncReady}
+          onRegistryChange={onLocalAssetIndexChange}
           videoSig={videoSig}
           onDeleteAsset={onDeleteAsset}
           isSrcLive={isSrcLive}

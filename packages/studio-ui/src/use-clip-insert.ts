@@ -7,7 +7,7 @@
  * hyperframes-workbench.tsx — bodies verbatim.
  */
 
-import { type Dispatch, type MutableRefObject, type SetStateAction, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, type SetStateAction, useEffect, useRef, useState } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
   type Block,
@@ -155,9 +155,10 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const shots = ensureShots(compRef.current);
     const { at, idx } = nearestShotBound(shots, atWish);
     if (file) clipFilesRef.current.set(url, file);
-    // srcSigOverride = this clip is DERIVED (image → 5s still): identity of record is the source
-    // asset's sig — the caller owns persistence/backup of the source bytes, recovery re-derives.
-    if (file && !srcSigOverride) backupMediaToCloud(file, fileSig(file), 'clip'); // insert sources also go to the cloud byte rendezvous
+    // srcSigOverride = the source already has a LOCAL identity (including image → 5s derived still):
+    // persist bytes on-device and sync metadata only. Sig-less remote sources still use the legacy
+    // cloud rendezvous so a fetched CDN asset does not turn into an unrecoverable document-local blob.
+    if (file && !srcSigOverride) backupMediaToCloud(file, fileSig(file), 'clip');
     const sg = srcSigOverride ?? (file ? fileSig(file) : undefined);
     const nb: VideoShot = { id: shotId(), src: url, ...(sg ? { srcSig: sg } : {}), srcStart: 0, srcEnd: clipDur, treatment: 'full' };
     setComp((c) => ({
@@ -236,25 +237,6 @@ export function useClipInsert(deps: ClipInsertDeps) {
     if (dead.size) toast.error(t('workbench.insertSourcesMissing', { n: dead.size }));
   };
 
-  /** Reconnect a dead-link clip: re-pick a file to reconnect (srcSig verifies it's the original file; segments split from the same source reconnect together). */
-  const reconnectClip = async (shotId: string) => {
-    const s = (compRef.current.shots ?? []).find((x) => x.id === shotId);
-    if (!s?.src) return;
-    const f = await pickFile('video/*');
-    if (!f) return;
-    const sig = fileSig(f);
-    if (s.srcSig && sig !== s.srcSig) {
-      toast.error(t('workbench.checksumMismatch'));
-      return;
-    }
-    backupMediaToCloud(f, sig, 'clip'); // manual reconnections also go to the cloud rendezvous, no re-prompt on the next device
-    const url = URL.createObjectURL(f);
-    clipFilesRef.current.set(url, f);
-    void saveLocalVideo(f, sig).catch(() => {});
-    const old = s.src;
-    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((x) => (x.src === old ? { ...x, src: url, srcSig: sig } : x)) }));
-    toast.success(t('workbench.bRollReconnected'));
-  };
   /** Image → 5-second still-frame video (the user-defined default): freeze on canvas + MediaBunny avc mp4, no audio track
    *  = silent clip. Uses a video shape rather than adding an image branch to shots — trim/split/framing/captions/export
    *  all work automatically with zero changes. 30fps of identical frames, near-zero encode cost; dimensions clamped ≤1920 and made even (avc requirement). */
@@ -287,10 +269,25 @@ export function useClipInsert(deps: ClipInsertDeps) {
       return null;
     }
   };
+  /** Reconnect every shot that references one indexed local asset. Images are identities of record:
+   *  reselect the original image, derive a fresh local still clip, and keep srcSig pointing at the image. */
+  const reconnectIndexedSource = async (oldSrc: string, sourceFile: File, sig: string, kind: 'video' | 'image') => {
+    const playbackFile = kind === 'image' ? await stillClipFromImage(sourceFile, sourceFile.name) : sourceFile;
+    if (!playbackFile) {
+      toast.error(t('workbench.couldNotConvertImage'));
+      return false;
+    }
+    const url = URL.createObjectURL(playbackFile);
+    clipFilesRef.current.set(url, playbackFile);
+    await saveLocalVideo(sourceFile, sig).catch(() => {});
+    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((shot) => (shot.src === oldSrc ? { ...shot, src: url, srcSig: sig } : shot)) }));
+    toast.success(t('workbench.bRollReconnected'));
+    return true;
+  };
   /** Dragging a library image/video onto the main track = insert a clip (per user 2026-07-17, reversing "video-into-main-track
    *  was cut" — what was cut back then was OS file drops; library assets have direct links and caching, so the experience holds).
    *  Bytes first via the asset direct link (CDN CORS is allowed), falling back to the /api/media/fetch same-origin proxy; then
-   *  the same insertClipCore as the "+" button (OPFS/cloud backup/caption auto-follow all reused). */
+   *  the same insertClipCore as the "+" button (local persistence/caption auto-follow reused). */
   const insertLibraryClipAt = async (a: MediaRef & { label?: string; sig?: string | null; dims?: { w: number; h: number } }, at: number) => {
     setClipPending(at);
     try {
@@ -302,7 +299,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
           const url = URL.createObjectURL(held);
           const meta = await videoMetaOf(url);
           if (meta) {
-            insertClipCore(url, Math.round(meta.dur * 100) / 100, at, held, meta);
+            insertClipCore(url, Math.round(meta.dur * 100) / 100, at, held, meta, a.sig);
             return;
           }
           URL.revokeObjectURL(url);
@@ -316,7 +313,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
         if (twin) {
           const dur = await videoDurationOf(twin.src!);
           if (dur) {
-            insertClipCore(twin.src!, Math.round(dur * 100) / 100, at, clipFilesRef.current.get(twin.src!));
+            insertClipCore(twin.src!, Math.round(dur * 100) / 100, at, clipFilesRef.current.get(twin.src!), null, a.sig);
             return;
           }
         }
@@ -329,7 +326,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
           const url = URL.createObjectURL(f);
           const meta = await videoMetaOf(url);
           if (meta) {
-            insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta);
+            insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta, a.sig);
             return;
           }
           URL.revokeObjectURL(url);
@@ -368,7 +365,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
           return;
         }
         void saveLocalVideo(f, fileSig(f)).catch(() => {});
-        insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta);
+        insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta, a.sig);
       } else {
         const f = await stillClipFromImage(blob, a.label);
         if (!f) {
@@ -378,11 +375,10 @@ export function useClipInsert(deps: ClipInsertDeps) {
         const url = URL.createObjectURL(f);
         if (a.sig) {
           // One asset, one identity: the shot records the IMAGE's sig (panel dedupe holds — no
-          // phantom "5s video" card); the image bytes are what persist (handle/OPFS from import,
-          // vault below), and recovery re-derives the still clip from them.
+          // phantom "5s video" card); the image bytes persist through the local handle/OPFS only,
+          // and recovery re-derives the still clip from them.
           const img = alignFileToSig(new File([blob], 'image', { type: blob.type, lastModified: 0 }), a.sig);
           void saveLocalVideo(img, a.sig).catch(() => {});
-          backupMediaToCloud(img, a.sig, 'clip');
           insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, a.sig);
         } else {
           void saveLocalVideo(f, fileSig(f)).catch(() => {});
@@ -407,11 +403,12 @@ export function useClipInsert(deps: ClipInsertDeps) {
         toast.error(t('workbench.couldNotReadDuration'));
         return;
       }
-      void saveLocalVideo(f, fileSig(f)); // OPFS local library: draft restore fetches by srcSig
-      insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta);
+      const sig = fileSig(f);
+      void saveLocalVideo(f, sig); // OPFS local library: draft restore fetches by srcSig
+      insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta, sig);
     } finally {
       setClipPending(null);
     }
   };
-  return { videoDurationOf, insertClipCore, recoverLocalClips, reconnectClip, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips };
+  return { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips };
 }

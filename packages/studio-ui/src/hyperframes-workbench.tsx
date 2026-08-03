@@ -107,7 +107,7 @@ import {
   setProjectVersion,
   useDraftAutosave,
 } from './use-draft-persist';
-import type { StudioProjectDto } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry, StudioProjectDto } from '@pireel/studio-engine/project-dto';
 import { useGenerationLock } from './use-generation-lock';
 import { useDraftPipeline } from './use-draft-pipeline';
 import { useStudioExport } from './use-export';
@@ -687,6 +687,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Cloud byte index (in-memory form of context.media): sig → R2 key. Successful backups land here, carried on the next cloud sync. */
   const cloudMediaRef = useRef<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>({});
   const [cloudMediaRev, setCloudMediaRev] = useState(0);
+  /** Metadata-only index of project-local assets. Unlike cloudMediaRef, this never implies the bytes
+   *  are in R2 — it exists so another browser can render restore cards and ask for the originals. */
+  const localAssetIndexRef = useRef<LocalAssetIndexEntry[]>([]);
+  const localAssetIndexKnownRef = useRef(false);
+  const localAssetIndexMutationRevRef = useRef(0);
+  const [localAssetIndexRev, setLocalAssetIndexRev] = useState(0);
+  const setLocalAssetIndex = useCallback((entries: LocalAssetIndexEntry[]) => {
+    const next = [...new Map(entries.map((entry) => [entry.sig, entry])).values()].sort((a, b) => b.createdAt - a.createdAt);
+    if (JSON.stringify(next) === JSON.stringify(localAssetIndexRef.current) && localAssetIndexKnownRef.current) return;
+    localAssetIndexRef.current = next;
+    localAssetIndexKnownRef.current = true;
+    setLocalAssetIndexRev((value) => value + 1);
+  }, []);
+  const changeLocalAssetIndex = useCallback((entries: LocalAssetIndexEntry[]) => {
+    localAssetIndexMutationRevRef.current += 1;
+    setLocalAssetIndex(entries);
+  }, [setLocalAssetIndex]);
   /** Silently back up a source video to R2 (content-addressed, dup = instant); on success record the index and trigger a cloud sync. */
   const backupMediaToCloud = (file: File, sig: string, kind: 'video' | 'clip') => {
     void studioProviders().vault.backup(file, sig).then((r) => {
@@ -834,6 +851,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const unsub = playhead.subscribe(tick);
     return () => unsub();
   }, []);
+
   const filmstripGenRef = useRef(0); // swap generation: invalidates old-video frame-extraction callbacks (extractFilmstrip has no abort)
   const filmstripRef = useRef<FilmstripFrame[]>([]); // mirror of filmstrip, to revoke frame blob URLs on unmount
   filmstripRef.current = filmstrip;
@@ -2824,6 +2842,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Per-asset reconnect (user gesture): handle/OPFS first (may prompt for permission), then the R2
    *  vault, then a manual re-pick verified against the sig. src = null targets the main source. */
   const reconnectSource = async (src: string | null, sig?: string | null) => {
+    const indexedKind = sig ? localAssetIndexRef.current.find((entry) => entry.sig === sig)?.kind : undefined;
     let f = sig ? await loadLocalVideo(sig) : null;
     if (!f && sig) {
       const vaulted = src == null ? cloudMediaRef.current.video?.sig === sig : !!cloudMediaRef.current.clips?.[sig];
@@ -2833,7 +2852,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }
     }
     if (!f) {
-      f = await pickFile('video/*');
+      f = await pickFile(indexedKind === 'image' ? 'image/*' : 'video/*');
       if (!f) return;
       if (sig && fileSig(f) !== sig) {
         toast.error(t('workbench.checksumMismatch'));
@@ -2845,12 +2864,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       return;
     }
     const sg = sig ?? fileSig(f);
-    backupMediaToCloud(f, sg, 'clip');
-    const url = URL.createObjectURL(f);
-    clipFilesRef.current.set(url, f);
-    void saveLocalVideo(f, sg).catch(() => {});
-    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((x) => (x.src === src ? { ...x, src: url, srcSig: sg } : x)) }));
-    toast.success(t('workbench.bRollReconnected'));
+    await reconnectIndexedSource(src, f, sg, indexedKind === 'image' ? 'image' : 'video');
   };
   /** Bulk-delete multiple component blocks (⌘ multi-select/marquee). The caption layer (pure computed product) and generating blocks are skipped; one undo snapshot. */
   const deleteBlocks = (ids: Set<string>) => {
@@ -3156,7 +3170,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Clip insertion (multi-source main track) — see use-clip-insert.ts. Same runTool ref indirection as captions.
-  const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectClip, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
+  const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
     comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, planRef, setPlan, setComp, setSelectedId,
     setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, ensureClipTranscripts, relayCaptionLayer, pickFile,
     backupMediaToCloud, runTool: (toolId, input) => runToolRef.current(toolId, input),
@@ -3177,12 +3191,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     comp, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
     setComp, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, relayCaptionLayer, stepAsr,
   });
+  const registerLocalAsset = (entry: LocalAssetIndexEntry) => {
+    const previous = localAssetIndexRef.current.find((item) => item.sig === entry.sig);
+    changeLocalAssetIndex([
+      { ...entry, createdAt: previous?.createdAt ?? entry.createdAt },
+      ...localAssetIndexRef.current.filter((item) => item.sig !== entry.sig),
+    ]);
+  };
   const agentToolCtx: AgentToolCtx = {
     projectId,
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo,
-    pickVideoFile, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
+    pickVideoFile, registerLocalAsset, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
     resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
@@ -3240,7 +3261,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // (chat-only payload — the comp section is NOT sent, so an empty canvas can never clobber a
       // cloud comp; the server seeds an empty comp on first insert). No threads either → nothing to save.
       const threads = readChatThreads(projectId);
-      return threads.length ? { chat: threads, videoSig: null, videoDurationSec: null, coverThumb: null } : null;
+      const indexContext = localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : undefined;
+      return threads.length || indexContext
+        ? { chat: threads, ...(indexContext ? { context: indexContext } : {}), videoSig: null, videoDurationSec: null, coverThumb: null }
+        : null;
     }
     const canDerive = (asrRef.current?.length ?? 0) > 0 || Object.keys(clipAsrRef.current).length > 0;
     return {
@@ -3252,6 +3276,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
         ...(planRef.current ? { plan: planRef.current } : {}),
         ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
+        ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
       },
       videoSig: videoFileRef.current ? (videoSigRef.current ?? fileSig(videoFileRef.current)) : null,
       videoDurationSec: c.video?.durationSec ?? null,
@@ -3505,6 +3530,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // The boot layer's data gate: released once auto-restore (cloud-first falling back to local) finishes —
   // video-byte reconnection (OPFS/cloud fetch) continues behind the gate, not counted as entry waiting
   const [bootDataReady, setBootDataReady] = useState(false);
+  // The canvas may fall back locally after 1.2s, but publishing a cached asset index must wait for
+  // the cloud request itself to settle or a slow response can resurrect cross-browser deletions.
+  const [localAssetIndexSyncReady, setLocalAssetIndexSyncReady] = useState(false);
   // CAPTIONS ARE DERIVED STATE: transcript × shots × captionStyle.on → display cues, materialized into
   // comp.blocks for every consumer (preview/timeline/selection/agent) but NEVER persisted — autosave
   // strips them; the transcript is the single stored source. This one reactive effect replaces the old
@@ -3533,6 +3561,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const hydrateContextRefs = (rc: StudioProjectDto['context'] | undefined) => {
       if (!rc) return;
       if (rc.media && !cloudMediaRef.current.video && !cloudMediaRef.current.clips) cloudMediaRef.current = rc.media;
+      if (Array.isArray(rc.localAssets)) {
+        const merged = new Map(rc.localAssets.map((entry) => [entry.sig, entry]));
+        for (const entry of localAssetIndexRef.current) merged.set(entry.sig, entry);
+        setLocalAssetIndex([...merged.values()]);
+      }
       if (rc.asr?.length && !asrRef.current?.length) {
         asrRef.current = rc.asr;
         setAsrSentences(rc.asr);
@@ -3566,6 +3599,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         loadP,
         new Promise<undefined>((res) => setTimeout(() => res(undefined), local ? 1200 : 15_000)),
       ]);
+      if (remote !== undefined) setLocalAssetIndexSyncReady(true);
       if (remote) {
         setProjectVersion(projectId, remote.version);
         hydrateContextRefs(remote.context);
@@ -3591,6 +3625,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // write-back); ② if the canvas is still empty (the user did nothing) reconnect the whole thing — agent/device-switch scenarios auto-recover without a manual refresh
       if (remote === undefined) {
         void loadP.then((late) => {
+          setLocalAssetIndexSyncReady(true);
           if (!late) return;
           setProjectVersion(projectId, late.version);
           hydrateContextRefs(late.context);
@@ -3608,6 +3643,38 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Another browser can change only the metadata index while this tab stays open. Revalidate when
+  // the user returns here. The delay lets a just-closed file picker or a blur-triggered save finish;
+  // a mutation during the GET cancels adoption so fresh local intent is never overwritten.
+  useEffect(() => {
+    if (!bootDataReady || !projectId) return;
+    let dead = false;
+    let timer: number | null = null;
+    let request = 0;
+    const scheduleIndexRefresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ticket = ++request;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void cloudSaveChainRef.current.then(async () => {
+          const mutationRev = localAssetIndexMutationRevRef.current;
+          const remote = await studioProviders().projects.load(projectId);
+          if (dead || ticket !== request || mutationRev !== localAssetIndexMutationRevRef.current) return;
+          if (Array.isArray(remote?.context?.localAssets)) setLocalAssetIndex(remote.context.localAssets);
+        });
+      }, 1800);
+    };
+    window.addEventListener('focus', scheduleIndexRefresh);
+    document.addEventListener('visibilitychange', scheduleIndexRefresh);
+    return () => {
+      dead = true;
+      request += 1;
+      if (timer != null) window.clearTimeout(timer);
+      window.removeEventListener('focus', scheduleIndexRefresh);
+      document.removeEventListener('visibilitychange', scheduleIndexRefresh);
+    };
+  }, [bootDataReady, projectId, setLocalAssetIndex]);
 
   // "Canvas had content this session" — buildCloudPayload uses it to tell boot-empty (chat-only,
   // never blank the cloud) from user-emptied (must persist the emptiness). Set by restore or edits.
@@ -3645,7 +3712,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }, 1200);
     return () => window.clearTimeout(timer);
     // asrSentences/clipAsr are also deps: changes that touch only the transcript, not comp (like translations (sub)), must sync too
-  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, asrSentences, clipAsr, displaced]);
+  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced]);
 
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
@@ -4648,6 +4715,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <AssetsPanel
               comp={comp}
               projectId={projectId}
+              localAssetIndex={localAssetIndexKnownRef.current ? localAssetIndexRef.current : undefined}
+              localAssetIndexSyncReady={localAssetIndexSyncReady}
+              onLocalAssetIndexChange={changeLocalAssetIndex}
               videoSig={videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null)}
               onDeleteAsset={deleteAssetSource}
               isSrcLive={srcLive}
@@ -4783,7 +4853,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       <span className="text-ink-2 min-w-0 flex-1 text-[11px]">{t('workbench.insertSourceMissing')}</span>
                       <button
                         type="button"
-                        onClick={() => void reconnectClip(selectedShot.id)}
+                        onClick={() => void reconnectSource(selectedShot.src!, selectedShot.srcSig)}
                         className="bg-accent shrink-0 rounded px-2.5 py-1 text-[11px] font-medium text-white transition hover:brightness-110"
                       >
                         {t('workbench.rePickFile')}
