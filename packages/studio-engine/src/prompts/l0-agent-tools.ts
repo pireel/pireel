@@ -49,6 +49,18 @@ export interface StudioToolDef {
 }
 
 const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+const SHOT_FRAMING_PROPERTIES = {
+  shotId: { type: 'string' },
+  atSec: { type: 'number', description: 'Edited-timeline point inside the target shot; useful after split_shot when new ids are unknown.' },
+  treatment: { type: 'string', enum: [...TREATMENTS] },
+  size: { type: 'number', description: 'Treatment size 0..100.' },
+  crop: { type: 'number', description: 'Split crop position 0..100.' },
+  scale: { type: 'number', description: 'Exact zoom 1..4 relative to minimum cover fit; full/punch-in only.' },
+  anchorX: { type: 'number', description: 'Subject x, normalized 0..1 in the declared coordinate space.' },
+  anchorY: { type: 'number', description: 'Subject y, normalized 0..1 in the declared coordinate space.' },
+  coordinateSpace: { type: 'string', enum: ['source-normalized'], description: 'Use only for anchors measured on the original source frame.' },
+  resetPrecision: { type: 'boolean', description: 'true removes exact scale/anchor override.' },
+} as const;
 
 /** Helper: build an object schema. */
 function obj(
@@ -148,7 +160,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.analyze_visual.label',
     description:
-      'Analyze the footage LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content) so graphics avoid the speaker. A one-time whole-footage pass producing LAYOUT DATA — it does NOT let you see any frame; to actually look at a specific moment (or answer what a moment looks like), call review_visuals with that atSec instead. Slow (runs frame-by-frame in the browser) — shows a live progress + ETA. No input. Cached per file.',
+      'Analyze the footage LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content). Returns compact semantic segments plus subjectTracks: repeated source-normalized subject geometry is already clustered locally into stable intervals with representative safe areas. Consume subjectTracks directly; do NOT re-cluster every raw sample or create cuts where the track remains stable. These are observations, not edit decisions: use them with set_canvas, split_shot, set_shot_framing, and apply_layout as required. It does NOT show the rendered result; call review_visuals for final visual QA. Slow (runs frame-by-frame in the browser) — shows live progress + ETA. No input. Cached per file.',
     inputSchema: obj({}, []),
   },
   {
@@ -305,10 +317,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "LOOK at the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures the composed frame at each atSec and returns, per frame, a one-line scene description plus REAL visual problems as data — overlays covering the speaker, blocks colliding, elements cut off at the edge, unreadable contrast, clutter. Two jobs: ① QA after a batch of graphics lands (add_graphics / lay_out / theme change) with each new block's mid moment (max 6) — your atSecs MUST cover every moment where several overlay blocks are on screen together (concurrent blocks are where collisions happen, and an unsampled window ships unseen), then FIX what it reports (position → place_block, styling/contrast → edit_block) before wrapping up; ② whenever you need to know what a moment actually looks like (e.g. the user asks about the frame at some second) — answer from the returned scene, never from imagination. Skip it for single small edits. Uses hosted vision (small fee per frame).",
+      "LOOK at the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures every requested composed frame, compares them locally, and sends only visually distinct representatives to paid cloud vision. Returns the representative findings plus localComparison groups mapping skipped similar moments. Use it for final QA after a multi-shot aspect/framing change as well as after a batch of graphics lands. Sample every distinct framing and every moment where several overlays coexist (up to 18 candidates per call). Set forceCloudAll=true only when the user explicitly needs an independent reading of every requested moment. Fix reported issues with the relevant atomic tool. It also answers what a moment actually looks like; answer from returned scenes, never imagination. Skip it for single small edits.",
     inputSchema: obj(
       {
-        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline moments to review — each new block's midpoint, and always any moment where multiple blocks share the screen (max 6)." },
+        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline candidate moments to review; local similarity filtering runs before paid cloud vision (max 18)." },
+        forceCloudAll: { type: 'boolean', description: 'Bypass local similarity filtering only for explicit per-moment comparison/inspection.' },
       },
       ['atSecs'],
     ),
@@ -443,19 +456,19 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_framing.label',
     description:
-      'Atomically update one shot framing. treatment/size/crop cover the existing intent-level modes; scale (1..4) plus anchors anchorX/anchorY on the cover-fitted video layer (0..1, origin top-left) provide exact subject-aware full/punch framing. Set the canvas first, then determine anchors for that canvas. Preview and export consume the same resolved transform. To affect only part of a shot, split_shot first. resetPrecision returns to treatment defaults.',
+      'Atomically update one or many shot framings. For 2+ shots, ALWAYS collect them into ONE updates[] call: it creates one undo step/card and rejects the whole batch if any row is invalid. Each row uses shotId or edited-timeline atSec. treatment/size/crop cover intent modes; scale (1..4) plus anchorX/anchorY provide exact full/punch framing. Pass coordinateSpace="source-normalized" only for anchors measured on the original source. Set the canvas first; split_shot first only where framing actually changes. resetPrecision returns to treatment defaults. Do not mix updates[] with top-level framing fields.',
     inputSchema: obj(
       {
-        shotId: { type: 'string' },
-        treatment: { type: 'string', enum: [...TREATMENTS] },
-        size: { type: 'number', description: 'Treatment size 0..100.' },
-        crop: { type: 'number', description: 'Split crop position 0..100.' },
-        scale: { type: 'number', description: 'Exact cover-frame zoom 1..4; full/punch-in only.' },
-        anchorX: { type: 'number', description: 'Subject x on the cover-fitted video layer, normalized 0..1.' },
-        anchorY: { type: 'number', description: 'Subject y on the cover-fitted video layer, normalized 0..1.' },
-        resetPrecision: { type: 'boolean', description: 'true removes exact scale/anchor override.' },
+        ...SHOT_FRAMING_PROPERTIES,
+        updates: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 120,
+          description: 'Batch of independent shot framing rows. Prefer this whenever more than one shot changes.',
+          items: obj({ ...SHOT_FRAMING_PROPERTIES }, []),
+        },
       },
-      ['shotId'],
+      [],
     ),
   },
   {

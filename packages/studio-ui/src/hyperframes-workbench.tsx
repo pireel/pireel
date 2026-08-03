@@ -606,7 +606,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }
       try {
         w.postMessage(
-          { type: 'hf:frame', frame, ...(frame2 ? { frame2 } : {}), t: info.t, elKey: info.elKey, srcT: info.srcT },
+          {
+            type: 'hf:frame',
+            frame,
+            ...(frame2 ? { frame2 } : {}),
+            ...(info.framing ? { framing: info.framing } : {}),
+            ...(info.framing2 ? { framing2: info.framing2 } : {}),
+            ...(info.baked ? { baked: true } : {}),
+            ...(info.sourceWidth ? { sourceWidth: info.sourceWidth } : {}),
+            ...(info.sourceHeight ? { sourceHeight: info.sourceHeight } : {}),
+            t: info.t,
+            elKey: info.elKey,
+            srcT: info.srcT,
+          },
           '*',
           frame2 ? [frame, frame2] : [frame],
         );
@@ -723,6 +735,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           srcStart: s.srcStart,
           srcEnd: s.srcEnd,
           gain: shotGain(s),
+          ...(s.preciseFraming?.coordinateSpace === 'source-normalized' ? { framing: s.preciseFraming } : {}),
           ...(fade ? { fadeAt: fade } : {}),
         };
       }),
@@ -752,8 +765,37 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const fileA = A.src ? clipFilesRef.current.get(A.src) : videoFile;
       const fileB = B.src ? clipFilesRef.current.get(B.src) : videoFile;
       if (!fileA || !fileB) continue;
-      const sig = [tr.cut.toFixed(2), tr.half.toFixed(2), tr.effect, tr.dir, A.srcEnd.toFixed(3), B.srcStart.toFixed(3), fileSig(fileA), fileSig(fileB), c.width, c.height].join('|');
-      specs.push({ sig, cut: tr.cut, half: tr.half, effect: tr.effect, dir: tr.dir, fileA, aEnd: A.srcEnd, fileB, bStart: B.srcStart, compW: c.width, compH: c.height });
+      const framingA = A.preciseFraming?.coordinateSpace === 'source-normalized' ? A.preciseFraming : undefined;
+      const framingB = B.preciseFraming?.coordinateSpace === 'source-normalized' ? B.preciseFraming : undefined;
+      const sig = [
+        tr.cut.toFixed(2),
+        tr.half.toFixed(2),
+        tr.effect,
+        tr.dir,
+        A.srcEnd.toFixed(3),
+        B.srcStart.toFixed(3),
+        fileSig(fileA),
+        fileSig(fileB),
+        c.width,
+        c.height,
+        framingA ? `${framingA.scale}:${framingA.anchorX}:${framingA.anchorY}` : '-',
+        framingB ? `${framingB.scale}:${framingB.anchorX}:${framingB.anchorY}` : '-',
+      ].join('|');
+      specs.push({
+        sig,
+        cut: tr.cut,
+        half: tr.half,
+        effect: tr.effect,
+        dir: tr.dir,
+        fileA,
+        aEnd: A.srcEnd,
+        fileB,
+        bStart: B.srcStart,
+        ...(framingA ? { framingA } : {}),
+        ...(framingB ? { framingB } : {}),
+        compW: c.width,
+        compH: c.height,
+      });
     }
     const want = new Set(specs.map((sp) => sp.sig));
     for (const [sig, e] of bakesRef.current) {
@@ -4445,13 +4487,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   {floatWin === 'script'
                     ? t('workbench.smartScriptCut')
                     : floatWin === 'kitProps'
-                    ? t('workbench.kitProps')
-                    : floatWin === 'person'
-                      ? t('workbench.portrait')
-                      : floatWin === 'anim'
-                        ? t('workbench.assetMotion')
-                        : floatWin === 'captions'
-                          ? t('panels.captions')
+                      ? t('workbench.kitProps')
+                      : floatWin === 'person'
+                        ? t('workbench.portrait')
+                        : floatWin === 'anim'
+                          ? t('workbench.assetMotion')
+                          : floatWin === 'captions'
+                            ? t('panels.captions')
                             : floatWin === 'shot'
                             ? (() => {
                                 const i = (comp.shots ?? []).findIndex((s) => s.id === selectedShotId);

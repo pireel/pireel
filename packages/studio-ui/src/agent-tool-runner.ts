@@ -24,6 +24,7 @@ import {
   VOLUME_DB_MIN,
   applyBlockPlacement,
   applyCompositionLayout,
+  applyShotFramingInput,
   audioClipId,
   audioTrimPatch,
   blockId,
@@ -62,6 +63,7 @@ import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pi
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
+import { visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
@@ -70,6 +72,7 @@ import { fileSig } from './media';
 import { saveLocalVideo } from './local-media';
 import { type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
+import { groupSimilarReviewFrames } from './review-similarity';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
 
@@ -182,7 +185,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFraming, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
+    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
     splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -318,7 +321,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             try {
               const vis = await race(stepVisual(report));
               return vis
-                ? { ok: true, summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }) }
+                ? {
+                    ok: true,
+                    summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
+                    data: visualTimelineForAgent(vis),
+                  }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
             } finally {
               clearToolProgress(toolId);
@@ -330,13 +337,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const vv = currentVideo();
             if (!videoFileRef.current || !vv) return { ok: false, error: t('common.uploadVideoFirst') };
             if (visualRef.current) {
-              return { ok: true, summary: t('workbench.visualAnalysisAlreadyAvailable'), data: { status: 'done', segments: visualRef.current.segments.length, hint: 'visual analysis already available — no need to look/submit' } };
+              return {
+                ok: true,
+                summary: t('workbench.visualAnalysisAlreadyAvailable'),
+                data: { status: 'done', ...visualTimelineForAgent(visualRef.current), hint: 'visual analysis already available — no need to look/submit' },
+              };
             }
             try {
               const r = await prepareVisualAnalysis(videoFileRef.current, vv.durationSec, (done, tot) => report(t('workbench.geometryPassPct', { pct: tot ? Math.round((done / tot) * 100) : 0 }), tot ? done / tot : 0));
               if ('cached' in r) {
                 applyVisualResult(r.cached);
-                return { ok: true, summary: t('workbench.visualAnalysisCacheHit'), data: { status: 'done', segments: r.cached.segments.length } };
+                return {
+                  ok: true,
+                  summary: t('workbench.visualAnalysisCacheHit'),
+                  data: { status: 'done', ...visualTimelineForAgent(r.cached) },
+                };
               }
               visualBriefRef.current = r.prep;
               return {
@@ -376,7 +391,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const vis = finishVisualAnalysis(prep, labels);
             visualBriefRef.current = null;
             applyVisualResult(vis);
-            return { ok: true, summary: t('workbench.visualAnalysisDoneByo', { segs: vis.segments.length, cuts: vis.cuts.length }), data: { segments: vis.segments.length, cuts: vis.cuts.length } };
+            return {
+              ok: true,
+              summary: t('workbench.visualAnalysisDoneByo', { segs: vis.segments.length, cuts: vis.cuts.length }),
+              data: { status: 'done', ...visualTimelineForAgent(vis) },
+            };
           }
           case 'lay_out': {
             const v = currentVideo();
@@ -682,31 +701,80 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const atsIn = Array.isArray(input.atSecs) ? (input.atSecs as unknown[]).map(Number).filter(Number.isFinite) : [];
             if (!atsIn.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
             const dur = totalDuration(c);
-            const ats = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 6);
+            const ats = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 18);
             try {
-              const frames: { atSec: number; image_base64: string; expected: string }[] = [];
+              const candidates: {
+                atSec: number;
+                image_base64: string;
+                expected: string;
+                fingerprint?: Awaited<ReturnType<typeof captureCompositionFrame>>['localSimilarityFingerprint'];
+              }[] = [];
               for (let i = 0; i < ats.length; i++) {
                 if (stopped()) throw abortErr(); // frame boundary — captures are per-call work, safe to drop
                 const at = ats[i]!;
                 report(t('workbench.reviewingFrameN', { i: i + 1, n: ats.length }));
-                const shot = await captureCompositionFrame({ comp: c, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at, burnLabel: `${r1(at)}s`, maxDim: 720 });
+                const shot = await captureCompositionFrame({
+                  comp: c,
+                  videoFile: videoFileRef.current,
+                  clipFiles: clipFilesRef.current,
+                  atSec: at,
+                  burnLabel: `${r1(at)}s`,
+                  maxDim: 720,
+                  localSimilarityFingerprint: true,
+                });
                 const visBlocks = c.blocks
                   .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
                   .map((b) => `${b.id} (${blockKind(b)}${b.box ? `, ${zoneOf(b.box)}` : ''})`);
                 const expected = `${visBlocks.length ? `overlays: ${visBlocks.join('; ')}` : 'no overlays'}${isCaptionsOn(c) ? '; captions: on' : ''}`;
-                frames.push({ atSec: at, image_base64: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1), expected });
+                candidates.push({
+                  atSec: at,
+                  image_base64: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1),
+                  expected,
+                  ...(shot.localSimilarityFingerprint ? { fingerprint: shot.localSimilarityFingerprint } : {}),
+                });
               }
-              report(t('workbench.reviewJudging'));
+              report(t('workbench.reviewComparingLocally'));
+              const groups = groupSimilarReviewFrames(candidates, { forceCloudAll: input.forceCloudAll === true });
+              const frames = groups.map(({ representative }) => ({
+                atSec: representative.atSec,
+                image_base64: representative.image_base64,
+                expected: representative.expected,
+              }));
+              const localComparison = {
+                requestedFrames: candidates.length,
+                cloudReviewedFrames: frames.length,
+                skippedAsSimilar: candidates.length - frames.length,
+                groups: groups
+                  .filter((group) => group.similar.length > 0)
+                  .map((group) => ({
+                    representativeAtSec: group.representative.atSec,
+                    similarAtSecs: group.similar.map((frame) => frame.atSec),
+                  })),
+              };
+              report(t('workbench.reviewJudgingN', { n: frames.length }));
               const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }), ...(signal ? { signal } : {}) });
               // scene = per-frame one-line description from the vision pass: issues alone can't answer
               // "what does this moment look like", which this tool also serves
               const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; scene?: string; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
               if (!rr.ok || !j.frames) return { ok: false, error: t('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
               const total = j.frames.reduce((a, f) => a + f.issues.length, 0);
+              const summary = localComparison.skippedAsSimilar > 0
+                ? total
+                  ? t('workbench.reviewedDedupIssues', { requested: localComparison.requestedFrames, reviewed: localComparison.cloudReviewedFrames, m: total })
+                  : t('workbench.reviewedDedupClean', { requested: localComparison.requestedFrames, reviewed: localComparison.cloudReviewedFrames })
+                : total
+                  ? t('workbench.reviewedIssues', { n: j.frames.length, m: total })
+                  : t('workbench.reviewedClean', { n: j.frames.length });
               return {
                 ok: true,
-                summary: total ? t('workbench.reviewedIssues', { n: j.frames.length, m: total }) : t('workbench.reviewedClean', { n: j.frames.length }),
-                data: { frames: j.frames, ...(total ? { hint: 'fix real issues (position → place_block, styling/contrast → edit_block), then re-check the affected moment' } : {}) },
+                summary,
+                data: {
+                  frames: j.frames,
+                  localComparison,
+                  ...(total
+                    ? { hint: 'fix real issues (subject framing → set_shot_framing, overlay position → place_block, styling/contrast → edit_block), then re-check the affected moment' }
+                    : {}),
+                },
               };
             } catch (e) {
               // A user stop is not a review failure — rethrow with the localized stop message
@@ -1145,36 +1213,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } };
           }
           case 'set_shot_framing': {
-            const s = findShot(input.shotId);
-            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
-            const treatment = input.treatment == null ? undefined : String(input.treatment) as ShotTreatment;
-            if (treatment && !SHOT_TREATMENTS.some((x) => x.id === treatment)) return { ok: false, error: `invalid treatment: ${treatment}` };
-            const numericKeys = ['size', 'crop', 'scale', 'anchorX', 'anchorY'] as const;
-            const invalid = numericKeys.find((key) => key in input && (typeof input[key] !== 'number' || !Number.isFinite(input[key])));
-            if (invalid) return { ok: false, error: `${invalid} must be a finite number` };
-            const resolvedTreatment = treatment ?? s.treatment;
-            if ((input.scale != null || input.anchorX != null || input.anchorY != null) && resolvedTreatment !== 'full' && resolvedTreatment !== 'punch-in') {
-              return { ok: false, error: 'scale/anchorX/anchorY are valid only for full or punch-in framing' };
-            }
-            const patch: ShotFramingPatch = {
-              ...(treatment ? { treatment } : {}),
-              ...(typeof input.size === 'number' ? { size: input.size } : {}),
-              ...(typeof input.crop === 'number' ? { crop: input.crop } : {}),
-              ...(typeof input.scale === 'number' ? { scale: input.scale } : {}),
-              ...(typeof input.anchorX === 'number' ? { anchorX: input.anchorX } : {}),
-              ...(typeof input.anchorY === 'number' ? { anchorY: input.anchorY } : {}),
-              ...(typeof input.resetPrecision === 'boolean' ? { resetPrecision: input.resetPrecision } : {}),
-            };
-            if (!Object.keys(patch).length) return { ok: false, error: 'pass treatment / size / crop / scale / anchorX / anchorY / resetPrecision' };
-            setShotFraming(s.id, patch);
-            const updated = compRef.current.shots?.find((shot) => shot.id === s.id);
+            const shots = ensureShots(c);
+            const applied = applyShotFramingInput({ ...c, shots }, input, shots);
+            if ('error' in applied) return { ok: false, error: applied.error };
+            setComp(applied.comp);
+            const count = applied.updates.length;
             return {
               ok: true,
-              summary: `Updated framing for shot ${s.id}`,
-              data: {
-                shotId: s.id,
-                ...(updated ? { treatment: updated.treatment, size: updated.treatSize, crop: updated.treatCrop, framing: updated.preciseFraming ?? null } : {}),
-              },
+              summary: count === 1 ? `Updated framing for shot ${applied.updates[0]!.shotId}` : `Updated framing for ${count} shots`,
+              data: count === 1 ? applied.updates[0] : { updates: applied.updates },
             };
           }
           case 'apply_layout': {

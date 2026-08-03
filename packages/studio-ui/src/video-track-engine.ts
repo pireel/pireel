@@ -18,6 +18,8 @@
  * iframe contract (hf:frame / hf:seekTimelines) stays the same.
  */
 
+import type { ShotPreciseFraming } from '@pireel/studio-engine/composition';
+
 export interface EngineSeg {
   /** Source key: 'main' or this segment's src (blob/remote URL). */
   key: string;
@@ -32,6 +34,8 @@ export interface EngineSeg {
   /** Segment-local fade factor (shotFadeAt); absent = no fade. Evaluated per tick, so the level rides the
    *  curve instead of stepping at the segment's edges. */
   fadeAt?: (tLocal: number) => number;
+  /** Only source-normalized precision belongs here; legacy cover precision stays on #vidEl's CSS timeline. */
+  framing?: ShotPreciseFraming;
 }
 
 /** Audio-clip spec for the preview (declarative; envelope + source-time mapping arrive as closures
@@ -53,6 +57,10 @@ export interface FrameInfo {
   srcT: number;
   /** true = pre-baked finished transition frame (shim lays it down directly, no compositing). */
   baked?: boolean;
+  framing?: ShotPreciseFraming;
+  framing2?: ShotPreciseFraming;
+  sourceWidth?: number;
+  sourceHeight?: number;
 }
 
 const EPS = 0.04;
@@ -195,11 +203,17 @@ export class VideoTrackEngine {
         return n.key === s.key && n.elKey === s.elKey && Math.abs(n.srcStart - s.srcStart) < 1e-6 && Math.abs(n.srcEnd - s.srcEnd) < 1e-6;
       });
     if (sameShape) {
+      const framingChanged = this.segs.some((s, i) => {
+        const a = s.framing;
+        const b = segs[i]!.framing;
+        return a?.scale !== b?.scale || a?.anchorX !== b?.anchorX || a?.anchorY !== b?.anchorY || a?.coordinateSpace !== b?.coordinateSpace;
+      });
       this.segs = segs;
       const cur = this.segs[this.curIdx];
       const el = cur && this.els.get(cur.key);
       if (el && !el.muted) this.setElGain(el, this.segGain(this.curIdx)); // audible immediately, no wait for the next tick
-      return false;
+      if (framingChanged) this.lastPush = null;
+      return framingChanged;
     }
     this.segs = segs;
     this.starts = [];
@@ -576,7 +590,19 @@ export class VideoTrackEngine {
         (bmp) => {
           this.bitmapInflight = false;
           this.lastPush = { key: bkey, srcT: idx };
-          this.onFrame?.(bmp, { t, elKey: seg.elKey, srcT, baked: true }, null);
+          this.onFrame?.(
+            bmp,
+            {
+              t,
+              elKey: seg.elKey,
+              srcT,
+              baked: true,
+              sourceWidth: el.videoWidth,
+              sourceHeight: el.videoHeight,
+              ...(seg.framing ? { framing: seg.framing } : {}),
+            },
+            null,
+          );
         },
         () => {
           this.bitmapInflight = false;
@@ -592,7 +618,20 @@ export class VideoTrackEngine {
       ([bmp, bmp2]) => {
         this.bitmapInflight = false;
         this.lastPush = { key: seg.key, srcT };
-        this.onFrame?.(bmp, { t, elKey: seg.elKey, srcT }, bmp2);
+        const other = w ? this.segs[t < w.cut ? w.iB : w.iA] : null;
+        this.onFrame?.(
+          bmp,
+          {
+            t,
+            elKey: seg.elKey,
+            srcT,
+            sourceWidth: el.videoWidth,
+            sourceHeight: el.videoHeight,
+            ...(seg.framing ? { framing: seg.framing } : {}),
+            ...(bmp2 && other?.framing ? { framing2: other.framing } : {}),
+          },
+          bmp2,
+        );
       },
       () => {
         this.bitmapInflight = false;

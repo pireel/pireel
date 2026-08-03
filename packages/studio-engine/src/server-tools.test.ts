@@ -102,7 +102,6 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(canvas.result.ok).toBe(true);
     expect([canvas.comp!.width, canvas.comp!.height]).toEqual([1920, 1080]);
     expect((canvas.result.data as { delta: { canvas: unknown } }).delta.canvas).toEqual({ from: [1080, 1920], to: [1920, 1080] });
-
     const framing = runServerTool('set_shot_framing', { shotId: 's1', scale: 2, anchorX: 0.2, anchorY: 0.4 }, p);
     expect(framing.result.ok).toBe(true);
     expect(framing.comp!.shots![0]!.preciseFraming).toEqual({ scale: 2, anchorX: 0.2, anchorY: 0.4 });
@@ -110,6 +109,48 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const invalidPrecision = runServerTool('set_shot_framing', { shotId: 's1', treatment: 'split-l', scale: 2 }, p);
     expect(invalidPrecision.result.ok).toBe(false);
     expect(invalidPrecision.comp).toBeUndefined();
+
+    const sourceFraming = runServerTool(
+      'set_shot_framing',
+      { atSec: 15, scale: 1.4, anchorX: 0.8, anchorY: 0.3, coordinateSpace: 'source-normalized' },
+      p,
+    );
+    expect(sourceFraming.result.ok).toBe(true);
+    expect(sourceFraming.comp!.shots![1]!.preciseFraming).toEqual({
+      scale: 1.4,
+      anchorX: 0.8,
+      anchorY: 0.3,
+      coordinateSpace: 'source-normalized',
+    });
+    expect(runServerTool('set_shot_framing', { atSec: 30, scale: 2 }, p).result.ok).toBe(false);
+
+    const batch = runServerTool(
+      'set_shot_framing',
+      {
+        updates: [
+          { shotId: '@s1', scale: 1.6, anchorX: 0.25, anchorY: 0.45, coordinateSpace: 'source-normalized' },
+          { atSec: 15, scale: 1.8, anchorX: 0.72, anchorY: 0.4, coordinateSpace: 'source-normalized' },
+        ],
+      },
+      p,
+    );
+    expect(batch.result.ok).toBe(true);
+    expect(batch.result.summary).toBe('Updated framing for 2 shots');
+    expect(batch.comp!.shots!.map((shot) => shot.preciseFraming?.anchorX)).toEqual([0.25, 0.72]);
+    expect((batch.result.data as { delta: { shotsUpdated: { ids: string[] } } }).delta.shotsUpdated.ids).toEqual(['s1', 's2']);
+
+    const invalidBatch = runServerTool(
+      'set_shot_framing',
+      { updates: [{ shotId: 's1', scale: 2 }, { shotId: 'missing', scale: 2 }] },
+      p,
+    );
+    expect(invalidBatch.result.ok).toBe(false);
+    expect(invalidBatch.result.error).toContain('updates[1]: shot not found');
+    expect(invalidBatch.comp).toBeUndefined();
+    expect(p.comp.shots![0]!.preciseFraming).toBeUndefined();
+    expect(runServerTool('set_shot_framing', { updates: [{ shotId: 's1', scale: 2 }, { atSec: 2, scale: 3 }] }, p).result.error).toContain(
+      'targeted more than once',
+    );
 
     const layout = runServerTool('apply_layout', { layout: 'split-left-right', blockIds: ['b1'], shotId: 's1', videoPosition: 'left' }, p);
     expect(layout.result.ok).toBe(true);

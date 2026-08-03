@@ -33,6 +33,7 @@ import {
   VOLUME_DB_MIN,
   applyBlockPlacement,
   applyCompositionLayout,
+  applyShotFramingInput,
   placementFramingNotes,
   audioClipId,
   audioClipWindow,
@@ -381,27 +382,16 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     }
     case 'set_shot_framing': {
       const shots = shotsOf(p);
-      const shot = shots.find((x) => x.id === input.shotId);
-      if (!shot) return { result: { ok: false, error: 'shot not found' } };
-      const treatment = input.treatment == null ? undefined : String(input.treatment);
-      if (treatment && !TREATMENTS.has(treatment)) return { result: { ok: false, error: `invalid treatment: ${treatment}` } };
-      const numericKeys = ['size', 'crop', 'scale', 'anchorX', 'anchorY'] as const;
-      const invalid = numericKeys.find((key) => key in input && (typeof input[key] !== 'number' || !Number.isFinite(input[key])));
-      if (invalid) return { result: { ok: false, error: `${invalid} must be a finite number` } };
-      const resolvedTreatment = (treatment ?? shot.treatment) as VideoShot['treatment'];
-      if ((input.scale != null || input.anchorX != null || input.anchorY != null) && resolvedTreatment !== 'full' && resolvedTreatment !== 'punch-in') {
-        return { result: { ok: false, error: 'scale/anchorX/anchorY are valid only for full or punch-in framing' } };
-      }
-      const patch = {
-        ...(treatment ? { treatment: treatment as VideoShot['treatment'] } : {}),
-        ...Object.fromEntries(numericKeys.filter((key) => typeof input[key] === 'number').map((key) => [key, input[key]])),
-        ...(typeof input.resetPrecision === 'boolean' ? { resetPrecision: input.resetPrecision } : {}),
-      };
-      if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass treatment / size / crop / scale / anchorX / anchorY / resetPrecision' } };
-      const next = patchShotFraming(shot, patch);
+      const applied = applyShotFramingInput({ ...c, shots }, input, shots);
+      if ('error' in applied) return { result: { ok: false, error: applied.error } };
+      const count = applied.updates.length;
       return {
-        result: { ok: true, summary: `Updated framing for shot ${shot.id}`, data: { shotId: shot.id, framing: next.preciseFraming ?? null, treatment: next.treatment } },
-        comp: { ...c, shots: shots.map((x) => (x.id === shot.id ? next : x)) },
+        result: {
+          ok: true,
+          summary: count === 1 ? `Updated framing for shot ${applied.updates[0]!.shotId}` : `Updated framing for ${count} shots`,
+          data: count === 1 ? applied.updates[0] : { updates: applied.updates },
+        },
+        comp: applied.comp,
       };
     }
     case 'apply_layout': {

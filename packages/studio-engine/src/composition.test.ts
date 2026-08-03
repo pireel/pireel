@@ -716,6 +716,20 @@ describe('精确主体取景(预览/导出共用 transform)', () => {
     expect(shotTransformVars('full', undefined, undefined, { scale: 2, anchorX: 0, anchorY: 1 })).toMatchObject({ scale: 2, xPercent: 50, yPercent: -50 });
   });
 
+  it('source-normalized precision 在源帧绘制,canvas transform 必须保持 identity', () => {
+    const precise = { scale: 2, anchorX: 0.2, anchorY: 0.4, coordinateSpace: 'source-normalized' as const };
+    expect(shotTransformVars('full', undefined, undefined, precise)).toEqual({
+      scale: 1,
+      xPercent: 0,
+      yPercent: 0,
+      borderRadius: 0,
+      clipPath: 'inset(0% 0% 0% 0%)',
+    });
+    const base: VideoShot = { id: 's', srcStart: 0, srcEnd: 3, treatment: 'full' };
+    const patched = patchShotFraming(base, precise);
+    expect(patched.preciseFraming).toEqual(precise);
+  });
+
   it('patch 统一归一化数值,切到 split 自动丢弃无意义的精确锚点', () => {
     const base: VideoShot = { id: 's', srcStart: 0, srcEnd: 3, treatment: 'full' };
     const exact = patchShotFraming(base, { scale: 9, anchorX: -2, anchorY: 0.33333 });
@@ -732,6 +746,17 @@ describe('精确主体取景(预览/导出共用 transform)', () => {
     expect(keys).toHaveLength(1);
     expect(keys[0]!.precise).toEqual(precise);
     expect(videoFrameTimelineBody([{ id: 'a', srcStart: 0, srcEnd: 2, treatment: 'full', preciseFraming: precise }])).toContain('scale: 1.8');
+  });
+
+  it('数值相同但坐标空间不同不能去重', () => {
+    const legacy = { scale: 1.8, anchorX: 0.3, anchorY: 0.4 };
+    const source = { ...legacy, coordinateSpace: 'source-normalized' as const };
+    expect(
+      videoFrameKeyframes([
+        { id: 'a', srcStart: 0, srcEnd: 2, treatment: 'full', preciseFraming: legacy },
+        { id: 'b', srcStart: 2, srcEnd: 4, treatment: 'full', preciseFraming: source },
+      ]),
+    ).toHaveLength(2);
   });
 });
 

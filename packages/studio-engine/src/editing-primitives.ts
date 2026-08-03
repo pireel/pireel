@@ -10,10 +10,14 @@ import {
   type Block,
   type Composition,
   type NormBox,
+  type ShotFramingPatch,
   type ShotTreatment,
+  type VideoShot,
+  SHOT_TREATMENTS,
   patchShotFraming,
   treatmentVacancyBox,
 } from './composition-core';
+import { spans as clipSpans } from './trim';
 
 export const CANVAS_PRESETS = ['portrait', 'landscape', 'square'] as const;
 export type CanvasPreset = (typeof CANVAS_PRESETS)[number];
@@ -47,6 +51,128 @@ export function canvasSizeFromInput(input: Record<string, unknown>): { width: nu
   if (!finite(input.width) || !finite(input.height)) return null;
   if (input.width < 240 || input.height < 240 || input.width > 7680 || input.height > 7680) return null;
   return { width: even(input.width), height: even(input.height) };
+}
+
+export interface AppliedShotFraming {
+  shotId: string;
+  treatment: ShotTreatment;
+  size?: number;
+  crop?: number;
+  framing: VideoShot['preciseFraming'] | null;
+}
+
+export interface ShotFramingResult {
+  comp: Composition;
+  updates: AppliedShotFraming[];
+}
+
+const SHOT_TREATMENT_IDS = new Set<ShotTreatment>(SHOT_TREATMENTS.map((item) => item.id));
+const SHOT_FRAMING_NUMBERS = ['size', 'crop', 'scale', 'anchorX', 'anchorY'] as const;
+const SHOT_FRAMING_FIELDS = ['shotId', 'atSec', 'treatment', ...SHOT_FRAMING_NUMBERS, 'coordinateSpace', 'resetPrecision'] as const;
+
+function framingRows(input: Record<string, unknown>): Record<string, unknown>[] | { error: string } {
+  if (!('updates' in input)) return [input];
+  if (!Array.isArray(input.updates)) return { error: 'updates must be an array' };
+  if (!input.updates.length) return { error: 'updates must contain at least one framing update' };
+  if (input.updates.length > 120) return { error: 'updates supports at most 120 shots per call' };
+  if (SHOT_FRAMING_FIELDS.some((key) => key in input)) return { error: 'use either updates[] or top-level framing fields, not both' };
+  const invalid = input.updates.findIndex((row) => !row || typeof row !== 'object' || Array.isArray(row));
+  if (invalid >= 0) return { error: `updates[${invalid}] must be an object` };
+  return input.updates as Record<string, unknown>[];
+}
+
+/** Resolve and apply one or many exact shot-framing edits as one pure transaction. Every row is
+ * validated against the same pre-edit timeline before anything changes, so a stale id or malformed
+ * late row cannot leave a partially reframed composition. */
+export function applyShotFramingInput(
+  comp: Composition,
+  input: Record<string, unknown>,
+  fallbackShots: VideoShot[] = comp.shots ?? [],
+): ShotFramingResult | { error: string } {
+  const rows = framingRows(input);
+  if ('error' in rows) return rows;
+  const shots = fallbackShots;
+  const timeline = clipSpans(shots);
+  const resolved: { shot: VideoShot; patch: ShotFramingPatch }[] = [];
+  const targeted = new Set<string>();
+
+  for (const [index, row] of rows.entries()) {
+    const prefix = rows.length > 1 ? `updates[${index}]: ` : '';
+    const requestedId = typeof row.shotId === 'string' ? row.shotId.replace(/^@/, '') : null;
+    const requestedAt = finite(row.atSec) ? row.atSec : null;
+    const spanAt =
+      requestedAt == null
+        ? null
+        : timeline.find(
+            (span, spanIndex, all) =>
+              requestedAt >= span.editedStart - 1e-6 &&
+              (requestedAt < span.editedEnd - 1e-6 || (spanIndex === all.length - 1 && requestedAt <= span.editedEnd + 1e-6)),
+          );
+    const shot = requestedId ? shots.find((candidate) => candidate.id === requestedId) : spanAt?.clip;
+    if (!shot) return { error: `${prefix}${requestedId || requestedAt != null ? 'shot not found' : 'pass shotId or atSec'}` };
+    if (targeted.has(shot.id)) return { error: `${prefix}shot ${shot.id} is targeted more than once` };
+
+    const treatment = row.treatment == null ? undefined : String(row.treatment);
+    if (treatment && !SHOT_TREATMENT_IDS.has(treatment as ShotTreatment)) return { error: `${prefix}invalid treatment: ${treatment}` };
+    const coordinateSpace = row.coordinateSpace == null ? undefined : String(row.coordinateSpace);
+    if (coordinateSpace && coordinateSpace !== 'source-normalized') return { error: `${prefix}invalid coordinateSpace: ${coordinateSpace}` };
+    const invalidNumber = SHOT_FRAMING_NUMBERS.find((key) => key in row && !finite(row[key]));
+    if (invalidNumber) return { error: `${prefix}${invalidNumber} must be a finite number` };
+    const resolvedTreatment = (treatment ?? shot.treatment) as ShotTreatment;
+    if ((row.scale != null || row.anchorX != null || row.anchorY != null) && resolvedTreatment !== 'full' && resolvedTreatment !== 'punch-in') {
+      return { error: `${prefix}scale/anchorX/anchorY are valid only for full or punch-in framing` };
+    }
+    const patch: ShotFramingPatch = {
+      ...(treatment ? { treatment: treatment as ShotTreatment } : {}),
+      ...Object.fromEntries(SHOT_FRAMING_NUMBERS.filter((key) => finite(row[key])).map((key) => [key, row[key]])),
+      ...(coordinateSpace === 'source-normalized' ? { coordinateSpace: 'source-normalized' as const } : {}),
+      ...(typeof row.resetPrecision === 'boolean' ? { resetPrecision: row.resetPrecision } : {}),
+    };
+    if (!Object.keys(patch).length) {
+      return { error: `${prefix}pass treatment / size / crop / scale / anchorX / anchorY / coordinateSpace / resetPrecision` };
+    }
+    targeted.add(shot.id);
+    resolved.push({ shot, patch });
+  }
+
+  const patchById = new Map(resolved.map(({ shot, patch }) => [shot.id, patch]));
+  const nextShots = shots.map((shot) => {
+    const patch = patchById.get(shot.id);
+    return patch ? patchShotFraming(shot, patch) : shot;
+  });
+
+  // Preserve the existing layout contract for legacy partner links: if an updated shot exposes a
+  // vacancy, move its already-linked block to that exact region and shot span. Never create blocks.
+  const nextTimeline = clipSpans(nextShots);
+  const blockPatches = new Map<string, Partial<Block>>();
+  for (const shotId of targeted) {
+    const shot = nextShots.find((candidate) => candidate.id === shotId);
+    const vacancy = shot ? treatmentVacancyBox(shot.treatment, shot.treatSize) : null;
+    const span = nextTimeline.find((candidate) => candidate.clip.id === shotId);
+    if (!shot?.partnerBlockId || !vacancy || !span || !comp.blocks.some((block) => block.id === shot.partnerBlockId)) continue;
+    blockPatches.set(shot.partnerBlockId, {
+      box: vacancy,
+      startSec: span.editedStart,
+      durationSec: Math.max(0.3, span.editedEnd - span.editedStart),
+    });
+  }
+  const blocks = blockPatches.size
+    ? comp.blocks.map((block) => (blockPatches.has(block.id) ? { ...block, ...blockPatches.get(block.id)! } : block))
+    : comp.blocks;
+  const nextComp: Composition = { ...comp, blocks, shots: nextShots };
+  return {
+    comp: nextComp,
+    updates: resolved.map(({ shot }) => {
+      const next = nextShots.find((candidate) => candidate.id === shot.id)!;
+      return {
+        shotId: next.id,
+        treatment: next.treatment,
+        ...(next.treatSize != null ? { size: next.treatSize } : {}),
+        ...(next.treatCrop != null ? { crop: next.treatCrop } : {}),
+        framing: next.preciseFraming ?? null,
+      };
+    }),
+  };
 }
 
 export interface LayoutInput {
@@ -200,6 +326,8 @@ export function validateComposition(comp: Composition): CompositionIssue[] {
       issues.push({ path: `shots[${i}].preciseFraming`, message: 'precise framing is valid only for full/punch-in' });
     } else if (p && (!finite(p.scale) || p.scale < 1 || p.scale > 4 || !finite(p.anchorX) || p.anchorX < 0 || p.anchorX > 1 || !finite(p.anchorY) || p.anchorY < 0 || p.anchorY > 1)) {
       issues.push({ path: `shots[${i}].preciseFraming`, message: 'scale must be 1..4 and anchors 0..1' });
+    } else if (p?.coordinateSpace != null && p.coordinateSpace !== 'source-normalized') {
+      issues.push({ path: `shots[${i}].preciseFraming.coordinateSpace`, message: 'unsupported precise-framing coordinate space' });
     }
   }
   return issues;

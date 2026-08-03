@@ -217,3 +217,31 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
     </div>
   );
 }
+
+/** Presentation-only fallback for legacy/model-emitted scalar framing calls. New calls should use
+ * set_shot_framing.updates[], but persisted conversations may already contain dozens of adjacent
+ * receipts; summarize such a run as one card without rewriting the stored AI SDK message. */
+export function renderToolPartGroup(
+  parts: ToolPartLike[],
+  key: string,
+  opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition },
+): React.ReactNode {
+  if (parts.length <= 1) return parts[0] ? renderToolPart(parts[0], key, opts) : null;
+  const statuses = parts.map(toolStatus);
+  const done = statuses.filter((status) => status.kind === 'done').length;
+  const failed = statuses.filter((status) => status.kind === 'error').length;
+  const running = statuses.length - done - failed;
+  const summary = running
+    ? t('workbench.framingGroupRunning', { n: parts.length, done })
+    : failed
+      ? t('workbench.framingGroupFailed', { n: parts.length, done, failed })
+      : t('workbench.framingGroupDone', { n: parts.length });
+  const first = parts[0]!;
+  const aggregate: ToolPartLike = {
+    type: first.type,
+    ...(first.toolName ? { toolName: first.toolName } : {}),
+    state: running ? 'input-available' : failed ? 'output-error' : 'output-available',
+    ...(running ? {} : failed ? { errorText: summary } : { output: { ok: true, summary } }),
+  };
+  return renderToolPart(aggregate, key, opts);
+}

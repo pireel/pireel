@@ -17,7 +17,7 @@ import { type ChatSituation, buildSituation } from '@pireel/studio-engine/prompt
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import { mid, PiAvatar, ThinkingDots, renderTextWithElementPills } from './chat-format';
-import { renderToolPart, toolStatus, type ToolPartLike } from './chat-tool-parts';
+import { renderToolPart, renderToolPartGroup, toolStatus, type ToolPartLike } from './chat-tool-parts';
 import { Composer, type ComposerHandle } from './chat-composer';
 import { t } from './i18n';
 import type {
@@ -319,6 +319,28 @@ export function ChatThread({
                 while (j < parts.length && parts[j]!.type === 'step-start') j++;
                 if (j < parts.length && parts[j]!.type === 'tool-track_export') collapsed.add(i);
               }
+              // Older runs (and a model ignoring the new vectorized schema) can emit one precise-
+              // framing call per shot. Adjacent calls separated only by SDK step markers become one
+              // visual receipt; message history/tool outputs remain untouched.
+              const framingGroups = new Map<number, ToolPartLike[]>();
+              const isFraming = (part: ToolPartLike) =>
+                part.type === 'tool-set_shot_framing' || (part.type === 'dynamic-tool' && part.toolName === 'set_shot_framing');
+              for (let i = 0; i < parts.length; i++) {
+                if (collapsed.has(i) || !isFraming(parts[i]!)) continue;
+                const grouped = [parts[i]!];
+                const groupedIndexes: number[] = [];
+                let cursor = i + 1;
+                while (cursor < parts.length) {
+                  while (cursor < parts.length && parts[cursor]!.type === 'step-start') cursor++;
+                  if (cursor >= parts.length || !isFraming(parts[cursor]!)) break;
+                  grouped.push(parts[cursor]!);
+                  groupedIndexes.push(cursor);
+                  cursor++;
+                }
+                if (grouped.length <= 1) continue;
+                framingGroups.set(i, grouped);
+                for (const index of groupedIndexes) collapsed.add(index);
+              }
               // Dead-zone detection: stream still running, but the last visible part is neither a "running tool" (its card animates itself)
               // nor "growing text" (the tokens are their own feedback) → show thinking dots, don't let the view freeze
               const busy = status === 'submitted' || status === 'streaming';
@@ -359,7 +381,9 @@ export function ChatThread({
                         if (part.type === 'reasoning') return null;
                         if (part.type.startsWith('tool-') || part.type === 'dynamic-tool')
                           // Locate rides the existing seek tool (playhead + preview follow) — no new channel to the workbench
-                          return renderToolPart(part, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }), getComp });
+                          return framingGroups.has(idx)
+                            ? renderToolPartGroup(framingGroups.get(idx)!, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }), getComp })
+                            : renderToolPart(part, key, { onLocate: (sec) => void runToolRef.current('seek', { toSec: sec }), getComp });
                         return null;
                       })}
                       {thinking && <ThinkingDots />}

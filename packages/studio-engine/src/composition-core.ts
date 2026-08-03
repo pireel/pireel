@@ -139,9 +139,9 @@ export interface VideoShot extends Clip {
    *  source, so something is always cut; this is the knob for choosing what. Ignored by other framings. */
   treatCrop?: number;
   /** Precise subject-aware framing for full/punch-in shots. Coordinates are normalized on the
-   *  cover-fitted video layer (0..1, origin top-left); scale is dimensionless (1 = that fitted frame). Keeping this
-   *  separate from treatment preserves the intent-level layout vocabulary while giving agents an exact,
-   *  renderer-independent crop target. Preview and export both consume the transform produced below. */
+   *  source frame when coordinateSpace='source-normalized'; legacy saved values without that marker
+   *  remain normalized on the cover-fitted video layer. Keeping this separate from treatment preserves
+   *  the intent-level layout vocabulary while giving agents an exact crop target. */
   preciseFraming?: ShotPreciseFraming;
   /** Shot-level color grade (1 = neutral, only stores fields deviating from neutral; applies to the whole shot, swaps at the cut with no transition).
    *  Preview = #vidEl's CSS filter, export = ctx.filter, same shotFilterCss convention on both ends. */
@@ -168,6 +168,10 @@ export interface ShotPreciseFraming {
   scale: number;
   anchorX: number;
   anchorY: number;
+  /** Absent = legacy cover-fitted-canvas transform. Source-normalized framing is applied while the
+   * source frame is drawn, before transitions/mattes, so a changed aspect ratio can recover pixels
+   * outside the old centred cover crop. */
+  coordinateSpace?: 'source-normalized';
 }
 
 export interface ShotFramingPatch {
@@ -176,11 +180,13 @@ export interface ShotFramingPatch {
   size?: number;
   /** Split crop position (0..100). */
   crop?: number;
-  /** Exact cover-frame zoom (1..4). Only valid for full/punch-in. */
+  /** Exact zoom (1..4, relative to the minimum cover fit). Only valid for full/punch-in. */
   scale?: number;
-  /** Subject point on the cover-fitted video layer to keep centred, normalized 0..1. */
+  /** Subject point to keep centred, normalized 0..1 in coordinateSpace (legacy cover layer when absent). */
   anchorX?: number;
   anchorY?: number;
+  /** Explicit only for source-aware exact framing. Omit to retain legacy cover-layer semantics. */
+  coordinateSpace?: 'source-normalized';
   /** Drop the exact override and return to the treatment defaults. */
   resetPrecision?: boolean;
 }
@@ -510,12 +516,13 @@ export function patchShotFraming<T extends VideoShot>(shot: T, patch: ShotFramin
 
   if (patch.resetPrecision || (treatment !== 'full' && treatment !== 'punch-in')) {
     delete next.preciseFraming;
-  } else if (patch.scale != null || patch.anchorX != null || patch.anchorY != null) {
+  } else if (patch.scale != null || patch.anchorX != null || patch.anchorY != null || patch.coordinateSpace != null) {
     const prev = shot.preciseFraming;
     next.preciseFraming = {
       scale: Math.round(clamp(Number.isFinite(patch.scale) ? patch.scale! : (prev?.scale ?? treatmentScale(treatment, next.treatSize)), 1, 4) * 1000) / 1000,
       anchorX: Math.round(clamp(Number.isFinite(patch.anchorX) ? patch.anchorX! : (prev?.anchorX ?? 0.5), 0, 1) * 1000) / 1000,
       anchorY: Math.round(clamp(Number.isFinite(patch.anchorY) ? patch.anchorY! : (prev?.anchorY ?? 0.5), 0, 1) * 1000) / 1000,
+      ...((patch.coordinateSpace ?? prev?.coordinateSpace) === 'source-normalized' ? { coordinateSpace: 'source-normalized' as const } : {}),
     };
   }
   return next as T;
@@ -544,6 +551,11 @@ export interface ShotVars {
 export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): ShotVars {
   const s = treatmentScale(tr, size);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  // Source-normalized precision is already baked into the pixels drawn onto #vidEl. Applying the
+  // legacy canvas transform again would double-zoom and lose preview/export parity.
+  if (precise?.coordinateSpace === 'source-normalized' && (tr === 'full' || tr === 'punch-in')) {
+    return { scale: 1, xPercent: 0, yPercent: 0, borderRadius: 0, clipPath: 'inset(0% 0% 0% 0%)' };
+  }
   if (precise && (tr === 'full' || tr === 'punch-in')) {
     const ps = clamp(precise.scale, 1, 4);
     const ax = clamp(precise.anchorX, 0, 1);
@@ -670,7 +682,12 @@ export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotT
     const prev = final[final.length - 1];
     const samePrecise =
       (!prev?.precise && !k.precise) ||
-      (!!prev?.precise && !!k.precise && prev.precise.scale === k.precise.scale && prev.precise.anchorX === k.precise.anchorX && prev.precise.anchorY === k.precise.anchorY);
+      (!!prev?.precise &&
+        !!k.precise &&
+        prev.precise.scale === k.precise.scale &&
+        prev.precise.anchorX === k.precise.anchorX &&
+        prev.precise.anchorY === k.precise.anchorY &&
+        prev.precise.coordinateSpace === k.precise.coordinateSpace);
     if (!prev || prev.tr !== k.tr || (prev.size ?? -1) !== (k.size ?? -1) || (prev.crop ?? -1) !== (k.crop ?? -1) || !samePrecise) final.push(k);
   }
   return final;

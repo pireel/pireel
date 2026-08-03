@@ -9,6 +9,9 @@ import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
 import { type Composition, emptyComposition } from './composition';
+import { canonicalJson, hashSection } from './stable-json';
+
+export { canonicalJson, hashSection } from './stable-json';
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {
@@ -165,34 +168,6 @@ export interface ProjectSaveWire {
   title?: string;
   videoSig?: string | null;
   videoDurationSec?: number | null;
-}
-
-/** Canonical serialization (object keys sorted): the hash must match on both ends, but jsonb
- *  storage reorders keys, so plain JSON.stringify yields different strings for the same data.
- *  undefined handled per JSON semantics (object keys dropped / array elements → null). */
-export function canonicalJson(v: unknown): string {
-  if (v === undefined) return 'null';
-  if (v === null || typeof v !== 'object') return JSON.stringify(v);
-  if (Array.isArray(v)) return `[${v.map((x) => canonicalJson(x)).join(',')}]`;
-  const o = v as Record<string, unknown>;
-  const keys = Object.keys(o)
-    .filter((k) => o[k] !== undefined)
-    .sort();
-  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`).join(',')}}`;
-}
-
-/** Section hash: two 32-bit rolling hashes (FNV-1a + multiplicative) + length, ~64-bit collision
- *  rate — a collision just means one edit to a section doesn't reach the cloud (self-heals on the
- *  next change), not worth pulling in an async SHA. */
-export function hashSection(s: string): string {
-  let a = 0x811c9dc5;
-  let b = 0x12345679;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    a = Math.imul(a ^ c, 0x01000193);
-    b = (Math.imul(b + c, 0x85ebca6b) ^ (b >>> 13)) | 0;
-  }
-  return `${(a >>> 0).toString(36)}.${(b >>> 0).toString(36)}.${s.length}`;
 }
 
 export interface SectionHashes {

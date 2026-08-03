@@ -18,6 +18,7 @@ import {
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
+import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 
 /* ============================ Assembly ============================ */
 
@@ -47,26 +48,27 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var TRS = ${JSON.stringify(transitions)};
   var MIX = null;
   try { MIX = (${GL_MIXER_SRC})(W, H, ${JSON.stringify(TRANSITION_GLSL)}); } catch (eM) {}
-  var liveBmp = null, ghostBmp = null, lastT = -1, ghostAtT = -1, bakedWinCut = -1;
+  var liveBmp = null, ghostBmp = null, liveFraming = null, ghostFraming = null, lastT = -1, ghostAtT = -1, bakedWinCut = -1;
   var liveVer = 0, ghostVer = 0, stagedLiveVer = -1, stagedGhostVer = -1;
   var frozen = null, frozenCut = null, ghostWarned = false;
   var mkStage = function () { var s = document.createElement('canvas'); s.width = W; s.height = H; return s; };
   var stageLive = mkStage(), stageGhost = mkStage();
-  var cover = function (stage, bmp) {
+  var sourceRect = (${SOURCE_DRAW_RECT_FUNCTION});
+  var cover = function (stage, bmp, framing) {
     var g = stage.getContext('2d');
-    var k = Math.max(W / bmp.width, H / bmp.height), dw = bmp.width * k, dh = bmp.height * k;
+    var r = sourceRect(bmp.width, bmp.height, W, H, framing);
     g.clearRect(0, 0, W, H);
-    g.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    g.drawImage(bmp, r.x, r.y, r.width, r.height);
     return stage;
   };
   // per-source staging + version: if the frame is unchanged, redraw only — skip re-cover/re-upload (clock-driven per-tick recompositing is what hits 60fps)
-  var SL = function () { if (stagedLiveVer !== liveVer) { cover(stageLive, liveBmp); stagedLiveVer = liveVer; } return stageLive; };
-  var SG = function () { if (stagedGhostVer !== ghostVer) { cover(stageGhost, ghostBmp); stagedGhostVer = ghostVer; } return stageGhost; };
-  var drawPlain = function (bmp) {
+  var SL = function () { if (stagedLiveVer !== liveVer) { cover(stageLive, liveBmp, liveFraming); stagedLiveVer = liveVer; } return stageLive; };
+  var SG = function () { if (stagedGhostVer !== ghostVer) { cover(stageGhost, ghostBmp, ghostFraming); stagedGhostVer = ghostVer; } return stageGhost; };
+  var drawPlain = function (bmp, framing) {
     if (!bmp) return;
-    var k = Math.max(W / bmp.width, H / bmp.height), dw = bmp.width * k, dh = bmp.height * k;
+    var r = sourceRect(bmp.width, bmp.height, W, H, framing);
     ctx.clearRect(0, 0, W, H);
-    ctx.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    ctx.drawImage(bmp, r.x, r.y, r.width, r.height);
   };
   var render = function (t) {
     if (!liveBmp || !(t >= 0)) return;
@@ -82,10 +84,10 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
       // side switch: ghosts arriving before the cut are B's pre-roll; after the cut "from" should be A's tail — old-side frames are discarded,
       // and until the new-side ghost arrives the frozen last frame of A holds (content stays continuous, no flicker). Ghost frames whose
       // arrival time is past the cut are already new-side (the engine's ghostFresh gate verified this) — don't kill them by mistake
-      if (ghostBmp && ghostAtT < tr.cut) { try { ghostBmp.close(); } catch (eX) {} ghostBmp = null; }
+      if (ghostBmp && ghostAtT < tr.cut) { try { ghostBmp.close(); } catch (eX) {} ghostBmp = null; ghostFraming = null; }
     }
     lastT = t;
-    if (!tr) { bakedWinCut = -1; drawPlain(liveBmp); return; }
+    if (!tr) { bakedWinCut = -1; drawPlain(liveBmp, liveFraming); return; }
     // this window is now owned by baked frames: the old dual-stream compositing steps aside entirely (don't draw into inter-frame gaps either — that layers up into strobe)
     if (bakedWinCut === tr.cut) return;
     var p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
@@ -101,7 +103,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
       ctx.drawImage(MIX.canvas, 0, 0, W, H);
       return;
     }
-    drawPlain(liveBmp); // GL unavailable / ghost not warm and no frozen frame: hard cut
+    drawPlain(liveBmp, liveFraming); // GL unavailable / ghost not warm and no frozen frame: hard cut
   };
   // current frame's source info (personCut needs it for the mask): elKey='main'|clip_<shotId>, srcT=time within that source file
   window.__vidSrc = null;
@@ -128,27 +130,27 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
         var bt = typeof d.t === 'number' ? d.t : lastT;
         lastT = bt;
         for (var bwi = 0; bwi < TRS.length; bwi++) { if (bt >= TRS[bwi].cut - TRS[bwi].half && bt <= TRS[bwi].cut + TRS[bwi].half) { bakedWinCut = TRS[bwi].cut; break; } }
-        window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.frame.width, h: d.frame.height };
+        window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.sourceWidth || d.frame.width, h: d.sourceHeight || d.frame.height, framing: d.framing || null };
       } catch (errB) {}
       try { d.frame.close && d.frame.close(); } catch (errB2) {}
       return;
     }
     try {
       if (liveBmp && liveBmp.close) { try { liveBmp.close(); } catch (errC) {} }
-      liveBmp = d.frame; liveVer++;
+      liveBmp = d.frame; liveFraming = d.framing || null; liveVer++;
       if (d.frame2) {
         if (ghostBmp && ghostBmp.close) { try { ghostBmp.close(); } catch (errG) {} }
-        ghostBmp = d.frame2; ghostVer++;
+        ghostBmp = d.frame2; ghostFraming = d.framing2 || null; ghostVer++;
         ghostAtT = typeof d.t === 'number' ? d.t : lastT;
       } else if (ghostBmp) {
         // discard ghost frame once out of the window (if missing inside the window, reuse the last one — a tiny stutter beats a flicker cut)
         var t0 = typeof d.t === 'number' ? d.t : lastT;
         var inWin = false;
         for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].cut - TRS[wi].half && t0 <= TRS[wi].cut + TRS[wi].half) { inWin = true; break; } }
-        if (!inWin) { try { ghostBmp.close(); } catch (errG2) {} ghostBmp = null; }
+        if (!inWin) { try { ghostBmp.close(); } catch (errG2) {} ghostBmp = null; ghostFraming = null; }
       }
       render(typeof d.t === 'number' ? d.t : lastT);
-      window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.frame.width, h: d.frame.height };
+      window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.sourceWidth || d.frame.width, h: d.sourceHeight || d.frame.height, framing: liveFraming };
     } catch (err) {}
   });
 })();`;
@@ -176,6 +178,7 @@ const PERSON_CUT_SHIM = `(function(){
   var strokeC = c.getAttribute('data-stroke-color') || '#ffffff';
   var bgEl = document.getElementById('personBg');
   var W = c.width, H = c.height;
+  var sourceRect = (${SOURCE_DRAW_RECT_FUNCTION});
   // person (video ∘ mask) and stroke silhouette each render offscreen; the main canvas composites in stroke→person order
   var P = document.createElement('canvas'); P.width = W; P.height = H;
   var pctx = P.getContext('2d');
@@ -320,7 +323,7 @@ const PERSON_CUT_SHIM = `(function(){
     if (!mask) return;
     // mask aspect ratio = source frame; the on-canvas frame is already cover-fit, so align the mask with the same cover mapping
     var vw = fi.w || W, vh = fi.h || H;
-    var k = Math.max(W / vw, H / vh), dw = vw * k, dh = vh * k, dx = (W - dw) / 2, dy = (H - dh) / 2;
+    var rect = sourceRect(vw, vh, W, H, fi.framing || null), dw = rect.width, dh = rect.height, dx = rect.x, dy = rect.y;
     pctx.clearRect(0, 0, W, H);
     pctx.drawImage(v, 0, 0); // video frame taken straight from the #vidEl canvas (already cover-composited)
     pctx.globalCompositeOperation = 'destination-in';

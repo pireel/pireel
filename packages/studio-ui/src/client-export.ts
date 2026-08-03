@@ -3,8 +3,8 @@
  *
  *  Video layer (track 0, multi-source) — each source (main video File / insert-clip File|URL)
  *    gets one sequential MediaBunny sample stream; frames are drawn to canvas per edited time.
- *    Framing transforms are not recomputed — the GSAP/inline computed transform inside the
- *    hidden iframe is copied verbatim per frame (strictly same-source as the preview).
+ *    Legacy framing transforms are copied from the hidden iframe; source-normalized precise framing
+ *    uses the same sourceDrawRect geometry as preview before transitions are composited.
  *  Overlay layer (track ≥1) — after seekTimelines(t) on the same iframe, #root is serialized
  *    into an SVG foreignObject → <img> → drawImage; the rasterizer is Blink itself. Fonts and
  *    in-block images must be inlined as data: (foreignObject rasterization forbids any external
@@ -36,7 +36,23 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, parseClipInset, segmentFadeFn, shotFilterCss, shotGain, shotsContiguous, totalDuration, validateComposition } from '@pireel/studio-engine/composition';
+import {
+  type AudioClip,
+  type Composition,
+  type ShotFilter,
+  type ShotPreciseFraming,
+  type TransitionDirection,
+  assembleHtml,
+  cutTransitions,
+  parseClipInset,
+  segmentFadeFn,
+  shotFilterCss,
+  shotGain,
+  shotsContiguous,
+  sourceDrawRect,
+  totalDuration,
+  validateComposition,
+} from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
 import { mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
@@ -44,6 +60,7 @@ import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { buildInlineFontCss } from './export-fonts';
 import { t } from './i18n';
+import { fingerprintReviewPixels, type ReviewFrameFingerprint } from './review-similarity';
 
 /** Export options (chosen in the dialog): res=short-side pixels (width for portrait), fps, format=container/codec. */
 export interface ExportRenderOpts {
@@ -71,6 +88,8 @@ interface ExpSeg {
   gain?: number;
   /** Segment-local fade factor (segmentFadeFn: shot fades × seam micro-fades); absent = flat. */
   fadeAt?: (tLocal: number) => number;
+  /** Source-normalized precision is drawn before the element-level framing matrix. */
+  framing?: ShotPreciseFraming;
 }
 
 export interface SourceRig {
@@ -81,8 +100,9 @@ export interface SourceRig {
   it: AsyncIterator<VideoSample> | null;
   cur: VideoSample | null;
   pending: VideoSample | null;
-  dw: number;
-  dh: number;
+  /** Native displayed source dimensions used by the shared source-framing geometry. */
+  sw: number;
+  sh: number;
 }
 
 export async function openSource(file: File, from: number, to: number, W: number, H: number): Promise<SourceRig> {
@@ -90,7 +110,6 @@ export async function openSource(file: File, from: number, to: number, W: number
   const video = await input.getPrimaryVideoTrack();
   if (!video) throw new Error(t('common.sourceNoVideoTrack'));
   const audio = await input.getPrimaryAudioTrack();
-  const cover = Math.max(W / video.displayWidth, H / video.displayHeight);
   const sink = new VideoSampleSink(video);
   return {
     input,
@@ -99,8 +118,8 @@ export async function openSource(file: File, from: number, to: number, W: number
     it: sink.samples(from, to + 0.5)[Symbol.asyncIterator](),
     cur: null,
     pending: null,
-    dw: video.displayWidth * cover,
-    dh: video.displayHeight * cover,
+    sw: video.displayWidth,
+    sh: video.displayHeight,
   };
 }
 
@@ -287,6 +306,14 @@ export class ExportCanceled extends Error {
  *  from the same render pipeline as export — theme background + source video frame (with framing
  *  transform/rounded corners/shadow) + overlay foreignObject rasterization.
  *  Returns a downsampled JPEG dataURL (small enough for LLM context); with no video, draws only background + overlay. */
+export interface CapturedCompositionFrame {
+  dataUrl: string;
+  width: number;
+  height: number;
+  /** Local-only fingerprint of the composed frame before the harness timecode is burned in. */
+  localSimilarityFingerprint?: ReviewFrameFingerprint;
+}
+
 export async function captureCompositionFrame(opts: {
   comp: Composition;
   videoFile: File | null;
@@ -297,7 +324,9 @@ export async function captureCompositionFrame(opts: {
   /** Burn a small dark chip with this text into the top-left corner — captured frames self-identify
    *  (the agent may hold several) and the label survives any downstream re-encoding. */
   burnLabel?: string;
-}): Promise<{ dataUrl: string; width: number; height: number }> {
+  /** Compute a local visual fingerprint for paid-review deduplication. */
+  localSimilarityFingerprint?: boolean;
+}): Promise<CapturedCompositionFrame> {
   const { comp } = opts;
   assertExportableComposition(comp);
   const W = comp.width;
@@ -311,6 +340,7 @@ export async function captureCompositionFrame(opts: {
   // Find which edited segment t falls in (same logic as export's segAt), open only that one source
   let rig: SourceRig | null = null;
   let srcT = 0;
+  let sourceFraming: ShotPreciseFraming | undefined;
   if (opts.videoFile) {
     const shots = comp.shots?.length ? comp.shots : [{ id: 'all', srcStart: 0, srcEnd: comp.video?.durationSec ?? 0, treatment: 'full' as const }];
     let file: File | null = null;
@@ -319,6 +349,7 @@ export async function captureCompositionFrame(opts: {
         const s = sp.clip as (typeof shots)[number] & { src?: string };
         srcT = Math.min(s.srcEnd, s.srcStart + (t - sp.editedStart));
         file = s.src ? (opts.clipFiles.get(s.src) ?? null) : opts.videoFile;
+        sourceFraming = s.preciseFraming?.coordinateSpace === 'source-normalized' ? s.preciseFraming : undefined;
         break;
       }
     }
@@ -362,11 +393,22 @@ export async function captureCompositionFrame(opts: {
       ctx.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
       ctx.translate(-W / 2, -H / 2);
       ctx.clip(framedClipPath(W, H, vs));
-      sample.draw(ctx, (W - rig.dw) / 2, (H - rig.dh) / 2, rig.dw, rig.dh);
+      const rect = sourceDrawRect(rig.sw, rig.sh, W, H, sourceFraming);
+      sample.draw(ctx, rect.x, rect.y, rect.width, rect.height);
       ctx.restore();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
     ctx.drawImage(overlayImg, 0, 0);
+    let localSimilarityFingerprint: ReviewFrameFingerprint | undefined;
+    if (opts.localSimilarityFingerprint) {
+      try {
+        const pixels = ctx.getImageData(0, 0, outW, outH);
+        localSimilarityFingerprint = fingerprintReviewPixels(pixels.data, outW, outH) ?? undefined;
+      } catch {
+        // A tainted/unsupported canvas must never turn into a false local match: no fingerprint means
+        // this frame remains distinct and is conservatively sent to the cloud reviewer.
+      }
+    }
     if (opts.burnLabel) {
       const fs = Math.max(14, Math.round(Math.max(outW, outH) * 0.028));
       const pad = Math.round(fs * 0.45);
@@ -381,7 +423,12 @@ export async function captureCompositionFrame(opts: {
       ctx.textBaseline = 'middle';
       ctx.fillText(opts.burnLabel, pad * 2, pad + bh / 2 + 0.5);
     }
-    return { dataUrl: canvas.toDataURL('image/jpeg', 0.8), width: outW, height: outH };
+    return {
+      dataUrl: canvas.toDataURL('image/jpeg', 0.8),
+      width: outW,
+      height: outH,
+      ...(localSimilarityFingerprint ? { localSimilarityFingerprint } : {}),
+    };
   } finally {
     if (rig) {
       rig.cur?.close();
@@ -438,12 +485,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       !!next && !shotsContiguous(s, next),
     );
     const fade = fadeFn ? { fadeAt: fadeFn } : {};
+    const framing = s.preciseFraming?.coordinateSpace === 'source-normalized' ? { framing: s.preciseFraming } : {};
     if (!s.src) {
-      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter, ...gain, ...fade });
+      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter, ...gain, ...fade, ...framing });
       continue;
     }
     const key = `clip_${s.id}`;
-    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter, ...gain, ...fade });
+    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter, ...gain, ...fade, ...framing });
     if (!files.has(key)) {
       const local = clipFiles.get(s.src);
       if (local) files.set(key, local);
@@ -662,7 +710,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       // transform (crisp text/graphics at 4K). The source video is still drawn in comp coordinates;
       // setTransform(Sx) maps the target rect to output size, drawImage scales straight from native frames.
       // Single-side video layer paint pipeline (shared by live and ghost): framing transform + rounded-corner clip + shadow + per-shot grade
-      const paintLayer = (tc: OffscreenCanvasRenderingContext2D, smp: { draw: (c2: OffscreenCanvasRenderingContext2D, x: number, y: number, w2: number, h2: number) => void }, rg: SourceRig, filterCss?: string) => {
+      const paintLayer = (
+        tc: OffscreenCanvasRenderingContext2D,
+        smp: { draw: (c2: OffscreenCanvasRenderingContext2D, x: number, y: number, w2: number, h2: number) => void },
+        rg: SourceRig,
+        layerSeg: ExpSeg,
+        filterCss?: string,
+      ) => {
         tc.setTransform(1, 0, 0, 1, 0, 0);
         tc.clearRect(0, 0, outW, outH);
         tc.setTransform(Sx, 0, 0, Sy, 0, 0);
@@ -686,20 +740,21 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         tc.clip(path);
         // Per-shot grade: same source as the preview's #vidEl CSS filter (canvas filter, same syntax); restore resets it
         if (filterCss) tc.filter = filterCss;
-        smp.draw(tc, (W - rg.dw) / 2, (H - rg.dh) / 2, rg.dw, rg.dh);
+        const rect = sourceDrawRect(rg.sw, rg.sh, W, H, layerSeg.framing);
+        smp.draw(tc, rect.x, rect.y, rect.width, rect.height);
         tc.restore();
         tc.setTransform(1, 0, 0, 1, 0, 0);
       };
       lctx.setTransform(1, 0, 0, 1, 0, 0);
       lctx.clearRect(0, 0, outW, outH);
-      if (sample && rig) paintLayer(lctx, sample, rig, seg.filter);
+      if (sample && rig) paintLayer(lctx, sample, rig, seg, seg.filter);
       // Shadow layer: the "other side" frame within the window (true dual-stream; sample out-of-range/absent = hard-cut fallback)
       let ghostReady = false;
       if (tr) {
         gctx.setTransform(1, 0, 0, 1, 0, 0);
         gctx.clearRect(0, 0, outW, outH);
         if (gSample && gRig && gseg) {
-          paintLayer(gctx, gSample, gRig, gseg.filter);
+          paintLayer(gctx, gSample, gRig, gseg, gseg.filter);
           ghostReady = true;
         }
       }

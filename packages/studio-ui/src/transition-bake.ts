@@ -8,13 +8,12 @@
  * approaches the window, then drops them once past. Bake fails / didn't finish → engine
  * falls back to the shadow-decode path, same semantics.
  *
- * Frame content matches the preview shim exactly: both source frames composed cover
- * (no framing/grading — those are element-level CSS transform/filter on #vidEl in the
- * preview, applied by GSAP keyframes over the whole canvas as usual).
+ * Frame content matches the preview shim: source-normalized framing is applied per side before
+ * mixing; legacy framing/grading remain element-level CSS transform/filter on #vidEl.
  */
 
 import { type GlMixer, createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
-import type { CutTransitionEffect, TransitionDirection } from '@pireel/studio-engine/composition';
+import { sourceDrawRect, type CutTransitionEffect, type ShotPreciseFraming, type TransitionDirection } from '@pireel/studio-engine/composition';
 import { type SourceRig, openSource, sampleAt } from './client-export';
 
 export interface BakeSpec {
@@ -28,6 +27,8 @@ export interface BakeSpec {
   aEnd: number;
   fileB: File;
   bStart: number;
+  framingA?: ShotPreciseFraming;
+  framingB?: ShotPreciseFraming;
   /** Canvas (comp) size — bake renders at 0.5×. */
   compW: number;
   compH: number;
@@ -74,12 +75,13 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
     // Each side draws into its own stage; if sampling runs out of bounds (handle too short), reuse the last frame rather than aborting the bake
     let haveF = false;
     let haveT = false;
-    const drawSide = async (rig: SourceRig, srcT: number, stage: OffscreenCanvas): Promise<boolean> => {
+    const drawSide = async (rig: SourceRig, srcT: number, stage: OffscreenCanvas, framing?: ShotPreciseFraming): Promise<boolean> => {
       const smp = await sampleAt(rig, srcT);
       if (!smp) return false;
       const g = stage.getContext('2d')!;
       g.clearRect(0, 0, W, H);
-      smp.draw(g, (W - rig.dw) / 2, (H - rig.dh) / 2, rig.dw, rig.dh);
+      const rect = sourceDrawRect(rig.sw, rig.sh, W, H, framing);
+      smp.draw(g, rect.x, rect.y, rect.width, rect.height);
       return true;
     };
     for (let i = 0; i < n; i++) {
@@ -88,8 +90,14 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
       const p = i / (n - 1);
       const pre = t < spec.cut;
       // from/to same convention as shim: before cut A live / B pre-roll, after cut A tail / B live
-      haveF = (pre ? await drawSide(liveA, spec.aEnd - (spec.cut - t), stageF) : await drawSide(ghostA, spec.aEnd + (t - spec.cut), stageF)) || haveF;
-      haveT = (pre ? await drawSide(ghostB, spec.bStart - (spec.cut - t), stageT) : await drawSide(liveB, spec.bStart + (t - spec.cut), stageT)) || haveT;
+      haveF =
+        (pre
+          ? await drawSide(liveA, spec.aEnd - (spec.cut - t), stageF, spec.framingA)
+          : await drawSide(ghostA, spec.aEnd + (t - spec.cut), stageF, spec.framingA)) || haveF;
+      haveT =
+        (pre
+          ? await drawSide(ghostB, spec.bStart - (spec.cut - t), stageT, spec.framingB)
+          : await drawSide(liveB, spec.bStart + (t - spec.cut), stageT, spec.framingB)) || haveT;
       if (!haveF || !haveT) return null; // can't even sample the first frame: this window can't be baked (media boundary)
       if (!mixer.render(stageF, stageT, spec.effect, p, dx, dy, `f${i}`, `t${i}`)) return null;
       octx.clearRect(0, 0, W, H);

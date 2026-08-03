@@ -64,6 +64,30 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
   });
+  it('画幅重构由 Agent 组合原语，不暴露完整功能工具', () => {
+    expect(STUDIO_TOOLS.some((t) => ['auto_reframe', 'reframe_video'].includes(t.id))).toBe(false);
+    expect(CHAT_IDENTITY).toContain('ASPECT REFRAMING IS A WORKFLOW, NOT A TOOL');
+    for (const id of ['analyze_visual', 'set_canvas', 'split_shot', 'set_shot_framing', 'review_visuals']) {
+      expect(CHAT_IDENTITY).toContain(id);
+    }
+  });
+  it('批量精确取景是一笔原子调用,画面分析先返回本地稳定人物区间', () => {
+    const framing = STUDIO_TOOLS.find((tool) => tool.id === 'set_shot_framing')!;
+    const framingSchema = framing.inputSchema as { properties: Record<string, unknown> };
+    expect(framingSchema.properties).toHaveProperty('updates');
+    expect(framing.description).toContain('ONE updates[] call');
+    expect(CHAT_IDENTITY).toContain('ONE set_shot_framing {updates:[...]} call');
+    const visual = STUDIO_TOOLS.find((tool) => tool.id === 'analyze_visual')!;
+    expect(visual.description).toContain('subjectTracks');
+    expect(visual.description).toContain('already clustered locally');
+  });
+  it('成品画面复检先本地去重，并允许显式逐帧云端检查', () => {
+    const review = STUDIO_TOOLS.find((tool) => tool.id === 'review_visuals')!;
+    const schema = review.inputSchema as { properties: Record<string, unknown> };
+    expect(review.description).toContain('compares them locally');
+    expect(schema.properties).toHaveProperty('forceCloudAll');
+    expect(CHAT_IDENTITY).toContain('locally collapses visually similar frames');
+  });
   it('口播剪辑手册单独 skill:工具在表、映射到我们的剪辑面、按需进(不进 system)', () => {
     expect(STUDIO_TOOLS.some((t) => t.id === 'read_editing_guide')).toBe(true);
     expect(AROLL_GUIDE).toContain('cut_narration'); // 映射到我们的剪辑面
