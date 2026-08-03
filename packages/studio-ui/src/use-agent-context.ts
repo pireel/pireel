@@ -152,6 +152,9 @@ export function useAgentContext(deps: AgentContextDeps) {
             srcStart: sp.clip.srcStart,
             srcEnd: sp.clip.srcEnd,
             treatment: sp.clip.treatment,
+            ...(sp.clip.treatSize != null ? { size: sp.clip.treatSize } : {}),
+            ...(sp.clip.treatCrop != null ? { crop: sp.clip.treatCrop } : {}),
+            ...(sp.clip.preciseFraming ? { ...sp.clip.preciseFraming } : {}),
             ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
             ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
           }));
@@ -261,6 +264,13 @@ export function useAgentContext(deps: AgentContextDeps) {
    *     clip's own geometry analysis (local File + MediaPipe, avoiding faces), falling back to a fixed box on unavailable/failure. */
   const restoreDraftContext = async (draft: Composition, vis: VisualTimeline | null): Promise<Composition> => {
     const keep = compRef.current;
+    if (draft.video && keep.video) {
+      draft.video = {
+        ...draft.video,
+        ...(keep.video.sourceWidth ? { sourceWidth: keep.video.sourceWidth } : {}),
+        ...(keep.video.sourceHeight ? { sourceHeight: keep.video.sourceHeight } : {}),
+      };
+    }
     if (keep.frameId) {
       draft.frameId = keep.frameId;
       if (keep.palette) draft.palette = keep.palette;

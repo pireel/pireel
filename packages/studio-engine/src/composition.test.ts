@@ -26,6 +26,7 @@ import {
   VOLUME_DB_MIN,
   dbToGain,
   patchShotAudio,
+  patchShotFraming,
   shotFadeAt,
   shotsContiguous,
   segmentFadeFn,
@@ -706,6 +707,31 @@ describe('取景 clipPath 可插值(所有取景同 token 数)', () => {
       const clip = shotTransformVars(tr).clipPath;
       expect(clip.match(/[\d.]+%/g), `${tr} → ${clip}`).toHaveLength(4);
     }
+  });
+});
+
+describe('精确主体取景(预览/导出共用 transform)', () => {
+  it('scale+source anchor 转成无露边的中心缩放/位移', () => {
+    expect(shotTransformVars('full', undefined, undefined, { scale: 2, anchorX: 0.5, anchorY: 0.5 })).toMatchObject({ scale: 2, xPercent: 0, yPercent: 0 });
+    expect(shotTransformVars('full', undefined, undefined, { scale: 2, anchorX: 0, anchorY: 1 })).toMatchObject({ scale: 2, xPercent: 50, yPercent: -50 });
+  });
+
+  it('patch 统一归一化数值,切到 split 自动丢弃无意义的精确锚点', () => {
+    const base: VideoShot = { id: 's', srcStart: 0, srcEnd: 3, treatment: 'full' };
+    const exact = patchShotFraming(base, { scale: 9, anchorX: -2, anchorY: 0.33333 });
+    expect(exact.preciseFraming).toEqual({ scale: 4, anchorX: 0, anchorY: 0.333 });
+    expect(patchShotFraming(exact, { treatment: 'split-l' }).preciseFraming).toBeUndefined();
+  });
+
+  it('时间轴保留精确 framing,相邻相同状态仍会去重', () => {
+    const precise = { scale: 1.8, anchorX: 0.3, anchorY: 0.4 };
+    const keys = videoFrameKeyframes([
+      { id: 'a', srcStart: 0, srcEnd: 2, treatment: 'full', preciseFraming: precise },
+      { id: 'b', srcStart: 2, srcEnd: 4, treatment: 'full', preciseFraming: precise },
+    ]);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]!.precise).toEqual(precise);
+    expect(videoFrameTimelineBody([{ id: 'a', srcStart: 0, srcEnd: 2, treatment: 'full', preciseFraming: precise }])).toContain('scale: 1.8');
   });
 });
 

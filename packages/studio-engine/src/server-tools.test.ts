@@ -96,6 +96,55 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(false);
     expect(r2.result.error).toContain('no screen box');
   });
+  it('P0 canvas/framing/layout:离线与 Chat 共用原语,每次回执都有实际 delta', () => {
+    const p = proj();
+    const canvas = runServerTool('set_canvas', { preset: 'landscape' }, p);
+    expect(canvas.result.ok).toBe(true);
+    expect([canvas.comp!.width, canvas.comp!.height]).toEqual([1920, 1080]);
+    expect((canvas.result.data as { delta: { canvas: unknown } }).delta.canvas).toEqual({ from: [1080, 1920], to: [1920, 1080] });
+
+    const framing = runServerTool('set_shot_framing', { shotId: 's1', scale: 2, anchorX: 0.2, anchorY: 0.4 }, p);
+    expect(framing.result.ok).toBe(true);
+    expect(framing.comp!.shots![0]!.preciseFraming).toEqual({ scale: 2, anchorX: 0.2, anchorY: 0.4 });
+    expect((framing.result.data as { delta: { shotsUpdated: { ids: string[] } } }).delta.shotsUpdated.ids).toEqual(['s1']);
+    const invalidPrecision = runServerTool('set_shot_framing', { shotId: 's1', treatment: 'split-l', scale: 2 }, p);
+    expect(invalidPrecision.result.ok).toBe(false);
+    expect(invalidPrecision.comp).toBeUndefined();
+
+    const layout = runServerTool('apply_layout', { layout: 'split-left-right', blockIds: ['b1'], shotId: 's1', videoPosition: 'left' }, p);
+    expect(layout.result.ok).toBe(true);
+    expect(layout.comp!.shots![0]!.treatment).toBe('split-l');
+    expect(layout.comp!.blocks[0]!.box).toBeTruthy();
+  });
+  it('P0 word addressing/delete:稳定 id 精确删词,stale id 整笔拒绝', () => {
+    const p = proj({
+      context: {
+        asr: [
+          {
+            start: 0,
+            end: 4,
+            text: 'one two three',
+            words: [
+              { text: 'one', start: 0.2, end: 0.8 },
+              { text: 'two', start: 1, end: 1.6 },
+              { text: 'three', start: 2, end: 2.8 },
+            ],
+          },
+        ],
+      },
+    });
+    const listed = runServerTool('list_words', {}, p);
+    expect(listed.result.ok).toBe(true);
+    const words = (listed.result.data as { words: { id: string }[] }).words;
+    expect(words).toHaveLength(3);
+    const stale = runServerTool('delete_words', { wordIds: [words[0]!.id, 'word_stale'] }, p);
+    expect(stale.result.ok).toBe(false);
+    expect(stale.comp).toBeUndefined();
+    const deleted = runServerTool('delete_words', { wordIds: [words[1]!.id] }, p);
+    expect(deleted.result.ok).toBe(true);
+    expect(deleted.comp!.shots!.reduce((n, s) => n + s.srcEnd - s.srcStart, 0)).toBeCloseTo(19.4, 1);
+    expect((deleted.result.data as { delta: { durationSec: [number, number] } }).delta.durationSec).toEqual([20, 19.4]);
+  });
   it('cut_narration:源秒→成片秒换算 + 删除(与浏览器同一批 trim 纯函数)', () => {
     const p = proj();
     const r = runServerTool('cut_narration', { ranges: [{ fromSec: 0, toSec: 5 }] }, p);
@@ -299,6 +348,9 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect((r3.result.data as { newBlockId: string }).newBlockId).toBe(handed);
   });
   it('不支持的工具明确拒绝(路由据 SERVER_EXECUTABLE_TOOLS 预筛,这里兜底)', () => {
+    for (const id of ['set_canvas', 'set_shot_framing', 'apply_layout', 'list_words', 'delete_words']) {
+      expect(SERVER_EXECUTABLE_TOOLS.has(id)).toBe(true);
+    }
     expect(SERVER_EXECUTABLE_TOOLS.has('extract_asr')).toBe(false);
     expect(SERVER_EXECUTABLE_TOOLS.has('capture_frame')).toBe(false);
     const r = runServerTool('extract_asr', {}, proj());

@@ -68,8 +68,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
-  const relayCaptionLayer = (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null): Block[] =>
-    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, { subLang: resolveCaptionStyle(compRef.current).sub?.lang, canvasW: compRef.current.width });
+  const relayCaptionLayer = (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null, canvasW = compRef.current.width): Block[] =>
+    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, { subLang: resolveCaptionStyle(compRef.current).sub?.lang, canvasW });
   /** Edit one caption line's TEXT (captions panel). Single source of truth = the transcript: the fix
    *  reaches caption re-lay, read_script/agents and the script panel at once. Timing untouched; word
    *  timing redistributed proportionally within the sentence (wordsFromText — karaoke presets keep working).

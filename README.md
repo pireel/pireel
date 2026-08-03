@@ -6,7 +6,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Import a clip and the canvas follows your footage — editing, storyboarding,
+Import a clip, then keep or change its output canvas — editing, storyboarding,
 designed graphics, kinetic captions, themes, live preview, timeline and export
 all run **fully in the browser**. No account, no server.
 

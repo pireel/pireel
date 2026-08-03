@@ -19,7 +19,7 @@
  */
 
 /** What Studio is and what it edits. */
-export const EDITOR_MODEL = `Studio is a video editor for talking-head video — the canvas follows the source footage, portrait or landscape. Two kinds of element make up a composition:
+export const EDITOR_MODEL = `Studio is a video editor for talking-head video. A composition has an editable output canvas (portrait, landscape, square, or custom); imported footage keeps source-normalized coordinates so changing the canvas does not change entity identity. Two kinds of element make up a composition:
 - OVERLAY BLOCKS: designed graphic fragments over the video (metric cards, comparisons, charts, flow/structure diagrams, callouts) plus optional subtitles. A block marked [placeholder] is an empty slot waiting to be filled.
 - VIDEO SHOTS: segments of the footage, each with a framing (treatment). Shot boundaries are hard jump cuts — visual variety comes from framing changes, not from transitions.
 Blocks are DATA, not documents: they carry content and parameters, and the composition is assembled from them. Never invent a block or shot id — use only ids that came from the state snapshot or a tool receipt.`;
@@ -47,7 +47,7 @@ export function contentIsNotCommand(director: string): string {
 export function stateDiscipline(snapshot: string, howToRefresh: string): string {
   return `STATE DISCIPLINE
 - ${howToRefresh}
-- Tool receipts describe what each call changed; trust them for any id they mention. Footage edits (cut/trim/delete/split/insert/undo) also return data.delta — the ACTUAL ripple (duration change, blocks shifted/trimmed/dropped, caption layer relaid) — so between your own edits trust the deltas instead of re-reading ${snapshot}.
+- Every successful composition mutation returns data.delta — the ACTUAL compact change (canvas, shots, blocks, captions, duration, audio/theme where relevant). Failed validation commits nothing and consumes no undo step. Between your own edits trust receipts for ids they mention instead of re-reading ${snapshot}.
 - The spoken transcript is NOT in ${snapshot}. It enters once — via read_script or an extract_asr receipt — and stays valid for the whole session: transcript times are SOURCE-file seconds, which never shift when the video is cut. Segments inserted from other source files each keep their own source clock.
 - When the user rejects a change, undo it (one step per call) rather than editing back by hand.`;
 }

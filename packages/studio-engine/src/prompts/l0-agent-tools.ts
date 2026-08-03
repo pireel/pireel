@@ -113,6 +113,25 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({}, []),
   },
   {
+    id: 'list_words',
+    kind: 'badge',
+    icon: '🔤',
+    label: 'tools.list_words.label',
+    description:
+      'List transcript words with STABLE wordIds and source timestamps for exact text-based editing. Call this before delete_words; never invent or cache positional word indexes. Omit filters for the main narration, pass shotId for an inserted clip source, or narrow by sentenceIndexes/fromSec/toSec. IDs survive timeline cuts because they address the source transcript, not edited positions.',
+    inputSchema: obj(
+      {
+        shotId: { type: 'string', description: "A shot id whose source transcript to list. Omit for main narration." },
+        sentenceIndexes: { type: 'array', items: { type: 'number' }, description: 'Optional read_script sentence row indexes.' },
+        fromSec: { type: 'number', description: 'Optional source-clock lower bound.' },
+        toSec: { type: 'number', description: 'Optional source-clock upper bound.' },
+        offset: { type: 'number', description: 'Pagination offset (default 0).' },
+        limit: { type: 'number', description: 'Max words returned (default 300, max 1000).' },
+      },
+      [],
+    ),
+  },
+  {
     id: 'analyze_narration',
     kind: 'card',
     busyText: 'tools.analyze_narration.busy',
@@ -403,6 +422,60 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
 
   /* ---------- video track shots (instant, badge) ---------- */
   {
+    id: 'set_canvas',
+    kind: 'badge',
+    icon: '▣',
+    label: 'tools.set_canvas.label',
+    description:
+      'Change the composition canvas while preserving normalized block/layout coordinates. Use preset portrait/9:16 (1080×1920), landscape/16:9 (1920×1080), square/1:1 (1080×1080), or custom even codec-safe width+height. This does NOT auto-reframe every shot; follow with set_shot_framing/apply_layout as needed.',
+    inputSchema: obj(
+      {
+        preset: { type: 'string', enum: ['portrait', 'vertical', '9:16', 'landscape', 'horizontal', '16:9', 'square', '1:1'] },
+        width: { type: 'number', description: 'Custom width, 240..7680. Use together with height.' },
+        height: { type: 'number', description: 'Custom height, 240..7680. Use together with width.' },
+      },
+      [],
+    ),
+  },
+  {
+    id: 'set_shot_framing',
+    kind: 'badge',
+    icon: '🎯',
+    label: 'tools.set_shot_framing.label',
+    description:
+      'Atomically update one shot framing. treatment/size/crop cover the existing intent-level modes; scale (1..4) plus anchors anchorX/anchorY on the cover-fitted video layer (0..1, origin top-left) provide exact subject-aware full/punch framing. Set the canvas first, then determine anchors for that canvas. Preview and export consume the same resolved transform. To affect only part of a shot, split_shot first. resetPrecision returns to treatment defaults.',
+    inputSchema: obj(
+      {
+        shotId: { type: 'string' },
+        treatment: { type: 'string', enum: [...TREATMENTS] },
+        size: { type: 'number', description: 'Treatment size 0..100.' },
+        crop: { type: 'number', description: 'Split crop position 0..100.' },
+        scale: { type: 'number', description: 'Exact cover-frame zoom 1..4; full/punch-in only.' },
+        anchorX: { type: 'number', description: 'Subject x on the cover-fitted video layer, normalized 0..1.' },
+        anchorY: { type: 'number', description: 'Subject y on the cover-fitted video layer, normalized 0..1.' },
+        resetPrecision: { type: 'boolean', description: 'true removes exact scale/anchor override.' },
+      },
+      ['shotId'],
+    ),
+  },
+  {
+    id: 'apply_layout',
+    kind: 'badge',
+    icon: '▦',
+    label: 'tools.apply_layout.label',
+    description:
+      'Apply one intent-level normalized layout to 1–4 existing blocks: picture-in-picture, split-left-right, split-top-bottom, or grid. Optional shotId makes the same transaction frame the video and place blocks in its actual vacancy; videoPosition chooses the video side. Use stable block/shot ids, never hand-calculate pixels.',
+    inputSchema: obj(
+      {
+        layout: { type: 'string', enum: ['picture-in-picture', 'split-left-right', 'split-top-bottom', 'grid'] },
+        blockIds: { type: 'array', items: { type: 'string' } },
+        shotId: { type: 'string' },
+        videoPosition: { type: 'string', enum: ['left', 'right', 'top', 'bottom'] },
+      },
+      ['layout', 'blockIds'],
+    ),
+  },
+  {
     id: 'set_shot_treatment',
     kind: 'badge',
     icon: '🎯',
@@ -560,6 +633,20 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         },
       },
       ['ranges'],
+    ),
+  },
+  {
+    id: 'delete_words',
+    kind: 'badge',
+    icon: '⌫',
+    label: 'tools.delete_words.label',
+    description:
+      'Delete exact spoken words by stable IDs returned by list_words. The operation resolves source words onto every surviving edited occurrence, cuts all ranges atomically, ripples overlays, and re-lays captions. Any unknown/stale id rejects the whole operation. Use cut_narration for broader sentence/passages and pause tightening.',
+    inputSchema: obj(
+      {
+        wordIds: { type: 'array', items: { type: 'string' }, description: 'Stable ids copied from list_words.' },
+      },
+      ['wordIds'],
     ),
   },
   {

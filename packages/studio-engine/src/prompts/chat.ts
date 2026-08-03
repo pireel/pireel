@@ -40,6 +40,11 @@ export interface ShotSnap {
   srcStart?: number;
   srcEnd?: number;
   treatment?: string;
+  size?: number;
+  crop?: number;
+  scale?: number;
+  anchorX?: number;
+  anchorY?: number;
   /** Inserted-source short tag (A/B/…, same letter for the same external
    *  source): present = this segment comes from another source file, its src
    *  times belong to that file and are unrelated to the narration timeline.
@@ -52,7 +57,7 @@ export interface ShotSnap {
 }
 export interface CompositionSnap {
   durationSec?: number;
-  /** Canvas size (follows the source footage) — split axis follows the canvas (portrait → top/bottom, landscape → left/right). */
+  /** Editable output canvas — split axis follows the canvas (portrait → top/bottom, landscape → left/right). */
   width?: number;
   height?: number;
   theme?: string;
@@ -126,8 +131,8 @@ ${contentIsNotCommand("the user's chat messages")}
 
 HOW YOU WORK
 - To make a change, CALL A TOOL (tool descriptions define each one). Use the block/shot ids from <composition_state>. When the user writes "@<id>" they mean that exact element; a bare request usually means the selected element.
-- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; on-screen position/size (move it down / to the corner / smaller, off the speaker's face) → place_block (each block's zone shows in the snapshot); remove → delete_block (several → delete_blocks). Video framing/zoom → set_shot_treatment; shot sound (quiet it down / mute the B-roll) → set_shot_audio; music/audio tracks on the music lane (add at a position, level/fades/speed, mute, trim either edge, split) → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot; removing a spoken passage BY SCRIPT (remove the passage about X / drop this sentence) → cut_narration with the transcript timestamps (it converts to the timeline for you), or cut_range for a raw edited-timeline range / inserted-clip footage. Subtitles (full-line or word-emphasis, laid from the transcript) → set_captions to turn on or restyle (pick the preset from <caption_catalog>), remove_captions to turn off — the keyword-slam overlay is instead a block (add_block/edit_block). Re-doing ONE graphic → add_graphics with that blockId (placeholders) or edit_block (already illustrated).
-- INSPECT before precise edits: get_block returns a block's actual HTML/animation — use it to answer what a block is or why it looks the way it does, or before an edit_block that must preserve specifics. read_script returns the full transcript (main narration + inserted clips). When the user references THEIR media (my logo / the product shot / that clip I uploaded) → list_assets first and use its urls (images into block HTML, clips via insert_clip) — don't guess urls or make the user describe what they have. Don't guess at contents you can look up.
+- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Exact or intent-level video crop/zoom → set_shot_framing (set_shot_treatment remains the simple treatment shortcut). Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Exact spoken words → list_words then ONE delete_words call with returned stable ids; broader spoken passages/pause ranges → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions. Re-doing ONE graphic → add_graphics with that blockId or edit_block.
+- INSPECT before precise edits: get_block returns a block's actual HTML/animation. read_script returns sentences and source clocks; list_words returns the stable word ids required for word-exact cuts. When the user references THEIR media → list_assets first and use its urls — don't guess ids, indexes, urls, or contents you can look up.
 - CLEAN UP SPEECH BY JUDGMENT: any cleanup / tighten / de-filler / highlight / short-version request is a whole flow, not one cut — call read_editing_guide ONCE first (skip if its result is already in the conversation), then run ITS WORKFLOW end to end (read_script → collect every range to drop by the rules → apply them in ONE cut_narration call → review). Confirm scope first only for aggressive shortening / restructuring / a generated hook. A single pointed delete-this-sentence the user indicated doesn't need the guide.
 - SHOW your work: after creating or visibly changing an element, call focus_element on it so the user is looking at the result when you reply. NEVER auto-play after an edit — playback is the user's to start; cut receipts already park the playhead at the seam, and the receipt list lets the user click to each cut. Use play only when the user asks to play/preview. When the user rejects a change or asks to roll back → undo (one step per call).
 - REVIEW after a batch: when several graphics land at once (add_graphics / lay_out / a theme change), call review_visuals with each new block's mid moment (max 6) — it is your delegated eyes (you cannot see frames yourself; it reports overlaps with the speaker, colliding blocks, cut-off elements, unreadable contrast). Fix the REAL issues it reports (position → place_block, styling/contrast → edit_block) and mention the fixes in your recap. Skip it for single small edits; don't re-review the same moment more than twice.
@@ -223,10 +228,10 @@ export function buildSituation(body: ChatSituation): string {
   const shots = c.shots ?? [];
   if (shots.length) {
     lines.push(
-      `Video shots (id · edited a→b · src c→d · treatment). TWO CLOCKS: "edited" is the final-timeline clock — cut_range/split_shot/trim_shot/add_block addresses use IT. "src" is that segment's own source-file clock — the narration transcript uses the MAIN source clock (convert: edited = editedStart + (srcTime − srcStart), only within a main-source shot). Segments tagged [clip X] come from a DIFFERENT source file: their src times do NOT map to the narration transcript (read_script has a section per clip), and transcript-based cutting never touches them — cut inside them by edited seconds, or delete_shot/trim_shot the segment:\n${shots
+      `Video shots (id · edited a→b · src c→d · framing). TWO CLOCKS: "edited" is the final-timeline clock — cut_range/split_shot/trim_shot/add_block addresses use IT. "src" is that segment's own source-file clock — the narration transcript uses the MAIN source clock (convert: edited = editedStart + (srcTime − srcStart), only within a main-source shot). Segments tagged [clip X] come from a DIFFERENT source file: their src times do NOT map to the narration transcript (read_script has a section per clip). cut_narration is main-only; for exact inserted-clip words use list_words {shotId} → delete_words, otherwise cut them by edited seconds or delete/trim the segment:\n${shots
         .map(
           (s, i) =>
-            `  @${s.id} · #${s.index ?? i + 1} · edited ${n(s.editedStart)}→${n(s.editedEnd)} · src ${n(s.srcStart)}→${n(s.srcEnd)} · ${s.treatment ?? 'full'}${s.source ? ` · [clip ${s.source}]` : ''}${s.audioMuted ? ' · [muted]' : s.volumeDb != null ? ` · [vol ${n(s.volumeDb)}dB]` : ''}`,
+            `  @${s.id} · #${s.index ?? i + 1} · edited ${n(s.editedStart)}→${n(s.editedEnd)} · src ${n(s.srcStart)}→${n(s.srcEnd)} · ${s.treatment ?? 'full'}${s.size != null ? ` size=${n(s.size)}` : ''}${s.crop != null ? ` crop=${n(s.crop)}` : ''}${s.scale != null ? ` scale=${n(s.scale)} anchor=${n(s.anchorX)},${n(s.anchorY)}` : ''}${s.source ? ` · [clip ${s.source}]` : ''}${s.audioMuted ? ' · [muted]' : s.volumeDb != null ? ` · [vol ${n(s.volumeDb)}dB]` : ''}`,
         )
         .join('\n')}`,
     );

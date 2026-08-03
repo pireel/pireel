@@ -55,7 +55,12 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     expect(STUDIO_TOOLS.some((t) => t.id === 'read_script')).toBe(true);
   });
   it('字幕/口播稿剪辑工具在契约表里', () => {
-    for (const id of ['set_captions', 'remove_captions', 'cut_narration']) {
+    for (const id of ['set_captions', 'remove_captions', 'cut_narration', 'list_words', 'delete_words']) {
+      expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
+    }
+  });
+  it('全局 P0 编辑原语在 Chat/MCP 同一契约表里', () => {
+    for (const id of ['set_canvas', 'set_shot_framing', 'apply_layout']) {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
   });

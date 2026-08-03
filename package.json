@@ -2,7 +2,7 @@
   "name": "pireel-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Pireel Studio — an open-source, backend-free AI video editor for talking-head video. The canvas follows your source footage; editing, preview, timeline, and client export run fully in the browser.",
+  "description": "Pireel Studio — an open-source, backend-free AI video editor for talking-head video with an editable output canvas. Editing, preview, timeline, and client export run fully in the browser.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "packageManager": "pnpm@9.12.0",

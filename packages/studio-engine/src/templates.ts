@@ -154,8 +154,8 @@ function presetFontFamilies(p: CaptionPreset): string {
  * selection highlight must locate the same segments). Split budget (in px, item-for-item
  * from the render CSS, all accounted at the ROUNDED real value; lines are nowrap, so even if
  * underestimated it's only symmetric micro-overflow, never a visual wrap):
- *   box width = wPct% × canvas width (canvasW from comp.width — the canvas follows the source
- *     aspect, short side normalized to 1080; always passed as a param, never hardcoded)
+ *   box width = wPct% × the current editable canvas width (canvasW from comp.width; always passed
+ *     as a param, never hardcoded)
  *   − plate left/right padding: exactly the CSS formula round(fs×0.42)×2 (only when there's a plate)
  *   − 0.15em safety margin (subpixel diff between canvas and the layout engine / font-not-ready fallback)
  *   inter-word flex gap = round(fs×0.18), n−1 for n words: accounted precisely as "one per word, one added back from budget".

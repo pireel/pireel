@@ -28,6 +28,7 @@ import {
   type CutTransitionEffect,
   type TransitionDirection,
   type ShotFilter,
+  type ShotFramingPatch,
   type ShotTreatment,
   type PersonFx,
   type VideoShot,
@@ -59,6 +60,7 @@ import {
   audioTrimPatch,
   patchAudioClip,
   patchShotAudio,
+  patchShotFraming,
   segmentFadeFn,
   shotsContiguous,
   shotFilterCss,
@@ -1939,7 +1941,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (pr && pr.videoSig && sig === pr.videoSig) {
         // Draft restore: re-picked the same original video — only reconnect the video, keep restored blocks/shots
         pendingRestoreRef.current = null;
-        setComp((c) => ({ ...c, video: { url, durationSec: dur }, width: dims.width, height: dims.height }));
+        // Reconnect only the source bytes. The draft's canvas may have been deliberately changed
+        // (set_canvas); restoring the source dimensions here used to silently erase that edit.
+        setComp((c) => ({ ...c, video: { url, durationSec: dur, sourceWidth: p.width, sourceHeight: p.height } }));
         toast.success(t('workbench.originalVideoReconnectedDraft'));
       } else {
         if (pr) pendingRestoreRef.current = null; // picked a different video = give up reconnecting, treat as new project
@@ -1948,7 +1952,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         setComp((c) => ({
           ...emptyComposition(),
           theme: c.theme,
-          video: { url, durationSec: dur },
+          video: { url, durationSec: dur, sourceWidth: p.width, sourceHeight: p.height },
           width: dims.width,
           height: dims.height,
           shots: [{ id: shotId(), srcStart: 0, srcEnd: dur, treatment: 'full' as const }],
@@ -2126,22 +2130,22 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setSelectedShotId(id);
     setSelectedId(null); // focus only one object at a time
   };
-  const setShotTreatment = (sid: string, treatment: ShotTreatment) => {
-    // Instant: apply the framing transform directly via the hf:shotVars live channel (the rebuild's keyframe end value
-    // matches, so landing has no jump); structural parts like the partner vacancy / keyframe sequence are picked up by the debounced rebuild afterward
+  const setShotFraming = (sid: string, patch: ShotFramingPatch) => {
+    // One write path for panel + Agent: resolve/clamp first, drive the same live transform the exporter
+    // later reads, then commit framing and its vacancy partner together.
     const cur = compRef.current.shots?.find((x) => x.id === sid);
-    if (cur) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(treatment, cur.treatSize, cur.treatCrop) });
+    if (cur) {
+      const next = patchShotFraming(cur, patch);
+      postPreview({ type: 'hf:shotVars', vars: shotTransformVars(next.treatment, next.treatSize, next.treatCrop, next.preciseFraming) });
+    }
     setComp((c) => {
-      const shots = (c.shots ?? []).map((s) => (s.id === sid ? { ...s, treatment } : s));
+      const shots = (c.shots ?? []).map((s) => (s.id === sid ? patchShotFraming(s, patch) : s));
       return syncVacancyPartner({ ...c, shots }, sid);
     });
   };
+  const setShotTreatment = (sid: string, treatment: ShotTreatment) => setShotFraming(sid, { treatment });
   /** Framing size (0–100, non-full types): video scale/proportion follows, and the other-half vacancy moves in sync. */
-  const setShotTreatSize = (sid: string, size: number) =>
-    setComp((c) => {
-      const shots = (c.shots ?? []).map((s) => (s.id === sid ? { ...s, treatSize: size } : s));
-      return syncVacancyPartner({ ...c, shots }, sid);
-    });
+  const setShotTreatSize = (sid: string, size: number) => setShotFraming(sid, { size, resetPrecision: true });
   /** Live preview during size drag: send hf:shotVars straight to the iframe (zero setState, no debounced rebuild); setShotTreatSize only on release.
    *  canvas render mode: every segment's framing is applied on the #vidEl canvas. */
   const previewShotTreatSize = (sid: string, size: number) => {
@@ -2149,8 +2153,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (s) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(s.treatment, size, s.treatCrop) });
   };
   /** Half-split crop position (0–100): which part of the frame survives the fill. Same live channel as size. */
-  const setShotTreatCrop = (sid: string, crop: number) =>
-    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? { ...s, treatCrop: crop } : s)) }));
+  const setShotTreatCrop = (sid: string, crop: number) => setShotFraming(sid, { crop });
   const previewShotTreatCrop = (sid: string, crop: number) => {
     const s = compRef.current.shots?.find((x) => x.id === sid);
     if (s) postPreview({ type: 'hf:shotVars', vars: shotTransformVars(s.treatment, s.treatSize, crop) });
@@ -3045,7 +3048,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     pickVideoFile, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
-    resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
+    resizeCutTransition, setShotTreatment, setShotFraming, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
     audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,

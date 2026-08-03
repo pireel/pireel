@@ -14,6 +14,7 @@ import {
   type Composition,
   type CutTransitionEffect,
   type ShotFilter,
+  type ShotFramingPatch,
   type ShotTreatment,
   type TransitionDirection,
   type VideoShot,
@@ -22,11 +23,13 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  applyCompositionLayout,
   audioClipId,
   audioTrimPatch,
   blockId,
   blockKind,
   compReceiptDelta,
+  canvasSizeFromInput,
   freeTrack,
   getCaptionPreset,
   isCaptionsOn,
@@ -37,9 +40,14 @@ import {
   shotFilterCss,
   blockOverlapWarnings,
   shotId,
+  listAddressedWords,
+  resolveWordIds,
+  wordRanges,
+  wordRangesToEdited,
   splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
+  validateComposition,
   zoneOf,
 } from '@pireel/studio-engine/composition';
 import { type CutSeamEntry, finalizeCutSeams, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
@@ -64,6 +72,9 @@ import { type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAna
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
+
+const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
+const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo'));
 
 /** Progress reporter fed to pipeline steps: pushes friendly text (and optional 0–1 fraction) to the tool's chat card. */
 type Report = (text: string, frac?: number) => void;
@@ -136,6 +147,7 @@ export interface AgentToolCtx {
   setCutTransition: (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
   resizeCutTransition: (shotId: string, durationSec: number) => void;
   setShotTreatment: (sid: string, treatment: ShotTreatment) => void;
+  setShotFraming: (sid: string, patch: ShotFramingPatch) => void;
   setShotFilter: (sid: string, f: ShotFilter | null) => void;
   setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
@@ -153,7 +165,7 @@ export interface AgentToolCtx {
   setCaptionStyle: (patch: Partial<CaptionStyle>) => void;
   applyCaptionPreset: (preset: string) => Promise<void>;
   removeCaptionLayer: () => void;
-  relayCaptionLayer: (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null) => Block[];
+  relayCaptionLayer: (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null, canvasW?: number) => Block[];
   // Export
   agentExportRef: MutableRefObject<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   exportPctRef: MutableRefObject<number>;
@@ -163,14 +175,14 @@ export interface AgentToolCtx {
   chatRef: MutableRefObject<StudioChatHandle | null>;
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
+async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
+    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFraming, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
     splitAtPlayhead, trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -212,17 +224,12 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             ? Promise.reject(abortErr())
             : Promise.race([p, new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(abortErr()), { once: true }))])
           : p;
-      // Footage edits ripple the timeline (blocks shift/trim/drop silently, captions relay) — attach the actual
-      // before/after diff as data.delta so receipts stay honest and the agent doesn't re-read state between its own edits
-      const withDelta = (res: StudioToolResult): StudioToolResult => {
-        if (!res.ok) return res;
-        const delta = compReceiptDelta(c, compRef.current);
-        return delta ? { ...res, data: { ...((res.data as Record<string, unknown> | undefined) ?? {}), delta } } : res;
-      };
+      // Kept as a semantic marker at ripple-heavy call sites; the outer transaction attaches the
+      // final delta for every mutation after validation (not just footage edits).
+      const withDelta = (res: StudioToolResult): StudioToolResult => res;
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
-      const READONLY_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
-      if (!READONLY_TOOLS.has(toolId)) {
+      if (!NO_UNDO_TOOLS.has(toolId)) {
         const targetIds = [input.blockId, ...(Array.isArray(input.blockIds) ? (input.blockIds as unknown[]) : [])].filter(
           (x): x is string => typeof x === 'string',
         );
@@ -232,7 +239,7 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
           return { ok: false, error: t('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
-      if (!READONLY_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
+      if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         switch (toolId) {
           case 'extract_asr': {
@@ -253,6 +260,20 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             if (!asrRef.current?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
             await ensureClipTranscripts(); // transcribe missing insert sources on demand (the failure blacklist avoids re-burning ASR)
             return { ok: true, summary: t('workbench.readTranscript'), data: { transcript: transcriptForAgent() } };
+          }
+          case 'list_words': {
+            if (!asrRef.current?.length && typeof input.shotId !== 'string') return { ok: false, error: t('workbench.noTranscriptYetRun') };
+            if (typeof input.shotId === 'string') await ensureClipTranscripts();
+            const listed = listAddressedWords(ensureShots(compRef.current), asrRef.current ?? [], clipAsrRef.current, {
+              ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+              ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
+              ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
+              ...(typeof input.toSec === 'number' && Number.isFinite(input.toSec) ? { toSec: input.toSec } : {}),
+              ...(typeof input.offset === 'number' && Number.isInteger(input.offset) ? { offset: input.offset } : {}),
+              ...(typeof input.limit === 'number' && Number.isInteger(input.limit) ? { limit: input.limit } : {}),
+            });
+            if ('error' in listed) return { ok: false, error: listed.error };
+            return { ok: true, summary: `Listed ${listed.words.length} transcript words`, data: listed };
           }
           case 'load_local_source': {
             // Agent local-import fast path: pull the video bytes straight from the import helper's
@@ -867,6 +888,34 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             if (compRef.current.blocks.some(isSentenceCaption)) return { ok: true, summary };
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }
+          case 'delete_words': {
+            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
+            const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))] : [];
+            if (!ids.length) return { ok: false, error: 'wordIds must contain at least one id from list_words' };
+            await ensureClipTranscripts();
+            const shots0 = ensureShots(c);
+            const resolved = resolveWordIds(shots0, asrRef.current ?? [], clipAsrRef.current, ids);
+            if (resolved.missing.length) return { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } };
+            const mapped = wordRangesToEdited(shots0, wordRanges(resolved.words));
+            if (!mapped.length) return { ok: false, error: 'the selected words are already absent from the edited timeline' };
+            let shots = shots0;
+            let blocks = c.blocks;
+            let firstCut = Infinity;
+            const seams: CutSeamEntry[] = [];
+            for (const range of mapped) {
+              const removed = removeEditedRange(shots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
+              if (!removed.removed) continue;
+              shots = removed.clips;
+              blocks = removeEditedInterval(blocks, removed.removed[0], removed.removed[1]);
+              firstCut = Math.min(firstCut, removed.removed[0]);
+              seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
+            }
+            if (!seams.length) return { ok: false, error: 'cannot remove the selected words (the cut would remove the entire video)' };
+            setComp((cur) => ({ ...cur, shots, blocks: relayCaptionLayer(blocks, shots, asrRef.current) }));
+            setSelectedShotId(null);
+            if (Number.isFinite(firstCut)) applyT(firstCut);
+            return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
+          }
           case 'cut_narration': {
             if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             const raw = Array.isArray(input.ranges) ? input.ranges : [];
@@ -1086,6 +1135,60 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
             }
             if (j.error) return { ok: false, error: j.error };
             return { ok: true, summary: t('workbench.noExportStarted'), data: { status: 'idle', hint: 'call export_video first' } };
+          }
+          case 'set_canvas': {
+            const size = canvasSizeFromInput(input);
+            if (!size) return { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' };
+            if (size.width === c.width && size.height === c.height) return { ok: false, error: 'canvas already has that size' };
+            const shots = ensureShots(c);
+            setComp((cur) => ({ ...cur, ...size, blocks: relayCaptionLayer(cur.blocks, shots, asrRef.current, size.width) }));
+            return { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } };
+          }
+          case 'set_shot_framing': {
+            const s = findShot(input.shotId);
+            if (!s) return { ok: false, error: t('workbench.shotNotFound') };
+            const treatment = input.treatment == null ? undefined : String(input.treatment) as ShotTreatment;
+            if (treatment && !SHOT_TREATMENTS.some((x) => x.id === treatment)) return { ok: false, error: `invalid treatment: ${treatment}` };
+            const numericKeys = ['size', 'crop', 'scale', 'anchorX', 'anchorY'] as const;
+            const invalid = numericKeys.find((key) => key in input && (typeof input[key] !== 'number' || !Number.isFinite(input[key])));
+            if (invalid) return { ok: false, error: `${invalid} must be a finite number` };
+            const resolvedTreatment = treatment ?? s.treatment;
+            if ((input.scale != null || input.anchorX != null || input.anchorY != null) && resolvedTreatment !== 'full' && resolvedTreatment !== 'punch-in') {
+              return { ok: false, error: 'scale/anchorX/anchorY are valid only for full or punch-in framing' };
+            }
+            const patch: ShotFramingPatch = {
+              ...(treatment ? { treatment } : {}),
+              ...(typeof input.size === 'number' ? { size: input.size } : {}),
+              ...(typeof input.crop === 'number' ? { crop: input.crop } : {}),
+              ...(typeof input.scale === 'number' ? { scale: input.scale } : {}),
+              ...(typeof input.anchorX === 'number' ? { anchorX: input.anchorX } : {}),
+              ...(typeof input.anchorY === 'number' ? { anchorY: input.anchorY } : {}),
+              ...(typeof input.resetPrecision === 'boolean' ? { resetPrecision: input.resetPrecision } : {}),
+            };
+            if (!Object.keys(patch).length) return { ok: false, error: 'pass treatment / size / crop / scale / anchorX / anchorY / resetPrecision' };
+            setShotFraming(s.id, patch);
+            const updated = compRef.current.shots?.find((shot) => shot.id === s.id);
+            return {
+              ok: true,
+              summary: `Updated framing for shot ${s.id}`,
+              data: {
+                shotId: s.id,
+                ...(updated ? { treatment: updated.treatment, size: updated.treatSize, crop: updated.treatCrop, framing: updated.preciseFraming ?? null } : {}),
+              },
+            };
+          }
+          case 'apply_layout': {
+            const layout = String(input.layout);
+            const applied = applyCompositionLayout({ ...c, shots: ensureShots(c) }, {
+              layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
+              blockIds: Array.isArray(input.blockIds) ? input.blockIds.map(String) : [],
+              ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+              ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
+            });
+            if ('error' in applied) return { ok: false, error: applied.error };
+            setComp(applied.comp);
+            if (applied.shotId) setSelectedShotId(applied.shotId);
+            return { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: applied.blockIds, ...(applied.shotId ? { shotId: applied.shotId } : {}), ...(applied.treatment ? { treatment: applied.treatment } : {}) } };
           }
           case 'set_shot_treatment': {
             const s = findShot(input.shotId);
@@ -1360,11 +1463,93 @@ export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Re
       }
 }
 
+const cloneComposition = (comp: Composition): Composition => JSON.parse(JSON.stringify(comp)) as Composition;
+
+/** Transaction boundary shared by Chat and the external bridge. Existing handlers may perform several
+ * synchronous setComp calls internally; callers only observe a validated final composition. Failed/no-op
+ * calls restore both state and history stacks, so retrying cannot consume undo or preserve a partial edit. */
+export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<StudioToolResult>): Promise<StudioToolResult> {
+  const before = cloneComposition(ctx.compRef.current);
+  const beforeJson = JSON.stringify(before);
+  const undoBefore = [...ctx.undoStackRef.current];
+  const redoBefore = [...ctx.redoStackRef.current];
+  const restore = () => {
+    if (JSON.stringify(ctx.compRef.current) !== beforeJson) ctx.setComp(before);
+    ctx.undoStackRef.current = undoBefore;
+    ctx.redoStackRef.current = redoBefore;
+  };
+
+  let result: StudioToolResult;
+  let pending: Promise<StudioToolResult>;
+  try {
+    pending = execute();
+  } catch (error) {
+    restore();
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  const afterSyncJson = JSON.stringify(ctx.compRef.current);
+  const undoAfterSync = [...ctx.undoStackRef.current];
+  const redoAfterSync = [...ctx.redoStackRef.current];
+  const sameRefs = <T,>(a: T[], b: T[]) => a.length === b.length && a.every((value, index) => value === b[index]);
+  const rollbackFailure = () => {
+    const currentJson = JSON.stringify(ctx.compRef.current);
+    const historyUnchanged = sameRefs(ctx.undoStackRef.current, undoAfterSync) && sameRefs(ctx.redoStackRef.current, redoAfterSync);
+    if (currentJson === beforeJson) {
+      ctx.undoStackRef.current = undoBefore;
+      ctx.redoStackRef.current = redoBefore;
+    } else if ((afterSyncJson !== beforeJson && currentJson === afterSyncJson) || historyUnchanged) {
+      restore();
+    } else if (ctx.undoStackRef.current.length >= undoAfterSync.length && undoAfterSync.every((value, index) => ctx.undoStackRef.current[index] === value)) {
+      // Drop only the failed tool's synchronous history entries and retain snapshots appended by
+      // later manual edits. Redo stays as the current manual edit left it.
+      ctx.undoStackRef.current = [...undoBefore, ...ctx.undoStackRef.current.slice(undoAfterSync.length)];
+    }
+    // A different history line means the user edited while an async tool was waiting. Preserve that
+    // state and its undo chain; the failed tool must never erase a concurrent manual change.
+  };
+  try {
+    result = await pending;
+  } catch (error) {
+    rollbackFailure();
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (!result.ok) {
+    // Synchronous mutation branches (including every P0 primitive) can be rolled back exactly. A
+    // long-running generator may have allowed an unrelated manual edit while awaiting a provider;
+    // never erase that user edit merely because the generator later returned an error.
+    rollbackFailure();
+    return result;
+  }
+
+  const next = ctx.compRef.current;
+  const nextJson = JSON.stringify(next);
+  const changed = beforeJson !== nextJson;
+  if (!changed) {
+    // Raw handlers push their snapshot before validating inputs. A successful read/context operation or
+    // harmless no-op must not create a ghost history entry either.
+    ctx.undoStackRef.current = undoBefore;
+    ctx.redoStackRef.current = redoBefore;
+    return result;
+  }
+  const issues = validateComposition(next);
+  if (issues.length) {
+    restore();
+    return { ok: false, error: 'mutation rejected: composition invariants failed', data: { issues } };
+  }
+  const delta = compReceiptDelta(before, next) ?? { compositionUpdated: ['other'] };
+  return { ...result, data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), delta } };
+}
+
+export function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
+  if (QUERY_TOOLS.has(toolId)) return runStudioToolInner(ctx, toolId, input, opts);
+  return runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
+}
+
   /** External-agent-only bridge operations (MCP-only, invisible to the internal chat) — the browser half of the BYO-brain contract:
    *  compose_context/plan_context fetch live context (the server briefs assemble the prompt, the external model generates itself),
    *  apply_block/submit_plan receive the output and run it through the **same** validation as the in-house path (parseBlockResponse+lintBlock /
    *  parsePlan) before landing state — swap the LLM, the quality contract doesn't degrade. Other tools fall back to runStudioTool. */
-export async function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
+async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
     compRef, setComp, setSelectedId, setSelectedShotId, applyT, tRef, pushUndoSnapshot, genIdsRef, videoFileRef,
     clipFilesRef, asrRef, currentVideo, planRef, setPlan, visualRef, insertedClipsForPlanRef, graphicsRoster,
@@ -1579,4 +1764,9 @@ export async function runExternalTool(ctx: AgentToolCtx, tool: string, input: Re
       default:
         return runStudioTool(ctx, tool, input);
     }
+}
+
+export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
+  if (QUERY_TOOLS.has(tool) || tool === 'compose_context' || tool === 'capture_frame' || tool === 'plan_context') return runExternalToolInner(ctx, tool, input);
+  return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input));
 }

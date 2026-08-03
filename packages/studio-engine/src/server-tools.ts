@@ -32,6 +32,7 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  applyCompositionLayout,
   placementFramingNotes,
   audioClipId,
   audioClipWindow,
@@ -42,6 +43,7 @@ import {
   blockId,
   blockKind,
   compReceiptDelta,
+  canvasSizeFromInput,
   freeTrack,
   freezeBlockVars,
   getCaptionPreset,
@@ -53,8 +55,10 @@ import {
   zoneOf,
   shotFilterCss,
   shotId,
+  patchShotFraming,
   splitBlockedByTransition,
   totalDuration,
+  validateComposition,
 } from './composition';
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
@@ -66,6 +70,7 @@ import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, de
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
 import { ensureTemplatesRegistered } from './templates';
+import { listAddressedWords, resolveWordIds, wordRanges, wordRangesToEdited } from './transcript-address';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -95,6 +100,7 @@ export interface ServerToolOutcome {
 export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'get_state',
   'read_script',
+  'list_words',
   'get_block',
   'move_block',
   'resize_block',
@@ -103,6 +109,9 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'delete_blocks',
   'duplicate_block',
   'set_shot_treatment',
+  'set_canvas',
+  'set_shot_framing',
+  'apply_layout',
   'set_video_filter',
   'set_shot_audio',
   'set_bgm',
@@ -111,6 +120,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'delete_shot',
   'cut_range',
   'cut_narration',
+  'delete_words',
   'add_transition',
   'set_captions',
   'remove_captions',
@@ -177,6 +187,9 @@ function offlineState(p: ServerToolProject): string {
         srcStart: sp.clip.srcStart,
         srcEnd: sp.clip.srcEnd,
         treatment: sp.clip.treatment,
+        ...(sp.clip.treatSize != null ? { size: sp.clip.treatSize } : {}),
+        ...(sp.clip.treatCrop != null ? { crop: sp.clip.treatCrop } : {}),
+        ...(sp.clip.preciseFraming ? { ...sp.clip.preciseFraming } : {}),
         ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
         ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
       })),
@@ -215,21 +228,28 @@ function offlineTranscript(p: ServerToolProject): string {
   return wrapSpokenTranscript(out.length > 4000 ? `${out.slice(0, 4000)}\n…(truncated)` : out);
 }
 
-/** Footage edits whose ripple side-effects (blocks shifted/trimmed/dropped, captions relaid) get diffed into the receipt. */
-const DELTA_TOOLS = new Set(['split_shot', 'trim_shot', 'delete_shot', 'cut_range', 'cut_narration']);
-
 /** Execute one offline tool. Filter through SERVER_EXECUTABLE_TOOLS before calling. */
 export function runServerTool(tool: string, input: Record<string, unknown>, p: ServerToolProject): ServerToolOutcome {
   const out = runServerToolInner(tool, input, p);
-  // Same honesty mechanism as the browser runner: receipts report what ACTUALLY changed (data.delta),
-  // so the agent doesn't re-read state between its own edits
-  if (out.comp && out.result.ok && DELTA_TOOLS.has(tool)) {
-    const delta = compReceiptDelta(p.comp, out.comp);
-    if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
-  }
   // Insertion-time look freeze — the offline twin of the workbench setComp funnel (see freezeBlockVars):
   // blocks added or first touched here get the current effective tokens stamped on before persisting.
-  if (out.comp) out.comp = freezeBlockVars(out.comp);
+  if (out.comp && out.result.ok) {
+    const next = freezeBlockVars(out.comp);
+    const issues = validateComposition(next);
+    if (issues.length) {
+      return {
+        result: {
+          ok: false,
+          error: 'mutation rejected: composition invariants failed',
+          data: { issues },
+        },
+      };
+    }
+    out.comp = next;
+    // Every successful composition mutation reports its actual compact diff, not just cutting tools.
+    const delta = compReceiptDelta(p.comp, next);
+    if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
+  }
   return out;
 }
 
@@ -244,6 +264,26 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'read_script': {
       if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
       return { result: { ok: true, summary: 'Read transcript (cloud)', data: { transcript: offlineTranscript(p) } } };
+    }
+    case 'list_words': {
+      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — run extract_asr in the studio first' } };
+      const query = {
+        ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+        ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
+        ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
+        ...(typeof input.toSec === 'number' && Number.isFinite(input.toSec) ? { toSec: input.toSec } : {}),
+        ...(typeof input.offset === 'number' && Number.isInteger(input.offset) ? { offset: input.offset } : {}),
+        ...(typeof input.limit === 'number' && Number.isInteger(input.limit) ? { limit: input.limit } : {}),
+      };
+      const listed = listAddressedWords(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), query);
+      if ('error' in listed) return { result: { ok: false, error: listed.error } };
+      return {
+        result: {
+          ok: true,
+          summary: `Listed ${listed.words.length} transcript words`,
+          data: listed,
+        },
+      };
     }
     case 'get_block': {
       const b = findBlock(input.blockId);
@@ -325,6 +365,60 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const nb: Block = { ...b, id: blockId('ai'), startSec: at, trackIndex: freeTrack(c.blocks, at, b.durationSec) };
       return { result: { ok: true, summary: `Duplicated "${bname(b)}"`, data: { newBlockId: nb.id } }, comp: { ...c, blocks: [...c.blocks, nb] } };
     }
+    case 'set_canvas': {
+      const size = canvasSizeFromInput(input);
+      if (!size) return { result: { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' } };
+      if (size.width === c.width && size.height === c.height) return { result: { ok: false, error: 'canvas already has that size' } };
+      const shots = shotsOf(p);
+      return {
+        result: { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } },
+        comp: {
+          ...c,
+          ...size,
+          blocks: relayCaptionLayer(c.blocks, shots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: size.width }),
+        },
+      };
+    }
+    case 'set_shot_framing': {
+      const shots = shotsOf(p);
+      const shot = shots.find((x) => x.id === input.shotId);
+      if (!shot) return { result: { ok: false, error: 'shot not found' } };
+      const treatment = input.treatment == null ? undefined : String(input.treatment);
+      if (treatment && !TREATMENTS.has(treatment)) return { result: { ok: false, error: `invalid treatment: ${treatment}` } };
+      const numericKeys = ['size', 'crop', 'scale', 'anchorX', 'anchorY'] as const;
+      const invalid = numericKeys.find((key) => key in input && (typeof input[key] !== 'number' || !Number.isFinite(input[key])));
+      if (invalid) return { result: { ok: false, error: `${invalid} must be a finite number` } };
+      const resolvedTreatment = (treatment ?? shot.treatment) as VideoShot['treatment'];
+      if ((input.scale != null || input.anchorX != null || input.anchorY != null) && resolvedTreatment !== 'full' && resolvedTreatment !== 'punch-in') {
+        return { result: { ok: false, error: 'scale/anchorX/anchorY are valid only for full or punch-in framing' } };
+      }
+      const patch = {
+        ...(treatment ? { treatment: treatment as VideoShot['treatment'] } : {}),
+        ...Object.fromEntries(numericKeys.filter((key) => typeof input[key] === 'number').map((key) => [key, input[key]])),
+        ...(typeof input.resetPrecision === 'boolean' ? { resetPrecision: input.resetPrecision } : {}),
+      };
+      if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass treatment / size / crop / scale / anchorX / anchorY / resetPrecision' } };
+      const next = patchShotFraming(shot, patch);
+      return {
+        result: { ok: true, summary: `Updated framing for shot ${shot.id}`, data: { shotId: shot.id, framing: next.preciseFraming ?? null, treatment: next.treatment } },
+        comp: { ...c, shots: shots.map((x) => (x.id === shot.id ? next : x)) },
+      };
+    }
+    case 'apply_layout': {
+      const layout = String(input.layout);
+      const blockIds = Array.isArray(input.blockIds) ? input.blockIds.map(String) : [];
+      const applied = applyCompositionLayout({ ...c, shots: shotsOf(p) }, {
+        layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
+        blockIds,
+        ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+        ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
+      });
+      if ('error' in applied) return { result: { ok: false, error: applied.error } };
+      return {
+        result: { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: applied.blockIds, ...(applied.shotId ? { shotId: applied.shotId } : {}), ...(applied.treatment ? { treatment: applied.treatment } : {}) } },
+        comp: applied.comp,
+      };
+    }
     case 'set_shot_treatment': {
       const shots = shotsOf(p);
       const s = shots.find((x) => x.id === input.shotId);
@@ -333,7 +427,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!TREATMENTS.has(t)) return { result: { ok: false, error: `invalid treatment: ${t}` } };
       return {
         result: { ok: true, summary: `Set shot framing to ${t}` },
-        comp: { ...c, shots: shots.map((x) => (x.id === s.id ? { ...x, treatment: t as VideoShot['treatment'] } : x)) },
+        comp: { ...c, shots: shots.map((x) => (x.id === s.id ? patchShotFraming(x, { treatment: t as VideoShot['treatment'] }) : x)) },
       };
     }
     case 'set_video_filter': {
@@ -469,6 +563,38 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       return {
         result: { ok: true, summary: 'Deleted this scene' },
         comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
+      };
+    }
+    case 'delete_words': {
+      const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))] : [];
+      if (!ids.length) return { result: { ok: false, error: 'wordIds must contain at least one id from list_words' } };
+      const shots = shotsOf(p);
+      const resolved = resolveWordIds(shots, asAsr(p.context.asr), clipAsrOf(p.context), ids);
+      if (resolved.missing.length) {
+        return { result: { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } } };
+      }
+      const mapped = wordRangesToEdited(shots, wordRanges(resolved.words));
+      if (!mapped.length) return { result: { ok: false, error: 'the selected words are already absent from the edited timeline' } };
+      let curShots = shots;
+      let blocks = c.blocks;
+      const seams: CutSeamEntry[] = [];
+      for (const range of mapped) {
+        const removed = removeEditedRange(curShots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
+        if (!removed.removed) continue;
+        curShots = removed.clips;
+        blocks = removeEditedInterval(blocks, removed.removed[0], removed.removed[1]);
+        seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
+      }
+      if (!seams.length) return { result: { ok: false, error: 'cannot remove the selected words (the cut would remove the entire video)' } };
+      const cuts = finalizeCutSeams(seams);
+      const relaid = relayCaptionLayer(blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+      return {
+        result: {
+          ok: true,
+          summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`,
+          data: { wordIds: ids, cuts },
+        },
+        comp: { ...c, shots: curShots, blocks: relaid },
       };
     }
     case 'cut_range':

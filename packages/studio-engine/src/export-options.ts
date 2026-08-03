@@ -3,9 +3,8 @@
  * target distribution platform. The export tool returns these when the user hasn't chosen yet, so
  * the agent can ask (in chat, or in the external MCP client) instead of silently defaulting.
  *
- * Pure + deterministic (no DOM, no clock): the canvas dimensions ARE the source's native pixels
- * (the canvas follows the footage at import), so min(width,height) is the native short side that
- * caps every recommendation — we never suggest upscaling the footage past what it actually is.
+ * Pure + deterministic (no DOM, no clock): the editable canvas controls output aspect while
+ * video.sourceWidth/sourceHeight, when available, cap recommendations to source resolution.
  * Native fps isn't stored, so fps is a per-platform standard (30) with a 60 note where motion warrants.
  */
 
@@ -48,8 +47,10 @@ export interface ExportRecommendations {
 export function exportRecommendations(comp: Composition): ExportRecommendations {
   const width = comp.width || 1080;
   const height = comp.height || 1920;
-  const shortSide = Math.min(width, height);
-  const longSide = Math.max(width, height);
+  const sourceWidth = comp.video?.sourceWidth ?? width;
+  const sourceHeight = comp.video?.sourceHeight ?? height;
+  const shortSide = Math.min(sourceWidth, sourceHeight);
+  const longSide = Math.max(sourceWidth, sourceHeight);
   const orientation = width === height ? 'square' : width < height ? 'portrait' : 'landscape';
   const nativeTier = tierAtOrBelow(shortSide);
   const cap = (v: number): Tier => tierAtOrBelow(Math.min(v, shortSide));
@@ -65,7 +66,7 @@ export function exportRecommendations(comp: Composition): ExportRecommendations 
       resolution: nativeTier,
       fps: 30,
       format: 'mp4',
-      note: `matches the source ${width}×${height}, no upscaling or loss`,
+      note: `keeps the ${width}×${height} canvas aspect and stays within the ${sourceWidth}×${sourceHeight} source resolution`,
     },
     {
       id: 'xiaohongshu',

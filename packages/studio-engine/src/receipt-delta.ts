@@ -34,11 +34,22 @@ export interface BlockResize {
 }
 
 export interface ReceiptDelta {
+  /** Canvas pixels before -> after. Normalized block/source coordinates remain stable across this change. */
+  canvas?: { from: [number, number]; to: [number, number] };
+  /** Changed composition-level fields not described elsewhere (theme, captions, audio, source, etc.). */
+  compositionUpdated?: string[];
   /** Edited duration before → after. */
   durationSec?: [number, number];
   shotCount?: [number, number];
+  /** Existing shots whose source window, framing, grade, audio, or transition changed. */
+  shotsUpdated?: { count: number; ids?: string[] };
+  shotsAdded?: string[];
+  shotsDropped?: string[];
   blocksShifted?: BlockShiftGroup[];
   blocksResized?: BlockResize[];
+  /** Existing blocks changed outside timeline move/resize (layout, content, style, layer, etc.). */
+  blocksUpdated?: { count: number; ids?: string[] };
+  blocksAdded?: string[];
   /** Blocks that fell entirely inside the removed range and were dropped. */
   blocksDropped?: string[];
   /** Sentence-caption layer aggregate: relaid = regenerated from the transcript, shifted = same lines moved, removed = layer gone. */
@@ -51,6 +62,13 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
 export function compReceiptDelta(before: Composition, after: Composition): ReceiptDelta | null {
   const delta: ReceiptDelta = {};
 
+  if (before.width !== after.width || before.height !== after.height) {
+    delta.canvas = { from: [before.width, before.height], to: [after.width, after.height] };
+  }
+  const topLevel = ['theme', 'palette', 'frameId', 'captionStyle', 'audioTracks', 'audioDenoise', 'video'] as const;
+  const compositionUpdated = topLevel.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+  if (compositionUpdated.length) delta.compositionUpdated = [...compositionUpdated];
+
   const dur0 = r2(totalDuration(before));
   const dur1 = r2(totalDuration(after));
   if (Math.abs(dur0 - dur1) > 0.05) delta.durationSec = [dur0, dur1];
@@ -58,6 +76,17 @@ export function compReceiptDelta(before: Composition, after: Composition): Recei
   const sc0 = before.shots?.length ?? 0;
   const sc1 = after.shots?.length ?? 0;
   if (sc0 !== sc1) delta.shotCount = [sc0, sc1];
+
+  const beforeShots = new Map((before.shots ?? []).map((s) => [s.id, s]));
+  const afterShots = new Map((after.shots ?? []).map((s) => [s.id, s]));
+  const shotAdded = [...afterShots.keys()].filter((id) => !beforeShots.has(id));
+  const shotDropped = [...beforeShots.keys()].filter((id) => !afterShots.has(id));
+  const shotUpdated = [...beforeShots.entries()]
+    .filter(([id, shot]) => afterShots.has(id) && JSON.stringify(shot) !== JSON.stringify(afterShots.get(id)))
+    .map(([id]) => id);
+  if (shotAdded.length) delta.shotsAdded = shotAdded;
+  if (shotDropped.length) delta.shotsDropped = shotDropped;
+  if (shotUpdated.length) delta.shotsUpdated = { count: shotUpdated.length, ...(shotUpdated.length <= 4 ? { ids: shotUpdated } : {}) };
 
   // Sentence-caption layer: compare as one unit (relays regenerate every line block, enumerating them is noise)
   const caps0 = before.blocks.filter(isSentenceCaption);
@@ -76,6 +105,7 @@ export function compReceiptDelta(before: Composition, after: Composition): Recei
   const shiftGroups = new Map<number, { count: number; fromSec: number; ids: string[] }>();
   const resized: BlockResize[] = [];
   const dropped: string[] = [];
+  const updated: string[] = [];
   for (const b of before.blocks) {
     if (isSentenceCaption(b)) continue;
     const o = afterById.get(b.id);
@@ -94,8 +124,15 @@ export function compReceiptDelta(before: Composition, after: Composition): Recei
       g.ids.push(b.id);
       shiftGroups.set(dStart, g);
     }
+    const { startSec: _bs, durationSec: _bd, ...beforeRest } = b;
+    const { startSec: _as, durationSec: _ad, ...afterRest } = o;
+    if (JSON.stringify(beforeRest) !== JSON.stringify(afterRest)) updated.push(b.id);
   }
+  const beforeBlockIds = new Set(before.blocks.map((b) => b.id));
+  const added = after.blocks.filter((b) => !isSentenceCaption(b) && !beforeBlockIds.has(b.id)).map((b) => b.id);
   if (dropped.length) delta.blocksDropped = dropped;
+  if (added.length) delta.blocksAdded = added;
+  if (updated.length) delta.blocksUpdated = { count: updated.length, ...(updated.length <= 4 ? { ids: updated } : {}) };
   if (resized.length) delta.blocksResized = resized;
   if (shiftGroups.size) {
     delta.blocksShifted = [...shiftGroups.entries()].map(([by, g]) => ({

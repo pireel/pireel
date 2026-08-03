@@ -36,7 +36,7 @@ import {
   WebMOutputFormat,
   type VideoSample,
 } from 'mediabunny';
-import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, parseClipInset, segmentFadeFn, shotFilterCss, shotGain, shotsContiguous, totalDuration } from '@pireel/studio-engine/composition';
+import { type AudioClip, type Composition, type ShotFilter, type TransitionDirection, assembleHtml, cutTransitions, parseClipInset, segmentFadeFn, shotFilterCss, shotGain, shotsContiguous, totalDuration, validateComposition } from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
 import { mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
@@ -52,6 +52,11 @@ export interface ExportRenderOpts {
   format: 'mp4' | 'mov' | 'webm';
 }
 export const DEFAULT_RENDER_OPTS: ExportRenderOpts = { res: 1080, fps: 30, format: 'mp4' };
+
+function assertExportableComposition(comp: Composition): void {
+  const issues = validateComposition(comp);
+  if (issues.length) throw new Error(`Invalid composition: ${issues.slice(0, 3).map((issue) => `${issue.path} ${issue.message}`).join('; ')}`);
+}
 
 /* ============================ Sources and segments ============================ */
 
@@ -294,6 +299,7 @@ export async function captureCompositionFrame(opts: {
   burnLabel?: string;
 }): Promise<{ dataUrl: string; width: number; height: number }> {
   const { comp } = opts;
+  assertExportableComposition(comp);
   const W = comp.width;
   const H = comp.height;
   const k = Math.min(1, (opts.maxDim ?? 960) / Math.max(W, H));
@@ -392,6 +398,7 @@ export async function captureCompositionFrame(opts: {
 
 export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const { comp, videoFile, clipFiles } = opts;
+  assertExportableComposition(comp);
   const render = opts.render ?? DEFAULT_RENDER_OPTS;
   const FPS = render.fps;
   const W = comp.width;

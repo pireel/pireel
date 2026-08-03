@@ -123,8 +123,8 @@ export function displayCues(
     const gRef = g.ref;
     const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
-    // ONE line per cue, sized by the real canvas (the canvas follows the source aspect, short side
-    // 1080): budget = default box width in em minus plate/safety — a 16:9 canvas holds a full
+    // ONE line per cue, sized by the current editable canvas: budget = default box width in em
+    // minus plate/safety — a 16:9 canvas holds a full
     // single-line subtitle (~21em ≈ 42 latin chars ≈ 21 zh chars), portrait ≈11 zh chars. Geometry,
     // not language, decides the cue size.
     const chunks = cueChunks(words, { maxEm: budgetEm });

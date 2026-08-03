@@ -36,4 +36,13 @@ describe('exportRecommendations', () => {
     expect(by.source.resolution).toBe(720);
     expect(by.youtube.resolution).toBe(720);
   });
+
+  it('set_canvas 后输出比例与源分辨率分开:竖屏画布仍按横屏原片上限推荐', () => {
+    const c = comp(1080, 1920);
+    c.video = { url: 'x', durationSec: 10, sourceWidth: 3840, sourceHeight: 2160 };
+    const r = exportRecommendations(c);
+    expect(r.canvas).toMatchObject({ width: 1080, height: 1920, orientation: 'portrait' });
+    expect(r.source).toEqual({ shortSide: 2160, longSide: 3840 });
+    expect(r.options.find((o) => o.id === 'source')!.note).toContain('1080×1920 canvas');
+  });
 });

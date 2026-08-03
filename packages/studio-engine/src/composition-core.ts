@@ -92,6 +92,9 @@ export interface Block {
 export interface StudioVideo {
   url: string;
   durationSec: number;
+  /** Native main-source dimensions when known. The editable output canvas may have another aspect. */
+  sourceWidth?: number;
+  sourceHeight?: number;
 }
 
 /** Shot treatment — how the talking-head video is framed within a segment (shrink to corner to make room for graphics / punch-in emphasis / half-split / fullscreen).
@@ -135,6 +138,11 @@ export interface VideoShot extends Clip {
    *  top/left edge, 100 = the bottom/right, default 50 = centred). A filled half shows a window of the
    *  source, so something is always cut; this is the knob for choosing what. Ignored by other framings. */
   treatCrop?: number;
+  /** Precise subject-aware framing for full/punch-in shots. Coordinates are normalized on the
+   *  cover-fitted video layer (0..1, origin top-left); scale is dimensionless (1 = that fitted frame). Keeping this
+   *  separate from treatment preserves the intent-level layout vocabulary while giving agents an exact,
+   *  renderer-independent crop target. Preview and export both consume the transform produced below. */
+  preciseFraming?: ShotPreciseFraming;
   /** Shot-level color grade (1 = neutral, only stores fields deviating from neutral; applies to the whole shot, swaps at the cut with no transition).
    *  Preview = #vidEl's CSS filter, export = ctx.filter, same shotFilterCss convention on both ends. */
   filter?: ShotFilter;
@@ -154,6 +162,27 @@ export interface VideoShot extends Clip {
    *  the audio lane; preview and export both evaluate shotGainAt. */
   audioFadeInSec?: number;
   audioFadeOutSec?: number;
+}
+
+export interface ShotPreciseFraming {
+  scale: number;
+  anchorX: number;
+  anchorY: number;
+}
+
+export interface ShotFramingPatch {
+  treatment?: ShotTreatment;
+  /** Intent-level treatment size (0..100, same convention as the existing panel). */
+  size?: number;
+  /** Split crop position (0..100). */
+  crop?: number;
+  /** Exact cover-frame zoom (1..4). Only valid for full/punch-in. */
+  scale?: number;
+  /** Subject point on the cover-fitted video layer to keep centred, normalized 0..1. */
+  anchorX?: number;
+  anchorY?: number;
+  /** Drop the exact override and return to the treatment defaults. */
+  resetPrecision?: boolean;
 }
 
 /** Cut transition: the handoff effect between two shots' content. Effect set = 10 picks from the gl-transitions gallery (id matches upstream shader name,
@@ -461,12 +490,35 @@ export const TREAT_SIZE_DEFAULT: Record<ShotTreatment, number> = {
 };
 
 /** Framing size 0–100 → video scale: punch-in 1.05–2.0, corner 0.2–0.6, half-split 0.3–0.7. */
-function treatScale(tr: ShotTreatment, size?: number): number {
+export function treatmentScale(tr: ShotTreatment, size?: number): number {
   const v = Math.max(0, Math.min(100, size ?? TREAT_SIZE_DEFAULT[tr])) / 100;
   if (tr === 'punch-in') return 1.05 + v * 0.95;
   if (tr === 'corner-br' || tr === 'corner-tl') return 0.2 + v * 0.4;
   if (tr.startsWith('split-')) return 0.3 + v * 0.4;
   return 1;
+}
+
+const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+
+/** Apply one exact framing patch. This is the single write path used by the UI and both agent
+ *  executors; it normalizes numbers and drops fields that are meaningless for the resolved mode. */
+export function patchShotFraming<T extends VideoShot>(shot: T, patch: ShotFramingPatch): T {
+  const treatment = patch.treatment ?? shot.treatment;
+  const next: VideoShot = { ...shot, treatment };
+  if (patch.size != null && Number.isFinite(patch.size)) next.treatSize = Math.round(clamp(patch.size, 0, 100) * 100) / 100;
+  if (patch.crop != null && Number.isFinite(patch.crop)) next.treatCrop = Math.round(clamp(patch.crop, 0, 100) * 100) / 100;
+
+  if (patch.resetPrecision || (treatment !== 'full' && treatment !== 'punch-in')) {
+    delete next.preciseFraming;
+  } else if (patch.scale != null || patch.anchorX != null || patch.anchorY != null) {
+    const prev = shot.preciseFraming;
+    next.preciseFraming = {
+      scale: Math.round(clamp(Number.isFinite(patch.scale) ? patch.scale! : (prev?.scale ?? treatmentScale(treatment, next.treatSize)), 1, 4) * 1000) / 1000,
+      anchorX: Math.round(clamp(Number.isFinite(patch.anchorX) ? patch.anchorX! : (prev?.anchorX ?? 0.5), 0, 1) * 1000) / 1000,
+      anchorY: Math.round(clamp(Number.isFinite(patch.anchorY) ? patch.anchorY! : (prev?.anchorY ?? 0.5), 0, 1) * 1000) / 1000,
+    };
+  }
+  return next as T;
 }
 
 /** Shot framing → GSAP transform variable object (transform-only, compositor layer, scrub-safe, same-source as export).
@@ -489,9 +541,21 @@ export interface ShotVars {
  *
  * corner/punch-in keep the scale-and-park model: those ARE a small window over the footage.
  */
-export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: number): ShotVars {
-  const s = treatScale(tr, size);
+export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): ShotVars {
+  const s = treatmentScale(tr, size);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
+  if (precise && (tr === 'full' || tr === 'punch-in')) {
+    const ps = clamp(precise.scale, 1, 4);
+    const ax = clamp(precise.anchorX, 0, 1);
+    const ay = clamp(precise.anchorY, 0, 1);
+    // The cover-fitted canvas is scaled around its centre. Translate the requested anchor back to
+    // centre, but clamp to the no-empty-border envelope. xPercent/yPercent are element-size based,
+    // so export can recover the exact same matrix from computed style.
+    const maxShift = ((ps - 1) / 2) * 100;
+    const xPercent = clamp((0.5 - ax) * ps * 100, -maxShift, maxShift);
+    const yPercent = clamp((0.5 - ay) * ps * 100, -maxShift, maxShift);
+    return { scale: r3(ps), xPercent: r3(xPercent), yPercent: r3(yPercent), borderRadius: 0, clipPath: 'inset(0% 0% 0% 0%)' };
+  }
   const corner = r3(((1 - s) / 2 - 0.02) * 100);
   // Four explicit edges, never the shorthand: GSAP interpolates complex strings by pairing numeric
   // tokens, so tweening 'inset(0%)' (one token) against a split's four-token inset can't animate —
@@ -545,8 +609,8 @@ export function parseClipInset(clipPath: string | undefined): { t: number; r: nu
 }
 
 
-function shotVars(tr: ShotTreatment, size?: number, crop?: number): string {
-  const v = shotTransformVars(tr, size, crop);
+function shotVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): string {
+  const v = shotTransformVars(tr, size, crop, precise);
   return `{ scale: ${n(v.scale)}, xPercent: ${n(v.xPercent)}, yPercent: ${n(v.yPercent)}, borderRadius: ${n(v.borderRadius)}, clipPath: '${v.clipPath}' }`;
 }
 
@@ -559,7 +623,7 @@ function shotVars(tr: ShotTreatment, size?: number, crop?: number): string {
 const VACANCY_CAPTION_FLOOR = 0.84;
 
 export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox | null {
-  const s = treatScale(tr, size);
+  const s = treatmentScale(tr, size);
   const raw = ((): NormBox | null => {
   switch (tr) {
     case 'corner-br': // video shrinks to bottom-right → frees a large top block (height tracks small-window size)
@@ -592,19 +656,22 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
  * (see prompts/plan.ts FRAMING); framings on shot fragments the user hand-cut are executed as-is.
  * Registered to __timelines['vid'].
  */
-export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotTreatment; size?: number; crop?: number }[] {
+export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] {
   const sp = spans(shots);
   if (sp.length === 0) return [];
 
   // canvas render mode: the video track is **one canvas**; all segments' framings (including other-source inserts) are applied to it uniformly
-  const keys: { at: number; tr: ShotTreatment; size?: number; crop?: number }[] = [];
+  const keys: { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] = [];
   for (const { clip, editedStart } of sp) {
-    keys.push({ at: editedStart, tr: clip.treatment, size: (clip as VideoShot).treatSize, crop: (clip as VideoShot).treatCrop });
+    keys.push({ at: editedStart, tr: clip.treatment, size: (clip as VideoShot).treatSize, crop: (clip as VideoShot).treatCrop, precise: (clip as VideoShot).preciseFraming });
   }
   const final: typeof keys = [];
   for (const k of keys) {
     const prev = final[final.length - 1];
-    if (!prev || prev.tr !== k.tr || (prev.size ?? -1) !== (k.size ?? -1) || (prev.crop ?? -1) !== (k.crop ?? -1)) final.push(k);
+    const samePrecise =
+      (!prev?.precise && !k.precise) ||
+      (!!prev?.precise && !!k.precise && prev.precise.scale === k.precise.scale && prev.precise.anchorX === k.precise.anchorX && prev.precise.anchorY === k.precise.anchorY);
+    if (!prev || prev.tr !== k.tr || (prev.size ?? -1) !== (k.size ?? -1) || (prev.crop ?? -1) !== (k.crop ?? -1) || !samePrecise) final.push(k);
   }
   return final;
 }
@@ -616,11 +683,11 @@ export function videoFrameTimelineBody(shots: VideoShot[]): string {
   const final = videoFrameKeyframes(shots);
   if (!final.length) return '';
 
-  const lines: string[] = [`tl.set('#vidEl', ${shotVars(final[0]!.tr, final[0]!.size, final[0]!.crop)}, 0);`];
+  const lines: string[] = [`tl.set('#vidEl', ${shotVars(final[0]!.tr, final[0]!.size, final[0]!.crop, final[0]!.precise)}, 0);`];
   for (let i = 1; i < final.length; i++) {
     const gap = (final[i + 1]?.at ?? total) - final[i]!.at;
     const dur = Math.max(0.2, Math.min(0.5, gap - 0.05));
-    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotVars(final[i]!.tr, final[i]!.size, final[i]!.crop)}), ${n(final[i]!.at)});`);
+    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotVars(final[i]!.tr, final[i]!.size, final[i]!.crop, final[i]!.precise)}), ${n(final[i]!.at)});`);
   }
   // Color-grade keyframes (deduped independently of framing): jump-cut semantics — swap at the cut (set), no transition tween.
   // No grading anywhere = no lines emitted; if any, neutral segments emit a 'none' reset, otherwise the prior shot's filter leaks into the next.
@@ -872,9 +939,8 @@ export function applyBlockPlacement(block: Block, input: PlaceBlockInput): Block
 
 /** The currently-effective global caption style: explicit setting wins, else derived from the first sentence-level caption's slots (a stable initial value
  *  for the panel selected-state and canvas handles); if there's no caption yet, take the default. */
-/** Default subtitle box width (canvas width %). The canvas follows the SOURCE aspect with the short
- *  side normalized to 1080 (normalizeDims): portrait 1080-wide → ≈11 zh chars per line; landscape
- *  1920-wide → a full single-line subtitle (~21 zh / ~42 latin chars). One ratio, geometry does the rest. */
+/** Default subtitle box width (canvas width %). The initial canvas follows the source aspect and may
+ *  later be changed; cue layout always derives from the current canvas geometry. */
 export const DEFAULT_CAPTION_WIDTH_PCT = 56;
 
 export function resolveCaptionStyle(comp: Composition): CaptionStyle {

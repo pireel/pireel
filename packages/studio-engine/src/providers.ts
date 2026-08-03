@@ -40,7 +40,7 @@ export interface BlockComposer {
 export interface PlanRequest {
   sentences: PlanSentence[];
   videoDurationSec: number;
-  /** Canvas size (follows the source footage) — split axis follows the canvas (portrait → top/bottom, landscape → left/right). */
+  /** Editable output canvas — split axis follows it (portrait → top/bottom, landscape → left/right). */
   canvas?: { width: number; height: number };
   theme?: string;
   visuals?: PlanVisual[];
