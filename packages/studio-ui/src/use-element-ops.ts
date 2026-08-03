@@ -28,6 +28,7 @@ import type { StudioChatHandle } from './studio-chat';
 import { t } from './i18n';
 
 export interface ElementOpsDeps {
+  projectId: string;
   playing: boolean;
   compRef: MutableRefObject<Composition>;
   tRef: MutableRefObject<number>;
@@ -56,7 +57,7 @@ export interface ElementOpsDeps {
 
 export function useElementOps(deps: ElementOpsDeps) {
   const {
-    playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
+    projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
     setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
     composeBlockChecked, insertKitBlock, openChat,
   } = deps;
@@ -315,7 +316,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     const baked = slots.innerHtml.includes('data-hf-baked')
       ? slots.innerHtml
       : `${slots.innerHtml}\n<style data-hf-baked>#${b.id}{${themeVarsCss(getTheme(compRef.current.theme), compRef.current.palette)}}</style>`;
-    addElementEntry({
+    addElementEntry(projectId, {
       id: `saved:${b.id}`,
       prompt: b.label || t('workbench.canvasElement'),
       createdAt: Date.now(),

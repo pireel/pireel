@@ -76,6 +76,15 @@ describe('buildSaveWire(分段)', () => {
     expect(next!.wire.comp ?? next!.wire.compPatch).toBeDefined();
   });
 
+  it('context-only 载荷(只导入本地素材):不伪造 comp,索引仍可单独上云', () => {
+    const localAssets = [{ sig: 'a.png:10:1', label: 'a.png', kind: 'image' as const, createdAt: 1 }];
+    const r = buildSaveWire({ chat: [], context: { localAssets }, videoSig: null, videoDurationSec: null, coverThumb: null }, null, null);
+    expect(r).not.toBeNull();
+    expect(r!.wire.comp).toBeUndefined();
+    expect(r!.wire.compPatch).toBeUndefined();
+    expect(r!.wire.context).toEqual({ localAssets });
+  });
+
   it('meta 段(videoSig/时长/title)独立于 comp', () => {
     const first = buildSaveWire(payload(), 3, null)!;
     const r = buildSaveWire(payload({ videoSig: 'sig2' }), 4, first.acked)!;
@@ -233,6 +242,27 @@ describe('mergeSaveIntoRow', () => {
     const m = mergeSaveIntoRow(existing, p)!;
     expect(m.context.asr).toEqual(['b']);
     expect(m.context.media).toEqual({ video: { sig: 's', key: 'k' } });
+  });
+
+  it('本地素材只同步元数据索引,可整段替换且不抹云媒体索引', () => {
+    const localAssets = [
+      {
+        sig: 'photo.jpg:42:7',
+        label: 'photo.jpg',
+        kind: 'image',
+        w: 1080,
+        h: 1920,
+        folder: { id: 'folder-1', name: 'B-roll', path: 'day-1/photo.jpg' },
+        createdAt: 7,
+      },
+    ];
+    const p = sanitizeSavePayload({ baseVersion: 5, context: { localAssets } })!;
+    const m = mergeSaveIntoRow(existing, p)!;
+    expect(m.context.localAssets).toEqual(localAssets);
+    expect(m.context.media).toEqual({ video: { sig: 's', key: 'k' } });
+
+    const cleared = mergeSaveIntoRow({ ...existing, context: m.context }, sanitizeSavePayload({ baseVersion: 6, context: { localAssets: [] } })!)!;
+    expect(cleared.context.localAssets).toEqual([]);
   });
 
   it('context 补丁应用在服务端现值上,不动客户端不知道的 key', () => {

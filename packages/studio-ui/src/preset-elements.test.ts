@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { ELEMENT_TEMPLATES } from './gen-templates/element';
+import { ElementTemplateCard } from './gen-templates/element-card';
+import { localizedTemplatePrompt } from './gen-templates/types';
 import { presetElements } from './preset-elements';
 
 /**
@@ -20,4 +23,21 @@ describe('预置默认时间轴选择器对账', () => {
       expect(n).toBeGreaterThan(0);
     });
   }
+});
+
+describe('生成区组件模板', () => {
+  it('12 张模板卡使用唯一 ID，并可由生成区和官方素材复用同一个卡片组件', () => {
+    expect(ELEMENT_TEMPLATES).toHaveLength(12);
+    expect(new Set(ELEMENT_TEMPLATES.map((template) => template.id)).size).toBe(ELEMENT_TEMPLATES.length);
+    expect(typeof ElementTemplateCard).toBe('function');
+  });
+
+  it('每张模板都有中英文提示词并按界面语言选择', () => {
+    for (const template of ELEMENT_TEMPLATES) {
+      expect(template.prompt.trim().length, `${template.id}: 英文提示词为空`).toBeGreaterThan(20);
+      expect(template.promptI18n?.zh?.trim().length, `${template.id}: 中文提示词为空`).toBeGreaterThan(10);
+      expect(localizedTemplatePrompt(template, 'zh-CN')).toBe(template.promptI18n!.zh);
+      expect(localizedTemplatePrompt(template, 'en-US')).toBe(template.prompt);
+    }
+  });
 });

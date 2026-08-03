@@ -522,7 +522,11 @@ export class VideoTrackEngine {
     const s = this.segs[i];
     if (!s) return false;
     const el = this.els.get(s.key);
-    return !!el && !!el.currentSrc && !el.error;
+    // A just-created element has currentSrc '' until resource selection starts — it IS alive (seek
+    // parks a 'loadeddata' listener and the frame arrives once loaded). Requiring currentSrc here
+    // made the first insert's synchronous refresh() give up with curIdx=-1 and nothing ever retried
+    // (blank canvas until the next seek). Dead = no element (source removed/missing) or a load error.
+    return !!el && !el.error && (!!el.currentSrc || !!el.src);
   }
 
   private segIndexAt(t: number): number {

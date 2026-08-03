@@ -731,9 +731,9 @@ export function totalDuration(comp: Composition): number {
   return Math.max(0.1, max);
 }
 
-/** Track count (including video track 0). */
+/** Track count (including video track 0). Equal-footing: any shots = a video track, main source or not. */
 export function trackCount(comp: Composition): number {
-  let max = comp.video ? 0 : -1;
+  let max = comp.video || comp.shots?.length ? 0 : -1;
   for (const b of comp.blocks) if (b.trackIndex > max) max = b.trackIndex;
   return max + 1;
 }

@@ -16,7 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Film, Loader2, Music, Plus, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeftRight, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
@@ -151,6 +151,10 @@ interface StudioTimelineProps {
   onOpenMusicPanel?: () => void;
   /** Filmstrips for externally inserted clips (shotId -> frames, t = the clip's own source time). */
   clipStrips?: Record<string, FilmstripFrame[]>;
+  /** Per-asset missing-source UI: is the main source's File loaded this session? Default true (hosts without the signal). */
+  mainLive?: boolean;
+  /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
+  srcLive?: (src: string) => boolean;
   /** Shot boundary "+": insert a local video at that edited-time (workbench pops a file picker -> upload -> insert into main track). */
   onInsertClipAt?: (t: number) => void;
   /** Shot boundary transition hotspot: click to pick a transition effect in the shared popover (cutSec = that boundary's edited-time). */
@@ -168,6 +172,17 @@ export const StudioTimeline = memo(StudioTimelineImpl);
 /** Track mute toggle (track header): the NLE speaker icon, in front of the track it silences. Mute is a
  *  TRACK property here rather than a per-clip one — "quiet the music while I listen to the cut" is a
  *  statement about a track, and per-item silencing is already the level slider's bottom stop. */
+/** Missing-source strip: the shot stays editable (cut/trim/delete all cloud-backed), only its frames
+ *  can't render on this device — hatched fill + label instead of a blank/misleading filmstrip. */
+function MissingStrip() {
+  return (
+    <div className="bg-panel-2 absolute inset-0 flex items-center justify-center gap-1 bg-[repeating-linear-gradient(45deg,rgba(148,163,184,0.14)_0_5px,transparent_5px_10px)]">
+      <VideoOff size={11} className="text-ink-4 shrink-0" />
+      <span className="text-ink-4 truncate text-[9px]">{t('workbench.srcMissing')}</span>
+    </div>
+  );
+}
+
 function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void }) {
   return (
     <button
@@ -235,9 +250,12 @@ function StudioTimelineImpl({
   onResizeTransition,
   clipPendingAt,
   clipStrips,
+  mainLive = true,
+  srcLive,
 }: StudioTimelineProps) {
   const dur = totalDuration(comp);
-  const videoDur = comp.video ? editedVideoDuration(comp) : 0; // edited video duration (filmstrip / scene track width)
+  const hasVideoLane = !!comp.video || !!comp.shots?.length; // equal-footing: clips-only comps have a video lane too
+  const videoDur = hasVideoLane ? editedVideoDuration(comp) : 0; // edited video duration (filmstrip / scene track width)
   const shots = useMemo(() => comp.shots ?? [], [comp.shots]);
   // Scenes' spans on the **edited** timeline (clip source spans joined end to end)
   const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
@@ -644,7 +662,7 @@ function StudioTimelineImpl({
   // Track 0 = scene rail (taller when there's video); per-track height/offset.
   // **Display order != track-number order**: overlay tracks sort by descending z (NLE convention, upper rows cover lower ones),
   // captions (track 1, lowest z) naturally land at the bottom; gutter drag-reorder = recomputing z (onReorderTracks).
-  const sceneRail = !!comp.video;
+  const sceneRail = hasVideoLane;
   const H0 = sceneRail ? SCENE_H : ROW_H;
   // Only open a row for tracks that actually have non-caption blocks: sentence captions don't enter the timeline (pure computed output), and empty tracks no longer render empty rows
   const overlayTracks = useMemo(() => {
@@ -1018,7 +1036,7 @@ function StudioTimelineImpl({
               )}
 
               {/* Track 0 = scene rail: filmstrip base + scene cards (shot slices). Hover a shot card -> "+" at both ends to insert a local video */}
-              {comp.video && (
+              {hasVideoLane && (
                 <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }} onMouseLeave={() => setHoverBounds(null)}>
                   {/* Filmstrip base fill (fixed tile width, nearest source frame; like cloud editors). Not filled when there are scene cards —
                       the filmstrip gets clipped inside each card; otherwise the continuous base leaks through the cards' transparent rounded corners, hiding the corners/gaps */}
@@ -1094,12 +1112,17 @@ function StudioTimelineImpl({
                           {shot.src ? (
                             <div className="pointer-events-none absolute inset-0">
                               {(() => {
+                                if (srcLive && !srcLive(shot.src)) return <MissingStrip />;
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 return stripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
                                   <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                                 ));
                               })()}
+                            </div>
+                          ) : !mainLive ? (
+                            <div className="pointer-events-none absolute inset-0">
+                              <MissingStrip />
                             </div>
                           ) : (
                             <>
@@ -1479,7 +1502,7 @@ function StudioTimelineImpl({
 
             {/* Playhead: spans ruler + tracks, bright line + top dot (subscribes to the playhead store, only this component moves each frame).
                 Not drawn on an empty project — a red line hanging on empty tracks looks broken */}
-            {(comp.video || comp.blocks.length > 0) && <PlayheadCursor pps={pps} />}
+            {(hasVideoLane || comp.blocks.length > 0) && <PlayheadCursor pps={pps} />}
           </div>
 
           {/* Right breathing room: the last block's selection ring bleed isn't clipped by the scroll container's right edge */}

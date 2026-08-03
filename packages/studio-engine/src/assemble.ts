@@ -321,11 +321,11 @@ const PERSON_CUT_SHIM = `(function(){
     // background-replace layer follows the mask: only lit on segments that have a mask (export / no parent / matting-off segments all hidden, fall back to original frame)
     if (bgEl) bgEl.style.display = mask ? 'block' : 'none';
     if (!mask) return;
-    // mask aspect ratio = source frame; the on-canvas frame is already cover-fit, so align the mask with the same cover mapping
+    // mask aspect ratio = source frame; the on-canvas frame is contain-fit, so align the mask with the same contain mapping
     var vw = fi.w || W, vh = fi.h || H;
     var rect = sourceRect(vw, vh, W, H, fi.framing || null), dw = rect.width, dh = rect.height, dx = rect.x, dy = rect.y;
     pctx.clearRect(0, 0, W, H);
-    pctx.drawImage(v, 0, 0); // video frame taken straight from the #vidEl canvas (already cover-composited)
+    pctx.drawImage(v, 0, 0); // video frame taken straight from the #vidEl canvas (already source-composited)
     pctx.globalCompositeOperation = 'destination-in';
     if (feather > 0) pctx.filter = 'blur(' + feather + 'px)';
     pctx.drawImage(mask, dx, dy, dw, dh);
@@ -485,12 +485,14 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   const body: string[] = [];
   const scripts: string[] = [];
 
-  if (comp.video) {
+  if (comp.video || comp.shots?.length) {
     // Video track = a single <canvas> (canvas render mode, per the user's decision): decode/clock/audio all in the parent-layer engine
     // (video-track-engine), frames drawn as they're pushed via hf:frame. Document rebuild no longer recreates the decoder → the root cause of the whole
     // "decode zombie" class of problems is removed. The id stays vidEl: framing keyframe / shotVars / personCut selectors need zero changes.
+    // Equal-footing: comp.video is just the first-loaded source — a clips-only comp (external inserts,
+    // no "main") still gets the canvas; only a truly source-less comp skips it.
     const hasShots = !!(comp.shots && comp.shots.length);
-    const editedDur = hasShots ? editedDuration(comp.shots!) : comp.video.durationSec;
+    const editedDur = hasShots ? editedDuration(comp.shots!) : comp.video!.durationSec;
     body.push(
       `<canvas id="vidEl" data-composition-id="vid" width="${n(comp.width)}" height="${n(comp.height)}" data-start="0" data-duration="${n(editedDur)}" data-track-index="0" ` +
         `style="position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;box-shadow:0 30px 90px rgba(0,0,0,0.45);"></canvas>`,

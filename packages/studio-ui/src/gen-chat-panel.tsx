@@ -11,27 +11,35 @@
  * Enter to generate. Asset actions: insert (at playhead) / reference (image→reference_images,
  * video→reference_videos, feeds the next generation).
  *
- * Data: image/video go through the /api/create gen stack (server-persisted history,
+ * Data: image/video go through the /api/create gen stack (project-scoped server history,
  * pending polled on mount); elements go through composeBlockChecked (client-side,
- * not auto-added to the film, history in localStorage, re-scoped id on insert).
+ * not auto-added to the film, project-scoped cloud history + local cache, re-scoped id on insert).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, ChevronDown, Film, ImagePlus, Loader2, Plus, Sliders, X, ZoomIn } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, Film, Loader2, Music2, Pause, Play, Plus, RefreshCw, Search, Sliders, SlidersHorizontal, X, ZoomIn } from 'lucide-react';
 import { useStudioShell } from './shell-context';
 import { useQuote } from '@pireel/ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@pireel/ui/dropdown-menu';
 
-import { type Composition, type MediaRef, listTemplates } from '@pireel/studio-engine/composition';
-import { studioProviders } from '@pireel/studio-engine/providers';
-import { toast } from '@pireel/ui/toast';
+import { type Composition, type MediaRef } from '@pireel/studio-engine/composition';
 import { type GenAsset, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { BlockPreviewFrame } from './block-preview-card';
-import { KIND_META } from './kind-meta';
-import { type GenTemplate, TEMPLATES_BY_TYPE, zhCategory } from './gen-templates';
+import { type GenTemplate, localizedTemplatePrompt, TEMPLATES_BY_TYPE, zhCategory } from './gen-templates';
+import { ElementTemplateCard } from './gen-templates/element-card';
+import { fmtDur, type PanelDragAsset, useAudioPreview } from './asset-card';
+import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory } from './official-assets-types';
 
-import { type ElementEntry, type GenElementResult, loadElementEntries as loadStoredElements, pushElementToCloud, saveElementEntries as saveStoredElements } from './element-history';
-import { t } from './i18n';
+import { type ElementEntry, type GenElementResult, loadElementEntries as loadStoredElements, pushElementToCloud, saveElementEntries as saveStoredElements, syncElementEntries as syncStoredElements } from './element-history';
+import { studioLocale, t } from './i18n';
 
 export type { GenElementResult } from './element-history';
 
@@ -51,13 +59,17 @@ interface Entry {
 }
 
 export interface GenChatPanelProps {
+  /** Generation history belongs to this Studio project. */
+  projectId: string;
   /** Type this panel generates/shows (one per rail entry, never mixed). */
   type: AssetType;
+  /** External Remix entry (for example Official Assets) can prefill this composer. */
+  seedPrompt?: { prompt: string; revision: number };
   comp: Composition; // element card live preview needs theme/canvas
   /** dims: known natural w/h (derived from requested ratio for images) → insert side skips measuring, placeholder is instant. */
   onInsertMedia: (m: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Drag an asset out of the panel (onto canvas/timeline to insert): report asset on drag start, null on end (same contract as upload panel). */
-  onDragAsset?: (asset: (MediaRef & { label?: string; dims?: { w: number; h: number } }) | null) => void;
+  onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Set as main video. Video cards currently only show "insert / reference" (like image cards), so this entry is hidden for now; plumbing kept for later. */
   onSetMainVideo: (url: string) => Promise<void>;
   onInsertElement: (el: GenElementResult, prompt: string) => void;
@@ -65,21 +77,20 @@ export interface GenChatPanelProps {
   onMention: (text: string) => void;
   /** Generate one element (composeBlockChecked, not added to the film). */
   generateElement: (prompt: string, base?: GenElementResult) => Promise<GenElementResult>;
-  /** Element panel only: insert a base block (block-type registry; the old template panel's entry was folded in here). */
-  onInsertTemplate?: (templateId: string) => void;
-  /** Audio panel only: generate one music track (hosted); resolves to the stored url. */
-  generateAudio?: (prompt: string, durationSec: number) => Promise<string>;
+  /** Audio panel only: generate one music track (hosted); resolves to its project-history id + stored url. */
+  generateAudio?: (prompt: string, durationSec: number) => Promise<{ id: string; url: string }>;
   /** Audio panel only: put a generated track on the music lane at the playhead. */
   onInsertAudio?: (url: string, label?: string) => void;
 }
 
 /* ---------------- Element history (localStorage; single source in element-history.ts; image/video history lives server-side) ---------------- */
 
-function loadElementEntries(): Entry[] {
-  return loadStoredElements().map((e: ElementEntry): Entry => ({ ...e, type: 'element', status: 'succeeded' }));
+function loadElementEntries(projectId: string): Entry[] {
+  return loadStoredElements(projectId).map((e: ElementEntry): Entry => ({ ...e, type: 'element', status: 'succeeded' }));
 }
-function saveElementEntries(entries: Entry[]) {
+function saveElementEntries(projectId: string, entries: Entry[]) {
   saveStoredElements(
+    projectId,
     entries
       .filter((e) => e.type === 'element' && e.status === 'succeeded' && e.element)
       .map((e) => ({ id: e.id, prompt: e.prompt, createdAt: e.createdAt, element: e.element! })),
@@ -159,6 +170,40 @@ function ratioDims(size: string | undefined): { w: number; h: number } | undefin
   return m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
 }
 
+/** Official audio is a semantic generation seed: keep its mood/pacing metadata, never copy the
+ * original melody. The current music model is text-to-audio, so this is the faithful Remix input
+ * rather than pretending that the source file itself is accepted as an audio reference. */
+const AUDIO_META_ZH: Record<string, string> = {
+  adventurous: '冒险感', atmospheric: '氛围感', bright: '明亮', calm: '平静', chill: '松弛', compact: '紧凑',
+  confident: '自信', dark: '暗黑', dramatic: '戏剧性', emotional: '情绪化', epic: '史诗感', forward: '推进感',
+  funny: '幽默', futuristic: '未来感', global: '世界音乐感', happy: '愉快', horror: '惊悚', inspiring: '鼓舞',
+  loopable: '适合循环', melancholic: '忧郁', minimal: '极简', modern: '现代', mystery: '神秘', ominous: '不祥',
+  optimistic: '乐观', organic: '自然质感', playful: '俏皮', powerful: '有力量', quirky: '古怪有趣', rhythmic: '节奏鲜明',
+  romantic: '浪漫', soft: '柔和', suspense: '悬疑', urgent: '紧迫', warm: '温暖',
+  low: '低', 'low-medium': '中低', medium: '中等', 'medium-high': '中高', high: '高', variable: '有起伏', 'very-high': '很高',
+  'brand-recap': '品牌回顾', 'case-study': '案例解析', casual: '轻松内容', climax: '高潮段落', comedy: '喜剧内容',
+  conflict: '冲突场景', corporate: '企业内容', culture: '文化内容', digital: '数字科技', documentary: '纪录片',
+  education: '教育内容', explainer: '讲解视频', food: '美食内容', highlights: '高光集锦', intro: '片头',
+  investigation: '调查揭秘', kids: '儿童内容', lifestyle: '生活方式', 'light-transition': '轻转场', meditation: '冥想',
+  memory: '回忆叙事', opener: '开场', outdoor: '户外内容', outro: '片尾', podcast: '播客', 'product-demo': '产品演示',
+  reveal: '揭晓时刻', 'short-social': '社交短视频', 'slow-lifestyle': '慢生活', sports: '运动内容', storytelling: '故事叙述',
+  tech: '科技内容', 'tense-story': '紧张叙事', trailer: '预告片', transition: '转场', travel: '旅行', 'true-crime': '真实罪案',
+  tutorial: '教程', vlog: 'Vlog', voiceover: '旁白视频', wedding: '婚礼内容',
+};
+
+const zhAudioMeta = (value: string): string => AUDIO_META_ZH[value] ?? value;
+
+function officialAudioRemixPrompt(item: OfficialBgm): string {
+  if (studioLocale().toLowerCase().startsWith('zh')) {
+    const moods = item.moods.length ? item.moods.map(zhAudioMeta).join('、') : item.categoryLabel;
+    const uses = item.useCases.length ? item.useCases.slice(0, 4).map(zhAudioMeta).join('、') : '口播视频';
+    return `参考《${item.label}》的情绪、节奏与叙事适配度，创作一首全新的原创纯音乐。风格分类：${item.categoryLabel}；情绪：${moods}；能量：${zhAudioMeta(item.energy)}；适合：${uses}。保持相近的氛围和口播兼容性，但不要复制原曲的旋律或编曲。`;
+  }
+  const moods = item.moods.length ? item.moods.join(', ') : item.categoryLabelEn;
+  const uses = item.useCases.length ? item.useCases.slice(0, 4).join(', ') : 'talking-head video';
+  return `Create a fresh original instrumental track inspired by the mood and pacing of "${item.label}". ${item.categoryLabelEn}; ${moods} mood; ${item.energy} energy; suitable for ${uses}. Keep a similar atmosphere and narration fit, but do not copy the original melody or arrangement.`;
+}
+
 /**
  * The size sent to image-gen. gpt-image needs a concrete WxH (other models take aspect):
  *  - billing tier_param='image_tier'=`${quality}_${sizeTier}`, sizeTier derived from WxH (see pickGptImageSizeTier);
@@ -180,14 +225,14 @@ const SHIMMER: React.CSSProperties = {
 
 /* ---------------- Panel ---------------- */
 
-const TYPE_META: Record<AssetType, { title: string; ph: string; empty: string }> = {
-  image: { title: 'panels.image', ph: 'chatGen.describeImageGenerate', empty: '' },
-  video: { title: 'panels.video', ph: 'chatGen.describeShotGenerate', empty: '' },
-  element: { title: 'panels.element', ph: 'chatGen.describeOverlayElement', empty: 'chatGen.generatedComponentsStayHere' },
-  audio: { title: 'panels.music', ph: 'panels.musicPromptPlaceholder', empty: '' },
+const TYPE_META: Record<AssetType, { ph: string; empty: string }> = {
+  image: { ph: 'chatGen.describeImageGenerate', empty: '' },
+  video: { ph: 'chatGen.describeShotGenerate', empty: '' },
+  element: { ph: 'chatGen.describeOverlayElement', empty: 'chatGen.generatedComponentsStayHere' },
+  audio: { ph: 'panels.musicPromptPlaceholder', empty: '' },
 };
 
-export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, onInsertTemplate, generateAudio, onInsertAudio }: GenChatPanelProps) {
+export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia, onDragAsset, onInsertElement, generateElement, generateAudio, onInsertAudio }: GenChatPanelProps) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -262,22 +307,42 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     params: quoteParams,
   });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // templates / mine tabs: only image and video panels have a template library (elements use "base blocks", not here)
-  const templates = type === 'element' || type === 'audio' ? [] : (TEMPLATES_BY_TYPE[type] ?? []);
+  // Every generation type shares the same templates/mine interaction. Audio is intentionally
+  // sourced from the same official catalog as Assets → Official, so these are playable tracks
+  // with real covers rather than duplicate prompt-only presets.
+  const templates = TEMPLATES_BY_TYPE[type] ?? [];
+  const [officialAudio, setOfficialAudio] = useState<OfficialAssetsResponse | null>(null);
+  useEffect(() => {
+    if (type !== 'audio') return;
+    let cancelled = false;
+    setOfficialAudio(null);
+    void fetch('/api/studio/official-assets')
+      .then((r) => (r.ok ? (r.json() as Promise<OfficialAssetsResponse>) : null))
+      .then((catalog) => {
+        if (!cancelled) setOfficialAudio(catalog ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setOfficialAudio({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [type]);
+  const hasTemplateLibrary = type === 'audio' || templates.length > 0;
   const [tab, setTab] = useState<'mine' | 'templates'>('mine');
   // remember across sessions whether this panel ever had its own output → get the first frame right (had output → open "mine",
   // otherwise show templates), avoiding the flash of "show templates on empty entries, then switch back to mine once history arrives".
   const hadMineHint = useMemo(() => {
     try {
-      return window.localStorage.getItem(`studio:gen-hasmine:${type}`) === '1';
+      return window.localStorage.getItem(`studio:gen-hasmine:${projectId}:${type}`) === '1';
     } catch {
       return false;
     }
-  }, [type]);
+  }, [projectId, type]);
   // entries are authoritative only after history loads; before that, trust the persisted hint. Decide templates vs "mine" from this.
   const knownHasMine = loaded ? entries.length > 0 : hadMineHint;
-  const showTemplates = templates.length > 0 && (tab === 'templates' || !knownHasMine);
-  const showTabs = templates.length > 0 && knownHasMine;
+  const showTemplates = hasTemplateLibrary && (tab === 'templates' || !knownHasMine);
+  const showTabs = hasTemplateLibrary && knownHasMine;
   const viewKey: 'mine' | 'templates' = showTemplates ? 'templates' : 'mine';
   const viewKeyRef = useRef(viewKey);
   viewKeyRef.current = viewKey;
@@ -285,7 +350,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
   const scrollMemRef = useRef<{ mine?: number; templates?: number }>({});
 
   /** Template card click: fill the prompt into the input (still editable), focus, and return to the edit state next to "mine". */
-  const useTemplate = useCallback((prompt: string) => {
+  const applyTemplate = useCallback((prompt: string) => {
     setInput(prompt);
     requestAnimationFrame(() => {
       const el = inputRef.current;
@@ -295,24 +360,37 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
       }
     });
   }, []);
-
-  // on mount: load only this panel type's history (elements from localStorage, image/video from server incl. pending)
   useEffect(() => {
+    if (seedPrompt) applyTemplate(seedPrompt.prompt);
+  }, [applyTemplate, seedPrompt]);
+  const remixOfficialAudio = useCallback(
+    (item: OfficialBgm) => {
+      if (item.durationSec) setAudioSec(Math.max(10, Math.min(300, Math.round(item.durationSec))));
+      applyTemplate(officialAudioRemixPrompt(item));
+    },
+    [applyTemplate],
+  );
+
+  // On mount, load only this panel type's history for the current project.
+  useEffect(() => {
+    setEntries([]);
+    setLoaded(false);
     if (type === 'element') {
-      setEntries((cur) => {
-        const seen = new Set(cur.map((e) => e.id));
-        return [...cur, ...loadElementEntries().filter((e) => !seen.has(e.id))].sort((a, b) => a.createdAt - b.createdAt);
-      });
-      setLoaded(true);
-      return;
-    }
-    if (type === 'audio') {
-      // music generation isn't a create-pipeline job (the route answers inline), so there is no history to list
-      setLoaded(true);
-      return;
+      let cancelled = false;
+      setEntries(loadElementEntries(projectId));
+      void syncStoredElements(projectId)
+        .then((merged) => {
+          if (!cancelled && merged) setEntries(merged.map((e): Entry => ({ ...e, type: 'element', status: 'succeeded' })));
+        })
+        .finally(() => {
+          if (!cancelled) setLoaded(true);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
-    void listStudioGens(type)
+    void listStudioGens(projectId, type)
       .then((jobs) => {
         if (cancelled) return;
         const server: Entry[] = jobs.map((j) => ({ id: j.id, type, prompt: j.prompt, status: j.status, createdAt: j.createdAt, assets: j.assets, ...(j.error ? { error: j.error } : {}) }));
@@ -328,7 +406,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     return () => {
       cancelled = true;
     };
-  }, [type]);
+  }, [projectId, type]);
 
   // poll pending jobs (server-side)
   const pendingKey = entries
@@ -364,13 +442,13 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
   useEffect(() => {
     if (!loaded) return;
     try {
-      const k = `studio:gen-hasmine:${type}`;
+      const k = `studio:gen-hasmine:${projectId}:${type}`;
       if (entries.length > 0) window.localStorage.setItem(k, '1');
       else window.localStorage.removeItem(k);
     } catch {
       /* ignore quota/private-mode errors */
     }
-  }, [loaded, entries.length, type]);
+  }, [loaded, entries.length, projectId, type]);
 
   // switch tab (view switch) → restore that view's last scroll position; first entry: templates to top, mine to latest (bottom)
   useLayoutEffect(() => {
@@ -406,10 +484,10 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         setBusy(false); // element gen is slow, unlock input first (generation continues in background)
         try {
           const el = await generateElement(text, baseEl?.el);
-          pushElementToCloud({ id, prompt: text, createdAt, element: el }); // element library is cloud-authoritative, new items sync immediately
+          pushElementToCloud(projectId, { id, prompt: text, createdAt, element: el }); // project library is cloud-authoritative, new items sync immediately
           setEntries((cur) => {
             const next = cur.map((e) => (e.id === id ? { ...e, status: 'succeeded' as const, element: el } : e));
-            saveElementEntries(next);
+            saveElementEntries(projectId, next);
             return next;
           });
         } catch (err) {
@@ -425,8 +503,8 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         setInput('');
         setBusy(false); // music generation is slow; unlock the input while it runs
         try {
-          const url = await generateAudio!(text, audioSec);
-          setEntries((cur) => cur.map((e) => (e.id === id ? { ...e, status: 'succeeded' as const, assets: [{ url, key: url, mime: 'audio/mpeg' }] } : e)));
+          const result = await generateAudio!(text, audioSec);
+          setEntries((cur) => cur.map((e) => (e.id === id ? { ...e, id: result.id, status: 'succeeded' as const, assets: [{ url: result.url, key: result.url, mime: 'audio/mpeg' }] } : e)));
         } catch (err) {
           const msg = err instanceof Error ? err.message : t('common.generationFailed');
           setEntries((cur) => cur.map((e) => (e.id === id ? { ...e, status: 'failed' as const, error: msg } : e)));
@@ -438,7 +516,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         type === 'image'
           ? { prompt: text, user_prompt: text, size: imageSizeParam(modelId, ratio), n: Math.min(4, Math.max(1, count)), ...(quality ? { quality } : {}), ...model, ...(refs.length ? { reference_images: refs.map((r) => r.url) } : {}) }
           : { prompt: text, user_prompt: text, aspect_ratio: ratio === '1:1' ? '9:16' : ratio, duration_sec: vidDur, resolution: vidRes, count: 1, generate_audio: false, ...model, ...(refs.length ? { reference_videos: refs.map((r) => r.url) } : {}) };
-      const res = await startGeneration(type === 'image' ? 'image-gen' : 'video-gen', params);
+      const res = await startGeneration(projectId, type === 'image' ? 'image-gen' : 'video-gen', params);
       if (!res.ok) {
         if (res.kind === 'credits') setCredits({ need: res.need, balance: res.balance });
         else setEntries((cur) => [...cur, { id: `err_${Date.now()}`, type, prompt: text, status: 'failed', error: res.message, createdAt: Date.now() }]);
@@ -450,7 +528,7 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     } finally {
       setBusy(false);
     }
-  }, [input, busy, type, ratio, count, vidDur, quality, vidRes, refs, baseEl, modelId, generateElement, generateAudio, audioSec]);
+  }, [input, busy, projectId, type, ratio, count, vidDur, quality, vidRes, refs, baseEl, modelId, generateElement, generateAudio, audioSec]);
 
   const meta = TYPE_META[type];
 
@@ -458,8 +536,8 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* shimmer placeholder animation (same as fc-shimmer; studio doesn't import free-create.css, defined locally) */}
       <style>{'@keyframes hfgen-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}@media (prefers-reduced-motion: reduce){[style*="hfgen-shimmer"]{animation:none !important}}'}</style>
-      <div className="border-line text-ink flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
-        {showTabs ? (
+      {showTabs && (
+        <div className="border-line text-ink flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
           <div className="flex items-center gap-1">
             {(['mine', 'templates'] as const).map((tb) => (
               <button
@@ -474,11 +552,8 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
               </button>
             ))}
           </div>
-        ) : (
-          <span className="truncate">{t(meta.title)}</span>
-        )}
-      </div>
-
+        </div>
+      )}
 
       {/* stream: template library / my output (newest at bottom) */}
       <div
@@ -489,7 +564,14 @@ export function GenChatPanel({ type, comp, onInsertMedia, onDragAsset, onInsertE
         className="min-h-0 flex-1 overflow-auto p-3"
       >
         {showTemplates ? (
-          <TemplateGallery templates={templates} onUse={useTemplate} />
+          type === 'audio' ? (
+            <OfficialAudioTemplateGallery
+              catalog={officialAudio}
+              onRemix={remixOfficialAudio}
+            />
+          ) : (
+            <TemplateGallery type={type} templates={templates} onUse={applyTemplate} />
+          )
         ) : (
           <>
             {entries.length === 0 && meta.empty && (
@@ -759,22 +841,36 @@ function Lightbox({ asset, onClose }: { asset: GenAsset; onClose: () => void }) 
 
 /* ---------------- Template library: click a card to fill its prompt into the input ---------------- */
 
-function TemplateGallery({ templates, onUse }: { templates: GenTemplate[]; onUse: (prompt: string) => void }) {
+function TemplateGallery({
+  type,
+  templates,
+  onUse,
+}: {
+  type: AssetType;
+  templates: GenTemplate[];
+  onUse: (prompt: string) => void;
+}) {
   return (
     <div className="grid grid-cols-2 gap-2">
       {templates.map((t) => (
-        <TemplateCard key={t.id} t={t} onUse={onUse} />
+        <TemplateCard key={t.id} type={type} t={t} onUse={onUse} />
       ))}
     </div>
   );
 }
 
-function TemplateCard({ t: tpl, onUse }: { t: GenTemplate; onUse: (prompt: string) => void }) {
+function TemplateCard({ type, t: tpl, onUse }: { type: AssetType; t: GenTemplate; onUse: (prompt: string) => void }) {
+  if (type === 'element') return <ElementTemplateCard template={tpl} onUse={onUse} />;
+
+  const FallbackIcon = type === 'audio' ? Music2 : Film;
+  const fallbackTone = type === 'audio' ? 'from-violet-700 via-indigo-800 to-slate-950' : 'from-neutral-700 to-neutral-900';
+  const prompt = localizedTemplatePrompt(tpl, studioLocale());
   return (
     <button
       type="button"
-      title={tpl.prompt}
-      onClick={() => onUse(tpl.prompt)}
+      title={prompt}
+      aria-label={`${tpl.title ? t(tpl.title) : ''} · ${t('chatGen.remix')}`}
+      onClick={() => onUse(prompt)}
       className="border-line group relative block overflow-hidden rounded-lg border text-left"
     >
       {tpl.video ? (
@@ -795,22 +891,164 @@ function TemplateCard({ t: tpl, onUse }: { t: GenTemplate; onUse: (prompt: strin
       ) : tpl.image ? (
         <img src={imageThumb(tpl.image, 'list')} alt="" loading="lazy" className="aspect-[4/5] w-full bg-[#f3f3f0] object-cover" />
       ) : (
-        // video template with no preview clip: dark gradient card + title + prompt summary
-        <div className="flex aspect-[4/5] flex-col justify-between bg-gradient-to-br from-neutral-700 to-neutral-900 p-2.5">
-          <Film size={14} className="text-white/60" />
+        // Text-only template: type-specific title card + prompt summary.
+        <div className={`flex aspect-[4/5] flex-col justify-between bg-gradient-to-br p-2.5 ${fallbackTone}`}>
+          <div className="flex items-center justify-between">
+            <FallbackIcon size={14} className="text-white/60" />
+            {type === 'audio' && (
+              <span className="flex h-3 items-end gap-px opacity-55" aria-hidden>
+                {[5, 10, 7, 12, 8, 4].map((h, i) => <i key={i} className="w-px rounded-full bg-white" style={{ height: h }} />)}
+              </span>
+            )}
+          </div>
           <div>
             <div className="text-[12px] font-medium leading-tight text-white">{tpl.title ? t(tpl.title) : ''}</div>
-            <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-white/60">{tpl.prompt}</div>
+            <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-white/60">{prompt}</div>
           </div>
         </div>
       )}
       <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[9.5px] text-white">
         {t(zhCategory(tpl.category))}
       </span>
-      <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100">
-        <span className="text-ink rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium">{t('chatGen.fillEdit')}</span>
+      <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100 group-focus-within:bg-black/35 group-focus-within:opacity-100">
+        <span className="text-ink rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium">
+          {t('chatGen.remix')}
+        </span>
       </span>
     </button>
+  );
+}
+
+/** Audio templates are real official tracks: cover + inline preview + semantic Remix into the composer. */
+function OfficialAudioTemplateGallery({
+  catalog,
+  onRemix,
+}: {
+  catalog: OfficialAssetsResponse | null;
+  onRemix: (item: OfficialBgm) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const { playingUrl, toggle } = useAudioPreview();
+  const english = !studioLocale().toLowerCase().startsWith('zh');
+  const rows = catalog?.bgm ?? [];
+  const categories = catalog?.bgmCategories ?? [];
+  const filterItemClass = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
+  const needle = query.trim().toLocaleLowerCase();
+  const visible = rows.filter((item) => {
+    if (category !== 'all' && item.category !== category) return false;
+    if (!needle) return true;
+    return [
+      item.label,
+      item.artist,
+      item.categoryLabel,
+      item.categoryLabelEn,
+      item.energy,
+      item.narrationFit,
+      ...item.moods,
+      ...item.useCases,
+    ].some((value) => value.toLocaleLowerCase().includes(needle));
+  });
+
+  if (catalog === null) {
+    return (
+      <div className="text-ink-4 flex items-center justify-center gap-2 py-12 text-[11px]">
+        <Loader2 size={13} className="animate-spin" /> {t('panels.loading')}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="bg-panel sticky -top-3 z-10 -mx-1 flex items-center gap-1.5 px-1 pb-1 pt-0.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              title={t('panels.filterOfficialAssets')}
+              aria-label={t('panels.filterOfficialAssets')}
+              className={`border-line hover:text-ink inline-flex size-7 shrink-0 items-center justify-center rounded-md border transition active:translate-y-px ${
+                category === 'all' ? 'text-ink-4' : 'bg-panel-2 text-ink'
+              }`}
+            >
+              <SlidersHorizontal size={12} />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" sideOffset={5} className="max-h-[420px] min-w-[180px] overflow-auto">
+            <DropdownMenuRadioGroup value={category} onValueChange={setCategory}>
+              <DropdownMenuRadioItem value="all" className={filterItemClass}>
+                <span className="truncate">{t('panels.all')}</span>
+                {category === 'all' && <Check size={10} className="ml-auto shrink-0" />}
+              </DropdownMenuRadioItem>
+              {categories.length > 0 && <DropdownMenuSeparator />}
+              {categories.map((item: OfficialCategory) => (
+                <DropdownMenuRadioItem key={item.id} value={item.id} className={filterItemClass}>
+                  <span className="truncate">{english ? item.labelEn : item.label}</span>
+                  {category === item.id && <Check size={10} className="ml-auto shrink-0" />}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <label className="border-line bg-panel-2 flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2">
+          <Search size={12} className="text-ink-4 shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('panels.searchOfficialAudio')}
+            aria-label={t('panels.searchOfficialAudio')}
+            className="text-ink placeholder:text-ink-4 h-7 min-w-0 flex-1 bg-transparent text-[11px] outline-none"
+          />
+        </label>
+      </div>
+
+      {visible.length === 0 ? (
+        <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-8 text-center text-[10.5px]">
+          {rows.length === 0 ? t('panels.officialPreparing') : t('panels.noMatchingAssetsTry')}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {visible.map((item: OfficialBgm) => {
+            const playing = playingUrl === item.url;
+            return (
+              <div key={item.id} className="border-line bg-panel hover:bg-panel-2 group relative flex items-center gap-2 rounded-lg border p-1.5 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => toggle(item.url)}
+                  aria-label={playing ? t('panels.pauseAudio') : t('panels.playAudio')}
+                  title={item.label}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  <span className="bg-panel-2 relative size-11 shrink-0 overflow-hidden rounded-md">
+                    <img src={imageThumb(item.coverKey, 'thumb')} alt="" loading="lazy" className="size-full object-cover" />
+                    <span className={`absolute inset-0 flex items-center justify-center text-white ${playing ? 'bg-accent/75' : 'bg-black/25'}`}>
+                      {playing ? <Pause size={14} /> : <Play size={14} />}
+                    </span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="text-ink block truncate text-[11px] font-medium">{item.label}</span>
+                    <span className="text-ink-4 mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px]">
+                      <Music2 size={9} className="shrink-0" />
+                      <span className="truncate">{item.artist}</span>
+                      <span>·</span>
+                      <span className="shrink-0">{item.durationSec ? fmtDur(item.durationSec) : (english ? item.categoryLabelEn : item.categoryLabel)}</span>
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRemix(item)}
+                  title={t('chatGen.remix')}
+                  className="bg-accent text-bg pointer-events-none absolute right-1.5 top-1/2 inline-flex h-7 -translate-y-1/2 items-center gap-1 rounded-md px-2 text-[10px] font-medium opacity-0 shadow-sm transition-[opacity,transform] duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                >
+                  <RefreshCw size={10} /> {t('chatGen.remix')}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -889,7 +1127,7 @@ function EntryRow({
           </div>
           <div className="flex flex-wrap gap-1">
             <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertMedia({ type: 'image', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('tools.add_graphics.label'), ratioDims(e.ratio))} />
-            {onAddRef && <ActionChip icon={ImagePlus} label={t('chatGen.reference')} onClick={() => onAddRef(e.assets![0]!)} />}
+            {onAddRef && <ActionChip icon={RefreshCw} label={t('chatGen.remix')} onClick={() => onAddRef(e.assets![0]!)} />}
           </div>
         </div>
       )}
@@ -921,7 +1159,7 @@ function EntryRow({
           />
           <div className="flex flex-wrap gap-1">
             <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertMedia({ type: 'video', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('chatGen.videoClip'), ratioDims(e.ratio))} />
-            {onAddRef && <ActionChip icon={ImagePlus} label={t('chatGen.reference')} onClick={() => onAddRef(e.assets![0]!)} />}
+            {onAddRef && <ActionChip icon={RefreshCw} label={t('chatGen.remix')} onClick={() => onAddRef(e.assets![0]!)} />}
           </div>
         </div>
       )}
@@ -946,7 +1184,7 @@ function ElementResult({ el, prompt, comp, onInsertElement, onUseAsBase }: { el:
       </div>
       <div className="flex items-center gap-1.5">
         <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertElement(el, prompt)} />
-        {onUseAsBase && <ActionChip icon={ImagePlus} label={t('chatGen.reference')} onClick={() => onUseAsBase(el, prompt)} />}
+        {onUseAsBase && <ActionChip icon={RefreshCw} label={t('chatGen.remix')} onClick={() => onUseAsBase(el, prompt)} />}
       </div>
     </div>
   );

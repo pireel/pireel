@@ -33,6 +33,26 @@ export interface TranscriptSegment {
   cue?: boolean;
 }
 
+/** Metadata-only index of a project-local asset. The original bytes stay on the user's device;
+ *  syncing this small record lets another browser show the asset and guide the user to reselect it. */
+export interface LocalAssetIndexEntry {
+  sig: string;
+  label: string;
+  /** Absent on legacy entries = video. */
+  kind?: 'video' | 'image' | 'audio';
+  w?: number | null;
+  h?: number | null;
+  /** Folder imports share one logical source. The directory handle itself is device-local;
+   *  this cloud-safe path metadata lets another browser re-authorize the root once and recover
+   *  every indexed file beneath it. */
+  folder?: {
+    id: string;
+    name: string;
+    path: string;
+  };
+  createdAt: number;
+}
+
 /** Server-operable editing context (fuel for the offline MCP executor): client autosave mirrors
  *  it up alongside comp. plan stored loosely (shape is normalized by parsePlan on the use side);
  *  video bytes still never persisted. */
@@ -46,6 +66,8 @@ export interface StudioProjectContext {
     video?: { sig: string; key: string };
     clips?: Record<string, { key: string }>;
   };
+  /** Metadata only — never file bytes. Used to render per-asset restore cards across browsers. */
+  localAssets?: LocalAssetIndexEntry[];
 }
 
 /** Full project payload between client and server. */

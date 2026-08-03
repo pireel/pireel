@@ -75,7 +75,7 @@ export interface AssetUploader {
   upload(blob: Blob, opts: { contentType: string; filename?: string }): Promise<{ url: string; key: string }>;
 }
 
-/** One reusable overlay component in the user-level library (few-KB HTML + timeline script). */
+/** One reusable overlay component in a Studio project's library (few-KB HTML + timeline script). */
 export interface StoredElement {
   id: string;
   prompt: string;
@@ -84,11 +84,11 @@ export interface StoredElement {
   element: { seedId: string; innerHtml: string; timelineBody: string; label: string };
 }
 
-/** User-level component library beyond the current device (localStorage stays as cache). */
+/** Project-level component library beyond the current device (localStorage stays as cache). */
 export interface ElementStore {
-  list(): Promise<StoredElement[] | null>;
-  save(e: StoredElement): Promise<void>;
-  remove(id: string): Promise<void>;
+  list(projectId: string): Promise<StoredElement[] | null>;
+  save(projectId: string, e: StoredElement): Promise<void>;
+  remove(projectId: string, id: string): Promise<void>;
 }
 
 export interface StudioProviders {
@@ -98,7 +98,7 @@ export interface StudioProviders {
   vault: MediaVault;
   projects: ProjectStore;
   uploads: AssetUploader;
-  /** Component library sync (absent = pure-local localStorage library, e.g. the OSS shell). */
+  /** Project component library sync (absent = pure-local localStorage library, e.g. the OSS shell). */
   elements?: ElementStore;
   /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
   chatEndpoint?: string;

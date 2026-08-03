@@ -15,8 +15,8 @@ describe('sourceDrawRect', () => {
     expect(() => new Function(videoFrameShim([]))).not.toThrow();
   });
 
-  it('旧工程/无标记 precision 保持居中 cover', () => {
-    expect(sourceDrawRect(1920, 1080, 1080, 1920)).toEqual({ x: -1166.6666666666665, y: 0, width: 3413.333333333333, height: 1920 });
+  it('无显式取景时居中 contain，不裁掉导入素材', () => {
+    expect(sourceDrawRect(1920, 1080, 1080, 1920)).toEqual({ x: 0, y: 656.25, width: 1080, height: 607.5 });
     expect(sourceDrawRect(1920, 1080, 1080, 1920, { scale: 2, anchorX: 0, anchorY: 1 })).toEqual(
       sourceDrawRect(1920, 1080, 1080, 1920),
     );

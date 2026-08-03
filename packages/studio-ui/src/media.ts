@@ -159,3 +159,22 @@ export async function uploadImageFile(file: File): Promise<string> {
   const { url } = await studioProviders().uploads.upload(file, { contentType: file.type || 'image/png', filename: file.name || 'studio-image.png' });
   return url;
 }
+
+/** Extract embedded cover art from an audio file (ID3 APIC / MP4 covr / FLAC PICTURE — MediaBunny
+ *  reads them all) as an object URL, or null. Best-effort: any failure = no cover, never an error. */
+export async function audioCoverUrl(file: File): Promise<string | null> {
+  try {
+    const { ALL_FORMATS, BlobSource, Input } = await import('mediabunny');
+    const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+    try {
+      const tags = (await input.getMetadataTags()) as { images?: { data: Uint8Array; mimeType?: string }[] };
+      const img = tags.images?.[0];
+      if (!img?.data?.length) return null;
+      return URL.createObjectURL(new Blob([img.data as BlobPart], { type: img.mimeType || 'image/jpeg' }));
+    } finally {
+      (input as { dispose?: () => void }).dispose?.();
+    }
+  } catch {
+    return null;
+  }
+}

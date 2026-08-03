@@ -8,6 +8,9 @@
  * - Video templates: a self-authored batch of talking-head B-roll / camera-move / cutaway /
  *   mood prompts (no ready leaderboard for video sources). If there's a finished preview clip,
  *   fill video (bare R2 key, card loops a small video); otherwise fall back to a title placeholder card.
+ * - Component templates: finished bundled overlay components with live previews.
+ * - Audio templates come from the official-assets catalog at runtime, so cards play the
+ *   licensed files and show their uploaded covers instead of acting as prompt presets.
  *
  * Panel logic: nothing generated yet → show templates directly; once the user has their own
  * output → show two tabs ("Mine / Templates") at the top.
@@ -21,9 +24,11 @@ import { PRODUCT_BRAND_TEMPLATES } from './gen-templates/product-brand';
 import { PHOTOGRAPHY_TEMPLATES } from './gen-templates/photography';
 import { FOOD_DRINK_TEMPLATES } from './gen-templates/food-drink';
 import { VIDEO_TEMPLATES } from './gen-templates/video';
+import { ELEMENT_TEMPLATES } from './gen-templates/element';
 
 export type { GenTemplate } from './gen-templates/types';
-export { VIDEO_TEMPLATES };
+export { localizedTemplatePrompt } from './gen-templates/types';
+export { ELEMENT_TEMPLATES, VIDEO_TEMPLATES };
 
 export const TEMPLATE_CATEGORY_ZH: Record<string, string> = {
   'Poster Design': 'chatGen.poster',
@@ -52,7 +57,9 @@ export const IMAGE_TEMPLATES: GenTemplate[] = [
   ...FOOD_DRINK_TEMPLATES,
 ];
 
-export const TEMPLATES_BY_TYPE: Record<'image' | 'video', GenTemplate[]> = {
+export const TEMPLATES_BY_TYPE: Record<'image' | 'video' | 'element' | 'audio', GenTemplate[]> = {
   image: IMAGE_TEMPLATES,
   video: VIDEO_TEMPLATES,
+  element: ELEMENT_TEMPLATES,
+  audio: [],
 };
