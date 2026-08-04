@@ -91,6 +91,12 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Native UI mutations have a live `dispatchCommand` gateway; failed commands cannot publish partial state.
 - Legacy panels update only clips visible in their prior projection. V2-only tracks/clips and
   unchanged native geometry survive subsequent compatibility edits, so the rollout remains additive.
+- Browser, manual timeline and offline-MCP narration range edits now share
+  `applyNarrationDocumentEdit`: the V2 command ripples sync-locked/linked lanes atomically, then the
+  semantic layer re-derives managed captions. This covers range/transcript cuts, word deletion and
+  ordinary trim/scene deletion; locked native lanes fail the whole edit.
+- Agent transactions snapshot and validate both V2 and the runtime projection, so an error can roll
+  back media lanes which `Composition` cannot see.
 
 Direct V2 preview/export/tool consumption remains a rollout gate, not schema work. The server adapter
 currently projects legacy tool input and remigrates its result;

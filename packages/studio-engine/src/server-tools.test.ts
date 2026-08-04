@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Composition, cutTransitions, videoFrameTimelineBody } from './composition';
+import { type Composition, cutTransitions, normalizeProjectDocument, videoFrameTimelineBody } from './composition';
 import { SERVER_EXECUTABLE_TOOLS, type ServerToolProject, runServerTool } from './server-tools';
 
 function proj(over: Partial<ServerToolProject> = {}): ServerToolProject {
@@ -32,6 +32,19 @@ function proj(over: Partial<ServerToolProject> = {}): ServerToolProject {
   };
 }
 
+function v2proj(over: Partial<ServerToolProject> = {}): ServerToolProject {
+  const project = proj(over);
+  return {
+    ...project,
+    document: normalizeProjectDocument({
+      projectId: project.id,
+      value: project.comp,
+      context: project.context,
+      videoDurationSec: project.videoDurationSec,
+    }).document,
+  };
+}
+
 describe('离线执行器(标签页关着时的 MCP fallback)', () => {
   it('get_state:离线声明 + 与浏览器同源的局势快照', () => {
     const r = runServerTool('get_state', {}, proj());
@@ -41,6 +54,11 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('@b1');
     expect(r.result.state).toContain('@s2');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
+  });
+  it('V2 项目上的兼容工具只补丁其可见块，不丢 canonical document', () => {
+    const moved = runServerTool('move_block', { blockId: 'b1', startSec: 5.5 }, v2proj());
+    expect(moved.result.ok).toBe(true);
+    expect(moved.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 165 });
   });
   it('get_state:积分护栏只带布尔行——没钱时明示别调计费工具,未知时整行省略', () => {
     const broke = runServerTool('get_state', {}, proj({ canGenerate: false }));
@@ -197,6 +215,24 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const delta = (r.result.data as { delta?: { durationSec?: [number, number] } }).delta;
     expect(delta).toBeTruthy();
     expect(delta!.durationSec).toEqual([20, 15]);
+  });
+  it('cut_range:V2 命令同步涟漪原生 B-roll 轨，锁轨时整笔拒绝', () => {
+    const p = v2proj();
+    p.document!.assets.broll = { id: 'broll', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 2 } };
+    p.document!.timeline.tracks.push({
+      id: 'broll-track', type: 'visual', role: 'broll', muted: false, hidden: false,
+      locked: false, syncLocked: true, stackOrder: 2,
+      clips: [{ id: 'broll-clip', kind: 'media', assetId: 'broll', startFrame: 150, durationFrames: 60, sourceInSec: 0, sourceOutSec: 2, enabled: true }],
+    });
+    const cut = runServerTool('cut_range', { fromSec: 0, toSec: 2 }, p);
+    expect(cut.result.ok).toBe(true);
+    expect(cut.document?.timeline.tracks.find((track) => track.id === 'broll-track')?.clips[0]).toMatchObject({ startFrame: 90 });
+
+    p.document!.timeline.tracks.find((track) => track.id === 'broll-track')!.locked = true;
+    const rejected = runServerTool('cut_range', { fromSec: 0, toSec: 1 }, p);
+    expect(rejected).toMatchObject({ result: { ok: false, data: { code: 'track-locked', trackIds: ['broll-track'] } } });
+    expect(rejected.document).toBeUndefined();
+    expect(rejected.comp).toBeUndefined();
   });
   it('split_shot:离线必须给 atSec(没有播放头)', () => {
     const r = runServerTool('split_shot', {}, proj());

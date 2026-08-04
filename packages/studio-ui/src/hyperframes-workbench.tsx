@@ -37,6 +37,7 @@ import {
   SHOT_TREATMENTS,
   STUDIO_FONTS_HREF,
   CAPTION_PRESETS,
+  applyNarrationDocumentEdit,
   assembleHtml,
   blockBgCss,
   captionLineSegments,
@@ -2783,6 +2784,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  A just-uploaded URL may hit CDN propagation delay (first fetch 404): retry 2 more times, 1.2s apart. */
 
 
+  const prepareNarrationRangeEdit = (ranges: { fromSec: number; toSec: number }[]) => applyNarrationDocumentEdit({
+    projectId,
+    document: editorDocumentRef.current,
+    ranges,
+    context: liveMigrationContextRef.current.context,
+    mainTranscript: asrRef.current,
+    clipTranscripts: clipAsrRef.current,
+    canvasWidth: compRef.current.width,
+  });
+
   /** Cut: split the current shot in two at the playhead (content unchanged). Compute first, push the snapshot after —
    *  if it lands on a boundary and doesn't cut, don't touch the undo/redo stack (clearing the redo line without re-rendering would leave button states stale). */
   const splitAtPlayhead = () => {
@@ -2815,52 +2826,66 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   };
   /** Trim left / right: cut the source footage on the left/right of the playhead in the current shot, everything after
    *  shifts left, captions/effect blocks compress along with it. Read compRef (setComp wrapper writes synchronously) — the agent firing multiple trim tools in one round doesn't swallow the previous step. */
-  const trimAtPlayhead = (side: 'left' | 'right') => {
+  const trimAtPlayhead = (side: 'left' | 'right'): { ok: boolean; error?: string } => {
     const c = compRef.current;
     // Audio clip selected → trim ITS edge to the playhead (same math the lane handles use)
     const audId = selectedAudioIdRef.current;
     if (audId) {
       const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
-      if (!clip) return;
+      if (!clip) return { ok: false, error: t('workbench.movePlayheadToTrimAudio') };
       const w = audioClipWindow(clip, totalDuration(c));
       if (tRef.current <= w.start + 0.05 || tRef.current >= w.end - 0.05) {
         toast.error(t('workbench.movePlayheadToTrimAudio'));
-        return;
+        return { ok: false, error: t('workbench.movePlayheadToTrimAudio') };
       }
       pushUndoSnapshot();
       audioOps.patchClip(audId, audioTrimPatch(clip, side, tRef.current));
-      return;
+      return { ok: true };
     }
     const shots = ensureShots(c);
-    if (!shots.length) return;
+    if (!shots.length) return { ok: false, error: t('workbench.noVideoYet') };
     const r = side === 'left' ? trimLeftAtEdited(shots, tRef.current) : trimRightAtEdited(shots, tRef.current);
     if (!r.removed) {
       toast.error(t('workbench.movePlayheadToTrim'));
-      return;
+      return { ok: false, error: t('workbench.movePlayheadToTrim') };
+    }
+    const edit = prepareNarrationRangeEdit([{ fromSec: r.removed[0], toSec: r.removed[1] }]);
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return { ok: false, error: edit.error.message };
     }
     pushUndoSnapshot();
-    setComp((cur) => ({ ...cur, shots: r.clips, ...rippleRemoveSiblingLayers(cur, r.removed![0], r.removed![1]) }));
+    setEditorDocument(edit.document);
     setSelectedShotId(null);
     applyT(r.removed[0]); // playhead lands at the cut point
+    return { ok: true };
   };
   /** Delete scene: ordinary deletes ripple; deleting the final video clip leaves independent
    *  graphic/audio tracks intact, so an empty primary track is useful rather than destructive. */
-  const deleteShot = (sid: string) => {
+  const deleteShot = (sid: string): { ok: boolean; error?: string } => {
     const c = compRef.current;
     const shots = ensureShots(c);
     const r = deleteClipById(shots, sid);
     if (!r.removed) {
       toast.error(t('workbench.shotNotFound'));
-      return;
+      return { ok: false, error: t('workbench.shotNotFound') };
     }
-    pushUndoSnapshot();
-    setComp((cur) => ({
-      ...cur,
-      shots: r.clips,
-      ...(r.clips.length ? rippleRemoveSiblingLayers(cur, r.removed![0], r.removed![1]) : {}),
-    }));
+    if (r.clips.length) {
+      const edit = prepareNarrationRangeEdit([{ fromSec: r.removed[0], toSec: r.removed[1] }]);
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return { ok: false, error: edit.error.message };
+      }
+      pushUndoSnapshot();
+      setEditorDocument(edit.document);
+    } else {
+      // Emptying the primary lane intentionally preserves every independent sibling lane.
+      pushUndoSnapshot();
+      setComp((cur) => ({ ...cur, shots: [] }));
+    }
     setSelectedShotId(null);
     applyT(r.removed[0]);
+    return { ok: true };
   };
   /** Bulk-delete multiple shots (multi-select). Delete from the final-cut end backward — removing a later shot doesn't
    *  affect an earlier shot's final-cut coords. Select-all empties only the primary track. */
@@ -2872,24 +2897,30 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       .sort((a, b) => b.editedStart - a.editedStart); // end first
     if (targets.length === 0) return;
     if (targets.length === 1) return deleteShot(targets[0]!.clip.id); // degrade to single delete (reuse guard/landing point)
-    pushUndoSnapshot();
     if (targets.length === shots.length) {
+      pushUndoSnapshot();
       setComp((cur) => ({ ...cur, shots: [] }));
       setSelectedShotId(null);
       applyT(0);
       toast.success(t('workbench.deletedNScenes', { n: targets.length }));
       return;
     }
-    let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
+    const removedRanges: { fromSec: number; toSec: number }[] = [];
     let firstStart = Infinity;
     for (const sp of targets) {
       const r = deleteClipById(shots, sp.clip.id);
       if (!r.removed) continue;
       shots = r.clips;
-      layers = rippleRemoveSiblingLayers(layers, r.removed[0], r.removed[1]);
+      removedRanges.push({ fromSec: r.removed[0], toSec: r.removed[1] });
       firstStart = Math.min(firstStart, r.removed[0]);
     }
-    setComp((cur) => ({ ...cur, shots, ...layers }));
+    const edit = prepareNarrationRangeEdit(removedRanges);
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(edit.document);
     setSelectedShotId(null);
     applyT(Number.isFinite(firstStart) ? firstStart : 0);
     toast.success(t('workbench.deletedNScenes', { n: targets.length }));

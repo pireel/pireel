@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { Composition } from '@pireel/studio-engine/composition';
+import {
+  type Composition,
+  type EditorDocumentV2,
+  normalizeProjectDocument,
+  projectDocumentToLegacyComposition,
+} from '@pireel/studio-engine/composition';
 import type { AgentToolCtx } from './agent-tool-runner';
 
 async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<{ ok: boolean; summary?: string; error?: string }>) {
@@ -23,12 +28,22 @@ const composition = (): Composition => ({
 
 function harness() {
   const compRef = { current: composition() };
-  const undoStackRef = { current: [] as Composition[] };
-  const redoStackRef = { current: [composition()] };
+  const documentRef = { current: normalizeProjectDocument({ projectId: 'test', value: compRef.current }).document };
+  const undoStackRef = { current: [] as EditorDocumentV2[] };
+  const redoStackRef = { current: [documentRef.current] };
   const setComp = (action: Composition | ((c: Composition) => Composition)) => {
     compRef.current = typeof action === 'function' ? action(compRef.current) : action;
+    documentRef.current = normalizeProjectDocument({
+      projectId: 'test',
+      value: compRef.current,
+      previousDocument: documentRef.current,
+    }).document;
   };
-  return { ctx: { compRef, undoStackRef, redoStackRef, setComp } as unknown as AgentToolCtx, compRef, undoStackRef, redoStackRef };
+  const setDocument = (document: EditorDocumentV2, runtimeComposition?: Composition) => {
+    documentRef.current = document;
+    compRef.current = runtimeComposition ?? projectDocumentToLegacyComposition({ projectId: 'test', value: document });
+  };
+  return { ctx: { compRef, documentRef, undoStackRef, redoStackRef, setComp, setDocument } as unknown as AgentToolCtx, compRef, documentRef, undoStackRef, redoStackRef };
 }
 
 describe('Agent composition transaction boundary', () => {
@@ -36,7 +51,7 @@ describe('Agent composition transaction boundary', () => {
     const h = harness();
     const redo = h.redoStackRef.current[0];
     const result = await runAtomicCompositionTool(h.ctx, async () => {
-      h.undoStackRef.current.push(h.compRef.current);
+      h.undoStackRef.current.push(h.documentRef.current);
       h.redoStackRef.current = [];
       h.ctx.setComp((c) => ({ ...c, width: 1920 }));
       return { ok: false, error: 'bad input' };
@@ -65,6 +80,55 @@ describe('Agent composition transaction boundary', () => {
     expect((committed.data as { delta: { canvas: unknown } }).delta.canvas).toEqual({ from: [1080, 1920], to: [1920, 1080] });
   });
 
+  it('rolls back a V2-only mutation which the compatibility composition cannot see', async () => {
+    const h = harness();
+    const before = h.documentRef.current;
+    const result = await runAtomicCompositionTool(h.ctx, async () => {
+      h.ctx.setDocument({
+        ...h.documentRef.current,
+        timeline: {
+          tracks: [
+            ...h.documentRef.current.timeline.tracks,
+            { id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1, clips: [] },
+          ],
+        },
+      });
+      return { ok: false, error: 'later semantic step failed' };
+    });
+    expect(result.ok).toBe(false);
+    expect(h.documentRef.current).toBe(before);
+    expect(h.documentRef.current.timeline.tracks.map((track) => track.id)).not.toContain('broll');
+  });
+
+  it('browser cut_range commits through V2 and ripples a media lane invisible to Composition', async () => {
+    const h = harness();
+    h.compRef.current = {
+      ...h.compRef.current,
+      video: { url: 'blob:runtime-main', durationSec: 3 },
+    };
+    h.documentRef.current = normalizeProjectDocument({ projectId: 'test', value: h.compRef.current, videoSig: 'main-sig' }).document;
+    h.documentRef.current.assets['broll-asset'] = { id: 'broll-asset', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 1 } };
+    h.documentRef.current.timeline.tracks.push({
+      id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+      clips: [{ id: 'broll-clip', kind: 'media', assetId: 'broll-asset', startFrame: 60, durationFrames: 30, sourceInSec: 0, sourceOutSec: 1, enabled: true }],
+    });
+    Object.assign(h.ctx, {
+      ensureShots: (c: Composition) => c.shots ?? [],
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      genIdsRef: { current: new Set<string>() },
+      relayCaptionLayer: (blocks: Composition['blocks']) => blocks,
+      asrRef: { current: null },
+      clipAsrRef: { current: {} },
+      setSelectedShotId: () => {},
+      applyT: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'cut_range', { fromSec: 0, toSec: 1 });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')?.clips[0]).toMatchObject({ startFrame: 30 });
+  });
+
   it('async failure preserves a later manual edit and removes only the tool ghost snapshot', async () => {
     const h = harness();
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
@@ -72,12 +136,12 @@ describe('Agent composition transaction boundary', () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const pending = run(h.ctx, async () => {
-      h.undoStackRef.current.push(h.compRef.current); // raw tool snapshot
+      h.undoStackRef.current.push(h.documentRef.current); // raw tool snapshot
       h.redoStackRef.current = [];
       await gate;
       return { ok: false, error: 'provider failed' };
     });
-    h.undoStackRef.current.push(h.compRef.current); // manual edit snapshot
+    h.undoStackRef.current.push(h.documentRef.current); // manual edit snapshot
     h.ctx.setComp((c) => ({ ...c, width: 1440 }));
     release();
     const result = await pending;

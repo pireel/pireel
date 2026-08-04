@@ -22,6 +22,7 @@ import { interpretApplyRaw } from './briefs';
 import {
   type Block,
   type Composition,
+  type EditorDocumentV2,
   type CutTransitionEffect,
   type ShotFilter,
   type TransitionDirection,
@@ -34,8 +35,11 @@ import {
   VOLUME_DB_MIN,
   applyBlockPlacement,
   applyCompositionLayout,
+  applyNarrationDocumentEdit,
   applyShotFramingInput,
   placementFramingNotes,
+  normalizeProjectDocument,
+  projectDocumentToLegacyComposition,
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
@@ -62,6 +66,7 @@ import {
   patchShotFraming,
   totalDuration,
   validateComposition,
+  validateEditorDocumentV2,
 } from './composition';
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
@@ -85,6 +90,8 @@ export interface ServerToolProject {
   id: string;
   title: string;
   comp: Composition;
+  /** Canonical authority when the caller has crossed the V2 persistence boundary. */
+  document?: EditorDocumentV2;
   context: StudioProjectContext;
   videoDurationSec: number | null;
   /** Credits guardrail for the snapshot: hosted generation affordable? Boolean by design (never the balance
@@ -96,6 +103,7 @@ export interface ServerToolProject {
 export interface ServerToolOutcome {
   result: { ok: boolean; summary?: string; error?: string; data?: unknown; state?: string };
   comp?: Composition;
+  document?: EditorDocumentV2;
   context?: StudioProjectContext;
 }
 
@@ -251,6 +259,30 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       };
     }
     out.comp = next;
+    if (p.document) {
+      const documentBase = out.document ?? p.document;
+      const projectionBase = out.document
+        ? projectDocumentToLegacyComposition({ projectId: p.id, value: out.document })
+        : p.comp;
+      out.document = normalizeProjectDocument({
+        projectId: p.id,
+        value: next,
+        context: out.context ?? p.context,
+        videoDurationSec: p.videoDurationSec,
+        previousDocument: documentBase,
+        previousProjection: projectionBase,
+      }).document;
+      const documentIssues = validateEditorDocumentV2(out.document).filter((issue) => issue.severity === 'error');
+      if (documentIssues.length) {
+        return {
+          result: {
+            ok: false,
+            error: 'mutation rejected: editor document invariants failed',
+            data: { issues: documentIssues },
+          },
+        };
+      }
+    }
     // Every successful composition mutation reports its actual compact diff, not just cutting tools.
     const delta = compReceiptDelta(p.comp, next);
     if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
@@ -565,6 +597,25 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const side = input.side === 'left' ? 'left' : 'right';
       const r = side === 'left' ? trimLeftAtEdited(shots, at) : trimRightAtEdited(shots, at);
       if (!r.removed) return { result: { ok: false, error: 'cannot trim here (not inside a shot)' } };
+      if (p.document) {
+        const command = applyNarrationDocumentEdit({
+          projectId: p.id,
+          document: p.document,
+          ranges: [{ fromSec: r.removed[0], toSec: r.removed[1] }],
+          context: p.context,
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+          canvasWidth: c.width,
+        });
+        if (!command.ok) {
+          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
+        }
+        return {
+          result: { ok: true, summary: `Trimmed the ${side === 'left' ? 'left' : 'right'} side at ${r1(at)}s` },
+          document: command.document,
+          comp: command.composition,
+        };
+      }
       const layers = rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1]);
       return {
         result: { ok: true, summary: `Trimmed the ${side === 'left' ? 'left' : 'right'} side at ${r1(at)}s` },
@@ -580,6 +631,21 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const layers: TimelineSiblingLayers = r.clips.length
         ? rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1])
         : { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
+      if (p.document && r.clips.length) {
+        const command = applyNarrationDocumentEdit({
+          projectId: p.id,
+          document: p.document,
+          ranges: [{ fromSec: r.removed[0], toSec: r.removed[1] }],
+          context: p.context,
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+          canvasWidth: c.width,
+        });
+        if (!command.ok) {
+          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
+        }
+        return { result: { ok: true, summary: 'Deleted this scene' }, document: command.document, comp: command.composition };
+      }
       return {
         result: { ok: true, summary: 'Deleted this scene' },
         comp: { ...c, shots: r.clips, ...layers, blocks: relayCaptionLayer(layers.blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
@@ -607,14 +673,35 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       if (!seams.length) return { result: { ok: false, error: 'cannot remove the selected words from the current edit' } };
       const cuts = finalizeCutSeams(seams);
-      const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+      let document: EditorDocumentV2 | undefined;
+      let nextComp: Composition;
+      if (p.document) {
+        const command = applyNarrationDocumentEdit({
+          projectId: p.id,
+          document: p.document,
+          ranges: seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })),
+          context: p.context,
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+          canvasWidth: c.width,
+        });
+        if (!command.ok) {
+          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
+        }
+        document = command.document;
+        nextComp = command.composition;
+      } else {
+        const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+        nextComp = { ...c, shots: curShots, ...layers, blocks: relaid };
+      }
       return {
         result: {
           ok: true,
           summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`,
           data: { wordIds: ids, cuts },
         },
-        comp: { ...c, shots: curShots, ...layers, blocks: relaid },
+        comp: nextComp,
+        ...(document ? { document } : {}),
       };
     }
     case 'cut_range':
@@ -656,15 +743,37 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       let curShots = shots;
       let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
       const seams: CutSeamEntry[] = [];
+      const removedRanges: { fromSec: number; toSec: number }[] = [];
       for (const e of ranges) {
         const rr = removeEditedRange(curShots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
         if (!rr.removed) continue;
         curShots = rr.clips;
         layers = rippleRemoveSiblingLayers(layers, rr.removed[0], rr.removed[1]);
         seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
+        removedRanges.push({ fromSec: rr.removed[0], toSec: rr.removed[1] });
       }
       if (!seams.length) return { result: { ok: false, error: 'cannot remove these ranges from the current edit' } };
-      const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+      let document: EditorDocumentV2 | undefined;
+      let nextComp: Composition;
+      if (p.document) {
+        const command = applyNarrationDocumentEdit({
+          projectId: p.id,
+          document: p.document,
+          ranges: removedRanges,
+          context: p.context,
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+          canvasWidth: c.width,
+        });
+        if (!command.ok) {
+          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
+        }
+        document = command.document;
+        nextComp = command.composition;
+      } else {
+        const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+        nextComp = { ...c, shots: curShots, ...layers, blocks: relaid };
+      }
       // The receipt speaks ACTUAL seconds removed (post-margin) — the agent quotes these, not its own gap arithmetic
       const cuts = finalizeCutSeams(seams);
       const removedTotalSec = Math.round(cuts.reduce((a, x) => a + x.removedSec, 0) * 10) / 10;
@@ -677,7 +786,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
               : 'Removed the specified range',
           ...(tool === 'cut_narration' ? { data: { cuts, removedTotalSec, ...(Number.isFinite(kg) && kg > 0 ? { keepGapSec: kg } : {}) } } : {}),
         },
-        comp: { ...c, shots: curShots, ...layers, blocks: relaid },
+        comp: nextComp,
+        ...(document ? { document } : {}),
       };
     }
     case 'add_transition': {

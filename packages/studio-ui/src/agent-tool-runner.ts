@@ -19,7 +19,6 @@ import {
   type ShotFramingPatch,
   type ShotTreatment,
   type TransitionDirection,
-  type TimelineSiblingLayers,
   type VideoShot,
   CAPTION_PRESETS,
   SHOT_TREATMENTS,
@@ -27,6 +26,7 @@ import {
   VOLUME_DB_MIN,
   applyBlockPlacement,
   applyCompositionLayout,
+  applyNarrationDocumentEdit,
   applyShotFramingInput,
   audioClipId,
   audioTrimPatch,
@@ -46,13 +46,13 @@ import {
   shotId,
   listAddressedWords,
   resolveWordIds,
-  rippleRemoveSiblingLayers,
   wordRanges,
   wordRangesToEdited,
   splitAudioClipAt,
   splitShotsAtEditedPoints,
   totalDuration,
   validateComposition,
+  validateEditorDocumentV2,
   zoneOf,
 } from '@pireel/studio-engine/composition';
 import { type CutSeamEntry, finalizeCutSeams, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
@@ -192,8 +192,8 @@ export interface AgentToolCtx {
   /** Narration denoise (use-denoise.ts): strength = on/retune, null = off; bakes in the background. */
   setDenoise: (strength: number | null) => void;
   splitAtPlayhead: () => void;
-  trimAtPlayhead: (side: 'left' | 'right') => void;
-  deleteShot: (sid: string) => void;
+  trimAtPlayhead: (side: 'left' | 'right') => { ok: boolean; error?: string };
+  deleteShot: (sid: string) => { ok: boolean; error?: string };
   videoDurationOf: (url: string) => Promise<number | null>;
   insertClipCore: (url: string, clipDur: number, atWish: number, file?: File) => string;
   // Captions
@@ -262,6 +262,23 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Kept as a semantic marker at ripple-heavy call sites; the outer transaction attaches the
       // final delta for every mutation after validation (not just footage edits).
       const withDelta = (res: StudioToolResult): StudioToolResult => res;
+      const commitNarrationRanges = (ranges: { fromSec: number; toSec: number }[]) => {
+        const command = applyNarrationDocumentEdit({
+          projectId: ctx.projectId,
+          document: documentRef.current,
+          ranges,
+          context: {
+            ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
+            ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+          },
+          mainTranscript: asrRef.current,
+          clipTranscripts: clipAsrRef.current,
+          canvasWidth: c.width,
+        });
+        if (!command.ok) return command;
+        setDocument(command.document);
+        return { ...command, composition: compRef.current };
+      };
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
       if (!NO_UNDO_TOOLS.has(toolId)) {
@@ -980,10 +997,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const shots = ensureShots(c);
             const r = removeEditedRange(shots, from, to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
             if (!r.removed) return { ok: false, error: t('workbench.rangeDeletedMayCover') };
-            setComp((cur) => ({ ...cur, shots: r.clips, ...rippleRemoveSiblingLayers(cur, r.removed![0], r.removed![1]) }));
+            const committed = commitNarrationRanges([{ fromSec: r.removed[0], toSec: r.removed[1] }]);
+            if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
             applyT(r.removed[0]);
-            return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: r.clips.map((s) => s.id) } });
+            return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: (committed.composition.shots ?? []).map((s) => s.id) } });
           }
           case 'set_captions': {
             if (!c.video) return { ok: false, error: t('workbench.uploadVideoBeforeSetting') };
@@ -1068,19 +1086,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const mapped = wordRangesToEdited(shots0, wordRanges(resolved.words));
             if (!mapped.length) return { ok: false, error: 'the selected words are already absent from the edited timeline' };
             let shots = shots0;
-            let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
             let firstCut = Infinity;
             const seams: CutSeamEntry[] = [];
             for (const range of mapped) {
               const removed = removeEditedRange(shots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
               if (!removed.removed) continue;
               shots = removed.clips;
-              layers = rippleRemoveSiblingLayers(layers, removed.removed[0], removed.removed[1]);
               firstCut = Math.min(firstCut, removed.removed[0]);
               seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
             }
             if (!seams.length) return { ok: false, error: 'cannot remove the selected words from the current edit' };
-            setComp((cur) => ({ ...cur, shots, ...layers, blocks: relayCaptionLayer(layers.blocks, shots, asrRef.current) }));
+            const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
+            if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
@@ -1114,20 +1131,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               .sort((a, b) => b.from - a.from);
             if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
             let shots = shots0;
-            let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
             const seams: CutSeamEntry[] = [];
             let firstCut = Infinity;
             for (const e of edited) {
               const rr = removeEditedRange(shots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
               if (!rr.removed) continue;
               shots = rr.clips;
-              layers = rippleRemoveSiblingLayers(layers, rr.removed[0], rr.removed[1]);
               seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
               firstCut = Math.min(firstCut, rr.removed[0]);
             }
             if (!seams.length) return { ok: false, error: t('workbench.thoseRangesDeletedThey') };
-            const relaid = relayCaptionLayer(layers.blocks, shots, asrRef.current); // captions follow the narration: deleted words drop out automatically
-            setComp((cur) => ({ ...cur, shots, ...layers, blocks: relaid }));
+            const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
+            if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             // The receipt speaks ACTUAL seconds (post-margin, what really left the timeline) — the agent's own
@@ -1391,13 +1406,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
             const side = input.side === 'left' ? 'left' : 'right';
             if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
-            trimAtPlayhead(side);
+            const trimmed = trimAtPlayhead(side);
+            if (!trimmed.ok) return { ok: false, error: trimmed.error ?? t('workbench.movePlayheadToTrim') };
             return withDelta({ ok: true, summary: side === 'left' ? t('workbench.trimmedFootageLeftSec', { sec: r1(tRef.current) }) : t('workbench.trimmedFootageRightSec', { sec: r1(tRef.current) }) });
           }
           case 'delete_shot': {
             const s = findShot(input.shotId);
             if (!s) return { ok: false, error: t('workbench.shotNotFound') };
-            deleteShot(s.id);
+            const deleted = deleteShot(s.id);
+            if (!deleted.ok) return { ok: false, error: deleted.error ?? t('workbench.shotNotFound') };
             return withDelta({ ok: true, summary: t('workbench.deletedScene') });
           }
           case 'set_video_filter': {
@@ -1648,12 +1665,15 @@ const cloneComposition = (comp: Composition): Composition => JSON.parse(JSON.str
  * synchronous setComp calls internally; callers only observe a validated final composition. Failed/no-op
  * calls restore both state and history stacks, so retrying cannot consume undo or preserve a partial edit. */
 export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<StudioToolResult>): Promise<StudioToolResult> {
+  const beforeDocument = ctx.documentRef.current;
   const before = cloneComposition(ctx.compRef.current);
   const beforeJson = JSON.stringify(before);
   const undoBefore = [...ctx.undoStackRef.current];
   const redoBefore = [...ctx.redoStackRef.current];
   const restore = () => {
-    if (JSON.stringify(ctx.compRef.current) !== beforeJson) ctx.setComp(before);
+    if (ctx.documentRef.current !== beforeDocument || JSON.stringify(ctx.compRef.current) !== beforeJson) {
+      ctx.setDocument(beforeDocument, before);
+    }
     ctx.undoStackRef.current = undoBefore;
     ctx.redoStackRef.current = redoBefore;
   };
@@ -1667,16 +1687,18 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
   const afterSyncJson = JSON.stringify(ctx.compRef.current);
+  const afterSyncDocument = ctx.documentRef.current;
   const undoAfterSync = [...ctx.undoStackRef.current];
   const redoAfterSync = [...ctx.redoStackRef.current];
   const sameRefs = <T,>(a: T[], b: T[]) => a.length === b.length && a.every((value, index) => value === b[index]);
   const rollbackFailure = () => {
     const currentJson = JSON.stringify(ctx.compRef.current);
+    const currentDocument = ctx.documentRef.current;
     const historyUnchanged = sameRefs(ctx.undoStackRef.current, undoAfterSync) && sameRefs(ctx.redoStackRef.current, redoAfterSync);
-    if (currentJson === beforeJson) {
+    if (currentJson === beforeJson && currentDocument === beforeDocument) {
       ctx.undoStackRef.current = undoBefore;
       ctx.redoStackRef.current = redoBefore;
-    } else if ((afterSyncJson !== beforeJson && currentJson === afterSyncJson) || historyUnchanged) {
+    } else if ((afterSyncDocument !== beforeDocument && currentDocument === afterSyncDocument && currentJson === afterSyncJson) || historyUnchanged) {
       restore();
     } else if (ctx.undoStackRef.current.length >= undoAfterSync.length && undoAfterSync.every((value, index) => ctx.undoStackRef.current[index] === value)) {
       // Drop only the failed tool's synchronous history entries and retain snapshots appended by
@@ -1702,7 +1724,7 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
 
   const next = ctx.compRef.current;
   const nextJson = JSON.stringify(next);
-  const changed = beforeJson !== nextJson;
+  const changed = beforeDocument !== ctx.documentRef.current || beforeJson !== nextJson;
   if (!changed) {
     // Raw handlers push their snapshot before validating inputs. A successful read/context operation or
     // harmless no-op must not create a ghost history entry either.
@@ -1711,9 +1733,10 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
     return result;
   }
   const issues = validateComposition(next);
-  if (issues.length) {
+  const documentIssues = validateEditorDocumentV2(ctx.documentRef.current).filter((issue) => issue.severity === 'error');
+  if (issues.length || documentIssues.length) {
     restore();
-    return { ok: false, error: 'mutation rejected: composition invariants failed', data: { issues } };
+    return { ok: false, error: 'mutation rejected: editor invariants failed', data: { issues, documentIssues } };
   }
   const delta = compReceiptDelta(before, next) ?? { compositionUpdated: ['other'] };
   return { ...result, data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), delta } };
