@@ -422,9 +422,9 @@ export function useDraftAutosave(
   comp: Composition,
   videoSig: string | null,
   projectId: string,
+  document: EditorDocumentV2,
   coverThumbRef?: MutableRefObject<string | null>,
   contextOf?: () => StudioDraft['context'],
-  documentOverride?: EditorDocumentV2,
 ) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -443,14 +443,6 @@ export function useDraftAutosave(
         const cover = coverThumbRef?.current ?? prev?.coverThumb;
         const context = contextOf?.();
         const videoDurationSec = comp.video?.durationSec ?? prev?.videoDurationSec ?? null;
-        const document = documentOverride ?? normalizeProjectDocument({
-          projectId,
-          value: comp,
-          context,
-          videoSig,
-          videoDurationSec,
-          previousDocument: prev?.document,
-        }).document;
         const draft: StudioDraft = {
           id: projectId,
           ...(prev?.title ? { title: prev.title } : {}),
@@ -472,6 +464,6 @@ export function useDraftAutosave(
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [comp, videoSig, projectId, documentOverride]);
+  }, [comp, videoSig, projectId, document]);
   return { lastSavedAt };
 }

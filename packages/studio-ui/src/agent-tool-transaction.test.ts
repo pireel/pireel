@@ -31,19 +31,11 @@ function harness() {
   const documentRef = { current: normalizeProjectDocument({ projectId: 'test', value: compRef.current }).document };
   const undoStackRef = { current: [] as EditorDocumentV2[] };
   const redoStackRef = { current: [documentRef.current] };
-  const setComp = (action: Composition | ((c: Composition) => Composition)) => {
-    compRef.current = typeof action === 'function' ? action(compRef.current) : action;
-    documentRef.current = normalizeProjectDocument({
-      projectId: 'test',
-      value: compRef.current,
-      previousDocument: documentRef.current,
-    }).document;
-  };
   const setDocument = (document: EditorDocumentV2, runtimeComposition?: Composition) => {
     documentRef.current = document;
     compRef.current = runtimeComposition ?? projectDocumentToLegacyComposition({ projectId: 'test', value: document });
   };
-  return { ctx: { compRef, documentRef, undoStackRef, redoStackRef, setComp, setDocument } as unknown as AgentToolCtx, compRef, documentRef, undoStackRef, redoStackRef };
+  return { ctx: { compRef, documentRef, undoStackRef, redoStackRef, setDocument } as unknown as AgentToolCtx, compRef, documentRef, undoStackRef, redoStackRef };
 }
 
 describe('Agent composition transaction boundary', () => {
@@ -53,7 +45,7 @@ describe('Agent composition transaction boundary', () => {
     const result = await runAtomicCompositionTool(h.ctx, async () => {
       h.undoStackRef.current.push(h.documentRef.current);
       h.redoStackRef.current = [];
-      h.ctx.setComp((c) => ({ ...c, width: 1920 }));
+      h.ctx.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1920 } });
       return { ok: false, error: 'bad input' };
     });
     expect(result.ok).toBe(false);
@@ -65,7 +57,11 @@ describe('Agent composition transaction boundary', () => {
   it('invalid final composition rejects atomically; valid commit returns compact delta', async () => {
     const invalid = harness();
     const rejected = await runAtomicCompositionTool(invalid.ctx, async () => {
-      invalid.ctx.setComp((c) => ({ ...c, shots: [...c.shots!, { ...c.shots![0]! }] }));
+      const primary = invalid.documentRef.current.timeline.tracks[0]!;
+      invalid.ctx.setDocument({
+        ...invalid.documentRef.current,
+        timeline: { tracks: [{ ...primary, clips: [...primary.clips, { ...primary.clips[0]! }] }] },
+      });
       return { ok: true, summary: 'candidate' };
     });
     expect(rejected.ok).toBe(false);
@@ -73,7 +69,7 @@ describe('Agent composition transaction boundary', () => {
 
     const valid = harness();
     const committed = await runAtomicCompositionTool(valid.ctx, async () => {
-      valid.ctx.setComp((c) => ({ ...c, width: 1920, height: 1080 }));
+      valid.ctx.setDocument({ ...valid.documentRef.current, canvas: { ...valid.documentRef.current.canvas, width: 1920, height: 1080 } });
       return { ok: true, summary: 'canvas' };
     });
     expect(committed.ok).toBe(true);
@@ -163,7 +159,7 @@ describe('Agent composition transaction boundary', () => {
       return { ok: false, error: 'provider failed' };
     });
     h.undoStackRef.current.push(h.documentRef.current); // manual edit snapshot
-    h.ctx.setComp((c) => ({ ...c, width: 1440 }));
+    h.ctx.setDocument({ ...h.documentRef.current, canvas: { ...h.documentRef.current.canvas, width: 1440 } });
     release();
     const result = await pending;
     expect(result.ok).toBe(false);

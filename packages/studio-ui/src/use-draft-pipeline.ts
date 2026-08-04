@@ -11,7 +11,7 @@
  */
 
 import { useRef, type MutableRefObject } from 'react';
-import type { Composition } from '@pireel/studio-engine/composition';
+import { applyEditorCommand, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import type { DraftPlan, PlanInsert } from '@pireel/studio-engine/plan';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -27,7 +27,8 @@ export interface DraftPipelineDeps {
   setAsrSentences: (v: AsrSegment[]) => void;
   setPlan: (v: DraftPlan) => void;
   setVisual: (v: VisualTimeline | null) => void;
-  setComp: (updater: (c: Composition) => Composition) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2) => void;
   /** Current video (blob preview URL + canvas size), null when there's no video. */
   currentVideo: () => { url: string; durationSec: number; width: number; height: number } | null;
   /** Planning context for inserted clips (multi-source main track): transcribe on demand to give anchor/duration/content.
@@ -36,7 +37,7 @@ export interface DraftPipelineDeps {
 }
 
 export function useDraftPipeline(deps: DraftPipelineDeps) {
-  const { videoFileRef, compRef, asrRef, planRef, visualRef, setAsrSentences, setPlan, setVisual, setComp, currentVideo } = deps;
+  const { videoFileRef, compRef, asrRef, planRef, visualRef, setAsrSentences, setPlan, setVisual, documentRef, setDocument, currentVideo } = deps;
 
   const inflightRef = useRef<{ asr?: Promise<AsrSegment[]>; plan?: Promise<DraftPlan>; visual?: Promise<VisualTimeline | null> }>({});
   function dedup<K extends 'asr' | 'plan' | 'visual', T>(key: K, run: () => Promise<T>): Promise<T> {
@@ -131,7 +132,10 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
       setVisual(vis);
       // Attach the palette derived from the background to the composition → assembleHtml injects #root, compose passes it to the LLM (light blend).
       // Don't override when a frame (frameId) is mounted: a frame is the user's explicitly chosen design system; the visual-derived palette is only a default source
-      if (vis.palette) setComp((c) => (c.frameId ? c : { ...c, palette: vis.palette }));
+      if (vis.palette && !documentRef.current.appearance.frameId) {
+        const command = applyEditorCommand(documentRef.current, { type: 'appearance.patch', patch: { palette: vis.palette } });
+        if (command.ok) setDocument(command.document);
+      }
     }
     return vis;
   }

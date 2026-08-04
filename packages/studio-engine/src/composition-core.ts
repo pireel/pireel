@@ -82,7 +82,7 @@ export interface Block {
    *  NEW blocks, never this one (one video can mix themes across its sections). Rendered as a
    *  #blockId-scoped override above #root's live tokens; the user's explicit bg/border still win
    *  (inline style beats the scoped rule). Absent only on legacy data in flight — both write funnels
-   *  (workbench setComp / offline runServerTool) stamp it on contact via freezeBlockVars. Captions,
+   *  Native document publication stamps it on contact. V1-only tools use freezeBlockVars. Captions,
    *  transitions and media blocks stay unstamped: they follow global styling by design. */
   vars?: Record<string, string>;
   /** User-facing label. */

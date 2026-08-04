@@ -1,5 +1,7 @@
 import type { EditorDocumentV2 } from '../types';
 import { patchEditorCanvas } from './canvas';
+import { patchEditorAppearance } from './appearance';
+import { patchEditorProcessing } from './processing';
 import { insertAudioClip } from './audio-insert';
 import { patchAudioClips } from './audio-patch';
 import { patchCaptionStyle } from './caption-style';
@@ -8,6 +10,9 @@ import { insertEditorClips } from './insert';
 import { relayManagedCaptionTrack } from './managed-captions';
 import { patchNarrativeClips } from './narrative-patch';
 import { patchOverlayClips } from './overlay-patch';
+import { insertOverlayClip } from './overlay-insert';
+import { insertNarrativeClip } from './narrative-insert';
+import { reorderNarrativeClips } from './narrative-reorder';
 import { moveOverlayClip } from './overlay-move';
 import { duplicateOverlayClip } from './overlay-duplicate';
 import { removeEditorClips } from './remove';
@@ -21,6 +26,10 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
   switch (command.type) {
     case 'canvas.patch':
       return patchEditorCanvas(document, command.patch);
+    case 'appearance.patch':
+      return patchEditorAppearance(document, command.patch);
+    case 'processing.patch':
+      return patchEditorProcessing(document, command.patch);
     case 'track.insert':
       return insertEditorTrack(document, command.track, command.index);
     case 'track.remove':
@@ -33,6 +42,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchEditorClip(document, command.trackId, command.clipId, command.patch);
     case 'overlay.patch':
       return patchOverlayClips(document, command.updates);
+    case 'overlay.insert':
+      return insertOverlayClip(document, command.trackId, command.clip, command.asset);
     case 'overlay.move':
       return moveOverlayClip(document, command.clipId, command.toTrackId);
     case 'overlay.duplicate':
@@ -45,6 +56,10 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchCaptionStyle(document, command.patch);
     case 'captions.relay':
       return relayManagedCaptionTrack(document);
+    case 'narrative.insert':
+      return insertNarrativeClip(document, command.atFrame, command.clip, command.asset, command.mode);
+    case 'narrative.reorder':
+      return reorderNarrativeClips(document, command.clipIds);
     case 'clips.remove':
       return removeEditorClips(document, command);
     case 'clips.insert':

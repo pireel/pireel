@@ -3,16 +3,16 @@
  *
  * The existing `studio_projects.comp` JSON column is reused: old rows contain Composition V1,
  * new rows contain EditorDocumentV2. Callers never inspect that column directly; they normalize
- * it here and use a read-only Composition projection only while the UI/server tools are cut over.
+ * it here and expose Composition only as a read projection for rendering and legacy clients.
  */
 
 import type { Composition } from './composition-core';
 import {
   emptyEditorDocumentV2,
   isEditorDocumentV2,
-  mergeLegacyProjectionEdit,
   migrateLegacyProjectToV2,
   projectV2ToLegacyComposition,
+  syncCaptionTranscripts,
   validateEditorDocumentV2,
   type EditorDocumentIssue,
   type EditorDocumentV2,
@@ -29,10 +29,6 @@ export interface ProjectDocumentInput {
   videoSig?: string | null;
   videoDurationSec?: number | null;
   fps?: number;
-  /** Previous V2 authority when `value` is an edit made through its compatibility projection. */
-  previousDocument?: EditorDocumentV2;
-  /** The resolved runtime projection paired with previousDocument, when the caller owns it. */
-  previousProjection?: Composition;
 }
 
 export interface NormalizedProjectDocument {
@@ -88,23 +84,111 @@ export function normalizeProjectDocument(input: ProjectDocumentInput): Normalize
     videoSig: input.videoSig ?? undefined,
     videoDurationSec: input.videoDurationSec ?? undefined,
     fps: input.fps,
-    previousDocument: input.previousDocument,
   });
-  const document = input.previousDocument
-    ? mergeLegacyProjectionEdit({
-        previousDocument: input.previousDocument,
-        migratedDocument: migrated.document,
-        composition,
-        previousComposition: input.previousProjection,
-      })
-    : migrated.document;
+  const document = migrated.document;
   return {
     document: prepareEditorDocumentForPersistence(document),
     migrated: true,
-    issues: input.previousDocument
-      ? [...migrated.issues.filter((issue) => issue.severity !== 'error'), ...validateEditorDocumentV2(document)]
-      : migrated.issues,
+    issues: migrated.issues,
   };
+}
+
+function stableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+export interface ProjectDocumentContextInput {
+  projectId: string;
+  document: EditorDocumentV2;
+  context?: StudioProjectContext;
+  videoSig?: string | null;
+  videoDurationSec?: number | null;
+}
+
+/** Add persistence metadata to V2 without reconstructing any timeline state from Composition. */
+export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInput): EditorDocumentV2 {
+  const context = input.context ?? {};
+  const assets = Object.fromEntries(Object.entries(input.document.assets).map(([id, asset]) => [id, {
+    ...asset,
+    locator: {
+      ...asset.locator,
+      ...(asset.locator.localSig && context.media?.clips?.[asset.locator.localSig]?.key
+        ? { cloudKey: context.media.clips[asset.locator.localSig]!.key }
+        : {}),
+    },
+  }]));
+  const mainId = input.document.semantics.primaryNarrativeAssetId;
+  if (mainId && assets[mainId]) {
+    const main = assets[mainId]!;
+    assets[mainId] = {
+      ...main,
+      locator: {
+        ...main.locator,
+        ...(input.videoSig ? { localSig: input.videoSig } : {}),
+        ...(context.media?.video?.key ? { cloudKey: context.media.video.key } : {}),
+      },
+      metadata: {
+        ...main.metadata,
+        ...(input.videoDurationSec && input.videoDurationSec > 0 ? { durationSec: input.videoDurationSec } : {}),
+      },
+    };
+  }
+  for (const entry of context.localAssets ?? []) {
+    const existing = Object.values(assets).find((asset) => asset.locator.localSig === entry.sig);
+    const cloudKey = context.media?.clips?.[entry.sig]?.key;
+    if (existing) {
+      assets[existing.id] = {
+        ...existing,
+        label: existing.label ?? entry.label,
+        locator: { ...existing.locator, ...(cloudKey ? { cloudKey } : {}) },
+        metadata: {
+          ...existing.metadata,
+          ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
+          ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),
+        },
+      };
+      continue;
+    }
+    const kind = entry.kind ?? 'video';
+    const stem = `asset_${kind}_${stableHash(`${input.projectId}\u0000${entry.sig}`)}`;
+    let id = stem;
+    let suffix = 2;
+    while (assets[id]) id = `${stem}_${suffix++}`;
+    assets[id] = {
+      id,
+      kind,
+      label: entry.label,
+      locator: { localSig: entry.sig, ...(cloudKey ? { cloudKey } : {}) },
+      metadata: {
+        ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
+        ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),
+      },
+    };
+  }
+  for (const [sig, ref] of Object.entries(context.media?.clips ?? {})) {
+    if (Object.values(assets).some((asset) => asset.locator.localSig === sig)) continue;
+    const stem = `asset_video_${stableHash(`${input.projectId}\u0000${sig}`)}`;
+    let id = stem;
+    let suffix = 2;
+    while (assets[id]) id = `${stem}_${suffix++}`;
+    assets[id] = {
+      id,
+      kind: 'video',
+      locator: { localSig: sig, cloudKey: ref.key },
+      metadata: {},
+    };
+  }
+  let document: EditorDocumentV2 = { ...input.document, assets };
+  document = syncCaptionTranscripts(document, context.asr ?? null, context.clipAsr ?? {});
+  if (context.plan !== undefined && document.semantics.plan !== context.plan) {
+    document = { ...document, semantics: { ...document.semantics, plan: context.plan } };
+  }
+  return prepareEditorDocumentForPersistence(document);
 }
 
 export function projectDocumentToLegacyComposition(

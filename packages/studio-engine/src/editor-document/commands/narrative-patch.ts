@@ -39,7 +39,12 @@ function narrativeProperties(shot: VideoShot): NarrativeTimelineClip['properties
 }
 
 function validatePatch(patch: NarrativeClipPatch): string | null {
-  if (!('framing' in patch) && !('partnerBlockId' in patch) && !('filter' in patch) && !('audio' in patch)) return 'Narrative patch is empty.';
+  if (!('properties' in patch) && !('framing' in patch) && !('partnerBlockId' in patch) && !('filter' in patch) && !('audio' in patch)) return 'Narrative patch is empty.';
+  if ('properties' in patch) {
+    if (!patch.properties || typeof patch.properties !== 'object' || Array.isArray(patch.properties)) return 'properties must be an object.';
+    if (!Object.keys(patch.properties).length) return 'Narrative properties patch is empty.';
+    if (patch.properties.treatment != null && !TREATMENTS.has(patch.properties.treatment)) return `Invalid shot treatment: ${patch.properties.treatment}`;
+  }
   if ('framing' in patch) {
     if (!patch.framing || typeof patch.framing !== 'object' || Array.isArray(patch.framing)) return 'framing must be an object.';
     const framing = patch.framing;
@@ -78,7 +83,13 @@ function validatePatch(patch: NarrativeClipPatch): string | null {
 }
 
 function patchedNarrativeClip(clip: NarrativeTimelineClip, patch: NarrativeClipPatch): NarrativeTimelineClip {
-  let shot = narrativeShot(clip);
+  const properties = { ...clip.properties, ...(patch.properties ?? {}) };
+  if (patch.properties) {
+    for (const key of Object.keys(patch.properties) as (keyof NarrativeTimelineClip['properties'])[]) {
+      if (patch.properties[key] === undefined) delete properties[key];
+    }
+  }
+  let shot = narrativeShot({ ...clip, properties });
   if (patch.framing) shot = patchShotFraming(shot, patch.framing);
   if ('partnerBlockId' in patch) {
     if (patch.partnerBlockId == null) delete shot.partnerBlockId;

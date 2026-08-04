@@ -184,7 +184,7 @@ export function CaptionEditOverlay({
   const rootR = ghost ? baseR : liveR;
   const startRef = useRef(style);
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  /** Zero setComp during drag: each frame updates local liveStyle (box follows); mode='live' (move) also sends onLive
+  /** Drag frames update local liveStyle; mode='live' (move) also sends onLive
    *  (hf:capStyle edits the iframe directly), mode='ghost' (resize) only moves the virtual box line — resizing needs reflow/re-segmentation,
    *  and per-frame direct edits can't keep up (user-reported performance), so a single rebuild applies on release. The overlay isn't unmounted, so capture stays valid. */
   const drag = (e: React.PointerEvent, apply: (s: CaptionStyle, dx: number, dy: number) => Partial<CaptionStyle>, mode: 'live' | 'ghost' = 'live') => {

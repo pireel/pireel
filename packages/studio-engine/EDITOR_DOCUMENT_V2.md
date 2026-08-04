@@ -47,11 +47,10 @@ Clip payloads remain typed:
 - DTO-level `videoSig` and `videoDurationSec`;
 - `context.asr`, `clipAsr`, `plan`, `media`, and `localAssets`.
 
-The migration is deterministic and idempotent. `projectV2ToLegacyComposition` is a temporary read
-projection for unchanged panels/preview/export. A compatibility-panel write is reconciled by
-`legacy-edit-merge.ts` as a patch over its prior V2 authority; it is never accepted as a wholesale
-document replacement. This preserves empty/custom tracks, media clips, track flags, anchors, scenes
-and narrative gaps that the projection cannot express.
+The migration is deterministic and idempotent. `projectV2ToLegacyComposition` is a read-only
+projection for unchanged panels, preview and export. It has no reverse writer. Every editor, Agent,
+offline-tool and persistence mutation targets V2 directly, so empty/custom tracks, media clips,
+track flags, anchors, scenes and narrative gaps cannot be erased by a lossy round trip.
 
 `project-document.ts` is the shared persisted-data boundary. The historical `studio_projects.comp`
 column remains in place, but its value is now `Composition | EditorDocumentV2` on read and
@@ -76,12 +75,15 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `insert.ts` owns overwrite/ripple insertion;
 - `split.ts` owns atomic clip/link-group subdivision;
 - `narrative-patch.ts` owns normalized framing, grade and shot-audio properties without exposing geometry;
+- `narrative-insert.ts` and `narrative-reorder.ts` own durable primary-lane insertion and ordering;
 - `managed-captions.ts` derives the semantic caption lane from V2 transcript and clip placement;
 - `canvas.ts` owns deliberate output dimensions independently from track/media presence;
 - `overlay-patch.ts` owns stable-id timing and payload edits for graphics/caption clips;
+- `overlay-insert.ts` owns native graphic creation on an explicit lane;
 - `overlay-move.ts` and `overlay-duplicate.ts` own cross-lane identity placement and cloning;
 - `audio-insert.ts` and `audio-patch.ts` own durable audio placement plus coupled timeline/source/envelope state;
 - `caption-style.ts` owns sparse managed-caption appearance independently from compatibility blocks;
+- `appearance.ts` and `processing.ts` own sparse document-level styling and media processing;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
@@ -98,19 +100,19 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Cloud rows and local drafts dual-read V1/V2 and single-write V2; DTOs expose canonical V2 plus a temporary V1 view.
 - Cloud undo history restores and rewrites V2, and offline MCP/analysis/import paths share one server adapter instead of casting stored JSON.
 - A dry-run-first bulk migration script covers both live project rows and undo history.
-- The workbench live store, local/cloud save payloads and undo/redo stacks now own V2 snapshots. Runtime
-  media URLs live in a separate asset-resolution map and are reattached only to the compatibility view.
+- The workbench live store, local/cloud save payloads and undo/redo stacks own V2 snapshots. Runtime
+  media URLs live in a separate asset-resolution map and are attached only while producing a read view.
 - Native UI mutations have a live `dispatchCommand` gateway; failed commands cannot publish partial state.
-- Legacy panels update only clips visible in their prior projection. V2-only tracks/clips and
-  unchanged native geometry survive subsequent compatibility edits, so the rollout remains additive.
+- Browser panels, internal/external Agents, offline MCP tools, analysis proposals and media import
+  all publish native V2 transactions. There is no `setComposition`/remigration edit gateway.
 - Browser, manual timeline and offline-MCP narration range edits now share
   `applyNarrationDocumentEdit`: the V2 command ripples sync-locked/linked lanes atomically, then the
   semantic layer re-derives managed captions. This covers range/transcript cuts, word deletion and
   ordinary trim/scene deletion; locked native lanes fail the whole edit. Deleting the final scene or
   clearing all scenes instead uses exact `clips.remove`, retains every sibling position, clears only
   derived managed captions and keeps the empty primary lane itself.
-- Agent transactions snapshot and validate both V2 and the runtime projection, so an error can roll
-  back media lanes which `Composition` cannot see.
+- Agent transactions snapshot V2 authority and validate both V2 and its read projection, so an error
+  rolls back media lanes which `Composition` cannot see.
 - Shot splitting now uses the native `clip.split` command. Compatibility playhead points are resolved
   by stable clip lineage plus source seconds, so splitting never collapses a V2 leading gap or targets
   the wrong reused source segment. Linked partners split atomically by default, including locked-lane

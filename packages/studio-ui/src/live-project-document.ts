@@ -1,5 +1,5 @@
 /**
- * Canonical live editor state during the V1 UI -> V2 command rollout.
+ * Canonical V2 live editor state with a read-only Composition render projection.
  *
  * EditorDocumentV2 owns persistence/history. Composition is a runtime projection retained for
  * existing panels, preview and export. Runtime media URLs live in a side map so undoing a V2
@@ -13,6 +13,8 @@ import {
   type EditorCommandResult,
   type EditorDocumentV2,
   type EditorMediaAsset,
+  freezeEditorDocumentBlockVars,
+  mergeProjectContextIntoDocument,
   normalizeProjectDocument,
   projectDocumentToLegacyComposition,
 } from '@pireel/studio-engine/composition';
@@ -39,6 +41,13 @@ const isCompatibilityPlaceholder = (url: string) => url.startsWith('blob:pireel-
 
 export function resolveLiveAssetUrl(session: LiveProjectDocumentSession, asset: EditorMediaAsset): string | undefined {
   return session.runtimeAssetUrls.get(asset.id) ?? asset.locator.remoteUrl;
+}
+
+/** Attach session-only bytes to a durable asset identity without mutating the document. */
+export function rememberLiveAssetUrl(session: LiveProjectDocumentSession, assetId: string, url: string): void {
+  if (!assetId) throw new Error('Asset id is required.');
+  if (!url || isCompatibilityPlaceholder(url)) return;
+  session.runtimeAssetUrls.set(assetId, url);
 }
 
 function assetClipIdMap(document: EditorDocumentV2): Map<string, string> {
@@ -98,41 +107,29 @@ export function createLiveProjectDocumentSession(
   return session;
 }
 
-/** Apply one existing V1 UI edit while immediately advancing the canonical V2 authority. */
-export function applyCompositionToLiveProject(
+/** Build a persistence-safe V2 snapshot from canonical authority and project metadata. */
+export function persistableLiveProjectDocument(
   session: LiveProjectDocumentSession,
-  composition: Composition,
   migration: LiveProjectMigrationContext = {},
-): LiveProjectDocumentState {
-  const document = normalizeProjectDocument({
-    projectId: session.projectId,
-    value: composition,
-    context: migration.context,
-    videoSig: migration.videoSig,
-    videoDurationSec: migration.videoDurationSec,
-    previousDocument: session.state.document,
-    previousProjection: session.state.composition,
-  }).document;
-  rememberCompositionRuntimeUrls(document, composition, session.runtimeAssetUrls);
-  session.state = { document, composition };
-  return session.state;
-}
-
-/** Build a persistence-safe V2 view of runtime Composition without mutating the live session. */
-export function documentFromLiveComposition(
-  session: LiveProjectDocumentSession,
-  composition: Composition,
-  migration: LiveProjectMigrationContext = {},
+  options: { stripManagedCaptions?: boolean } = {},
 ): EditorDocumentV2 {
-  return normalizeProjectDocument({
+  const document = mergeProjectContextIntoDocument({
     projectId: session.projectId,
-    value: composition,
+    document: session.state.document,
     context: migration.context,
     videoSig: migration.videoSig,
     videoDurationSec: migration.videoDurationSec,
-    previousDocument: session.state.document,
-    previousProjection: session.state.composition,
-  }).document;
+  });
+  if (!options.stripManagedCaptions || !document.semantics.managedCaptionTrackId) return document;
+  return {
+    ...document,
+    timeline: {
+      ...document.timeline,
+      tracks: document.timeline.tracks.map((track) => (
+        track.id === document.semantics.managedCaptionTrackId ? { ...track, clips: [] } : track
+      )),
+    },
+  };
 }
 
 /** Restore/replace the V2 authority (undo, redo, cloud restore or a native V2 command). */
@@ -141,7 +138,9 @@ export function applyDocumentToLiveProject(
   document: EditorDocumentV2,
   runtimeComposition?: Composition,
 ): LiveProjectDocumentState {
-  const canonical = normalizeProjectDocument({ projectId: session.projectId, value: document }).document;
+  const canonical = freezeEditorDocumentBlockVars(
+    normalizeProjectDocument({ projectId: session.projectId, value: document }).document,
+  );
   if (runtimeComposition) rememberCompositionRuntimeUrls(canonical, runtimeComposition, session.runtimeAssetUrls);
   const composition = runtimeComposition ?? projectRuntimeComposition(session, canonical);
   session.state = { document: canonical, composition };

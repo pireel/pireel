@@ -1,13 +1,13 @@
 'use client';
 
-import { type MutableRefObject, type SetStateAction, useCallback, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useRef, useState } from 'react';
 import type { Composition, EditorCommand, EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import {
   applyCommandToLiveProject,
-  applyCompositionToLiveProject,
   applyDocumentToLiveProject,
   createLiveProjectDocumentSession,
-  documentFromLiveComposition,
+  persistableLiveProjectDocument,
+  rememberLiveAssetUrl,
   resolveLiveAssetUrl,
   type LiveProjectDocumentState,
   type LiveProjectMigrationContext,
@@ -17,11 +17,10 @@ export interface UseLiveProjectDocumentOptions {
   projectId: string;
   initialComposition: Composition;
   migrationContextRef: MutableRefObject<LiveProjectMigrationContext>;
-  prepareComposition?: (composition: Composition) => Composition;
 }
 
 export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
-  const { projectId, initialComposition, migrationContextRef, prepareComposition } = options;
+  const { projectId, initialComposition, migrationContextRef } = options;
   const sessionRef = useRef<ReturnType<typeof createLiveProjectDocumentSession> | null>(null);
   if (!sessionRef.current) sessionRef.current = createLiveProjectDocumentSession(projectId, initialComposition);
   const [state, setState] = useState<LiveProjectDocumentState>(sessionRef.current.state);
@@ -35,19 +34,12 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
     setState(next);
   }, []);
 
-  const setComposition = useCallback((action: SetStateAction<Composition>) => {
-    const current = compositionRef.current;
-    const candidate = typeof action === 'function' ? (action as (value: Composition) => Composition)(current) : action;
-    const composition = prepareComposition ? prepareComposition(candidate) : candidate;
-    publish(applyCompositionToLiveProject(sessionRef.current!, composition, migrationContextRef.current));
-  }, [migrationContextRef, prepareComposition, publish]);
-
   const setDocument = useCallback((document: EditorDocumentV2, runtimeComposition?: Composition) => {
     publish(applyDocumentToLiveProject(sessionRef.current!, document, runtimeComposition));
   }, [publish]);
 
-  const persistableDocument = useCallback((composition: Composition) => (
-    documentFromLiveComposition(sessionRef.current!, composition, migrationContextRef.current)
+  const persistableDocument = useCallback((stripManagedCaptions = false) => (
+    persistableLiveProjectDocument(sessionRef.current!, migrationContextRef.current, { stripManagedCaptions })
   ), [migrationContextRef]);
 
   const dispatchCommand = useCallback((command: EditorCommand) => {
@@ -60,15 +52,19 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
     resolveLiveAssetUrl(sessionRef.current!, asset)
   ), []);
 
+  const rememberAssetUrl = useCallback((assetId: string, url: string) => {
+    rememberLiveAssetUrl(sessionRef.current!, assetId, url);
+  }, []);
+
   return {
     composition: state.composition,
     compositionRef,
     document: state.document,
     documentRef,
-    setComposition,
     setDocument,
     dispatchCommand,
     resolveAssetUrl,
+    rememberAssetUrl,
     persistableDocument,
   };
 }

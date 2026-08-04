@@ -47,12 +47,13 @@ import {
   applyShotFramingInput,
   placementFramingNotes,
   narrationSourceSplitsAtEditedPoints,
-  normalizeProjectDocument,
   projectDocumentToLegacyComposition,
   removeNarrationClipsWithoutRipple,
   removeAudioDocumentClips,
   removeOverlayDocumentClips,
   duplicateOverlayDocumentClip,
+  freezeEditorDocumentBlockVars,
+  insertOverlayDocumentClip,
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
@@ -78,7 +79,6 @@ import {
   shotFilterCss,
   shotId,
   splitShotsAtEditedPoints,
-  syncFrozenBlockVars,
   patchShotFraming,
   totalDuration,
   validateComposition,
@@ -283,8 +283,8 @@ function offlineTranscript(p: ServerToolProject): string {
 /** Execute one offline tool. Filter through SERVER_EXECUTABLE_TOOLS before calling. */
 export function runServerTool(tool: string, input: Record<string, unknown>, p: ServerToolProject): ServerToolOutcome {
   const out = runServerToolInner(tool, input, p);
-  // Insertion-time look freeze — the offline twin of the workbench setComp funnel (see freezeBlockVars):
-  // blocks added or first touched here get the current effective tokens stamped on before persisting.
+  // Insertion-time look freeze remains a native document operation. Composition below is only the
+  // read receipt returned to older tool clients.
   if (out.comp && out.result.ok) {
     const next = freezeBlockVars(out.comp);
     const issues = validateComposition(next);
@@ -299,27 +299,23 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
     }
     out.comp = next;
     if (p.document) {
-      if (out.document) {
-        const projected = projectDocumentToLegacyComposition({ projectId: p.id, value: out.document });
-        const frozenProjection = freezeBlockVars(projected);
-        if (JSON.stringify(next) !== JSON.stringify(frozenProjection)) {
-          return {
-            result: {
-              ok: false,
-              error: 'mutation rejected: native document and compatibility result diverged',
-            },
-          };
-        }
-        out.document = syncFrozenBlockVars(out.document, next.blocks);
-      } else {
-        out.document = normalizeProjectDocument({
-          projectId: p.id,
-          value: next,
-          context: out.context ?? p.context,
-          videoDurationSec: p.videoDurationSec,
-          previousDocument: p.document,
-          previousProjection: p.comp,
-        }).document;
+      if (!out.document) {
+        return {
+          result: {
+            ok: false,
+            error: 'mutation rejected: this tool has no native editor-document transaction',
+          },
+        };
+      }
+      out.document = freezeEditorDocumentBlockVars(out.document);
+      const projected = projectDocumentToLegacyComposition({ projectId: p.id, value: out.document });
+      if (JSON.stringify(next) !== JSON.stringify(projected)) {
+        return {
+          result: {
+            ok: false,
+            error: 'mutation rejected: native document and read projection diverged',
+          },
+        };
       }
       const documentIssues = validateEditorDocumentV2(out.document).filter((issue) => issue.severity === 'error');
       if (documentIssues.length) {
@@ -1071,17 +1067,24 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const effect: CutTransitionEffect = typeof input.effect === 'string' && ['fade', 'fadeblack', 'directional', 'directionalwipe', 'circleopen', 'windowslice', 'crosszoom', 'rotatescale', 'glitch', 'dreamy'].includes(input.effect) ? (input.effect as CutTransitionEffect) : 'fade';
       const dir = typeof input.direction === 'string' && ['up', 'down', 'left', 'right'].includes(input.direction) ? (input.direction as TransitionDirection) : undefined;
       const durIn = Number(input.durationSec);
+      const current = sp[bi]!.clip.transIn;
+      const durationSec = Math.min(MAX_TRANSITION_SEC, Math.max(0.2, Number.isFinite(durIn) && durIn > 0 ? durIn : (current?.durationSec ?? 1)));
+      const direction = dir ?? current?.direction;
+      const transition = remove
+        ? undefined
+        : { prevId, effect, durationSec, ...(DIRECTIONAL_TRANSITIONS.has(effect) && direction ? { direction } : {}) };
+      const native = applyNativeNarrativePatches(p, [{ clipId: selfId, patch: { properties: { transIn: transition } } }]);
+      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       const shots = shotsOf(p).map((s) => {
         if (s.id !== selfId) return s;
         const { transIn: _drop, ...rest } = s;
         if (remove) return rest;
-        const durationSec = Math.min(MAX_TRANSITION_SEC, Math.max(0.2, Number.isFinite(durIn) && durIn > 0 ? durIn : (s.transIn?.durationSec ?? 1)));
-        const direction = dir ?? s.transIn?.direction;
-        return { ...rest, transIn: { prevId, effect, durationSec, ...(DIRECTIONAL_TRANSITIONS.has(effect) && direction ? { direction } : {}) } };
+        return { ...rest, transIn: transition };
       });
       return {
         result: { ok: true, summary: remove ? `Removed the transition at ${r1(cut)}s` : `Set a transition at the ${r1(cut)}s cut (${effect})` },
-        comp: { ...c, shots },
+        comp: native?.comp ?? { ...c, shots },
+        ...(native ? { document: native.document } : {}),
       };
     }
     case 'set_captions': {
@@ -1227,6 +1230,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (shape.kind === 'kit') {
         const slots = { props: shape.props };
         if (target) {
+          if (p.document) {
+            const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: target.id, block: { templateId: `kit:${shape.component}`, slots } }] });
+            if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+            return {
+              result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id } },
+              comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+              document: edit.document,
+            };
+          }
           return {
             result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id } },
             comp: { ...c, blocks: c.blocks.map((x) => (x.id === target.id ? { ...x, templateId: `kit:${shape.component}`, slots } : x)) },
@@ -1243,6 +1255,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           trackIndex: freeTrack(c.blocks, kAt, kDur),
           label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
         };
+        if (p.document) {
+          const edit = insertOverlayDocumentClip({ document: p.document, block: kb });
+          if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+          return {
+            result: { ok: true, summary: 'Added block', data: { newBlockId: kb.id } },
+            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+            document: edit.document,
+          };
+        }
         return { result: { ok: true, summary: 'Added block', data: { newBlockId: kb.id } }, comp: { ...c, blocks: [...c.blocks, kb] } };
       }
       if (shape.kind === 'kit-unknown') {
@@ -1256,6 +1277,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (shape.kind === 'declined') {
         if (target && isPlaceholder(target)) {
           // The moment deserves no graphic: remove the empty slot instead of leaving a shell.
+          if (p.document) {
+            const edit = removeOverlayDocumentClips({ document: p.document, clipIds: [target.id] });
+            if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+            return {
+              result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } },
+              comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+              document: edit.document,
+            };
+          }
           return { result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } }, comp: { ...c, blocks: c.blocks.filter((x) => x.id !== target.id) } };
         }
         return { result: { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' } };
@@ -1275,6 +1305,18 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
       if (target) {
+        if (p.document) {
+          const edit = applyOverlayDocumentEdits({
+            document: p.document,
+            updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } }],
+          });
+          if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+          return {
+            result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id, ...warnings } },
+            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+            document: edit.document,
+          };
+        }
         return {
           result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id, ...warnings } },
           comp: {
@@ -1294,6 +1336,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         trackIndex: freeTrack(c.blocks, at, dur),
         label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
       };
+      if (p.document) {
+        const edit = insertOverlayDocumentClip({ document: p.document, block: nb });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: 'Added block', data: { newBlockId: nb.id, ...warnings } },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return { result: { ok: true, summary: 'Added block', data: { newBlockId: nb.id, ...warnings } }, comp: { ...c, blocks: [...c.blocks, nb] } };
     }
     case 'submit_plan': {

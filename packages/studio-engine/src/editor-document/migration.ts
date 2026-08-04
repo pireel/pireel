@@ -29,19 +29,6 @@ export interface LegacyProjectForMigration {
   videoDurationSec?: number | null;
   fps?: number;
   canvasConfigured?: boolean;
-  /** Previous V2 authority when applying an edit made through the temporary V1 projection. */
-  previousDocument?: EditorDocumentV2;
-}
-
-function previousAssetForProjectionUrl(input: LegacyProjectForMigration, url: string | undefined): EditorMediaAsset | undefined {
-  if (!url?.startsWith('blob:pireel-offline/')) return undefined;
-  const encodedId = url.slice('blob:pireel-offline/'.length).split(/[?#]/, 1)[0];
-  if (!encodedId) return undefined;
-  try {
-    return input.previousDocument?.assets[decodeURIComponent(encodedId)];
-  } catch {
-    return undefined;
-  }
 }
 
 function managedCaptionBlock(block: Block): boolean {
@@ -139,13 +126,11 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
   let cursorSec = 0;
   for (const [index, shot] of legacyShots.entries()) {
     const sourceDuration = Math.max(0, shot.srcEnd - shot.srcStart);
-    const previousAsset = previousAssetForProjectionUrl(input, shot.src);
     const locator = shot.src
       ? {
-          ...(previousAsset?.locator ?? {}),
           ...(shot.srcSig ? { localSig: shot.srcSig } : {}),
           ...(shot.srcSig && context.media?.clips?.[shot.srcSig]?.key ? { cloudKey: context.media.clips[shot.srcSig]!.key } : {}),
-          ...(!previousAsset ? { remoteUrl: shot.src } : {}),
+          ...(!shot.src.startsWith('blob:pireel-offline/') ? { remoteUrl: shot.src } : {}),
         }
       : mainLocator;
     const assetId = shot.src
@@ -211,13 +196,11 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
             (entry.kind ?? 'video') === rawMedia.type && entry.label === block.label
           ))
         : undefined;
-      const previousAsset = previousAssetForProjectionUrl(input, rawMedia?.url);
       const assetId = rawMedia?.url && (rawMedia.type === 'image' || rawMedia.type === 'video')
         ? upsertAsset(rawMedia.type, {
-            ...(previousAsset?.locator ?? {}),
             ...(localMedia?.sig ? { localSig: localMedia.sig } : {}),
             ...(localMedia?.sig && context.media?.clips?.[localMedia.sig]?.key ? { cloudKey: context.media.clips[localMedia.sig]!.key } : {}),
-            ...(!previousAsset ? { remoteUrl: rawMedia.url } : {}),
+            ...(!rawMedia.url.startsWith('blob:pireel-offline/') ? { remoteUrl: rawMedia.url } : {}),
           }, `block-media:${block.id}`, {
             label: block.label,
             metadata: {},
@@ -293,12 +276,10 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
 
   if ((comp.audioTracks?.length ?? 0) > 0) {
     const clips: AudioTimelineClip[] = comp.audioTracks!.map((audio, index) => {
-      const previousAsset = previousAssetForProjectionUrl(input, audio.src);
       const locator = {
-        ...(previousAsset?.locator ?? {}),
         ...(audio.sig ? { localSig: audio.sig } : {}),
         ...(audio.sig && context.media?.clips?.[audio.sig]?.key ? { cloudKey: context.media.clips[audio.sig]!.key } : {}),
-        ...(audio.src && !previousAsset ? { remoteUrl: audio.src } : {}),
+        ...(audio.src && !audio.src.startsWith('blob:pireel-offline/') ? { remoteUrl: audio.src } : {}),
       };
       const assetId = upsertAsset('audio', locator, `audio:${audio.id}`, {
         label: audio.label,

@@ -7,24 +7,26 @@
  * bodies verbatim.
  */
 
-import { type MutableRefObject, type SetStateAction, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
-  type Block,
   type Composition,
-  type TimelineSiblingLayers,
+  type EditorDocumentV2,
   type VideoShot,
-  rippleInsertSiblingLayers,
-  rippleRemoveSiblingLayers,
+  applyCaptionDocumentEdit,
+  applyNarrationDocumentEdit,
+  insertNarrativeAssetRange,
   shotId,
 } from '@pireel/studio-engine/composition';
 import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/studio-engine/trim';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import type { DraftPlan } from '@pireel/studio-engine/plan';
 import type { ScriptCut } from './script-panel';
 import { t } from './i18n';
 
 export interface ScriptCutDeps {
+  projectId: string;
   comp: Composition;
   /** Which tool panel is open ('script' triggers auto-extract). */
   floatWin: string | null;
@@ -35,46 +37,61 @@ export interface ScriptCutDeps {
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
   setClipAsr: (v: Record<string, AsrSegment[]>) => void;
   setAsrSentences: (v: AsrSegment[] | null) => void;
-  setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2) => void;
+  planRef: MutableRefObject<DraftPlan | null>;
+  setPlan: (plan: DraftPlan | null) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
   pushUndoSnapshot: () => void;
   ensureShots: (c: Composition) => VideoShot[];
-  relayCaptionLayer: (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null) => Block[];
   stepAsr: () => Promise<AsrSegment[]>;
 }
 
 export function useScriptCut(deps: ScriptCutDeps) {
   const {
-    comp, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
-    setComp, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, relayCaptionLayer, stepAsr,
+    projectId, comp, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
+    documentRef, setDocument, planRef, setPlan, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, stepAsr,
   } = deps;
   /** The script panel's scissors: delete a batch of (source, source-time range) (shared by delete-sentence / delete-silence
    *  / delete-filler; the mapping math is in trim.removeSrcRanges); grouped and computed per source (source timelines are
-   *  independent), overlay blocks compressed in the order deletions occur; one setComp (rebuilds flicker only once). */
+   *  independent), overlay blocks compressed in deletion order; one document publish avoids rebuild flicker. */
   const cutSrcRanges = (cuts: ScriptCut[], msg: string) => {
     const c0 = compRef.current;
-    if (!c0.video || !cuts.length) return;
-    pushUndoSnapshot();
+    if (!cuts.length) return;
     const groups = new Map<string | null, [number, number][]>();
     for (const it of cuts) groups.set(it.src, [...(groups.get(it.src) ?? []), it.range]);
     let shots = ensureShots(c0);
-    let layers: TimelineSiblingLayers = { blocks: c0.blocks, ...(c0.audioTracks ? { audioTracks: c0.audioTracks } : {}) };
+    let document = documentRef.current;
     let cut = 0;
     for (const [src, ranges] of groups) {
       const r = removeSrcRanges(shots, ranges, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }), (c) => (c.src ?? null) === src);
       cut += r.removed.reduce((a, [x, y]) => a + (y - x), 0);
-      // Non-caption blocks compressed by the deleted spans; the caption layer is recomputed whole at the end (captions = a pure computed product of the transcript, word times must follow the new edit)
-      layers = r.removed.reduce((current, [a, b]) => rippleRemoveSiblingLayers(current, a, b), layers);
+      if (r.removed.length) {
+        const edit = applyNarrationDocumentEdit({
+          projectId,
+          document,
+          ranges: r.removed.map(([fromSec, toSec]) => ({ fromSec, toSec })),
+          mainTranscript: asrRef.current,
+          clipTranscripts: clipAsrRef.current,
+        });
+        if (!edit.ok) {
+          toast.error(edit.error.message);
+          return;
+        }
+        document = edit.document;
+      }
       shots = r.clips;
     }
     if (cut < 0.01) {
       toast.info(t('workbench.thoseRangesAlreadyOut'));
       return;
     }
-    layers = { ...layers, blocks: relayCaptionLayer(layers.blocks, shots, asrRef.current) };
-    setComp((c) => ({ ...c, shots, ...layers }));
+    pushUndoSnapshot();
+    planRef.current = null;
+    setPlan(null);
+    setDocument(document);
     setSelectedShotId(null);
     setSelectedId(null);
     const lastSp = clipSpans(shots);
@@ -86,42 +103,69 @@ export function useScriptCut(deps: ScriptCutDeps) {
    *  same-source shot or inserts a new shot); overlay blocks after the restore point shift right by the restored duration to stay content-aligned. */
   const restoreSrcRanges = (cuts: ScriptCut[], msg: string) => {
     const c0 = compRef.current;
-    if (!c0.video || !cuts.length) return;
-    pushUndoSnapshot();
+    if (!cuts.length) return;
     let shots = ensureShots(c0);
-    let layers: TimelineSiblingLayers = { blocks: c0.blocks, ...(c0.audioTracks ? { audioTracks: c0.audioTracks } : {}) };
+    let document = documentRef.current;
     let restored = 0;
     for (const { src, range: [s, e] } of cuts) {
       const before = shots;
       const inSrc = (c: VideoShot) => (c.src ?? null) === src;
       // An insert source entirely absent from the video = no anchor and no srcSig, unrecoverable (the panel only emits words for present sources, so this shouldn't happen in theory)
       if (src && !before.some(inSrc)) continue;
-      const srcSig = src ? before.find((c) => c.src === src)?.srcSig : undefined;
-      const durBefore = clipSpans(before).at(-1)?.editedEnd ?? 0;
+      const sourceShot = src ? before.find((candidate) => candidate.src === src) : before.find((candidate) => !candidate.src);
+      const sourceClip = sourceShot
+        ? document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === sourceShot.id && clip.kind === 'narrative')
+        : undefined;
+      const assetId = sourceClip?.kind === 'narrative' ? sourceClip.assetId : src == null ? document.semantics.primaryNarrativeAssetId : undefined;
+      if (!assetId) continue;
+      const generated: VideoShot[] = [];
       shots = restoreSrcRange(
         before,
         s,
         e,
-        (a, b) => ({ id: shotId(), ...(src ? { src, ...(srcSig ? { srcSig } : {}) } : {}), srcStart: a, srcEnd: b, treatment: 'full' as const }),
-        (c) => !c.partnerBlockId,
+        (a, b) => {
+          const shot = { id: shotId(), ...(src ? { src } : {}), srcStart: a, srcEnd: b, treatment: 'full' as const };
+          generated.push(shot);
+          return shot;
+        },
+        () => false,
         inSrc,
       );
       if (shots === before) continue;
-      const durAfter = clipSpans(shots).at(-1)?.editedEnd ?? 0;
-      const len = durAfter - durBefore;
+      const len = generated.reduce((total, shot) => total + shot.srcEnd - shot.srcStart, 0);
       if (len <= 0.01) continue;
+      const spans = clipSpans(shots);
+      for (const inserted of generated.sort((left, right) => (
+        (spans.find((span) => span.clip.id === left.id)?.editedStart ?? 0)
+        - (spans.find((span) => span.clip.id === right.id)?.editedStart ?? 0)
+      ))) {
+        const at = spans.find((span) => span.clip.id === inserted.id)?.editedStart;
+        if (at == null) continue;
+        const edit = insertNarrativeAssetRange({
+          document,
+          assetId,
+          clipId: inserted.id,
+          atSec: at,
+          sourceInSec: inserted.srcStart,
+          sourceOutSec: inserted.srcEnd,
+          properties: { treatment: 'full' },
+        });
+        if (!edit.ok) {
+          toast.error(edit.error.message);
+          return;
+        }
+        document = edit.document;
+      }
       restored += len;
-      // The restored segment's final-cut start: where s lands on the new shots (only same-source clips count, different-source seconds would collide numerically); blocks after it shift right as a whole
-      const sp = clipSpans(shots).find((x) => inSrc(x.clip) && s >= x.clip.srcStart - 1e-3 && s < x.clip.srcEnd);
-      const at = sp ? sp.editedStart + Math.max(0, s - sp.clip.srcStart) : 0;
-      layers = rippleInsertSiblingLayers(layers, at, len);
     }
     if (restored < 0.01) {
       toast.info(t('workbench.contentAlreadyInVideo'));
       return;
     }
-    const relaid = relayCaptionLayer(layers.blocks, shots, asrRef.current);
-    setComp((c) => ({ ...c, shots, ...layers, blocks: relaid }));
+    pushUndoSnapshot();
+    planRef.current = null;
+    setPlan(null);
+    setDocument(document);
     setSelectedShotId(null);
     toast.success(t('workbench.msgUndoHint', { msg }));
   };
@@ -150,7 +194,16 @@ export function useScriptCut(deps: ScriptCutDeps) {
       setClipAsr(next);
       clipAsrRef.current = next;
     }
-    setComp((c) => ({ ...c, blocks: relayCaptionLayer(c.blocks, ensureShots(c), asrRef.current) }));
+    const edit = applyCaptionDocumentEdit({
+      document: documentRef.current,
+      mainTranscript: asrRef.current,
+      clipTranscripts: clipAsrRef.current,
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    setDocument(edit.document);
     toast.success(t('workbench.replacedText', { text: txt }));
   };
   /** The script panel's "extract narration script" (spinner prevents double-clicks; errors toast). */

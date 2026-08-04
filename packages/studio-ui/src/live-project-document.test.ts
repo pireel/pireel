@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from '@pireel/studio-engine/composition';
 import {
-  applyCompositionToLiveProject,
   applyCommandToLiveProject,
   applyDocumentToLiveProject,
   createLiveProjectDocumentSession,
-  documentFromLiveComposition,
+  persistableLiveProjectDocument,
   resolveLiveAssetUrl,
 } from './live-project-document';
 
 describe('canonical live project document', () => {
-  it('advances V2 immediately when an existing Composition setter edits the canvas', () => {
+  it('advances V2 and its read projection through a native command', () => {
     const session = createLiveProjectDocumentSession('project-1', emptyComposition());
-    applyCompositionToLiveProject(session, { ...session.state.composition, width: 1920, height: 1080 });
+    const result = applyCommandToLiveProject(session, { type: 'canvas.patch', patch: { width: 1920, height: 1080 } });
+    expect(result.ok).toBe(true);
     expect(session.state.document.canvas).toMatchObject({ width: 1920, height: 1080 });
     expect(session.state.composition.width).toBe(1920);
   });
@@ -26,7 +26,7 @@ describe('canonical live project document', () => {
     const session = createLiveProjectDocumentSession('project-1', withVideo, { videoSig: 'main.mp4:42:7' });
     const snapshot = session.state.document;
     expect(Object.values(snapshot.assets)[0]!.locator).toEqual({ localSig: 'main.mp4:42:7' });
-    applyCompositionToLiveProject(session, { ...withVideo, width: 720 }, { videoSig: 'main.mp4:42:7' });
+    applyCommandToLiveProject(session, { type: 'canvas.patch', patch: { width: 720, height: 1920 } });
     applyDocumentToLiveProject(session, snapshot);
     expect(session.state.composition.video?.url).toBe('blob:runtime-main');
     expect(JSON.stringify(snapshot)).not.toContain('blob:runtime-main');
@@ -38,20 +38,27 @@ describe('canonical live project document', () => {
       blocks: [{ id: 'title', templateId: 'custom', slots: {}, startSec: 1, durationSec: 2, trackIndex: 1 }],
     });
     const snapshot = session.state.document;
-    applyCompositionToLiveProject(session, { ...session.state.composition, blocks: [] });
+    const removed = applyCommandToLiveProject(session, {
+      type: 'clips.remove',
+      trackId: snapshot.timeline.tracks.find((track) => track.type === 'graphics')!.id,
+      clipIds: ['title'],
+      includeLinked: false,
+    });
+    expect(removed.ok).toBe(true);
     applyDocumentToLiveProject(session, snapshot);
     expect(session.state.composition.blocks).toHaveLength(1);
     expect(session.state.composition.video).toBeNull();
   });
 
-  it('derives a caption-stripped save document without mutating live state', () => {
+  it('builds a persistence snapshot from V2/context without mutating live state', () => {
     const session = createLiveProjectDocumentSession('project-1', {
       ...emptyComposition(),
       blocks: [{ id: 'title', templateId: 'custom', slots: {}, startSec: 1, durationSec: 2, trackIndex: 1 }],
     });
     const before = session.state.document;
-    const saved = documentFromLiveComposition(session, { ...session.state.composition, blocks: [] });
-    expect(saved.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
+    const saved = persistableLiveProjectDocument(session, { context: { plan: { scenes: 2 } } });
+    expect(saved.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.id)).toEqual(['title']);
+    expect(saved.semantics.plan).toEqual({ scenes: 2 });
     expect(session.state.document).toBe(before);
   });
 
@@ -70,7 +77,8 @@ describe('canonical live project document', () => {
     const mainAsset = session.state.document.assets[session.state.document.semantics.primaryNarrativeAssetId!];
     expect(resolveLiveAssetUrl(session, mainAsset!)).toBe('blob:runtime-main');
     expect(session.state.composition.video?.url).toBe('blob:runtime-main');
-    applyCompositionToLiveProject(session, { ...session.state.composition, width: 720 }, { videoSig: 'main.mp4:42:7' });
+    const canvas = applyCommandToLiveProject(session, { type: 'canvas.patch', patch: { width: 720, height: 1920 } });
+    expect(canvas.ok).toBe(true);
     expect(session.state.document.timeline.tracks.map((track) => track.id)).toContain('track_broll');
   });
 

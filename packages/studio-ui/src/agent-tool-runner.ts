@@ -6,7 +6,7 @@
  * apply_block / capture_frame / plan_context / submit_plan) and falls back to runStudioTool for the rest.
  */
 
-import type { MutableRefObject, SetStateAction } from 'react';
+import type { MutableRefObject } from 'react';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import {
   type AudioClip,
@@ -28,6 +28,7 @@ import {
   applyCanvasDocumentEdit,
   applyCaptionDocumentEdit,
   applyCompositionLayout,
+  applyGeneratedDraftDocument,
   applyLayoutDocumentEdit,
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
@@ -54,6 +55,8 @@ import {
   patchNarrativeClips,
   removeOverlayDocumentClips,
   duplicateOverlayDocumentClip,
+  insertOverlayDocumentClip,
+  normalizeProjectDocument,
   resolveWordIds,
   wordRanges,
   wordRangesToEdited,
@@ -152,7 +155,6 @@ type Report = (text: string, frac?: number) => void;
 export interface AgentToolCtx {
   // Composition state
   compRef: MutableRefObject<Composition>;
-  setComp: (action: SetStateAction<Composition>) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
   resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
@@ -243,7 +245,7 @@ export interface AgentToolCtx {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
-    compRef, setComp, documentRef, resolveAssetUrl, setDocument, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
+    compRef, documentRef, resolveAssetUrl, setDocument, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
@@ -318,6 +320,28 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       };
       const commitOverlayRemoval = (clipIds: readonly string[]) => {
         const command = removeOverlayDocumentClips({ document: documentRef.current, clipIds });
+        if (!command.ok) return command;
+        setDocument(command.document);
+        return command;
+      };
+      const commitOverlayInsert = (block: Block) => {
+        const command = insertOverlayDocumentClip({ document: documentRef.current, block });
+        if (!command.ok) return command;
+        setDocument(command.document);
+        return command;
+      };
+      const commitGeneratedDraft = (draft: Composition) => {
+        const command = applyGeneratedDraftDocument({
+          projectId: ctx.projectId,
+          document: documentRef.current,
+          draft,
+          context: {
+            ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
+            ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+            ...(planRef.current ? { plan: planRef.current } : {}),
+          },
+          videoDurationSec: c.video?.durationSec,
+        });
         if (!command.ok) return command;
         setDocument(command.document);
         return command;
@@ -555,7 +579,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 vis,
               );
               if (stopped()) throw abortErr(); // stop before the write: analyses stay cached, the storyboard is not applied
-              setComp(draft);
+              const committed = commitGeneratedDraft(draft);
+              if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
               setSelectedId(null);
               setSelectedShotId(null);
               applyT(0);
@@ -584,7 +609,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (genIdsRef.current.size) return { ok: false, error: t('workbench.graphicsRewriteAlreadyProgress') };
             const lockedIds: string[] = []; // placeholders locked by this run; finally unlocks as a fallback (an exception break leaves no deadlock)
             try {
-              // Do the shot layout first if there are none (placeholders not yet placed). The setComp wrapper writes compRef synchronously, so reading here gets the new draft (no more empty-handed old blocks)
+              // Do the shot layout first if there are none (placeholders not yet placed). Native
+              // document publication updates compRef synchronously before the fill queue is built.
               if (!compRef.current.blocks.some(isPlaceholder)) {
                 report(t('workbench.cuttingShotsFirst'));
                 const v = currentVideo();
@@ -598,7 +624,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   vis,
                 );
                 if (stopped()) throw abortErr(); // same as lay_out: don't apply the storyboard after a stop
-                setComp(draft);
+                const committed = commitGeneratedDraft(draft);
+                if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
               }
               let allSlots = compRef.current.blocks.filter(isPlaceholder);
               // Optional blockIds: only (re)fill the specified placeholders (the agent's "redo the 3rd one" doesn't run everything).
@@ -678,17 +705,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   // composition forever. A REGEN veto keeps the existing component instead: never
                   // delete user-visible work because a redo pass found nothing better to say.
                   skipped += 1;
-                  if (isPlaceholder(slot)) setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => b.id !== slot.id) }));
+                  if (isPlaceholder(slot)) {
+                    const removed = commitOverlayRemoval([slot.id]);
+                    if (!removed.ok) throw new Error(removed.error.message);
+                  }
                   return;
                 }
                 // Keep the original spec in slots across the fill (composedBlockFields replaces slots
                 // wholesale): a later "redo this component" regenerates from the same design intent.
                 const fields = composedBlockFields(parsed);
                 const keepSpec = placeholderSpec(slot);
-                setComp((cc) => ({
-                  ...cc,
-                  blocks: cc.blocks.map((b) => (b.id === slot.id ? { ...b, ...fields, slots: { ...fields.slots, ...(keepSpec ? { spec: keepSpec } : {}) } } : b)),
-                }));
+                const updated = commitOverlayEdits([{
+                  clipId: slot.id,
+                  block: { ...fields, slots: { ...fields.slots, ...(keepSpec ? { spec: keepSpec } : {}) } },
+                }]);
+                if (!updated.ok) throw new Error(updated.error.message);
               };
               const worker = async () => {
                 for (;;) {
@@ -1249,10 +1280,23 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!pull) return { ok: false, error: t('workbench.nothingUndo') };
               const entry = await pull(ctx.projectId).catch(() => null);
               if (!entry) return { ok: false, error: t('workbench.nothingUndoCloudEmpty') };
-              const restored = entry.comp as Composition;
               redoStackRef.current.push(documentRef.current);
               if (entry.document) setDocument(entry.document);
-              else setComp(restored);
+              else {
+                const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+                const primaryAsset = primaryAssetId ? documentRef.current.assets[primaryAssetId] : undefined;
+                const restored = normalizeProjectDocument({
+                  projectId: ctx.projectId,
+                  value: entry.comp,
+                  context: {
+                    ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
+                    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
+                  },
+                  videoSig: primaryAsset?.locator.localSig,
+                  videoDurationSec: c.video?.durationSec,
+                }).document;
+                setDocument(restored);
+              }
               setSelectedId(null);
               setSelectedShotId(null);
               return withDelta({
@@ -1734,7 +1778,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 trackIndex: freeTrack(compRef.current.blocks, at, 3),
                 label: String(input.instruction ?? t('workbench.newElement')).slice(0, 12),
               };
-              setComp((cc) => ({ ...cc, blocks: [...cc.blocks, nb] }));
+              const inserted = commitOverlayInsert(nb);
+              if (!inserted.ok) return { ok: false, error: inserted.error.message, data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
               setSelectedShotId(null);
               setSelectedId(seed.id);
               applyT(Math.max(0, at + 0.01)); // on completion, take the user straight to the result
@@ -1758,10 +1803,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // exactly as it is (never silently convert a kit block to markup) and hand the note
               // back so the agent can rephrase or explain.
               if (parsed.declined) return { ok: false, error: parsed.note || t('workbench.aiEditFailed') };
-              setComp((cc) => ({
-                ...cc,
-                blocks: cc.blocks.map((x) => (x.id === b.id ? { ...x, ...composedBlockFields(parsed) } : x)),
-              }));
+              const updated = commitOverlayEdits([{ clipId: b.id, block: composedBlockFields(parsed) }]);
+              if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
               return { ok: true, summary: parsed.note || t('workbench.elementUpdated') };
             } finally {
               markGenerating([b.id], false);
@@ -1778,9 +1821,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
 
 const cloneComposition = (comp: Composition): Composition => JSON.parse(JSON.stringify(comp)) as Composition;
 
-/** Transaction boundary shared by Chat and the external bridge. Existing handlers may perform several
- * synchronous setComp calls internally; callers only observe a validated final composition. Failed/no-op
- * calls restore both state and history stacks, so retrying cannot consume undo or preserve a partial edit. */
+/** Transaction boundary shared by Chat and the external bridge. Handlers publish only canonical
+ * documents; failed/no-op calls restore authority and history without retaining a partial edit. */
 export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<StudioToolResult>): Promise<StudioToolResult> {
   const beforeDocument = ctx.documentRef.current;
   const before = cloneComposition(ctx.compRef.current);
@@ -1788,9 +1830,7 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   const undoBefore = [...ctx.undoStackRef.current];
   const redoBefore = [...ctx.redoStackRef.current];
   const restore = () => {
-    if (ctx.documentRef.current !== beforeDocument || JSON.stringify(ctx.compRef.current) !== beforeJson) {
-      ctx.setDocument(beforeDocument, before);
-    }
+    if (ctx.documentRef.current !== beforeDocument) ctx.setDocument(beforeDocument);
     ctx.undoStackRef.current = undoBefore;
     ctx.redoStackRef.current = redoBefore;
   };
@@ -1870,11 +1910,26 @@ export function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<s
    *  parsePlan) before landing state — swap the LLM, the quality contract doesn't degrade. Other tools fall back to runStudioTool. */
 async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
-    compRef, setComp, setSelectedId, setSelectedShotId, applyT, tRef, pushUndoSnapshot, genIdsRef, videoFileRef,
+    compRef, documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, tRef, pushUndoSnapshot, genIdsRef, videoFileRef,
     clipFilesRef, asrRef, currentVideo, planRef, setPlan, visualRef, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow,
   } = ctx;
     const c2 = compRef.current;
+    const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) => {
+      const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId, block }] });
+      if (edit.ok) setDocument(edit.document);
+      return edit;
+    };
+    const insertBlock = (block: Block) => {
+      const edit = insertOverlayDocumentClip({ document: documentRef.current, block });
+      if (edit.ok) setDocument(edit.document);
+      return edit;
+    };
+    const removeBlock = (clipId: string) => {
+      const edit = removeOverlayDocumentClips({ document: documentRef.current, clipIds: [clipId] });
+      if (edit.ok) setDocument(edit.document);
+      return edit;
+    };
     switch (tool) {
       case 'compose_context': {
         const script = (asrRef.current ?? []).map((s) => s.text).join('');
@@ -1937,7 +1992,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (shape.kind === 'kit') {
           pushUndoSnapshot();
           if (target) {
-            setComp((cc) => ({ ...cc, blocks: cc.blocks.map((x) => (x.id === target.id ? { ...x, templateId: `kit:${shape.component}`, slots: { props: shape.props } } : x)) }));
+            const updated = patchBlock(target.id, { templateId: `kit:${shape.component}`, slots: { props: shape.props } });
+            if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
             setSelectedShotId(null);
             setSelectedId(target.id);
             applyT(Math.max(0, target.startSec + 0.01));
@@ -1954,7 +2010,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             trackIndex: freeTrack(c2.blocks, kAt, kDur),
             label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
           };
-          setComp((cc) => ({ ...cc, blocks: [...cc.blocks, kb] }));
+          const inserted = insertBlock(kb);
+          if (!inserted.ok) return { ok: false, error: inserted.error.message, data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
           setSelectedShotId(null);
           setSelectedId(kb.id);
           applyT(Math.max(0, kAt + 0.01));
@@ -1969,7 +2026,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (shape.kind === 'declined') {
           if (target && isPlaceholder(target)) {
             pushUndoSnapshot();
-            setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((x) => x.id !== target.id) }));
+            const removed = removeBlock(target.id);
+            if (!removed.ok) return { ok: false, error: removed.error.message, data: { code: removed.error.code, trackIds: removed.error.trackIds } };
             return { ok: true, summary: t('workbench.slotRemovedNothingToSay'), data: { removedBlockId: target.id } };
           }
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
@@ -1984,10 +2042,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
         pushUndoSnapshot();
         if (target) {
-          setComp((cc) => ({
-            ...cc,
-            blocks: cc.blocks.map((x) => (x.id === target.id ? { ...x, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } : x)),
-          }));
+          const updated = patchBlock(target.id, { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } });
+          if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
           setSelectedShotId(null);
           setSelectedId(target.id);
           applyT(Math.max(0, target.startSec + 0.01));
@@ -2004,7 +2060,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           trackIndex: freeTrack(c2.blocks, at, dur),
           label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
         };
-        setComp((cc) => ({ ...cc, blocks: [...cc.blocks, nb] }));
+        const inserted = insertBlock(nb);
+        if (!inserted.ok) return { ok: false, error: inserted.error.message, data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
         setSelectedShotId(null);
         setSelectedId(nb.id);
         applyT(Math.max(0, at + 0.01));

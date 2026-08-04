@@ -79,7 +79,7 @@ export interface TimelineClipBase {
   linkGroupId?: string;
 }
 
-type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd'>;
+export type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd'>;
 
 export interface NarrativeTimelineClip extends TimelineClipBase {
   kind: 'narrative';

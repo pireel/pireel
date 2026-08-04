@@ -10,8 +10,8 @@
  * export via the audio-track substitution in client-export. One file, identical sound.
  */
 
-import { useEffect, useRef, useState, type MutableRefObject, type SetStateAction } from 'react';
-import type { Composition } from '@pireel/studio-engine/composition';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { applyEditorCommand, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { toast } from '@pireel/ui/toast';
 import type { VideoTrackEngine } from './video-track-engine';
 import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from './denoise';
@@ -23,7 +23,8 @@ import { t } from './i18n';
 export interface DenoiseDeps {
   comp: Composition;
   compRef: MutableRefObject<Composition>;
-  setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2) => void;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
@@ -31,7 +32,7 @@ export interface DenoiseDeps {
 }
 
 export function useDenoise(deps: DenoiseDeps) {
-  const { comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot } = deps;
+  const { comp, compRef, documentRef, setDocument, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot } = deps;
   const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
@@ -121,14 +122,16 @@ export function useDenoise(deps: DenoiseDeps) {
 
   /** Panel/agent entry: strength = turn on / retune (0 < s ≤ 1), null = off. */
   const setDenoise = (s: number | null) => {
-    pushUndoSnapshot();
-    setComp((c) => {
-      if (s == null) {
-        const { audioDenoise: _drop, ...rest } = c;
-        return rest as Composition;
-      }
-      return { ...c, audioDenoise: { strength: Math.round(Math.max(0.05, Math.min(1, s)) * 100) / 100 } };
+    const command = applyEditorCommand(documentRef.current, {
+      type: 'processing.patch',
+      patch: { audioDenoise: s == null ? undefined : { strength: Math.round(Math.max(0.05, Math.min(1, s)) * 100) / 100 } },
     });
+    if (!command.ok) {
+      toast.error(command.error.message);
+      return;
+    }
+    pushUndoSnapshot();
+    setDocument(command.document);
   };
 
   return { status, progress, denoiseForExport, setDenoise };

@@ -33,9 +33,8 @@ const isPresetComponent = (b: Block): boolean => b.templateId.startsWith('kit:')
 /** Insertion-time look freeze: stamp effective tokens onto every eligible block that doesn't carry
  *  them yet (see Block.vars) — preset components get the neutral general set, everything else the
  *  composition's current theme+palette. Idempotent, and returns the SAME reference when there is
- *  nothing to stamp — safe to run on every write. Both write funnels call this (workbench setComp on
- *  the client, runServerTool offline), so a block acquires its frozen look the moment it enters a
- *  composition — at insertion for new blocks, at first contact for legacy data. */
+ *  nothing to stamp. This remains for standalone V1 import/tool execution; live V2 publication uses
+ *  freezeEditorDocumentBlockVars directly. */
 export function freezeBlockVars(comp: Composition): Composition {
   const missing = (b: Block) => !b.vars && blockFreezesVars(b.templateId);
   if (!comp.blocks.some(missing)) return comp;

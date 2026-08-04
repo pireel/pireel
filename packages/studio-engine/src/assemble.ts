@@ -181,7 +181,7 @@ const PERSON_CUT_SHIM = `(function(){
   if (!ctx) return;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  // effect params are baked into data-attributes by assemble (config change → setComp → doc rebuild, same path as other config)
+  // Effect params are baked into data attributes; a native config patch triggers the normal document rebuild.
   var feather = parseFloat(c.getAttribute('data-feather')) || 0;
   var strokeW = parseFloat(c.getAttribute('data-stroke-w')) || 0;
   var strokeC = c.getAttribute('data-stroke-color') || '#ffffff';

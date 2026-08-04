@@ -55,7 +55,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('@s2');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
   });
-  it('V2 项目上的兼容工具只补丁其可见块，不丢 canonical document', () => {
+  it('V2 项目上的工具直接补丁原生块，不丢 canonical document', () => {
     const moved = runServerTool('move_block', { blockId: 'b1', startSec: 5.5 }, v2proj());
     expect(moved.result.ok).toBe(true);
     expect(moved.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 165 });
@@ -83,6 +83,18 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(duplicated.document?.timeline.tracks.find((track) => track.id === 'empty-graphics')).toMatchObject({
       hidden: true, syncLocked: false, stackOrder: 4, clips: [],
     });
+  });
+  it('V2 apply_block 原生插入并保留投影看不到的轨道', () => {
+    const p = v2proj();
+    p.document!.timeline.tracks.push({
+      id: 'empty-broll', type: 'visual', role: 'broll', muted: false, hidden: true,
+      locked: false, syncLocked: false, stackOrder: 7, clips: [],
+    });
+    const raw = 'native\n```html\n<div><style>#ai-native .t{color:red}</style><div class="t">Native</div></div>\n```\n```js\ntl.to("#ai-native .t",{opacity:1,duration:.3});\n```';
+    const applied = runServerTool('apply_block', { raw, blockId: 'ai-native', atSec: 2 }, p);
+    expect(applied.result.ok, JSON.stringify(applied.result)).toBe(true);
+    expect(applied.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'ai-native')).toMatchObject({ kind: 'graphic', startFrame: 60 });
+    expect(applied.document?.timeline.tracks.find((track) => track.id === 'empty-broll')).toMatchObject({ hidden: true, syncLocked: false, clips: [] });
   });
   it('V2 apply_layout 原子更新镜头与覆盖层且不重建原生轨道', () => {
     const p = v2proj();

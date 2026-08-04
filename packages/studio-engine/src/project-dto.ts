@@ -333,7 +333,6 @@ export function buildSaveWire(
           context: p.context,
           videoSig: p.videoSig,
           videoDurationSec: p.videoDurationSec,
-          previousDocument: acked?.values.comp,
         }).document
       : null;
   const compCanon = document ? canonicalJson(document) : null;

@@ -7,8 +7,9 @@
  * Extracted from hyperframes-workbench.tsx — bodies verbatim.
  */
 
-import type { MutableRefObject, SetStateAction } from 'react';
-import { type Block, type Composition, blockKind } from '@pireel/studio-engine/composition';
+import type { MutableRefObject } from 'react';
+import { type Block, type Composition, type EditorDocumentV2, applyOverlayDocumentEdits, blockKind } from '@pireel/studio-engine/composition';
+import { toast } from '@pireel/ui/toast';
 import { startPointerDrag } from './drag-shell';
 import { shiftBox } from './comp-diff';
 
@@ -24,7 +25,8 @@ export interface BoxDragDeps {
   setBodyDragging: (v: boolean) => void;
   setGhostRect: (g: { x: number; y: number; w: number; h: number } | null) => void;
   setGuideVis: (cx: boolean, cy: boolean) => void;
-  setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2) => void;
   postPreview: (msg: Record<string, unknown>) => void;
   setBlockRotation: (id: string, deg: number) => void;
 }
@@ -32,8 +34,16 @@ export interface BoxDragDeps {
 export function useBoxDrag(deps: BoxDragDeps) {
   const {
     fit, compRef, genIdsRef, stageBoxRef, rotateOverlayRef, rotateLabelRef, dragCursorRef,
-    setBodyDragging, setGhostRect, setGuideVis, setComp, postPreview, setBlockRotation,
+    setBodyDragging, setGhostRect, setGuideVis, documentRef, setDocument, postPreview, setBlockRotation,
   } = deps;
+  const patchBlock = (clipId: string, block: Partial<Omit<Block, 'id' | 'startSec' | 'durationSec' | 'trackIndex'>>) => {
+    const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId, block }] });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    setDocument(edit.document);
+  };
   /** Edge-handle stretch (same as caption line width, per user: change the box size on this axis, content reflows to fill,
    *  no crop, no locked ratio): the opposite edge is anchored; contentBox resets to = box (old crop semantics are dropped,
    *  legacy cropped blocks reset to full-fill on one drag). The process writes directly in the iframe via hf:boxSize (zero React re-render), one commit on release. */
@@ -67,10 +77,7 @@ export function useBoxDrag(deps: BoxDragDeps) {
         setBodyDragging(false);
         setGhostRect(null);
         const gg = g;
-        setComp((cc) => ({
-          ...cc,
-          blocks: cc.blocks.map((b) => (b.id === blk.id && b.box ? { ...b, box: gg, contentBox: undefined } : b)),
-        }));
+        patchBlock(blk.id, { box: gg, contentBox: undefined });
       },
     });
   };
@@ -120,10 +127,7 @@ export function useBoxDrag(deps: BoxDragDeps) {
         setBodyDragging(false);
         setGhostRect(null);
         const gg = g;
-        setComp((cc) => ({
-          ...cc,
-          blocks: cc.blocks.map((b) => (b.id === blk.id && b.box ? { ...b, box: gg, contentBox: undefined } : b)),
-        }));
+        patchBlock(blk.id, { box: gg, contentBox: undefined });
       },
     });
   };
@@ -155,7 +159,7 @@ export function useBoxDrag(deps: BoxDragDeps) {
       onEnd: () => {
         setGuideVis(false, false);
         setGhostRect(null);
-        if (dxn || dyn) setComp((cc) => ({ ...cc, blocks: cc.blocks.map((b) => (b.id === blk.id ? shiftBox(b, dxn, dyn) : b)) }));
+        if (dxn || dyn) patchBlock(blk.id, { box: shiftBox(blk, dxn, dyn).box });
       },
     });
   };

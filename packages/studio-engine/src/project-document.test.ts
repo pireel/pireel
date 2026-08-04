@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import {
   normalizeProjectDocument,
+  mergeProjectContextIntoDocument,
   prepareEditorDocumentForPersistence,
   projectDocumentStats,
   projectDocumentHasTimelineContent,
@@ -107,35 +108,28 @@ describe('stored project document boundary', () => {
     expect(placed?.locator).toEqual({ localSig: 'photo.webp:42:7' });
   });
 
-  it('preserves asset locators when a compatibility projection is edited and remigrated', () => {
-    const first = normalizeProjectDocument({
-      projectId: 'project-1',
-      value: {
-        ...emptyComposition(),
-        blocks: [{
-          id: 'local-image',
-          templateId: 'media',
-          slots: { media: { type: 'image', url: 'https://runtime.test/preview.webp' } },
-          startSec: 0,
-          durationSec: 2,
-          trackIndex: 1,
-          label: 'photo.webp',
-        }],
-      },
-    }).document;
-    const assetId = Object.keys(first.assets)[0]!;
-    first.assets[assetId] = {
-      ...first.assets[assetId]!,
-      locator: { localSig: 'photo.webp:42:7', cloudKey: 'studio/media/photo' },
+  it('merges persistence context without rebuilding native timeline lanes', () => {
+    const document = normalizeProjectDocument({ projectId: 'project-1', value: emptyComposition() }).document;
+    const customTrack = {
+      id: 'custom-empty', type: 'visual' as const, role: 'broll' as const, muted: false, hidden: false,
+      locked: true, syncLocked: false, stackOrder: 3, clips: [],
     };
-    const projection = projectDocumentToLegacyComposition({ projectId: 'project-1', value: first });
-    const remigrated = normalizeProjectDocument({
+    const native = { ...document, timeline: { tracks: [...document.timeline.tracks, customTrack] } };
+    const merged = mergeProjectContextIntoDocument({
       projectId: 'project-1',
-      value: { ...projection, width: 1920 },
-      previousDocument: first,
-    }).document;
-    const placed = Object.values(remigrated.assets).find((asset) => asset.label === 'photo.webp');
-    expect(placed?.locator).toEqual({ localSig: 'photo.webp:42:7', cloudKey: 'studio/media/photo' });
-    expect(remigrated.canvas.width).toBe(1920);
+      document: native,
+      context: {
+        plan: { version: 1 },
+        localAssets: [{ sig: 'clip.mp4:9:1', label: 'clip.mp4', kind: 'video', createdAt: 1 }],
+        media: { clips: { 'clip.mp4:9:1': { key: 'studio/media/clip' } } },
+      },
+    });
+    expect(merged.timeline.tracks.find((track) => track.id === customTrack.id)).toEqual(customTrack);
+    expect(merged.semantics.plan).toEqual({ version: 1 });
+    expect(Object.values(merged.assets)).toContainEqual(expect.objectContaining({
+      label: 'clip.mp4',
+      locator: { localSig: 'clip.mp4:9:1', cloudKey: 'studio/media/clip' },
+    }));
   });
+
 });

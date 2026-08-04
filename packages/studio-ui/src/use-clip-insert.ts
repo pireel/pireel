@@ -7,19 +7,18 @@
  * hyperframes-workbench.tsx — bodies verbatim.
  */
 
-import { type MutableRefObject, type SetStateAction, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
-  type Block,
   type Composition,
+  type EditorDocumentV2,
   type MediaRef,
   type VideoShot,
+  addNarrativeDocumentClip,
   isSentenceCaption,
-  rippleInsertSiblingLayers,
   resolveCaptionStyle,
   shotId,
 } from '@pireel/studio-engine/composition';
-import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import type { DraftPlan } from '@pireel/studio-engine/plan';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -33,18 +32,17 @@ export interface ClipInsertDeps {
   compRef: MutableRefObject<Composition>;
   clipFilesRef: MutableRefObject<Map<string, File>>;
   cloudMediaRef: MutableRefObject<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>;
-  asrRef: MutableRefObject<AsrSegment[] | null>;
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
   planRef: MutableRefObject<DraftPlan | null>;
   setPlan: (p: DraftPlan | null) => void;
-  setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2) => void;
+  rememberAssetUrl: (assetId: string, url: string) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
   pushUndoSnapshot: () => void;
-  ensureShots: (c: Composition) => VideoShot[];
   ensureClipTranscripts: () => Promise<void>;
-  relayCaptionLayer: (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null) => Block[];
   pickFile: (accept: string) => Promise<File | null>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<unknown>;
@@ -52,8 +50,8 @@ export interface ClipInsertDeps {
 
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
-    comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, planRef, setPlan, setComp, setSelectedId,
-    setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, ensureClipTranscripts, relayCaptionLayer, pickFile,
+    comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, planRef, setPlan, documentRef, setDocument,
+    rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts, pickFile,
     backupMediaToCloud, runTool,
   } = deps;
   const videoMetaOf = async (url: string): Promise<{ dur: number; w: number; h: number } | null> => {
@@ -127,34 +125,30 @@ export function useClipInsert(deps: ClipInsertDeps) {
       })();
     }
   }, [comp.shots]);
-  /** Nearest split point (0 + each shot's end). */
-  const nearestShotBound = (shots: VideoShot[], t: number) => {
+  /** Nearest explicit V2 boundary, including leading/inter-clip gaps. */
+  const nearestShotBound = (document: EditorDocumentV2, t: number) => {
     let at = 0;
-    let idx = 0;
     let best = Infinity;
-    [0, ...clipSpans(shots).map((x) => x.editedEnd)].forEach((b, i) => {
+    const track = document.timeline.tracks.find((candidate) => candidate.id === document.semantics.primaryNarrativeTrackId);
+    const fps = document.canvas.fps;
+    const bounds = [0, ...(track?.clips.flatMap((clip) => [clip.startFrame / fps, (clip.startFrame + clip.durationFrames) / fps]) ?? [])];
+    bounds.forEach((b) => {
       const d = Math.abs(b - t);
       if (d < best) {
         best = d;
         at = b;
-        idx = i;
       }
     });
-    return { at, idx };
+    return at;
   };
   /** Insert core: an external clip lands at the nearest split point (an equal-standing clip: framing/matte/audio/captions
    *  same as the main source). Overlay blocks after the boundary shift right as a whole — the mirror of removeEditedInterval. file = local mode (blob url). */
   const insertClipCore = (url: string, clipDur: number, atWish: number, file?: File, srcDims?: { w: number; h: number } | null, srcSigOverride?: string | null): string => {
-    pushUndoSnapshot();
     // First source into an empty project DECIDES the canvas ratio (per user) — later sources
     // contain-fit into it; the ratio picker can override afterwards.
-    const firstSource = !compRef.current.video && !(compRef.current.shots?.length);
     // Narrative structure changed: the old plan is void. A cached plan doesn't know about this beat, and a cached lay_out
     // would treat it as absent (scenes crossing the insert window / mismatched placeholders); re-planning is what treats the inserted clip as its own beat.
-    setPlan(null);
-    planRef.current = null;
-    const shots = ensureShots(compRef.current);
-    const { at, idx } = nearestShotBound(shots, atWish);
+    const at = nearestShotBound(documentRef.current, atWish);
     if (file) clipFilesRef.current.set(url, file);
     // srcSigOverride = the source already has a LOCAL identity (including image → 5s derived still):
     // persist bytes on-device and sync metadata only. Sig-less remote sources still use the legacy
@@ -162,12 +156,22 @@ export function useClipInsert(deps: ClipInsertDeps) {
     if (file && !srcSigOverride) backupMediaToCloud(file, fileSig(file), 'clip');
     const sg = srcSigOverride ?? (file ? fileSig(file) : undefined);
     const nb: VideoShot = { id: shotId(), src: url, ...(sg ? { srcSig: sg } : {}), srcStart: 0, srcEnd: clipDur, treatment: 'full' };
-    setComp((c) => ({
-      ...c,
-      ...(firstSource && srcDims ? normalizeDims(srcDims.w, srcDims.h) : {}),
-      shots: [...shots.slice(0, idx), nb, ...shots.slice(idx)],
-      ...rippleInsertSiblingLayers(c, at, clipDur),
-    }));
+    const dims = srcDims ? normalizeDims(srcDims.w, srcDims.h) : undefined;
+    const edit = addNarrativeDocumentClip({
+      document: documentRef.current,
+      shot: nb,
+      atSec: at,
+      ...(dims ? { sourceWidth: dims.width, sourceHeight: dims.height } : {}),
+    });
+    if (!edit.ok || !edit.assetId) {
+      toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : edit.error.message);
+      return '';
+    }
+    pushUndoSnapshot();
+    setPlan(null);
+    planRef.current = null;
+    rememberAssetUrl(edit.assetId, url);
+    setDocument(edit.document);
     setSelectedId(null);
     setSelectedShotId(nb.id);
     applyT(at + Math.min(0.1, clipDur / 2));
@@ -178,21 +182,11 @@ export function useClipInsert(deps: ClipInsertDeps) {
   };
   /** Auto-complete captions/translation for a newly inserted clip: a bonus, silent on failure (the panel/agent can still fill manually). */
   const autoCaptionNewClip = async (src: string, insertedShotId: string) => {
-    const relay = () => setComp((cur) => ({ ...cur, blocks: relayCaptionLayer(cur.blocks, ensureShots(cur), asrRef.current) }));
-    // The insert already shifted final-cut time / split sentences: **re-lay once unconditionally first** (sentences
-    // crossing the insert point are re-split by the new time). Still/silent clips have no speech to transcribe, and by
-    // this point captions are already correct — previously re-laying was gated behind "the new clip transcribed sentences",
-    // so silent clips returned early and the whole caption layer stayed on the old time (user reported).
-    try {
-      relay();
-    } catch {
-      /* same as below: auto-complete failure is silent */
-    }
     try {
       await ensureClipTranscripts(); // transcribe new sources on demand (cache / failure blacklist handled internally)
       const segs = clipAsrRef.current[src];
       if (!segs?.length) return;
-      relay(); // new-source sentences enter the layer
+      // Transcript state drives the native caption derivation effect; no compatibility re-lay write.
       // A target language was chosen in the panel → auto-fill the new clip's translation in that language (same executor writes data as manual translation)
       const lang = resolveCaptionStyle(compRef.current).sub?.lang;
       const t = studioProviders().translate;
@@ -228,7 +222,13 @@ export function useClipInsert(deps: ClipInsertDeps) {
       remap.set(s.src, url);
     }
     if (remap.size) {
-      setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.src && remap.has(s.src) ? { ...s, src: remap.get(s.src)! } : s)) }));
+      const clipById = new Map(documentRef.current.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
+      for (const shot of shots) {
+        const url = shot.src ? remap.get(shot.src) : undefined;
+        const clip = clipById.get(shot.id);
+        if (url && clip?.kind === 'narrative') rememberAssetUrl(clip.assetId, url);
+      }
+      setDocument(documentRef.current);
     }
     // Unrecovered dead links (blob src with no File): say so plainly and point to reconnection — previously a silent black
     // segment, whereas the main video has a "re-import" prompt in the same case; equal-standing clips deserve their own repair path
@@ -281,7 +281,13 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const url = URL.createObjectURL(playbackFile);
     clipFilesRef.current.set(url, playbackFile);
     await saveLocalVideo(sourceFile, sig).catch(() => {});
-    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((shot) => (shot.src === oldSrc ? { ...shot, src: url, srcSig: sig } : shot)) }));
+    const clipById = new Map(documentRef.current.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
+    for (const shot of compRef.current.shots ?? []) {
+      if (shot.src !== oldSrc) continue;
+      const clip = clipById.get(shot.id);
+      if (clip?.kind === 'narrative') rememberAssetUrl(clip.assetId, url);
+    }
+    setDocument(documentRef.current);
     toast.success(t('workbench.bRollReconnected'));
     return true;
   };

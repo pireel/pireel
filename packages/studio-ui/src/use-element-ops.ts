@@ -7,15 +7,19 @@
  * sync. Extracted from hyperframes-workbench.tsx — bodies verbatim.
  */
 
-import { type MutableRefObject, type SetStateAction, useState } from 'react';
+import { type MutableRefObject, useState } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
   type Block,
   type Composition,
+  type EditorDocumentV2,
   type VideoShot,
   blockId,
   blockKind,
   freeTrack,
+  applyOverlayDocumentEdits,
+  insertOverlayDocumentClip,
+  moveOverlayDocumentClip,
   isSentenceCaption,
 } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
@@ -35,7 +39,8 @@ export interface ElementOpsDeps {
   asrRef: MutableRefObject<AsrSegment[] | null>;
   elementTargetRef: MutableRefObject<string | null>;
   chatRef: MutableRefObject<StudioChatHandle | null>;
-  setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   setPendingInsert: (box: { x: number; y: number; w: number; h: number } | null) => void;
@@ -57,7 +62,7 @@ export interface ElementOpsDeps {
 
 export function useElementOps(deps: ElementOpsDeps) {
   const {
-    projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
+    projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, documentRef, setDocument, setSelectedId, setSelectedShotId,
     setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
     composeBlockChecked, insertKitBlock, openChat,
   } = deps;
@@ -253,27 +258,29 @@ export function useElementOps(deps: ElementOpsDeps) {
     const tbSlots = tb?.slots as { media?: { url?: string }; spec?: unknown } | undefined;
     if (tb && blockKind(tb) === 'media' && !tbSlots?.media?.url && typeof tbSlots?.spec !== 'string') {
       elementTargetRef.current = null;
+      const edit = applyOverlayDocumentEdits({
+        document: documentRef.current,
+        updates: [{
+          clipId: tb.id,
+          block: {
+            templateId: 'custom',
+            slots: { innerHtml: geom.innerHtml.replaceAll(el.seedId, tb.id), timelineBody: el.timelineBody.replaceAll(el.seedId, tb.id), ...(el.presetId ? { presetId: el.presetId } : {}) },
+            label: el.label || prompt.slice(0, 12),
+          },
+        }],
+      });
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      setComp((c) => ({
-        ...c,
-        blocks: c.blocks.map((b) =>
-          b.id === tb.id
-            ? {
-                ...b,
-                templateId: 'custom',
-                slots: { innerHtml: geom.innerHtml.replaceAll(el.seedId, tb.id), timelineBody: el.timelineBody.replaceAll(el.seedId, tb.id), ...(el.presetId ? { presetId: el.presetId } : {}) },
-                label: el.label || prompt.slice(0, 12),
-              }
-            : b,
-        ),
-      }));
+      setDocument(edit.document);
       setSelectedShotId(null);
       setSelectedId(tb.id);
       if (!playing) applyT(Math.max(0, tb.startSec + 0.01));
       toast.success(t('workbench.filledIntoElementCard'));
       return;
     }
-    pushUndoSnapshot();
     const newId = blockId('cst');
     const at = Math.max(0, Math.round((atSec ?? tRef.current) * 100) / 100);
     // Only with a box are there selection frame / move / resize handles (a boxless block can't show a border, so the user can't adjust it after dragging into the canvas)
@@ -287,7 +294,13 @@ export function useElementOps(deps: ElementOpsDeps) {
       label: el.label || prompt.slice(0, 12),
       box: geom.box,
     };
-    setComp((c) => ({ ...c, blocks: [...c.blocks, nb] }));
+    const inserted = insertOverlayDocumentClip({ document: documentRef.current, block: nb });
+    if (!inserted.ok) {
+      toast.error(inserted.error.message);
+      return;
+    }
+    pushUndoSnapshot();
+    setDocument(inserted.document);
     if (nb.box) setPendingInsert(nb.box);
     setSelectedShotId(null);
     setSelectedId(newId);
@@ -296,14 +309,34 @@ export function useElementOps(deps: ElementOpsDeps) {
   };
   /** Layer: move a block up/down one layer (trackIndex±1, DOM order = stacking; 0 = video, clamped to [1,55]). */
   const bumpBlockLayer = (b: Block, dir: 1 | -1) => {
+    const stackOrder = Math.max(1, Math.min(55, b.trackIndex + dir));
+    const existing = documentRef.current.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+    const used = new Set(documentRef.current.timeline.tracks.map((track) => track.id));
+    let trackId = `track_graphics_${stackOrder}`;
+    let suffix = 2;
+    while (used.has(trackId)) trackId = `track_graphics_${stackOrder}_${suffix++}`;
+    const edit = moveOverlayDocumentClip({
+      document: documentRef.current,
+      clipId: b.id,
+      ...(existing ? { toTrackId: existing.id } : { newTrack: { id: trackId, stackOrder, name: `Graphics ${stackOrder}` } }),
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
     pushUndoSnapshot();
-    setComp((c) => ({ ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, trackIndex: Math.max(1, Math.min(55, x.trackIndex + dir)) } : x)) }));
+    setDocument(edit.document);
   };
   /** Block-level person-layer override: toggle between on-top-of / behind the person (defaults to global personFront, see engine Block.personLayer). */
   const togglePersonLayer = (b: Block) => {
-    pushUndoSnapshot();
     const behindNow = b.personLayer ? b.personLayer === 'behind' : !!compRef.current.personFx?.personFront;
-    setComp((c) => ({ ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, personLayer: behindNow ? 'front' : 'behind' } : x)) }));
+    const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId: b.id, block: { personLayer: behindNow ? 'front' : 'behind' } }] });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    pushUndoSnapshot();
+    setDocument(edit.document);
   };
   /** Floating toolbar "save as component": save a canvas custom block as-is into the asset library (snapshot copy, later
    *  edits don't affect each other; seedId = block id, the insert side re-scopes as usual). Re-saving the same block = overwrites the same entry. */
@@ -416,15 +449,18 @@ export function useElementOps(deps: ElementOpsDeps) {
           /* compile failed: discard, keep the original timeline */
         }
       }
+      const edit = applyOverlayDocumentEdits({
+        document: documentRef.current,
+        updates: [{
+          clipId: b.id,
+          startSec: newStart,
+          durationSec: newDur,
+          block: { slots: { ...b.slots, innerHtml: nextHtml, ...(nextTlb ? { timelineBody: nextTlb } : {}) } },
+        }],
+      });
+      if (!edit.ok) throw new Error(edit.error.message);
       pushUndoSnapshot();
-      setComp((c) => ({
-        ...c,
-        blocks: c.blocks.map((x) =>
-          x.id === b.id
-            ? { ...x, startSec: newStart, durationSec: newDur, slots: { ...x.slots, innerHtml: nextHtml, ...(nextTlb ? { timelineBody: nextTlb } : {}) } }
-            : x,
-        ),
-      }));
+      setDocument(edit.document);
       toast.success(nextTlb ? t('workbench.syncedContentTimingBlock') : t('workbench.syncedContentAlignedNarration'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t('workbench.syncFailedTryAgain'));

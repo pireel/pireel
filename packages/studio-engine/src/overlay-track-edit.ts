@@ -2,11 +2,14 @@
 
 import {
   applyEditorCommand,
+  positiveDurationFrames,
   secondsToTimelineFrames,
+  type EditorMediaAsset,
   type EditorCommandError,
   type EditorCommandReceipt,
   type EditorDocumentV2,
 } from './editor-document';
+import type { Block } from './composition-core';
 import type { OverlayDocumentEditResult } from './overlay-document-edit';
 
 type OverlayDocumentEditFailure = Extract<OverlayDocumentEditResult, { ok: false }>;
@@ -34,6 +37,18 @@ export interface DuplicateOverlayDocumentClipInput extends OverlayTrackTarget {
   newClipId: string;
   startSec: number;
 }
+
+export interface InsertOverlayDocumentClipInput extends Partial<OverlayTrackTarget> {
+  document: EditorDocumentV2;
+  block: Block;
+  asset?: EditorMediaAsset;
+}
+
+export type InsertOverlayDocumentClipResult = OverlayDocumentEditResult & {
+  clipId?: string;
+  trackId?: string;
+  assetId?: string;
+};
 
 function failure(
   document: EditorDocumentV2,
@@ -76,6 +91,60 @@ function insertTargetTrack(
   });
   if (!inserted.ok) return { ok: false, document: original, error: inserted.error };
   return { ok: true, document: inserted.document, trackId: newTrack.id, receipts: [inserted.receipt] };
+}
+
+function uniqueTrackId(document: EditorDocumentV2, stackOrder: number): string {
+  const used = new Set(document.timeline.tracks.map((track) => track.id));
+  const stem = `track_graphics_${Math.max(1, Math.round(stackOrder))}`;
+  let id = stem;
+  let suffix = 2;
+  while (used.has(id)) id = `${stem}_${suffix++}`;
+  return id;
+}
+
+/** Insert a legacy-shaped Block through a native graphic clip/lane identity. */
+export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput): InsertOverlayDocumentClipResult {
+  if (!input.block.id.trim()) return failure(input.document, 'invalid-command', 'Overlay block id is required.', { path: 'block.id' });
+  if (!Number.isFinite(input.block.startSec) || input.block.startSec < 0 || !Number.isFinite(input.block.durationSec) || input.block.durationSec <= 0) {
+    return failure(input.document, 'invalid-range', 'Overlay block needs a non-negative start and positive duration.', { path: 'block' });
+  }
+  const stackOrder = Number.isFinite(input.block.trackIndex) ? Math.max(1, Math.round(input.block.trackIndex)) : 1;
+  const existing = input.toTrackId
+    ? input.document.timeline.tracks.find((track) => track.id === input.toTrackId)
+    : !input.newTrack
+      ? input.document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder)
+      : undefined;
+  const target = insertTargetTrack(input.document, existing
+    ? { toTrackId: existing.id }
+    : input.newTrack
+      ? { newTrack: input.newTrack }
+      : { newTrack: { id: uniqueTrackId(input.document, stackOrder), stackOrder, name: `Graphics ${stackOrder}` } });
+  if (!target.ok) return target;
+  const { id, startSec, durationSec, trackIndex: _trackIndex, ...block } = input.block;
+  const inserted = applyEditorCommand(target.document, {
+    type: 'overlay.insert',
+    trackId: target.trackId,
+    clip: {
+      id,
+      kind: 'graphic',
+      startFrame: secondsToTimelineFrames(startSec, target.document.canvas.fps),
+      durationFrames: positiveDurationFrames(durationSec, target.document.canvas.fps),
+      enabled: true,
+      block,
+      ...(input.asset ? { assetId: input.asset.id } : {}),
+      anchor: { type: 'timeline' },
+    },
+    ...(input.asset ? { asset: input.asset } : {}),
+  });
+  if (!inserted.ok) return { ok: false, document: input.document, error: inserted.error };
+  return {
+    ok: true,
+    document: inserted.document,
+    receipts: [...target.receipts, inserted.receipt],
+    clipId: id,
+    trackId: target.trackId,
+    ...(input.asset ? { assetId: input.asset.id } : {}),
+  };
 }
 
 /** Move an overlay to an existing or newly-created lane, retaining the empty source lane. */

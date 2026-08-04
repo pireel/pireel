@@ -101,7 +101,7 @@ export interface StudioChatProps {
 /* ============================ Multi-session shell ============================ */
 
 /** memo: chat stays mounted (switching panels only hides it), so the workbench's high-frequency re-renders
- *  (box drag setComp every frame) must not re-render the whole message tree along with it. Precondition = the three
+ *  (box drag publishes frequently) must not re-render the whole message tree along with it. Precondition = the three
  *  props have stable identity (guaranteed on the workbench side: runTool via useStableCallbacks, getBody useCallback([]),
  *  elements memoized by content key). */
 export const StudioChat = memo(

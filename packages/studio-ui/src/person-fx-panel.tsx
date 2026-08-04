@@ -4,7 +4,7 @@
  * Person panel (toolbar "Person" entry): smart-matte toggle (per-shot, only the selected
  * shot) + global effect styles — person on top, feather, stroke, background swap. Values
  * are unitless 0–100 (a mainstream editor convention), assemble converts to px by canvas resolution.
- * All edits go through setComp, same path as other config: debounced doc rebuild + double-buffer swap.
+ * All edits publish native appearance patches; preview rebuild remains debounced and double-buffered.
  * Effect config stays expanded: disabled/dimmed when no shot has matte on, hover hints to enable the toggle first.
  */
 

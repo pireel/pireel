@@ -7,6 +7,9 @@ import type {
   GraphicBlockPayload,
   AudioClipProperties,
   AudioTimelineClip,
+  GraphicTimelineClip,
+  NarrativeTimelineClip,
+  NarrativeProperties,
   TimelineClip,
   TimelineClipId,
   TrackId,
@@ -21,6 +24,8 @@ export interface ShotAudioPatch {
 }
 
 export interface NarrativeClipPatch {
+  /** Sparse semantic shot fields such as transitions, matte and treatment metadata. */
+  properties?: Partial<NarrativeProperties>;
   framing?: ShotFramingPatch;
   /** Stable overlay identity occupying the framing vacancy; null deliberately clears the link. */
   partnerBlockId?: TimelineClipId | null;
@@ -82,6 +87,8 @@ export interface AudioTimelineClipPatchUpdate {
 }
 
 export type CaptionStylePatch = Partial<CaptionStyle>;
+export type AppearancePatch = Partial<EditorDocumentV2['appearance']>;
+export type ProcessingPatch = Partial<NonNullable<EditorDocumentV2['processing']>>;
 
 type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip extends TimelineClip
   ? Omit<Clip, 'startFrame'> & { offsetFrames: number }
@@ -91,18 +98,29 @@ export type TimelineClipPlacement = RelativeClipPlacement;
 
 export type EditorCommand =
   | { type: 'canvas.patch'; patch: CanvasPatch }
+  | { type: 'appearance.patch'; patch: AppearancePatch }
+  | { type: 'processing.patch'; patch: ProcessingPatch }
   | { type: 'track.insert'; track: InsertTrackInput; index?: number }
   | { type: 'track.remove'; trackId: TrackId }
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
   | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
   | { type: 'overlay.patch'; updates: OverlayClipPatchUpdate[] }
+  | { type: 'overlay.insert'; trackId: TrackId; clip: GraphicTimelineClip; asset?: EditorMediaAsset }
   | { type: 'overlay.move'; clipId: TimelineClipId; toTrackId: TrackId }
   | { type: 'overlay.duplicate'; clipId: TimelineClipId; newClipId: TimelineClipId; startFrame: number; toTrackId?: TrackId }
   | { type: 'audio.insert'; trackId: TrackId; clip: AudioTimelineClip; asset?: EditorMediaAsset }
   | { type: 'audio.patch'; updates: AudioTimelineClipPatchUpdate[] }
   | { type: 'captions.style'; patch: CaptionStylePatch }
   | { type: 'captions.relay' }
+  | {
+    type: 'narrative.insert';
+    atFrame: number;
+    clip: Omit<NarrativeTimelineClip, 'startFrame'>;
+    asset?: EditorMediaAsset;
+    mode?: 'ripple' | 'overwrite';
+  }
+  | { type: 'narrative.reorder'; clipIds: TimelineClipId[] }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
   | {
     type: 'clips.insert';

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2, type GraphicTimelineClip } from './editor-document';
 import {
   duplicateOverlayDocumentClip,
+  insertOverlayDocumentClip,
   moveOverlayDocumentClip,
   reorderOverlayDocumentTracks,
 } from './overlay-track-edit';
@@ -24,6 +25,29 @@ function documentWithGraphics() {
 }
 
 describe('overlay track transactions', () => {
+  it('inserts a generated block into a stable existing lane or creates that lane once', () => {
+    const document = documentWithGraphics();
+    const first = insertOverlayDocumentClip({
+      document,
+      block: { id: 'generated', templateId: 'custom', slots: { innerHtml: '<b>Hi</b>' }, startSec: 2, durationSec: 3, trackIndex: 5 },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.trackId).toBe('track_graphics_5');
+    expect(first.document.timeline.tracks.find((track) => track.id === first.trackId)).toMatchObject({
+      stackOrder: 5,
+      clips: [{ id: 'generated', startFrame: 60, durationFrames: 90, block: { templateId: 'custom' } }],
+    });
+    const second = insertOverlayDocumentClip({
+      document: first.document,
+      block: { id: 'generated-2', templateId: 'custom', slots: {}, startSec: 0, durationSec: 1, trackIndex: 5 },
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.trackId).toBe(first.trackId);
+    expect(second.document.timeline.tracks.filter((track) => track.type === 'graphics' && track.stackOrder === 5)).toHaveLength(1);
+  });
+
   it('creates a new lane and moves a clip without pruning the source, then reorders empty lanes', () => {
     const document = documentWithGraphics();
     const moved = moveOverlayDocumentClip({

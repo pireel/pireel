@@ -28,6 +28,8 @@ export * from './overlay-track-edit';
 export * from './layout-document-edit';
 export * from './audio-document-edit';
 export * from './caption-document-edit';
+export * from './narrative-document-edit';
+export * from './generated-draft-document-edit';
 export * from './project-document';
 export * from './transcript-address';
 export * from './templates';
