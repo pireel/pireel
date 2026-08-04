@@ -59,6 +59,7 @@ function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSe
 
 export interface AudioLaneProps {
   clips: AudioClip[];
+  disabledIds?: ReadonlySet<string>;
   /** Timeline duration (s) and scale (px per second). */
   dur: number;
   pps: number;
@@ -79,7 +80,7 @@ export interface AudioLaneProps {
   drag: (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => void;
 }
 
-function AudioLaneImpl({ clips, dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onOpenPanel, secAt, snap, drag }: AudioLaneProps) {
+function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onOpenPanel, secAt, snap, drag }: AudioLaneProps) {
   /** Live gesture value (this component's whole reason to exist): the clip under the pointer renders
    *  from base + patch, and the commit lands once on release. */
   const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
@@ -130,8 +131,9 @@ function AudioLaneImpl({ clips, dur, pps, top, peaks, selectedId, onSelect, onMo
             key={clip.id}
             role="button"
             tabIndex={0}
+            aria-disabled={disabledIds?.has(clip.id)}
             title={clip.label || t('panels.musicBed')}
-            className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${
+            className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${disabledIds?.has(clip.id) ? 'opacity-45 grayscale ' : ''}${
               selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
             }`}
             style={{ left: px(w.start), width, height: CHIP_H }}

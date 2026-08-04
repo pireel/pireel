@@ -67,7 +67,6 @@ import {
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
-  patchAudioClip,
   patchShotFraming,
   segmentFadeFn,
   shotsContiguous,
@@ -105,13 +104,14 @@ import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadI
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
 import { segmentSourceRate } from './video-segment-time';
+import { compositionRenderView } from './composition-render-view';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS } from './studio-timeline';
+import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS, type TimelineTrackState } from './studio-timeline';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
 import { ElementSourceEditor, type SourceDraft } from './element-source-editor';
 import { useStableCallbacks } from './use-stable-callbacks';
@@ -216,7 +216,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const primaryNarrative = useMemo(() => primaryNarrativeRenderPlan(renderPlan), [renderPlan]);
   const videoPlacements = primaryNarrative.placements;
   const renderVideoPlacements = primaryNarrative.activePlacements;
+  const renderComposition = useMemo(() => compositionRenderView(comp, renderPlan), [comp, renderPlan]);
   const supplementalVisuals = useMemo(() => supplementalVisualMedia(renderPlan), [renderPlan]);
+  const disabledClipIds = useMemo(() => new Set(renderPlan.tracks.flatMap((track) => (
+    track.clips.filter((entry) => !entry.clip.enabled).map((entry) => entry.clipId)
+  ))), [renderPlan]);
+  const timelineTrackStates = useMemo<TimelineTrackState[]>(() => renderPlan.tracks.flatMap((track) => (
+    track.type === 'graphics' || track.type === 'caption' || track.type === 'audio'
+      ? [{
+          trackId: track.id,
+          type: track.type,
+          ...(track.role ? { role: track.role } : {}),
+          stackOrder: track.stackOrder,
+          hidden: track.hidden,
+          muted: track.muted,
+        }]
+      : []
+  )), [renderPlan]);
   const videoPlacementsRef = useRef(videoPlacements);
   videoPlacementsRef.current = videoPlacements;
   const primaryHiddenRef = useRef(primaryNarrative.hidden);
@@ -562,8 +578,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   });
   // Debug panel's assembled HTML is built only when the panel is open (don't stitch strings every frame during high-frequency setComp like dragging)
   const assembled = useMemo(
-    () => (showCode ? assembleHtml(previewCompOf(comp), undefined, renderVideoPlacements, supplementalVisuals) : ''),
-    [comp, showCode, renderVideoPlacements, supplementalVisuals],
+    () => (showCode ? assembleHtml(previewCompOf(renderComposition), undefined, renderVideoPlacements, supplementalVisuals) : ''),
+    [renderComposition, showCode, renderVideoPlacements, supplementalVisuals],
   );
 
   // Test hook: readable snapshot of the narration script + visual analysis (also on window.__studio for devtools)
@@ -1112,7 +1128,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // Caption global style (preset/scale/width/color/plate/bold/sub): re-assemble ONLY the
         // sentence-caption nodes with the new resolved style and swap them in place — segmentation
         // re-runs inside the render, so even size/width changes stay off the rebuild path
-        const pcomp = previewCompOf(comp);
+        const pcomp = previewCompOf(renderComposition);
         for (const cb of pcomp.blocks) {
           if (!isSentenceCaption(cb)) continue;
           const r = assembleBlockHtml(cb, pcomp);
@@ -1133,7 +1149,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const fxSplit = hasVideoTrack && (comp.shots ?? []).some((sh) => sh.personMatte);
         if (structuralN === 0 || (!fxSplit && patchable.added.length <= 8)) {
           // Same comp variant the doc was assembled from (image thumbs, fitScale reset) — patched bytes must match a rebuild
-          const pcomp = previewCompOf(comp);
+          const pcomp = previewCompOf(renderComposition);
           const pblockOf = (id: string) => pcomp.blocks.find((x) => x.id === id);
           // DOM order = stacking = blocks stable-sorted by (sentence captions topmost, else trackIndex) — mirror of the assembler
           const zKey = (x: Block) => (isSentenceCaption(x) ? Number.MAX_SAFE_INTEGER : x.trackIndex);
@@ -1212,7 +1228,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         return;
       }
       lastBuiltCompRef.current = comp;
-      const doc = injectPreviewRuntime(assembleHtml(previewCompOf(comp), undefined, renderVideoPlacements, supplementalVisuals));
+      const doc = injectPreviewRuntime(assembleHtml(previewCompOf(renderComposition), undefined, renderVideoPlacements, supplementalVisuals));
       if (doc !== bufsRef.current.docs[bufsRef.current.active]) {
         pendingSwitchRef.current = true; // swap pending: patch path steps aside
         setRebuilding(true);
@@ -1228,7 +1244,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       });
     }, fontsChanged || sizeOnly || cutOnly || capOnly || framingOnly || patchable ? 0 : 300);
     return () => clearTimeout(id);
-  }, [comp, fontsTick, renderVideoPlacements, supplementalVisuals]);
+  }, [comp, renderComposition, fontsTick, renderVideoPlacements, supplementalVisuals]);
 
   // Pending background-buffer swap: ping/pong handshake state. The load event isn't trustworthy — the empty load of a
   // cleared buffer (srcdoc='') arrives late, and font blocking can make a half-loaded doc fire load first, which once
@@ -2395,11 +2411,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => {
     commitNarrativePatches([{ clipId: sid, patch: { audio: patch } }]);
   };
-  const setShotEnabled = (sid: string, enabled: boolean) => {
+  const setTimelineClipEnabled = (trackId: string, clipId: string, enabled: boolean) => {
     const result = applyEditorCommand(editorDocumentRef.current, {
       type: 'clip.patch',
-      trackId: primaryNarrative.trackId,
-      clipId: sid,
+      trackId,
+      clipId,
       patch: { enabled },
     });
     if (!result.ok) {
@@ -2412,8 +2428,27 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Track flags stay independent from per-shot audio settings. */
   const videoTrackMuted = primaryNarrative.muted;
   const videoTrackHidden = primaryNarrative.hidden;
-  const selectedShotEnabled = primaryNarrative.placements.find((placement) => placement.shotId === selectedShotId)?.enabled ?? true;
-  const audioTrackMuted = (comp.audioTracks ?? []).length > 0 && (comp.audioTracks ?? []).every((c) => c.muted);
+  const musicTrack = renderPlan.tracks.find((track) => track.type === 'audio' && track.role === 'music')
+    ?? renderPlan.tracks.find((track) => track.type === 'audio');
+  const audioTrackMuted = musicTrack?.muted ?? false;
+  const selectedTimelineClipId = selectedAudioId ?? selectedId ?? selectedShotId;
+  const selectedTimelineClip = selectedTimelineClipId
+    ? renderPlan.tracks.flatMap((track) => track.clips.map((entry) => ({ trackId: track.id, entry })))
+      .find((candidate) => candidate.entry.clipId === selectedTimelineClipId)
+    : undefined;
+  const canToggleSelectedClip = !!selectedTimelineClip
+    && selectedShotIds.size <= 1
+    && selectedBlockIds.size <= 1;
+
+  const patchTrackFlags = (trackId: string, patch: { muted?: boolean; hidden?: boolean }) => {
+    const result = applyEditorCommand(editorDocumentRef.current, { type: 'track.patch', trackId, patch });
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(result.document);
+  };
 
 
   /** Picked an image/video → write into a media-slot block's media slot. */
@@ -2836,7 +2871,22 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
-  const audioOps = useAudioTracks({ projectId, comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot });
+  const audioOps = useAudioTracks({
+    projectId,
+    comp,
+    compRef,
+    renderAudioTracks: renderComposition.audioTracks,
+    timelineDurationSec: renderPlan.durationSec,
+    setComp,
+    videoFileRef,
+    videoSigRef,
+    videoEngineRef,
+    clipFilesRef,
+    tRef,
+    pickFile,
+    backupMediaToCloud,
+    pushUndoSnapshot,
+  });
   audioExportRef.current = audioOps.audioForExport;
   /** Switch the rail to the audio settings tab (expanding the rail if the user had collapsed it). */
   const openAudioTab = () => {
@@ -3678,37 +3728,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     onOpenMusicPanel: () => openAudioTab(),
     /** Track mute is a native V2 flag. Per-shot levels/mutes remain untouched, so unmuting restores the mix. */
     onToggleVideoMute: () => {
-      const result = applyEditorCommand(editorDocumentRef.current, {
-        type: 'track.patch',
-        trackId: primaryNarrative.trackId,
-        patch: { muted: !primaryNarrative.muted },
-      });
-      if (!result.ok) {
-        toast.error(result.error.message);
-        return;
-      }
-      pushUndoSnapshot();
-      setEditorDocument(result.document);
+      patchTrackFlags(primaryNarrative.trackId, { muted: !primaryNarrative.muted });
     },
     onToggleVideoHidden: () => {
-      const result = applyEditorCommand(editorDocumentRef.current, {
-        type: 'track.patch',
-        trackId: primaryNarrative.trackId,
-        patch: { hidden: !primaryNarrative.hidden },
-      });
-      if (!result.ok) {
-        toast.error(result.error.message);
-        return;
-      }
-      pushUndoSnapshot();
-      setEditorDocument(result.document);
+      patchTrackFlags(primaryNarrative.trackId, { hidden: !primaryNarrative.hidden });
     },
     onToggleAudioMute: () => {
-      const clips = compRef.current.audioTracks ?? [];
-      if (!clips.length) return;
-      const next = !clips.every((x) => x.muted);
-      pushUndoSnapshot();
-      setComp((c) => ({ ...c, audioTracks: (c.audioTracks ?? []).map((x) => patchAudioClip(x, { muted: next })) }));
+      if (musicTrack) patchTrackFlags(musicTrack.id, { muted: !musicTrack.muted });
+    },
+    onToggleTrackHidden: (trackId: string) => {
+      const track = renderPlan.tracks.find((candidate) => candidate.id === trackId);
+      if (track) patchTrackFlags(trackId, { hidden: !track.hidden });
     },
     onReorderTracks: (topToBottom: number[]) => {
       // Timeline overlay tracks top-to-bottom = canvas z high-to-low (NLE convention): re-index z by the new display order.
@@ -5322,17 +5352,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={() => {
-                  if (!selectedShotId) return;
-                  setShotEnabled(selectedShotId, !selectedShotEnabled);
+                  if (!selectedTimelineClip) return;
+                  setTimelineClipEnabled(
+                    selectedTimelineClip.trackId,
+                    selectedTimelineClip.entry.clipId,
+                    !selectedTimelineClip.entry.clip.enabled,
+                  );
                 }}
-                disabled={!selectedShotId || selectedShotIds.size > 1}
-                aria-label={selectedShotEnabled ? t('panels.disableClip') : t('panels.enableClip')}
-                className={`rounded p-1 disabled:opacity-40 ${selectedShotEnabled ? 'text-ink-3 hover:text-ink hover:bg-panel-2' : 'text-accent bg-panel-2'}`}
+                disabled={!canToggleSelectedClip}
+                aria-label={selectedTimelineClip?.entry.clip.enabled === false ? t('panels.enableClip') : t('panels.disableClip')}
+                className={`rounded p-1 disabled:opacity-40 ${selectedTimelineClip?.entry.clip.enabled === false ? 'text-accent bg-panel-2' : 'text-ink-3 hover:text-ink hover:bg-panel-2'}`}
               >
                 <Power size={14} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{selectedShotEnabled ? t('panels.disableClip') : t('panels.enableClip')}</TooltipContent>
+            <TooltipContent>{selectedTimelineClip?.entry.clip.enabled === false ? t('panels.enableClip') : t('panels.disableClip')}</TooltipContent>
           </Tooltip>
           {/* 剪口播 / 字幕 moved to the library rail tabs (siblings of 素材); the caption-selected
               shortcuts + style popover still open them floating. */}
@@ -5564,6 +5598,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           videoMuted={videoTrackMuted}
           videoHidden={videoTrackHidden}
           audioMuted={audioTrackMuted}
+          trackStates={timelineTrackStates}
+          disabledClipIds={disabledClipIds}
           audioPeaks={audioOps.audioPeaks}
           sourcePeaks={audioOps.sourcePeaks}
           clipPendingAt={clipPending}

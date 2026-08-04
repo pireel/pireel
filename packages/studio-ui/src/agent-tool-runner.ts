@@ -88,6 +88,7 @@ import { saveLocalVideo } from './local-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
+import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
@@ -114,16 +115,26 @@ function reviewMomentAttempts(compRef: object, compositionHash: string): Map<num
 }
 
 function canonicalRenderTimeline(
+  composition: Composition,
   document: EditorDocumentV2,
   resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined,
 ) {
   const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
   const primary = primaryNarrativeRenderPlan(plan);
+  const renderComposition = compositionRenderView(composition, plan);
+  const visualMediaClips = supplementalVisualMedia(plan);
   return {
     durationSec: plan.durationSec,
     placements: primary.activePlacements,
     primaryHidden: primary.hidden,
-    visualMediaClips: supplementalVisualMedia(plan),
+    visualMediaClips,
+    composition: renderComposition,
+    fingerprint: `${compositionRevision(renderComposition).compositionHash}:${JSON.stringify({
+      durationSec: plan.durationSec,
+      placements: primary.activePlacements,
+      primaryHidden: primary.hidden,
+      visualMediaClips,
+    })}`,
   };
 }
 
@@ -819,10 +830,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // vision model looks at the composed frames and the FINDINGS come back as text (issues JSON)
             const atsIn = Array.isArray(input.atSecs) ? (input.atSecs as unknown[]).map(Number).filter(Number.isFinite) : [];
             if (!atsIn.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
-            const renderTimeline = canonicalRenderTimeline(documentRef.current, resolveAssetUrl);
+            const renderTimeline = canonicalRenderTimeline(c, documentRef.current, resolveAssetUrl);
             const dur = renderTimeline.durationSec;
             const requestedAts = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 18);
-            const compHash = `${compositionRevision(c).compositionHash}:${JSON.stringify(renderTimeline)}`;
+            const compHash = renderTimeline.fingerprint;
             const momentAttempts = reviewMomentAttempts(compRef, compHash);
             const { allowedAtSecs: ats, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
             if (!ats.length) {
@@ -844,7 +855,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const at = ats[i]!;
                 report(t('workbench.reviewingFrameN', { i: i + 1, n: ats.length }));
                 const shot = await captureCompositionFrame({
-                  comp: c,
+                  comp: renderTimeline.composition,
                   videoPlacements: renderTimeline.placements,
                   primaryVisualHidden: renderTimeline.primaryHidden,
                   visualMediaClips: renderTimeline.visualMediaClips,
@@ -856,7 +867,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   maxDim: 720,
                   localSimilarityFingerprint: true,
                 });
-                const visBlocks = c.blocks
+                const visBlocks = renderTimeline.composition.blocks
                   .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
                   .map((b) => `${b.id} (${blockKind(b)}${b.box ? `, ${zoneOf(b.box)}` : ''})`);
                 const expected = `${visBlocks.length ? `overlays: ${visBlocks.join('; ')}` : 'no overlays'}${isCaptionsOn(c) ? '; captions: on' : ''}`;
@@ -1937,11 +1948,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
       }
       case 'capture_frame': {
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
-        const renderTimeline = canonicalRenderTimeline(ctx.documentRef.current, ctx.resolveAssetUrl);
+        const renderTimeline = canonicalRenderTimeline(c2, ctx.documentRef.current, ctx.resolveAssetUrl);
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), renderTimeline.durationSec) : tRef.current;
         const momentAttempts = reviewMomentAttempts(
           compRef,
-          `${compositionRevision(c2).compositionHash}:${JSON.stringify(renderTimeline)}`,
+          renderTimeline.fingerprint,
         );
         if (!selectReviewMoments([at], momentAttempts).allowedAtSecs.length) {
           return {
@@ -1953,7 +1964,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         try {
           const label = `${Math.round(at * 10) / 10}s`;
           const shot = await captureCompositionFrame({
-            comp: c2,
+            comp: renderTimeline.composition,
             videoPlacements: renderTimeline.placements,
             primaryVisualHidden: renderTimeline.primaryHidden,
             visualMediaClips: renderTimeline.visualMediaClips,
@@ -1966,7 +1977,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const b64 = shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1);
           // What the image SHOWS mapped back to what the agent can EDIT: overlay blocks visible at this
           // moment (with screen zone), the shot it lands in, and whether the caption layer is on
-          const visBlocks = c2.blocks
+          const visBlocks = renderTimeline.composition.blocks
             .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
             .map((b) => ({ id: b.id, kind: blockKind(b), ...(b.label ? { label: b.label } : {}), ...(b.box ? { zone: zoneOf(b.box) } : {}) }));
           const span = videoShotTimelineSpans(c2.shots ?? [], renderTimeline.placements)

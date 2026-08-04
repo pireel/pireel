@@ -69,6 +69,15 @@ export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
 /** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
 const SCENE_WAVE_H = 18;
 
+export interface TimelineTrackState {
+  trackId: string;
+  type: 'graphics' | 'caption' | 'audio';
+  role?: string;
+  stackOrder: number;
+  hidden: boolean;
+  muted: boolean;
+}
+
 interface StudioTimelineProps {
   comp: Composition;
   /** Canonical V2 placements. Omit only for legacy contiguous compositions. */
@@ -151,6 +160,9 @@ interface StudioTimelineProps {
   onToggleVideoHidden?: () => void;
   audioMuted?: boolean;
   onToggleAudioMute?: () => void;
+  trackStates?: readonly TimelineTrackState[];
+  onToggleTrackHidden?: (trackId: string) => void;
+  disabledClipIds?: ReadonlySet<string>;
   /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
   selectedAudioId?: string | null;
   onSelectAudio?: (id: string | null) => void;
@@ -273,6 +285,9 @@ function StudioTimelineImpl({
   onToggleVideoHidden,
   audioMuted,
   onToggleAudioMute,
+  trackStates,
+  onToggleTrackHidden,
+  disabledClipIds,
   selectedAudioId,
   onSelectAudio,
   onOpenMusicPanel,
@@ -930,6 +945,11 @@ function StudioTimelineImpl({
             <div style={{ paddingTop: 0 }}>
               {displayTracks.map((track) => {
                 const k = trackKind(track);
+                const nativeTrack = track === CAP_LANE
+                  ? trackStates?.find((candidate) => candidate.type === 'caption' && candidate.role === 'managedCaptions')
+                  : track > 0
+                    ? trackStates?.find((candidate) => candidate.type === 'graphics' && candidate.stackOrder === track)
+                    : undefined;
                 const meta =
                   track === CAP_LANE
                     ? KIND_META.caption
@@ -949,6 +969,9 @@ function StudioTimelineImpl({
                     <Icon size={13} className={meta.dot} />
                     {k === 'video' && onToggleVideoMute && <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />}
                     {k === 'video' && onToggleVideoHidden && <VisibilityToggle hidden={!!videoHidden} onToggle={onToggleVideoHidden} />}
+                    {nativeTrack && onToggleTrackHidden && (
+                      <VisibilityToggle hidden={nativeTrack.hidden} onToggle={() => onToggleTrackHidden(nativeTrack.trackId)} />
+                    )}
                   </div>
                 );
               })}
@@ -1377,7 +1400,8 @@ function StudioTimelineImpl({
                   <div
                     key={b.id}
                     title={b.label}
-                    className={`group absolute overflow-hidden rounded-md ring-1 ${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
+                    aria-disabled={disabledClipIds?.has(b.id)}
+                    className={`group absolute overflow-hidden rounded-md ring-1 ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
                     style={{ left, width, top, height: ROW_H - 8 }}
                     onClick={(e) => e.stopPropagation()} // chip is selected via pointer; block bubbling so the background doesn't clear it
                     onMouseEnter={(e) => openHover(b, e.currentTarget)}
@@ -1491,7 +1515,8 @@ function StudioTimelineImpl({
                   <div
                     key={b.id}
                     title={b.label || t('panels.captions')}
-                    className="absolute overflow-hidden rounded-md bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20"
+                    aria-disabled={disabledClipIds?.has(b.id)}
+                    className={`absolute overflow-hidden rounded-md bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20 ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
                     style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1511,6 +1536,7 @@ function StudioTimelineImpl({
               {musicLane && (
                 <AudioLane
                   clips={audioClips}
+                  disabledIds={disabledClipIds}
                   dur={dur}
                   pps={pps}
                   top={musicTop}

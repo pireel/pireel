@@ -27,6 +27,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
 import { t } from './i18n';
+import { compositionRenderView } from './composition-render-view';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 
@@ -136,7 +137,7 @@ export function useStudioExport(deps: {
     if (cached && cached.key === key && cached.blob) return cached.blob;
     const primary = primaryNarrativeRenderPlan(plan);
     const blob = await clientExportVideo({
-      comp: c,
+      comp: compositionRenderView(c, plan),
       videoPlacements: primary.activePlacements,
       primaryVisualHidden: primary.hidden,
       primaryAudioMuted: primary.muted,

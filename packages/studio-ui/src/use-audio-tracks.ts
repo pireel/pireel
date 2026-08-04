@@ -33,6 +33,9 @@ export interface AudioTracksDeps {
   projectId: string;
   comp: Composition;
   compRef: MutableRefObject<Composition>;
+  /** Native V2 playback projection. Editing and media recovery continue to use the full comp. */
+  renderAudioTracks?: readonly AudioClip[];
+  timelineDurationSec?: number;
   setComp: (action: SetStateAction<Composition>) => void;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
@@ -47,7 +50,12 @@ export interface AudioTracksDeps {
 }
 
 export function useAudioTracks(deps: AudioTracksDeps) {
-  const { projectId, comp, compRef, setComp, videoFileRef, videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot } = deps;
+  const {
+    projectId, comp, compRef, renderAudioTracks, timelineDurationSec, setComp, videoFileRef,
+    videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
+  } = deps;
+  const renderAudioTracksRef = useRef(renderAudioTracks);
+  renderAudioTracksRef.current = renderAudioTracks;
   /** Mounted bytes per clip sig (blob src dies on refresh; the File here is the live handle). */
   const audioFilesRef = useRef<Map<string, File>>(new Map());
   const [audioFileRev, setAudioFileRev] = useState(0);
@@ -222,8 +230,8 @@ export function useAudioTracks(deps: AudioTracksDeps) {
    *  preview override to thread through — the effect below respecs from whatever comp says). */
   const engineSpecs = (): EngineAudioClip[] => {
     const c = compRef.current;
-    const total = totalDuration(c);
-    return (c.audioTracks ?? [])
+    const total = timelineDurationSec ?? totalDuration(c);
+    return (renderAudioTracksRef.current ?? c.audioTracks ?? [])
       .filter(clipUsable)
       .map((clip) => ({
         id: clip.id,
@@ -239,7 +247,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     videoEngineRef.current?.setAudioClips(engineSpecs());
     videoEngineRef.current?.setMonitorMuteVideo(!!soloId); // solo silences the footage too, or it isn't solo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.audioTracks, comp.shots, comp.video, audioFileRev, soloId]);
+  }, [comp.audioTracks, comp.shots, comp.video, renderAudioTracks, timelineDurationSec, audioFileRev, soloId]);
 
   // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
   useEffect(() => {
@@ -294,7 +302,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Export payload (bytes per usable clip); clips with missing bytes are skipped (panel shows them). */
   const audioForExport = (): { clip: AudioClip; file: File }[] | null => {
     const out: { clip: AudioClip; file: File }[] = [];
-    for (const clip of compRef.current.audioTracks ?? []) {
+    for (const clip of renderAudioTracksRef.current ?? compRef.current.audioTracks ?? []) {
       const f = clip.sig ? audioFilesRef.current.get(clip.sig) : undefined;
       if (f) out.push({ clip, file: f });
     }
