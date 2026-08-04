@@ -2,12 +2,12 @@
 
 /**
  * Shared building blocks for the assets library (My / Official scopes): the LibraryItem
- * shape, the fixed 120×68 grid card with its tiles (image/video/audio/element), the list-row
+ * shape, the responsive grid card with its tiles (image/video/audio/element), the list-row
  * thumb, drag-out payload wiring, the audio inline-preview hook, and the preview lightbox.
  * Panels own their data sources and handlers; everything visual and draggable lives here.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Image as ImageIcon, Loader2, Pause, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
 import type { Block, Composition, MediaRef } from '@pireel/studio-engine/composition';
@@ -16,6 +16,10 @@ import { KitPropsPanel } from './kit-props-panel';
 import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
 import { BlockPreviewFrame } from './block-preview-card';
 import { t } from './i18n';
+
+/** Compact card grid shared by asset and generation libraries.
+ * The 88px floor lets the padded generation panel keep three compact columns at its default width. */
+export const RESPONSIVE_ASSET_CARD_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(min(88px,100%),1fr))] gap-2';
 
 /** Static 16:9 canvas for previews that must not depend on the project comp (presets/kit). */
 export const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
@@ -208,22 +212,43 @@ export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: 
   );
 }
 
-/** Element card live preview: same render as the gen panel (freeze on the stable frame after entrance, loops only on hover).
- *  Cards are a fixed 120×68, so the tile is hard-sized to match (no responsive measuring). */
-export function ElementTile({ item, width = 120, height = 68 }: { item: LibraryItem; width?: number; height?: number }) {
+/** Element card live preview: same render as the gen panel (freeze on the stable frame after entrance).
+ * The viewport follows its responsive grid track while the 1920×1080 source stays scaled and centered. */
+export function ElementTile({ item, width, height }: { item: LibraryItem; width?: number; height?: number }) {
   const el = item.element!;
-  // Static HTML output: no GSAP (from-animations don't apply = frozen end state), zero iframe,
-  // zero rasterization; the #seedId selector scope lands directly in the main document without leaking styles
-  // (same technique as InlineBlockPreview). After mount, measure the content's true rect once (including rotate)
-  // to scale and center the piece in the card.
+  const slotRef = useRef<HTMLDivElement | null>(null);
   const holderRef = useRef<HTMLDivElement | null>(null);
-  const [fit, setFit] = useState<{ scale: number; dx: number; dy: number } | null>(null);
-  useEffect(() => {
+  const [slot, setSlot] = useState({ width: width ?? 120, height: height ?? 67.5 });
+  const [contentBounds, setContentBounds] = useState<{ x: number; y: number; w: number; h: number; tight: boolean } | null>(null);
+
+  useLayoutEffect(() => {
+    const node = slotRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2) return;
+      setSlot((current) =>
+        Math.abs(current.width - rect.width) < 0.5 && Math.abs(current.height - rect.height) < 0.5
+          ? current
+          : { width: rect.width, height: rect.height });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [width, height]);
+
+  // Static HTML output: no GSAP, iframe or rasterization. Measure its true design-space bounds
+  // once per item; resizing a panel then only recomputes lightweight scale/translation math.
+  useLayoutEffect(() => {
     const holder = holderRef.current;
     if (!holder) return;
+    holder.style.left = '0px';
+    holder.style.top = '0px';
+    holder.style.transform = 'scale(1)';
     const base = holder.getBoundingClientRect();
     if (base.width < 2) return;
-    // Is holder pre-scaled to 0? No — measurement happens at scale(1) in a hidden state: see the visibility strategy below
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
@@ -240,46 +265,56 @@ export function ElementTile({ item, width = 120, height = 68 }: { item: LibraryI
       if (r.bottom > y1) y1 = r.bottom;
     }
     if (!Number.isFinite(x0) || x1 - x0 < 8) {
-      setFit({ scale: width / 1920, dx: 0, dy: (height - 1080 * (width / 1920)) / 2 });
+      setContentBounds({ x: 0, y: 0, w: 1920, h: 1080, tight: false });
       return;
     }
-    const pad = 24;
-    const bx = x0 - base.left - pad;
-    const by = y0 - base.top - pad;
-    const bw = x1 - x0 + pad * 2;
-    const bh = y1 - y0 + pad * 2;
-    const scale = Math.min((width * 0.9) / bw, (height * 0.9) / bh);
-    setFit({ scale, dx: width / 2 - (bx + bw / 2) * scale, dy: height / 2 - (by + bh / 2) * scale });
-  }, [item.id, width, height]);
+    setContentBounds({ x: x0 - base.left, y: y0 - base.top, w: x1 - x0, h: y1 - y0, tight: true });
+  }, [item.id, el.innerHtml]);
+
+  const fit = useMemo(() => {
+    if (!contentBounds) return null;
+    const pad = contentBounds.tight ? 24 : 0;
+    const fill = contentBounds.tight ? 0.9 : 1;
+    const bx = contentBounds.x - pad;
+    const by = contentBounds.y - pad;
+    const bw = contentBounds.w + pad * 2;
+    const bh = contentBounds.h + pad * 2;
+    const scale = Math.min((slot.width * fill) / bw, (slot.height * fill) / bh);
+    return {
+      scale,
+      dx: slot.width / 2 - (bx + bw / 2) * scale,
+      dy: slot.height / 2 - (by + bh / 2) * scale,
+    };
+  }, [contentBounds, slot.height, slot.width]);
+
   return (
-    <div className="w-full overflow-hidden">
+    <div
+      ref={slotRef}
+      className="relative aspect-video w-full overflow-hidden"
+      style={{
+        ...(width ? { width } : {}),
+        ...(height ? { height } : {}),
+        backgroundColor: '#ffffff',
+        backgroundImage:
+          'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
+        backgroundSize: '16px 16px',
+        backgroundPosition: '0 0,8px 8px',
+      }}
+    >
       <div
-        className="relative overflow-hidden"
+        ref={holderRef}
         style={{
-          width,
-          height,
-          backgroundColor: '#ffffff',
-          backgroundImage:
-            'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
-          backgroundSize: '16px 16px',
-          backgroundPosition: '0 0,8px 8px',
+          position: 'absolute',
+          left: fit ? fit.dx : -100000,
+          top: fit ? fit.dy : 0,
+          width: 1920,
+          height: 1080,
+          transform: `scale(${fit ? fit.scale : 1})`,
+          transformOrigin: 'top left',
+          pointerEvents: 'none',
         }}
       >
-        <div
-          ref={holderRef}
-          style={{
-            position: 'absolute',
-            left: fit ? fit.dx : -100000,
-            top: fit ? fit.dy : 0,
-            width: 1920,
-            height: 1080,
-            transform: `scale(${fit ? fit.scale : 1})`,
-            transformOrigin: 'top left',
-            pointerEvents: 'none',
-          }}
-        >
-          <div id={el.seedId} style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: el.innerHtml }} />
-        </div>
+        <div id={el.seedId} style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: el.innerHtml }} />
       </div>
     </div>
   );
@@ -315,7 +350,7 @@ export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: b
   );
 }
 
-/** Grid card: fixed 120×68 thumb + 24px title row; click to preview (audio: toggle playback),
+/** Grid card: responsive 16:9 thumb + 24px title row; click to preview (audio: toggle playback),
  *  draggable, hover shows insert (+) inside the thumb area and delete top-left. */
 export function AssetCard({
   item: it,

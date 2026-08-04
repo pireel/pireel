@@ -35,7 +35,7 @@ import { type GenAsset, listStudioGens, pollCreation, startGeneration } from './
 import { BlockPreviewFrame } from './block-preview-card';
 import { type GenTemplate, localizedTemplatePrompt, TEMPLATES_BY_TYPE, zhCategory } from './gen-templates';
 import { ElementTemplateCard, ElementTemplatePreview } from './gen-templates/element-card';
-import { fmtDur, type PanelDragAsset, useAudioPreview } from './asset-card';
+import { fmtDur, RESPONSIVE_ASSET_CARD_GRID, type PanelDragAsset, useAudioPreview } from './asset-card';
 import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory } from './official-assets-types';
 
 import { type ElementEntry, type GenElementResult, loadElementEntries as loadStoredElements, pushElementToCloud, saveElementEntries as saveStoredElements, syncElementEntries as syncStoredElements } from './element-history';
@@ -853,7 +853,7 @@ function TemplateGallery({
   const [preview, setPreview] = useState<GenTemplate | null>(null);
   return (
     <>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={RESPONSIVE_ASSET_CARD_GRID}>
         {templates.map((template) => (
           <TemplateCard key={template.id} type={type} template={template} onUse={onUse} onPreview={() => setPreview(template)} />
         ))}

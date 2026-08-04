@@ -32,6 +32,7 @@ import { ElementTemplateCard } from './gen-templates/element-card';
 import {
   AssetCard,
   AssetLightbox,
+  RESPONSIVE_ASSET_CARD_GRID,
   type LibraryItem,
   type PanelDragAsset,
   dimsOf,
@@ -47,8 +48,7 @@ type OfficialCategorySection = 'stickers' | 'audio';
 type OfficialSection = 'all' | 'components' | OfficialCategorySection;
 type OfficialDetail = { section: OfficialCategorySection; categoryId: string; label: string };
 type OfficialGenerationType = 'image' | 'video' | 'element' | 'audio';
-const GROUP_GRID_PREVIEW = 8;
-const GROUP_GRID_TWO_ROWS_PX = 196;
+const GROUP_GRID_PREVIEW = 6;
 const HIDDEN_STICKER_CATEGORY_IDS = new Set(['03_decorative-symbols/01_kenney-emotes']);
 const FILTER_ITEM_CLASS = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
 
@@ -292,19 +292,17 @@ export function OfficialAssetsPanel({
   const kitGrid = (items: LibraryItem[], previewOnly = false) => {
     const shown = previewOnly ? items.slice(0, GROUP_GRID_PREVIEW) : items;
     return (
-      <div className={previewOnly ? 'overflow-hidden' : undefined} style={previewOnly ? { maxHeight: GROUP_GRID_TWO_ROWS_PX } : undefined}>
-        <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
-          {shown.map((it) => (
-            <AssetCard
-              key={it.id}
-              item={it}
-              onActivate={() => setPreview(it)}
-              onInsert={() => insertOf(it)}
-              dragProps={dragPropsFor(it, onDragAsset)}
-              insertLabel={t('panels.insert')}
-            />
-          ))}
-        </div>
+      <div className={RESPONSIVE_ASSET_CARD_GRID}>
+        {shown.map((it) => (
+          <AssetCard
+            key={it.id}
+            item={it}
+            onActivate={() => setPreview(it)}
+            onInsert={() => insertOf(it)}
+            dragProps={dragPropsFor(it, onDragAsset)}
+            insertLabel={t('panels.insert')}
+          />
+        ))}
       </div>
     );
   };
@@ -315,7 +313,7 @@ export function OfficialAssetsPanel({
   };
 
   const componentTemplateGrid = (
-    <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
+    <div className={RESPONSIVE_ASSET_CARD_GRID}>
       {visibleComponentTemplates.map((template) => (
         <ElementTemplateCard
           key={template.id}
@@ -419,8 +417,8 @@ export function OfficialAssetsPanel({
       noMatches
     ) : (
       <div className="flex flex-col gap-2.5">
-        {visibleComponentItems.length > 0 && kitGrid(visibleComponentItems)}
         {visibleComponentTemplates.length > 0 && componentTemplateGrid}
+        {visibleComponentItems.length > 0 && kitGrid(visibleComponentItems)}
       </div>
     );
   const stickersOverview =
