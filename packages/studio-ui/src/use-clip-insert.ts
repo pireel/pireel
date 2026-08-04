@@ -15,6 +15,7 @@ import {
   type MediaRef,
   type VideoShot,
   isSentenceCaption,
+  rippleInsertSiblingLayers,
   resolveCaptionStyle,
   shotId,
 } from '@pireel/studio-engine/composition';
@@ -165,7 +166,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       ...c,
       ...(firstSource && srcDims ? normalizeDims(srcDims.w, srcDims.h) : {}),
       shots: [...shots.slice(0, idx), nb, ...shots.slice(idx)],
-      blocks: c.blocks.map((b) => (b.startSec >= at - 1e-3 ? { ...b, startSec: b.startSec + clipDur } : b)),
+      ...rippleInsertSiblingLayers(c, at, clipDur),
     }));
     setSelectedId(null);
     setSelectedShotId(nb.id);
@@ -389,23 +390,29 @@ export function useClipInsert(deps: ClipInsertDeps) {
       setClipPending(null);
     }
   };
-  /** Shot-boundary "+": pick a local video → insert at that split point. Like the main video, **kept local, not uploaded**
-   *  (per user; uploading previously hit the 200MB direct-upload cap) — blob preview, the File is injected into the iframe via hf:clipFile. */
+  /** Shot-boundary "+": pick a local video or image → insert at that split point. Images become
+   *  5-second still clips, matching library-drop semantics. Source bytes stay local. */
   const insertLocalClipAt = async (at: number) => {
-    const f = await pickFile('video/*');
-    if (!f) return;
+    const sourceFile = await pickFile('video/*,image/*');
+    if (!sourceFile) return;
     setClipPending(at);
     try {
-      const url = URL.createObjectURL(f);
+      const isImage = sourceFile.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|bmp)$/i.test(sourceFile.name);
+      const sig = fileSig(sourceFile);
+      const playbackFile = isImage ? await stillClipFromImage(sourceFile, sourceFile.name) : sourceFile;
+      if (!playbackFile) {
+        toast.error(t('workbench.couldNotConvertImage'));
+        return;
+      }
+      const url = URL.createObjectURL(playbackFile);
       const meta = await videoMetaOf(url);
       if (!meta) {
         URL.revokeObjectURL(url);
         toast.error(t('workbench.couldNotReadDuration'));
         return;
       }
-      const sig = fileSig(f);
-      void saveLocalVideo(f, sig); // OPFS local library: draft restore fetches by srcSig
-      insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta, sig);
+      void saveLocalVideo(sourceFile, sig); // image identity stays the original bytes; restore re-derives its still clip
+      insertClipCore(url, Math.round(meta.dur * 100) / 100, at, playbackFile, meta, sig);
     } finally {
       setClipPending(null);
     }

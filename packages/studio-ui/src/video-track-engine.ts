@@ -8,8 +8,8 @@
  * just a <canvas>, frames pushed over via ImageBitmap postMessage (zero-copy transfer); audio
  * comes straight from the parent element (the active source is unmuted).
  *
- * Master clock = the active source element's currentTime (film time mapped by the segment
- * table); boundary handoff / dead-window skipping use a debuggable TS implementation here
+ * Master clock = the active source element's currentTime while footage is present, with a
+ * timeline rAF clock for graphics/audio-only regions. Boundary handoff / dead-window skipping use a debuggable TS implementation here
  * (port and retirement of the old VIDEO_TRIM_SHIM state machine). Caption/HTML blocks are
  * still DOM/GSAP in the iframe — during playback the parent sends hf:seekTimelines every frame
  * to align; the edit surface is unchanged.
@@ -72,6 +72,8 @@ export class VideoTrackEngine {
   private srcIds = new Map<string, File | string>(); // source identity: File by reference, URL by string for idempotence checks
   private segs: EngineSeg[] = [];
   private starts: number[] = [];
+  private segmentTotal = 0;
+  private timelineTotal = 0;
   private total = 0;
   private playing = false;
   private tEdited = 0;
@@ -222,7 +224,8 @@ export class VideoTrackEngine {
       this.starts.push(acc);
       acc += Math.max(0, s.srcEnd - s.srcStart);
     }
-    this.total = acc;
+    this.segmentTotal = acc;
+    this.total = Math.max(this.segmentTotal, this.timelineTotal);
     this.curIdx = -1; // segment table changed: recompute the active one
     // segment table changed mid-playback (delete/trim/insert while playing): the rAF loop only knows
     // curIdx, and without re-locating it spins dead — restart playback from the current film time
@@ -233,6 +236,16 @@ export class VideoTrackEngine {
 
   get durationSec(): number {
     return this.total;
+  }
+
+  /**
+   * Sets the authoritative timeline end. Video is one possible clock source, not the document
+   * duration: graphics/audio-only edits and content after the final video frame still need time.
+   */
+  setTimelineDuration(durationSec: number): void {
+    this.timelineTotal = Number.isFinite(durationSec) ? Math.max(0, durationSec) : 0;
+    this.total = Math.max(this.segmentTotal, this.timelineTotal);
+    if (this.tEdited > this.total) this.seek(this.total);
   }
 
   private segGain(i: number, tEdited?: number): number {
@@ -650,6 +663,8 @@ export class VideoTrackEngine {
     const i = this.playableAt(this.tEdited);
     if (i < 0) {
       this.curIdx = -1;
+      this.syncGhost(this.tEdited);
+      this.syncAudioClips(this.tEdited, this.playing, true);
       return;
     }
     const seg = this.segs[i]!;
@@ -679,15 +694,14 @@ export class VideoTrackEngine {
     this.playing = true;
     const i = this.playableAt(this.tEdited);
     if (i < 0) {
-      this.playing = false;
-      this.onEnded?.();
-      return;
+      this.curIdx = -1;
+    } else {
+      const seg = this.segs[i]!;
+      const inSeg = this.segIndexAt(this.tEdited) === i;
+      const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
+      if (!inSeg) this.tEdited = this.starts[i]!; // starting play in a dead window: begin at the next playable segment (skip)
+      this.activateIdx(i, srcT, true);
     }
-    const seg = this.segs[i]!;
-    const inSeg = this.segIndexAt(this.tEdited) === i;
-    const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
-    if (!inSeg) this.tEdited = this.starts[i]!; // starting play in a dead window: begin at the next playable segment (skip)
-    this.activateIdx(i, srcT, true);
     this.syncAudioClips(this.tEdited, true, true); // hard-align the clips at play start
     if (this.raf) cancelAnimationFrame(this.raf);
     let lastCt = -1;
@@ -763,6 +777,16 @@ export class VideoTrackEngine {
             } else {
               this.activateIdx(nx, nxSeg.srcStart, true);
             }
+          } else if (this.total > this.segmentTotal + EPS) {
+            // Footage ended before the document: park only the video side and let the timeline
+            // clock continue for trailing graphics/audio. Calling pause() here would also stop BGM.
+            el.muted = true;
+            if (!el.paused) el.pause();
+            for (const g of this.ghosts.values()) if (!g.paused) g.pause();
+            for (const d of this.dubs.values()) if (!d.el.paused) d.el.pause();
+            this.curIdx = -1;
+            this.tEdited = Math.max(this.tEdited, this.segmentTotal);
+            this.tSmooth = Math.max(this.tSmooth, this.tEdited);
           } else {
             this.pause();
             this.tEdited = this.total;
@@ -770,6 +794,21 @@ export class VideoTrackEngine {
             this.onEnded?.();
             return;
           }
+        }
+      } else {
+        // No playable video at this time (or no video at all): advance the document clock from
+        // wall time. This is the canonical path for graphics/audio-only projects.
+        this.tEdited = Math.min(this.total, this.tEdited + dtWall);
+        this.tSmooth = this.tEdited;
+        this.onTick?.(this.tEdited);
+        this.syncGhost(this.tEdited);
+        this.syncAudioClips(this.tEdited, true);
+        if (this.tEdited >= this.total - 1e-6) {
+          this.pause();
+          this.tEdited = this.total;
+          this.onTick?.(this.total);
+          this.onEnded?.();
+          return;
         }
       }
       this.raf = requestAnimationFrame(loop);

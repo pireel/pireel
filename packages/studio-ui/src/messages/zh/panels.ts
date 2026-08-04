@@ -259,6 +259,7 @@ export const PANELS_ZH: Record<string, string> = {
   'panels.speedRate': '变速',
   'panels.stickers': '贴纸',
   'panels.still5s': '5s 静帧',
+  'panels.addMediaToMainTrack': '添加图片或视频',
   'panels.strokeName': '描边:{name}',
   'panels.strokeOpacity': '描边透明度',
   'panels.strokeStyleName': '描边样式:{name}',

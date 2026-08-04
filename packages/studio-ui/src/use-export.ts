@@ -15,7 +15,7 @@
 
 import { useRef, useState, type MutableRefObject } from 'react';
 import { toast } from '@pireel/ui/toast';
-import type { AudioClip, Composition } from '@pireel/studio-engine/composition';
+import { type AudioClip, type Composition, hasTimelineContent, videoTrackShots } from '@pireel/studio-engine/composition';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
@@ -94,10 +94,13 @@ export function useStudioExport(deps: {
   const exportKey = (c: Composition, opts: ExportRenderOpts): string =>
     `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(c)}`;
 
-  /** Whether client compositing is possible locally (WebCodecs + a source File). If not = honest error, no longer handed to the deprecated server render. */
-  const canClientExport = () => typeof window !== 'undefined' && 'VideoEncoder' in window && !!videoFileRef.current;
-  const noExportReason = () =>
-    !videoFileRef.current ? t('common.localSourceVideoMissing') : t('workbench.browserCannotExport');
+  /** WebCodecs is always required; main-source bytes are required only when a surviving clip
+   *  actually references that source. Clips-only and graphics/audio-only documents need no main file. */
+  const needsMainSource = (c: Composition) => videoTrackShots(c).some((shot) => !shot.src);
+  const canClientExport = (c: Composition) =>
+    typeof window !== 'undefined' && 'VideoEncoder' in window && (!needsMainSource(c) || !!videoFileRef.current);
+  const noExportReason = (c: Composition) =>
+    needsMainSource(c) && !videoFileRef.current ? t('common.localSourceVideoMissing') : t('workbench.browserCannotExport');
 
   /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
   const renderBlob = async (c: Composition, key: string, opts: ExportRenderOpts): Promise<Blob> => {
@@ -105,7 +108,7 @@ export function useStudioExport(deps: {
     if (cached && cached.key === key && cached.blob) return cached.blob;
     const blob = await clientExportVideo({
       comp: c,
-      videoFile: videoFileRef.current!,
+      videoFile: videoFileRef.current,
       clipFiles: clipFilesRef?.current ?? new Map(),
       audio: audioExportRef?.current?.() ?? null,
       denoise: denoiseExportRef?.current?.() ?? null,
@@ -123,14 +126,14 @@ export function useStudioExport(deps: {
    *  saved filename and how the file was delivered. */
   async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
     const c = compRef.current;
-    if (!c.video?.url) {
-      toast.error(t('common.uploadBeforeExport'));
-      return { ok: false, error: t('common.uploadBeforeExport') };
+    if (!hasTimelineContent(c)) {
+      toast.error(t('common.nothingToExport'));
+      return { ok: false, error: t('common.nothingToExport') };
     }
     if (exporting || publishing) return { ok: false, error: t('common.exportAlreadyProgress') };
-    if (!canClientExport()) {
-      toast.error(noExportReason());
-      return { ok: false, error: noExportReason() };
+    if (!canClientExport(c)) {
+      toast.error(noExportReason(c));
+      return { ok: false, error: noExportReason(c) };
     }
     const key = exportKey(c, opts);
     const name = filenameFor(opts);
@@ -164,13 +167,13 @@ export function useStudioExport(deps: {
    *  Triggered on demand (only runs when "Publish" is clicked); if the same content was uploaded before, reuse the last link. Returns the public URL (null on failure/cancel). */
   async function publishVideo(opts: ExportRenderOpts): Promise<string | null> {
     const c = compRef.current;
-    if (!c.video?.url) {
-      toast.error(t('common.uploadVideoFirst'));
+    if (!hasTimelineContent(c)) {
+      toast.error(t('common.nothingToExport'));
       return null;
     }
     if (exporting || publishing) return null;
-    if (!canClientExport()) {
-      toast.error(noExportReason());
+    if (!canClientExport(c)) {
+      toast.error(noExportReason(c));
       return null;
     }
     const key = exportKey(c, opts);

@@ -31,6 +31,7 @@ import {
   type ShotFramingPatch,
   type ShotTreatment,
   type PersonFx,
+  type TimelineSiblingLayers,
   type VideoShot,
   SHOT_TREATMENTS,
   STUDIO_FONTS_HREF,
@@ -75,10 +76,14 @@ import {
   splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
+  hasTimelineContent,
+  hasVideoTrackContent,
+  videoTrackShots,
   treatmentVacancyBox,
+  rippleRemoveSiblingLayers,
 } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
-import { deleteClipById, removeEditedInterval, removeEditedRange, removeSrcRanges, restoreSrcRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from '@pireel/studio-engine/trim';
+import { deleteClipById, restoreSrcRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from '@pireel/studio-engine/trim';
 import { parseBlockResponse, parseKitResponse } from '@pireel/studio-engine/compose';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
@@ -464,8 +469,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [liveGeom, setLiveGeom] = useState<SafeZone | null>(null); // live single-frame detection (measure whichever frame you scrub to)
 
   const duration = totalDuration(comp);
-  const hasVideoTrack = !!comp.video || !!comp.shots?.length; // equal-footing: clips-only comps have a video track
-  const hasContent = hasVideoTrack || comp.blocks.length > 0; // empty canvas (no sources, no blocks) isn't playable
+  const hasVideoTrack = hasVideoTrackContent(comp);
+  const hasContent = hasTimelineContent(comp);
   // Canvas ratio: seeded by the FIRST inserted source (insertClipCore), overridable here; other
   // sources contain-fit into it (frame shim letterboxes, never crops).
   const CANVAS_RATIOS = [
@@ -754,17 +759,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     videoEngineRef.current?.setSource('main', videoFile ?? null);
     if (videoFile) videoEngineRef.current?.seek(tRef.current);
   }, [videoFile]);
+  // Timeline duration is independent from the video segment table: an empty primary track may
+  // still contain graphics/audio, and those regions need a real parent-side playback clock.
+  useEffect(() => {
+    videoEngineRef.current?.setTimelineDuration(duration);
+  }, [duration]);
   // Engine segment table + other sources: refeed the whole table whenever shots change (split/trim/insert/delete); push the current frame when paused
   useEffect(() => {
     const eng = videoEngineRef.current;
     if (!eng) return;
     // Equal-footing: real shots always feed the engine, main source or not (a clips-only comp must
     // render); the implicit whole-video single clip is only for a loaded main with no cuts yet.
-    const shots = comp.shots?.length
-      ? comp.shots
-      : comp.video
-        ? [{ id: 'all', src: undefined, srcStart: 0, srcEnd: comp.video.durationSec, treatment: 'full' as const }]
-        : [];
+    const shots = videoTrackShots(comp);
     for (const s of shots) {
       if (!s.src) continue;
       const f = clipFilesRef.current.get(s.src);
@@ -795,7 +801,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         };
       }),
     );
-    eng.setTransitions(cutTransitions(comp.shots ?? []).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
+    eng.setTransitions(cutTransitions(shots).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
     // A level-only respec keeps the frame it already shows — re-pushing one per pointer move while dragging
     // a volume slider is work nobody can see.
     if (shapeChanged && !playingRef.current) eng.refresh();
@@ -1902,7 +1908,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (e.key === ' ') {
         // Focus often sits on a button, so bare Space would re-trigger it — hijack uniformly to play/pause
         const c = compRef.current;
-        if (!c.video && !c.shots?.length && c.blocks.length === 0) return;
+        if (!hasTimelineContent(c)) return;
         e.preventDefault();
         setPlaying((p) => !p);
         return;
@@ -2019,6 +2025,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     try {
       const p = await probeVideoFile(file);
       const dims = normalizeDims(p.width, p.height);
+      // Adding the first main-source clip to a graphics/audio-only edit is an insertion, not a
+      // project replacement. Preserve the work already built on the empty visual track.
+      const preserveEmptyTrackEdit = !hasVideoTrackContent(compRef.current) && hasTimelineContent(compRef.current);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       const url = URL.createObjectURL(file);
       objectUrlRef.current = url;
@@ -2056,14 +2065,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         toast.success(t('workbench.originalVideoReconnectedDraft'));
       } else {
         if (pr) pendingRestoreRef.current = null; // picked a different video = give up reconnecting, treat as new project
-        // Swap video = new project: clear shots/blocks/palette (old shots' source spans point at the old video; leftovers seek out of range and misalign the scene bar).
-        // Seed one shot spanning the whole video: selectable without splitting, so per-segment abilities (framing/person) need no special-casing (per user)
+        // A real source swap keeps the historical "new edit" behavior; filling an empty track keeps
+        // graphics/audio and the canvas settings that the user established before importing footage.
         setComp((c) => ({
-          ...emptyComposition(),
-          theme: c.theme,
+          ...(preserveEmptyTrackEdit ? c : { ...emptyComposition(), theme: c.theme }),
           video: { url, durationSec: dur, sourceWidth: p.width, sourceHeight: p.height },
-          width: dims.width,
-          height: dims.height,
+          ...(!preserveEmptyTrackEdit ? { width: dims.width, height: dims.height } : {}),
           shots: [{ id: shotId(), srcStart: 0, srcEnd: dur, treatment: 'full' as const }],
         }));
       }
@@ -2714,9 +2721,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       ),
     }));
   };
-  // Ensure there's a shot spanning the whole video (give one full segment when there are no shots) for trim operations to act on
-  const ensureShots = (c: Composition): VideoShot[] =>
-    c.shots && c.shots.length ? c.shots : c.video ? [{ id: shotId(), srcStart: 0, srcEnd: c.video.durationSec, treatment: 'full' as const }] : [];
+  // Materialize the legacy pre-shots representation only. An explicit [] is a real empty track.
+  const ensureShots = (c: Composition): VideoShot[] => videoTrackShots(c);
 
   // Audio tracks orchestration (upload/generate/clips/engine sync/export payload — see use-bgm.ts).
   // Called here (not earlier) because pushUndoSnapshot is a const — TDZ before its definition.
@@ -2765,8 +2771,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === audId ? halves : [x])) }));
       return;
     }
-    if (!c.video) return;
     const shots = ensureShots(c);
+    if (!shots.length) return;
     if (splitBlockedByTransition(shots, tRef.current)) {
       toast.error(t('workbench.removeTransitionToSplit'));
       return;
@@ -2794,34 +2800,39 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       audioOps.patchClip(audId, audioTrimPatch(clip, side, tRef.current));
       return;
     }
-    if (!c.video) return;
     const shots = ensureShots(c);
+    if (!shots.length) return;
     const r = side === 'left' ? trimLeftAtEdited(shots, tRef.current) : trimRightAtEdited(shots, tRef.current);
     if (!r.removed) {
       toast.error(t('workbench.movePlayheadToTrim'));
       return;
     }
     pushUndoSnapshot();
-    setComp((cur) => ({ ...cur, shots: r.clips, blocks: removeEditedInterval(cur.blocks, r.removed![0], r.removed![1]) }));
+    setComp((cur) => ({ ...cur, shots: r.clips, ...rippleRemoveSiblingLayers(cur, r.removed![0], r.removed![1]) }));
     setSelectedShotId(null);
     applyT(r.removed[0]); // playhead lands at the cut point
   };
-  /** Delete scene: remove the source footage for this shot (everything after shifts left, blocks compress). */
+  /** Delete scene: ordinary deletes ripple; deleting the final video clip leaves independent
+   *  graphic/audio tracks intact, so an empty primary track is useful rather than destructive. */
   const deleteShot = (sid: string) => {
     const c = compRef.current;
     const shots = ensureShots(c);
     const r = deleteClipById(shots, sid);
     if (!r.removed) {
-      toast.error(t('workbench.keepLeastOneScene'));
+      toast.error(t('workbench.shotNotFound'));
       return;
     }
     pushUndoSnapshot();
-    setComp((cur) => ({ ...cur, shots: r.clips, blocks: removeEditedInterval(cur.blocks, r.removed![0], r.removed![1]) }));
+    setComp((cur) => ({
+      ...cur,
+      shots: r.clips,
+      ...(r.clips.length ? rippleRemoveSiblingLayers(cur, r.removed![0], r.removed![1]) : {}),
+    }));
     setSelectedShotId(null);
     applyT(r.removed[0]);
   };
   /** Bulk-delete multiple shots (multi-select). Delete from the final-cut end backward — removing a later shot doesn't
-   *  affect an earlier shot's final-cut coords, and removeEditedInterval compresses overlay blocks each time. Keep at least one scene; select-all = refuse. */
+   *  affect an earlier shot's final-cut coords. Select-all empties only the primary track. */
   const deleteShots = (ids: Set<string>) => {
     const c = compRef.current;
     let shots = ensureShots(c);
@@ -2830,27 +2841,30 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       .sort((a, b) => b.editedStart - a.editedStart); // end first
     if (targets.length === 0) return;
     if (targets.length === 1) return deleteShot(targets[0]!.clip.id); // degrade to single delete (reuse guard/landing point)
-    if (targets.length >= shots.length) {
-      toast.error(t('workbench.keepLeastOneScene'));
+    pushUndoSnapshot();
+    if (targets.length === shots.length) {
+      setComp((cur) => ({ ...cur, shots: [] }));
+      setSelectedShotId(null);
+      applyT(0);
+      toast.success(t('workbench.deletedNScenes', { n: targets.length }));
       return;
     }
-    pushUndoSnapshot();
-    let blocks = c.blocks;
+    let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
     let firstStart = Infinity;
     for (const sp of targets) {
       const r = deleteClipById(shots, sp.clip.id);
-      if (!r.removed) continue; // hit the "last shot" guard: skip
+      if (!r.removed) continue;
       shots = r.clips;
-      blocks = removeEditedInterval(blocks, r.removed[0], r.removed[1]);
+      layers = rippleRemoveSiblingLayers(layers, r.removed[0], r.removed[1]);
       firstStart = Math.min(firstStart, r.removed[0]);
     }
-    setComp((cur) => ({ ...cur, shots, blocks }));
+    setComp((cur) => ({ ...cur, shots, ...layers }));
     setSelectedShotId(null);
     applyT(Number.isFinite(firstStart) ? firstStart : 0);
     toast.success(t('workbench.deletedNScenes', { n: targets.length }));
   };
-  /** Delete a SOURCE from the track (assets-panel delete): every shot cut from that source goes, overlay
-   *  blocks compress per removed span (same math as multi-delete). Equal-footing: the first-loaded source
+  /** Delete a SOURCE from the track (assets-panel delete): every shot cut from that source goes. Overlay
+   *  blocks ripple while video remains; removing all video keeps independent tracks intact. Equal-footing: the first-loaded source
    *  gets no special treatment (src = null addresses it, even when its bytes are missing and comp.video
    *  is already null). One undo snapshot; blob URLs stay alive, so undo restores a playable track for
    *  this session (only the OPFS bytes are gone for good). */
@@ -2864,20 +2878,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (spans.length === 0 && !isMain) return;
     pushUndoSnapshot();
     let cur = shots;
-    let blocks = c.blocks;
+    let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
     let firstStart = spans.length ? spans[spans.length - 1]!.editedStart : 0;
-    for (const sp of spans) {
-      const r = deleteClipById(cur, sp.clip.id);
-      if (r.removed) {
+    if (spans.length > 0 && spans.length === shots.length) {
+      cur = [];
+    } else {
+      for (const sp of spans) {
+        const r = deleteClipById(cur, sp.clip.id);
+        if (!r.removed) continue;
         cur = r.clips;
-        blocks = removeEditedInterval(blocks, r.removed[0], r.removed[1]);
-      } else {
-        // Engine's keep-one guard fired: this span IS the whole remaining track — empty it outright
-        blocks = removeEditedInterval(blocks, 0, sp.clip.srcEnd - sp.clip.srcStart);
-        cur = [];
+        layers = rippleRemoveSiblingLayers(layers, r.removed[0], r.removed[1]);
       }
     }
-    setComp((x) => ({ ...x, shots: cur, blocks, ...(isMain ? { video: null } : {}) }));
+    setComp((x) => ({ ...x, shots: cur, ...layers, ...(isMain ? { video: null } : {}) }));
     // Drop the source's cloud byte-rendezvous index too — otherwise the next boot resurrects the
     // deleted source from the R2 vault (loadLocalVideo miss → vault hit → source re-appears).
     const deadSigs = new Set(spans.map((sp) => sp.clip.srcSig).filter(Boolean) as string[]);
@@ -3317,7 +3330,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   function buildCloudPayload() {
     const c = compRef.current;
     if (!projectId) return null;
-    const hasContent = c.blocks.length > 0 || (c.shots?.length ?? 0) > 0;
+    const hasContent = hasTimelineContent(c);
     // Boot-empty stays chat-only (never blank the cloud from a just-opened tab), but a canvas the
     // user EMPTIED this session (content seen earlier, edits removed it) must persist as empty —
     // otherwise a refresh resurrects the deleted sources from the last non-empty cloud comp.
@@ -3545,11 +3558,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // OPFS local library hit → the main video auto-reconnects (via the existing pendingRestore check); inserted clips revive by srcSig.
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
-    // The main-source anchor only counts when the draft's comp actually REFERENCES a main source:
-    // src-less shots, or an uncut whole-main comp (no shots but a recorded main duration). A stale
-    // anchor on a clips-only/emptied comp must be ignored — honoring it would resurrect a deleted
-    // main video at every boot (duplicate asset card, the 成片-720p case) and re-persist itself
-    // forever via autosave. Ignored here = autosave rewrites videoSig:null = self-heals.
+    // The source can remain in the media library while the explicit shots array is empty. Reconnect
+    // its bytes for reuse, but videoTrackShots keeps the timeline empty instead of resurrecting it.
     const wantsMain = (d.comp.shots ?? []).some((s) => !s.src) || (!(d.comp.shots ?? []).length && d.videoDurationSec != null);
     // Keep the sig anchor even before (or without) the bytes: autosave reads videoSigRef, and
     // writing videoSig:null to the cloud row while the media is missing would destroy the
@@ -3694,7 +3704,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           if (!late) return;
           setProjectVersion(projectId, late.version);
           hydrateContextRefs(late.context);
-          const untouched = !compRef.current.blocks.length && !(compRef.current.shots?.length ?? 0);
+          const untouched = !hasTimelineContent(compRef.current);
           if (!local && untouched) {
             applyRemote(late);
             toast.success(t('workbench.cloudProjectReconnected'));
@@ -3745,7 +3755,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // never blank the cloud) from user-emptied (must persist the emptiness). Set by restore or edits.
   const everCanvasContentRef = useRef(false);
   useEffect(() => {
-    if (comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0) everCanvasContentRef.current = true;
+    if (hasTimelineContent(comp)) everCanvasContentRef.current = true;
   }, [comp]);
 
   // Cloud sync (debounced): coalesce one PUT 1.2s after comp or the session changes. The cloud-authoritative write-back —
@@ -3899,8 +3909,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         <div ref={previewAreaRef} className="bg-panel-2 relative flex min-h-0 min-w-0 flex-1 items-center justify-center p-3">
           {/* Canvas-ratio picker (bottom-right): the ratio is a project decision — seeded by the first
               inserted source, switchable here; sources contain-fit so switching never crops content. */}
-          {hasVideoTrack && (
-            <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
+          <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
               {ratioOpen && (
                 <div className="border-line bg-panel absolute bottom-8 right-0 flex flex-col overflow-hidden rounded-md border shadow-lg">
                   {CANVAS_RATIOS.map((r) => (
@@ -3925,8 +3934,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               >
                 {currentRatioId ?? t('workbench.ratioCustom')}
               </button>
-            </div>
-          )}
+          </div>
           {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):
               top-left = reopen chat (the chat area is on the left, returns to the same side; theme black primary button).
               Icon-only (per user): no text floating over the frame — the label lives in title/aria. */}
@@ -3941,24 +3949,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <MessageSquare size={14} />
             </button>
           )}
-          {!hasVideoTrack ? (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const f = e.dataTransfer.files?.[0];
-                if (f) void pickVideoFile(f);
-              }}
-              className="border-line text-ink-3 hover:border-ink-3 hover:text-ink flex h-full max-h-[70vh] w-full max-w-md flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed transition"
-            >
-              {busyImport ? <Loader2 size={28} className="animate-spin" /> : <Upload size={28} />}
-              <div className="text-[13px] font-medium">{busyImport ? t('workbench.reading') : t('workbench.uploadTalkingHeadVideo')}</div>
-              <div className="text-ink-4 text-[11px]">{t('workbench.videoStaysLocalOnly')}</div>
-            </button>
-          ) : (
-            <div ref={stageBoxRef} data-cap-keep className="relative" style={{ width: boxW, height: boxH }}>
+          <div ref={stageBoxRef} data-cap-keep className="relative" style={{ width: boxW, height: boxH }}>
+              {!hasContent && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const f = e.dataTransfer.files?.[0];
+                    if (f) void pickVideoFile(f);
+                  }}
+                  className="border-line bg-panel/90 text-ink-3 hover:border-ink-3 hover:text-ink absolute left-1/2 top-1/2 z-20 flex w-[min(78%,320px)] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-5 py-6 shadow-lg backdrop-blur-sm transition"
+                >
+                  {busyImport ? <Loader2 size={24} className="animate-spin" /> : <Upload size={24} />}
+                  <div className="text-[12px] font-medium">{busyImport ? t('workbench.reading') : t('workbench.startWithAnyMedia')}</div>
+                  <div className="text-ink-4 text-center text-[10.5px]">{t('workbench.emptyCanvasHint')}</div>
+                </button>
+              )}
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
                   so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
               <div className="absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20">
@@ -4653,8 +4661,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   </div>
                 </div>
               )}
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Library rail: content column + a vertical primary-nav strip on the outer edge
@@ -5243,7 +5250,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <button
                 type="button"
                 onClick={() => setExportOpen(true)}
-                disabled={exporting || publishing || !hasVideoTrack}
+                disabled={exporting || publishing || !hasContent}
                 className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
               >
                 {exporting || publishing ? <Loader2 size={14} className="animate-spin" /> : <FileVideo size={14} />}{' '}

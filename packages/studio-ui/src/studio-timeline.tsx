@@ -28,6 +28,7 @@ import {
   MAX_TRANSITION_SEC,
   totalDuration,
   isSentenceCaption,
+  videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { shotFadeAt } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
@@ -254,9 +255,9 @@ function StudioTimelineImpl({
   srcLive,
 }: StudioTimelineProps) {
   const dur = totalDuration(comp);
-  const hasVideoLane = !!comp.video || !!comp.shots?.length; // equal-footing: clips-only comps have a video lane too
+  const hasVideoLane = videoTrackShots(comp).length > 0;
   const videoDur = hasVideoLane ? editedVideoDuration(comp) : 0; // edited video duration (filmstrip / scene track width)
-  const shots = useMemo(() => comp.shots ?? [], [comp.shots]);
+  const shots = useMemo(() => videoTrackShots(comp), [comp.video, comp.shots]);
   // Scenes' spans on the **edited** timeline (clip source spans joined end to end)
   const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
   /** Scene-card audio bands, precomputed per shot. These are the timeline's heaviest drawing by far — one
@@ -1035,9 +1036,22 @@ function StudioTimelineImpl({
                 />
               )}
 
-              {/* Track 0 = scene rail: filmstrip base + scene cards (shot slices). Hover a shot card -> "+" at both ends to insert a local video */}
-              {hasVideoLane && (
-                <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }} onMouseLeave={() => setHoverBounds(null)}>
+              {/* Track 0 is persistent document structure: it remains a drop target when empty, like a
+                  conventional NLE. With clips it expands into the scene rail. */}
+              <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }} onMouseLeave={() => setHoverBounds(null)}>
+                  {!hasVideoLane && (
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onInsertClipAt?.(0);
+                      }}
+                      className="border-line text-ink-4 hover:border-line-2 hover:text-ink-2 absolute inset-x-2 top-1/2 flex h-7 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border border-dashed text-[10.5px] transition"
+                    >
+                      <Plus size={11} /> {t('panels.addMediaToMainTrack')}
+                    </button>
+                  )}
                   {/* Filmstrip base fill (fixed tile width, nearest source frame; like cloud editors). Not filled when there are scene cards —
                       the filmstrip gets clipped inside each card; otherwise the continuous base leaks through the cards' transparent rounded corners, hiding the corners/gaps */}
                   {sceneSpans.length === 0 && (
@@ -1295,8 +1309,7 @@ function StudioTimelineImpl({
                         <Plus size={12} />
                       </button>
                     ))}
-                </div>
-              )}
+              </div>
 
               {/* Overlay element chip: type icon + label + time when selected; whole-block drag + trim at both ends */}
               {comp.blocks.map((b) => {

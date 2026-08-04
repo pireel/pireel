@@ -52,6 +52,7 @@ import {
   sourceDrawRect,
   totalDuration,
   validateComposition,
+  videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
 import { mixAudioTrack } from './export-audio-mix';
@@ -282,7 +283,8 @@ function framedClipPath(W: number, H: number, vs: { radius: number; inset: { t: 
 
 export interface ClientExportOpts {
   comp: Composition;
-  videoFile: File;
+  /** Main-source bytes. Null is valid for graphics/audio-only and clips-only documents. */
+  videoFile: File | null;
   /** Local insert-clip Files (key = blob URL, same source as workbench clipFilesRef). */
   clipFiles: Map<string, File>;
   /** Audio-track clips + their bytes. Absent/empty = the untouched narration-only audio path. */
@@ -341,24 +343,22 @@ export async function captureCompositionFrame(opts: {
   let rig: SourceRig | null = null;
   let srcT = 0;
   let sourceFraming: ShotPreciseFraming | undefined;
-  if (opts.videoFile) {
-    const shots = comp.shots?.length ? comp.shots : [{ id: 'all', srcStart: 0, srcEnd: comp.video?.durationSec ?? 0, treatment: 'full' as const }];
-    let file: File | null = null;
-    for (const sp of clipSpans(shots)) {
-      if (t >= sp.editedStart - 1e-6 && t < sp.editedEnd + 1e-6) {
-        const s = sp.clip as (typeof shots)[number] & { src?: string };
-        srcT = Math.min(s.srcEnd, s.srcStart + (t - sp.editedStart));
-        file = s.src ? (opts.clipFiles.get(s.src) ?? null) : opts.videoFile;
-        sourceFraming = s.preciseFraming?.coordinateSpace === 'source-normalized' ? s.preciseFraming : undefined;
-        break;
-      }
+  const shots = videoTrackShots(comp);
+  let file: File | null = null;
+  for (const sp of clipSpans(shots)) {
+    if (t >= sp.editedStart - 1e-6 && t < sp.editedEnd + 1e-6) {
+      const s = sp.clip as (typeof shots)[number] & { src?: string };
+      srcT = Math.min(s.srcEnd, s.srcStart + (t - sp.editedStart));
+      file = s.src ? (opts.clipFiles.get(s.src) ?? null) : opts.videoFile;
+      sourceFraming = s.preciseFraming?.coordinateSpace === 'source-normalized' ? s.preciseFraming : undefined;
+      break;
     }
-    if (file) {
-      try {
-        rig = await openSource(file, Math.max(0, srcT - 0.1), srcT, W, H);
-      } catch {
-        rig = null; // Source won't open: degrade to no video frame (overlay still visible)
-      }
+  }
+  if (file) {
+    try {
+      rig = await openSource(file, Math.max(0, srcT - 0.1), srcT, W, H);
+    } catch {
+      rig = null; // Source won't open: degrade to no video frame (overlay still visible)
     }
   }
 
@@ -462,12 +462,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const outH = even(H * k);
   const Sx = outW / W;
   const Sy = outH / H;
-  const shots = comp.shots?.length ? comp.shots : [{ id: 'all', srcStart: 0, srcEnd: comp.video?.durationSec ?? 0, treatment: 'full' as const }];
+  const shots = videoTrackShots(comp);
   const durationSec = Math.max(0.5, totalDuration(comp));
 
   // Segment table (edited order) + each source's File
   const segs: ExpSeg[] = [];
-  const files = new Map<string, File>([['main', videoFile]]);
+  const files = new Map<string, File>();
+  if (videoFile) files.set('main', videoFile);
   const spans = clipSpans(shots);
   for (let i = 0; i < spans.length; i++) {
     const s = spans[i]!.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
@@ -570,7 +571,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       }
     }
     const videoTotal = segStarts.length ? segStarts[segStarts.length - 1]! + Math.max(0, segs.at(-1)!.srcEnd - segs.at(-1)!.srcStart) : 0;
+    const blankSeg: ExpSeg = { srcStart: 0, srcEnd: 0, key: '__blank' };
     const segAt = (te: number): { seg: ExpSeg; srcT: number } => {
+      if (!segs.length) return { seg: blankSeg, srcT: 0 };
       const t = Math.max(0, Math.min(videoTotal, te));
       for (let i = segs.length - 1; i >= 0; i--) {
         if (t >= segStarts[i]! - 1e-6) {

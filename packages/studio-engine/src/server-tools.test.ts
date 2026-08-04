@@ -223,6 +223,24 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(proj().comp.shots).toHaveLength(2);
     expect(runServerTool('split_shot', { atSec: 2, atSecs: [4] }, proj()).result.ok).toBe(false);
   });
+  it('delete_shot:最后一个片段可删，显式空主轨不会被 videoDurationSec 复活', () => {
+    const only = proj({
+      comp: {
+        ...proj().comp,
+        shots: [{ id: 'only', srcStart: 0, srcEnd: 20, treatment: 'full' }],
+        blocks: [{ ...proj().comp.blocks[0]!, id: 'independent-overlay', startSec: 3, durationSec: 4 }],
+      },
+    });
+    const deleted = runServerTool('delete_shot', { shotId: 'only' }, only);
+    expect(deleted.result.ok).toBe(true);
+    expect(deleted.comp!.shots).toEqual([]);
+    expect(deleted.comp!.blocks).toHaveLength(1); // 清空主轨不删或 ripple 其他轨
+    expect(deleted.comp!.blocks[0]).toMatchObject({ id: 'independent-overlay', startSec: 3, durationSec: 4 });
+
+    const after = runServerTool('split_shot', { atSec: 5 }, { ...only, comp: deleted.comp! });
+    expect(after.result.ok).toBe(false);
+    expect(after.result.error).toContain('no video track');
+  });
   it('set_captions:有云端转写才能开;submit_plan 落 context 不落 comp', () => {
     const r = runServerTool('set_captions', { preset: 'ln-clean' }, proj());
     expect(r.result.ok).toBe(true);

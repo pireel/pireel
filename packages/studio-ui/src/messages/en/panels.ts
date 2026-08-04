@@ -259,6 +259,7 @@ export const PANELS_EN: Record<string, string> = {
   'panels.speedRate': 'Speed',
   'panels.stickers': 'Stickers',
   'panels.still5s': '5s still',
+  'panels.addMediaToMainTrack': 'Add image or video',
   'panels.strokeName': 'Stroke: {name}',
   'panels.strokeOpacity': 'Stroke opacity',
   'panels.strokeStyleName': 'Stroke style: {name}',

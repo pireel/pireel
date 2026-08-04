@@ -97,16 +97,17 @@ describe('裁/删:返回被移除的成片区间', () => {
     expect(editedDuration(r.clips)).toBe(6);
   });
 
-  it('delete:移除所在片段,removed=整段成片区间;至少留一段', () => {
+  it('delete:移除所在片段,removed=整段成片区间;最后一段也可删除', () => {
     const r = deleteAtEdited(clips, 5);
     expect(r.clips.map((c) => c.id)).toEqual(['a']);
     expect(r.removed).toEqual([4, 8]);
-    expect(deleteAtEdited([shot('a', 0, 4)], 1).clips).toHaveLength(1); // 仅一段不删
+    expect(deleteAtEdited([shot('a', 0, 4)], 1)).toEqual({ clips: [], removed: [0, 4] });
   });
 
   it('deleteClipById', () => {
     expect(deleteClipById(clips, 'a').clips.map((c) => c.id)).toEqual(['b']);
     expect(deleteClipById(clips, 'a').removed).toEqual([0, 4]);
+    expect(deleteClipById([shot('only', 3, 7)], 'only')).toEqual({ clips: [], removed: [0, 4] });
   });
 });
 
@@ -165,9 +166,9 @@ describe('removeEditedRange(删成片区间,可跨片段)', () => {
     ]);
   });
 
-  it('区间越界夹取;全删保护(至少留一段)', () => {
+  it('区间越界夹取;全删产生合法空轨', () => {
     const clips: Clip[] = [{ srcStart: 0, srcEnd: 5 }];
-    expect(removeEditedRange(clips, -3, 99, mk).removed).toBeNull(); // 全删 → 不动
+    expect(removeEditedRange(clips, -3, 99, mk)).toEqual({ clips: [], removed: [0, 5] });
     const r = removeEditedRange(clips, 4, 99, mk); // 尾部夹取
     expect(r.removed).toEqual([4, 5]);
     expect(r.clips).toEqual([{ srcStart: 0, srcEnd: 4 }]);

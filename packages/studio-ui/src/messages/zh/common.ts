@@ -61,6 +61,7 @@ export const COMMON_ZH: Record<string, string> = {
   'common.transcribing': '提取口播稿…',
   'common.transcriptionRequestFailedHttp': 'ASR 请求失败(HTTP {status})',
   'common.untitledProject': '未命名项目',
+  'common.nothingToExport': '先添加片段、组件或音频再导出',
   'common.uploadBeforeExport': '先上传口播视频再导出',
   'common.uploadingExport': '上传成片中…',
   'common.uploadVideoFirst': '先上传口播视频',

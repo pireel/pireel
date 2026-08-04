@@ -15,6 +15,7 @@ import {
   pct,
   renderBlock,
   resolveCaptionStyle,
+  videoTrackShots,
   videoFrameTimelineBody,
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
@@ -485,14 +486,14 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   const body: string[] = [];
   const scripts: string[] = [];
 
-  if (comp.video || comp.shots?.length) {
+  const videoShots = videoTrackShots(comp);
+  if (videoShots.length) {
     // Video track = a single <canvas> (canvas render mode, per the user's decision): decode/clock/audio all in the parent-layer engine
     // (video-track-engine), frames drawn as they're pushed via hf:frame. Document rebuild no longer recreates the decoder → the root cause of the whole
     // "decode zombie" class of problems is removed. The id stays vidEl: framing keyframe / shotVars / personCut selectors need zero changes.
     // Equal-footing: comp.video is just the first-loaded source — a clips-only comp (external inserts,
     // no "main") still gets the canvas; only a truly source-less comp skips it.
-    const hasShots = !!(comp.shots && comp.shots.length);
-    const editedDur = hasShots ? editedDuration(comp.shots!) : comp.video!.durationSec;
+    const editedDur = editedDuration(videoShots);
     body.push(
       `<canvas id="vidEl" data-composition-id="vid" width="${n(comp.width)}" height="${n(comp.height)}" data-start="0" data-duration="${n(editedDur)}" data-track-index="0" ` +
         `style="position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;box-shadow:0 30px 90px rgba(0,0,0,0.45);"></canvas>`,
@@ -500,16 +501,14 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
     // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
     scripts.push(
       videoFrameShim(
-        hasShots
-          ? cutTransitions(comp.shots!).map((tr) => {
-              const [dx, dy] = glDirection(tr.dir);
-              return { cut: tr.cut, effect: tr.effect, half: tr.half, dx, dy };
-            })
-          : [],
+        cutTransitions(videoShots).map((tr) => {
+          const [dx, dy] = glDirection(tr.dir);
+          return { cut: tr.cut, effect: tr.effect, half: tr.half, dx, dy };
+        }),
       ),
     );
     // Framing timeline (in final-cut time) registered to vid → transforms applied to the canvas element, one canvas absorbing every segment's framing
-    const frameBody = hasShots ? videoFrameTimelineBody(comp.shots!) : '';
+    const frameBody = videoFrameTimelineBody(videoShots);
     if (frameBody) {
       scripts.push(timelineScript('vid', frameBody));
     }
@@ -526,7 +525,7 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   // Matting takes effect per segment (VideoShot.personMatte): the pipeline is installed only if any segment turned it on; outside those segments there's no mask, the canvas is
   // transparent and the background layer hidden, auto-reverting to the normal picture. Layer order (personFront) / stroke / background are global styles.
   const fx = comp.personFx;
-  const fxOn = !!comp.video && (comp.shots ?? []).some((s) => s.personMatte);
+  const fxOn = videoShots.some((s) => s.personMatte);
   const personFront = fxOn && !!fx?.personFront;
   // Block-level override: b.personLayer explicitly sets front/behind person; default follows the global personFront
   const isBehind = (b: Block) => (fxOn ? (b.personLayer ? b.personLayer === 'behind' : personFront) : false);

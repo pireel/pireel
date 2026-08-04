@@ -13,7 +13,7 @@
  */
 
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
-import type { Composition } from '@pireel/studio-engine/composition';
+import { type Composition, hasTimelineContent } from '@pireel/studio-engine/composition';
 import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
@@ -59,10 +59,10 @@ function rawDraft(id: string): StudioDraft | null {
   }
 }
 
-/** Only a draft with content counts as recoverable (opening an empty project = fresh workbench, no recovery bar). */
+/** Only a draft with timeline content counts as recoverable (including audio-only projects). */
 export function loadDraft(id: string): StudioDraft | null {
   const d = rawDraft(id);
-  if (!d || (!d.comp.blocks?.length && !d.comp.shots?.length)) return null;
+  if (!d || !hasTimelineContent(d.comp)) return null;
   return d;
 }
 
@@ -161,7 +161,7 @@ export function migrateLegacyDraft() {
     const raw = window.localStorage.getItem(LEGACY_KEY);
     if (!raw) return;
     const d = JSON.parse(raw) as StudioDraft;
-    if (d?.comp && d.id && (d.comp.blocks?.length || d.comp.shots?.length)) {
+    if (d?.comp && d.id && hasTimelineContent(d.comp)) {
       window.localStorage.setItem(keyFor(d.id), JSON.stringify({ ...d, title: d.title || t('common.untitledProject') }));
       const chat = window.localStorage.getItem(LEGACY_CHAT_KEY);
       if (chat && !window.localStorage.getItem(chatKeyFor(d.id))) {
@@ -374,7 +374,7 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
   // "Emptied" = this hook saw content earlier in the session and now it's gone.
   const everContent = useRef(false);
   useEffect(() => {
-    const hasContent = comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0;
+    const hasContent = hasTimelineContent(comp);
     if (hasContent) everContent.current = true;
     if ((!hasContent && !everContent.current) || !projectId) return;
     if (timer.current) window.clearTimeout(timer.current);

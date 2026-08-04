@@ -25,6 +25,7 @@ import {
   type CutTransitionEffect,
   type ShotFilter,
   type TransitionDirection,
+  type TimelineSiblingLayers,
   type VideoShot,
   CAPTION_PRESETS,
   DIRECTIONAL_TRANSITIONS,
@@ -52,6 +53,7 @@ import {
   isSentenceCaption,
   renderBlock,
   resolveCaptionStyle,
+  rippleRemoveSiblingLayers,
   stripDerivedCaptions,
   zoneOf,
   shotFilterCss,
@@ -66,7 +68,7 @@ import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
-import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
+import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
@@ -142,9 +144,11 @@ const asAsr = (segs: TranscriptSegment[] | undefined): AsrSegment[] => desegment
 const clipAsrOf = (ctx: StudioProjectContext): Record<string, AsrSegment[]> =>
   Object.fromEntries(Object.entries(ctx.clipAsr ?? {}).map(([k, v]) => [k, desegmentCues((v ?? []) as AsrSegment[])]));
 
-/** shots fallback (same convention as workbench ensureShots): never cut = whole clip as one shot (duration from the row's videoDurationSec). */
+/** Legacy shots fallback: only a missing `shots` field means "uncut whole clip". An explicit [] is
+ *  an intentionally empty main track and must stay empty even while the imported source remains in
+ *  the project media library. */
 function shotsOf(p: ServerToolProject): VideoShot[] {
-  if (p.comp.shots?.length) return p.comp.shots;
+  if (p.comp.shots !== undefined) return p.comp.shots;
   const dur = p.comp.video?.durationSec ?? p.videoDurationSec ?? 0;
   return dur > 0 ? [{ id: shotId(), srcStart: 0, srcEnd: dur, treatment: 'full' }] : [];
 }
@@ -561,20 +565,24 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const side = input.side === 'left' ? 'left' : 'right';
       const r = side === 'left' ? trimLeftAtEdited(shots, at) : trimRightAtEdited(shots, at);
       if (!r.removed) return { result: { ok: false, error: 'cannot trim here (not inside a shot)' } };
-      const blocks = removeEditedInterval(c.blocks, r.removed[0], r.removed[1]);
+      const layers = rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1]);
       return {
         result: { ok: true, summary: `Trimmed the ${side === 'left' ? 'left' : 'right'} side at ${r1(at)}s` },
-        comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
+        comp: { ...c, shots: r.clips, ...layers, blocks: relayCaptionLayer(layers.blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
       };
     }
     case 'delete_shot': {
       const shots = shotsOf(p);
       const r = deleteClipById(shots, String(input.shotId));
-      if (!r.removed) return { result: { ok: false, error: shots.length <= 1 ? 'only one shot left, cannot delete' : 'shot not found' } };
-      const blocks = removeEditedInterval(c.blocks, r.removed[0], r.removed[1]);
+      if (!r.removed) return { result: { ok: false, error: 'shot not found' } };
+      // Once the primary track becomes empty, other tracks own their own timeline and keep their
+      // positions. For an ordinary in-track ripple delete, preserve the existing compression.
+      const layers: TimelineSiblingLayers = r.clips.length
+        ? rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1])
+        : { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
       return {
         result: { ok: true, summary: 'Deleted this scene' },
-        comp: { ...c, shots: r.clips, blocks: relayCaptionLayer(blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
+        comp: { ...c, shots: r.clips, ...layers, blocks: relayCaptionLayer(layers.blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
       };
     }
     case 'delete_words': {
@@ -588,25 +596,25 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const mapped = wordRangesToEdited(shots, wordRanges(resolved.words));
       if (!mapped.length) return { result: { ok: false, error: 'the selected words are already absent from the edited timeline' } };
       let curShots = shots;
-      let blocks = c.blocks;
+      let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
       const seams: CutSeamEntry[] = [];
       for (const range of mapped) {
         const removed = removeEditedRange(curShots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
         if (!removed.removed) continue;
         curShots = removed.clips;
-        blocks = removeEditedInterval(blocks, removed.removed[0], removed.removed[1]);
+        layers = rippleRemoveSiblingLayers(layers, removed.removed[0], removed.removed[1]);
         seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
       }
-      if (!seams.length) return { result: { ok: false, error: 'cannot remove the selected words (the cut would remove the entire video)' } };
+      if (!seams.length) return { result: { ok: false, error: 'cannot remove the selected words from the current edit' } };
       const cuts = finalizeCutSeams(seams);
-      const relaid = relayCaptionLayer(blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+      const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
       return {
         result: {
           ok: true,
           summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`,
           data: { wordIds: ids, cuts },
         },
-        comp: { ...c, shots: curShots, blocks: relaid },
+        comp: { ...c, shots: curShots, ...layers, blocks: relaid },
       };
     }
     case 'cut_range':
@@ -646,17 +654,17 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       if (!ranges.length) return { result: { ok: false, error: 'ranges empty/invalid, or these ranges no longer exist in the edited video' } };
       let curShots = shots;
-      let blocks = c.blocks;
+      let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
       const seams: CutSeamEntry[] = [];
       for (const e of ranges) {
         const rr = removeEditedRange(curShots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
         if (!rr.removed) continue;
         curShots = rr.clips;
-        blocks = removeEditedInterval(blocks, rr.removed[0], rr.removed[1]);
+        layers = rippleRemoveSiblingLayers(layers, rr.removed[0], rr.removed[1]);
         seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
       }
-      if (!seams.length) return { result: { ok: false, error: 'cannot remove these ranges (they may cover the entire video)' } };
-      const relaid = relayCaptionLayer(blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
+      if (!seams.length) return { result: { ok: false, error: 'cannot remove these ranges from the current edit' } };
+      const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
       // The receipt speaks ACTUAL seconds removed (post-margin) — the agent quotes these, not its own gap arithmetic
       const cuts = finalizeCutSeams(seams);
       const removedTotalSec = Math.round(cuts.reduce((a, x) => a + x.removedSec, 0) * 10) / 10;
@@ -669,7 +677,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
               : 'Removed the specified range',
           ...(tool === 'cut_narration' ? { data: { cuts, removedTotalSec, ...(Number.isFinite(kg) && kg > 0 ? { keepGapSec: kg } : {}) } } : {}),
         },
-        comp: { ...c, shots: curShots, blocks: relaid },
+        comp: { ...c, shots: curShots, ...layers, blocks: relaid },
       };
     }
     case 'add_transition': {

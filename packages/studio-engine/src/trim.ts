@@ -142,9 +142,8 @@ export function trimRightAtEdited<T extends Clip>(clips: T[], edited: number): C
   return { clips: out, removed: [edited, sp.editedEnd] };
 }
 
-/** Delete clip: remove the clip at the playhead (keep at least 1). */
+/** Delete clip: remove the clip at the playhead. An empty track is a valid document state. */
 export function deleteAtEdited<T extends Clip>(clips: T[], edited: number): ClipEdit<T> {
-  if (clips.length <= 1) return { clips, removed: null };
   const hit = editedToSrc(clips, edited);
   if (!hit) return { clips, removed: null };
   const sp = spans(clips)[hit.index]!;
@@ -153,9 +152,9 @@ export function deleteAtEdited<T extends Clip>(clips: T[], edited: number): Clip
 
 /**
  * Remove range: erase edited time [a,b) — each clip keeps the part outside the range (clips spanning the range
- * split into left/right halves, the right built via makeRight). The range may span multiple clips. Empty-result
- * guard: if the result is empty, do nothing. removed = the clamped [a,b], passed to removeEditedInterval to
- * compress overlay blocks.
+ * split into left/right halves, the right built via makeRight). The range may span multiple clips. An empty
+ * result is valid: the primary lane is document structure, not a requirement to retain footage. `removed` is
+ * the clamped [a,b], passed to sibling-track ripple helpers.
  */
 export function removeEditedRange<T extends Clip>(
   clips: T[],
@@ -179,7 +178,6 @@ export function removeEditedRange<T extends Clip>(
     // keep right side (clip ends after the range) — new clip (new id from makeRight)
     if (editedEnd > hi + 1e-9) out.push(makeRight(clip, clip.srcStart + (hi - editedStart), clip.srcEnd));
   }
-  if (!out.length) return { clips, removed: null }; // empty-result guard: keep at least one clip
   return { clips: out, removed: [lo, hi] };
 }
 
@@ -306,7 +304,6 @@ export function restoreSrcRange<T extends Clip>(
 
 /** Delete clip (by id). */
 export function deleteClipById<T extends Clip & { id: string }>(clips: T[], id: string): ClipEdit<T> {
-  if (clips.length <= 1) return { clips, removed: null };
   const i = clips.findIndex((c) => c.id === id);
   if (i < 0) return { clips, removed: null };
   const sp = spans(clips)[i]!;

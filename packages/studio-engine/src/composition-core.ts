@@ -423,7 +423,10 @@ export interface Composition {
   theme: ThemeId;
   video: StudioVideo | null;
   blocks: Block[];
-  /** Video-track shot slices (one framing per slice). Empty/absent = one continuous fullscreen clip. */
+  /** Video-track shot slices (one framing per slice).
+   *  `undefined` is the legacy "uncut main source" representation; an explicit empty array is an
+   *  empty main track. Keeping those states distinct lets a user remove the last clip without also
+   *  deleting the imported source from the media library. */
   shots?: VideoShot[];
   /** Palette derived from the frame's base colors (overrides #root color vars, layered after theme defaults). From frame analysis. */
   palette?: Record<string, string>;
@@ -460,6 +463,21 @@ export interface PersonFx {
 
 export function emptyComposition(): Composition {
   return { width: 1080, height: 1920, theme: 'general', video: null, blocks: [], shots: [] };
+}
+
+/** Materialized video-track clips. New documents always persist `shots`; the synthetic legacy clip
+ *  only exists for old documents that predate shot persistence and carried a main video directly. */
+export function videoTrackShots(comp: Composition): VideoShot[] {
+  if (comp.shots !== undefined) return comp.shots;
+  return comp.video
+    ? [{ id: 'legacy-main', srcStart: 0, srcEnd: comp.video.durationSec, treatment: 'full' }]
+    : [];
+}
+
+/** Whether the implicit primary visual track currently contains a clip. Imported media may remain
+ *  available in the library after this becomes false. */
+export function hasVideoTrackContent(comp: Composition): boolean {
+  return videoTrackShots(comp).length > 0;
 }
 
 let _shotUid = 0;
@@ -720,20 +738,46 @@ export function videoFrameTimelineBody(shots: VideoShot[]): string {
   return lines.join('\n');
 }
 
-/** Edited duration: with shot clips = Σ clip source lengths, else original video duration; then max'd against block end times. */
+/** Edited duration of the primary visual track. An explicit empty `shots` array stays empty; only
+ *  legacy documents with no `shots` field synthesize the old continuous-main-video clip. */
 export function editedVideoDuration(comp: Composition): number {
-  return comp.shots && comp.shots.length ? editedDuration(comp.shots) : (comp.video?.durationSec ?? 0);
+  return editedDuration(videoTrackShots(comp));
+}
+
+/** Timeline end of one audio-lane clip. This mirrors audioClipWindow's stored/default semantics but
+ *  deliberately returns null for an unknown media duration: an unresolved file must not create an
+ *  infinite document. */
+export function audioClipTimelineEnd(c: import('./audio-tracks').AudioClip): number | null {
+  const start = Math.max(0, c.startSec ?? 0);
+  const inSec = Math.max(0, c.inSec ?? 0);
+  const cap = c.durationSec;
+  const outSec = c.outSec ?? cap;
+  if (outSec == null || !Number.isFinite(outSec)) return null;
+  const speed = Math.max(0.5, Math.min(2, c.speed ?? 1));
+  return start + Math.max(0, Math.min(cap ?? outSec, outSec) - inSec) / speed;
 }
 
 export function totalDuration(comp: Composition): number {
   let max = editedVideoDuration(comp);
   for (const b of comp.blocks) if (b.startSec + b.durationSec > max) max = b.startSec + b.durationSec;
+  for (const a of comp.audioTracks ?? []) {
+    const end = audioClipTimelineEnd(a);
+    if (end != null && end > max) max = end;
+  }
   return Math.max(0.1, max);
 }
 
-/** Track count (including video track 0). Equal-footing: any shots = a video track, main source or not. */
+/** Whether the document contains something time-based that can be previewed/exported. */
+export function hasTimelineContent(comp: Composition): boolean {
+  // Keep unresolved legacy/cloud audio clips recoverable too. Their unknown duration cannot extend
+  // totalDuration yet, but the clip is still real document content and must survive persistence.
+  return hasVideoTrackContent(comp) || comp.blocks.length > 0 || (comp.audioTracks?.length ?? 0) > 0;
+}
+
+/** Track count (including the always-present primary visual track 0). The track is document
+ *  structure, not an accidental side effect of having imported a video. */
 export function trackCount(comp: Composition): number {
-  let max = comp.video || comp.shots?.length ? 0 : -1;
+  let max = 0;
   for (const b of comp.blocks) if (b.trackIndex > max) max = b.trackIndex;
   return max + 1;
 }

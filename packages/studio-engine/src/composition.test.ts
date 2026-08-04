@@ -7,6 +7,7 @@ import {
   captionBlock,
   emptyComposition,
   freeTrack,
+  hasTimelineContent,
   isSentenceCaption,
   placementFramingNotes,
   mediaBlock,
@@ -39,6 +40,7 @@ import {
 function sampleComp(): Composition {
   const c = emptyComposition();
   c.video = { url: 'https://cdn.pireel.com/koudbo.mp4', durationSec: 6 };
+  c.shots = [{ id: 'main', srcStart: 0, srcEnd: 6, treatment: 'full' }];
   c.blocks = [
     titleBlock({ text: '标题', startSec: 0, durationSec: 2 }),
     captionBlock({
@@ -59,7 +61,7 @@ describe('assembleHtml', () => {
     expect(html).toContain('<canvas id="vidEl"'); // canvas 渲染模式:视频轨=画布,帧由父层引擎推
     // canvas 模式:源 URL 不再烤进文档(解码在父层引擎),不断言 src
     expect(html).toContain('data-track-index="0"'); // 视频轨
-    expect((html.match(/window\.__timelines\[/g) ?? []).length).toBe(2); // 两块各注册一条
+    expect((html.match(/window\.__timelines\[/g) ?? []).length).toBe(3); // 视频 framing + 两块各注册一条
   });
 
   it('时间轴体经 new Function 隔离:一块的坏脚本不能放倒整个 <script>', () => {
@@ -594,12 +596,29 @@ describe('blockPreviewDoc(单块 hover 预览)', () => {
 });
 
 describe('totalDuration / trackCount', () => {
-  it('总时长取视频与块末端最大', () => {
+  it('总时长取视频、块与音频末端最大', () => {
     expect(totalDuration(sampleComp())).toBeCloseTo(6);
+    const audioOnly = emptyComposition();
+    audioOnly.audioTracks = [{ id: 'music', src: 'music.mp3', durationSec: 8, startSec: 2, inSec: 1, outSec: 7, speed: 2 }];
+    expect(totalDuration(audioOnly)).toBeCloseTo(5); // 2 + (7 - 1) / 2
+    const unresolvedAudio = emptyComposition();
+    unresolvedAudio.audioTracks = [{ id: 'remote', src: 'https://example.com/audio.mp3' }];
+    expect(hasTimelineContent(unresolvedAudio)).toBe(true); // 字节尚未恢复时也不能丢草稿
   });
-  it('轨数含视频轨', () => {
+  it('空项目也保留视频主轨结构', () => {
+    expect(trackCount(emptyComposition())).toBe(1);
     // 视频轨0 + caption轨1 + title轨2 = 3
     expect(trackCount(sampleComp())).toBe(3);
+  });
+  it('显式空 shots 不会因素材库仍有 main video 而复活主轨', () => {
+    const c = emptyComposition();
+    c.video = { url: 'blob:available-in-library', durationSec: 12 };
+    expect(totalDuration(c)).toBeCloseTo(0.1);
+    expect(assembleHtml(c)).not.toContain('id="vidEl"');
+
+    const legacy = { ...c, shots: undefined };
+    expect(totalDuration(legacy)).toBeCloseTo(12);
+    expect(assembleHtml(legacy)).toContain('id="vidEl"');
   });
 });
 

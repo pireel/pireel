@@ -61,6 +61,7 @@ export const COMMON_EN: Record<string, string> = {
   'common.transcribing': 'Transcribing…',
   'common.transcriptionRequestFailedHttp': 'Transcription request failed (HTTP {status}) — try again in a moment',
   'common.untitledProject': 'Untitled project',
+  'common.nothingToExport': 'Add a clip, graphic, or audio track before exporting',
   'common.uploadBeforeExport': 'Upload a talking-head video first, then export',
   'common.uploadingExport': 'Uploading the export…',
   'common.uploadVideoFirst': 'Upload a talking-head video first',

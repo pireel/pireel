@@ -18,6 +18,7 @@ import {
   type ShotFramingPatch,
   type ShotTreatment,
   type TransitionDirection,
+  type TimelineSiblingLayers,
   type VideoShot,
   CAPTION_PRESETS,
   SHOT_TREATMENTS,
@@ -44,6 +45,7 @@ import {
   shotId,
   listAddressedWords,
   resolveWordIds,
+  rippleRemoveSiblingLayers,
   wordRanges,
   wordRangesToEdited,
   splitAudioClipAt,
@@ -52,7 +54,7 @@ import {
   validateComposition,
   zoneOf,
 } from '@pireel/studio-engine/composition';
-import { type CutSeamEntry, finalizeCutSeams, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
+import { type CutSeamEntry, finalizeCutSeams, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
@@ -975,7 +977,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const shots = ensureShots(c);
             const r = removeEditedRange(shots, from, to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
             if (!r.removed) return { ok: false, error: t('workbench.rangeDeletedMayCover') };
-            setComp((cur) => ({ ...cur, shots: r.clips, blocks: removeEditedInterval(cur.blocks, r.removed![0], r.removed![1]) }));
+            setComp((cur) => ({ ...cur, shots: r.clips, ...rippleRemoveSiblingLayers(cur, r.removed![0], r.removed![1]) }));
             setSelectedShotId(null);
             applyT(r.removed[0]);
             return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: r.clips.map((s) => s.id) } });
@@ -1063,19 +1065,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const mapped = wordRangesToEdited(shots0, wordRanges(resolved.words));
             if (!mapped.length) return { ok: false, error: 'the selected words are already absent from the edited timeline' };
             let shots = shots0;
-            let blocks = c.blocks;
+            let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
             let firstCut = Infinity;
             const seams: CutSeamEntry[] = [];
             for (const range of mapped) {
               const removed = removeEditedRange(shots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
               if (!removed.removed) continue;
               shots = removed.clips;
-              blocks = removeEditedInterval(blocks, removed.removed[0], removed.removed[1]);
+              layers = rippleRemoveSiblingLayers(layers, removed.removed[0], removed.removed[1]);
               firstCut = Math.min(firstCut, removed.removed[0]);
               seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
             }
-            if (!seams.length) return { ok: false, error: 'cannot remove the selected words (the cut would remove the entire video)' };
-            setComp((cur) => ({ ...cur, shots, blocks: relayCaptionLayer(blocks, shots, asrRef.current) }));
+            if (!seams.length) return { ok: false, error: 'cannot remove the selected words from the current edit' };
+            setComp((cur) => ({ ...cur, shots, ...layers, blocks: relayCaptionLayer(layers.blocks, shots, asrRef.current) }));
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
@@ -1109,20 +1111,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               .sort((a, b) => b.from - a.from);
             if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
             let shots = shots0;
-            let blocks = c.blocks;
+            let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
             const seams: CutSeamEntry[] = [];
             let firstCut = Infinity;
             for (const e of edited) {
               const rr = removeEditedRange(shots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
               if (!rr.removed) continue;
               shots = rr.clips;
-              blocks = removeEditedInterval(blocks, rr.removed[0], rr.removed[1]);
+              layers = rippleRemoveSiblingLayers(layers, rr.removed[0], rr.removed[1]);
               seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
               firstCut = Math.min(firstCut, rr.removed[0]);
             }
             if (!seams.length) return { ok: false, error: t('workbench.thoseRangesDeletedThey') };
-            const relaid = relayCaptionLayer(blocks, shots, asrRef.current); // captions follow the narration: deleted words drop out automatically
-            setComp((cur) => ({ ...cur, shots, blocks: relaid }));
+            const relaid = relayCaptionLayer(layers.blocks, shots, asrRef.current); // captions follow the narration: deleted words drop out automatically
+            setComp((cur) => ({ ...cur, shots, ...layers, blocks: relaid }));
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             // The receipt speaks ACTUAL seconds (post-margin, what really left the timeline) — the agent's own
