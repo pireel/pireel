@@ -11,7 +11,7 @@ import type {
   TimelineClipId,
   TrackId,
 } from '../types';
-import type { ShotFilter, ShotFramingPatch } from '../../composition-core';
+import type { CaptionStyle, ShotFilter, ShotFramingPatch } from '../../composition-core';
 
 export interface ShotAudioPatch {
   volumeDb?: number;
@@ -81,6 +81,8 @@ export interface AudioTimelineClipPatchUpdate {
   patch: AudioTimelineClipPatch;
 }
 
+export type CaptionStylePatch = Partial<CaptionStyle>;
+
 type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip extends TimelineClip
   ? Omit<Clip, 'startFrame'> & { offsetFrames: number }
   : never;
@@ -99,6 +101,7 @@ export type EditorCommand =
   | { type: 'overlay.duplicate'; clipId: TimelineClipId; newClipId: TimelineClipId; startFrame: number; toTrackId?: TrackId }
   | { type: 'audio.insert'; trackId: TrackId; clip: AudioTimelineClip; asset?: EditorMediaAsset }
   | { type: 'audio.patch'; updates: AudioTimelineClipPatchUpdate[] }
+  | { type: 'captions.style'; patch: CaptionStylePatch }
   | { type: 'captions.relay' }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
   | {

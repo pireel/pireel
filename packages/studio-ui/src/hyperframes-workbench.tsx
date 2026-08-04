@@ -40,6 +40,7 @@ import {
   CAPTION_PRESETS,
   applyEditorCommand,
   applyCanvasDocumentEdit,
+  applyCaptionDocumentEdit,
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
@@ -102,7 +103,7 @@ import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { injectPreviewRuntime } from './sample-composition';
 import { playhead } from './playhead';
-import { type AsrSegment, captionBlocksFromAsr, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
+import { type AsrSegment, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
 import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
@@ -113,7 +114,7 @@ import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
-import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
+import { beatsForWindow as beatsForWindowPure, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS, type TimelineTrackState } from './studio-timeline';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
@@ -3416,10 +3417,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           const segs = await studioProviders().transcriber.transcribe(got.file);
           setClipAsr((m) => ({ ...m, [src]: segs }));
           clipAsrRef.current = { ...clipAsrRef.current, [src]: segs }; // mirror immediately: the re-lay below needs to read it
-          // Caption layer is on: lay this source's captions in right away (captions = a pure computed product of the transcript)
-          if (segs.length && compRef.current.blocks.some(isSentenceCaption)) {
-            setComp((c) => ({ ...c, blocks: relayCaptionLayer(c.blocks, ensureShots(c), asrRef.current) }));
-          }
+          // The native caption derivation effect observes clipAsr and relays this source atomically.
         } catch (e) {
           console.warn('[studio] clip transcribe failed', e);
           clipAsrFailRef.current.add(src); // don't retry this session, avoids hammering ASR
@@ -3476,7 +3474,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const runToolRef = useRef<(toolId: string, input: Record<string, unknown>) => Promise<StudioToolResult>>(() => Promise.resolve({ ok: false, error: 'not ready' }));
   const { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, removeCaptionLayer } = useCaptionsOps({
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
-    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, setComp, ensureShots, stepAsr,
+    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef,
+    documentRef: editorDocumentRef, setDocument: setEditorDocument, ensureShots, stepAsr,
     ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
   });
@@ -3484,22 +3483,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  back into sentences on load — display cues are DERIVED at lay time now (displayCues), the
    *  persisted transcript stays sentence-granular. Idempotent; then re-lay so blocks re-derive. */
   const migrateTranscriptCues = useCallback(() => {
-    let changed = false;
     if (asrRef.current?.some((s) => s.cue)) {
       asrRef.current = desegmentCues(asrRef.current);
       setAsrSentences(asrRef.current);
-      changed = true;
     }
     for (const [src, segs] of Object.entries(clipAsrRef.current)) {
       if (!segs.some((s) => s.cue)) continue;
       const m = { ...clipAsrRef.current, [src]: desegmentCues(segs) };
       clipAsrRef.current = m;
       setClipAsr(m);
-      changed = true;
     }
-    if (changed && compRef.current.blocks.some(isSentenceCaption)) {
-      setComp((c) => ({ ...c, blocks: relayCaptionLayer(c.blocks, ensureShots(c), asrRef.current) }));
-    }
+    // Transcript state updates trigger the native caption derivation effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Clip insertion (multi-source main track) — see use-clip-insert.ts. Same runTool ref indirection as captions.
@@ -3709,7 +3703,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const next = shots.slice();
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved!);
-      setComp((cur) => ({ ...cur, shots: next, blocks: relayCaptionLayer(cur.blocks, next, asrRef.current) }));
+      setComp((cur) => ({ ...cur, shots: next }));
     },
     onDeselectAll: () => {
       setSelectedId(null);
@@ -3889,16 +3883,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // scattered manual re-lays: any transcript/cut/toggle change re-derives, so blocks can't go stale.
   useEffect(() => {
     if (!bootDataReady) return;
-    const c = compRef.current;
-    const on = isCaptionsOn(c);
-    const cues = on ? displayCues(ensureShots(c), asrRef.current, clipAsrRef.current, { subLang: resolveCaptionStyle(c).sub?.lang, canvasW: c.width }) : [];
-    // On with nothing derivable (no transcript, e.g. a legacy comp whose context never mirrored):
-    // keep whatever exists — the persisted legacy blocks keep rendering, nothing is destroyed.
-    if (on && !cues.length) return;
-    const derived = captionBlocksFromAsr(cues);
-    const sigOf = (bs: typeof derived) => JSON.stringify(bs.map((b) => [b.id, b.startSec, b.durationSec, b.slots.words, b.slots.sub, b.slots.ref]));
-    if (sigOf(derived) === sigOf(c.blocks.filter(isSentenceCaption))) return;
-    setComp((cur) => ({ ...cur, blocks: [...cur.blocks.filter((b) => !isSentenceCaption(b)), ...derived] }));
+    const edit = applyCaptionDocumentEdit({
+      document: editorDocumentRef.current,
+      mainTranscript: asrRef.current,
+      clipTranscripts: clipAsrRef.current,
+    });
+    if (edit.ok && edit.document !== editorDocumentRef.current) setEditorDocument(edit.document);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bootDataReady, asrSentences, clipAsr, comp.shots, comp.captionStyle, comp.width, comp.height, comp.blocks]);
   useEffect(() => {

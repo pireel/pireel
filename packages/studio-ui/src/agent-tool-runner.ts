@@ -26,6 +26,7 @@ import {
   VOLUME_DB_MIN,
   applyBlockPlacement,
   applyCanvasDocumentEdit,
+  applyCaptionDocumentEdit,
   applyCompositionLayout,
   applyLayoutDocumentEdit,
   applyNarrationDocumentEdit,
@@ -229,7 +230,7 @@ export interface AgentToolCtx {
   insertClipCore: (url: string, clipDur: number, atWish: number, file?: File) => string;
   // Captions
   setCaptionStyle: (patch: Partial<CaptionStyle>) => void;
-  applyCaptionPreset: (preset: string) => Promise<void>;
+  applyCaptionPreset: (preset: string, stylePatch?: Partial<CaptionStyle>) => Promise<void>;
   removeCaptionLayer: () => void;
   // Export
   agentExportRef: MutableRefObject<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
@@ -1084,8 +1085,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (Number.isFinite(yPct)) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
             if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
-            if (preset) await applyCaptionPreset(preset); // enable/switch style: re-lay the whole layer from the narration script (internally runs ASR, pushes an undo snapshot)
-            if (Object.keys(patch).length) setCaptionStyle(patch);
+            if (preset) await applyCaptionPreset(preset, patch); // style + transcript relay publish as one V2 transaction
+            else if (Object.keys(patch).length) setCaptionStyle(patch);
             if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.couldNotGenerateCaptions') };
             const cs = resolveCaptionStyle(compRef.current);
             return { ok: true, summary: preset ? t('workbench.captionsSetName', { name: t(getCaptionPreset(cs.preset).name) }) : t('workbench.captionsAdjustedName', { name: t(getCaptionPreset(cs.preset).name) }) };
@@ -1097,7 +1098,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'set_caption_translations': {
             // Bilingual captions: transcript writes go through the SHARED writer (applyCaptionTranslations —
-            // identical semantics to the offline executor); captions re-derive reactively from the transcript.
+            // identical semantics to the offline executor), then publish through the native caption transaction.
             const clear = input.clear === true;
             const lang = typeof input.lang === 'string' && input.lang.trim() ? input.lang.trim() : undefined;
             const items = (Array.isArray(input.items) ? input.items : [])
@@ -1143,6 +1144,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               }
               summary = t('workbench.setNTranslationLines', { n: items.filter((it) => it.text).length });
             }
+            const captionEdit = applyCaptionDocumentEdit({
+              document: documentRef.current,
+              mainTranscript: asrRef.current,
+              clipTranscripts: clipAsrRef.current,
+            });
+            if (!captionEdit.ok) return { ok: false, error: captionEdit.error.message, data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
+            setDocument(captionEdit.document);
             if (compRef.current.blocks.some(isSentenceCaption)) return { ok: true, summary };
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }

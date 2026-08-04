@@ -81,6 +81,7 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `overlay-patch.ts` owns stable-id timing and payload edits for graphics/caption clips;
 - `overlay-move.ts` and `overlay-duplicate.ts` own cross-lane identity placement and cloning;
 - `audio-insert.ts` and `audio-patch.ts` own durable audio placement plus coupled timeline/source/envelope state;
+- `caption-style.ts` owns sparse managed-caption appearance independently from compatibility blocks;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
@@ -169,6 +170,9 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Manual audio controls plus browser/server `set_bgm` now add durable assets and edit native audio clip
   identities. Overlapping clips share lanes without overwrite, split seams suppress internal default
   fades, locked lanes reject atomically, and deleting the last clip retains the user's empty audio lane.
+- Caption panels plus browser/server caption tools now sync semantic transcripts, sparse style and the
+  managed caption lane in one V2 lifecycle transaction. Enabling creates the lane once, disabling clears
+  clips without deleting it, translations relay immediately, and locked lanes roll every part back.
 
 Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
 adapter still projects and remigrates results for tools not yet cut over; that path must be removed

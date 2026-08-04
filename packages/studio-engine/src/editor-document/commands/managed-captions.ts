@@ -106,7 +106,10 @@ export function relayManagedCaptionTrack(document: EditorDocumentV2): EditorComm
     const assetId = ref.src ? assetBySourceKey.get(ref.src) : primaryAssetId;
     return assetId ? document.semantics.transcripts[assetId]?.[ref.seg] as AsrSegment | undefined : undefined;
   };
-  const cues = displayCuesFromMappedSegs(mapped, sourceSegment, { canvasW: document.canvas.width });
+  const cues = displayCuesFromMappedSegs(mapped, sourceSegment, {
+    canvasW: document.canvas.width,
+    ...(document.appearance.captionStyle?.sub?.lang ? { subLang: document.appearance.captionStyle.sub.lang } : {}),
+  });
   const blocks = captionBlocksFromAsr(cues);
   const existingById = new Map(track.clips.map((clip) => [clip.id, clip] as const));
   const usedIds = new Set(document.timeline.tracks

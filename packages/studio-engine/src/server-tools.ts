@@ -38,6 +38,7 @@ import {
   addAudioDocumentClip,
   applyAudioDocumentEdits,
   applyCanvasDocumentEdit,
+  applyCaptionDocumentEdit,
   applyCompositionLayout,
   applyLayoutDocumentEdit,
   applyNarrationDocumentEdit,
@@ -1103,6 +1104,21 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       // SPARSE persistence: merge into the raw stored style (defaults live in the resolver)
       const style = { ...(base.captionStyle ?? {}), ...(preset ? { on: true, preset } : {}), ...patch };
+      if (p.document) {
+        const edit = applyCaptionDocumentEdit({
+          document: p.document,
+          patch: { ...(preset ? { on: true, preset, color: undefined, bg: undefined } : {}), ...patch },
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        const comp = projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document });
+        return {
+          result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(resolveCaptionStyle(comp).preset).name}` },
+          comp,
+          document: edit.document,
+        };
+      }
       return {
         result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(style.preset).name}` },
         comp: { ...base, captionStyle: style },
@@ -1110,6 +1126,20 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     }
     case 'remove_captions': {
       if (!isCaptionsOn(c)) return { result: { ok: false, error: 'no captions right now' } };
+      if (p.document) {
+        const edit = applyCaptionDocumentEdit({
+          document: p.document,
+          patch: { on: false },
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: 'Removed captions' },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       // Switch off, KEEP the style (preset/positions/translation language round-trip through the toggle); drop any legacy persisted caption blocks.
       return {
         result: { ok: true, summary: 'Removed captions' },
@@ -1159,6 +1189,20 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       // Captions derive from the transcript at render time — the translation shows up without any re-lay.
       const captionsOn = isCaptionsOn(c);
+      if (p.document) {
+        const edit = applyCaptionDocumentEdit({
+          document: p.document,
+          mainTranscript: asAsr(ctx.asr),
+          clipTranscripts: clipAsrOf(ctx),
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: captionsOn ? summary : `${summary} (captions are off; will show after set_captions)` },
+          context: ctx,
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return {
         result: { ok: true, summary: captionsOn ? summary : `${summary} (captions are off; will show after set_captions)` },
         context: ctx,

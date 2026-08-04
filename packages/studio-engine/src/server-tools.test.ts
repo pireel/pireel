@@ -431,6 +431,44 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r3.context?.plan).toBeTruthy();
     expect(r3.comp).toBeUndefined();
   });
+  it('V2 set_captions/remove_captions 原子维护样式和 managed lane', () => {
+    const p = v2proj();
+    p.document!.timeline.tracks.push({
+      id: 'empty-graphics', type: 'graphics', muted: false, hidden: true, locked: false,
+      syncLocked: false, stackOrder: 8, clips: [],
+    });
+    const enabled = runServerTool('set_captions', { preset: 'ln-clean', yPct: 80, scale: 1.2 }, p);
+    expect(enabled.result.ok).toBe(true);
+    const captionTrackId = enabled.document!.semantics.managedCaptionTrackId!;
+    expect(enabled.document?.appearance.captionStyle).toMatchObject({ on: true, preset: 'ln-clean', yPct: 80, scale: 1.2 });
+    expect(enabled.document?.timeline.tracks.find((track) => track.id === captionTrackId)!.clips.length).toBeGreaterThan(0);
+    expect(enabled.document?.timeline.tracks.find((track) => track.id === 'empty-graphics')).toMatchObject({
+      hidden: true, syncLocked: false, stackOrder: 8, clips: [],
+    });
+
+    const translated = runServerTool('set_caption_translations', {
+      items: [{ index: 0, text: 'First sentence' }], lang: 'en',
+    }, { ...p, comp: enabled.comp!, document: enabled.document! });
+    expect(translated.result.ok).toBe(true);
+    const mainAssetId = translated.document!.semantics.primaryNarrativeAssetId!;
+    expect(translated.document!.semantics.transcripts[mainAssetId]![0]).toMatchObject({ sub: 'First sentence', subLang: 'en' });
+    expect(translated.document!.timeline.tracks.find((track) => track.id === captionTrackId)!.clips.some((clip) => (
+      clip.kind === 'caption' && clip.block.slots.sub === 'First sentence'
+    ))).toBe(true);
+
+    const lockedProject = { ...p, comp: enabled.comp!, document: enabled.document! };
+    lockedProject.document.timeline.tracks.find((track) => track.id === captionTrackId)!.locked = true;
+    const rejected = runServerTool('set_captions', { yPct: 70 }, lockedProject);
+    expect(rejected.result).toMatchObject({ ok: false, data: { code: 'track-locked' } });
+    expect(rejected.document).toBeUndefined();
+    expect(lockedProject.document.appearance.captionStyle?.yPct).toBe(80);
+
+    lockedProject.document.timeline.tracks.find((track) => track.id === captionTrackId)!.locked = false;
+    const removed = runServerTool('remove_captions', {}, lockedProject);
+    expect(removed.result.ok).toBe(true);
+    expect(removed.document?.appearance.captionStyle).toMatchObject({ on: false, preset: 'ln-clean', yPct: 80 });
+    expect(removed.document?.timeline.tracks.find((track) => track.id === captionTrackId)).toMatchObject({ clips: [] });
+  });
   it('set_video_filter:整镜调色,值替换整份;全中性=字段摘掉;关键帧进 vid 时间轴体', () => {
     const r = runServerTool('set_video_filter', { shotId: 's1', brightness: 1.2, saturate: 0 }, proj());
     expect(r.result.ok).toBe(true);

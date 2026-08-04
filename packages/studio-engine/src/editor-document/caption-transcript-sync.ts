@@ -1,6 +1,10 @@
 import type { AsrSegment } from '../build-blocks';
 import type { EditorDocumentV2, NarrativeTimelineClip } from './types';
 
+function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly AsrSegment[]): boolean {
+  return left === right || JSON.stringify(left ?? []) === JSON.stringify(right);
+}
+
 /**
  * Fold temporary browser/server transcript inputs into V2 semantic ownership before a native
  * managed-caption command runs. Asset identity, not track position or a projected shot URL, is the
@@ -34,13 +38,13 @@ export function syncCaptionTranscripts(
   let changed = false;
   const transcripts = { ...document.semantics.transcripts };
   const mainAssetId = document.semantics.primaryNarrativeAssetId;
-  if (mainAssetId && mainTranscript?.length && transcripts[mainAssetId] !== mainTranscript) {
+  if (mainAssetId && mainTranscript?.length && !sameTranscript(transcripts[mainAssetId], mainTranscript)) {
     transcripts[mainAssetId] = [...mainTranscript];
     changed = true;
   }
   for (const [sourceKey, segments] of Object.entries(clipTranscripts)) {
     const assetId = assetBySourceKey.get(sourceKey);
-    if (!assetId || !narrativeAssetIds.has(assetId) || !segments.length || transcripts[assetId] === segments) continue;
+    if (!assetId || !narrativeAssetIds.has(assetId) || !segments.length || sameTranscript(transcripts[assetId], segments)) continue;
     transcripts[assetId] = [...segments];
     changed = true;
   }

@@ -13,7 +13,9 @@ import {
   type Block,
   type CaptionStyle,
   type Composition,
+  type EditorDocumentV2,
   type VideoShot,
+  applyCaptionDocumentEdit,
   isCaptionsOn,
   isSentenceCaption,
   resolveCaptionStyle,
@@ -43,7 +45,8 @@ export interface CaptionsOpsDeps {
   videoFileRef: MutableRefObject<File | null>;
   playingRef: MutableRefObject<boolean>;
   tRef: MutableRefObject<number>;
-  setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   ensureShots: (c: Composition) => VideoShot[];
   stepAsr: () => Promise<AsrSegment[]>;
   ensureClipTranscripts: () => Promise<void>;
@@ -57,14 +60,25 @@ export interface CaptionsOpsDeps {
 export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const {
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
-    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, setComp, ensureShots, stepAsr,
+    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, documentRef, setDocument, ensureShots, stepAsr,
     ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT, runTool,
   } = deps;
   const [capTransBusy, setCapTransBusy] = useState(false); // bilingual translation in progress (captions panel)
+  const captionEdit = (patch: Partial<CaptionStyle>) => applyCaptionDocumentEdit({
+    document: documentRef.current,
+    patch,
+    mainTranscript: asrRef.current,
+    clipTranscripts: clipAsrRef.current,
+  });
   const setCaptionStyle = useCallback((patch: Partial<CaptionStyle>) => {
     // SPARSE persistence: merge into the raw stored style, never the resolved one — defaults stay in
     // the resolver so future default changes reach projects that never explicitly set those fields.
-    setComp((c) => ({ ...c, captionStyle: { ...(c.captionStyle ?? {}), ...patch } }));
+    const edit = captionEdit(patch);
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    setDocument(edit.document);
   }, []);
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
@@ -247,7 +261,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
    *  if there's no transcript but old captions exist (a loaded legacy draft), degrade to style-only. */
   const captionGenBusyRef = useRef(false);
   const [capGenBusy, setCapGenBusy] = useState(false); // used by the panel's "generating captions" overlay (the ref only prevents re-entry, doesn't trigger render)
-  const applyCaptionPreset = async (preset: string) => {
+  const applyCaptionPreset = async (preset: string, stylePatch: Partial<CaptionStyle> = {}) => {
     const has = isCaptionsOn(compRef.current);
     if (!compRef.current.video) {
       toast.error(t('workbench.uploadVideoBeforeApplying'));
@@ -270,12 +284,15 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
       }
+      // Preset switch = a complete look: clear per-line color/bg overrides, then relay from the
+      // transcript in the same V2 transaction so locked lanes cannot publish half a style change.
+      const edit = captionEdit({ on: true, preset, color: undefined, bg: undefined, ...stylePatch });
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      // Preset switch = a complete look: clear the per-line color/bg overrides (kept overrides would tint the new preset)
-      setComp((c) => {
-        const { color: _oc, bg: _ob, ...rest } = c.captionStyle ?? {};
-        return { ...c, captionStyle: { ...rest, on: true, preset } };
-      });
+      setDocument(edit.document);
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
       // caption window, move it to the first caption — otherwise nothing on screen moves after laying and it feels like "clicked but no effect" (user reported)
       if (!playingRef.current && cues.length) {
@@ -299,13 +316,14 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const removeCaptionLayer = () => {
     if (!isCaptionsOn(compRef.current)) return;
     const ids = compRef.current.blocks.filter(isSentenceCaption).map((b) => b.id);
+    const edit = captionEdit({ on: false });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
     pushUndoSnapshot();
     ids.forEach((id) => postPreview({ type: 'hf:remove', id }));
-    setComp((c) => ({
-      ...c,
-      blocks: c.blocks.filter((b) => !isSentenceCaption(b)),
-      captionStyle: { ...(c.captionStyle ?? {}), on: false },
-    }));
+    setDocument(edit.document);
     setSelectedIdRaw((s) => (s && ids.includes(s) ? null : s));
     setSelectedBlockIds((cur) => {
       const n = new Set([...cur].filter((x) => !ids.includes(x)));

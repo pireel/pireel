@@ -1,6 +1,7 @@
 export * from './canvas';
 export * from './audio-insert';
 export * from './audio-patch';
+export * from './caption-style';
 export * from './clip-geometry';
 export * from './clip-patch';
 export * from './dispatcher';
