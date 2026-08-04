@@ -97,6 +97,10 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   ordinary trim/scene deletion; locked native lanes fail the whole edit.
 - Agent transactions snapshot and validate both V2 and the runtime projection, so an error can roll
   back media lanes which `Composition` cannot see.
+- Shot splitting now uses the native `clip.split` command. Compatibility playhead points are resolved
+  by stable clip lineage plus source seconds, so splitting never collapses a V2 leading gap or targets
+  the wrong reused source segment. Linked partners split atomically by default, including locked-lane
+  rejection and matching link groups for the newly created right halves.
 
 Direct V2 preview/export/tool consumption remains a rollout gate, not schema work. The server adapter
 currently projects legacy tool input and remigrates its result;

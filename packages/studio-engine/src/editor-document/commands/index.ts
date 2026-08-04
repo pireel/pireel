@@ -2,6 +2,8 @@ export * from './clip-geometry';
 export * from './dispatcher';
 export * from './insert';
 export * from './narration-range';
+export * from './narration-split';
 export * from './range';
+export * from './split';
 export * from './tracks';
 export * from './types';

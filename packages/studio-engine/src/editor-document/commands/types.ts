@@ -56,6 +56,14 @@ export type EditorCommand =
     includeLinked?: boolean;
     /** Empty lanes are retained by default so the user's track layout remains stable. */
     pruneEmptyTracks?: boolean;
+  }
+  | {
+    type: 'clip.split';
+    trackId: TrackId;
+    clipId: TimelineClipId;
+    atFrame: number;
+    /** Linked partners split at the same timeline frame by default. */
+    includeLinked?: boolean;
   };
 
 export type EditorCommandErrorCode =
@@ -63,6 +71,7 @@ export type EditorCommandErrorCode =
   | 'invalid-range'
   | 'invalid-document'
   | 'track-not-found'
+  | 'clip-not-found'
   | 'duplicate-track-id'
   | 'duplicate-clip-id'
   | 'invalid-track-role'

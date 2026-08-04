@@ -38,9 +38,11 @@ import {
   STUDIO_FONTS_HREF,
   CAPTION_PRESETS,
   applyNarrationDocumentEdit,
+  applyNarrationSplitCommands,
   assembleHtml,
   blockBgCss,
   captionLineSegments,
+  narrationSourceSplitsAtEditedPoints,
   customHasSurface,
   blockId,
   blockKind,
@@ -85,7 +87,7 @@ import {
   rippleRemoveSiblingLayers,
 } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
-import { deleteClipById, restoreSrcRange, spans as clipSpans, splitAtEdited, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from '@pireel/studio-engine/trim';
+import { deleteClipById, restoreSrcRange, spans as clipSpans, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from '@pireel/studio-engine/trim';
 import { parseBlockResponse, parseKitResponse } from '@pireel/studio-engine/compose';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
@@ -2819,10 +2821,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       toast.error(t('workbench.removeTransitionToSplit'));
       return;
     }
-    const r = splitAtEdited(shots, tRef.current, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-    if (r.clips === shots) return;
+    const requests = narrationSourceSplitsAtEditedPoints(shots, [tRef.current]);
+    if (!requests) return;
+    const split = applyNarrationSplitCommands(editorDocumentRef.current, requests);
+    if (!split.ok) {
+      toast.error(split.error.message);
+      return;
+    }
     pushUndoSnapshot();
-    setComp((cur) => ({ ...cur, shots: r.clips }));
+    setEditorDocument(split.document);
   };
   /** Trim left / right: cut the source footage on the left/right of the playhead in the current shot, everything after
    *  shifts left, captions/effect blocks compress along with it. Read compRef (setComp wrapper writes synchronously) — the agent firing multiple trim tools in one round doesn't swallow the previous step. */

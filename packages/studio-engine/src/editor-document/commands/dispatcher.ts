@@ -1,5 +1,6 @@
 import type { EditorDocumentV2 } from '../types';
 import { insertEditorClips } from './insert';
+import { splitEditorClip } from './split';
 import { removeEditorRange } from './range';
 import { insertEditorTrack, moveEditorTrack, patchEditorTrack, removeEditorTrack } from './tracks';
 import { commandFailure, type EditorCommand, type EditorCommandResult } from './types';
@@ -19,6 +20,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return insertEditorClips(document, command);
     case 'range.remove':
       return removeEditorRange(document, command);
+    case 'clip.split':
+      return splitEditorClip(document, command);
     default: {
       const unreachable: never = command;
       return commandFailure(document, 'invalid-command', `Unsupported editor command: ${String(unreachable)}`);

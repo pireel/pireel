@@ -259,6 +259,17 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(proj().comp.shots).toHaveLength(2);
     expect(runServerTool('split_shot', { atSec: 2, atSecs: [4] }, proj()).result.ok).toBe(false);
   });
+  it('split_shot:V2 按源秒定位，不把原生主轨间隙压平', () => {
+    const p = v2proj();
+    for (const clip of p.document!.timeline.tracks[0]!.clips) clip.startFrame += 45;
+    const split = runServerTool('split_shot', { atSec: 5 }, p);
+    expect(split.result.ok).toBe(true);
+    expect(split.document?.timeline.tracks[0]?.clips).toMatchObject([
+      { startFrame: 45, sourceInSec: 0, sourceOutSec: 5 },
+      { startFrame: 195, sourceInSec: 5, sourceOutSec: 10 },
+      { startFrame: 345, sourceInSec: 10, sourceOutSec: 20 },
+    ]);
+  });
   it('delete_shot:最后一个片段可删，显式空主轨不会被 videoDurationSec 复活', () => {
     const only = proj({
       comp: {

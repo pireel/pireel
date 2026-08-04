@@ -36,8 +36,10 @@ import {
   applyBlockPlacement,
   applyCompositionLayout,
   applyNarrationDocumentEdit,
+  applyNarrationSplitCommands,
   applyShotFramingInput,
   placementFramingNotes,
+  narrationSourceSplitsAtEditedPoints,
   normalizeProjectDocument,
   projectDocumentToLegacyComposition,
   audioClipId,
@@ -580,6 +582,24 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!points.length) return { result: { ok: false, error: 'offline mode needs atSec or atSecs (no playhead)' } };
       const split = splitShotsAtEditedPoints(shots, points);
       if ('error' in split) return { result: { ok: false, error: split.error } };
+      if (p.document) {
+        const requests = narrationSourceSplitsAtEditedPoints(shots, split.atSecs);
+        if (!requests) return { result: { ok: false, error: 'Validated split points no longer resolve to narration clips' } };
+        const command = applyNarrationSplitCommands(p.document, requests);
+        if (!command.ok) {
+          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
+        }
+        const comp = projectDocumentToLegacyComposition({ projectId: p.id, value: command.document });
+        return {
+          result: {
+            ok: true,
+            summary: split.atSecs.length === 1 ? `Split at ${r1(split.atSecs[0]!)}s` : `Split at ${split.atSecs.length} timeline points`,
+            data: { atSecs: split.atSecs, shotIds: comp.shots?.map((shot) => shot.id) ?? [] },
+          },
+          document: command.document,
+          comp,
+        };
+      }
       return {
         result: {
           ok: true,

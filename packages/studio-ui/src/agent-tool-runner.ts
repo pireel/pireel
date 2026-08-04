@@ -27,6 +27,7 @@ import {
   applyBlockPlacement,
   applyCompositionLayout,
   applyNarrationDocumentEdit,
+  applyNarrationSplitCommands,
   applyShotFramingInput,
   audioClipId,
   audioTrimPatch,
@@ -45,6 +46,7 @@ import {
   blockOverlapWarnings,
   shotId,
   listAddressedWords,
+  narrationSourceSplitsAtEditedPoints,
   resolveWordIds,
   wordRanges,
   wordRangesToEdited,
@@ -1394,12 +1396,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
             const split = splitShotsAtEditedPoints(shots, points);
             if ('error' in split) return { ok: false, error: split.error };
-            setComp({ ...c, shots: split.shots });
+            const requests = narrationSourceSplitsAtEditedPoints(shots, split.atSecs);
+            if (!requests) return { ok: false, error: 'Validated split points no longer resolve to narration clips' };
+            const command = applyNarrationSplitCommands(documentRef.current, requests);
+            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            setDocument(command.document);
             applyT(split.atSecs[split.atSecs.length - 1]!);
             return withDelta({
               ok: true,
               summary: split.atSecs.length === 1 ? t('workbench.splitPlayhead') : t('workbench.splitNPoints', { n: split.atSecs.length }),
-              data: { atSecs: split.atSecs, shotIds: split.shots.map((shot) => shot.id) },
+              data: { atSecs: split.atSecs, shotIds: (compRef.current.shots ?? []).map((shot) => shot.id) },
             });
           }
           case 'trim_shot': {
