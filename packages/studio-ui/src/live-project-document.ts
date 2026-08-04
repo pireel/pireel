@@ -12,6 +12,7 @@ import {
   type EditorCommand,
   type EditorCommandResult,
   type EditorDocumentV2,
+  type EditorMediaAsset,
   normalizeProjectDocument,
   projectDocumentToLegacyComposition,
 } from '@pireel/studio-engine/composition';
@@ -35,6 +36,10 @@ export interface LiveProjectDocumentSession {
 }
 
 const isCompatibilityPlaceholder = (url: string) => url.startsWith('blob:pireel-offline/');
+
+export function resolveLiveAssetUrl(session: LiveProjectDocumentSession, asset: EditorMediaAsset): string | undefined {
+  return session.runtimeAssetUrls.get(asset.id) ?? asset.locator.remoteUrl;
+}
 
 function assetClipIdMap(document: EditorDocumentV2): Map<string, string> {
   const result = new Map<string, string>();

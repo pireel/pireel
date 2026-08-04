@@ -105,6 +105,7 @@ import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadI
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
 import { segmentSourceRate } from './video-segment-time';
+import { supplementalVisualMedia } from './visual-render-plan';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
@@ -199,6 +200,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     documentRef: editorDocumentRef,
     setComposition: setComp,
     setDocument: setEditorDocument,
+    resolveAssetUrl,
     persistableDocument,
   } = useLiveProjectDocument({
     projectId,
@@ -206,12 +208,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     migrationContextRef: liveMigrationContextRef,
     prepareComposition: freezeBlockVars,
   });
-  const renderPlan = useMemo(() => editorDocumentRenderPlan(editorDocument), [editorDocument]);
+  const renderPlan = useMemo(
+    () => editorDocumentRenderPlan(editorDocument, { resolveAssetUrl }),
+    [editorDocument, resolveAssetUrl],
+  );
   const videoPlacements = useMemo<VideoShotTimelinePlacement[]>(() => renderPlan.narrative.map((entry) => ({
     shotId: entry.clipId,
     startSec: entry.startSec,
     endSec: entry.endSec,
   })), [renderPlan]);
+  const supplementalVisuals = useMemo(() => supplementalVisualMedia(renderPlan), [renderPlan]);
   const videoPlacementsRef = useRef(videoPlacements);
   videoPlacementsRef.current = videoPlacements;
   // Block selection: selectedId = primary (anchor; floating toolbar/panels only act on a single block);
@@ -555,8 +561,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   });
   // Debug panel's assembled HTML is built only when the panel is open (don't stitch strings every frame during high-frequency setComp like dragging)
   const assembled = useMemo(
-    () => (showCode ? assembleHtml(previewCompOf(comp), undefined, videoPlacements) : ''),
-    [comp, showCode, videoPlacements],
+    () => (showCode ? assembleHtml(previewCompOf(comp), undefined, videoPlacements, supplementalVisuals) : ''),
+    [comp, showCode, videoPlacements, supplementalVisuals],
   );
 
   // Test hook: readable snapshot of the narration script + visual analysis (also on window.__studio for devtools)
@@ -791,6 +797,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({
     compRef,
     documentRef: editorDocumentRef,
+    resolveAssetUrl,
     videoFileRef,
     clipFilesRef,
     audioExportRef,
@@ -1190,7 +1197,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         return;
       }
       lastBuiltCompRef.current = comp;
-      const doc = injectPreviewRuntime(assembleHtml(previewCompOf(comp), undefined, videoPlacements));
+      const doc = injectPreviewRuntime(assembleHtml(previewCompOf(comp), undefined, videoPlacements, supplementalVisuals));
       if (doc !== bufsRef.current.docs[bufsRef.current.active]) {
         pendingSwitchRef.current = true; // swap pending: patch path steps aside
         setRebuilding(true);
@@ -1206,7 +1213,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       });
     }, fontsChanged || sizeOnly || cutOnly || capOnly || framingOnly || patchable ? 0 : 300);
     return () => clearTimeout(id);
-  }, [comp, fontsTick, videoPlacements]);
+  }, [comp, fontsTick, videoPlacements, supplementalVisuals]);
 
   // Pending background-buffer swap: ping/pong handshake state. The load event isn't trustworthy — the empty load of a
   // cleared buffer (srcdoc='') arrives late, and font blocking can make a half-loaded doc fire load first, which once
@@ -3385,7 +3392,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ]);
   };
   const agentToolCtx: AgentToolCtx = {
-    projectId, documentRef: editorDocumentRef, setDocument: setEditorDocument,
+    projectId, documentRef: editorDocumentRef, resolveAssetUrl, setDocument: setEditorDocument,
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo,

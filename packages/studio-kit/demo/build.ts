@@ -68,7 +68,7 @@ for (const [cid, samples] of Object.entries(SAMPLES)) {
   <div class="frame"><div class="stage" style="${vars}">
     <div class="blk" id="${id}">${html}</div>
   </div></div>
-  <figcaption><b>${cid}</b> · ${props.variant ?? components[cid].defaults.variant} · ${theme}</figcaption>
+  <figcaption><b>${cid}</b> · ${props.variant ?? components[cid as keyof typeof components].defaults.variant} · ${theme}</figcaption>
   <script type="sk-timeline" data-for="${id}">${timeline.replace(/<\/script/gi, '<\\/script')}</script>
 </figure>`);
     }

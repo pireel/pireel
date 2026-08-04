@@ -19,6 +19,7 @@ import {
   type AudioClip,
   type Composition,
   type EditorDocumentV2,
+  type EditorMediaAsset,
   editorDocumentRenderPlan,
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
@@ -26,6 +27,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
 import { t } from './i18n';
+import { supplementalVisualMedia } from './visual-render-plan';
 
 /** presign's hard cap (413 past it); intercept early to give a human message. */
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
@@ -76,6 +78,7 @@ const filenameFor = (o: ExportRenderOpts) => t('common.exportFilename', { res: o
 export function useStudioExport(deps: {
   compRef: MutableRefObject<Composition>;
   documentRef: MutableRefObject<EditorDocumentV2>;
+  resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined;
   videoFileRef: MutableRefObject<File | null>;
   /** Local insert-clip File table (key = blob URL); used by client compositing to fetch insert clips. */
   clipFilesRef?: MutableRefObject<Map<string, File>>;
@@ -84,7 +87,7 @@ export function useStudioExport(deps: {
   /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
   denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
 }) {
-  const { compRef, documentRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
+  const { compRef, documentRef, resolveAssetUrl, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -96,10 +99,19 @@ export function useStudioExport(deps: {
   /** Last-result cache: key = comp + source fingerprint + options. Unchanged → re-download/publish directly, don't re-composite. */
   const lastExportRef = useRef<{ key: string; blob?: Blob; opts: ExportRenderOpts } | null>(null);
 
-  /** Full comp JSON + source fingerprint + options: if anything affecting the result changes, the key changes.
-   *  (Insert clips appear as blob URLs in comp.shots, stable within a session, so they're naturally in the key.) */
-  const exportKey = (c: Composition, document: EditorDocumentV2, opts: ExportRenderOpts): string =>
-    `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(document)}`;
+  /** Canonical document + runtime source fingerprints + options. Runtime URLs stay outside V2
+   *  persistence, so they are included separately to invalidate a cached export after asset recovery. */
+  const exportKey = (
+    c: Composition,
+    document: EditorDocumentV2,
+    plan: ReturnType<typeof editorDocumentRenderPlan>,
+    opts: ExportRenderOpts,
+  ): string => {
+    const resolvedSources = plan.tracks.flatMap((track) => track.clips.flatMap((entry) => (
+      entry.resolvedSource ? [[entry.clipId, entry.resolvedSource]] : []
+    )));
+    return `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(document)}|${JSON.stringify(resolvedSources)}`;
+  };
 
   /** WebCodecs is always required; main-source bytes are required only when a surviving clip
    *  actually references that source. Clips-only and graphics/audio-only documents need no main file. */
@@ -124,6 +136,7 @@ export function useStudioExport(deps: {
     const blob = await clientExportVideo({
       comp: c,
       videoPlacements: plan.narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec })),
+      visualMediaClips: supplementalVisualMedia(plan),
       timelineDurationSec: plan.durationSec,
       videoFile: videoFileRef.current,
       clipFiles: clipFilesRef?.current ?? new Map(),
@@ -146,7 +159,7 @@ export function useStudioExport(deps: {
     // Snapshot the canonical document once. Edits made while encoding belong to the next export;
     // they must not change placements under an already-computed cache key.
     const document = documentRef.current;
-    const plan = editorDocumentRenderPlan(document);
+    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
     if (plan.durationFrames === 0) {
       toast.error(t('common.nothingToExport'));
       return { ok: false, error: t('common.nothingToExport') };
@@ -156,7 +169,7 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return { ok: false, error: noExportReason(c, plan) };
     }
-    const key = exportKey(c, document, opts);
+    const key = exportKey(c, document, plan, opts);
     const name = filenameFor(opts);
     if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
       toast.success(t('common.downloadedPreviousExport'));
@@ -189,7 +202,7 @@ export function useStudioExport(deps: {
   async function publishVideo(opts: ExportRenderOpts): Promise<string | null> {
     const c = compRef.current;
     const document = documentRef.current;
-    const plan = editorDocumentRenderPlan(document);
+    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
     if (plan.durationFrames === 0) {
       toast.error(t('common.nothingToExport'));
       return null;
@@ -199,7 +212,7 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return null;
     }
-    const key = exportKey(c, document, opts);
+    const key = exportKey(c, document, plan, opts);
     if (uploadedExportRef.current?.key === key) {
       // Same content already uploaded: reuse the direct link
       setPublishUrl(uploadedExportRef.current.url);

@@ -14,7 +14,7 @@
 
 import { type GlMixer, createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { sourceDrawRect, type CutTransitionEffect, type ShotPreciseFraming, type TransitionDirection } from '@pireel/studio-engine/composition';
-import { type SourceRig, openSource, sampleAt } from './client-export';
+import { disposeSourceRig, type SourceRig, openSource, sampleAt } from './export-video-source';
 
 export interface BakeSpec {
   /** Output cut point (seconds) and half-width. */
@@ -59,7 +59,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   // Two sequential sample streams per side (live + handle; sampleAt is monotonic per stream, and the time domains don't connect so they must be separate)
   const rigs: SourceRig[] = [];
   const open = async (f: File, from: number, to: number) => {
-    const r = await openSource(f, Math.max(0, from), Math.max(0, to), W, H);
+    const r = await openSource(f, Math.max(0, from), Math.max(0, to));
     rigs.push(r);
     return r;
   };
@@ -112,11 +112,7 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   } catch {
     return null;
   } finally {
-    for (const r of rigs) {
-      r.cur?.close();
-      r.pending?.close();
-      void r.input.dispose();
-    }
+    for (const r of rigs) disposeSourceRig(r);
   }
 }
 

@@ -116,14 +116,22 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   differs from the source trim duration; the old contiguous 1× behavior remains the explicit fallback.
 - Export takes one V2 document snapshot before encoding. Its cache key, placements and total duration
   therefore describe the same revision even if editing continues while an export is running.
+- Non-primary visual media now crosses the same render boundary through the focused
+  `visual-render-plan.ts` adapter. Preview assembles timed native image/video layers; Agent frame
+  capture and browser export composite the same resolved layers in stable track order above the
+  primary picture and below Pireel graphics/captions. Source trims and retimes use native V2 clip
+  geometry, overlapping video audio joins the timeline mixer, and supplemental `hidden`, `enabled`
+  and `muted` flags are enforced without deleting unavailable/offline assets from the document.
 
-The next render gate is visual compositing for non-primary `visual` tracks (B-roll/PIP) plus applying
-track visibility/mute flags in the renderer. Primary-lane placement is native now, but overlapping
-visual tracks are intentionally not claimed as complete. Consumption by the remaining compatibility
-tools is also a rollout gate, not schema work. The server adapter still projects and remigrates results
-for tools not yet cut over; that path must be removed before overlapping multi-track editing is exposed
-because V1 cannot round-trip those states. The remaining gates must reuse this document, render plan
-and command layer rather than introduce another model.
+The next render gate is independent `hidden`, `enabled` and `muted` behavior for the primary narrative,
+then a declared cross-type ordering rule if users are allowed to move visual media above arbitrary
+graphics/caption tracks. Supplemental B-roll/PIP compositing is native, but graphics and captions are
+currently a deliberate top overlay rather than participants in one arbitrary mixed-media z-stack.
+Consumption by the remaining compatibility tools is also a rollout gate, not schema work. The server
+adapter still projects and remigrates results for tools not yet cut over; that path must be removed
+before overlapping multi-track editing is exposed because V1 cannot round-trip those states. The
+remaining gates must reuse this document, render plan and command layer rather than introduce another
+model.
 
 ## Rollout gates
 
@@ -131,8 +139,8 @@ The multi-track UI must not ship until all of these are true:
 
 - [x] persistence loads V1/V2 and writes only V2;
 - [x] live undo/redo snapshots V2, including cloud-history restore;
-- preview and export consume V2 or a tested read projection (primary native placement complete;
-  overlapping visual-track compositing and render flags remain);
+- preview and export consume V2 or a tested read projection (native primary placement and
+  supplemental visual compositing complete; primary render flags and cross-type order remain);
 - browser and server tools use the same V2 command engine;
 - no command discovers primary narration via `tracks[0]`;
 - audio/graphics/captions follow one declared ripple and anchor policy;

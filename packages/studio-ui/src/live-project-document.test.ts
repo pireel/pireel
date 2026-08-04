@@ -6,6 +6,7 @@ import {
   applyDocumentToLiveProject,
   createLiveProjectDocumentSession,
   documentFromLiveComposition,
+  resolveLiveAssetUrl,
 } from './live-project-document';
 
 describe('canonical live project document', () => {
@@ -66,6 +67,8 @@ describe('canonical live project document', () => {
     });
     expect(result.ok).toBe(true);
     expect(session.state.document.timeline.tracks.map((track) => track.id)).toContain('track_broll');
+    const mainAsset = session.state.document.assets[session.state.document.semantics.primaryNarrativeAssetId!];
+    expect(resolveLiveAssetUrl(session, mainAsset!)).toBe('blob:runtime-main');
     expect(session.state.composition.video?.url).toBe('blob:runtime-main');
     applyCompositionToLiveProject(session, { ...session.state.composition, width: 720 }, { videoSig: 'main.mp4:42:7' });
     expect(session.state.document.timeline.tracks.map((track) => track.id)).toContain('track_broll');

@@ -8,6 +8,7 @@ import {
   applyDocumentToLiveProject,
   createLiveProjectDocumentSession,
   documentFromLiveComposition,
+  resolveLiveAssetUrl,
   type LiveProjectDocumentState,
   type LiveProjectMigrationContext,
 } from './live-project-document';
@@ -55,6 +56,10 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
     return result;
   }, [publish]);
 
+  const resolveAssetUrl = useCallback((asset: Parameters<typeof resolveLiveAssetUrl>[1]) => (
+    resolveLiveAssetUrl(sessionRef.current!, asset)
+  ), []);
+
   return {
     composition: state.composition,
     compositionRef,
@@ -63,6 +68,7 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
     setComposition,
     setDocument,
     dispatchCommand,
+    resolveAssetUrl,
     persistableDocument,
   };
 }

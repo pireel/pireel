@@ -485,10 +485,25 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     return { html, timelineBody };
 }
 
+export interface SupplementalVisualMediaClip {
+  clipId: string;
+  trackId: string;
+  stackOrder: number;
+  kind: 'image' | 'video';
+  source: string;
+  startSec: number;
+  endSec: number;
+  sourceInSec: number;
+  sourceOutSec: number;
+  fit: 'contain' | 'cover';
+  muted: boolean;
+}
+
 export function assembleHtml(
   comp: Composition,
   gsapSrc = '/vendor/gsap.min.js',
   videoPlacements?: readonly import('./composition-core').VideoShotTimelinePlacement[],
+  supplementalVisuals: readonly SupplementalVisualMediaClip[] = [],
 ): string {
   const { width: W, height: H } = comp;
   const theme = getTheme(comp.theme);
@@ -528,6 +543,32 @@ export function assembleHtml(
     if (frameBody) {
       scripts.push(timelineScript('vid', frameBody));
     }
+  }
+  if (!placedVideoShots.length && supplementalVisuals.some((visual) => visual.kind === 'video')) {
+    scripts.push('window.__parentClock = true;');
+  }
+
+  // Non-primary visual tracks are independent layers. Images participate in the ordinary
+  // data-start visibility runtime; videos carry source/timeline mapping for the parent-clock
+  // runtime and remain real media elements only in preview (browser export composites them itself).
+  for (const visual of [...supplementalVisuals].sort((left, right) => (
+    left.stackOrder - right.stackOrder || left.startSec - right.startSec || left.clipId.localeCompare(right.clipId)
+  ))) {
+    const id = `hf-visual-${visual.clipId}`;
+    const duration = Math.max(0, visual.endSec - visual.startSec);
+    const common = `id="${escapeAttr(id)}" data-composition-id="${escapeAttr(id)}" data-start="${n(visual.startSec)}" ` +
+      `data-duration="${n(duration)}" data-track-index="${n(visual.stackOrder)}" data-hf-visual-track="${escapeAttr(visual.trackId)}"`;
+    const mediaStyle = `position:absolute;inset:0;width:100%;height:100%;object-fit:${visual.fit};`;
+    if (visual.kind === 'image') {
+      body.push(`<img class="comp hf-native-visual" ${common} src="${escapeAttr(visual.source)}" alt="" style="${mediaStyle}" />`);
+      continue;
+    }
+    const rate = duration > 1e-9 ? Math.max(0, visual.sourceOutSec - visual.sourceInSec) / duration : 1;
+    body.push(
+      `<video class="hf-native-visual hf-native-video" ${common} data-hf-timeline-media="1" ` +
+      `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" data-source-rate="${n(rate)}" ` +
+      `src="${escapeAttr(visual.source)}" preload="auto" playsinline ${visual.muted ? 'muted ' : ''}style="${mediaStyle}"></video>`,
+    );
   }
 
   // Render after a stable sort by trackIndex: blocks carry no z-index, so DOM order = stacking → sorting makes the claim

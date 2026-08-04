@@ -13,9 +13,9 @@
  *  Audio track — concatenated in edited-segment order: main segments take the main video's audio,
  *    insert clips take their own (matching the preview), timestamps re-stamped onto the edited timeline.
  *
- *  Known not exported: picture-in-picture video block frames (video elements can't enter
- *    foreignObject), the person-matte layer (canvas isn't serialized, degrades gracefully outside
- *    preview). Ported from experiments/client-export-spike (gotchas and notes all from real testing).
+ *  Known not exported: ad-hoc video elements embedded inside graphic blocks (V2 visual-track media
+ *    is composited separately), the person-matte layer (canvas isn't serialized, degrades gracefully
+ *    outside preview). Ported from experiments/client-export-spike (gotchas and notes all from real testing).
  */
 
 import {
@@ -32,15 +32,14 @@ import {
   Output,
   QUALITY_HIGH,
   QUALITY_MEDIUM,
-  VideoSampleSink,
   WebMOutputFormat,
-  type VideoSample,
 } from 'mediabunny';
 import {
   type AudioClip,
   type Composition,
   type ShotFilter,
   type ShotPreciseFraming,
+  type SupplementalVisualMediaClip,
   type TransitionDirection,
   type VideoShotTimelinePlacement,
   assembleHtml,
@@ -58,6 +57,15 @@ import {
 } from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
 import { mixAudioTrack } from './export-audio-mix';
+import {
+  activeVisualMedia,
+  disposeVisualImageBitmaps,
+  drawSupplementalVisualMedia,
+  loadExportVideoFile,
+  loadVisualImageBitmaps,
+  type SampledVisualVideo,
+} from './export-visual-media';
+import { disposeSourceRig, openSource, sampleAt, type SourceRig } from './export-video-source';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { injectPreviewRuntime } from './sample-composition';
 import { buildInlineFontCss } from './export-fonts';
@@ -97,37 +105,6 @@ interface ExpSeg {
   framing?: ShotPreciseFraming;
 }
 
-export interface SourceRig {
-  input: Input;
-  video: Awaited<ReturnType<Input['getPrimaryVideoTrack']>>;
-  audio: Awaited<ReturnType<Input['getPrimaryAudioTrack']>>;
-  /** Sequential sampling (this source's frame times increase monotonically): current frame + single-frame lookahead. */
-  it: AsyncIterator<VideoSample> | null;
-  cur: VideoSample | null;
-  pending: VideoSample | null;
-  /** Native displayed source dimensions used by the shared source-framing geometry. */
-  sw: number;
-  sh: number;
-}
-
-export async function openSource(file: File, from: number, to: number, W: number, H: number): Promise<SourceRig> {
-  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
-  const video = await input.getPrimaryVideoTrack();
-  if (!video) throw new Error(t('common.sourceNoVideoTrack'));
-  const audio = await input.getPrimaryAudioTrack();
-  const sink = new VideoSampleSink(video);
-  return {
-    input,
-    video,
-    audio,
-    it: sink.samples(from, to + 0.5)[Symbol.asyncIterator](),
-    cur: null,
-    pending: null,
-    sw: video.displayWidth,
-    sh: video.displayHeight,
-  };
-}
-
 /** Rewrite an audio sample's PCM through a gain ENVELOPE (interleaved f32 round-trip; format/rate/channels
  *  preserved). gainAt takes the sample-relative offset in seconds, so a shot's fades ride inside one sample
  *  buffer too. Only called when the segment isn't a plain gain-1 passthrough. */
@@ -146,32 +123,6 @@ export function scaleAudioSample(sample: AudioSample, gainAt: (offsetSec: number
     sampleRate: sample.sampleRate,
     timestamp: sample.timestamp,
   });
-}
-
-/** From the sequential stream, take "the last frame with timestamp ≤ srcT" (same as the spike: webm without cues returns null on random access across large ranges). */
-export async function sampleAt(rig: SourceRig, srcT: number): Promise<VideoSample | null> {
-  for (;;) {
-    if (rig.pending) {
-      if (rig.pending.timestamp <= srcT) {
-        rig.cur?.close();
-        rig.cur = rig.pending;
-        rig.pending = null;
-        continue;
-      }
-      break;
-    }
-    if (!rig.it) break;
-    const { value, done } = await rig.it.next();
-    if (done || !value) break;
-    if (value.timestamp <= srcT) {
-      rig.cur?.close();
-      rig.cur = value;
-    } else {
-      rig.pending = value;
-      break;
-    }
-  }
-  return rig.cur;
 }
 
 /* ============================ Overlay layer ============================ */
@@ -201,7 +152,7 @@ function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
           const doc = iframe.contentDocument!;
           // Main-track video is drawn by the canvas layer, kept out of DOM rasterization (#vidEl is the canvas; insert clips have no separate element)
           const hide = doc.createElement('style');
-          hide.textContent = '#vidEl { opacity: 0 !important; }';
+          hide.textContent = '#vidEl, .hf-native-visual { opacity: 0 !important; }';
           doc.head.appendChild(hide);
           await doc.fonts.ready;
           const root = doc.getElementById('root');
@@ -288,6 +239,7 @@ function framedClipPath(W: number, H: number, vs: { radius: number; inset: { t: 
 export interface ClientExportOpts {
   comp: Composition;
   videoPlacements?: readonly VideoShotTimelinePlacement[];
+  visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   /** Main-source bytes. Null is valid for graphics/audio-only and clips-only documents. */
   videoFile: File | null;
@@ -325,6 +277,7 @@ export interface CapturedCompositionFrame {
 export async function captureCompositionFrame(opts: {
   comp: Composition;
   videoPlacements?: readonly VideoShotTimelinePlacement[];
+  visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   videoFile: File | null;
   clipFiles: Map<string, File>;
@@ -364,13 +317,50 @@ export async function captureCompositionFrame(opts: {
   }
   if (file) {
     try {
-      rig = await openSource(file, Math.max(0, srcT - 0.1), srcT, W, H);
+      rig = await openSource(file, Math.max(0, srcT - 0.1), srcT);
     } catch {
       rig = null; // Source won't open: degrade to no video frame (overlay still visible)
     }
   }
+  const activeVisuals = activeVisualMedia(opts.visualMediaClips ?? [], t);
+  const visualRigs = new Map<string, { rig: SourceRig; srcT: number }>();
+  const visualImages = await loadVisualImageBitmaps(activeVisuals);
+  const visualFiles = new Map<string, Promise<File>>();
+  for (const visual of activeVisuals) {
+    if (visual.kind !== 'video') continue;
+    try {
+      let visualFile = visualFiles.get(visual.source);
+      if (!visualFile) {
+        visualFile = loadExportVideoFile(visual.source, opts.clipFiles);
+        visualFiles.set(visual.source, visualFile);
+      }
+      const srcT = segmentSourceTimeAt(
+        { srcStart: visual.sourceInSec, srcEnd: visual.sourceOutSec },
+        t,
+        visual.startSec,
+        visual.endSec,
+      );
+      visualRigs.set(visual.clipId, {
+        rig: await openSource(await visualFile, Math.max(visual.sourceInSec, srcT - 0.1), srcT),
+        srcT,
+      });
+    } catch {
+      // One unavailable supplemental source must not hide the rest of the composed frame.
+    }
+  }
 
-  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements)), W, H);
+  const disposeCaptureSources = () => {
+    if (rig) disposeSourceRig(rig);
+    for (const layer of visualRigs.values()) disposeSourceRig(layer.rig);
+    disposeVisualImageBitmaps(visualImages);
+  };
+  let overlay: Overlay;
+  try {
+    overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
+  } catch (error) {
+    disposeCaptureSources();
+    throw error;
+  }
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
@@ -406,6 +396,22 @@ export async function captureCompositionFrame(opts: {
       ctx.restore();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
+    const visualSamples = new Map<string, SampledVisualVideo>();
+    for (const [clipId, video] of visualRigs) {
+      const sample = await sampleAt(video.rig, video.srcT);
+      if (sample) visualSamples.set(clipId, { sourceWidth: video.rig.sw, sourceHeight: video.rig.sh, sample });
+    }
+    drawSupplementalVisualMedia({
+      ctx,
+      visuals: activeVisuals,
+      timelineTime: t,
+      imageBitmaps: visualImages,
+      videoSamples: visualSamples,
+      targetWidth: W,
+      targetHeight: H,
+      scaleX: outW / W,
+      scaleY: outH / H,
+    });
     ctx.drawImage(overlayImg, 0, 0);
     let localSimilarityFingerprint: ReviewFrameFingerprint | undefined;
     if (opts.localSimilarityFingerprint) {
@@ -438,15 +444,7 @@ export async function captureCompositionFrame(opts: {
       ...(localSimilarityFingerprint ? { localSimilarityFingerprint } : {}),
     };
   } finally {
-    if (rig) {
-      rig.cur?.close();
-      rig.pending?.close();
-      // Return the abandoned iterator so mediabunny's generator finally can close its
-      // decode-ahead samples (same as retireVideoStream; skipping this leaks VideoSamples
-      // to GC — "VideoSample was garbage collected without being closed" warnings).
-      void rig.it?.return?.(undefined);
-      void rig.input.dispose();
-    }
+    disposeCaptureSources();
     overlay.dispose();
   }
 }
@@ -503,43 +501,65 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const key = `clip_${s.id}`;
     segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...placement, ...filter, ...gain, ...fade, ...framing });
     if (!files.has(key)) {
-      const local = clipFiles.get(s.src);
-      if (local) files.set(key, local);
-      else {
-        const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(s.src)}`);
-        if (!r.ok) throw new Error(t('workbench.failedFetchInsertClip'));
-        files.set(key, new File([await r.blob()], 'clip.mp4', { type: 'video/mp4' }));
-      }
+      files.set(key, await loadExportVideoFile(s.src, clipFiles));
     }
   }
+  const visualMediaClips = [...(opts.visualMediaClips ?? [])];
+  const visualVideos = visualMediaClips.filter((clip) => clip.kind === 'video');
+  const visualVideoKeys = new Map<string, string>();
+  const visualFiles = new Map<string, Promise<File>>();
+  for (const visual of visualVideos) {
+    const key = `visual_${visual.trackId}_${visual.clipId}`;
+    visualVideoKeys.set(visual.clipId, key);
+    let visualFile = visualFiles.get(visual.source);
+    if (!visualFile) {
+      visualFile = loadExportVideoFile(visual.source, clipFiles);
+      visualFiles.set(visual.source, visualFile);
+    }
+    files.set(key, await visualFile);
+  }
+  const visualImageBitmaps = await loadVisualImageBitmaps(visualMediaClips);
 
   // Per-source sequential sample stream: start = earliest time this source is used, end = latest
   const rigs = new Map<string, SourceRig>();
-  for (const [key, file] of files) {
-    const mine = segs.filter((s) => s.key === key);
-    if (!mine.length) continue;
-    const from = Math.min(...mine.map((s) => s.srcStart));
-    const to = Math.max(...mine.map((s) => s.srcEnd));
-    rigs.set(key, await openSource(file, from, to, W, H));
-  }
-
-  // Denoise substitution: swap the source's audio track for the baked blend (same source seconds)
   const dnInputs: Input[] = [];
-  if (opts.denoise) {
-    for (const [key, f] of opts.denoise) {
-      const rig = rigs.get(key);
-      if (!rig) continue;
-      const input = new Input({ source: new BlobSource(f), formats: ALL_FORMATS });
-      const at = await input.getPrimaryAudioTrack();
-      if (at) {
-        rig.audio = at;
-        dnInputs.push(input);
-      } else void input.dispose();
+  let overlay: Overlay;
+  try {
+    for (const [key, file] of files) {
+      const mine = segs.filter((s) => s.key === key);
+      const visual = visualVideos.find((clip) => visualVideoKeys.get(clip.clipId) === key);
+      if (!mine.length && !visual) continue;
+      if (visual) {
+        rigs.set(key, await openSource(file, visual.sourceInSec, visual.sourceOutSec));
+        continue;
+      }
+      const from = Math.min(...mine.map((s) => s.srcStart));
+      const to = Math.max(...mine.map((s) => s.srcEnd));
+      rigs.set(key, await openSource(file, from, to));
     }
-  }
 
-  // Overlay document + asset inlining
-  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements)), W, H);
+    // Denoise substitution: swap the source's audio track for the baked blend (same source seconds)
+    if (opts.denoise) {
+      for (const [key, f] of opts.denoise) {
+        const rig = rigs.get(key);
+        if (!rig) continue;
+        const input = new Input({ source: new BlobSource(f), formats: ALL_FORMATS });
+        const at = await input.getPrimaryAudioTrack();
+        if (at) {
+          rig.audio = at;
+          dnInputs.push(input);
+        } else void input.dispose();
+      }
+    }
+
+    // Overlay document + asset inlining
+    overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
+  } catch (error) {
+    for (const rig of rigs.values()) disposeSourceRig(rig);
+    for (const input of dnInputs) void input.dispose();
+    disposeVisualImageBitmaps(visualImageBitmaps);
+    throw error;
+  }
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
@@ -564,10 +584,12 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const withClips = !!opts.audio?.length;
-    const needsTimelineMix = withClips || segs.some((segment) =>
+    const needsTimelineMix = withClips || visualVideos.length > 0 || segs.some((segment) =>
       Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
     );
-    const anyAudio = withClips || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
+    const anyAudio = withClips
+      || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio)
+      || visualVideos.some((visual) => !visual.muted && rigs.get(visualVideoKeys.get(visual.clipId)!)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
@@ -621,8 +643,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const postKey = `g_post_${trsX.length}`;
       const rateA = segmentSourceRate(segA, segA.timelineStart, segA.timelineEnd);
       const rateB = segmentSourceRate(segB, segB.timelineStart, segB.timelineEnd);
-      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - tr.half * rateB), segB.srcStart + 0.2 * rateB, W, H));
-      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.half + 0.2) * rateA, W, H));
+      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - tr.half * rateB), segB.srcStart + 0.2 * rateB));
+      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.half + 0.2) * rateA));
       trsX.push({ cut: tr.cut, half: tr.half, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
     }
     // gl-transitions mixer (output resolution; not built if there are no transitions)
@@ -638,6 +660,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const end = segs[si]!.timelineEnd;
       lastUse.set(segs[si]!.key, Math.max(lastUse.get(segs[si]!.key) ?? 0, end));
     }
+    for (const visual of visualVideos) lastUse.set(visualVideoKeys.get(visual.clipId)!, visual.endSec);
     for (const x of trsX) {
       lastUse.set(x.preKey, x.cut + x.half);
       lastUse.set(x.postKey, x.cut + x.half);
@@ -712,11 +735,27 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const gSrcT = tr && gseg
         ? (pre ? Math.max(0, gseg.srcStart - (tr.cut - t) * gRate) : gseg.srcEnd + (t - tr.cut) * gRate)
         : 0;
+      const visualSamplesP = Promise.all(visualVideos.map(async (visual) => {
+        if (t < visual.startSec - 1e-6 || t >= visual.endSec - 1e-6) return null;
+        const key = visualVideoKeys.get(visual.clipId)!;
+        const visualRig = rigs.get(key);
+        if (!visualRig) return null;
+        const segment = { srcStart: visual.sourceInSec, srcEnd: visual.sourceOutSec };
+        const visualSrcT = segmentSourceTimeAt(segment, t, visual.startSec, visual.endSec);
+        const visualSample = await sampleAt(visualRig, visualSrcT);
+        return visualSample ? {
+          clipId: visual.clipId,
+          sourceWidth: visualRig.sw,
+          sourceHeight: visualRig.sh,
+          sample: visualSample,
+        } : null;
+      }));
       const v0 = performance.now();
-      const [overlayImg, sample, gSample] = await Promise.all([
+      const [overlayImg, sample, gSample, visualSamples] = await Promise.all([
         overlayP,
         rig ? sampleAt(rig, srcT).then((s) => ((tm.video += performance.now() - v0), s)) : null,
         gRig ? sampleAt(gRig, gSrcT) : null,
+        visualSamplesP,
       ]);
       lastSerial = serial;
       lastOverlayImg = overlayImg;
@@ -788,6 +827,24 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         }
       }
       if (!mixed) vctx.drawImage(liveC, 0, 0);
+      // Supplemental V2 visual tracks composite bottom-to-top above the primary canvas and below
+      // the HTML graphics/caption overlay. Their array is already stack-order sorted by the adapter.
+      const videoLayers = new Map<string, SampledVisualVideo>();
+      for (const layer of visualSamples) {
+        if (!layer) continue;
+        videoLayers.set(layer.clipId, layer);
+      }
+      drawSupplementalVisualMedia({
+        ctx: vctx,
+        visuals: visualMediaClips,
+        timelineTime: t,
+        imageBitmaps: visualImageBitmaps,
+        videoSamples: videoLayers,
+        targetWidth: W,
+        targetHeight: H,
+        scaleX: Sx,
+        scaleY: Sy,
+      });
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const d0 = performance.now();
@@ -833,16 +890,27 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
       const clips: { clip: AudioClip; buffer: AudioBuffer }[] = [];
       for (const a of opts.audio ?? []) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
+      const supplementalAudioSegs = visualVideos.map((visual) => ({
+        srcStart: visual.sourceInSec,
+        srcEnd: visual.sourceOutSec,
+        key: visualVideoKeys.get(visual.clipId)!,
+        timelineStart: visual.startSec,
+        timelineEnd: visual.endSec,
+        gain: visual.muted ? 0 : 1,
+      }));
       await mixAudioTrack({
-        segs: segs.map((s) => ({
-          srcStart: s.srcStart,
-          srcEnd: s.srcEnd,
-          key: s.key,
-          timelineStart: s.timelineStart,
-          timelineEnd: s.timelineEnd,
-          gain: s.gain ?? 1,
-          fadeAt: s.fadeAt,
-        })),
+        segs: [
+          ...segs.map((s) => ({
+            srcStart: s.srcStart,
+            srcEnd: s.srcEnd,
+            key: s.key,
+            timelineStart: s.timelineStart,
+            timelineEnd: s.timelineEnd,
+            gain: s.gain ?? 1,
+            fadeAt: s.fadeAt,
+          })),
+          ...supplementalAudioSegs,
+        ],
         audioTracks,
         clips,
         totalSec: durationSec,
@@ -871,12 +939,9 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const buf = (output.target as BufferTarget).buffer!;
     return new Blob([buf], { type: render.format === 'webm' ? 'video/webm' : render.format === 'mov' ? 'video/quicktime' : 'video/mp4' });
   } finally {
-    for (const rig of rigs.values()) {
-      rig.cur?.close();
-      rig.pending?.close();
-      void rig.input.dispose();
-    }
+    for (const rig of rigs.values()) disposeSourceRig(rig);
     for (const input of dnInputs) void input.dispose();
+    disposeVisualImageBitmaps(visualImageBitmaps);
     overlay.dispose();
   }
 }

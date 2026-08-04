@@ -14,6 +14,7 @@ import {
   type CaptionStyle,
   type Composition,
   type EditorDocumentV2,
+  type EditorMediaAsset,
   type CutTransitionEffect,
   type ShotFilter,
   type ShotTreatment,
@@ -90,6 +91,7 @@ import { type ExportRenderOpts, captureCompositionFrame } from './client-export'
 import { groupSimilarReviewFrames } from './review-similarity';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
+import { supplementalVisualMedia } from './visual-render-plan';
 
 const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo'));
@@ -110,11 +112,15 @@ function reviewMomentAttempts(compRef: object, compositionHash: string): Map<num
   return attempts;
 }
 
-function canonicalRenderTimeline(document: EditorDocumentV2) {
-  const plan = editorDocumentRenderPlan(document);
+function canonicalRenderTimeline(
+  document: EditorDocumentV2,
+  resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined,
+) {
+  const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
   return {
     durationSec: plan.durationSec,
     placements: plan.narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec })),
+    visualMediaClips: supplementalVisualMedia(plan),
   };
 }
 
@@ -130,6 +136,7 @@ export interface AgentToolCtx {
   compRef: MutableRefObject<Composition>;
   setComp: (action: SetStateAction<Composition>) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
+  resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   ensureShots: (c: Composition) => VideoShot[];
   /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
@@ -220,7 +227,7 @@ export interface AgentToolCtx {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
-    compRef, setComp, documentRef, setDocument, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
+    compRef, setComp, documentRef, resolveAssetUrl, setDocument, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
@@ -809,10 +816,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // vision model looks at the composed frames and the FINDINGS come back as text (issues JSON)
             const atsIn = Array.isArray(input.atSecs) ? (input.atSecs as unknown[]).map(Number).filter(Number.isFinite) : [];
             if (!atsIn.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
-            const renderTimeline = canonicalRenderTimeline(documentRef.current);
+            const renderTimeline = canonicalRenderTimeline(documentRef.current, resolveAssetUrl);
             const dur = renderTimeline.durationSec;
             const requestedAts = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 18);
-            const compHash = `${compositionRevision(c).compositionHash}:${JSON.stringify(renderTimeline.placements)}`;
+            const compHash = `${compositionRevision(c).compositionHash}:${JSON.stringify(renderTimeline)}`;
             const momentAttempts = reviewMomentAttempts(compRef, compHash);
             const { allowedAtSecs: ats, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
             if (!ats.length) {
@@ -836,6 +843,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const shot = await captureCompositionFrame({
                   comp: c,
                   videoPlacements: renderTimeline.placements,
+                  visualMediaClips: renderTimeline.visualMediaClips,
                   timelineDurationSec: renderTimeline.durationSec,
                   videoFile: videoFileRef.current,
                   clipFiles: clipFilesRef.current,
@@ -1925,11 +1933,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
       }
       case 'capture_frame': {
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
-        const renderTimeline = canonicalRenderTimeline(ctx.documentRef.current);
+        const renderTimeline = canonicalRenderTimeline(ctx.documentRef.current, ctx.resolveAssetUrl);
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), renderTimeline.durationSec) : tRef.current;
         const momentAttempts = reviewMomentAttempts(
           compRef,
-          `${compositionRevision(c2).compositionHash}:${JSON.stringify(renderTimeline.placements)}`,
+          `${compositionRevision(c2).compositionHash}:${JSON.stringify(renderTimeline)}`,
         );
         if (!selectReviewMoments([at], momentAttempts).allowedAtSecs.length) {
           return {
@@ -1943,6 +1951,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const shot = await captureCompositionFrame({
             comp: c2,
             videoPlacements: renderTimeline.placements,
+            visualMediaClips: renderTimeline.visualMediaClips,
             timelineDurationSec: renderTimeline.durationSec,
             videoFile: videoFileRef.current,
             clipFiles: clipFilesRef.current,

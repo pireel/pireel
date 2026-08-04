@@ -80,7 +80,7 @@ window.__timelines = window.__timelines || {};
 /** Preview runtime injected into the iframe (runs after the composition's own scripts, so it can read __timelines).
  *  On play: video uses native play() (smooth, no per-frame seek); GSAP caption timelines align frame-by-frame to the video clock.
  *  On scrub/pause: only then seek the video's currentTime. */
-const PREVIEW_RUNTIME = `
+export const PREVIEW_RUNTIME = `
 <script>
 (function () {
   try { document.body.classList.add('hf-editor'); } catch (e) {} // edit mode: show media-slot placeholders (export doesn't inject this runtime → placeholders not rendered)
@@ -116,6 +116,31 @@ const PREVIEW_RUNTIME = `
     return max || 5;
   }
 
+  var timelinePlaying = false;
+  function syncTimelineMedia(t, wantPlay) {
+    media().forEach(function (m) {
+      if (!m.hasAttribute('data-hf-timeline-media')) return;
+      var s = num(m, 'data-start', 0);
+      var d = num(m, 'data-duration', 0);
+      var active = t >= s && t < s + d;
+      m.style.visibility = active ? 'visible' : 'hidden';
+      var sourceIn = num(m, 'data-source-in', 0);
+      var sourceOut = num(m, 'data-source-out', Infinity);
+      var rate = Math.max(0.0001, num(m, 'data-source-rate', 1));
+      var target = Math.min(sourceOut, Math.max(sourceIn, sourceIn + (t - s) * rate));
+      // Native media elements reject extreme playbackRate values. Keep native playback inside the
+      // interoperable range, while the independent target-time correction still follows exact V2
+      // source geometry for more extreme retimes.
+      try { m.playbackRate = Math.min(16, Math.max(0.0625, rate)); } catch (e) {}
+      try { if (!m.seeking && Math.abs(m.currentTime - target) > 0.18) m.currentTime = target; } catch (e2) {}
+      if (active && wantPlay) {
+        if (m.paused) { var p = m.play && m.play(); if (p && p.catch) p.catch(function () {}); }
+      } else if (!m.paused) {
+        try { m.pause(); } catch (e3) {}
+      }
+    });
+  }
+
   // align captions/layers only (GSAP timeline + visibility), don't touch video currentTime — called per frame during playback, smooth.
   function seekTimelines(t) {
     lastSeekT = t; // "latest render time" must include per-frame playback: capEdit/animPreview restore replays it;
@@ -142,11 +167,13 @@ const PREVIEW_RUNTIME = `
     });
     media().forEach(function (m) {
       if (m.tagName === 'VIDEO') {
+        if (m.hasAttribute('data-hf-timeline-media')) return;
         var s = num(m, 'data-start', 0);
         var d = num(m, 'data-duration', 1e9);
         m.style.visibility = (t >= s && t < s + d) ? 'visible' : 'hidden';
       }
     });
+    syncTimelineMedia(t, timelinePlaying);
   }
 
   // full seek (including video currentTime, final-cut time) — for scrub/pause positioning.
@@ -154,9 +181,11 @@ const PREVIEW_RUNTIME = `
   function seek(t) {
     lastSeekT = t;
     media().forEach(function (m) {
+      if (m.hasAttribute('data-hf-timeline-media')) return;
       var s = num(m, 'data-start', 0);
       try { m.currentTime = Math.max(0, t - s); } catch (e) {}
     });
+    syncTimelineMedia(t, timelinePlaying);
     seekTimelines(t);
   }
 
@@ -170,7 +199,9 @@ const PREVIEW_RUNTIME = `
   var FOCUS_CLEAR = 'opacity,visibility,transform,clipPath,filter';
 
   function play(t) {
+    timelinePlaying = true;
     media().forEach(function (m) {
+      if (m.hasAttribute('data-hf-timeline-media')) return;
       var s = num(m, 'data-start', 0);
       try { m.currentTime = Math.max(0, t - s); } catch (e) {}
       var p = m.play && m.play();
@@ -181,6 +212,7 @@ const PREVIEW_RUNTIME = `
         fpost({ type: 'playBlocked', name: err && err.name, msg: String((err && err.message) || '').slice(0, 140) });
       });
     });
+    syncTimelineMedia(t, true);
     // canvas render mode (__parentClock): clock/video frames belong to the parent engine; this doc doesn't self-drive or report clock/ended;
     // media() above holds only picture-in-picture assets, just start them normally. The parent sends hf:seekTimelines each frame to align overlays.
     if (window.__parentClock) { drive.on = false; return; }
@@ -188,6 +220,7 @@ const PREVIEW_RUNTIME = `
   }
   function pause() {
     drive.on = false;
+    timelinePlaying = false;
     media().forEach(function (m) { try { m.pause(); } catch (e) {} });
     // pause = freeze at the current playback state (user's intent); we've been bitten by "animation jumps back to base state on pause".
   }
