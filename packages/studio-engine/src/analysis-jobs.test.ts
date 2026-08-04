@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Composition } from './composition';
 import { runServerTool, type ServerToolProject } from './server-tools';
+import { compositionToEditorDocument } from './project-document';
 import {
   applyEditProposal,
   cancelAnalysisJob,
@@ -13,6 +14,7 @@ import {
   requestAnalysisCancellation,
   retryAnalysisJob,
   startAnalysisJob,
+  editorDocumentRevision,
 } from './analysis-jobs';
 
 const comp = (): Composition => ({
@@ -53,6 +55,27 @@ describe('analysis job state machine', () => {
     expect(compositionRevision(a, { sourceFingerprint: 'main-sig' }).compositionHash).not.toBe(
       compositionRevision(b, { sourceFingerprint: 'another-main' }).compositionHash,
     );
+  });
+
+  it('hashes native timeline gaps and track state that the render projection cannot preserve', () => {
+    const document = compositionToEditorDocument({ projectId: 'p1', composition: comp() }).document;
+    const primary = document.timeline.tracks.find((track) => track.role === 'primaryNarrative')!;
+    const moved = {
+      ...document,
+      timeline: {
+        tracks: document.timeline.tracks.map((track) => track.id === primary.id
+          ? { ...track, clips: track.clips.map((clip) => ({ ...clip, startFrame: clip.startFrame + 30 })) }
+          : track),
+      },
+    };
+    const hidden = {
+      ...document,
+      timeline: {
+        tracks: document.timeline.tracks.map((track) => track.id === primary.id ? { ...track, hidden: true } : track),
+      },
+    };
+    expect(editorDocumentRevision(document).compositionHash).not.toBe(editorDocumentRevision(moved).compositionHash);
+    expect(editorDocumentRevision(document).compositionHash).not.toBe(editorDocumentRevision(hidden).compositionHash);
   });
 
   it('progress is monotonic and completion publishes a reviewable proposal', () => {
@@ -127,7 +150,7 @@ describe('edit proposal evaluation', () => {
       id: 'p1',
       title: 'P1',
       comp: candidate,
-      context: {},
+      document: compositionToEditorDocument({ projectId: 'p1', composition: candidate }).document,
       videoDurationSec: 10,
     };
     const out = runServerTool(operation.tool, operation.input, project);

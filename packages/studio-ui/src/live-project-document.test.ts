@@ -50,13 +50,13 @@ describe('canonical live project document', () => {
     expect(session.state.composition.video).toBeNull();
   });
 
-  it('builds a persistence snapshot from V2/context without mutating live state', () => {
+  it('builds a persistence snapshot from V2 metadata without mutating live state', () => {
     const session = createLiveProjectDocumentSession('project-1', {
       ...emptyComposition(),
       blocks: [{ id: 'title', templateId: 'custom', slots: {}, startSec: 1, durationSec: 2, trackIndex: 1 }],
     });
     const before = session.state.document;
-    const saved = persistableLiveProjectDocument(session, { context: { plan: { scenes: 2 } } });
+    const saved = persistableLiveProjectDocument(session, { plan: { scenes: 2 } });
     expect(saved.timeline.tracks.flatMap((track) => track.clips).map((clip) => clip.id)).toEqual(['title']);
     expect(saved.semantics.plan).toEqual({ scenes: 2 });
     expect(session.state.document).toBe(before);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { emptyComposition } from './composition-core';
-import { normalizeProjectDocument, projectDocumentToLegacyComposition } from './project-document';
+import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
 
 const transcript: AsrSegment[] = [{
   start: 0,
@@ -23,8 +23,8 @@ function captionFixture() {
     shots: [{ id: 'main', srcStart: 0, srcEnd: 5, treatment: 'full' as const }],
     captionStyle: { color: '#ff0000', bg: '#000000' },
   };
-  const document = normalizeProjectDocument({
-    projectId: 'captions-test', value: composition, context: { asr: transcript }, videoSig: 'main-sig',
+  const document = compositionToEditorDocument({
+    projectId: 'captions-test', composition, videoSig: 'main-sig',
   }).document;
   document.timeline.tracks.push({
     id: 'empty-graphics', type: 'graphics', muted: false, hidden: true, locked: false,
@@ -75,7 +75,7 @@ describe('native caption lifecycle transaction', () => {
     if (!disabled.ok) return;
     expect(disabled.document.appearance.captionStyle).toMatchObject({ on: false, preset: 'ln-clean' });
     expect(disabled.document.timeline.tracks.find((track) => track.id === disabled.document.semantics.managedCaptionTrackId)).toMatchObject({ clips: [] });
-    expect(projectDocumentToLegacyComposition({ projectId: 'captions-test', value: disabled.document }).blocks).toEqual([]);
+    expect(projectDocumentToComposition(disabled.document).blocks).toEqual([]);
   });
 
   it('returns the original document when the managed lane is locked', () => {

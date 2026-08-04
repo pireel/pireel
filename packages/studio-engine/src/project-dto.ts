@@ -1,21 +1,18 @@
 /**
- * The seam between studio project rows and the client DTO (server routes and the client sync
- * layer share this shape). comp video is always stripped (blobs can't be persisted); chat is an
- * array of conversation threads. Cloud is source of truth + local cache; version increases
+ * The seam between Studio database rows and the native client DTO. Runtime URLs are stripped
+ * from EditorDocumentV2 before persistence; chat is an array of conversation threads.
+ * Cloud is source of truth + local cache; version increases
  * monotonically for optimistic concurrency (client save carries baseVersion, server 409s if larger).
  */
 
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
-import { type Composition } from './composition-core';
 import { isEditorDocumentV2, validateEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
 import {
-  emptyPersistedProjectDocument,
-  normalizeProjectDocument,
+  emptyProjectDocument,
   prepareEditorDocumentForPersistence,
   projectDocumentStats,
-  projectDocumentToLegacyComposition,
 } from './project-document';
 import { canonicalJson, hashSection } from './stable-json';
 
@@ -61,33 +58,19 @@ export interface LocalAssetIndexEntry {
   createdAt: number;
 }
 
-/** Server-operable editing context (fuel for the offline MCP executor): client autosave mirrors
- *  it up alongside comp. plan stored loosely (shape is normalized by parsePlan on the use side);
- *  video bytes still never persisted. */
-export interface StudioProjectContext {
-  asr?: TranscriptSegment[];
-  clipAsr?: Record<string, TranscriptSegment[]>;
-  plan?: unknown;
-  /** Index into the cloud byte rendezvous (R2): main video / inserted sources sig→key (the bytes
-   *  live in R2, content-addressed). Cross-device retrieval and future offline ASR / cloud render look up here. */
-  media?: {
-    video?: { sig: string; key: string };
-    clips?: Record<string, { key: string }>;
-  };
-  /** Metadata only — never file bytes. Used to render per-asset restore cards across browsers. */
-  localAssets?: LocalAssetIndexEntry[];
+/** Cloud byte rendezvous for native V2 assets. */
+export interface ProjectCloudMediaIndex {
+  video?: { sig: string; key: string };
+  clips?: Record<string, { key: string }>;
 }
 
 /** Full project payload between client and server. */
 export interface StudioProjectDto {
   id: string;
   title: string;
-  /** Canonical persisted/editing document. New saves always write this V2 shape. */
+  /** Canonical persisted/editing document. */
   document: EditorDocumentV2;
-  /** Temporary read-only projection for UI surfaces not yet cut over to V2. */
-  comp: Composition;
   chat: unknown[];
-  context: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
@@ -95,7 +78,7 @@ export interface StudioProjectDto {
   updatedAt: number; // epoch ms
 }
 
-/** Lightweight meta for lists (without the big comp/chat fields). */
+/** Lightweight meta for lists (without the large document/chat fields). */
 export interface StudioProjectMeta {
   id: string;
   title: string;
@@ -110,20 +93,15 @@ export interface StudioProjectMeta {
 /** Save payload from client to server (ProjectStore.save's arg; shared by cloud sync and the provider contract). */
 export interface ProjectSavePayload {
   title?: string;
-  /** Absent = chat-only save (consultation session on an empty canvas): the comp section is simply not sent,
-   *  the server keeps its current comp (merge) or seeds an empty one (first insert). Chat and canvas sync independently. */
-  comp?: Composition;
-  /** V2-native callers bypass legacy migration. Takes precedence over comp when supplied. */
+  /** Absent for chat-only saves; the server keeps the current document or seeds an empty V2 row. */
   document?: EditorDocumentV2;
   chat: unknown[];
-  /** Editing context (asr/clipAsr/plan/media): needed by the offline executor and cross-device retrieval. */
-  context?: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
 }
 
-/** Save payload cap (comp's LLM-generated HTML + chat history can be sizable, but keep it bounded). */
+/** Save payload cap (document graphics + chat history can be sizable, but keep it bounded). */
 export const MAX_PROJECT_BYTES = 8 * 1024 * 1024;
 
 type Row = {
@@ -131,7 +109,6 @@ type Row = {
   title: string;
   comp: unknown;
   chat: unknown;
-  context?: unknown;
   videoSig: string | null;
   videoDurationSec: string | number | null;
   coverThumb: string | null;
@@ -140,22 +117,14 @@ type Row = {
 };
 
 export function rowToDto(r: Row): StudioProjectDto {
-  const context = (r.context && typeof r.context === 'object' ? r.context : {}) as StudioProjectContext;
   const videoDurationSec = r.videoDurationSec == null ? null : Number(r.videoDurationSec);
-  const document = normalizeProjectDocument({
-    projectId: r.id,
-    value: r.comp,
-    context,
-    videoSig: r.videoSig,
-    videoDurationSec,
-  }).document;
+  if (!isEditorDocumentV2(r.comp)) throw new Error(`project document is not V2: ${r.id}`);
+  const document = prepareEditorDocumentForPersistence(r.comp);
   return {
     id: r.id,
     title: r.title,
     document,
-    comp: projectDocumentToLegacyComposition({ projectId: r.id, value: document }),
     chat: Array.isArray(r.chat) ? r.chat : [],
-    context,
     videoSig: r.videoSig,
     videoDurationSec,
     coverThumb: r.coverThumb,
@@ -165,14 +134,8 @@ export function rowToDto(r: Row): StudioProjectDto {
 }
 
 export function rowToMeta(r: Row): StudioProjectMeta {
-  const context = (r.context && typeof r.context === 'object' ? r.context : {}) as StudioProjectContext;
-  const document = normalizeProjectDocument({
-    projectId: r.id,
-    value: r.comp,
-    context,
-    videoSig: r.videoSig,
-    videoDurationSec: r.videoDurationSec == null ? null : Number(r.videoDurationSec),
-  }).document;
+  if (!isEditorDocumentV2(r.comp)) throw new Error(`project document is not V2: ${r.id}`);
+  const document = prepareEditorDocumentForPersistence(r.comp);
   const stats = projectDocumentStats(document);
   return {
     id: r.id,
@@ -189,35 +152,32 @@ export function rowToMeta(r: Row): StudioProjectMeta {
 /* ==================== incremental save wire format ==================== */
 /*
  * The PUT body is a DIFF, two levels:
- *  1. Sectioning: the full payload splits into five sections (comp/chat/context/coverThumb/meta);
+ *  1. Sectioning: the full payload splits into four sections (document/chat/coverThumb/meta);
  *     unchanged sections aren't sent, all-unchanged = zero request; on the server, ABSENT = unchanged,
  *     keeping the current stored value.
  *  2. Intra-section JSON Patch (RFC 6902, fast-json-patch): the client keeps a copy of the
- *     "last successfully saved value"; the changed big sections (comp/chat/context) compare against
+ *     "last successfully saved value"; the changed big sections (document/chat) compare against
  *     it into an op list, and if that's smaller than the whole section (<60%) it sends the patch —
  *     dragging one block = one replace of a few hundred bytes, no more re-sending the whole 246KB.
- * Correctness anchor: comp/chat patches carry a target canonical hash; the server verifies after
+ * Correctness anchor: document/chat patches carry a target canonical hash; the server verifies after
  * applying, and on mismatch (base drifted / patch corrupt) → 422 need_full, the client clears the
  * baseline and re-sends the whole section — worst case degrades to full, never silently wrong.
- * context patches aren't verified (the server may have merged in keys from elsewhere, legitimately
- * more than the client), and apply itself preserves unknown keys. The patch precondition =
- * baseVersion optimistic concurrency: on 409 the client re-seeds the baseline (ackedFromDto) from
+ * The patch precondition = baseVersion optimistic concurrency: on 409 the client re-seeds the baseline (ackedFromDto) from
  * the returned server full, so the retry diff is computed against server truth, converging per section.
  */
 
 /** Diff wire format from client to server (serverSaveProject builds it from the full payload).
  *  Each big section is one of three: full value / patch+target hash / absent (unchanged). */
 export interface ProjectSaveWire {
+  /** Save protocol version. Old tabs omit this and are told to reload instead of being normalized. */
+  documentSchemaVersion: 2;
   baseVersion: number | null;
-  /** Kept under the historical wire/DB key `comp`; its value is V2 from this version onward. */
-  comp?: EditorDocumentV2;
-  compPatch?: Operation[];
-  compHash?: string;
+  document?: EditorDocumentV2;
+  documentPatch?: Operation[];
+  documentHash?: string;
   chat?: unknown[];
   chatPatch?: Operation[];
   chatHash?: string;
-  context?: StudioProjectContext;
-  contextPatch?: Operation[];
   coverThumb?: string | null;
   title?: string;
   videoSig?: string | null;
@@ -225,16 +185,15 @@ export interface ProjectSaveWire {
 }
 
 export interface SectionHashes {
-  comp: string;
+  document: string;
   chat: string;
-  context: string;
   coverThumb: string;
   meta: string;
 }
 
 /** Diff baseline from the last successful save: values (JSON-clean, the base for patch diffs) + hashes (quick changed-or-not check). */
 export interface AckedSections {
-  values: { comp: EditorDocumentV2; chat: unknown[]; context: StudioProjectContext };
+  values: { document: EditorDocumentV2; chat: unknown[] };
   hashes: SectionHashes;
 }
 
@@ -243,38 +202,24 @@ const metaHashOf = (title: string | null | undefined, videoSig: string | null, d
 
 /** Server full DTO → diff baseline (re-seed from server truth after a 409 conflict so the retry diff aligns). */
 export function ackedFromDto(p: {
-  id?: string;
-  document?: EditorDocumentV2;
-  comp: Composition;
+  document: EditorDocumentV2;
   chat: unknown[];
-  context: StudioProjectContext;
   coverThumb: string | null;
   title: string;
   videoSig: string | null;
   videoDurationSec: number | null;
 }): AckedSections {
-  const document = p.document
-    ? prepareEditorDocumentForPersistence(p.document)
-    : normalizeProjectDocument({
-        projectId: p.id ?? 'legacy-project',
-        value: p.comp,
-        context: p.context,
-        videoSig: p.videoSig,
-        videoDurationSec: p.videoDurationSec,
-      }).document;
-  const compCanon = canonicalJson(document);
+  const document = prepareEditorDocumentForPersistence(p.document);
+  const documentCanon = canonicalJson(document);
   const chatCanon = canonicalJson(p.chat ?? []);
-  const ctxCanon = canonicalJson(p.context ?? {});
   return {
     values: {
-      comp: JSON.parse(compCanon) as EditorDocumentV2,
+      document: JSON.parse(documentCanon) as EditorDocumentV2,
       chat: JSON.parse(chatCanon) as unknown[],
-      context: JSON.parse(ctxCanon) as StudioProjectContext,
     },
     hashes: {
-      comp: hashSection(compCanon),
+      document: hashSection(documentCanon),
       chat: hashSection(chatCanon),
-      context: hashSection(ctxCanon),
       coverThumb: hashSection(p.coverThumb ?? ''),
       meta: metaHashOf(p.title, p.videoSig, p.videoDurationSec),
     },
@@ -320,43 +265,29 @@ export function buildSaveWire(
   p: ProjectSavePayload,
   baseVersion: number | null,
   acked: AckedSections | null,
-  projectId = 'legacy-project',
 ): { wire: ProjectSaveWire; acked: AckedSections } | null {
-  // comp absent = chat-only save: don't emit the comp section at all; carry the baseline forward so a later
-  // comp-ful save diffs correctly (no acked yet → seed the baseline as empty, matching the server's first-insert seed)
-  const document = p.document
-    ? prepareEditorDocumentForPersistence(p.document)
-    : p.comp
-      ? normalizeProjectDocument({
-          projectId,
-          value: p.comp,
-          context: p.context,
-          videoSig: p.videoSig,
-          videoDurationSec: p.videoDurationSec,
-        }).document
-      : null;
-  const compCanon = document ? canonicalJson(document) : null;
+  // document absent = chat-only save. Carry the baseline forward so a later document save diffs
+  // correctly (no acked yet means the server's empty V2 first-insert seed).
+  const document = p.document ? prepareEditorDocumentForPersistence(p.document) : null;
+  const documentCanon = document ? canonicalJson(document) : null;
   const chatCanon = canonicalJson(p.chat ?? []);
-  const ctxCanon = canonicalJson(p.context ?? {});
   const hashes: SectionHashes = {
-    comp: compCanon != null ? hashSection(compCanon) : (acked?.hashes.comp ?? hashSection(canonicalJson(emptyPersistedProjectDocument()))),
+    document: documentCanon != null ? hashSection(documentCanon) : (acked?.hashes.document ?? hashSection(canonicalJson(emptyProjectDocument()))),
     chat: hashSection(chatCanon),
-    context: hashSection(ctxCanon),
     coverThumb: hashSection(p.coverThumb ?? ''),
     meta: metaHashOf(p.title, p.videoSig, p.videoDurationSec),
   };
   // JSON-clean current values (parsed from the canonical string: incidentally drops undefined, so diff is structurally comparable to the baseline)
   const values: AckedSections['values'] = {
-    comp: compCanon != null ? (JSON.parse(compCanon) as EditorDocumentV2) : (acked?.values.comp ?? emptyPersistedProjectDocument()),
+    document: documentCanon != null ? (JSON.parse(documentCanon) as EditorDocumentV2) : (acked?.values.document ?? emptyProjectDocument()),
     chat: JSON.parse(chatCanon) as unknown[],
-    context: JSON.parse(ctxCanon) as StudioProjectContext,
   };
-  const wire: ProjectSaveWire = { baseVersion };
+  const wire: ProjectSaveWire = { documentSchemaVersion: 2, baseVersion };
   const w = wire as unknown as Record<string, unknown>;
   let changed = false;
 
   /** Big-section tri-state: unchanged → absent / has baseline and patch is smaller → send patch / else whole section. */
-  const emitBig = (key: 'comp' | 'chat' | 'context', canon: string, withHash: boolean) => {
+  const emitBig = (key: 'document' | 'chat', canon: string, withHash: boolean) => {
     if (acked && acked.hashes[key] === hashes[key]) return;
     changed = true;
     if (acked) {
@@ -373,9 +304,8 @@ export function buildSaveWire(
     }
     w[key] = values[key];
   };
-  if (compCanon != null) emitBig('comp', compCanon, true);
+  if (documentCanon != null) emitBig('document', documentCanon, true);
   emitBig('chat', chatCanon, true);
-  emitBig('context', ctxCanon, false);
 
   if (!acked || acked.hashes.coverThumb !== hashes.coverThumb) {
     wire.coverThumb = p.coverThumb;
@@ -399,55 +329,46 @@ function sanitizeOps(v: unknown): Operation[] | undefined {
 }
 
 /** Validate/sanitize the save request body (diff semantics: absent field = undefined = keep current value). Returns null = invalid. */
-export function sanitizeSavePayload(body: unknown, projectId = 'legacy-project'): {
+export function sanitizeSavePayload(body: unknown): {
   title?: string;
-  comp?: EditorDocumentV2;
-  compPatch?: Operation[];
-  compHash?: string;
+  document?: EditorDocumentV2;
+  documentPatch?: Operation[];
+  documentHash?: string;
   chat?: unknown[];
   chatPatch?: Operation[];
   chatHash?: string;
-  contextPatch?: Operation[];
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
-  context: StudioProjectContext | undefined;
   baseVersion: number | null;
+  documentSchemaVersion: 2 | null;
 } | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
+  if (['comp', 'compPatch', 'compHash', 'context', 'contextPatch'].some((key) => key in b)) return null;
   const dur = b.videoDurationSec;
-  const context = b.context && typeof b.context === 'object' && !Array.isArray(b.context)
-    ? b.context as StudioProjectContext
-    : undefined;
   const videoSig = typeof b.videoSig === 'string' ? b.videoSig.slice(0, 200) : null;
   const videoDurationSec = typeof dur === 'number' && Number.isFinite(dur) ? dur : null;
-  let comp: EditorDocumentV2 | undefined;
-  if (b.comp && typeof b.comp === 'object') {
-    const normalized = normalizeProjectDocument({
-      projectId,
-      value: b.comp,
-      context,
-      videoSig,
-      videoDurationSec,
-    });
-    if (normalized.issues.some((issue) => issue.severity === 'error')) return null;
-    comp = normalized.document;
+  let document: EditorDocumentV2 | undefined;
+  if (b.document && typeof b.document === 'object') {
+    if (!isEditorDocumentV2(b.document)) return null;
+    const prepared = prepareEditorDocumentForPersistence(b.document);
+    if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
+    document = prepared;
   }
   return {
     ...(typeof b.title === 'string' && b.title.trim() ? { title: b.title.slice(0, 120) } : {}),
-    ...(comp ? { comp } : {}),
+    ...(document ? { document } : {}),
     ...(Array.isArray(b.chat) ? { chat: b.chat } : {}),
-    ...(sanitizeOps(b.compPatch) ? { compPatch: sanitizeOps(b.compPatch) } : {}),
+    ...(sanitizeOps(b.documentPatch) ? { documentPatch: sanitizeOps(b.documentPatch) } : {}),
     ...(sanitizeOps(b.chatPatch) ? { chatPatch: sanitizeOps(b.chatPatch) } : {}),
-    ...(sanitizeOps(b.contextPatch) ? { contextPatch: sanitizeOps(b.contextPatch) } : {}),
-    ...(typeof b.compHash === 'string' ? { compHash: b.compHash.slice(0, 64) } : {}),
+    ...(typeof b.documentHash === 'string' ? { documentHash: b.documentHash.slice(0, 64) } : {}),
     ...(typeof b.chatHash === 'string' ? { chatHash: b.chatHash.slice(0, 64) } : {}),
     videoSig,
     videoDurationSec,
     coverThumb: typeof b.coverThumb === 'string' ? b.coverThumb.slice(0, 500_000) : null,
-    context,
     baseVersion: typeof b.baseVersion === 'number' ? b.baseVersion : null,
+    documentSchemaVersion: b.documentSchemaVersion === 2 ? 2 : null,
   };
 }
 
@@ -467,15 +388,14 @@ function applySectionPatch(base: unknown, ops: Operation[], verifyHash?: string)
 }
 
 /** Merge the diff into an existing row (update path): section-level "absent = keep", intra-section
- *  patch apply + hash verify, context merged by key, null doesn't overwrite non-empty.
+ *  patch apply + hash verify, null doesn't overwrite non-empty.
  *  videoDurationSec returns as string|null (numeric column spec). Returns null = patch apply doesn't
  *  hold (base drifted / patch corrupt), caller returns 422 need_full. */
 export function mergeSaveIntoRow(
   existing: {
     title: string;
-    comp: unknown;
+    document: unknown;
     chat: unknown;
-    context?: unknown;
     videoSig: string | null;
     videoDurationSec: string | number | null;
     coverThumb: string | null;
@@ -483,29 +403,24 @@ export function mergeSaveIntoRow(
   p: NonNullable<ReturnType<typeof sanitizeSavePayload>>,
 ): {
   title: string;
-  comp: unknown;
+  document: unknown;
   chat: unknown;
-  context: Record<string, unknown>;
   videoSig: string | null;
   videoDurationSec: string | null;
   coverThumb: string | null;
 } | null {
-  // comp JSON column: full V2 > V2 patch (with hash verify) > keep. Old full V1 clients
-  // are normalized by sanitizeSavePayload before reaching this function.
-  let comp = existing.comp;
-  if (p.comp) comp = p.comp;
-  else if (p.compPatch) {
-    if (!p.compHash) return null; // patch must carry a target hash; missing = client broken
-    const patched = applySectionPatch(existing.comp, p.compPatch);
+  let document = existing.document;
+  if (p.document) document = p.document;
+  else if (p.documentPatch) {
+    if (!p.documentHash) return null; // patch must carry a target hash; missing = client broken
+    const patched = applySectionPatch(existing.document, p.documentPatch);
     if (patched === null) return null;
-    // Patch clients introduced with V2. Refuse a patch against a legacy-shaped row; the caller
-    // responds `need_full` and the client retries with a complete V2 document. This avoids trying
-    // to infer missing migration context after a partial mutation.
+    // Refuse a patch against a legacy-shaped row. Online migration owns that transition.
     if (!isEditorDocumentV2(patched)) return null;
     const prepared = prepareEditorDocumentForPersistence(patched);
     if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
-    if (hashSection(canonicalJson(prepared)) !== p.compHash) return null;
-    comp = prepared;
+    if (hashSection(canonicalJson(prepared)) !== p.documentHash) return null;
+    document = prepared;
   }
 
   let chat = existing.chat;
@@ -517,24 +432,11 @@ export function mergeSaveIntoRow(
     chat = patched;
   }
 
-  // context: full = merge by key (guards partial state against erasure: missing key = don't know ≠ delete);
-  // patch = applied on the server's current value, naturally preserving keys the client doesn't know,
-  // no hash verify (the server may have merged in keys from elsewhere, legitimately more than the client, so verify would always false-positive).
-  const exCtx = (existing.context && typeof existing.context === 'object' ? existing.context : {}) as Record<string, unknown>;
-  let context = exCtx;
-  if (p.context) context = { ...exCtx, ...(p.context as Record<string, unknown>) };
-  else if (p.contextPatch) {
-    const patched = applySectionPatch(exCtx, p.contextPatch);
-    if (patched === null || typeof patched !== 'object' || Array.isArray(patched)) return null;
-    context = patched as Record<string, unknown>;
-  }
-
   const exDur = existing.videoDurationSec;
   return {
     title: p.title ?? existing.title,
-    comp,
+    document,
     chat,
-    context,
     // null doesn't overwrite non-empty: the saving tab may not have hydrated yet (its "absent" ≠ "user deleted")
     videoSig: p.videoSig ?? existing.videoSig,
     videoDurationSec: p.videoDurationSec != null ? String(p.videoDurationSec) : exDur == null ? null : String(exDur),

@@ -6,10 +6,10 @@ import {
   splitAudioDocumentClip,
 } from './audio-document-edit';
 import { emptyComposition } from './composition-core';
-import { normalizeProjectDocument, projectDocumentToLegacyComposition } from './project-document';
+import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
 
 function emptyDocument() {
-  return normalizeProjectDocument({ projectId: 'audio-test', value: emptyComposition(), context: {} }).document;
+  return compositionToEditorDocument({ projectId: 'audio-test', composition: emptyComposition() }).document;
 }
 
 describe('native audio document edits', () => {
@@ -40,7 +40,7 @@ describe('native audio document edits', () => {
       kind: 'audio', startFrame: 90, durationFrames: 120, sourceInSec: 1, sourceOutSec: 9,
       properties: { speed: 2, muted: true },
     });
-    const projected = projectDocumentToLegacyComposition({ projectId: 'audio-test', value: patched.document });
+    const projected = projectDocumentToComposition(patched.document);
     expect(projected.audioTracks?.find((clip) => clip.id === 'music-a')).toMatchObject({
       startSec: 3, inSec: 1, outSec: 9, speed: 2, muted: true,
     });
@@ -48,7 +48,7 @@ describe('native audio document edits', () => {
     const removed = removeAudioDocumentClips(patched.document, ['music-a', 'music-b']);
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
-    expect(projectDocumentToLegacyComposition({ projectId: 'audio-test', value: removed.document }).audioTracks).toBeUndefined();
+    expect(projectDocumentToComposition(removed.document).audioTracks).toBeUndefined();
     expect(removed.document.timeline.tracks.find((track) => track.type === 'audio')).toMatchObject({ clips: [], role: 'music' });
   });
 

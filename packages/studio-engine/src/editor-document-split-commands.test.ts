@@ -3,6 +3,8 @@ import {
   applyEditorCommand,
   applyNarrationSplitCommands,
   emptyEditorDocumentV2,
+  narrativeTimelineRangesForAssetSourceRange,
+  narrativeTrimRangeAtTimelineSecond,
   type EditorDocumentV2,
 } from './editor-document';
 
@@ -19,6 +21,16 @@ function documentWithGap(): EditorDocumentV2 {
 }
 
 describe('V2 clip split commands', () => {
+  it('resolves native trim and source ranges around gaps', () => {
+    const document = documentWithGap();
+    expect(narrativeTrimRangeAtTimelineSecond(document, 5, 'left')).toEqual({ fromSec: 1.5, toSec: 5 });
+    expect(narrativeTrimRangeAtTimelineSecond(document, 5, 'right')).toEqual({ fromSec: 5, toSec: 11.5 });
+    expect(narrativeTrimRangeAtTimelineSecond(document, 1, 'left')).toBeNull();
+    expect(narrativeTimelineRangesForAssetSourceRange(document, 'main', 2, 5)).toMatchObject([
+      { clipId: 'talk', fromSec: 3.5, toSec: 6.5, sourceFromSec: 2, sourceToSec: 5 },
+    ]);
+  });
+
   it('splits inside native timeline geometry without collapsing a leading gap', () => {
     const document = documentWithGap();
     const result = applyEditorCommand(document, {
@@ -36,12 +48,9 @@ describe('V2 clip split commands', () => {
     expect(result.document.semantics.scenes[0]?.clipIds).toEqual(['talk', 'talk~split-195']);
   });
 
-  it('resolves multiple compatibility points by clip lineage plus source seconds', () => {
+  it('resolves multiple native timeline points without collapsing the leading gap', () => {
     const document = documentWithGap();
-    const result = applyNarrationSplitCommands(document, [
-      { clipId: 'talk', sourceSec: 2 },
-      { clipId: 'talk', sourceSec: 5 },
-    ]);
+    const result = applyNarrationSplitCommands(document, [3.5, 6.5]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.document.timeline.tracks[0]!.clips).toMatchObject([
@@ -78,8 +87,15 @@ describe('V2 clip split commands', () => {
   it('fails atomically when the primary lane is locked', () => {
     const document = documentWithGap();
     document.timeline.tracks[0]!.locked = true;
-    const result = applyNarrationSplitCommands(document, [{ clipId: 'talk', sourceSec: 5 }]);
+    const result = applyNarrationSplitCommands(document, [6.5]);
     expect(result).toMatchObject({ ok: false, document, error: { code: 'track-locked' } });
+    expect(document.timeline.tracks[0]!.clips).toHaveLength(1);
+  });
+
+  it('rejects a split in a native timeline gap', () => {
+    const document = documentWithGap();
+    const result = applyNarrationSplitCommands(document, [1]);
+    expect(result).toMatchObject({ ok: false, document, error: { code: 'invalid-range' } });
     expect(document.timeline.tracks[0]!.clips).toHaveLength(1);
   });
 

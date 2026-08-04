@@ -67,7 +67,7 @@ export interface MediaVault {
 /** Project persistence beyond the current device. */
 export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
-  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'>;
+  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'schema-upgraded' | 'skip'>;
   remove(id: string): Promise<void>;
 }
 
@@ -104,9 +104,9 @@ export interface StudioProviders {
   /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
   chatEndpoint?: string;
   /** Cloud undo fallback: pop the newest entry off the project's server-side history ring and
-   *  return the restored composition (null = ring empty). Absent = in-memory undo only (OSS shell).
+   *  return the restored V2 document (null = ring empty). Absent = in-memory undo only (OSS shell).
    *  The server marks the restore as consumed — repeated calls walk strictly backward. */
-  historyUndo?: (projectId: string) => Promise<{ document?: EditorDocumentV2; comp: unknown; version: number } | null>;
+  historyUndo?: (projectId: string) => Promise<{ document: EditorDocumentV2; version: number } | null>;
   /** Sentence translator for bilingual captions (hosted-LLM feature; absent = the captions panel hides its translation section — BYO agents translate themselves via set_caption_translations). */
   translate?: (rows: { index: number; text: string }[], targetLanguage: string) => Promise<{ index: number; text: string }[]>;
   /** Fill a component's text slots from the narration around its time window (hosted-LLM feature;

@@ -12,12 +12,14 @@ import { toast } from '@pireel/ui/toast';
 import {
   type Block,
   type Composition,
+  type EditorDocumentV2,
   type VideoShot,
   audioClipWindow,
   blockKind,
   isCaptionsOn,
   isSentenceCaption,
   resolveCaptionStyle,
+  primaryNarrativeAsset,
   totalDuration,
 } from '@pireel/studio-engine/composition';
 import { narrationRowMarks, spans as clipSpans } from '@pireel/studio-engine/trim';
@@ -34,6 +36,7 @@ import { t } from './i18n';
 export interface AgentContextDeps {
   comp: Composition;
   compRef: MutableRefObject<Composition>;
+  documentRef: MutableRefObject<EditorDocumentV2>;
   selectedIdRef: MutableRefObject<string | null>;
   selectedShotIdRef: MutableRefObject<string | null>;
   tRef: MutableRefObject<number>;
@@ -53,7 +56,7 @@ export interface AgentContextDeps {
 
 export function useAgentContext(deps: AgentContextDeps) {
   const {
-    comp, compRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, planRef, visualRef, videoSigRef,
+    comp, compRef, documentRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, planRef, visualRef, videoSigRef,
     videoFileRef, clipAsrRef, clipFilesRef, clipAsrBusyRef, clipAsrFailRef, insertedClipsForPlanRef,
     setClipAsr, matteFileForShot,
   } = deps;
@@ -185,7 +188,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       main,
       compRef.current.shots ?? [],
       (c: { src?: string }) => !c.src,
-      compRef.current.video?.durationSec ?? undefined,
+      primaryNarrativeAsset(documentRef.current)?.metadata.durationSec,
     );
     const mainRow = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${s.text}${marks.rows[i]!.gapNote}`;
     const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];

@@ -26,7 +26,6 @@ import {
   type CutTransitionEffect,
   type ShotFilter,
   type TransitionDirection,
-  type TimelineSiblingLayers,
   type VideoShot,
   type NarrativeClipPatchUpdate,
   CAPTION_PRESETS,
@@ -44,10 +43,11 @@ import {
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
+  normalizeNarrationSplitPoints,
   applyShotFramingInput,
   placementFramingNotes,
-  narrationSourceSplitsAtEditedPoints,
-  projectDocumentToLegacyComposition,
+  editorDocumentRenderPlan,
+  projectDocumentToComposition,
   removeNarrationClipsWithoutRipple,
   removeAudioDocumentClips,
   removeOverlayDocumentClips,
@@ -59,8 +59,6 @@ import {
   audioTrimPatch,
   patchAudioClip,
   patchNarrativeClips,
-  patchShotAudio,
-  splitAudioClipAt,
   splitAudioDocumentClip,
   blockId,
   blockKind,
@@ -69,32 +67,39 @@ import {
   freeTrack,
   freezeBlockVars,
   getCaptionPreset,
+  hasPrimaryNarrativeClips,
+  narrativeClipTimelineRange,
+  narrativeTimelineRangesForAssetSourceRange,
+  narrativeTrimRangeAtTimelineSecond,
+  primaryNarrativeClips,
+  listDocumentAddressedWords,
+  resolveDocumentWordIds,
+  documentWordRanges,
+  documentWordRangesToTimeline,
   isCaptionsOn,
   isSentenceCaption,
   renderBlock,
   resolveCaptionStyle,
-  rippleRemoveSiblingLayers,
-  stripDerivedCaptions,
   zoneOf,
   shotFilterCss,
   shotId,
-  splitShotsAtEditedPoints,
-  patchShotFraming,
+  splitBlockedByTransition,
   totalDuration,
   validateComposition,
   validateEditorDocumentV2,
+  videoShotTimelineSpans,
 } from './composition';
+import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapSpokenTranscript } from './prompts';
-import type { StudioProjectContext, TranscriptSegment } from './project-dto';
-import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
+import type { TranscriptSegment } from './project-dto';
+import { type CutSeamEntry, finalizeCutSeams, narrationRowMarks, spans as clipSpans, tightenCutRanges } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
-import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
+import { beatsForWindow, insertPlanContexts } from './captions-relay';
 import { isPlaceholder, placeholderSpec } from './build-draft';
 import { ensureTemplatesRegistered } from './templates';
-import { listAddressedWords, resolveWordIds, wordRanges, wordRangesToEdited } from './transcript-address';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -106,9 +111,8 @@ export interface ServerToolProject {
   id: string;
   title: string;
   comp: Composition;
-  /** Canonical authority when the caller has crossed the V2 persistence boundary. */
-  document?: EditorDocumentV2;
-  context: StudioProjectContext;
+  /** Canonical authority. Offline execution is unavailable until the online V2 migration completes. */
+  document: EditorDocumentV2;
   videoDurationSec: number | null;
   /** Credits guardrail for the snapshot: hosted generation affordable? Boolean by design (never the balance
    *  number); route fills it for get_state from the billing store. Absent = line omitted. */
@@ -120,7 +124,6 @@ export interface ServerToolOutcome {
   result: { ok: boolean; summary?: string; error?: string; data?: unknown; state?: string };
   comp?: Composition;
   document?: EditorDocumentV2;
-  context?: StudioProjectContext;
 }
 
 /** The set of offline-executable tools (route uses this to decide between fallback and returning studio_not_open as-is). */
@@ -165,28 +168,33 @@ const r1 = (x: number) => Math.round(x * 10) / 10;
 // the short-lived cue-split extraction scheme merge back to sentences, so offline read_script / cut ranges / captions
 // see the SAME rows as the browser. Idempotent — sentence transcripts pass through by reference.
 const asAsr = (segs: TranscriptSegment[] | undefined): AsrSegment[] => desegmentCues((segs ?? []) as AsrSegment[]);
-const clipAsrOf = (ctx: StudioProjectContext): Record<string, AsrSegment[]> =>
-  Object.fromEntries(Object.entries(ctx.clipAsr ?? {}).map(([k, v]) => [k, desegmentCues((v ?? []) as AsrSegment[])]));
+const mainTranscriptOf = (project: ServerToolProject): AsrSegment[] => {
+  const assetId = project.document.semantics.primaryNarrativeAssetId;
+  return assetId ? asAsr(project.document.semantics.transcripts[assetId]) : [];
+};
 
-/** Legacy shots fallback: only a missing `shots` field means "uncut whole clip". An explicit [] is
- *  an intentionally empty main track and must stay empty even while the imported source remains in
- *  the project media library. */
+/** Temporary runtime projection for prompt helpers that still label inserted sources by render URL. */
+const projectedClipTranscripts = (project: ServerToolProject): Record<string, AsrSegment[]> => {
+  const assetIdByClipId = new Map(primaryNarrativeClips(project.document).map((clip) => [clip.id, clip.assetId]));
+  return Object.fromEntries((project.comp.shots ?? []).flatMap((shot) => {
+    const assetId = assetIdByClipId.get(shot.id);
+    const segments = assetId ? project.document.semantics.transcripts[assetId] : undefined;
+    return shot.src && segments?.length ? [[shot.src, asAsr(segments)] as const] : [];
+  }));
+};
+
 function shotsOf(p: ServerToolProject): VideoShot[] {
-  if (p.comp.shots !== undefined) return p.comp.shots;
-  const dur = p.comp.video?.durationSec ?? p.videoDurationSec ?? 0;
-  return dur > 0 ? [{ id: shotId(), srcStart: 0, srcEnd: dur, treatment: 'full' }] : [];
+  return p.comp.shots ?? [];
 }
 
 type NativeNarrativePatchResult =
   | { document: EditorDocumentV2; comp: Composition }
-  | { error: string; data?: unknown }
-  | null;
+  | { error: string; data?: unknown };
 
 function applyNativeNarrativePatches(
   p: ServerToolProject,
   updates: NarrativeClipPatchUpdate[],
 ): NativeNarrativePatchResult {
-  if (!p.document) return null;
   const command = patchNarrativeClips(p.document, updates);
   if (!command.ok) {
     return {
@@ -196,7 +204,7 @@ function applyNativeNarrativePatches(
   }
   return {
     document: command.document,
-    comp: projectDocumentToLegacyComposition({ projectId: p.id, value: command.document }),
+    comp: projectDocumentToComposition(command.document),
   };
 }
 
@@ -246,7 +254,11 @@ function offlineState(p: ServerToolProject): string {
         ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
       })),
     },
-    pipeline: { asr: !!p.context.asr?.length, plan: !!p.context.plan, visual: false },
+    pipeline: {
+      asr: Object.values(p.document.semantics.transcripts).some((segments) => segments.length > 0),
+      plan: !!p.document.semantics.plan,
+      visual: false,
+    },
     ...(typeof p.canGenerate === 'boolean' ? { canGenerate: p.canGenerate } : {}),
   });
   return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}). Video-dependent tools (extract_asr, analyze_visual, capture_frame, lay_out, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
@@ -258,8 +270,9 @@ function offlineTranscript(p: ServerToolProject): string {
   const row = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`;
   const parts: string[] = [];
   // Same derived-current-truth marks as the browser transcript — the two surfaces must tell one story
-  const main = asAsr(p.context.asr);
-  const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src, p.comp.video?.durationSec ?? p.videoDurationSec ?? undefined);
+  const main = mainTranscriptOf(p);
+  const primaryAssetId = p.document.semantics.primaryNarrativeAssetId;
+  const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src, primaryAssetId ? p.document.assets[primaryAssetId]?.metadata.durationSec : undefined);
   const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${s.text}${marks.rows[i]!.gapNote}`;
   const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
   parts.push(
@@ -270,7 +283,7 @@ function offlineTranscript(p: ServerToolProject): string {
     if (!s.src) continue;
     bySrc.set(s.src, [...(bySrc.get(s.src) ?? []), s.id]);
   }
-  const clipSegs = clipAsrOf(p.context);
+  const clipSegs = projectedClipTranscripts(p);
   for (const [src, ids] of bySrc) {
     const segs = clipSegs[src];
     const head = `INSERTED CLIP for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its OWN source seconds)`;
@@ -298,35 +311,33 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       };
     }
     out.comp = next;
-    if (p.document) {
-      if (!out.document) {
-        return {
-          result: {
-            ok: false,
-            error: 'mutation rejected: this tool has no native editor-document transaction',
-          },
-        };
-      }
-      out.document = freezeEditorDocumentBlockVars(out.document);
-      const projected = projectDocumentToLegacyComposition({ projectId: p.id, value: out.document });
-      if (JSON.stringify(next) !== JSON.stringify(projected)) {
-        return {
-          result: {
-            ok: false,
-            error: 'mutation rejected: native document and read projection diverged',
-          },
-        };
-      }
-      const documentIssues = validateEditorDocumentV2(out.document).filter((issue) => issue.severity === 'error');
-      if (documentIssues.length) {
-        return {
-          result: {
-            ok: false,
-            error: 'mutation rejected: editor document invariants failed',
-            data: { issues: documentIssues },
-          },
-        };
-      }
+    if (!out.document) {
+      return {
+        result: {
+          ok: false,
+          error: 'mutation rejected: this tool has no native editor-document transaction',
+        },
+      };
+    }
+    out.document = freezeEditorDocumentBlockVars(out.document);
+    const projected = projectDocumentToComposition(out.document);
+    if (JSON.stringify(next) !== JSON.stringify(projected)) {
+      return {
+        result: {
+          ok: false,
+          error: 'mutation rejected: native document and read projection diverged',
+        },
+      };
+    }
+    const documentIssues = validateEditorDocumentV2(out.document).filter((issue) => issue.severity === 'error');
+    if (documentIssues.length) {
+      return {
+        result: {
+          ok: false,
+          error: 'mutation rejected: editor document invariants failed',
+          data: { issues: documentIssues },
+        },
+      };
     }
     // Every successful composition mutation reports its actual compact diff, not just cutting tools.
     const delta = compReceiptDelta(p.comp, next);
@@ -344,11 +355,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'get_state':
       return { result: { ok: true, state: offlineState(p) } };
     case 'read_script': {
-      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
+      if (!Object.values(p.document.semantics.transcripts).some((segments) => segments.length)) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
       return { result: { ok: true, summary: 'Read transcript (cloud)', data: { transcript: offlineTranscript(p) } } };
     }
     case 'list_words': {
-      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — run extract_asr in the studio first' } };
+      const document = p.document;
+      if (!Object.values(document.semantics.transcripts).some((segments) => segments.length)) return { result: { ok: false, error: 'no transcript in the cloud project — run extract_asr in the studio first' } };
       const query = {
         ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
         ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
@@ -357,7 +369,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.offset === 'number' && Number.isInteger(input.offset) ? { offset: input.offset } : {}),
         ...(typeof input.limit === 'number' && Number.isInteger(input.limit) ? { limit: input.limit } : {}),
       };
-      const listed = listAddressedWords(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), query);
+      const listed = listDocumentAddressedWords(document, query);
       if ('error' in listed) return { result: { ok: false, error: listed.error } };
       return {
         result: {
@@ -395,18 +407,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const s = Number(input.startSec);
       if (!Number.isFinite(s)) return { result: { ok: false, error: 'invalid startSec' } };
       const start = Math.max(0, Math.round(s * 100) / 100);
-      if (p.document) {
-        const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: b.id, startSec: start }] });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: `Moved "${bname(b)}" to ${r1(start)}s` },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
+      const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: b.id, startSec: start }] });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: `Moved "${bname(b)}" to ${r1(start)}s` },
-        comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, startSec: start } : x)) },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'resize_block': {
@@ -417,21 +423,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!Number.isFinite(s) || !Number.isFinite(d)) return { result: { ok: false, error: 'invalid startSec/durationSec' } };
       const start = Math.max(0, Math.round(s * 100) / 100);
       const dur = Math.max(0.3, Math.round(d * 100) / 100);
-      if (p.document) {
-        const edit = applyOverlayDocumentEdits({
-          document: p.document,
-          updates: [{ clipId: b.id, startSec: start, durationSec: dur }],
-        });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: `Resized "${bname(b)}" to ${r1(start)}–${r1(start + dur)}s` },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
+      const edit = applyOverlayDocumentEdits({
+        document: p.document,
+        updates: [{ clipId: b.id, startSec: start, durationSec: dur }],
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: `Resized "${bname(b)}" to ${r1(start)}–${r1(start + dur)}s` },
-        comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, startSec: start, durationSec: dur } : x)) },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'place_block': {
@@ -444,126 +444,99 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       // Receipt hint, not a remap: when the block's window overlaps a corner/split span, say where
       // the video band is so the agent notices before parking a graphic on the speaker.
       const framing = placementFramingNotes(shotsOf(p), next.startSec, next.durationSec);
-      if (p.document) {
-        const edit = applyOverlayDocumentEdits({
-          document: p.document,
-          updates: [{ clipId: b.id, block: { box: next.box, contentBox: next.contentBox } }],
-        });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
+      const edit = applyOverlayDocumentEdits({
+        document: p.document,
+        updates: [{ clipId: b.id, block: { box: next.box, contentBox: next.contentBox } }],
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } },
-        comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? next : x)) },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'delete_block': {
       const b = findBlock(input.blockId);
       if (!b) return { result: { ok: false, error: 'block not found' } };
-      if (p.document) {
-        const edit = removeOverlayDocumentClips({ document: p.document, clipIds: [b.id] });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: `Deleted "${bname(b)}"` },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
-      return { result: { ok: true, summary: `Deleted "${bname(b)}"` }, comp: { ...c, blocks: c.blocks.filter((x) => x.id !== b.id) } };
+      const edit = removeOverlayDocumentClips({ document: p.document, clipIds: [b.id] });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: `Deleted "${bname(b)}"` },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
     }
     case 'delete_blocks': {
       const ids = Array.isArray(input.blockIds) ? new Set((input.blockIds as unknown[]).map(String)) : null;
       if (!ids?.size) return { result: { ok: false, error: 'missing blockIds' } };
       const hit = c.blocks.filter((b) => ids.has(b.id));
       if (!hit.length) return { result: { ok: false, error: 'blocks not found' } };
-      if (p.document) {
-        const edit = removeOverlayDocumentClips({ document: p.document, clipIds: hit.map((block) => block.id) });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: `Deleted ${hit.length} blocks` },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
-      return { result: { ok: true, summary: `Deleted ${hit.length} blocks` }, comp: { ...c, blocks: c.blocks.filter((b) => !ids.has(b.id)) } };
+      const edit = removeOverlayDocumentClips({ document: p.document, clipIds: hit.map((block) => block.id) });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: `Deleted ${hit.length} blocks` },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
     }
     case 'duplicate_block': {
       const b = findBlock(input.blockId);
       if (!b) return { result: { ok: false, error: 'block not found' } };
       const at = typeof input.atSec === 'number' ? Math.max(0, input.atSec) : b.startSec + b.durationSec;
-      if (p.document) {
-        const newClipId = blockId('ai');
-        const stackOrder = freeTrack(c.blocks, at, b.durationSec, b.trackIndex);
-        const sourceTrack = p.document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
-        const sourceClip = sourceTrack?.clips.find((clip) => clip.id === b.id);
-        const target = sourceClip?.kind === 'caption'
-          ? sourceTrack
-          : p.document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
-        const edit = duplicateOverlayDocumentClip({
-          document: p.document,
-          clipId: b.id,
-          newClipId,
-          startSec: at,
-          ...(target
-            ? { toTrackId: target.id }
-            : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),
-        });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: `Duplicated "${bname(b)}"`, data: { newBlockId: newClipId } },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
-      const nb: Block = { ...b, id: blockId('ai'), startSec: at, trackIndex: freeTrack(c.blocks, at, b.durationSec) };
-      return { result: { ok: true, summary: `Duplicated "${bname(b)}"`, data: { newBlockId: nb.id } }, comp: { ...c, blocks: [...c.blocks, nb] } };
+      const newClipId = blockId('ai');
+      const stackOrder = freeTrack(c.blocks, at, b.durationSec, b.trackIndex);
+      const sourceTrack = p.document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
+      const sourceClip = sourceTrack?.clips.find((clip) => clip.id === b.id);
+      const target = sourceClip?.kind === 'caption'
+        ? sourceTrack
+        : p.document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+      const edit = duplicateOverlayDocumentClip({
+        document: p.document,
+        clipId: b.id,
+        newClipId,
+        startSec: at,
+        ...(target
+          ? { toTrackId: target.id }
+          : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: `Duplicated "${bname(b)}"`, data: { newBlockId: newClipId } },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
     }
     case 'set_canvas': {
       const size = canvasSizeFromInput(input);
       if (!size) return { result: { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' } };
-      const currentCanvas = p.document?.canvas;
+      const currentCanvas = p.document.canvas;
       if (
-        size.width === (currentCanvas?.width ?? c.width)
-        && size.height === (currentCanvas?.height ?? c.height)
-        && (!currentCanvas || currentCanvas.configured)
+        size.width === currentCanvas.width
+        && size.height === currentCanvas.height
+        && currentCanvas.configured
       ) {
         return { result: { ok: false, error: 'canvas already has that size' } };
       }
-      if (p.document) {
-        const edit = applyCanvasDocumentEdit({
-          projectId: p.id,
-          document: p.document,
-          ...size,
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-        });
-        if (!edit.ok) {
-          return {
-            result: {
-              ok: false,
-              error: edit.error.message,
-              data: { code: edit.error.code, trackIds: edit.error.trackIds },
-            },
-          };
-        }
+      const edit = applyCanvasDocumentEdit({
+        projectId: p.id,
+        document: p.document,
+        ...size,
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!edit.ok) {
         return {
-          result: { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } },
-          comp: edit.composition,
-          document: edit.document,
+          result: {
+            ok: false,
+            error: edit.error.message,
+            data: { code: edit.error.code, trackIds: edit.error.trackIds },
+          },
         };
       }
-      const shots = shotsOf(p);
       return {
         result: { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } },
-        comp: {
-          ...c,
-          ...size,
-          blocks: relayCaptionLayer(c.blocks, shots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: size.width }),
-        },
+        comp: edit.composition,
+        document: edit.document,
       };
     }
     case 'set_shot_framing': {
@@ -574,7 +547,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         clipId: shotId,
         patch: { framing: patch },
       })));
-      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
+      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       const count = applied.updates.length;
       return {
         result: {
@@ -582,8 +555,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           summary: count === 1 ? `Updated framing for shot ${applied.updates[0]!.shotId}` : `Updated framing for ${count} shots`,
           data: count === 1 ? applied.updates[0] : { updates: applied.updates },
         },
-        comp: native?.comp ?? applied.comp,
-        ...(native ? { document: native.document } : {}),
+        comp: native.comp,
+        document: native.document,
       };
     }
     case 'apply_layout': {
@@ -595,26 +568,18 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
         ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
       };
-      if (p.document) {
-        const edit = applyLayoutDocumentEdit({
-          document: p.document,
-          composition: { ...c, shots: shotsOf(p) },
-          layout: layoutInput,
-        });
-        if (!edit.ok) {
-          return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        }
-        return {
-          result: { ok: true, summary: `Applied ${layout} layout`, data: edit.layout },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
+      const edit = applyLayoutDocumentEdit({
+        document: p.document,
+        composition: { ...c, shots: shotsOf(p) },
+        layout: layoutInput,
+      });
+      if (!edit.ok) {
+        return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       }
-      const applied = applyCompositionLayout({ ...c, shots: shotsOf(p) }, layoutInput);
-      if ('error' in applied) return { result: { ok: false, error: applied.error } };
       return {
-        result: { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: applied.blockIds, ...(applied.shotId ? { shotId: applied.shotId } : {}), ...(applied.treatment ? { treatment: applied.treatment } : {}) } },
-        comp: applied.comp,
+        result: { ok: true, summary: `Applied ${layout} layout`, data: edit.layout },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'set_shot_treatment': {
@@ -624,11 +589,11 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const t = String(input.treatment);
       if (!TREATMENTS.has(t)) return { result: { ok: false, error: `invalid treatment: ${t}` } };
       const native = applyNativeNarrativePatches(p, [{ clipId: s.id, patch: { framing: { treatment: t as VideoShot['treatment'] } } }]);
-      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
+      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       return {
         result: { ok: true, summary: `Set shot framing to ${t}` },
-        comp: native?.comp ?? { ...c, shots: shots.map((x) => (x.id === s.id ? patchShotFraming(x, { treatment: t as VideoShot['treatment'] }) : x)) },
-        ...(native ? { document: native.document } : {}),
+        comp: native.comp,
+        document: native.document,
       };
     }
     case 'set_video_filter': {
@@ -643,16 +608,11 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
       const css = shotFilterCss(f);
       const native = applyNativeNarrativePatches(p, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
-      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
-      const next = shots.map((x) => {
-        if (x.id !== s.id) return x;
-        const { filter: _drop, ...rest } = x;
-        return css === 'none' ? rest : { ...rest, filter: f };
-      });
+      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       return {
         result: { ok: true, summary: css === 'none' ? 'Reset color grading for this shot' : `Applied color grading: ${css}` },
-        comp: native?.comp ?? { ...c, shots: next },
-        ...(native ? { document: native.document } : {}),
+        comp: native.comp,
+        document: native.document,
       };
     }
     case 'set_shot_audio': {
@@ -670,16 +630,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
       if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass volumeDb / mute / fadeInSec / fadeOutSec' } };
       const native = applyNativeNarrativePatches(p, hit.map((shot) => ({ clipId: shot.id, patch: { audio: patch } })));
-      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
-      const next = shots.map((s) => (ids.has(s.id) ? patchShotAudio(s, patch) : s));
+      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       const bits = [
         ...('volumeDb' in patch ? [`volume ${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
         ...('mute' in patch ? [patch.mute ? 'muted' : 'unmuted'] : []),
       ];
       return {
         result: { ok: true, summary: `Audio on ${hit.length} shot${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
-        comp: native?.comp ?? { ...c, shots: next },
-        ...(native ? { document: native.document } : {}),
+        comp: native.comp,
+        document: native.document,
       };
     }
     case 'set_bgm': {
@@ -693,100 +652,43 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
         ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
       };
-      if (p.document) {
-        if (input.off === true) {
+      if (input.off === true) {
           if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
           if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };
           const removed = removeAudioDocumentClips(p.document, trackIdIn ? [trackIdIn] : tracks.map((track) => track.id));
           if (!removed.ok) return { result: { ok: false, error: removed.error.message, data: { code: removed.error.code, trackIds: removed.error.trackIds } } };
           return {
             result: { ok: true, summary: trackIdIn ? 'Removed the audio track' : 'Removed all audio tracks' },
-            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: removed.document }),
+            comp: projectDocumentToComposition(removed.document),
             document: removed.document,
           };
-        }
-        const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
-        if (urlIn) {
+      }
+      const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
+      if (urlIn) {
           const clip = patchAudioClip({ id: audioClipId(), src: urlIn }, knobs);
           const added = addAudioDocumentClip({ document: p.document, clip });
           if (!added.ok) return { result: { ok: false, error: added.error.message, data: { code: added.error.code, trackIds: added.error.trackIds } } };
           return {
             result: { ok: true, summary: `Added an audio track (${r1(clip.volumeDb ?? -18)}dB)`, data: { trackId: clip.id } },
-            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: added.document }),
+            comp: projectDocumentToComposition(added.document),
             document: added.document,
           };
-        }
-        const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
-        if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
-        if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
-        const splitAt = Number(input.splitAtSec);
-        if (Number.isFinite(splitAt)) {
+      }
+      const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
+      if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
+      if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
+      const splitAt = Number(input.splitAtSec);
+      if (Number.isFinite(splitAt)) {
           const split = splitAudioDocumentClip(p.document, target.id, splitAt);
           if (!split.ok || !split.newClipId) {
             return { result: { ok: false, error: split.ok ? 'audio split did not create a clip' : split.error.message } };
           }
           return {
             result: { ok: true, summary: `Split the audio track at ${r1(splitAt)}s`, data: { trackId: target.id, newTrackId: split.newClipId } },
-            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: split.document }),
+            comp: projectDocumentToComposition(split.document),
             document: split.document,
           };
-        }
-        const head = Number(input.headSec);
-        const tail = Number(input.tailSec);
-        let trimmed = target;
-        if (Number.isFinite(head)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'left', Math.max(0, head)));
-        if (Number.isFinite(tail)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'right', Math.max(0, tail)));
-        const trimming = trimmed !== target;
-        if (!Object.keys(knobs).length && !trimming) {
-          return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec / mute / headSec / tailSec / splitAtSec, or off:true' } };
-        }
-        const patch = {
-          ...(trimming ? {
-            startSec: trimmed.startSec,
-            inSec: trimmed.inSec,
-            outSec: trimmed.outSec,
-          } : {}),
-          ...knobs,
-        };
-        const edited = applyAudioDocumentEdits({ document: p.document, updates: [{ clipId: target.id, patch }] });
-        if (!edited.ok) return { result: { ok: false, error: edited.error.message, data: { code: edited.error.code, trackIds: edited.error.trackIds } } };
-        return {
-          result: { ok: true, summary: trimming ? 'Trimmed the audio track' : 'Adjusted the audio track' },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edited.document }),
-          document: edited.document,
-        };
       }
-      if (input.off === true) {
-        if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
-        if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };
-        const next = trackIdIn ? tracks.filter((x) => x.id !== trackIdIn) : [];
-        const { audioTracks: _drop, ...rest } = c;
-        return { result: { ok: true, summary: trackIdIn ? 'Removed the audio track' : 'Removed all audio tracks' }, comp: next.length ? { ...c, audioTracks: next } : rest };
-      }
-      const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
-      if (urlIn) {
-        // Offline add: no loudness measurement without the tab — the clip lands at the default level
-        // (or the explicit volumeDb); honest defaults are fine.
-        const clip = patchAudioClip({ id: audioClipId(), src: urlIn }, knobs);
-        return {
-          result: { ok: true, summary: `Added an audio track (${r1(clip.volumeDb ?? -18)}dB)`, data: { trackId: clip.id } },
-          comp: { ...c, audioTracks: [...tracks, clip] },
-        };
-      }
-      const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
-      if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
-      if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
-      // Split first: it's the one op that changes the track COUNT, so it can't be combined with knobs
-      const splitAt = Number(input.splitAtSec);
-      if (Number.isFinite(splitAt)) {
-        const halves = splitAudioClipAt(target, splitAt, audioClipId);
-        if (!halves) return { result: { ok: false, error: 'that second is outside the track (or too close to an edge to leave two usable halves)' } };
-        return {
-          result: { ok: true, summary: `Split the audio track at ${r1(splitAt)}s`, data: { trackId: halves[0].id, newTrackId: halves[1].id } },
-          comp: { ...c, audioTracks: tracks.flatMap((x) => (x.id === target.id ? halves : [x])) },
-        };
-      }
-      // Edge trims run through the same math as the lane handles (source in/out + start all move together)
       const head = Number(input.headSec);
       const tail = Number(input.tailSec);
       let trimmed = target;
@@ -796,12 +698,25 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!Object.keys(knobs).length && !trimming) {
         return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec / mute / headSec / tailSec / splitAtSec, or off:true' } };
       }
-      const next = Object.keys(knobs).length ? patchAudioClip(trimmed, knobs) : trimmed;
-      return { result: { ok: true, summary: trimming ? 'Trimmed the audio track' : 'Adjusted the audio track' }, comp: { ...c, audioTracks: tracks.map((x) => (x.id === target.id ? next : x)) } };
+      const patch = {
+        ...(trimming ? {
+          startSec: trimmed.startSec,
+          inSec: trimmed.inSec,
+          outSec: trimmed.outSec,
+        } : {}),
+        ...knobs,
+      };
+      const edited = applyAudioDocumentEdits({ document: p.document, updates: [{ clipId: target.id, patch }] });
+      if (!edited.ok) return { result: { ok: false, error: edited.error.message, data: { code: edited.error.code, trackIds: edited.error.trackIds } } };
+      return {
+        result: { ok: true, summary: trimming ? 'Trimmed the audio track' : 'Adjusted the audio track' },
+        comp: projectDocumentToComposition(edited.document),
+        document: edited.document,
+      };
     }
     case 'split_shot': {
+      if (!hasPrimaryNarrativeClips(p.document)) return { result: { ok: false, error: 'no video track yet' } };
       const shots = shotsOf(p);
-      if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
       if ('atSecs' in input && 'atSec' in input) return { result: { ok: false, error: 'use either atSec or atSecs, not both' } };
       const purpose = input.purpose == null ? 'editing' : String(input.purpose);
       if (purpose !== 'editing' && purpose !== 'framing') return { result: { ok: false, error: `invalid split purpose: ${purpose}` } };
@@ -822,141 +737,96 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           ? [input.atSec]
           : [];
       if (!points.length) return { result: { ok: false, error: 'offline mode needs atSec or atSecs (no playhead)' } };
-      const split = splitShotsAtEditedPoints(shots, points);
-      if ('error' in split) return { result: { ok: false, error: split.error } };
-      if (p.document) {
-        const requests = narrationSourceSplitsAtEditedPoints(shots, split.atSecs);
-        if (!requests) return { result: { ok: false, error: 'Validated split points no longer resolve to narration clips' } };
-        const command = applyNarrationSplitCommands(p.document, requests);
-        if (!command.ok) {
-          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
-        }
-        const comp = projectDocumentToLegacyComposition({ projectId: p.id, value: command.document });
-        return {
-          result: {
-            ok: true,
-            summary: split.atSecs.length === 1 ? `Split at ${r1(split.atSecs[0]!)}s` : `Split at ${split.atSecs.length} timeline points`,
-            data: { atSecs: split.atSecs, shotIds: comp.shots?.map((shot) => shot.id) ?? [] },
-          },
-          document: command.document,
-          comp,
-        };
+      const splitPoints = normalizeNarrationSplitPoints(points, STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall);
+      if ('error' in splitPoints) return { result: { ok: false, error: splitPoints.error } };
+      const nativePlacements = editorDocumentRenderPlan(p.document).narrative.map((entry) => ({
+        shotId: entry.clipId,
+        startSec: entry.startSec,
+        endSec: entry.endSec,
+      }));
+      const transitionPoint = splitPoints.find((atSec) => splitBlockedByTransition(shots, atSec, nativePlacements));
+      if (transitionPoint != null) return { result: { ok: false, error: `cannot split at ${r1(transitionPoint)}s because it is inside a transition region` } };
+      const command = applyNarrationSplitCommands(p.document, splitPoints);
+      if (!command.ok) {
+        return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
       }
+      const comp = projectDocumentToComposition(command.document);
       return {
         result: {
           ok: true,
-          summary: split.atSecs.length === 1 ? `Split at ${r1(split.atSecs[0]!)}s` : `Split at ${split.atSecs.length} timeline points`,
-          data: { atSecs: split.atSecs, shotIds: split.shots.map((shot) => shot.id) },
+          summary: splitPoints.length === 1 ? `Split at ${r1(splitPoints[0]!)}s` : `Split at ${splitPoints.length} timeline points`,
+          data: { atSecs: splitPoints, shotIds: comp.shots?.map((shot) => shot.id) ?? [] },
         },
-        comp: { ...c, shots: split.shots },
+        document: command.document,
+        comp,
       };
     }
     case 'trim_shot': {
-      const shots = shotsOf(p);
-      if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
+      if (!hasPrimaryNarrativeClips(p.document)) return { result: { ok: false, error: 'no video track yet' } };
       const at = Number(input.atSec);
       if (!Number.isFinite(at)) return { result: { ok: false, error: 'offline mode needs atSec (no playhead)' } };
       const side = input.side === 'left' ? 'left' : 'right';
-      const r = side === 'left' ? trimLeftAtEdited(shots, at) : trimRightAtEdited(shots, at);
-      if (!r.removed) return { result: { ok: false, error: 'cannot trim here (not inside a shot)' } };
-      if (p.document) {
-        const command = applyNarrationDocumentEdit({
-          projectId: p.id,
-          document: p.document,
-          ranges: [{ fromSec: r.removed[0], toSec: r.removed[1] }],
-          context: p.context,
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-          canvasWidth: c.width,
-        });
-        if (!command.ok) {
-          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
-        }
-        return {
-          result: { ok: true, summary: `Trimmed the ${side === 'left' ? 'left' : 'right'} side at ${r1(at)}s` },
-          document: command.document,
-          comp: command.composition,
-        };
+      const range = narrativeTrimRangeAtTimelineSecond(p.document, at, side);
+      if (!range) return { result: { ok: false, error: 'cannot trim here (not inside a shot)' } };
+      const command = applyNarrationDocumentEdit({
+        projectId: p.id,
+        document: p.document,
+        ranges: [range],
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!command.ok) {
+        return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
       }
-      const layers = rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1]);
       return {
         result: { ok: true, summary: `Trimmed the ${side === 'left' ? 'left' : 'right'} side at ${r1(at)}s` },
-        comp: { ...c, shots: r.clips, ...layers, blocks: relayCaptionLayer(layers.blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
+        document: command.document,
+        comp: command.composition,
       };
     }
     case 'delete_shot': {
-      const shots = shotsOf(p);
-      const r = deleteClipById(shots, String(input.shotId));
-      if (!r.removed) return { result: { ok: false, error: 'shot not found' } };
-      // Once the primary track becomes empty, other tracks own their own timeline and keep their
-      // positions. For an ordinary in-track ripple delete, preserve the existing compression.
-      const layers: TimelineSiblingLayers = r.clips.length
-        ? rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1])
-        : { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
-      if (p.document) {
-        const common = {
-          projectId: p.id,
-          document: p.document,
-          context: p.context,
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-          canvasWidth: c.width,
-        };
-        const command = r.clips.length
-          ? applyNarrationDocumentEdit({ ...common, ranges: [{ fromSec: r.removed[0], toSec: r.removed[1] }] })
-          : removeNarrationClipsWithoutRipple({ ...common, clipIds: [String(input.shotId)] });
-        if (!command.ok) {
-          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
-        }
-        return { result: { ok: true, summary: 'Deleted this scene' }, document: command.document, comp: command.composition };
-      }
-      return {
-        result: { ok: true, summary: 'Deleted this scene' },
-        comp: { ...c, shots: r.clips, ...layers, blocks: relayCaptionLayer(layers.blocks, r.clips, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width }) },
+      const clipId = String(input.shotId);
+      const range = narrativeClipTimelineRange(p.document, clipId);
+      if (!range) return { result: { ok: false, error: 'shot not found' } };
+      const common = {
+        projectId: p.id,
+        document: p.document,
+        mainTranscript: null,
+        clipTranscripts: {},
       };
+      const command = primaryNarrativeClips(p.document).length > 1
+        ? applyNarrationDocumentEdit({ ...common, ranges: [range] })
+        : removeNarrationClipsWithoutRipple({ ...common, clipIds: [clipId] });
+      if (!command.ok) {
+        return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
+      }
+      return { result: { ok: true, summary: 'Deleted this scene' }, document: command.document, comp: command.composition };
     }
     case 'delete_words': {
       const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))] : [];
       if (!ids.length) return { result: { ok: false, error: 'wordIds must contain at least one id from list_words' } };
-      const shots = shotsOf(p);
-      const resolved = resolveWordIds(shots, asAsr(p.context.asr), clipAsrOf(p.context), ids);
+      const sourceDocument = p.document;
+      const resolved = resolveDocumentWordIds(sourceDocument, ids);
       if (resolved.missing.length) {
         return { result: { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } } };
       }
-      const mapped = wordRangesToEdited(shots, wordRanges(resolved.words));
+      const mapped = documentWordRangesToTimeline(sourceDocument, documentWordRanges(resolved.words));
       if (!mapped.length) return { result: { ok: false, error: 'the selected words are already absent from the edited timeline' } };
-      let curShots = shots;
-      let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
-      const seams: CutSeamEntry[] = [];
-      for (const range of mapped) {
-        const removed = removeEditedRange(curShots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-        if (!removed.removed) continue;
-        curShots = removed.clips;
-        layers = rippleRemoveSiblingLayers(layers, removed.removed[0], removed.removed[1]);
-        seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
-      }
-      if (!seams.length) return { result: { ok: false, error: 'cannot remove the selected words from the current edit' } };
+      const seams: CutSeamEntry[] = mapped.map((range) => ({
+        at: range.fromSec,
+        len: range.toSec - range.fromSec,
+        ...(range.text ? { text: range.text } : {}),
+      }));
       const cuts = finalizeCutSeams(seams);
-      let document: EditorDocumentV2 | undefined;
-      let nextComp: Composition;
-      if (p.document) {
-        const command = applyNarrationDocumentEdit({
-          projectId: p.id,
-          document: p.document,
-          ranges: seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })),
-          context: p.context,
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-          canvasWidth: c.width,
-        });
-        if (!command.ok) {
-          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
-        }
-        document = command.document;
-        nextComp = command.composition;
-      } else {
-        const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
-        nextComp = { ...c, shots: curShots, ...layers, blocks: relaid };
+      const command = applyNarrationDocumentEdit({
+        projectId: p.id,
+        document: sourceDocument,
+        ranges: seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })),
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!command.ok) {
+        return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
       }
       return {
         result: {
@@ -964,15 +834,14 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`,
           data: { wordIds: ids, cuts },
         },
-        comp: nextComp,
-        ...(document ? { document } : {}),
+        comp: command.composition,
+        document: command.document,
       };
     }
     case 'cut_range':
     case 'cut_narration': {
-      const shots = shotsOf(p);
-      if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
-      // cut_narration takes source seconds (ranges), convert to edited seconds first; cut_range is already edited seconds
+      if (!hasPrimaryNarrativeClips(p.document)) return { result: { ok: false, error: 'no video track yet' } };
+      // cut_narration takes primary-asset source seconds; cut_range already addresses the native timeline.
       let ranges: { from: number; to: number; text?: string }[];
       let kg = NaN;
       if (tool === 'cut_narration') {
@@ -986,16 +855,19 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           })
           .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
         // Transcript snippet per cut: the receipt list names what each cut removed (no words = dead air)
-        const words = asAsr(p.context.asr).flatMap((s) => s.words ?? []);
+        const words = mainTranscriptOf(p).flatMap((s) => s.words ?? []);
         const snippetOf = (from: number, to: number): string | undefined => {
           const inside = words.filter((w) => w.start >= from - 0.02 && w.end <= to + 0.02).map((w) => w.text.trim());
           if (!inside.length) return undefined;
           const joined = inside.join('');
           return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
         };
+        const assetId = p.document.semantics.primaryNarrativeAssetId;
+        if (!assetId) return { result: { ok: false, error: 'primary narrative asset is missing' } };
         ranges = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
-          .map((r) => ({ from: srcToEditedLoose(shots, r.from, inNarrationSource), to: srcToEditedLoose(shots, r.to, inNarrationSource), text: snippetOf(r.from, r.to) }))
-          .filter((r) => r.to - r.from > 0.05)
+          .flatMap((r) => narrativeTimelineRangesForAssetSourceRange(p.document!, assetId, r.from, r.to)
+            .map((mapped) => ({ from: mapped.fromSec, to: mapped.toSec, text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec) })))
+          .filter((range) => range.to - range.from > 0.05)
           .sort((a, b) => b.from - a.from);
       } else {
         const from = Number(input.fromSec);
@@ -1004,42 +876,22 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ranges = [{ from, to }];
       }
       if (!ranges.length) return { result: { ok: false, error: 'ranges empty/invalid, or these ranges no longer exist in the edited video' } };
-      let curShots = shots;
-      let layers: TimelineSiblingLayers = { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
-      const seams: CutSeamEntry[] = [];
-      const removedRanges: { fromSec: number; toSec: number }[] = [];
-      for (const e of ranges) {
-        const rr = removeEditedRange(curShots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-        if (!rr.removed) continue;
-        curShots = rr.clips;
-        layers = rippleRemoveSiblingLayers(layers, rr.removed[0], rr.removed[1]);
-        seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
-        removedRanges.push({ fromSec: rr.removed[0], toSec: rr.removed[1] });
-      }
-      if (!seams.length) return { result: { ok: false, error: 'cannot remove these ranges from the current edit' } };
-      let document: EditorDocumentV2 | undefined;
-      let nextComp: Composition;
-      if (p.document) {
-        const command = applyNarrationDocumentEdit({
-          projectId: p.id,
-          document: p.document,
-          ranges: removedRanges,
-          context: p.context,
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-          canvasWidth: c.width,
-        });
-        if (!command.ok) {
-          return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
-        }
-        document = command.document;
-        nextComp = command.composition;
-      } else {
-        const relaid = relayCaptionLayer(layers.blocks, curShots, asAsr(p.context.asr), clipAsrOf(p.context), { canvasW: c.width });
-        nextComp = { ...c, shots: curShots, ...layers, blocks: relaid };
+      const command = applyNarrationDocumentEdit({
+        projectId: p.id,
+        document: p.document,
+        ranges: ranges.map((range) => ({ fromSec: range.from, toSec: range.to })),
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!command.ok) {
+        return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
       }
       // The receipt speaks ACTUAL seconds removed (post-margin) — the agent quotes these, not its own gap arithmetic
-      const cuts = finalizeCutSeams(seams);
+      const cuts = finalizeCutSeams(ranges.map((range) => ({
+        at: range.from,
+        len: range.to - range.from,
+        ...(range.text ? { text: range.text } : {}),
+      })));
       const removedTotalSec = Math.round(cuts.reduce((a, x) => a + x.removedSec, 0) * 10) / 10;
       return {
         result: {
@@ -1050,14 +902,16 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
               : 'Removed the specified range',
           ...(tool === 'cut_narration' ? { data: { cuts, removedTotalSec, ...(Number.isFinite(kg) && kg > 0 ? { keepGapSec: kg } : {}) } } : {}),
         },
-        comp: nextComp,
-        ...(document ? { document } : {}),
+        comp: command.composition,
+        document: command.document,
       };
     }
     case 'add_transition': {
       const at = Number(input.atSec);
       if (!Number.isFinite(at) || at < 0) return { result: { ok: false, error: 'invalid atSec' } };
-      const sp = clipSpans(shotsOf(p));
+      const shots = shotsOf(p);
+      const placements = editorDocumentRenderPlan(p.document).narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec }));
+      const sp = videoShotTimelineSpans(shots, placements);
       const bi = sp.findIndex((s, idx) => idx >= 1 && Math.abs(s.editedStart - at) < 0.3);
       if (bi < 1) return { result: { ok: false, error: `atSec must be a shot cut point (boundaries: ${sp.slice(1).map((s) => r1(s.editedStart)).join(', ')}s) — a transition joins two shots` } };
       const cut = sp[bi]!.editedStart;
@@ -1074,17 +928,11 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ? undefined
         : { prevId, effect, durationSec, ...(DIRECTIONAL_TRANSITIONS.has(effect) && direction ? { direction } : {}) };
       const native = applyNativeNarrativePatches(p, [{ clipId: selfId, patch: { properties: { transIn: transition } } }]);
-      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
-      const shots = shotsOf(p).map((s) => {
-        if (s.id !== selfId) return s;
-        const { transIn: _drop, ...rest } = s;
-        if (remove) return rest;
-        return { ...rest, transIn: transition };
-      });
+      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       return {
         result: { ok: true, summary: remove ? `Removed the transition at ${r1(cut)}s` : `Set a transition at the ${r1(cut)}s cut (${effect})` },
-        comp: native?.comp ?? { ...c, shots },
-        ...(native ? { document: native.document } : {}),
+        comp: native.comp,
+        document: native.document,
       };
     }
     case 'set_captions': {
@@ -1096,61 +944,43 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (Number.isFinite(yPct)) patch.yPct = yPct;
       if (Number.isFinite(scale)) patch.scale = scale;
       if (!preset && !Object.keys(patch).length) return { result: { ok: false, error: 'nothing to set: provide at least one of preset / yPct / scale' } };
-      // Captions are DERIVED state: persist only captionStyle {on, preset, ...} — blocks re-derive from
-      // the transcript on every surface (client materializes; offline state derives for display).
-      let base = c;
+      const sourceDocument = p.document;
       if (preset) {
-        if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
-        const cues = displayCues(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), { subLang: resolveCaptionStyle(c).sub?.lang, canvasW: c.width });
-        if (!cues.length) return { result: { ok: false, error: 'transcript is empty, cannot generate captions' } };
-        base = stripDerivedCaptions(c, true); // legacy persisted caption blocks retire now that derivation is proven possible
+        const narrativeAssetIds = new Set(primaryNarrativeClips(sourceDocument).map((clip) => clip.assetId));
+        const hasTranscript = Object.entries(sourceDocument.semantics.transcripts).some(([assetId, segments]) => narrativeAssetIds.has(assetId) && segments.length > 0);
+        if (!hasTranscript) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
       }
-      // SPARSE persistence: merge into the raw stored style (defaults live in the resolver)
-      const style = { ...(base.captionStyle ?? {}), ...(preset ? { on: true, preset } : {}), ...patch };
-      if (p.document) {
-        const edit = applyCaptionDocumentEdit({
-          document: p.document,
-          patch: { ...(preset ? { on: true, preset, color: undefined, bg: undefined } : {}), ...patch },
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-        });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        const comp = projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document });
-        return {
-          result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(resolveCaptionStyle(comp).preset).name}` },
-          comp,
-          document: edit.document,
-        };
-      }
+      const edit = applyCaptionDocumentEdit({
+        document: sourceDocument,
+        patch: { ...(preset ? { on: true, preset, color: undefined, bg: undefined } : {}), ...patch },
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      const comp = projectDocumentToComposition(edit.document);
       return {
-        result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(style.preset).name}` },
-        comp: { ...base, captionStyle: style },
+        result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(resolveCaptionStyle(comp).preset).name}` },
+        comp,
+        document: edit.document,
       };
     }
     case 'remove_captions': {
       if (!isCaptionsOn(c)) return { result: { ok: false, error: 'no captions right now' } };
-      if (p.document) {
-        const edit = applyCaptionDocumentEdit({
-          document: p.document,
-          patch: { on: false },
-          mainTranscript: asAsr(p.context.asr),
-          clipTranscripts: clipAsrOf(p.context),
-        });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: 'Removed captions' },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
-      // Switch off, KEEP the style (preset/positions/translation language round-trip through the toggle); drop any legacy persisted caption blocks.
+      const edit = applyCaptionDocumentEdit({
+        document: p.document,
+        patch: { on: false },
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: 'Removed captions' },
-        comp: { ...c, blocks: c.blocks.filter((b) => !isSentenceCaption(b)), captionStyle: { ...(c.captionStyle ?? {}), on: false } },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'set_caption_translations': {
-      // Translations are written onto the transcript sentences (sub / per-cue cueSubs of context.asr/clipAsr) via the
+      // Translations are written onto the V2 transcript sentences (sub / per-cue cueSubs) via the
       // SHARED writer (applyCaptionTranslations — same semantics as the browser mirror and the panel flows)
       const clear = input.clear === true;
       const lang = typeof input.lang === 'string' && input.lang.trim() ? input.lang.trim() : undefined;
@@ -1168,47 +998,47 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         })
         .filter((it): it is { index: number; text: string; w0?: number; w1?: number } => Number.isInteger(it.index) && it.index >= 0 && it.text !== null);
       if (!clear && !items.length) return { result: { ok: false, error: 'items empty/invalid (expected {index, text}[], where index is the read_script line number)' } };
-      let ctx: StudioProjectContext;
       let summary: string;
+      let document = p.document;
       if (clear) {
-        ctx = {
-          ...p.context,
-          ...(p.context.asr ? { asr: clearCaptionTranslations(asAsr(p.context.asr)) } : {}),
-          ...(p.context.clipAsr ? { clipAsr: Object.fromEntries(Object.entries(p.context.clipAsr).map(([k, v]) => [k, clearCaptionTranslations(asAsr(v))])) } : {}),
+        document = {
+          ...document,
+          semantics: {
+            ...document.semantics,
+            transcripts: Object.fromEntries(Object.entries(document.semantics.transcripts).map(([assetId, segments]) => [
+              assetId,
+              clearCaptionTranslations(segments as AsrSegment[]),
+            ])),
+          },
         };
         summary = 'Cleared all caption translations';
       } else {
         const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
-        const src = shotIdIn ? shotsOf(p).find((s) => s.id === shotIdIn)?.src : undefined;
-        if (shotIdIn && !src) return { result: { ok: false, error: 'this shotId is not an inserted clip (do not pass shotId for the main narration)' } };
-        // Through the desegment funnel: translation item indices refer to read_script's (desegmented) line numbers
-        const segs = src ? clipAsrOf(p.context)[src] : asAsr(p.context.asr);
-        if (!segs?.length) return { result: { ok: false, error: src ? 'this inserted clip has no transcript' : 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
+        const assetId = shotIdIn
+          ? primaryNarrativeClips(document).find((clip) => clip.id === shotIdIn)?.assetId
+          : document.semantics.primaryNarrativeAssetId;
+        if (!assetId) return { result: { ok: false, error: shotIdIn ? 'shot not found' : 'primary narrative asset not found' } };
+        const segs = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+        if (!segs?.length) return { result: { ok: false, error: shotIdIn ? 'this clip has no transcript' : 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
         const bad = items.filter((it) => it.index >= segs.length);
         if (bad.length) return { result: { ok: false, error: `index out of range: ${bad.map((b) => b.index).join(', ')} (this transcript has ${segs.length} lines; see read_script for line numbers)` } };
         const next = applyCaptionTranslations(segs, items, lang);
-        ctx = src ? { ...p.context, clipAsr: { ...p.context.clipAsr, [src]: next } } : { ...p.context, asr: next };
+        document = {
+          ...document,
+          semantics: {
+            ...document.semantics,
+            transcripts: { ...document.semantics.transcripts, [assetId]: next },
+          },
+        };
         summary = `Set ${items.filter((it) => it.text).length} translations`;
       }
-      // Captions derive from the transcript at render time — the translation shows up without any re-lay.
       const captionsOn = isCaptionsOn(c);
-      if (p.document) {
-        const edit = applyCaptionDocumentEdit({
-          document: p.document,
-          mainTranscript: asAsr(ctx.asr),
-          clipTranscripts: clipAsrOf(ctx),
-        });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: captionsOn ? summary : `${summary} (captions are off; will show after set_captions)` },
-          context: ctx,
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
+      const edit = applyCaptionDocumentEdit({ document, mainTranscript: null, clipTranscripts: {} });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: captionsOn ? summary : `${summary} (captions are off; will show after set_captions)` },
-        context: ctx,
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'apply_block': {
@@ -1230,18 +1060,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (shape.kind === 'kit') {
         const slots = { props: shape.props };
         if (target) {
-          if (p.document) {
-            const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: target.id, block: { templateId: `kit:${shape.component}`, slots } }] });
-            if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-            return {
-              result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id } },
-              comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-              document: edit.document,
-            };
-          }
+          const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: target.id, block: { templateId: `kit:${shape.component}`, slots } }] });
+          if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
           return {
             result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id } },
-            comp: { ...c, blocks: c.blocks.map((x) => (x.id === target.id ? { ...x, templateId: `kit:${shape.component}`, slots } : x)) },
+            comp: projectDocumentToComposition(edit.document),
+            document: edit.document,
           };
         }
         const kAt = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : 0;
@@ -1255,16 +1079,13 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           trackIndex: freeTrack(c.blocks, kAt, kDur),
           label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
         };
-        if (p.document) {
-          const edit = insertOverlayDocumentClip({ document: p.document, block: kb });
-          if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-          return {
-            result: { ok: true, summary: 'Added block', data: { newBlockId: kb.id } },
-            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-            document: edit.document,
-          };
-        }
-        return { result: { ok: true, summary: 'Added block', data: { newBlockId: kb.id } }, comp: { ...c, blocks: [...c.blocks, kb] } };
+        const edit = insertOverlayDocumentClip({ document: p.document, block: kb });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: 'Added block', data: { newBlockId: kb.id } },
+          comp: projectDocumentToComposition(edit.document),
+          document: edit.document,
+        };
       }
       if (shape.kind === 'kit-unknown') {
         return { result: { ok: false, error: `unknown component "${shape.component}" — use an id from the brief's COMPONENTS list, answer {"custom": true} for a bespoke build, or null for no graphic` } };
@@ -1277,16 +1098,13 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (shape.kind === 'declined') {
         if (target && isPlaceholder(target)) {
           // The moment deserves no graphic: remove the empty slot instead of leaving a shell.
-          if (p.document) {
-            const edit = removeOverlayDocumentClips({ document: p.document, clipIds: [target.id] });
-            if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-            return {
-              result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } },
-              comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-              document: edit.document,
-            };
-          }
-          return { result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } }, comp: { ...c, blocks: c.blocks.filter((x) => x.id !== target.id) } };
+          const edit = removeOverlayDocumentClips({ document: p.document, clipIds: [target.id] });
+          if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+          return {
+            result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } },
+            comp: projectDocumentToComposition(edit.document),
+            document: edit.document,
+          };
         }
         return { result: { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' } };
       }
@@ -1305,24 +1123,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       }
       const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
       if (target) {
-        if (p.document) {
-          const edit = applyOverlayDocumentEdits({
-            document: p.document,
-            updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } }],
-          });
-          if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-          return {
-            result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id, ...warnings } },
-            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-            document: edit.document,
-          };
-        }
+        const edit = applyOverlayDocumentEdits({
+          document: p.document,
+          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } }],
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
         return {
           result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id, ...warnings } },
-          comp: {
-            ...c,
-            blocks: c.blocks.map((x) => (x.id === target.id ? { ...x, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } : x)),
-          },
+          comp: projectDocumentToComposition(edit.document),
+          document: edit.document,
         };
       }
       const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : 0;
@@ -1336,24 +1145,22 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         trackIndex: freeTrack(c.blocks, at, dur),
         label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
       };
-      if (p.document) {
-        const edit = insertOverlayDocumentClip({ document: p.document, block: nb });
-        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
-        return {
-          result: { ok: true, summary: 'Added block', data: { newBlockId: nb.id, ...warnings } },
-          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
-          document: edit.document,
-        };
-      }
-      return { result: { ok: true, summary: 'Added block', data: { newBlockId: nb.id, ...warnings } }, comp: { ...c, blocks: [...c.blocks, nb] } };
+      const edit = insertOverlayDocumentClip({ document: p.document, block: nb });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: 'Added block', data: { newBlockId: nb.id, ...warnings } },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
     }
     case 'submit_plan': {
-      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project (the plan is anchored to sentence indexes)' } };
+      const mainTranscript = mainTranscriptOf(p);
+      if (!mainTranscript.length) return { result: { ok: false, error: 'no transcript in the cloud project (the plan is anchored to sentence indexes)' } };
       const text = typeof input.plan === 'string' ? input.plan : JSON.stringify(input.plan ?? {});
       // Unified narrative stream (same interleaving pure function as the browser's plan_context): global-row-number scenes are decomposed back into main/inserted segments at the assembly layer
-      const insCtx = insertPlanContexts(p.comp.shots ?? [], clipAsrOf(p.context));
+      const insCtx = insertPlanContexts(p.comp.shots ?? [], projectedClipTranscripts(p));
       const planRows = unifiedPlanRows(
-        (p.context.asr ?? []).map((x, i) => ({ index: i, text: x.text, start: x.start, end: x.end })),
+        mainTranscript.map((x, i) => ({ index: i, text: x.text, start: x.start, end: x.end })),
         insCtx,
       );
       let plan: DraftPlan;
@@ -1363,27 +1170,33 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         return { result: { ok: false, error: `failed to parse plan: ${e instanceof Error ? e.message : String(e)}` } };
       }
       if (!plan.scenes.length) return { result: { ok: false, error: 'no valid scenes — regenerate and resubmit' } };
+      const document = { ...p.document, semantics: { ...p.document.semantics, plan } };
       return {
         result: { ok: true, summary: `Plan received · ${plan.scenes.length} scenes (lay_out needs the studio tab open to run)`, data: { scenes: plan.scenes.length } },
-        context: { ...p.context, plan },
+        comp: projectDocumentToComposition(document),
+        document,
       };
     }
     case 'plan_context': {
-      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
+      const mainTranscript = mainTranscriptOf(p);
+      if (!mainTranscript.length) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
+      const primaryAssetId = p.document.semantics.primaryNarrativeAssetId;
       return {
         result: {
           ok: true,
           summary: 'Fetched plan context (cloud; no visual hints)',
           data: {
-            sentences: p.context.asr.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
-            videoDurationSec: p.comp.video?.durationSec ?? p.videoDurationSec ?? 0,
+            sentences: mainTranscript.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
+            videoDurationSec: primaryAssetId ? p.document.assets[primaryAssetId]?.metadata.durationSec ?? 0 : 0,
             theme: c.theme,
           },
         },
       };
     }
     case 'compose_context': {
-      const script = (p.context.asr ?? []).map((s) => s.text).join('');
+      const mainTranscript = mainTranscriptOf(p);
+      const clipTranscripts = projectedClipTranscripts(p);
+      const script = mainTranscript.map((s) => s.text).join('');
       const base = { theme: c.theme, ...(c.palette ? { palette: c.palette } : {}), ...(c.frameId ? { frameId: c.frameId } : {}) };
       const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
       if (bid) {
@@ -1391,7 +1204,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         if (!b) return { result: { ok: false, error: 'block not found' } };
         if (isPlaceholder(b)) {
           const boxPx = b.box ? { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } : undefined;
-          const beats = beatsForWindow(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), b.startSec, b.durationSec);
+          const beats = beatsForWindow(shotsOf(p), mainTranscript, clipTranscripts, b.startSec, b.durationSec);
           return {
             result: {
               ok: true,

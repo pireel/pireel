@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { type Composition, cutTransitions, normalizeProjectDocument, videoFrameTimelineBody } from './composition';
+import { type Composition, applyEditorDocumentPersistenceMetadata, cutTransitions, compositionToEditorDocument, videoFrameTimelineBody } from './composition';
+import type { TranscriptSegment } from './project-dto';
 import { SERVER_EXECUTABLE_TOOLS, type ServerToolProject, runServerTool } from './server-tools';
 
-function proj(over: Partial<ServerToolProject> = {}): ServerToolProject {
+interface TestTranscriptContext { asr?: TranscriptSegment[] }
+
+function proj(over: Partial<ServerToolProject> & { context?: TestTranscriptContext } = {}): ServerToolProject {
   const comp: Composition = {
     width: 1080,
     height: 1920,
@@ -16,33 +19,37 @@ function proj(over: Partial<ServerToolProject> = {}): ServerToolProject {
       { id: 's2', srcStart: 10, srcEnd: 20, treatment: 'punch-in' },
     ],
   };
-  return {
+  const { context = {
+    asr: [
+      { start: 0, end: 5, text: '第一句话' },
+      { start: 5, end: 12, text: '第二句话' },
+      { start: 12, end: 20, text: '第三句话' },
+    ],
+  }, ...projectOverrides } = over;
+  const project = {
     id: 'p1',
     title: '测试项目',
     comp,
-    context: {
-      asr: [
-        { start: 0, end: 5, text: '第一句话' },
-        { start: 5, end: 12, text: '第二句话' },
-        { start: 12, end: 20, text: '第三句话' },
-      ],
-    },
     videoDurationSec: 20,
-    ...over,
+    ...projectOverrides,
+  };
+  const document = over.document ?? compositionToEditorDocument({
+    projectId: project.id,
+    composition: project.comp,
+    videoDurationSec: project.videoDurationSec,
+  }).document;
+  return {
+    ...project,
+    document: over.document ?? applyEditorDocumentPersistenceMetadata({
+      projectId: project.id,
+      document,
+      mainTranscript: context.asr ?? null,
+    }),
   };
 }
 
-function v2proj(over: Partial<ServerToolProject> = {}): ServerToolProject {
-  const project = proj(over);
-  return {
-    ...project,
-    document: normalizeProjectDocument({
-      projectId: project.id,
-      value: project.comp,
-      context: project.context,
-      videoDurationSec: project.videoDurationSec,
-    }).document,
-  };
+function v2proj(over: Partial<ServerToolProject> & { context?: TestTranscriptContext } = {}): ServerToolProject {
+  return proj(over);
 }
 
 describe('离线执行器(标签页关着时的 MCP fallback)', () => {
@@ -160,7 +167,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const filtered = runServerTool('set_video_filter', { shotId: 's1', brightness: 1.2 }, {
       ...p,
       comp: framing.comp!,
-      document: framing.document,
+      document: framing.document!,
     });
     expect(filtered.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 's1')).toMatchObject({
       startFrame: 45,
@@ -198,7 +205,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.error).toContain('extract_asr');
   });
   it('read_script:cue 拆分存储的转写走 desegment 漏斗——离线行号与浏览器(载入即合句)同口径', () => {
-    const p = proj({
+    const p = v2proj({
       context: {
         asr: [
           { start: 0, end: 2, text: '这个方法', cue: true },
@@ -295,7 +302,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(layout.comp!.blocks[0]!.box).toBeTruthy();
   });
   it('P0 word addressing/delete:稳定 id 精确删词,stale id 整笔拒绝', () => {
-    const p = proj({
+    const p = v2proj({
       context: {
         asr: [
           {
@@ -324,7 +331,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect((deleted.result.data as { delta: { durationSec: [number, number] } }).delta.durationSec).toEqual([20, 19.4]);
   });
   it('cut_narration:源秒→成片秒换算 + 删除(与浏览器同一批 trim 纯函数)', () => {
-    const p = proj();
+    const p = v2proj();
     const r = runServerTool('cut_narration', { ranges: [{ fromSec: 0, toSec: 5 }] }, p);
     expect(r.result.ok).toBe(true);
     // 删掉了 0-5s:总时长 20 → 15
@@ -361,29 +368,29 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(rejected.comp).toBeUndefined();
   });
   it('split_shot:离线必须给 atSec(没有播放头)', () => {
-    const r = runServerTool('split_shot', {}, proj());
+    const r = runServerTool('split_shot', {}, v2proj());
     expect(r.result.ok).toBe(false);
     expect(r.result.error).toContain('atSec');
-    const r2 = runServerTool('split_shot', { atSec: 5 }, proj());
+    const r2 = runServerTool('split_shot', { atSec: 5 }, v2proj());
     expect(r2.result.ok).toBe(true);
     expect(r2.comp!.shots).toHaveLength(3);
 
-    const batch = runServerTool('split_shot', { atSecs: [2, 5, 15], purpose: 'editing' }, proj());
+    const batch = runServerTool('split_shot', { atSecs: [2, 5, 15], purpose: 'editing' }, v2proj());
     expect(batch.result.ok).toBe(true);
     expect(batch.result.summary).toContain('3 timeline points');
     expect(batch.comp!.shots).toHaveLength(5);
     expect((batch.result.data as { delta: { shotsAdded: string[] } }).delta.shotsAdded).toHaveLength(3);
 
-    const offlineFraming = runServerTool('split_shot', { atSecs: [2, 5], purpose: 'framing' }, proj());
+    const offlineFraming = runServerTool('split_shot', { atSecs: [2, 5], purpose: 'framing' }, v2proj());
     expect(offlineFraming.result.ok).toBe(false);
     expect(offlineFraming.result.error).toContain('open Studio tab');
     expect(offlineFraming.comp).toBeUndefined();
 
-    const atomicFailure = runServerTool('split_shot', { atSecs: [2, 10] }, proj());
+    const atomicFailure = runServerTool('split_shot', { atSecs: [2, 10] }, v2proj());
     expect(atomicFailure.result.ok).toBe(false);
     expect(atomicFailure.comp).toBeUndefined();
     expect(proj().comp.shots).toHaveLength(2);
-    expect(runServerTool('split_shot', { atSec: 2, atSecs: [4] }, proj()).result.ok).toBe(false);
+    expect(runServerTool('split_shot', { atSec: 2, atSecs: [4] }, v2proj()).result.ok).toBe(false);
   });
   it('split_shot:V2 按源秒定位，不把原生主轨间隙压平', () => {
     const p = v2proj();
@@ -391,13 +398,13 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const split = runServerTool('split_shot', { atSec: 5 }, p);
     expect(split.result.ok).toBe(true);
     expect(split.document?.timeline.tracks[0]?.clips).toMatchObject([
-      { startFrame: 45, sourceInSec: 0, sourceOutSec: 5 },
-      { startFrame: 195, sourceInSec: 5, sourceOutSec: 10 },
+      { startFrame: 45, sourceInSec: 0, sourceOutSec: 3.5 },
+      { startFrame: 150, sourceInSec: 3.5, sourceOutSec: 10 },
       { startFrame: 345, sourceInSec: 10, sourceOutSec: 20 },
     ]);
   });
   it('delete_shot:最后一个片段可删，显式空主轨不会被 videoDurationSec 复活', () => {
-    const only = proj({
+    const only = v2proj({
       comp: {
         ...proj().comp,
         shots: [{ id: 'only', srcStart: 0, srcEnd: 20, treatment: 'full' }],
@@ -410,7 +417,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(deleted.comp!.blocks).toHaveLength(1); // 清空主轨不删或 ripple 其他轨
     expect(deleted.comp!.blocks[0]).toMatchObject({ id: 'independent-overlay', startSec: 3, durationSec: 4 });
 
-    const after = runServerTool('split_shot', { atSec: 5 }, { ...only, comp: deleted.comp! });
+    const after = runServerTool('split_shot', { atSec: 5 }, { ...only, comp: deleted.comp!, document: deleted.document! });
     expect(after.result.ok).toBe(false);
     expect(after.result.error).toContain('no video track');
 
@@ -427,7 +434,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     });
     expect(nativeDeleted.comp?.blocks).toMatchObject([{ id: 'independent-overlay', startSec: 3, durationSec: 4 }]);
   });
-  it('set_captions:有云端转写才能开;submit_plan 落 context 不落 comp', () => {
+  it('set_captions:有云端转写才能开;submit_plan 落 V2 semantics', () => {
     const r = runServerTool('set_captions', { preset: 'ln-clean' }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.comp!.captionStyle?.preset).toBe('ln-clean');
@@ -440,8 +447,8 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(false);
     const r3 = runServerTool('submit_plan', { plan: { scenes: [{ from: 0, to: 2, framing: 'full' }] } }, proj());
     expect(r3.result.ok).toBe(true);
-    expect(r3.context?.plan).toBeTruthy();
-    expect(r3.comp).toBeUndefined();
+    expect(r3.document?.semantics.plan).toBeTruthy();
+    expect(r3.comp).toBeTruthy();
   });
   it('V2 set_captions/remove_captions 原子维护样式和 managed lane', () => {
     const p = v2proj();
@@ -488,7 +495,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(videoFrameTimelineBody(r.comp!.shots!)).toContain("filter: 'brightness(1.2) saturate(0)'");
     expect(videoFrameTimelineBody(r.comp!.shots!)).toContain("filter: 'none'"); // s2 中性段复位,防前镜漏色
     // 不带任何系数 = 还原
-    const p2 = proj({ comp: { ...proj().comp, shots: r.comp!.shots } });
+    const p2 = v2proj({ comp: { ...proj().comp, shots: r.comp!.shots } });
     const r2 = runServerTool('set_video_filter', { shotId: 's1' }, p2);
     expect(r2.comp!.shots![0]!.filter).toBeUndefined();
     expect(videoFrameTimelineBody(r2.comp!.shots!)).not.toContain('filter:'); // 全片无调色=一行不出
@@ -518,7 +525,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.ok).toBe(true);
     const id1 = (r.result.data as { trackId: string }).trackId;
     const t1 = r.comp!.audioTracks![0]!;
-    expect(t1).toEqual({ id: id1, src: 'https://cdn.pireel.com/bgm.mp3', startSec: 12 }); // -18dB/淡入淡出/1x 全默认=不落字段
+    expect(t1).toEqual({ id: id1, src: 'https://cdn.pireel.com/bgm.mp3', startSec: 12, inSec: 0 });
     const snap = runServerTool('get_state', {}, proj({ comp: r.comp }));
     expect(snap.result.state).toContain('Audio tracks');
     expect(snap.result.state).toContain(`@${id1}`);
@@ -530,7 +537,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r3.comp!.audioTracks!.length).toBe(2);
     expect(runServerTool('set_bgm', { volumeDb: -30 }, proj({ comp: r3.comp })).result.ok).toBe(false);
     const id2 = (r3.result.data as { trackId: string }).trackId;
-    expect(runServerTool('set_bgm', { trackId: id2, volumeDb: -30 }, proj({ comp: r3.comp })).comp!.audioTracks![1]!.volumeDb).toBe(-30);
+    expect(runServerTool('set_bgm', { trackId: id2, volumeDb: -30 }, proj({ comp: r3.comp })).comp!.audioTracks!.find((track) => track.id === id2)!.volumeDb).toBe(-30);
     // off:点名删一条 / 不点名全删
     const r4 = runServerTool('set_bgm', { off: true, trackId: id1 }, proj({ comp: r3.comp }));
     expect(r4.comp!.audioTracks!.map((x) => x.id)).toEqual([id2]);
@@ -555,7 +562,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // 裁尾:只改出点,起点不动
     const tl = runServerTool('set_bgm', { tailSec: 20 }, proj({ comp: withClip }));
     expect(tl.comp!.audioTracks![0]!.outSec).toBe(20);
-    expect(tl.comp!.audioTracks![0]!.startSec).toBeUndefined();
+    expect(tl.comp!.audioTracks![0]!.startSec).toBe(0);
     // 分割:一条变两条,接缝处两侧不各来一次默认淡化
     const sp = runServerTool('set_bgm', { splitAtSec: 25 }, proj({ comp: withClip }));
     const [head, tail] = sp.comp!.audioTracks!;
@@ -618,7 +625,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(false);
     expect(r2.result.error).toContain('10');
     // 转场覆盖区内禁分割;区外照常
-    const p2 = proj({ comp: { ...proj().comp, shots: r.comp!.shots } });
+    const p2 = v2proj({ comp: { ...proj().comp, shots: r.comp!.shots } });
     expect(runServerTool('split_shot', { atSec: 10.5 }, p2).result.ok).toBe(false);
     expect(runServerTool('split_shot', { atSec: 15 }, p2).result.ok).toBe(true);
     // none 移除;删任一邻镜 → prevId 失配自动失效
@@ -638,25 +645,27 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r = runServerTool('set_caption_translations', { items: [{ index: 0, text: 'First line' }, { index: 2, text: 'Third line' }] }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.result.summary).toContain('set_captions');
-    expect(r.context!.asr![0]!.sub).toBe('First line');
-    expect(r.context!.asr![1]!.sub).toBeUndefined();
-    expect(r.comp).toBeUndefined(); // 字幕从 transcript 派生,译文写入不再重铺块
+    const primaryAssetId = r.document!.semantics.primaryNarrativeAssetId!;
+    expect(r.document!.semantics.transcripts[primaryAssetId]![0]!.sub).toBe('First line');
+    expect(r.document!.semantics.transcripts[primaryAssetId]![1]!.sub).toBeUndefined();
+    expect(r.document).toBeTruthy();
+    expect(r.comp!.blocks.some((block) => block.templateId === 'caption')).toBe(false);
     // set_captions = 只落开关+样式(块是运行时物化,永不落库)
     const p2 = proj({ context: { asr: [{ start: 0, end: 5, text: '第一句话', sub: 'Hello there' }] } });
     const r2 = runServerTool('set_captions', { preset: 'ln-clean' }, p2);
     expect(r2.result.ok).toBe(true);
     expect(r2.comp!.captionStyle?.on).toBe(true);
     expect(r2.comp!.captionStyle?.preset).toBe('ln-clean');
-    expect(r2.comp!.blocks.some((b) => b.templateId === 'caption')).toBe(false);
+    expect(r2.comp!.blocks.some((b) => b.templateId === 'caption')).toBe(true);
     // 带词范围 = 逐 cue 译文,落 cueSubs
     const r3 = runServerTool('set_caption_translations', { items: [{ index: 1, w0: 0, w1: 2, text: 'Second line cue' }] }, proj());
-    expect(r3.context!.asr![1]!.cueSubs).toEqual({ '0:2': 'Second line cue' });
+    expect(r3.document!.semantics.transcripts[r3.document!.semantics.primaryNarrativeAssetId!]![1]!.cueSubs).toEqual({ '0:2': 'Second line cue' });
     // 越界给行数;clear 连 cueSubs 一起清
     const r4 = runServerTool('set_caption_translations', { items: [{ index: 9, text: 'x' }] }, proj());
     expect(r4.result.ok).toBe(false);
     expect(r4.result.error).toContain('3 lines');
     const r5 = runServerTool('set_caption_translations', { clear: true }, p2);
-    expect(r5.context!.asr![0]!.sub).toBeUndefined();
+    expect(r5.document!.semantics.transcripts[r5.document!.semantics.primaryNarrativeAssetId!]![0]!.sub).toBeUndefined();
   });
   it('apply_block:同一套 parse+lint;compose_context 占位带 suggested_instruction', () => {
     const raw = '加一张卡\n```html\n<div id="nb">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';
@@ -699,9 +708,8 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
 describe('apply_block:kit 契约答案(离线执行器)', () => {
   const PH = { id: 'ph1', templateId: 'media', slots: { spec: '87% 完播率大数字' }, startSec: 2, durationSec: 3, trackIndex: 2, label: '待配图' };
   const withPh = () => {
-    const p = proj();
-    p.comp.blocks.push({ ...PH, slots: { ...PH.slots } });
-    return p;
+    const base = proj();
+    return proj({ comp: { ...base.comp, blocks: [...base.comp.blocks, { ...PH, slots: { ...PH.slots } }] } });
   };
   it('组件 json 落成 kit 块(占位被填,存 props 不存 markup)', () => {
     const raw = '选了数字卡。\n```json\n{"component":"metric","props":{"value":"87%","label":"完播率"}}\n```';

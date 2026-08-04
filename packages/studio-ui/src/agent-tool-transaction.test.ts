@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   type Composition,
   type EditorDocumentV2,
-  normalizeProjectDocument,
-  projectDocumentToLegacyComposition,
+  compositionToEditorDocument,
+  projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
 import type { AgentToolCtx } from './agent-tool-runner';
 
@@ -28,12 +28,12 @@ const composition = (): Composition => ({
 
 function harness() {
   const compRef = { current: composition() };
-  const documentRef = { current: normalizeProjectDocument({ projectId: 'test', value: compRef.current }).document };
+  const documentRef = { current: compositionToEditorDocument({ projectId: 'test', composition: compRef.current }).document };
   const undoStackRef = { current: [] as EditorDocumentV2[] };
   const redoStackRef = { current: [documentRef.current] };
   const setDocument = (document: EditorDocumentV2, runtimeComposition?: Composition) => {
     documentRef.current = document;
-    compRef.current = runtimeComposition ?? projectDocumentToLegacyComposition({ projectId: 'test', value: document });
+    compRef.current = runtimeComposition ?? projectDocumentToComposition(document);
   };
   return { ctx: { compRef, documentRef, undoStackRef, redoStackRef, setDocument } as unknown as AgentToolCtx, compRef, documentRef, undoStackRef, redoStackRef };
 }
@@ -102,7 +102,7 @@ describe('Agent composition transaction boundary', () => {
       ...h.compRef.current,
       video: { url: 'blob:runtime-main', durationSec: 3 },
     };
-    h.documentRef.current = normalizeProjectDocument({ projectId: 'test', value: h.compRef.current, videoSig: 'main-sig' }).document;
+    h.documentRef.current = compositionToEditorDocument({ projectId: 'test', composition: h.compRef.current, videoSig: 'main-sig' }).document;
     h.documentRef.current.assets['broll-asset'] = { id: 'broll-asset', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 1 } };
     h.documentRef.current.timeline.tracks.push({
       id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,

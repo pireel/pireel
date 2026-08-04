@@ -42,6 +42,7 @@ export interface AudioTracksDeps {
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
+  videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
@@ -56,7 +57,7 @@ export interface AudioTracksDeps {
 
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
-    projectId, comp, compRef, renderAudioTracks, timelineDurationSec, documentRef, setDocument, videoFileRef,
+    projectId, comp, compRef, renderAudioTracks, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
     videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
@@ -273,7 +274,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     videoEngineRef.current?.setAudioClips(engineSpecs());
     videoEngineRef.current?.setMonitorMuteVideo(!!soloId); // solo silences the footage too, or it isn't solo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.audioTracks, comp.shots, comp.video, renderAudioTracks, timelineDurationSec, audioFileRev, soloId]);
+  }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, timelineDurationSec, audioFileRev, soloId]);
 
   // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
   useEffect(() => {
@@ -327,7 +328,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, comp.video]);
+  }, [comp.shots, videoFile]);
 
   /** Export payload (bytes per usable clip); clips with missing bytes are skipped (panel shows them). */
   const audioForExport = (): { clip: AudioClip; file: File }[] | null => {

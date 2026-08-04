@@ -5,12 +5,12 @@ import {
   EDITOR_DOCUMENT_VERSION,
   editorTimelineTotalFrames,
   emptyEditorDocumentV2,
-  migrateLegacyProjectToV2,
   primaryNarrativeTrack,
   projectV2ToLegacyComposition,
   validateEditorDocumentV2,
   type EditorDocumentV2,
 } from './editor-document';
+import { migrateLegacyProjectToV2 } from './editor-document/migration';
 
 const migrate = (
   composition: Composition,

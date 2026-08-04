@@ -33,6 +33,7 @@ function mergeAsset(into: EditorMediaAsset, patch: Omit<EditorMediaAsset, 'id'>)
     ...into.metadata,
     ...Object.fromEntries(Object.entries(patch.metadata).filter(([, value]) => value != null)),
   };
+  if (patch.library) into.library = { ...into.library, ...patch.library };
 }
 
 export interface MigrationAssetRegistry {

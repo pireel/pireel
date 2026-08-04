@@ -10,17 +10,17 @@ import {
   rememberLiveAssetUrl,
   resolveLiveAssetUrl,
   type LiveProjectDocumentState,
-  type LiveProjectMigrationContext,
+  type LiveProjectPersistenceMetadata,
 } from './live-project-document';
 
 export interface UseLiveProjectDocumentOptions {
   projectId: string;
   initialComposition: Composition;
-  migrationContextRef: MutableRefObject<LiveProjectMigrationContext>;
+  persistenceMetadataRef: MutableRefObject<LiveProjectPersistenceMetadata>;
 }
 
 export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
-  const { projectId, initialComposition, migrationContextRef } = options;
+  const { projectId, initialComposition, persistenceMetadataRef } = options;
   const sessionRef = useRef<ReturnType<typeof createLiveProjectDocumentSession> | null>(null);
   if (!sessionRef.current) sessionRef.current = createLiveProjectDocumentSession(projectId, initialComposition);
   const [state, setState] = useState<LiveProjectDocumentState>(sessionRef.current.state);
@@ -39,8 +39,8 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
   }, [publish]);
 
   const persistableDocument = useCallback((stripManagedCaptions = false) => (
-    persistableLiveProjectDocument(sessionRef.current!, migrationContextRef.current, { stripManagedCaptions })
-  ), [migrationContextRef]);
+    persistableLiveProjectDocument(sessionRef.current!, persistenceMetadataRef.current, { stripManagedCaptions })
+  ), [persistenceMetadataRef]);
 
   const dispatchCommand = useCallback((command: EditorCommand) => {
     const result = applyCommandToLiveProject(sessionRef.current!, command);

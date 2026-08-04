@@ -1,40 +1,30 @@
 /**
- * Stored project-document boundary.
- *
- * The existing `studio_projects.comp` JSON column is reused: old rows contain Composition V1,
- * new rows contain EditorDocumentV2. Callers never inspect that column directly; they normalize
- * it here and expose Composition only as a read projection for rendering and legacy clients.
+ * Native project-document helpers. Persisted/runtime state is always EditorDocumentV2;
+ * Composition exists only as an explicit render/import projection.
  */
 
 import type { Composition } from './composition-core';
 import {
   emptyEditorDocumentV2,
-  isEditorDocumentV2,
-  migrateLegacyProjectToV2,
   projectV2ToLegacyComposition,
   syncCaptionTranscripts,
-  validateEditorDocumentV2,
-  type EditorDocumentIssue,
   type EditorDocumentV2,
   type LegacyProjectionOptions,
 } from './editor-document';
-import type { StudioProjectContext } from './project-dto';
+import { migrateLegacyProjectToV2 } from './editor-document/migration';
+import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from './project-dto';
 
-export type PersistedProjectDocument = Composition | EditorDocumentV2;
-
-export interface ProjectDocumentInput {
+export interface CompositionDocumentInput {
   projectId: string;
-  value: unknown;
-  context?: StudioProjectContext;
+  composition: Composition;
   videoSig?: string | null;
   videoDurationSec?: number | null;
   fps?: number;
 }
 
-export interface NormalizedProjectDocument {
+export interface CompositionDocumentResult {
   document: EditorDocumentV2;
-  migrated: boolean;
-  issues: EditorDocumentIssue[];
+  issues: ReturnType<typeof migrateLegacyProjectToV2>['issues'];
 }
 
 function durableRemoteUrl(url: string | undefined): string | undefined {
@@ -64,32 +54,18 @@ export function prepareEditorDocumentForPersistence(document: EditorDocumentV2):
   };
 }
 
-/** V1/V2 dual-read. Migration is deterministic for a given project id and complete project context. */
-export function normalizeProjectDocument(input: ProjectDocumentInput): NormalizedProjectDocument {
-  if (isEditorDocumentV2(input.value)) {
-    const document = prepareEditorDocumentForPersistence(input.value);
-    return { document, migrated: false, issues: validateEditorDocumentV2(document) };
-  }
-  const composition = input.value && typeof input.value === 'object'
-    ? input.value as Composition
-    : undefined;
-  if (!composition) {
-    const document = emptyEditorDocumentV2();
-    return { document, migrated: true, issues: [] };
-  }
-  const migrated = migrateLegacyProjectToV2({
+/** Explicitly import an in-memory Composition produced by current UI/generation code into V2. */
+export function compositionToEditorDocument(input: CompositionDocumentInput): CompositionDocumentResult {
+  const converted = migrateLegacyProjectToV2({
     projectId: input.projectId,
-    composition,
-    context: input.context,
+    composition: input.composition,
     videoSig: input.videoSig ?? undefined,
     videoDurationSec: input.videoDurationSec ?? undefined,
     fps: input.fps,
   });
-  const document = migrated.document;
   return {
-    document: prepareEditorDocumentForPersistence(document),
-    migrated: true,
-    issues: migrated.issues,
+    document: prepareEditorDocumentForPersistence(converted.document),
+    issues: converted.issues,
   };
 }
 
@@ -102,23 +78,28 @@ function stableHash(value: string): string {
   return (hash >>> 0).toString(36);
 }
 
-export interface ProjectDocumentContextInput {
+export interface EditorDocumentPersistenceMetadataInput {
   projectId: string;
   document: EditorDocumentV2;
-  context?: StudioProjectContext;
+  mainTranscript?: readonly TranscriptSegment[] | null;
+  clipTranscripts?: Readonly<Record<string, readonly TranscriptSegment[]>>;
+  plan?: unknown;
+  cloudMedia?: ProjectCloudMediaIndex;
+  localAssets?: readonly LocalAssetIndexEntry[];
   videoSig?: string | null;
   videoDurationSec?: number | null;
 }
 
-/** Add persistence metadata to V2 without reconstructing any timeline state from Composition. */
-export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInput): EditorDocumentV2 {
-  const context = input.context ?? {};
+/** Fold current native session metadata into V2 without reconstructing timeline state. */
+export function applyEditorDocumentPersistenceMetadata(
+  input: EditorDocumentPersistenceMetadataInput,
+): EditorDocumentV2 {
   const assets = Object.fromEntries(Object.entries(input.document.assets).map(([id, asset]) => [id, {
     ...asset,
     locator: {
       ...asset.locator,
-      ...(asset.locator.localSig && context.media?.clips?.[asset.locator.localSig]?.key
-        ? { cloudKey: context.media.clips[asset.locator.localSig]!.key }
+      ...(asset.locator.localSig && input.cloudMedia?.clips?.[asset.locator.localSig]?.key
+        ? { cloudKey: input.cloudMedia.clips[asset.locator.localSig]!.key }
         : {}),
     },
   }]));
@@ -130,7 +111,7 @@ export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInp
       locator: {
         ...main.locator,
         ...(input.videoSig ? { localSig: input.videoSig } : {}),
-        ...(context.media?.video?.key ? { cloudKey: context.media.video.key } : {}),
+        ...(input.cloudMedia?.video?.key ? { cloudKey: input.cloudMedia.video.key } : {}),
       },
       metadata: {
         ...main.metadata,
@@ -138,9 +119,9 @@ export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInp
       },
     };
   }
-  for (const entry of context.localAssets ?? []) {
+  for (const entry of input.localAssets ?? []) {
     const existing = Object.values(assets).find((asset) => asset.locator.localSig === entry.sig);
-    const cloudKey = context.media?.clips?.[entry.sig]?.key;
+    const cloudKey = input.cloudMedia?.clips?.[entry.sig]?.key;
     if (existing) {
       assets[existing.id] = {
         ...existing,
@@ -150,6 +131,10 @@ export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInp
           ...existing.metadata,
           ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
           ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),
+        },
+        library: {
+          createdAt: entry.createdAt,
+          ...(entry.folder ? { folder: entry.folder } : {}),
         },
       };
       continue;
@@ -168,9 +153,13 @@ export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInp
         ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
         ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),
       },
+      library: {
+        createdAt: entry.createdAt,
+        ...(entry.folder ? { folder: entry.folder } : {}),
+      },
     };
   }
-  for (const [sig, ref] of Object.entries(context.media?.clips ?? {})) {
+  for (const [sig, ref] of Object.entries(input.cloudMedia?.clips ?? {})) {
     if (Object.values(assets).some((asset) => asset.locator.localSig === sig)) continue;
     const stem = `asset_video_${stableHash(`${input.projectId}\u0000${sig}`)}`;
     let id = stem;
@@ -184,21 +173,21 @@ export function mergeProjectContextIntoDocument(input: ProjectDocumentContextInp
     };
   }
   let document: EditorDocumentV2 = { ...input.document, assets };
-  document = syncCaptionTranscripts(document, context.asr ?? null, context.clipAsr ?? {});
-  if (context.plan !== undefined && document.semantics.plan !== context.plan) {
-    document = { ...document, semantics: { ...document.semantics, plan: context.plan } };
+  document = syncCaptionTranscripts(document, input.mainTranscript ?? null, input.clipTranscripts ?? {});
+  if (input.plan !== undefined && document.semantics.plan !== input.plan) {
+    document = { ...document, semantics: { ...document.semantics, plan: input.plan } };
   }
   return prepareEditorDocumentForPersistence(document);
 }
 
-export function projectDocumentToLegacyComposition(
-  input: ProjectDocumentInput,
+export function projectDocumentToComposition(
+  document: EditorDocumentV2,
   options: LegacyProjectionOptions = {},
 ): Composition {
-  return projectV2ToLegacyComposition(normalizeProjectDocument(input).document, options);
+  return projectV2ToLegacyComposition(document, options);
 }
 
-export function emptyPersistedProjectDocument(): EditorDocumentV2 {
+export function emptyProjectDocument(): EditorDocumentV2 {
   return emptyEditorDocumentV2();
 }
 

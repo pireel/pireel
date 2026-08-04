@@ -33,6 +33,8 @@ import {
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
+  normalizeNarrationSplitPoints,
+  narrativeTimelineRangesForAssetSourceRange,
   applyShotFramingInput,
   audioTrimPatch,
   blockId,
@@ -42,6 +44,7 @@ import {
   editorDocumentRenderPlan,
   freeTrack,
   getCaptionPreset,
+  hasPrimaryNarrativeClips,
   isCaptionsOn,
   isSentenceCaption,
   placementFramingNotes,
@@ -50,24 +53,23 @@ import {
   shotFilterCss,
   blockOverlapWarnings,
   shotId,
-  listAddressedWords,
-  narrationSourceSplitsAtEditedPoints,
+  listDocumentAddressedWords,
   patchNarrativeClips,
   removeOverlayDocumentClips,
   duplicateOverlayDocumentClip,
   insertOverlayDocumentClip,
-  normalizeProjectDocument,
-  resolveWordIds,
-  wordRanges,
-  wordRangesToEdited,
-  splitShotsAtEditedPoints,
+  resolveDocumentWordIds,
+  documentWordRanges,
+  documentWordRangesToTimeline,
+  splitBlockedByTransition,
   totalDuration,
   validateComposition,
   validateEditorDocumentV2,
+  syncCaptionTranscripts,
   videoShotTimelineSpans,
   zoneOf,
 } from '@pireel/studio-engine/composition';
-import { type CutSeamEntry, finalizeCutSeams, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
+import { type CutSeamEntry, finalizeCutSeams, spans as clipSpans, tightenCutRanges } from '@pireel/studio-engine/trim';
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
@@ -76,7 +78,6 @@ import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
 import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
-import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
 import {
@@ -101,6 +102,7 @@ import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
+import { captionTranscriptsByAsset } from './caption-transcript-bridge';
 
 const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo'));
@@ -300,13 +302,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           projectId: ctx.projectId,
           document: documentRef.current,
           ranges,
-          context: {
-            ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-            ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
-          },
           mainTranscript: asrRef.current,
           clipTranscripts: clipAsrRef.current,
-          canvasWidth: c.width,
         });
         if (!command.ok) return command;
         setDocument(command.document);
@@ -335,12 +332,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           projectId: ctx.projectId,
           document: documentRef.current,
           draft,
-          context: {
-            ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-            ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
-            ...(planRef.current ? { plan: planRef.current } : {}),
-          },
-          videoDurationSec: c.video?.durationSec,
+          ...(planRef.current ? { plan: planRef.current } : {}),
         });
         if (!command.ok) return command;
         setDocument(command.document);
@@ -383,7 +375,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'list_words': {
             if (!asrRef.current?.length && typeof input.shotId !== 'string') return { ok: false, error: t('workbench.noTranscriptYetRun') };
             if (typeof input.shotId === 'string') await ensureClipTranscripts();
-            const listed = listAddressedWords(ensureShots(compRef.current), asrRef.current ?? [], clipAsrRef.current, {
+            const transcriptDocument = syncCaptionTranscripts(
+              documentRef.current,
+              asrRef.current,
+              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+            );
+            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            const listed = listDocumentAddressedWords(transcriptDocument, {
               ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
               ...(Array.isArray(input.sentenceIndexes) ? { sentenceIndexes: input.sentenceIndexes.map(Number).filter(Number.isInteger) } : {}),
               ...(typeof input.fromSec === 'number' && Number.isFinite(input.fromSec) ? { fromSec: input.fromSec } : {}),
@@ -1033,8 +1031,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Project-scoped sources: main video + inserted clips (same letter tags as the state snapshot)
             const tag = new Map<string, string>();
             for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
+            const mainAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const mainDurationSec = mainAssetId
+              ? documentRef.current.assets[mainAssetId]?.metadata.durationSec
+              : undefined;
             const project = {
-              ...(c.video ? { mainVideo: { durationSec: r1(c.video.durationSec) } } : {}),
+              ...(mainDurationSec ? { mainVideo: { durationSec: r1(mainDurationSec) } } : {}),
               ...(tag.size
                 ? { insertedClips: [...tag.entries()].map(([src, tg]) => ({ clip: tg, transcribed: !!clipAsrRef.current[src]?.length })) }
                 : {}),
@@ -1093,21 +1095,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: was ? t('workbench.pausedAt', { t: r1(tRef.current) }) : t('workbench.playbackAlreadyPaused') };
           }
           case 'cut_range': {
-            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
             const from = Number(input.fromSec);
             const to = Number(input.toSec);
             if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { ok: false, error: t('workbench.invalidRange') };
-            const shots = ensureShots(c);
-            const r = removeEditedRange(shots, from, to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-            if (!r.removed) return { ok: false, error: t('workbench.rangeDeletedMayCover') };
-            const committed = commitNarrationRanges([{ fromSec: r.removed[0], toSec: r.removed[1] }]);
+            const committed = commitNarrationRanges([{ fromSec: from, toSec: to }]);
             if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
-            applyT(r.removed[0]);
-            return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(r.removed[0]), to: r1(r.removed[1]) }), data: { shotIds: (committed.composition.shots ?? []).map((s) => s.id) } });
+            applyT(from);
+            return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(from), to: r1(to) }), data: { shotIds: (committed.composition.shots ?? []).map((s) => s.id) } });
           }
           case 'set_captions': {
-            if (!c.video) return { ok: false, error: t('workbench.uploadVideoBeforeSetting') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.uploadVideoBeforeSetting') };
             const preset = typeof input.preset === 'string' ? input.preset : undefined;
             if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: t('workbench.noSuchCaptionPreset', { preset }) };
             const yPct = Number(input.yPct);
@@ -1186,26 +1185,25 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
           }
           case 'delete_words': {
-            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
             const ids = Array.isArray(input.wordIds) ? [...new Set(input.wordIds.map(String))] : [];
             if (!ids.length) return { ok: false, error: 'wordIds must contain at least one id from list_words' };
             await ensureClipTranscripts();
-            const shots0 = ensureShots(c);
-            const resolved = resolveWordIds(shots0, asrRef.current ?? [], clipAsrRef.current, ids);
+            const transcriptDocument = syncCaptionTranscripts(
+              documentRef.current,
+              asrRef.current,
+              captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+            );
+            if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
+            const resolved = resolveDocumentWordIds(transcriptDocument, ids);
             if (resolved.missing.length) return { ok: false, error: `unknown or stale word ids: ${resolved.missing.join(', ')}`, data: { missing: resolved.missing } };
-            const mapped = wordRangesToEdited(shots0, wordRanges(resolved.words));
+            const mapped = documentWordRangesToTimeline(transcriptDocument, documentWordRanges(resolved.words));
             if (!mapped.length) return { ok: false, error: 'the selected words are already absent from the edited timeline' };
-            let shots = shots0;
             let firstCut = Infinity;
-            const seams: CutSeamEntry[] = [];
-            for (const range of mapped) {
-              const removed = removeEditedRange(shots, range.editedFrom, range.editedTo, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-              if (!removed.removed) continue;
-              shots = removed.clips;
-              firstCut = Math.min(firstCut, removed.removed[0]);
-              seams.push({ at: removed.removed[0], len: removed.removed[1] - removed.removed[0], ...(range.text ? { text: range.text } : {}) });
-            }
-            if (!seams.length) return { ok: false, error: 'cannot remove the selected words from the current edit' };
+            const seams: CutSeamEntry[] = mapped.map((range) => {
+              firstCut = Math.min(firstCut, range.fromSec);
+              return { at: range.fromSec, len: range.toSec - range.fromSec, ...(range.text ? { text: range.text } : {}) };
+            });
             const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
             if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
@@ -1213,11 +1211,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
           }
           case 'cut_narration': {
-            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
             const raw = Array.isArray(input.ranges) ? input.ranges : [];
-            const shots0 = ensureShots(c);
-            // Narration source seconds → final-cut seconds (loose: if a boundary lands in an already-deleted segment, snap to the nearest surviving point, still deleting the remaining part);
-            // delete back to front so deleting an earlier segment doesn't shift later coordinates
+            // Primary-asset source seconds → every surviving native-timeline occurrence.
             // Pause tightening: keepGapSec 的余量收缩在源秒时钟上做(与离线执行器/评测共用同一份数学)
             const kg = Number(input.keepGapSec);
             const srcRanges = raw
@@ -1235,26 +1231,27 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const joined = inside.join('');
               return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
             };
+            const assetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            if (!assetId) return { ok: false, error: t('workbench.noVideoYet') };
             const edited = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
-              .map((r) => ({ from: srcToEditedLoose(shots0, r.from, inNarrationSource), to: srcToEditedLoose(shots0, r.to, inNarrationSource), text: snippetOf(r.from, r.to) }))
+              .flatMap((range) => narrativeTimelineRangesForAssetSourceRange(documentRef.current, assetId, range.from, range.to)
+                .map((mapped) => ({
+                  from: mapped.fromSec,
+                  to: mapped.toSec,
+                  text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec),
+                })))
               .filter((r) => r.to - r.from > 0.05)
               .sort((a, b) => b.from - a.from);
             if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
-            let shots = shots0;
-            const seams: CutSeamEntry[] = [];
-            let firstCut = Infinity;
-            for (const e of edited) {
-              const rr = removeEditedRange(shots, e.from, e.to, (base, srcStart, srcEnd) => ({ ...base, id: shotId(), srcStart, srcEnd }));
-              if (!rr.removed) continue;
-              shots = rr.clips;
-              seams.push({ at: rr.removed[0], len: rr.removed[1] - rr.removed[0], ...(e.text ? { text: e.text } : {}) });
-              firstCut = Math.min(firstCut, rr.removed[0]);
-            }
-            if (!seams.length) return { ok: false, error: t('workbench.thoseRangesDeletedThey') };
+            const seams: CutSeamEntry[] = edited.map((range) => ({
+              at: range.from,
+              len: range.to - range.from,
+              ...(range.text ? { text: range.text } : {}),
+            }));
             const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
             if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
-            if (Number.isFinite(firstCut)) applyT(firstCut);
+            applyT(Math.min(...edited.map((range) => range.from)));
             // The receipt speaks ACTUAL seconds (post-margin, what really left the timeline) — the agent's own
             // gap arithmetic (raw gap sizes) is what produced "cut 2.7s" while the panel said 2.4s.
             const cuts = finalizeCutSeams(seams);
@@ -1281,22 +1278,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const entry = await pull(ctx.projectId).catch(() => null);
               if (!entry) return { ok: false, error: t('workbench.nothingUndoCloudEmpty') };
               redoStackRef.current.push(documentRef.current);
-              if (entry.document) setDocument(entry.document);
-              else {
-                const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
-                const primaryAsset = primaryAssetId ? documentRef.current.assets[primaryAssetId] : undefined;
-                const restored = normalizeProjectDocument({
-                  projectId: ctx.projectId,
-                  value: entry.comp,
-                  context: {
-                    ...(asrRef.current?.length ? { asr: asrRef.current } : {}),
-                    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: clipAsrRef.current } : {}),
-                  },
-                  videoSig: primaryAsset?.locator.localSig,
-                  videoDurationSec: c.video?.durationSec,
-                }).document;
-                setDocument(restored);
-              }
+              setDocument(entry.document);
               setSelectedId(null);
               setSelectedShotId(null);
               return withDelta({
@@ -1340,7 +1322,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'export_video': {
             // Default local export (per user, same path in the OSS shell): the bridge drives this tab to run client-side compositing (WebCodecs),
             // the result goes straight to a browser download on the user's machine — no R2 upload, zero server cost. Poll via track_export.
-            if (!compRef.current.video?.url) return { ok: false, error: t('common.uploadBeforeExport') };
+            if (editorDocumentRenderPlan(documentRef.current, { resolveAssetUrl }).durationSec <= 0) return { ok: false, error: t('common.uploadBeforeExport') };
             const job = agentExportRef.current;
             if (job.running) return { ok: true, summary: t('common.exportAlreadyProgress'), data: { status: 'running', progress: exportPctRef.current, hint: 'poll track_export' } };
             // The specs are the user's to choose — enforced by the FRAMEWORK, not the prompt.
@@ -1510,7 +1492,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.framingChangedName', { name: t(name) }) };
           }
           case 'split_shot': {
-            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
             if ('atSecs' in input && 'atSec' in input) return { ok: false, error: 'use either atSec or atSecs, not both' };
             const purpose = input.purpose == null ? 'editing' : String(input.purpose);
             if (purpose !== 'editing' && purpose !== 'framing') return { ok: false, error: `invalid split purpose: ${purpose}` };
@@ -1539,22 +1521,27 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 };
               }
             }
-            const split = splitShotsAtEditedPoints(shots, points);
-            if ('error' in split) return { ok: false, error: split.error };
-            const requests = narrationSourceSplitsAtEditedPoints(shots, split.atSecs);
-            if (!requests) return { ok: false, error: 'Validated split points no longer resolve to narration clips' };
-            const command = applyNarrationSplitCommands(documentRef.current, requests);
+            const splitPoints = normalizeNarrationSplitPoints(points, STUDIO_AGENT_EXECUTION_LIMITS.splitPointsPerCall);
+            if ('error' in splitPoints) return { ok: false, error: splitPoints.error };
+            const nativePlacements = editorDocumentRenderPlan(documentRef.current).narrative.map((entry) => ({
+              shotId: entry.clipId,
+              startSec: entry.startSec,
+              endSec: entry.endSec,
+            }));
+            const transitionPoint = splitPoints.find((atSec) => splitBlockedByTransition(shots, atSec, nativePlacements));
+            if (transitionPoint != null) return { ok: false, error: `cannot split at ${transitionPoint}s because it is inside a transition region` };
+            const command = applyNarrationSplitCommands(documentRef.current, splitPoints);
             if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
             setDocument(command.document);
-            applyT(split.atSecs[split.atSecs.length - 1]!);
+            applyT(splitPoints[splitPoints.length - 1]!);
             return withDelta({
               ok: true,
-              summary: split.atSecs.length === 1 ? t('workbench.splitPlayhead') : t('workbench.splitNPoints', { n: split.atSecs.length }),
-              data: { atSecs: split.atSecs, shotIds: (compRef.current.shots ?? []).map((shot) => shot.id) },
+              summary: splitPoints.length === 1 ? t('workbench.splitPlayhead') : t('workbench.splitNPoints', { n: splitPoints.length }),
+              data: { atSecs: splitPoints, shotIds: (compRef.current.shots ?? []).map((shot) => shot.id) },
             });
           }
           case 'trim_shot': {
-            if (!c.video) return { ok: false, error: t('workbench.noVideoYet') };
+            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
             const side = input.side === 'left' ? 'left' : 'right';
             if (typeof input.atSec === 'number') applyT(Math.max(0, input.atSec));
             const trimmed = trimAtPlayhead(side);
@@ -1686,7 +1673,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Agent inserts B-roll: the bytes must already be in our storage (a helper-uploaded sig / a CDN url of a library / generated video) —
             // the canvas engine needs CORS-clean frames, so always fetch the bytes into a File and go through the full local-insert path
             // (blob src + srcSig + OPFS + cloud backup), fully isomorphic to a manual "+" insert
-            if (!c.video) return { ok: false, error: t('workbench.addMainVideoBefore') };
             const sigIn = typeof input.sig === 'string' ? input.sig.trim() : '';
             const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
             if (!sigIn && !urlIn) return { ok: false, error: t('workbench.needUrlOrSig') };

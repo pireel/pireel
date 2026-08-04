@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { applyCanvasDocumentEdit } from './canvas-document-edit';
 import { emptyComposition } from './composition-core';
-import { normalizeProjectDocument } from './project-document';
+import { compositionToEditorDocument } from './project-document';
 
 const words = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen'
   .split(' ')
@@ -21,10 +21,9 @@ function captionDocument() {
     shots: [{ id: 'main', srcStart: 0, srcEnd: 8, treatment: 'full' as const }],
     blocks: [{ id: 'old-caption', templateId: 'caption', slots: {}, startSec: 0, durationSec: 7.2, trackIndex: 1 }],
   };
-  const document = normalizeProjectDocument({
+  const document = compositionToEditorDocument({
     projectId: 'canvas-test',
-    value: composition,
-    context: { asr: transcript },
+    composition,
     videoSig: 'main-sig',
   }).document;
   document.timeline.tracks.push({

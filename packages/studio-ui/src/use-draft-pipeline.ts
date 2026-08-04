@@ -11,12 +11,14 @@
  */
 
 import { useRef, type MutableRefObject } from 'react';
-import { applyEditorCommand, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { applyEditorCommand, syncCaptionTranscripts, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import type { DraftPlan, PlanInsert } from '@pireel/studio-engine/plan';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type VisualTimeline, analyzeVisual } from './visual';
 import { t } from './i18n';
+import { deleteCachedAsr } from './asr-cache';
+import { fileSig } from './media';
 
 export interface DraftPipelineDeps {
   videoFileRef: MutableRefObject<File | null>;
@@ -52,17 +54,27 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
 
   /** Extract transcript: ASR only (lib-cached) + store sentences. Does not lay captions or cut shots (captions off
    *  by default, graphics-first; shot structure is built by lay_out per scene). Returns sentences. */
-  function stepAsr(report?: (text: string) => void): Promise<AsrSegment[]> {
-    if (asrRef.current?.length) return Promise.resolve(asrRef.current);
+  function runAsr(report: ((text: string) => void) | undefined, force: boolean): Promise<AsrSegment[]> {
+    if (!force && asrRef.current?.length) return Promise.resolve(asrRef.current);
     return dedup('asr', async () => {
       const vf = videoFileRef.current;
       if (!vf) throw new Error(t('common.uploadVideoFirst'));
+      if (force) deleteCachedAsr(fileSig(vf));
       report?.(t('common.transcribing'));
       const segs = await studioProviders().transcriber.transcribe(vf);
       asrRef.current = segs;
       setAsrSentences(segs);
+      setDocument(syncCaptionTranscripts(documentRef.current, segs, {}));
       return segs;
     });
+  }
+  function stepAsr(report?: (text: string) => void): Promise<AsrSegment[]> {
+    return runAsr(report, false);
+  }
+  /** Re-transcribe the mounted main source even when a cached transcript exists. Used only after
+   *  native caption relay proves the stored transcript cannot produce a cue for the current track. */
+  function refreshAsr(report?: (text: string) => void): Promise<AsrSegment[]> {
+    return runAsr(report, true);
   }
 
   /** Analyze transcript: plan the whole cut. Needs sentences (extract first if absent).
@@ -140,5 +152,5 @@ export function useDraftPipeline(deps: DraftPipelineDeps) {
     return vis;
   }
 
-  return { stepAsr, stepPlan, stepVisual };
+  return { stepAsr, refreshAsr, stepPlan, stepVisual };
 }

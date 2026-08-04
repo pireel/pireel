@@ -9,8 +9,8 @@
  *  - primary narration, managed captions and music are semantic roles, not magic track indexes;
  *  - transcript/scene data remains a first-class Pireel layer above the neutral timeline.
  *
- * V1 compatibility is deliberately a boundary concern. Migration creates the sole in-memory
- * source of truth; the legacy projection is temporary and read-only.
+ * Persisted V1 conversion is isolated to the one-shot online migration. Runtime callers receive
+ * V2 only; Composition is an explicit, read-only render projection.
  */
 
 export * from './create';
@@ -18,7 +18,8 @@ export * from './commands/index';
 export * from './caption-transcript-sync';
 export * from './frozen-block-vars';
 export * from './legacy-projection';
-export * from './migration';
+export * from './read-model';
+export * from './transcript-address';
 export * from './render-plan';
 export * from './time';
 export * from './types';

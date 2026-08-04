@@ -27,6 +27,8 @@ import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionL
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { t } from './i18n';
 import type { CaptionLineRow } from './captions-panel';
+import { inspectCaptionDocument } from './caption-document-state';
+import { captionTranscriptsByAsset } from './caption-transcript-bridge';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
 export interface CaptionsOpsDeps {
@@ -49,6 +51,7 @@ export interface CaptionsOpsDeps {
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   ensureShots: (c: Composition) => VideoShot[];
   stepAsr: () => Promise<AsrSegment[]>;
+  refreshAsr: () => Promise<AsrSegment[]>;
   ensureClipTranscripts: () => Promise<void>;
   pushUndoSnapshot: () => void;
   postPreview: (msg: Record<string, unknown>) => void;
@@ -60,7 +63,7 @@ export interface CaptionsOpsDeps {
 export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const {
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
-    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, documentRef, setDocument, ensureShots, stepAsr,
+    setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef, documentRef, setDocument, ensureShots, stepAsr, refreshAsr,
     ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT, runTool,
   } = deps;
   const [capTransBusy, setCapTransBusy] = useState(false); // bilingual translation in progress (captions panel)
@@ -68,7 +71,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     document: documentRef.current,
     patch,
     mainTranscript: asrRef.current,
-    clipTranscripts: clipAsrRef.current,
+    clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
   });
   const setCaptionStyle = useCallback((patch: Partial<CaptionStyle>) => {
     // SPARSE persistence: merge into the raw stored style, never the resolved one — defaults stay in
@@ -166,15 +169,21 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
    *  may just want to edit lines; picking a style later re-lays from this transcript). */
   const extractCaptionsNow = async () => {
-    if (!videoFileRef.current) {
+    const source = inspectCaptionDocument(documentRef.current);
+    if (!source.hasVideoTrack) {
       toast.error(t('common.uploadVideoFirst'));
+      return;
+    }
+    const hasMountedClipSource = ensureShots(compRef.current).some((shot) => !!shot.src);
+    if (!videoFileRef.current && !hasMountedClipSource) {
+      toast.error(t('workbench.restoreVideoSourceBeforeCaptions'));
       return;
     }
     if (captionGenBusyRef.current) return;
     captionGenBusyRef.current = true;
     setCapGenBusy(true);
     try {
-      await stepAsr();
+      if (videoFileRef.current) await stepAsr();
       await ensureClipTranscripts();
     } catch {
       toast.error(t('workbench.transcriptExtractionFailedTry'));
@@ -263,7 +272,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const [capGenBusy, setCapGenBusy] = useState(false); // used by the panel's "generating captions" overlay (the ref only prevents re-entry, doesn't trigger render)
   const applyCaptionPreset = async (preset: string, stylePatch: Partial<CaptionStyle> = {}) => {
     const has = isCaptionsOn(compRef.current);
-    if (!compRef.current.video) {
+    const source = inspectCaptionDocument(documentRef.current);
+    if (!source.hasVideoTrack) {
       toast.error(t('workbench.uploadVideoBeforeApplying'));
       return;
     }
@@ -275,32 +285,61 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       // switching the preset only writes captionStyle {on, preset} — the reactive derivation
       // materializes blocks from the transcript.
       let segs = asrRef.current;
-      if (!segs?.length) {
-        toast.info(t('workbench.extractingTranscript'));
-        segs = await stepAsr();
+      let transcribedForAttempt = false;
+      if (!source.hasNarrativeTranscript && !segs?.length) {
+        const hasMountedClipSource = ensureShots(compRef.current).some((shot) => !!shot.src);
+        if (!videoFileRef.current && !hasMountedClipSource) {
+          toast.error(t('workbench.restoreVideoSourceBeforeCaptions'));
+          return;
+        }
+        if (videoFileRef.current) {
+          toast.info(t('workbench.extractingTranscript'));
+          segs = await stepAsr();
+          transcribedForAttempt = true;
+        }
       }
-      const cues = displayCues(ensureShots(compRef.current), segs ?? [], clipAsrRef.current, { subLang: resolveCaptionStyle(compRef.current).sub?.lang, canvasW: compRef.current.width });
-      if (!cues.length) {
-        toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
-        return;
-      }
+      // V2 primary lanes can be built entirely from ordinary narrative assets. Their bytes and
+      // transcripts live in the per-source maps, not in the legacy special main-video File.
+      await ensureClipTranscripts();
       // Preset switch = a complete look: clear per-line color/bg overrides, then relay from the
       // transcript in the same V2 transaction so locked lanes cannot publish half a style change.
-      const edit = captionEdit({ on: true, preset, color: undefined, bg: undefined, ...stylePatch });
+      let edit = captionEdit({ on: true, preset, color: undefined, bg: undefined, ...stylePatch });
       if (!edit.ok) {
         toast.error(edit.error.message);
+        return;
+      }
+      let output = inspectCaptionDocument(edit.document);
+      // A transcript can survive a source replacement through an old project context. Asset-level
+      // presence alone is not proof that it overlaps the current source. Native relay is the final
+      // authority: zero cues + mounted bytes means re-transcribe this source once and retry atomically.
+      if (!output.captionCount && videoFileRef.current && !transcribedForAttempt) {
+        toast.info(t('workbench.extractingTranscript'));
+        segs = await refreshAsr();
+        edit = captionEdit({ on: true, preset, color: undefined, bg: undefined, ...stylePatch });
+        if (!edit.ok) {
+          toast.error(edit.error.message);
+          return;
+        }
+        output = inspectCaptionDocument(edit.document);
+      }
+      if (!output.captionCount) {
+        toast.error(t('workbench.transcriptEmptyGenerateCaptions'));
         return;
       }
       pushUndoSnapshot();
       setDocument(edit.document);
       // Let the user see the result immediately (same value as "select means visible"): if the playhead isn't in any
       // caption window, move it to the first caption — otherwise nothing on screen moves after laying and it feels like "clicked but no effect" (user reported)
-      if (!playingRef.current && cues.length) {
+      if (!playingRef.current && output.firstCaptionStartSec != null) {
         const t = tRef.current;
-        const within = cues.some((c) => t >= c.start && t < c.end);
-        if (!within) applyT(cues[0]!.start + Math.min(0.3, (cues[0]!.end - cues[0]!.start) / 2));
+        const within = edit.document.timeline.tracks
+          .find((track) => track.id === edit.document.semantics.managedCaptionTrackId)
+          ?.clips.some((clip) => clip.kind === 'caption' && clip.enabled
+            && t >= clip.startFrame / edit.document.canvas.fps
+            && t < (clip.startFrame + clip.durationFrames) / edit.document.canvas.fps);
+        if (!within) applyT(output.firstCaptionStartSec + 0.01);
       }
-      toast.success(has ? t('workbench.reLaidCaptionsFrom') : t('workbench.laidNCaptionsFrom', { n: cues.length }));
+      toast.success(has ? t('workbench.reLaidCaptionsFrom') : t('workbench.laidNCaptionsFrom', { n: output.captionCount }));
     } catch (e) {
       console.warn('[studio] apply caption preset failed', e);
       setCaptionStyle({ preset }); // on transcription failure, at least swap the style

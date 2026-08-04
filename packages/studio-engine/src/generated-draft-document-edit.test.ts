@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { applyGeneratedDraftDocument } from './generated-draft-document-edit';
-import { normalizeProjectDocument } from './project-document';
+import { compositionToEditorDocument } from './project-document';
 
 function baseDocument() {
   const composition = {
@@ -9,7 +9,7 @@ function baseDocument() {
     video: { url: 'https://cdn.example/main.mp4', durationSec: 12 },
     shots: [{ id: 'old-shot', srcStart: 0, srcEnd: 12, treatment: 'full' as const }],
   };
-  return normalizeProjectDocument({ projectId: 'generated-draft', value: composition }).document;
+  return compositionToEditorDocument({ projectId: 'generated-draft', composition: composition }).document;
 }
 
 describe('applyGeneratedDraftDocument', () => {

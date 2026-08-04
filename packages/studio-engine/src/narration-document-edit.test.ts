@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { emptyComposition } from './composition';
 import { applyNarrationDocumentEdit, removeNarrationClipsWithoutRipple } from './narration-document-edit';
-import { normalizeProjectDocument } from './project-document';
+import { compositionToEditorDocument } from './project-document';
 
 describe('semantic V2 narration edit', () => {
   it('re-derives managed captions after the multi-track ripple command', () => {
@@ -21,13 +21,11 @@ describe('semantic V2 narration edit', () => {
       shots: [{ id: 'main', srcStart: 0, srcEnd: 4, treatment: 'full' as const }],
       blocks: [{ id: 'old-caption', templateId: 'caption', slots: {}, startSec: 0, durationSec: 3, trackIndex: 1 }],
     };
-    const context = { asr: transcript };
-    const document = normalizeProjectDocument({ projectId: 'test', value: composition, context, videoSig: 'main-sig' }).document;
+    const document = compositionToEditorDocument({ projectId: 'test', composition, videoSig: 'main-sig' }).document;
     const result = applyNarrationDocumentEdit({
       projectId: 'test',
       document,
       ranges: [{ fromSec: 0, toSec: 1 }],
-      context,
       mainTranscript: transcript,
       clipTranscripts: {},
     });
@@ -54,8 +52,8 @@ describe('semantic V2 narration edit', () => {
         id: 'old-caption', templateId: 'caption', slots: {}, startSec: 0, durationSec: 4, trackIndex: 1,
       }],
     };
-    const context = { clipAsr: { 'https://cdn.test/insert.mp4': insertedTranscript } };
-    const document = normalizeProjectDocument({ projectId: 'insert-test', value: composition, context: {}, videoSig: 'main-sig' }).document;
+    const clipTranscripts = { 'https://cdn.test/insert.mp4': insertedTranscript };
+    const document = compositionToEditorDocument({ projectId: 'insert-test', composition, videoSig: 'main-sig' }).document;
     const insertedClip = document.timeline.tracks[0]!.clips.find((clip) => clip.id === 'insert');
     const insertedAssetId = insertedClip?.kind === 'narrative' ? insertedClip.assetId : undefined;
     document.timeline.tracks.push({
@@ -67,9 +65,8 @@ describe('semantic V2 narration edit', () => {
       projectId: 'insert-test',
       document,
       ranges: [{ fromSec: 0, toSec: 1 }],
-      context,
       mainTranscript: null,
-      clipTranscripts: context.clipAsr,
+      clipTranscripts,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -94,7 +91,7 @@ describe('semantic V2 narration edit', () => {
         { id: 'independent', templateId: 'custom', slots: {}, startSec: 4, durationSec: 2, trackIndex: 5 },
       ],
     };
-    const document = normalizeProjectDocument({ projectId: 'empty-test', value: composition, context: { asr: transcript }, videoSig: 'sig' }).document;
+    const document = compositionToEditorDocument({ projectId: 'empty-test', composition, videoSig: 'sig' }).document;
     const result = removeNarrationClipsWithoutRipple({
       projectId: 'empty-test', document, clipIds: ['only'], mainTranscript: transcript, clipTranscripts: {},
     });
@@ -117,7 +114,7 @@ describe('semantic V2 narration edit', () => {
         startSec: 0, durationSec: 2, trackIndex: 1,
       }],
     };
-    const document = normalizeProjectDocument({ projectId: 'insert-only-test', value: composition, context: {} }).document;
+    const document = compositionToEditorDocument({ projectId: 'insert-only-test', composition }).document;
     const insertedClip = document.timeline.tracks[0]!.clips[0];
     if (insertedClip?.kind !== 'narrative') throw new Error('expected narrative clip');
     const result = removeNarrationClipsWithoutRipple({

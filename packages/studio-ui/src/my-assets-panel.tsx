@@ -224,6 +224,8 @@ export function MyAssetsPanel({
   registrySyncReady,
   onRegistryChange,
   videoSig,
+  mainSourceUrl,
+  hasMainSource,
   onDeleteAsset,
   isSrcLive,
   onReconnectSource,
@@ -242,6 +244,8 @@ export function MyAssetsPanel({
   onRegistryChange?: (entries: LocalAssetIndexEntry[]) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — labels it by filename + keys its eviction. */
   videoSig?: string | null;
+  mainSourceUrl?: string | null;
+  hasMainSource?: boolean;
   /** Delete a source from the TRACK too (workbench-side comp surgery: every shot cut from it goes). null = the main source. */
   onDeleteAsset?: (src: string | null) => void;
   /** Per-asset liveness of a track source's bytes in this session (workbench-held Files). */
@@ -391,8 +395,8 @@ export function MyAssetsPanel({
   }
   const trackCards = useMemo<TrackCard[]>(() => {
     const out: TrackCard[] = [];
-    if (comp.video || (videoSig && (comp.shots ?? []).some((s) => !s.src))) {
-      const url = comp.video?.url;
+    if (hasMainSource || (videoSig && (comp.shots ?? []).some((s) => !s.src))) {
+      const url = mainSourceUrl ?? undefined;
       out.push({
         src: null,
         live: url ? (isSrcLive?.(url) ?? true) : false,
@@ -435,7 +439,7 @@ export function MyAssetsPanel({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.video, comp.shots, videoSig]);
+  }, [comp.shots, videoSig, mainSourceUrl, hasMainSource]);
 
   /** sig → the track src it appears as (null = the main source). Lets an IMPORT card represent an
    *  on-track asset: its delete also does the track surgery via this mapping. */

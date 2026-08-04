@@ -17,7 +17,7 @@ import { applyOverlayDocumentEdits, type OverlayDocumentPatch } from './overlay-
 
 export interface LayoutDocumentEditInput {
   document: EditorDocumentV2;
-  /** Current compatibility view is used only to calculate normalized layout geometry. */
+  /** Current render projection is used only to calculate normalized layout geometry. */
   composition: Composition;
   layout: LayoutInput;
 }
@@ -80,6 +80,6 @@ export function applyLayoutDocumentEdit(input: LayoutDocumentEditInput): LayoutD
   const overlays = applyOverlayDocumentEdits({ document, updates });
   if (!overlays.ok) return { ok: false, document: input.document, error: overlays.error };
   receipts.push(...overlays.receipts);
-  const { comp: _compatibilityView, ...layout } = applied;
+  const { comp: _renderProjection, ...layout } = applied;
   return { ok: true, document: overlays.document, receipts, layout };
 }

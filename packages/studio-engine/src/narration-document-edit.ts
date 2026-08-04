@@ -10,20 +10,15 @@ import {
   type EditorDocumentV2,
   type NarrationSecondRange,
 } from './editor-document';
-import { projectDocumentToLegacyComposition } from './project-document';
-import type { StudioProjectContext } from './project-dto';
+import { projectDocumentToComposition } from './project-document';
 import type { Composition } from './composition-core';
 
 export interface NarrationDocumentEditInput {
   projectId: string;
   document: EditorDocumentV2;
   ranges: readonly NarrationSecondRange[];
-  /** @deprecated Kept until all callers source transcript state exclusively from the V2 document. */
-  context?: StudioProjectContext;
   mainTranscript: AsrSegment[] | null;
   clipTranscripts: Record<string, AsrSegment[]>;
-  /** @deprecated Native caption derivation reads document.canvas.width. */
-  canvasWidth?: number;
 }
 
 export interface NarrationClipRemovalInput extends Omit<NarrationDocumentEditInput, 'ranges'> {
@@ -57,7 +52,7 @@ export function applyNarrationDocumentEdit(input: NarrationDocumentEditInput): N
       error: captions.error,
     };
   }
-  const composition = projectDocumentToLegacyComposition({ projectId: input.projectId, value: captions.document });
+  const composition = projectDocumentToComposition(captions.document);
   return {
     ok: true,
     document: captions.document,
@@ -82,7 +77,7 @@ export function removeNarrationClipsWithoutRipple(input: NarrationClipRemovalInp
   return {
     ok: true,
     document: captions.document,
-    composition: projectDocumentToLegacyComposition({ projectId: input.projectId, value: captions.document }),
+    composition: projectDocumentToComposition(captions.document),
     receipts: [removed.receipt, captions.receipt],
     removedFrames: 0,
   };

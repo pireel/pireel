@@ -27,3 +27,13 @@ export function setCachedAsr(url: string, segs: AsrSegment[]): void {
     // Quota full / private mode: degrade silently (still in memory)
   }
 }
+
+/** Explicit invalidation for a source whose cached transcript failed native timeline relay. */
+export function deleteCachedAsr(url: string): void {
+  if (!url || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(PREFIX + url);
+  } catch {
+    // Storage unavailable: the next provider call still remains safe; it simply cannot invalidate.
+  }
+}

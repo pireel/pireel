@@ -9,16 +9,13 @@ import {
   type EditorTrack,
   type TimelineClip,
 } from './editor-document';
-import { normalizeProjectDocument } from './project-document';
-import type { StudioProjectContext } from './project-dto';
+import { compositionToEditorDocument } from './project-document';
 
 export interface GeneratedDraftDocumentEditInput {
   projectId: string;
   document: EditorDocumentV2;
   draft: Composition;
-  context?: StudioProjectContext;
-  videoSig?: string | null;
-  videoDurationSec?: number | null;
+  plan?: unknown;
 }
 
 export type GeneratedDraftDocumentEditResult =
@@ -66,12 +63,9 @@ function remapClipAsset(clip: TimelineClip, assetId: string | undefined): Timeli
  */
 export function applyGeneratedDraftDocument(input: GeneratedDraftDocumentEditInput): GeneratedDraftDocumentEditResult {
   const original = input.document;
-  const imported = normalizeProjectDocument({
+  const imported = compositionToEditorDocument({
     projectId: input.projectId,
-    value: input.draft,
-    context: input.context,
-    videoSig: input.videoSig,
-    videoDurationSec: input.videoDurationSec,
+    composition: input.draft,
     fps: original.canvas.fps,
   }).document;
   const currentPrimary = original.timeline.tracks.find((track) => track.id === original.semantics.primaryNarrativeTrackId);
@@ -164,7 +158,7 @@ export function applyGeneratedDraftDocument(input: GeneratedDraftDocumentEditInp
       ...(primaryNarrativeAssetId ? { primaryNarrativeAssetId } : {}),
       transcripts,
       scenes: imported.semantics.scenes,
-      ...(imported.semantics.plan !== undefined ? { plan: imported.semantics.plan } : {}),
+      ...(input.plan !== undefined ? { plan: input.plan } : {}),
     },
   };
   const relaid = applyEditorCommand(next, { type: 'captions.relay' });

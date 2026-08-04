@@ -5,14 +5,14 @@ Editor Document V2 is Pireel's final multi-track persistence model. Its neutral 
 ## Non-negotiable invariants
 
 1. An empty timeline and an empty primary-narrative track are valid document states.
-2. `EditorDocumentV2` is the only in-memory authority after load. V1 projections are read-only adapters.
+2. `EditorDocumentV2` is the only in-memory authority after load. `Composition` is a read-only render projection.
 3. Media identity lives in `assets`; timeline clips reference `assetId`. Runtime blob/object URLs are not identities.
 4. Every placed item has explicit `startFrame` and `durationFrames` at the project FPS. Source trims remain source seconds.
 5. Primary narration and managed captions are track roles referenced by stable IDs, never track indexes.
 6. Transcript and scene semantics live above the timeline and refer to stable asset/clip IDs.
 7. Ripple, overwrite and lift will be document commands operating by track/clip ID and sync-lock policy. Feature code must not manually shift sibling arrays.
 8. Preview time belongs to the timeline. A video element may discipline the clock when present, but cannot be required for playback.
-9. V1 is dual-read/V2-single-write during rollout: old rows and drafts may be loaded, but every new persistence write is V2.
+9. Runtime reads and writes are V2-only. Persisted V1 rows are converted by the online migration before this build serves traffic.
 10. Multi-track UI is an exposure step, not a later schema change.
 11. The semantic primary-narrative picture remains Pireel's base canvas. Every non-primary visual,
     graphic and caption track shares one global bottom-to-top stack above it.
@@ -41,27 +41,28 @@ Clip payloads remain typed:
 
 ## Migration boundary
 
-`migrateLegacyProjectToV2` consumes the complete V1 project state, not just `Composition`, because media and semantic truth currently spans:
+`migratePersistedProjectDocument` consumes the complete V1 project state, not just `Composition`, because retired media and semantic truth spans:
 
 - `Composition.video`, `shots`, `blocks`, and `audioTracks`;
 - DTO-level `videoSig` and `videoDurationSec`;
 - `context.asr`, `clipAsr`, `plan`, `media`, and `localAssets`.
 
-The migration is deterministic and idempotent. `projectV2ToLegacyComposition` is a read-only
-projection for unchanged panels, preview and export. It has no reverse writer. Every editor, Agent,
+The migration is deterministic and idempotent. `projectDocumentToComposition` is a read-only
+render projection for panels, preview and export. It has no reverse writer. Every editor, Agent,
 offline-tool and persistence mutation targets V2 directly, so empty/custom tracks, media clips,
 track flags, anchors, scenes and narrative gaps cannot be erased by a lossy round trip.
 
-`project-document.ts` is the shared persisted-data boundary. The historical `studio_projects.comp`
-column remains in place, but its value is now `Composition | EditorDocumentV2` on read and
-`EditorDocumentV2` on write. The cloud DTO and local draft carry canonical `document`; `comp` is a
-temporary, non-persisted compatibility view. Runtime `blob:`/`data:` locators and unknown top-level
-keys are removed before hashing or storage.
+`project-document.ts` contains native persistence/import/projection helpers. The historical
+`studio_projects.comp` column name remains in the physical schema, but after migration its value is
+always `EditorDocumentV2`. Cloud DTOs, local drafts and save-wire sections carry only canonical
+`document`; Composition never crosses a persistence boundary. Runtime `blob:`/`data:` locators and
+unknown top-level keys are removed before hashing or storage.
 
-The optional bulk backfill is `pnpm studio:migrate-documents-v2`. It is dry-run by default and
-requires `--apply`; it migrates project and undo-history rows, skips validation errors, and uses a
-version compare-and-swap guard for live projects. Lazy migration remains supported, so deployment
-does not require a stop-the-world backfill.
+The required online backfill is `pnpm studio:migrate-documents-v2`. It is dry-run by default and
+requires `--apply`; it migrates project and undo-history rows, skips validation errors, clears the
+retired context shadow, bumps project versions and uses a compare-and-swap guard for live projects.
+Old autosave clients omit `documentSchemaVersion: 2` and receive `document_schema_upgraded` with a
+reload requirement. Runtime request handlers never lazily convert rows.
 
 ## Command boundary
 
@@ -82,22 +83,20 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `overlay-insert.ts` owns native graphic creation on an explicit lane;
 - `overlay-move.ts` and `overlay-duplicate.ts` own cross-lane identity placement and cloning;
 - `audio-insert.ts` and `audio-patch.ts` own durable audio placement plus coupled timeline/source/envelope state;
-- `caption-style.ts` owns sparse managed-caption appearance independently from compatibility blocks;
+- `caption-style.ts` owns sparse managed-caption appearance independently from render blocks;
 - `appearance.ts` and `processing.ts` own sparse document-level styling and media processing;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
 
-The compatibility-only `timeline-ripple.ts` applies matching interval geometry to V1 blocks and audio while the live store is being cut over. It is not a second V2 command engine.
-
 ## Implemented foundation
 
-- Native empty V2 creation, complete V1 migration, validation and read-only V1 projection.
+- Native empty V2 creation, complete one-shot V1 migration, validation and read-only Composition projection.
 - Track CRUD/reordering plus lift, ripple, overwrite and ripple-insert commands.
 - Linked-clip expansion, sync-lock, locked-track atomic failure and semantic scene repair.
 - Empty-primary playback through a timeline clock, including graphics/audio-only documents.
 - Exact V2 clip removal can leave the required primary lane empty without shifting independent sibling lanes.
-- Cloud rows and local drafts dual-read V1/V2 and single-write V2; DTOs expose canonical V2 plus a temporary V1 view.
+- Cloud rows, DTOs, local drafts and save-wire sections accept only canonical V2.
 - Cloud undo history restores and rewrites V2, and offline MCP/analysis/import paths share one server adapter instead of casting stored JSON.
 - A dry-run-first bulk migration script covers both live project rows and undo history.
 - The workbench live store, local/cloud save payloads and undo/redo stacks own V2 snapshots. Runtime
@@ -142,27 +141,27 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   transitions, Agent capture and browser export consume the active projection, while the timeline
   consumes all placements. Track eye/speaker controls write native V2 flags, and the clip power
   control uses the atomic `clip.patch` command instead of changing legacy shot payloads.
-- `composition-render-view.ts` applies the same split to compatibility graphics, captions and audio.
+- `composition-render-view.ts` applies the same split to projected graphics, captions and audio.
   Editing panels retain every projected item, while preview/export/Agent capture receive only enabled
   graphics/captions on visible tracks and enabled audio with native track mute applied. Track and clip
-  controls therefore never flatten per-item settings or delete hidden material from the V1 patch
+  controls therefore never flatten per-item settings or delete hidden material from the render
   surface.
 - `visual-layer-plan.ts` is the shared bottom-to-top compositor plan across native image/video tracks
-  and compatibility HTML graphics/captions. Iframe preview, Agent capture and browser export all
+  and projected HTML graphics/captions. Iframe preview, Agent capture and browser export all
   consume the same interleaved passes; adjacent tracks using the same renderer are coalesced. Managed
   captions from V1 migrate above the previous highest graphic track, preserving their old appearance
   without a permanent caption z-order exception. Person matte remains an explicit Pireel semantic
   sandwich over that neutral stack.
 - narration ripple edits now finish with the native `captions.relay` command. Managed captions map
   transcript source seconds through V2 clip placement (including gaps and retiming), keep their lane
-  flags and anchors, and never remigrate the compatibility Composition back into the document.
+  flags and anchors, and never remigrate the render Composition back into the document.
 - Manual ratio changes plus browser and server `set_canvas` now share one V2 transaction:
   `canvas.patch` marks explicit dimensions, then `captions.relay` reflows the managed lane against the
   new width. A locked caption lane rejects the whole transaction, while unrelated empty/native lanes
   remain untouched.
 - Manual timeline plus browser/server block move, resize, placement and deletion now target native
   overlay clip ids. Multi-lane batches remain atomic, locked lanes reject before publication, and
-  removal keeps empty lanes/stack order instead of rebuilding them from compatibility `trackIndex`.
+  removal keeps empty lanes/stack order instead of rebuilding them from projected `trackIndex`.
 - Overlay duplication, cross-track dragging, new-lane insertion and lane reorder now use native track
   ids. Empty graphics lanes remain visible/stable drag targets, and failed compound inserts roll back
   the provisional lane instead of leaking partial layout state.
@@ -176,21 +175,20 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   managed caption lane in one V2 lifecycle transaction. Enabling creates the lane once, disabling clears
   clips without deleting it, translations relay immediately, and locked lanes roll every part back.
 
-Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
-adapter still projects and remigrates results for tools not yet cut over; that path must be removed
-before overlapping multi-track editing is exposed because V1 cannot round-trip those states. The
-remaining gates must reuse this document, render plan and command layer rather than introduce another
-model.
+All browser, Agent and offline tools mutate V2 through the shared command/document-edit layer. A
+Composition may be produced after a successful transaction solely as a render receipt; it is never
+remigrated or saved. Remaining rollout gates must reuse this document, render plan and command layer
+rather than introduce another model.
 
 ## Rollout gates
 
 The multi-track UI must not ship until all of these are true:
 
-- [x] persistence loads V1/V2 and writes only V2;
+- [x] the online job migrates V1; runtime persistence reads and writes only V2;
 - [x] live undo/redo snapshots V2, including cloud-history restore;
 - [x] preview, Agent capture and browser export consume the same V2 placement, flags and cross-type
   layer plan;
-- browser and server tools use the same V2 command engine;
+- [x] browser and server tools use the same V2 command engine;
 - no command discovers primary narration via `tracks[0]`;
 - audio/graphics/captions follow one declared ripple and anchor policy;
 - [x] graphics-only and audio-only playback use the timeline clock;

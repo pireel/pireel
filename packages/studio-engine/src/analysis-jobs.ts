@@ -7,6 +7,7 @@
  */
 
 import type { Composition } from './composition-core';
+import type { EditorDocumentV2 } from './editor-document';
 import { validateStudioProposalBudget } from './agent-execution-budget';
 import { validateComposition } from './editing-primitives';
 import { compReceiptDelta, type ReceiptDelta } from './receipt-delta';
@@ -127,11 +128,45 @@ function revisionPayload(comp: Composition, sourceFingerprint?: string | null): 
   };
 }
 
+/** Canonical proposal/job revision for V2 projects. Unlike the render Composition projection this
+ * retains native gaps, every track flag/lane, stable asset identity, transcripts and semantic state.
+ * Runtime object/data URLs are ignored because they are session transport, not editing state. */
+function editorDocumentRevisionPayload(document: EditorDocumentV2, sourceFingerprint?: string | null): unknown {
+  return {
+    sourceFingerprint: sourceFingerprint ?? null,
+    document: {
+      ...document,
+      assets: Object.fromEntries(Object.entries(document.assets).map(([id, asset]) => {
+        const remoteUrl = asset.locator.remoteUrl;
+        const durableRemoteUrl = remoteUrl && !/^(?:blob|data):/i.test(remoteUrl) ? remoteUrl : undefined;
+        return [id, {
+          ...asset,
+          locator: {
+            ...asset.locator,
+            ...(durableRemoteUrl ? { remoteUrl: durableRemoteUrl } : { remoteUrl: undefined }),
+          },
+        }];
+      })),
+    },
+  };
+}
+
 export function compositionRevision(
   comp: Composition,
   options: { projectVersion?: number | null; sourceFingerprint?: string | null } = {},
 ): CompositionRevision {
   const canonical = canonicalJson(revisionPayload(comp, options.sourceFingerprint));
+  return {
+    projectVersion: options.projectVersion ?? null,
+    compositionHash: hashSection(canonical),
+  };
+}
+
+export function editorDocumentRevision(
+  document: EditorDocumentV2,
+  options: { projectVersion?: number | null; sourceFingerprint?: string | null } = {},
+): CompositionRevision {
+  const canonical = canonicalJson(editorDocumentRevisionPayload(document, options.sourceFingerprint));
   return {
     projectVersion: options.projectVersion ?? null,
     compositionHash: hashSection(canonical),

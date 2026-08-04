@@ -25,6 +25,7 @@ export interface DenoiseDeps {
   compRef: MutableRefObject<Composition>;
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2) => void;
+  videoFile: File | null;
   videoFileRef: MutableRefObject<File | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoEngineRef: MutableRefObject<VideoTrackEngine | null>;
@@ -32,7 +33,7 @@ export interface DenoiseDeps {
 }
 
 export function useDenoise(deps: DenoiseDeps) {
-  const { comp, compRef, documentRef, setDocument, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot } = deps;
+  const { comp, compRef, documentRef, setDocument, videoFile, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot } = deps;
   const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
@@ -99,7 +100,7 @@ export function useDenoise(deps: DenoiseDeps) {
     }
     void bake(strength, runId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strength, comp.video]);
+  }, [strength, videoFile]);
 
   // Feed the engine once a blend is ready (status flips drive this; failure keeps the original audio — honest degrade).
   useEffect(() => {

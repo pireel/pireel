@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
-import { normalizeProjectDocument } from './project-document';
+import { compositionToEditorDocument } from './project-document';
 import { addNarrativeDocumentClip, reorderNarrativeDocumentClips } from './narrative-document-edit';
 
 function emptyDocument() {
-  return normalizeProjectDocument({ projectId: 'narrative-structure', value: emptyComposition() }).document;
+  return compositionToEditorDocument({ projectId: 'narrative-structure', composition: emptyComposition() }).document;
 }
 
 describe('native narrative structure edits', () => {

@@ -27,7 +27,7 @@ function activeAudioClip(clip: AudioClip, states: Map<string, RenderClipState>):
 }
 
 /**
- * Native V2 render-only view over the temporary Composition compatibility surface.
+ * Native V2 render-only filtering over the Composition projection.
  *
  * The full Composition remains available to editing panels so hidden/disabled content can be
  * selected and restored. Only preview/export/playback receive this filtered view. Primary video

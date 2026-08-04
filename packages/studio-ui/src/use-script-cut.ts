@@ -15,6 +15,7 @@ import {
   type VideoShot,
   applyCaptionDocumentEdit,
   applyNarrationDocumentEdit,
+  hasPrimaryNarrativeClips,
   insertNarrativeAssetRange,
   shotId,
 } from '@pireel/studio-engine/composition';
@@ -226,9 +227,9 @@ export function useScriptCut(deps: ScriptCutDeps) {
   // Opening the script panel auto-extracts (no button needed): fileSig cache hit returns instantly; runs ASR once if uncached.
   // Only triggers when asrSentences is still null (never extracted) — an empty array = extracted but empty, don't retry in a loop
   useEffect(() => {
-    if (floatWin !== 'script' || !comp.video || asrSentences != null) return;
+    if (floatWin !== 'script' || !hasPrimaryNarrativeClips(documentRef.current) || asrSentences != null) return;
     void extractForScript();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatWin, comp.video, asrSentences]);
+  }, [floatWin, comp.shots, asrSentences]);
   return { cutSrcRanges, restoreSrcRanges, replaceScriptWord, extractForScript, asrBusy };
 }

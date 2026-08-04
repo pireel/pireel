@@ -8,8 +8,8 @@
  * The video itself is a local File and can't be stored — we store fileSig + duration; reselecting
  * the same file after restore snaps it fully back into place (pickVideoFile recognizes the restore
  * case by sig and skips the "new file = new project" clear).
- * The legacy single draft (studio:draft:v1) migrates into a project (with its chat key) on the
- * project list's first load.
+ * Retired V1 local caches are discarded. The online migration owns V1 -> V2 conversion, so the
+ * browser never reconstructs compatibility state that could race a migrated cloud row.
  */
 
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
@@ -17,10 +17,12 @@ import {
   type Composition,
   type EditorDocumentV2,
   hasTimelineContent,
-  normalizeProjectDocument,
-  projectDocumentToLegacyComposition,
+  isEditorDocumentV2,
+  compositionToEditorDocument,
+  primaryNarrativeAsset,
+  projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
-import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectContext, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
+import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
 const PREFIX = 'studio:draft:';
@@ -50,17 +52,9 @@ export interface StudioDraft {
    *  open via local autosave, so comparing it would make every browser think it's newest, each using
    *  its own copy and overwriting the cloud. Old drafts lack this field = cloud wins. */
   baseVersion?: number | null;
-  /** Edit-context cache (transcripts): captions are DERIVED from the transcript at runtime and never
-   *  persisted as blocks, so the local draft must carry the transcript for offline / zero-backend
-   *  (OSS shell) reopen — otherwise a refresh would lose the caption layer. */
-  context?: StudioProjectContext;
 }
 
-type StoredStudioDraft = Omit<StudioDraft, 'document' | 'comp'> & {
-  document?: EditorDocumentV2;
-  /** V1 local drafts written before the V2 cutover. */
-  comp?: Composition;
-};
+type StoredStudioDraft = Omit<StudioDraft, 'comp'>;
 
 function writeDraft(draft: StudioDraft): void {
   const { comp: _projection, ...stored } = draft;
@@ -73,19 +67,13 @@ function rawDraft(id: string): StudioDraft | null {
     const raw = window.localStorage.getItem(keyFor(id));
     if (!raw) return null;
     const stored = JSON.parse(raw) as StoredStudioDraft;
-    if (!stored || (!stored.document && !stored.comp)) return null;
-    const document = normalizeProjectDocument({
-      projectId: stored.id || id,
-      value: stored.document ?? stored.comp,
-      context: stored.context,
-      videoSig: stored.videoSig,
-      videoDurationSec: stored.videoDurationSec,
-    }).document;
+    if (!stored || !isEditorDocumentV2(stored.document)) return null;
+    const document = stored.document;
     return {
       ...stored,
       id: stored.id || id,
       document,
-      comp: projectDocumentToLegacyComposition({ projectId: stored.id || id, value: document }),
+      comp: projectDocumentToComposition(document),
     };
   } catch {
     return null;
@@ -148,8 +136,8 @@ export function listProjects(): ProjectMeta[] {
 /** New project: write an empty-shell draft first (otherwise an unsaved new project vanishes from the list). */
 export function createProject(comp: Composition, title = t('common.untitledProject')): string {
   const id = newProjectId();
-  const document = normalizeProjectDocument({ projectId: id, value: comp }).document;
-  const draft: StudioDraft = { id, title, document, comp: projectDocumentToLegacyComposition({ projectId: id, value: document }), videoSig: null, videoDurationSec: null, savedAt: Date.now() };
+  const document = compositionToEditorDocument({ projectId: id, composition: comp }).document;
+  const draft: StudioDraft = { id, title, document, comp: projectDocumentToComposition(document), videoSig: null, videoDurationSec: null, savedAt: Date.now() };
   try {
     writeDraft(draft);
   } catch {
@@ -189,31 +177,11 @@ export function deleteProject(id: string) {
   }
 }
 
-/** Single-draft era → project: the old key's draft moves to a new key under its own id, with its chat session reassigned to it. */
+/** Retired single-draft cache is discarded; the online V2 row is the recovery source. */
 export function migrateLegacyDraft() {
   try {
-    const raw = window.localStorage.getItem(LEGACY_KEY);
-    if (!raw) return;
-    const legacy = JSON.parse(raw) as StoredStudioDraft;
-    const document = legacy?.id && legacy.comp
-      ? normalizeProjectDocument({
-          projectId: legacy.id,
-          value: legacy.comp,
-          context: legacy.context,
-          videoSig: legacy.videoSig,
-          videoDurationSec: legacy.videoDurationSec,
-        }).document
-      : null;
-    const comp = document && legacy.id ? projectDocumentToLegacyComposition({ projectId: legacy.id, value: document }) : null;
-    if (document && comp && legacy.id && hasTimelineContent(comp)) {
-      writeDraft({ ...legacy, id: legacy.id, document, comp, title: legacy.title || t('common.untitledProject') });
-      const chat = window.localStorage.getItem(LEGACY_CHAT_KEY);
-      if (chat && !window.localStorage.getItem(chatKeyFor(legacy.id))) {
-        window.localStorage.setItem(chatKeyFor(legacy.id), chat);
-        window.localStorage.removeItem(LEGACY_CHAT_KEY);
-      }
-    }
     window.localStorage.removeItem(LEGACY_KEY);
+    window.localStorage.removeItem(LEGACY_CHAT_KEY);
   } catch {
     /* ignore */
   }
@@ -266,7 +234,11 @@ export async function serverRenameProject(id: string, title: string, baseVersion
     fetch(`/api/studio/projects/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title, baseVersion: v }),
+      body: JSON.stringify({
+        documentSchemaVersion: 2,
+        title,
+        baseVersion: v,
+      }),
     });
   try {
     let r = await put(baseVersion);
@@ -328,26 +300,32 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
  *  Sends the last-read baseVersion; on 409 (someone else wrote a newer version) record the new version and return
  *  'conflict' (caller retries immediately; section hashes not advanced = same sections resend). On 422 need_full
  *  (server has no such row) clear the baseline and resend in full. Network/db unavailable returns 'skip' (local cache covers it). */
-export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'> {
+export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'schema-upgraded' | 'skip'> {
   try {
-    const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null, id);
+    const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
     if (!built) return 'ok'; // all five sections unchanged: zero requests
     let r = await putWire(id, built.wire);
     let acked = built.acked;
     if (r.status === 422) {
       // need_full: server has no such row / the patch doesn't apply (base drifted) — clear baseline and resend all sections
       sectionCache.delete(id);
-      const full = buildSaveWire(p, projectVersion(id), null, id);
+      const full = buildSaveWire(p, projectVersion(id), null);
       if (!full) return 'skip';
       r = await putWire(id, full.wire);
       acked = full.acked;
     }
     if (r.status === 409) {
+      const body = (await r.json()) as {
+        error?: string;
+        reloadRequired?: boolean;
+        project?: StudioProjectDto;
+      };
+      if (body.error === 'document_schema_upgraded' || body.reloadRequired) return 'schema-upgraded';
       // Someone else wrote a newer version: record the new version + reseed the diff baseline from the server's
       // full state — so the immediate retry's diff is computed against server truth (sections others changed
       // but we didn't touch won't get overwritten; section-level convergence). Don't write back to local UI —
       // the in-memory user edits are this session's truth.
-      const { project } = (await r.json()) as { project: StudioProjectDto };
+      const { project } = body;
       if (project) {
         setProjectVersion(id, project.version);
         try {
@@ -360,7 +338,9 @@ export async function serverSaveProject(id: string, p: ProjectSavePayload): Prom
     }
     if (!r.ok) return 'skip';
     const { project } = (await r.json()) as { project: StudioProjectDto };
-    if (project) setProjectVersion(id, project.version);
+    if (project) {
+      setProjectVersion(id, project.version);
+    }
     sectionCache.set(id, acked);
     return 'ok';
   } catch {
@@ -385,26 +365,17 @@ export async function serverDeleteProject(id: string): Promise<void> {
 export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
   setProjectVersion(p.id, p.version);
   sectionCache.delete(p.id); // in-memory state swapped for the cloud version: diff baseline is void, next save aligns in full
-  const document = p.document ?? normalizeProjectDocument({
-    projectId: p.id,
-    value: p.comp,
-    context: p.context,
-    videoSig: p.videoSig,
-    videoDurationSec: p.videoDurationSec,
-  }).document;
+  const document = p.document;
   const draft: StudioDraft = {
     id: p.id,
     ...(p.title ? { title: p.title } : {}),
     ...(p.coverThumb ? { coverThumb: p.coverThumb } : {}),
     document,
-    comp: projectDocumentToLegacyComposition({ projectId: p.id, value: document }),
+    comp: projectDocumentToComposition(document),
     videoSig: p.videoSig,
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
     baseVersion: p.version,
-    ...(p.context?.asr?.length || Object.keys(p.context?.clipAsr ?? {}).length
-      ? { context: { ...(p.context?.asr?.length ? { asr: p.context.asr } : {}), ...(Object.keys(p.context?.clipAsr ?? {}).length ? { clipAsr: p.context!.clipAsr } : {}) } }
-      : {}),
   };
   try {
     writeDraft(draft);
@@ -424,7 +395,6 @@ export function useDraftAutosave(
   projectId: string,
   document: EditorDocumentV2,
   coverThumbRef?: MutableRefObject<string | null>,
-  contextOf?: () => StudioDraft['context'],
 ) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -441,19 +411,17 @@ export function useDraftAutosave(
       try {
         const prev = rawDraft(projectId);
         const cover = coverThumbRef?.current ?? prev?.coverThumb;
-        const context = contextOf?.();
-        const videoDurationSec = comp.video?.durationSec ?? prev?.videoDurationSec ?? null;
+        const videoDurationSec = primaryNarrativeAsset(document)?.metadata.durationSec ?? prev?.videoDurationSec ?? null;
         const draft: StudioDraft = {
           id: projectId,
           ...(prev?.title ? { title: prev.title } : {}),
           ...(cover ? { coverThumb: cover } : {}),
           document,
-          comp: projectDocumentToLegacyComposition({ projectId, value: document }),
+          comp: projectDocumentToComposition(document),
           videoSig,
           videoDurationSec,
           savedAt: Date.now(),
           baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
-          ...(context && (context.asr?.length || Object.keys(context.clipAsr ?? {}).length) ? { context } : {}),
         };
         writeDraft(draft);
         setLastSavedAt(draft.savedAt);

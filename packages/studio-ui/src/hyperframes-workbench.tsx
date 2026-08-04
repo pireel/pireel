@@ -34,7 +34,6 @@ import {
   type OverlayDocumentPatch,
   type ShotTreatment,
   type PersonFx,
-  type TimelineSiblingLayers,
   type VideoShot,
   SHOT_TREATMENTS,
   STUDIO_FONTS_HREF,
@@ -55,7 +54,6 @@ import {
   assembleHtml,
   blockBgCss,
   captionLineSegments,
-  narrationSourceSplitsAtEditedPoints,
   patchNarrativeClips,
   customHasSurface,
   blockId,
@@ -71,7 +69,12 @@ import {
   isSentenceCaption,
   stripDerivedCaptions,
   mediaBlock,
+  narrativeClipTimelineRange,
+  narrativeTrimRangeAtTimelineSecond,
   newBlock,
+  primaryNarrativeAsset,
+  primaryNarrativeClips,
+  projectDocumentToComposition,
   renderBlock,
   assembleBlockHtml,
   resolveCaptionStyle,
@@ -96,10 +99,9 @@ import {
   videoTrackShots,
   videoShotTimelineSpans,
   treatmentVacancyBox,
-  rippleRemoveSiblingLayers,
 } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
-import { deleteClipById, restoreSrcRange, spans as clipSpans, srcToEditedLoose, trimLeftAtEdited, trimRightAtEdited } from '@pireel/studio-engine/trim';
+import { restoreSrcRange, spans as clipSpans, srcToEditedLoose } from '@pireel/studio-engine/trim';
 import { parseBlockResponse, parseKitResponse } from '@pireel/studio-engine/compose';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf } from './compose-result';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
@@ -178,7 +180,8 @@ import { useBoxDrag } from './use-box-drag';
 import { useAgentContext } from './use-agent-context';
 import { useScriptCut } from './use-script-cut';
 import { useLiveProjectDocument } from './use-live-project-document';
-import type { LiveProjectMigrationContext } from './live-project-document';
+import type { LiveProjectPersistenceMetadata } from './live-project-document';
+import { nativeProjectLocalAssets, nativeProjectSessionMetadata } from './native-project-session';
 
 
 const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
@@ -200,7 +203,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const localeRef = useRef(locale);
   localeRef.current = locale;
   const starter = useMemo(() => emptyComposition(), []);
-  const liveMigrationContextRef = useRef<LiveProjectMigrationContext>({});
+  const livePersistenceMetadataRef = useRef<LiveProjectPersistenceMetadata>({});
   // V2 is the live authority. Composition is a read-only render projection.
   const {
     composition: comp,
@@ -214,7 +217,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   } = useLiveProjectDocument({
     projectId,
     initialComposition: starter,
-    migrationContextRef: liveMigrationContextRef,
+    persistenceMetadataRef: livePersistenceMetadataRef,
   });
   const patchOverlays = useCallback((updates: readonly OverlayDocumentPatch[]): boolean => {
     if (!updates.length) return false;
@@ -235,6 +238,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const renderVideoPlacements = primaryNarrative.activePlacements;
   const renderComposition = useMemo(() => compositionRenderView(comp, renderPlan), [comp, renderPlan]);
   const supplementalVisuals = useMemo(() => supplementalVisualMedia(renderPlan), [renderPlan]);
+  const primaryAsset = primaryNarrativeAsset(editorDocument);
+  const primaryAssetDurationSec = primaryAsset?.metadata.durationSec ?? null;
   const disabledClipIds = useMemo(() => new Set(renderPlan.tracks.flatMap((track) => (
     track.clips.filter((entry) => !entry.clip.enabled).map((entry) => entry.clipId)
   ))), [renderPlan]);
@@ -435,6 +440,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [chatRev, setChatRev] = useState(0); // chat thread persist counter: triggers cloud sync
   const bumpChatRev = useCallback(() => setChatRev((v) => v + 1), []); // stable reference (StudioChat is memoized)
   const conflictWarnedRef = useRef(false);
+  const schemaReloadingRef = useRef(false);
+  const reloadForSchemaUpgrade = () => {
+    if (schemaReloadingRef.current) return;
+    schemaReloadingRef.current = true;
+    toast.info(t('workbench.projectSchemaUpgradedReloading'));
+    window.setTimeout(() => window.location.reload(), 900);
+  };
   // Single-writer demotion: set when the bridge kicks this tab (close 4000 = another window took
   // over as the active surface). A displaced tab stops cloud autosave (its 409 rebase-retry is
   // forbidden — a stale tab must never clobber the writer), refreshes itself on focus, and
@@ -706,8 +718,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // hygiene: when nothing references the main source anymore, drop it (autosave would otherwise
   // re-persist a stale anchor forever).
   useEffect(() => {
-    if (videoSigRef.current && !videoFile && !comp.video && !(comp.shots ?? []).some((s) => !s.src)) videoSigRef.current = null;
-  }, [comp.video, comp.shots, videoFile]);
+    if (videoSigRef.current && !videoFile && !primaryNarrativeAsset(editorDocument)) videoSigRef.current = null;
+  }, [editorDocument, videoFile]);
   const objectUrlRef = useRef<string | null>(null); // current blob: preview URL, revoked on swap/unmount
   // Person matte: when enabled, the fully-budgeted mask track (source-time indexed, webp-compressed in memory; invalidated on video swap)
   // Parent-side video track engine (canvas render mode): decode/clock/audio stay resident, frames pushed to the iframe canvas
@@ -802,7 +814,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** The main video's **effective sig**: usually = fileSig(videoFile); when fetched from cloud, the original sig
    *  (a fetched File's name/mtime change so fileSig drifts — sync layer/cache keys all read this, never recompute). */
   const videoSigRef = useRef<string | null>(null);
-  /** Cloud byte index (in-memory form of context.media): sig → R2 key. Successful backups land here, carried on the next cloud sync. */
+  /** Transient cloud byte index: sig → R2 key. Successful backups are folded into V2 asset locators. */
   const cloudMediaRef = useRef<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>({});
   const [cloudMediaRev, setCloudMediaRev] = useState(0);
   /** Metadata-only index of project-local assets. Unlike cloudMediaRef, this never implies the bytes
@@ -824,18 +836,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, [setLocalAssetIndex]);
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs.
-  liveMigrationContextRef.current = {
-    context: {
-      ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
-      ...(Object.keys(clipAsrRef.current).length
-        ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([key, value]) => [key, sanitizeTranscriptSegs(value)])) }
-        : {}),
-      ...(planRef.current ? { plan: planRef.current } : {}),
-      ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
-      ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
-    },
+  livePersistenceMetadataRef.current = {
+    ...(asrRef.current?.length ? { mainTranscript: sanitizeTranscriptSegs(asrRef.current) } : {}),
+    ...(Object.keys(clipAsrRef.current).length
+      ? { clipTranscripts: Object.fromEntries(Object.entries(clipAsrRef.current).map(([key, value]) => [key, sanitizeTranscriptSegs(value)])) }
+      : {}),
+    ...(planRef.current ? { plan: planRef.current } : {}),
+    ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { cloudMedia: cloudMediaRef.current } : {}),
+    ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
     videoSig: videoSigRef.current,
-    videoDurationSec: compRef.current.video?.durationSec ?? primaryNarrativeDurationSec(editorDocumentRef.current),
+    videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
   };
   /** Silently back up a source video to R2 (content-addressed, dup = instant); on success record the index and trigger a cloud sync. */
   const backupMediaToCloud = (file: File, sig: string, kind: 'video' | 'clip') => {
@@ -941,7 +951,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   useEffect(() => {
     const gen = ++bakeGenRef.current;
     const c = comp;
-    if (!c.video || !videoFile) return;
     const shots = ensureShots(c);
     if (primaryNarrative.hidden) return;
     const spans = videoShotTimelineSpans(shots, renderVideoPlacements);
@@ -1016,7 +1025,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }, 600);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, comp.video, videoFile, comp.width, comp.height, primaryNarrative.hidden, renderVideoPlacements]);
+  }, [comp.shots, videoFile, comp.width, comp.height, primaryNarrative.hidden, renderVideoPlacements]);
   // Decode when near / release when past (playhead-driven, provider reads synchronously; decodes 0.5× bitmaps, a 1s transition ≈ 60MB transient)
   useEffect(() => {
     const tick = () => {
@@ -1456,10 +1465,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [persistableDocument, compForSave, editorDocument, asrSentences, clipAsr, cloudMediaRev, localAssetIndexRev, videoFile],
   );
-  useDraftAutosave(compForSave, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, documentForSave, coverThumbRef, () => ({
-    ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
-    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
-  }));
+  useDraftAutosave(
+    compForSave,
+    videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null),
+    projectId,
+    documentForSave,
+    coverThumbRef,
+  );
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
   // active buffer to apply live (fitScale isn't in the preview doc, so the write-back doesn't trigger a rebuild — see the assembled comment)
@@ -1812,7 +1824,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           const c = compRef.current;
           const shots = c.shots ?? [];
           let cur: string | null = null;
-          if (c.video && shots.length) {
+          if (shots.length) {
             const now = tRef.current;
             for (const s of shots) {
               const sp = shotSpan(c, s.id);
@@ -2240,14 +2252,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Current video (for build-draft): blob preview URL + canvas dimensions. Read the latest via ref.
   function currentVideo() {
     const c = compRef.current;
-    return c.video ? { url: c.video.url, durationSec: c.video.durationSec, width: c.width, height: c.height } : null;
+    const document = editorDocumentRef.current;
+    const asset = primaryNarrativeAsset(document);
+    const durationSec = asset?.metadata.durationSec;
+    const url = asset ? resolveAssetUrl(asset) : null;
+    return url && durationSec ? { url, durationSec, width: c.width, height: c.height } : null;
   }
 
   // Three render-pipeline steps (stepAsr/stepPlan/stepVisual, in-flight deduped) — see use-draft-pipeline.ts
   // Planning context for inserted clips: the implementation lands in the ref after ensureClipTranscripts is defined
   // (that code depends on later closures like matteFileForShot); this stub is empty for now, and by the time stepPlan runs it reads the real one
   const insertedClipsForPlanRef = useRef<() => Promise<PlanInsert[]>>(() => Promise.resolve([]));
-  const { stepAsr, stepPlan, stepVisual } = useDraftPipeline({
+  const { stepAsr, refreshAsr, stepPlan, stepVisual } = useDraftPipeline({
     videoFileRef,
     compRef,
     asrRef,
@@ -2264,14 +2280,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Debug hook: clear the visual-analysis cache + rerun (same video returns cache instantly by default; use this to re-measure analysis)
   async function rerunVisual() {
-    if (!videoFile || !comp.video) {
+    if (!videoFile || !primaryAssetDurationSec) {
       toast.error(t('common.uploadVideoFirst'));
       return;
     }
     clearVisualCache(videoSigRef.current ?? fileSig(videoFile));
     setVisual(null);
     toast.success(t('workbench.cacheClearedReanalyzingVideo'));
-    const vis = await analyzeVisual(videoFile, comp.video.durationSec).catch(() => null);
+    const vis = await analyzeVisual(videoFile, primaryAssetDurationSec).catch(() => null);
     setVisual(vis);
     toast.success(vis ? t('workbench.visualAnalysisDone') : t('workbench.visualAnalysisFoundNothing'));
   }
@@ -2825,7 +2841,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
   const setMainVideoFromUrl = async (url: string) => {
     const c = compRef.current;
-    if (c.video || c.blocks.length > 0) {
+    if (editorDocumentRenderPlan(editorDocumentRef.current).durationSec > 0) {
       const ok = await confirm({
         title: t('workbench.replaceMainVideo'),
         description: t('workbench.replacingMainVideoStarts'),
@@ -2940,6 +2956,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     timelineDurationSec: renderPlan.durationSec,
     documentRef: editorDocumentRef,
     setDocument: setEditorDocument,
+    videoFile,
     videoFileRef,
     videoSigRef,
     videoEngineRef,
@@ -2964,7 +2981,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Narration denoise (bake/cache/dub/export substitution — see use-denoise.ts)
   const denoiseOps = useDenoise({
     comp, compRef, documentRef: editorDocumentRef, setDocument: setEditorDocument,
-    videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot,
+    videoFile, videoFileRef, videoSigRef, videoEngineRef, pushUndoSnapshot,
   });
   denoiseExportRef.current = denoiseOps.denoiseForExport;
 
@@ -2981,19 +2998,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     projectId,
     document: editorDocumentRef.current,
     ranges,
-    context: liveMigrationContextRef.current.context,
     mainTranscript: asrRef.current,
     clipTranscripts: clipAsrRef.current,
-    canvasWidth: compRef.current.width,
   });
   const prepareNarrationClipRemoval = (clipIds: readonly string[]) => removeNarrationClipsWithoutRipple({
     projectId,
     document: editorDocumentRef.current,
     clipIds,
-    context: liveMigrationContextRef.current.context,
     mainTranscript: asrRef.current,
     clipTranscripts: clipAsrRef.current,
-    canvasWidth: compRef.current.width,
   });
 
   /** Cut: split the current shot in two at the playhead (content unchanged). Compute first, push the snapshot after —
@@ -3012,13 +3025,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     const shots = ensureShots(c);
     if (!shots.length) return;
-    if (splitBlockedByTransition(shots, tRef.current)) {
+    if (splitBlockedByTransition(shots, tRef.current, primaryNarrative.placements)) {
       toast.error(t('workbench.removeTransitionToSplit'));
       return;
     }
-    const requests = narrationSourceSplitsAtEditedPoints(shots, [tRef.current]);
-    if (!requests) return;
-    const split = applyNarrationSplitCommands(editorDocumentRef.current, requests);
+    const split = applyNarrationSplitCommands(editorDocumentRef.current, [tRef.current]);
     if (!split.ok) {
       toast.error(split.error.message);
       return;
@@ -3047,14 +3058,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }
       return { ok: true };
     }
-    const shots = ensureShots(c);
-    if (!shots.length) return { ok: false, error: t('workbench.noVideoYet') };
-    const r = side === 'left' ? trimLeftAtEdited(shots, tRef.current) : trimRightAtEdited(shots, tRef.current);
-    if (!r.removed) {
+    if (!primaryNarrativeClips(editorDocumentRef.current).length) return { ok: false, error: t('workbench.noVideoYet') };
+    const range = narrativeTrimRangeAtTimelineSecond(editorDocumentRef.current, tRef.current, side);
+    if (!range) {
       toast.error(t('workbench.movePlayheadToTrim'));
       return { ok: false, error: t('workbench.movePlayheadToTrim') };
     }
-    const edit = prepareNarrationRangeEdit([{ fromSec: r.removed[0], toSec: r.removed[1] }]);
+    const edit = prepareNarrationRangeEdit([range]);
     if (!edit.ok) {
       toast.error(edit.error.message);
       return { ok: false, error: edit.error.message };
@@ -3062,21 +3072,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     pushUndoSnapshot();
     setEditorDocument(edit.document);
     setSelectedShotId(null);
-    applyT(r.removed[0]); // playhead lands at the cut point
+    applyT(range.fromSec); // playhead lands at the cut point
     return { ok: true };
   };
   /** Delete scene: ordinary deletes ripple; deleting the final video clip leaves independent
    *  graphic/audio tracks intact, so an empty primary track is useful rather than destructive. */
   const deleteShot = (sid: string): { ok: boolean; error?: string } => {
-    const c = compRef.current;
-    const shots = ensureShots(c);
-    const r = deleteClipById(shots, sid);
-    if (!r.removed) {
+    const clips = primaryNarrativeClips(editorDocumentRef.current);
+    const range = narrativeClipTimelineRange(editorDocumentRef.current, sid);
+    if (!range) {
       toast.error(t('workbench.shotNotFound'));
       return { ok: false, error: t('workbench.shotNotFound') };
     }
-    if (r.clips.length) {
-      const edit = prepareNarrationRangeEdit([{ fromSec: r.removed[0], toSec: r.removed[1] }]);
+    if (clips.length > 1) {
+      const edit = prepareNarrationRangeEdit([range]);
       if (!edit.ok) {
         toast.error(edit.error.message);
         return { ok: false, error: edit.error.message };
@@ -3094,20 +3103,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setEditorDocument(edit.document);
     }
     setSelectedShotId(null);
-    applyT(r.removed[0]);
+    applyT(range.fromSec);
     return { ok: true };
   };
   /** Bulk-delete multiple shots (multi-select). Delete from the final-cut end backward — removing a later shot doesn't
    *  affect an earlier shot's final-cut coords. Select-all empties only the primary track. */
   const deleteShots = (ids: Set<string>) => {
-    const c = compRef.current;
-    let shots = ensureShots(c);
-    const targets = clipSpans(shots)
-      .filter((sp) => ids.has(sp.clip.id))
-      .sort((a, b) => b.editedStart - a.editedStart); // end first
+    const clips = primaryNarrativeClips(editorDocumentRef.current);
+    const targets = clips
+      .filter((clip) => ids.has(clip.id))
+      .map((clip) => ({ clip, range: narrativeClipTimelineRange(editorDocumentRef.current, clip.id)! }))
+      .sort((a, b) => b.range.fromSec - a.range.fromSec); // end first
     if (targets.length === 0) return;
     if (targets.length === 1) return deleteShot(targets[0]!.clip.id); // degrade to single delete (reuse guard/landing point)
-    if (targets.length === shots.length) {
+    if (targets.length === clips.length) {
       const edit = prepareNarrationClipRemoval(targets.map((target) => target.clip.id));
       if (!edit.ok) {
         toast.error(edit.error.message);
@@ -3120,15 +3129,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       toast.success(t('workbench.deletedNScenes', { n: targets.length }));
       return;
     }
-    const removedRanges: { fromSec: number; toSec: number }[] = [];
-    let firstStart = Infinity;
-    for (const sp of targets) {
-      const r = deleteClipById(shots, sp.clip.id);
-      if (!r.removed) continue;
-      shots = r.clips;
-      removedRanges.push({ fromSec: r.removed[0], toSec: r.removed[1] });
-      firstStart = Math.min(firstStart, r.removed[0]);
-    }
+    const removedRanges = targets.map((target) => target.range);
+    const firstStart = Math.min(...removedRanges.map((range) => range.fromSec));
     const edit = prepareNarrationRangeEdit(removedRanges);
     if (!edit.ok) {
       toast.error(edit.error.message);
@@ -3142,13 +3144,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   };
   /** Delete a SOURCE from the track (assets-panel delete): every shot cut from that source goes. Overlay
    *  blocks ripple while video remains; removing all video keeps independent tracks intact. Equal-footing: the first-loaded source
-   *  gets no special treatment (src = null addresses it, even when its bytes are missing and comp.video
-   *  is already null). One undo snapshot; blob URLs stay alive, so undo restores a playable track for
+   *  gets no special treatment (src = null addresses it, even when its bytes are missing). One undo snapshot;
+   *  blob URLs stay alive, so undo restores a playable track for
    *  this session (only the OPFS bytes are gone for good). */
   const deleteAssetSource = (src: string | null) => {
-    const c = compRef.current;
-    const isMain = src == null || c.video?.url === src;
-    const shots = ensureShots(c);
+    const isMain = src == null;
+    const shots = ensureShots(compRef.current);
     const spans = clipSpans(shots)
       .filter((sp) => (isMain ? !sp.clip.src : sp.clip.src === src))
       .sort((a, b) => b.editedStart - a.editedStart); // end first: earlier spans' coords stay valid
@@ -3195,8 +3196,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Per-asset source liveness: are this source's bytes reachable in THIS session? Main = the loaded
    *  File; local clips = the held File map; remote URLs count as live (fetchable). Drives the panel's
    *  restore-card variant and the timeline's missing-source strip. */
-  const srcLive = (src: string) =>
-    src === compRef.current.video?.url ? !!videoFileRef.current : !src.startsWith('blob:') || clipFilesRef.current.has(src);
+  const srcLive = (src: string) => {
+    const asset = primaryNarrativeAsset(editorDocumentRef.current);
+    const mainUrl = asset ? resolveAssetUrl(asset) : undefined;
+    return src === mainUrl ? !!videoFileRef.current : !src.startsWith('blob:') || clipFilesRef.current.has(src);
+  };
   /** Per-asset reconnect (user gesture): handle/OPFS first (may prompt for permission), then the R2
    *  vault, then a manual re-pick verified against the sig. src = null targets the main source. */
   const reconnectSource = async (src: string | null, sig?: string | null) => {
@@ -3386,7 +3390,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const matteFileForShot = useCallback(async (s: VideoShot): Promise<{ key: string; file: File; upTo: number } | null> => {
     if (!s.src) {
       const f = videoFileRef.current;
-      const dur = compRef.current.video?.durationSec;
+      const dur = primaryNarrativeDurationSec(editorDocumentRef.current);
       return f && dur ? { key: 'main', file: f, upTo: dur } : null;
     }
     let f = clipFilesRef.current.get(s.src) ?? null;
@@ -3491,7 +3495,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   })();
   // Agent-facing context (roster / situation snapshot / transcript / draft backfill) — see use-agent-context.ts.
   const { chatElements, getChatBody, transcriptForAgent, ensureClipTranscripts, restoreDraftContext, beatsForWindow, graphicsRoster, neighborsFrom } = useAgentContext({
-    comp, compRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, planRef, visualRef, videoSigRef,
+    comp, compRef, documentRef: editorDocumentRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, planRef, visualRef, videoSigRef,
     videoFileRef, clipAsrRef, clipFilesRef, clipAsrBusyRef, clipAsrFailRef, insertedClipsForPlanRef,
     setClipAsr, matteFileForShot,
   });
@@ -3509,7 +3513,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, removeCaptionLayer } = useCaptionsOps({
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
     setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef,
-    documentRef: editorDocumentRef, setDocument: setEditorDocument, ensureShots, stepAsr,
+    documentRef: editorDocumentRef, setDocument: setEditorDocument, ensureShots, stepAsr, refreshAsr,
     ensureClipTranscripts, pushUndoSnapshot, postPreview, applyT,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
   });
@@ -3597,7 +3601,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // already wrote; ours is the stale one, drop it (no rebase-retry for non-writers).
       const payload = buildCloudPayload();
       if (payload) {
-        cloudSaveChainRef.current = cloudSaveChainRef.current.then(() => studioProviders().projects.save(projectId, payload).then(() => undefined, () => undefined));
+        cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
+          const result = await studioProviders().projects.save(projectId, payload).catch(() => 'skip' as const);
+          if (result === 'schema-upgraded') reloadForSchemaUpgrade();
+        });
       }
       toast.info(t('workbench.displacedByAnotherWindow'));
     },
@@ -3612,8 +3619,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   bridgeReclaimRef.current = agentBridge.reclaim;
 
   /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict).
-   *  Tri-state: full payload / chat-only (empty canvas but threads exist — the comp section is not
-   *  sent, so a just-opened tab can never blank the cloud comp) / null (nothing worth saving). */
+   *  Tri-state: full payload / chat-only (empty canvas but threads exist, so the document section is
+   *  absent and a just-opened tab cannot blank cloud state) / null (nothing worth saving). */
   function buildCloudPayload() {
     const c = compRef.current;
     if (!projectId) return null;
@@ -3623,14 +3630,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // otherwise a refresh resurrects the deleted sources from the last non-empty cloud comp.
     if (!hasContent && !everCanvasContentRef.current) {
       // Chat is independent of canvas content: a consultation-only session still syncs its threads
-      // (chat-only payload — the comp section is NOT sent, so an empty canvas can never clobber a
-      // cloud comp; the server seeds an empty comp on first insert). No threads either → nothing to save.
+      // (chat-only payload: document is absent, so an empty canvas cannot clobber cloud state; the
+      // server seeds an empty V2 document on first insert). No threads either → nothing to save.
       const threads = readChatThreads(projectId);
-      const indexContext = localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : undefined;
-      return threads.length || indexContext
+      const hasLibraryState = localAssetIndexKnownRef.current;
+      return threads.length || hasLibraryState
         ? {
+            ...(hasLibraryState ? { document: persistableDocument(false) } : {}),
             chat: threads,
-            ...(indexContext ? { context: indexContext } : {}),
             videoSig: videoSigRef.current,
             videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
             coverThumb: coverThumbRef.current,
@@ -3638,20 +3645,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         : null;
     }
     const canDerive = (asrRef.current?.length ?? 0) > 0 || Object.keys(clipAsrRef.current).length > 0;
-    const context = {
-      // Persistence boundary: runtime derivation markers (cue/ref/si) never land in storage
-      ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
-      ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
-      ...(planRef.current ? { plan: planRef.current } : {}),
-      ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
-      ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
-    };
     return {
       document: persistableDocument(canDerive),
       chat: readChatThreads(projectId),
-      context,
       videoSig: videoSigRef.current ?? (videoFileRef.current ? fileSig(videoFileRef.current) : null),
-      videoDurationSec: c.video?.durationSec ?? primaryNarrativeDurationSec(editorDocumentRef.current),
+      videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
       coverThumb: coverThumbRef.current,
     };
   }
@@ -3868,6 +3866,35 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Cloud-authoritative + local cache: use local first (offline/instant), fetch cloud concurrently; if cloud is newer (or
   // local is absent) adopt cloud — after caching locally, remount chat to re-read the session, then run the same restore flow.
   // OPFS local library hit → the main video auto-reconnects (via the existing pendingRestore check); inserted clips revive by srcSig.
+  const hydrateNativeSession = useCallback((document: EditorDocumentV2, composition?: Composition) => {
+    const metadata = nativeProjectSessionMetadata(document, composition);
+    if (!cloudMediaRef.current.video && !cloudMediaRef.current.clips) cloudMediaRef.current = metadata.cloudMedia;
+    if (metadata.localAssets.length || !localAssetIndexKnownRef.current) {
+      const merged = new Map(metadata.localAssets.map((entry) => [entry.sig, entry]));
+      for (const entry of localAssetIndexRef.current) merged.set(entry.sig, entry);
+      setLocalAssetIndex([...merged.values()]);
+    }
+    if (metadata.mainTranscript?.length && !asrRef.current?.length) {
+      asrRef.current = metadata.mainTranscript;
+      setAsrSentences(metadata.mainTranscript);
+    }
+    if (Object.keys(metadata.clipTranscripts).length && !Object.keys(clipAsrRef.current).length) {
+      clipAsrRef.current = metadata.clipTranscripts;
+      setClipAsr(metadata.clipTranscripts);
+    }
+    if (metadata.plan !== undefined && !planRef.current) {
+      try {
+        const parsed = parsePlan(JSON.stringify(metadata.plan), metadata.mainTranscript?.length ?? 0);
+        if (parsed.scenes.length) {
+          planRef.current = parsed;
+          setPlan(parsed);
+        }
+      } catch {
+        /* Invalid persisted plans are ignored; the user can re-plan. */
+      }
+    }
+  }, [setLocalAssetIndex]);
+
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
     // The source can remain in the media library while the explicit shots array is empty. Reconnect
@@ -3876,32 +3903,24 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // Keep the sig anchor even before (or without) the bytes: autosave reads videoSigRef, and
     // writing videoSig:null to the cloud row while the media is missing would destroy the
     // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
-    if (d.videoSig && wantsMain) videoSigRef.current = d.videoSig;
+    const primaryId = d.document.semantics.primaryNarrativeAssetId;
+    const mainSig = (primaryId ? d.document.assets[primaryId]?.locator.localSig : undefined) ?? d.videoSig;
+    if (mainSig && wantsMain) videoSigRef.current = mainSig;
     setEditorDocument(d.document, { ...d.comp, video: null });
-    // Local-draft transcript hydration (fill gaps only — in-memory state is fresher): captions are
-    // derived from the transcript, so a zero-backend/offline reopen needs it from the draft.
-    const dc = d.context as { asr?: AsrSegment[]; clipAsr?: Record<string, AsrSegment[]> } | undefined;
-    if (dc?.asr?.length && !asrRef.current?.length) {
-      asrRef.current = dc.asr;
-      setAsrSentences(dc.asr);
-    }
-    if (dc?.clipAsr && Object.keys(dc.clipAsr).length && !Object.keys(clipAsrRef.current).length) {
-      clipAsrRef.current = dc.clipAsr;
-      setClipAsr(dc.clipAsr);
-    }
-    if (d.videoSig && wantsMain) {
-      void loadLocalVideo(d.videoSig).then(async (f) => {
+    hydrateNativeSession(d.document, d.comp);
+    if (mainSig && wantsMain) {
+      void loadLocalVideo(mainSig).then(async (f) => {
         if (f && pendingRestoreRef.current === d) {
-          void pickVideoFile(f, { asSig: d.videoSig! });
+          void pickVideoFile(f, { asSig: mainSig });
           return;
         }
         if (f) return;
         // Not in OPFS (device switch / cleared cache) → fetch from the cloud byte rendezvous; only a miss falls back to manual re-pick
-        if (cloudMediaRef.current.video?.sig === d.videoSig) {
+        if (cloudMediaRef.current.video?.sig === mainSig) {
           toast.info(t('workbench.retrievingVideoFromCloud'));
-          const cf = await studioProviders().vault.fetch(d.videoSig!);
+          const cf = await studioProviders().vault.fetch(mainSig);
           if (cf && pendingRestoreRef.current === d) {
-            void pickVideoFile(cf, { asSig: d.videoSig! });
+            void pickVideoFile(cf, { asSig: mainSig });
             return;
           }
         }
@@ -3912,7 +3931,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     void recoverLocalClips(d.comp.shots ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hydrateNativeSession]);
   const autoRestoredRef = useRef(false);
   // The boot layer's data gate: released once auto-restore (cloud-first falling back to local) finishes —
   // video-byte reconnection (OPFS/cloud fetch) continues behind the gate, not counted as entry waiting
@@ -3938,34 +3957,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (autoRestoredRef.current) return;
     autoRestoredRef.current = true;
     setDraftOffer(null);
-    // Edit-context hydration (device switch/refresh): transcript/media index/plan fetched back from the cloud, no re-burning ASR / re-planning.
-    // Only fill gaps — this session's existing in-memory state is the fresher truth. Backfill even when the cloud arrives late after losing the race (see below):
-    // this tab autosaving with empty asr / empty media index would progressively blank the cloud context.
-    const hydrateContextRefs = (rc: StudioProjectDto['context'] | undefined) => {
-      if (!rc) return;
-      if (rc.media && !cloudMediaRef.current.video && !cloudMediaRef.current.clips) cloudMediaRef.current = rc.media;
-      if (Array.isArray(rc.localAssets)) {
-        const merged = new Map(rc.localAssets.map((entry) => [entry.sig, entry]));
-        for (const entry of localAssetIndexRef.current) merged.set(entry.sig, entry);
-        setLocalAssetIndex([...merged.values()]);
-      }
-      if (rc.asr?.length && !asrRef.current?.length) {
-        asrRef.current = rc.asr;
-        setAsrSentences(rc.asr);
-      }
-      if (rc.clipAsr && !Object.keys(clipAsrRef.current).length) clipAsrRef.current = rc.clipAsr;
-      if (rc.plan && !planRef.current) {
-        try {
-          const p = parsePlan(JSON.stringify(rc.plan), rc.asr?.length ?? asrRef.current?.length ?? 0);
-          if (p.scenes.length) {
-            planRef.current = p;
-            setPlan(p);
-          }
-        } catch {
-          /* discard the bad plan, just re-plan */
-        }
-      }
-    };
     // Cloud project → straight into the workbench: use the in-memory draft returned by cacheProjectLocally directly, not
     // read back from localStorage — if the quota is full the write silently fails and you read a stale old draft, which autosave then writes back to the cloud.
     const applyRemote = (remote: StudioProjectDto) => {
@@ -3985,7 +3976,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (remote !== undefined) setLocalAssetIndexSyncReady(true);
       if (remote) {
         setProjectVersion(projectId, remote.version);
-        hydrateContextRefs(remote.context);
         // Judge newer/older by version number, not savedAt (local autosave self-refreshes savedAt on every open, so
         // comparing by it makes every browser think "I'm newest" — each keeps its own, writes stale state back to the cloud, never converges).
         // Cloud version ahead of the local draft's base = written elsewhere → cloud wins; equal = this browser is the last
@@ -4011,7 +4001,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           setLocalAssetIndexSyncReady(true);
           if (!late) return;
           setProjectVersion(projectId, late.version);
-          hydrateContextRefs(late.context);
+          hydrateNativeSession(late.document, projectDocumentToComposition(late.document));
           const untouched = !hasTimelineContent(compRef.current);
           if (!local && untouched) {
             applyRemote(late);
@@ -4044,7 +4034,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           const mutationRev = localAssetIndexMutationRevRef.current;
           const remote = await studioProviders().projects.load(projectId);
           if (dead || ticket !== request || mutationRev !== localAssetIndexMutationRevRef.current) return;
-          if (Array.isArray(remote?.context?.localAssets)) setLocalAssetIndex(remote.context.localAssets);
+          if (remote) setLocalAssetIndex(nativeProjectLocalAssets(remote.document));
         });
       }, 1800);
     };
@@ -4068,20 +4058,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   // Cloud sync (debounced): coalesce one PUT 1.2s after comp or the session changes. The cloud-authoritative write-back —
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).
-  // The payload mirrors the edit context to the cloud: the offline MCP executor (when the tab is closed) relies on it for
-  // read_script / cut_narration caption re-lay / set_captions / plan; only keys that exist in memory are reported —
-  // missing keys are merged and kept by the server per key, not wiped (projects.$id). See buildCloudPayload.
+  // Transcripts, plan, cloud locators and asset-library metadata are folded into the V2 document
+  // before this payload is built; the offline executor reads that same canonical state.
   // Single-writer: a displaced tab (bridge close 4000) does not autosave at all, and never rebase-retries a 409 —
   // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
   useEffect(() => {
     // No content gate here: buildCloudPayload decides (full payload / chat-only / null) — chat syncs independently
-    if (!projectId || displaced) return;
+    if (!projectId || displaced || schemaReloadingRef.current) return;
     const timer = window.setTimeout(() => {
-      if (displacedRef.current) return; // demoted while this timer was armed (flush-on-evict already carried this batch)
+      if (displacedRef.current || schemaReloadingRef.current) return; // demoted/upgraded while this timer was armed
       const payload = buildCloudPayload();
       if (!payload) return;
       cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
         const r = await studioProviders().projects.save(projectId, payload);
+        if (r === 'schema-upgraded') {
+          reloadForSchemaUpgrade();
+          return;
+        }
         if (r !== 'conflict') return;
         if (displacedRef.current) return; // read-only tabs drop conflicted batches instead of fighting
         // The 409 already refreshed baseVersion to the store's latest: resend this batch immediately to truly enforce "last write wins".
@@ -4103,11 +4096,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   useEffect(() => {
     if (!projectId) return;
     const onHide = () => {
-      if (document.visibilityState !== 'hidden' || displacedRef.current) return;
+      if (document.visibilityState !== 'hidden' || displacedRef.current || schemaReloadingRef.current) return;
       const payload = buildCloudPayload();
       if (!payload) return;
       cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
         const r = await studioProviders().projects.save(projectId, payload).catch(() => 'skip' as const);
+        if (r === 'schema-upgraded') {
+          reloadForSchemaUpgrade();
+          return;
+        }
         if (r === 'conflict' && !displacedRef.current) void studioProviders().projects.save(projectId, payload);
       });
     };
@@ -5071,6 +5068,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               localAssetIndexSyncReady={localAssetIndexSyncReady}
               onLocalAssetIndexChange={changeLocalAssetIndex}
               videoSig={videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null)}
+              mainSourceUrl={primaryAsset ? resolveAssetUrl(primaryAsset) ?? null : null}
+              hasMainSource={Boolean(primaryAsset)}
               onDeleteAsset={deleteAssetSource}
               isSrcLive={srcLive}
               onReconnectSource={(src, sig) => void reconnectSource(src, sig)}
@@ -5098,7 +5097,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 sentences={asrSentences}
                 clipSentences={clipAsr}
                 shots={ensureShots(comp)}
-                videoDurationSec={comp.video?.durationSec ?? 0}
+                videoDurationSec={primaryAssetDurationSec ?? 0}
                 extracting={asrBusy}
                 onExtract={() => void extractForScript()}
                 onSeek={(sec) => {
@@ -5190,7 +5189,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   sentences={asrSentences}
                   clipSentences={clipAsr}
                   shots={ensureShots(comp)}
-                  videoDurationSec={comp.video?.durationSec ?? 0}
+                  videoDurationSec={primaryAssetDurationSec ?? 0}
                   extracting={asrBusy}
                   onExtract={() => void extractForScript()}
                   onSeek={(sec) => {
@@ -5740,7 +5739,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <button
                   type="button"
                   onClick={() => void rerunVisual()}
-                  disabled={!comp.video}
+                  disabled={!videoFile || !primaryAssetDurationSec}
                   className="border-line text-ink-3 hover:text-ink hover:bg-panel-2 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40"
                 >
                   {t('workbench.clearCacheRerunVisual')}

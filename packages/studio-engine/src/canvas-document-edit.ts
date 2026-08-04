@@ -8,7 +8,7 @@ import {
   type EditorCommandReceipt,
   type EditorDocumentV2,
 } from './editor-document';
-import { projectDocumentToLegacyComposition } from './project-document';
+import { projectDocumentToComposition } from './project-document';
 import type { Composition } from './composition-core';
 
 export interface CanvasDocumentEditInput {
@@ -46,7 +46,7 @@ export function applyCanvasDocumentEdit(input: CanvasDocumentEditInput): CanvasD
   return {
     ok: true,
     document: captions.document,
-    composition: projectDocumentToLegacyComposition({ projectId: input.projectId, value: captions.document }),
+    composition: projectDocumentToComposition(captions.document),
     receipts: [canvas.receipt, captions.receipt],
   };
 }

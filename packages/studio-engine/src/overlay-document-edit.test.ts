@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { applyOverlayDocumentEdits, removeOverlayDocumentClips } from './overlay-document-edit';
-import { normalizeProjectDocument, projectDocumentToLegacyComposition } from './project-document';
+import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
 
 function documentWithOverlays() {
   const composition = {
@@ -11,7 +11,7 @@ function documentWithOverlays() {
       { id: 'upper', templateId: 'custom', slots: { innerHtml: '<div>upper</div>' }, startSec: 4, durationSec: 2, trackIndex: 6, box: { x: 0.5, y: 0.5, w: 0.3, h: 0.2 } },
     ],
   };
-  const document = normalizeProjectDocument({ projectId: 'overlay-test', value: composition, context: {} }).document;
+  const document = compositionToEditorDocument({ projectId: 'overlay-test', composition }).document;
   document.timeline.tracks.push({
     id: 'empty-graphics', type: 'graphics', muted: false, hidden: true, locked: false,
     syncLocked: false, stackOrder: 20, clips: [],
@@ -45,7 +45,7 @@ describe('stable-id overlay document edits', () => {
     });
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
-    expect(projectDocumentToLegacyComposition({ projectId: 'overlay-test', value: removed.document }).blocks).toEqual([]);
+    expect(projectDocumentToComposition(removed.document).blocks).toEqual([]);
     expect(removed.document.timeline.tracks.find((track) => track.id === trackByClip.get('lower'))).toMatchObject({ clips: [] });
     expect(removed.document.timeline.tracks.find((track) => track.id === trackByClip.get('upper'))).toMatchObject({ clips: [] });
     expect(removed.document.timeline.tracks.find((track) => track.id === 'empty-graphics')).toMatchObject({

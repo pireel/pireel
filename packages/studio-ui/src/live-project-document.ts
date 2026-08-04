@@ -13,15 +13,20 @@ import {
   type EditorCommandResult,
   type EditorDocumentV2,
   type EditorMediaAsset,
+  applyEditorDocumentPersistenceMetadata,
   freezeEditorDocumentBlockVars,
-  mergeProjectContextIntoDocument,
-  normalizeProjectDocument,
-  projectDocumentToLegacyComposition,
+  prepareEditorDocumentForPersistence,
+  compositionToEditorDocument,
+  projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
-import type { StudioProjectContext } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry, TranscriptSegment } from '@pireel/studio-engine/project-dto';
 
-export interface LiveProjectMigrationContext {
-  context?: StudioProjectContext;
+export interface LiveProjectPersistenceMetadata {
+  mainTranscript?: readonly TranscriptSegment[] | null;
+  clipTranscripts?: Readonly<Record<string, readonly TranscriptSegment[]>>;
+  plan?: unknown;
+  cloudMedia?: { video?: { sig: string; key: string }; clips?: Record<string, { key: string }> };
+  localAssets?: readonly LocalAssetIndexEntry[];
   videoSig?: string | null;
   videoDurationSec?: number | null;
 }
@@ -80,8 +85,8 @@ export function rememberCompositionRuntimeUrls(
 }
 
 function projectRuntimeComposition(session: LiveProjectDocumentSession, document: EditorDocumentV2): Composition {
-  return projectDocumentToLegacyComposition(
-    { projectId: session.projectId, value: document },
+  return projectDocumentToComposition(
+    document,
     { resolveAssetUrl: (asset) => session.runtimeAssetUrls.get(asset.id) },
   );
 }
@@ -89,14 +94,13 @@ function projectRuntimeComposition(session: LiveProjectDocumentSession, document
 export function createLiveProjectDocumentSession(
   projectId: string,
   composition: Composition,
-  migration: LiveProjectMigrationContext = {},
+  metadata: Pick<LiveProjectPersistenceMetadata, 'videoSig' | 'videoDurationSec'> = {},
 ): LiveProjectDocumentSession {
-  const document = normalizeProjectDocument({
+  const document = compositionToEditorDocument({
     projectId,
-    value: composition,
-    context: migration.context,
-    videoSig: migration.videoSig,
-    videoDurationSec: migration.videoDurationSec,
+    composition,
+    videoSig: metadata.videoSig,
+    videoDurationSec: metadata.videoDurationSec,
   }).document;
   const session: LiveProjectDocumentSession = {
     projectId,
@@ -110,15 +114,13 @@ export function createLiveProjectDocumentSession(
 /** Build a persistence-safe V2 snapshot from canonical authority and project metadata. */
 export function persistableLiveProjectDocument(
   session: LiveProjectDocumentSession,
-  migration: LiveProjectMigrationContext = {},
+  metadata: LiveProjectPersistenceMetadata = {},
   options: { stripManagedCaptions?: boolean } = {},
 ): EditorDocumentV2 {
-  const document = mergeProjectContextIntoDocument({
+  const document = applyEditorDocumentPersistenceMetadata({
     projectId: session.projectId,
     document: session.state.document,
-    context: migration.context,
-    videoSig: migration.videoSig,
-    videoDurationSec: migration.videoDurationSec,
+    ...metadata,
   });
   if (!options.stripManagedCaptions || !document.semantics.managedCaptionTrackId) return document;
   return {
@@ -138,9 +140,7 @@ export function applyDocumentToLiveProject(
   document: EditorDocumentV2,
   runtimeComposition?: Composition,
 ): LiveProjectDocumentState {
-  const canonical = freezeEditorDocumentBlockVars(
-    normalizeProjectDocument({ projectId: session.projectId, value: document }).document,
-  );
+  const canonical = freezeEditorDocumentBlockVars(prepareEditorDocumentForPersistence(document));
   if (runtimeComposition) rememberCompositionRuntimeUrls(canonical, runtimeComposition, session.runtimeAssetUrls);
   const composition = runtimeComposition ?? projectRuntimeComposition(session, canonical);
   session.state = { document: canonical, composition };

@@ -275,8 +275,12 @@ export function cutTransitions(
 }
 
 /** Whether a split point falls inside some transition's coverage region (splitting inside is forbidden — remove the transition first). */
-export function splitBlockedByTransition(shots: VideoShot[], atSec: number): boolean {
-  return cutTransitions(shots).some((tr) => Math.abs(atSec - tr.cut) < tr.half - 1e-3);
+export function splitBlockedByTransition(
+  shots: VideoShot[],
+  atSec: number,
+  placements?: readonly VideoShotTimelinePlacement[],
+): boolean {
+  return cutTransitions(shots, placements).some((tr) => Math.abs(atSec - tr.cut) < tr.half - 1e-3);
 }
 
 /** Three color-grade params (numeric factors, 1 = no change; undefined treated as 1). */

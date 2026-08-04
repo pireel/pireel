@@ -28,6 +28,16 @@ export interface EditorMediaAsset {
     height?: number;
     hasAudio?: boolean;
   };
+  /** Cloud-safe library metadata. The file/directory handle remains device-local; this is enough
+   * for another browser to render a restore card and ask for the original folder once. */
+  library?: {
+    createdAt: number;
+    folder?: {
+      id: string;
+      name: string;
+      path: string;
+    };
+  };
 }
 
 export interface EditorCanvasSettings {

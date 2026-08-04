@@ -1,6 +1,6 @@
 import { audioClipDefaults } from '../audio-tracks';
 import type { Block, Composition, VideoShot } from '../composition-core';
-import type { StudioProjectContext, TranscriptSegment } from '../project-dto';
+import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from '../project-dto';
 import { createMigrationAssetRegistry } from './asset-registry';
 import { DEFAULT_TIMELINE_FPS, isFinitePositive, positiveDurationFrames, secondsToTimelineFrames } from './time';
 import {
@@ -23,12 +23,21 @@ import { validateEditorDocumentV2 } from './validation';
 export interface LegacyProjectForMigration {
   projectId: string;
   composition: Composition;
-  context?: StudioProjectContext;
+  context?: LegacyStudioProjectContext;
   /** Stored outside Composition because persisted V1 strips the runtime video object. */
   videoSig?: string | null;
   videoDurationSec?: number | null;
   fps?: number;
   canvasConfigured?: boolean;
+}
+
+/** Retired V1 row shadow. Only the one-shot online migration may consume this shape. */
+export interface LegacyStudioProjectContext {
+  asr?: TranscriptSegment[];
+  clipAsr?: Record<string, TranscriptSegment[]>;
+  plan?: unknown;
+  media?: ProjectCloudMediaIndex;
+  localAssets?: LocalAssetIndexEntry[];
 }
 
 function managedCaptionBlock(block: Block): boolean {
@@ -381,7 +390,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
   return { document, issues: [...issues, ...validateEditorDocumentV2(document)] };
 }
 
-function addLibraryAssets(context: StudioProjectContext, registry: ReturnType<typeof createMigrationAssetRegistry>): void {
+function addLibraryAssets(context: LegacyStudioProjectContext, registry: ReturnType<typeof createMigrationAssetRegistry>): void {
   for (const [index, entry] of (context.localAssets ?? []).entries()) {
     const kind = entry.kind ?? 'video';
     registry.upsert(kind, {
@@ -392,6 +401,10 @@ function addLibraryAssets(context: StudioProjectContext, registry: ReturnType<ty
       metadata: {
         ...(isFinitePositive(entry.w) ? { width: entry.w } : {}),
         ...(isFinitePositive(entry.h) ? { height: entry.h } : {}),
+      },
+      library: {
+        createdAt: Number.isFinite(entry.createdAt) ? entry.createdAt : 0,
+        ...(entry.folder ? { folder: entry.folder } : {}),
       },
     });
   }

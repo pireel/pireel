@@ -120,7 +120,7 @@ export function PersonFxPanel({
         {/* Title/close live in the floating-window header; only a one-line hint here */}
         <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.smartCutoutHint')}</div>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
-          {!comp.video && <div className="text-ink-4">{t('panels.uploadVideoForPortraitFx')}</div>}
+          {!(comp.shots ?? []).length && <div className="text-ink-4">{t('panels.uploadVideoForPortraitFx')}</div>}
 
           {/* Per-shot toggle + budget progress: only affects the currently selected shot; can't enable with nothing selected */}
           <section className="flex flex-col gap-1.5">

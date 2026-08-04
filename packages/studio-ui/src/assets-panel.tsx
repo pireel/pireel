@@ -33,6 +33,8 @@ export function AssetsPanel({
   localAssetIndexSyncReady,
   onLocalAssetIndexChange,
   videoSig,
+  mainSourceUrl,
+  hasMainSource,
   onDeleteAsset,
   isSrcLive,
   onReconnectSource,
@@ -56,6 +58,9 @@ export function AssetsPanel({
   onLocalAssetIndexChange?: (entries: LocalAssetIndexEntry[]) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — "My" labels it by filename. */
   videoSig?: string | null;
+  /** Native primary asset runtime URL and existence; Composition.video is not source identity. */
+  mainSourceUrl?: string | null;
+  hasMainSource?: boolean;
   /** Delete a local source from the TRACK too (every shot cut from it) — workbench-side comp surgery. null = main. */
   onDeleteAsset?: (src: string | null) => void;
   /** Per-asset liveness of a track source's bytes (workbench-held Files) — drives "My"'s restore cards. */
@@ -129,6 +134,8 @@ export function AssetsPanel({
           registrySyncReady={localAssetIndexSyncReady}
           onRegistryChange={onLocalAssetIndexChange}
           videoSig={videoSig}
+          mainSourceUrl={mainSourceUrl}
+          hasMainSource={hasMainSource}
           onDeleteAsset={onDeleteAsset}
           isSrcLive={isSrcLive}
           onReconnectSource={onReconnectSource}

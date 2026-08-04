@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition, type Composition } from './composition-core';
 import { applyLayoutDocumentEdit } from './layout-document-edit';
-import { normalizeProjectDocument, projectDocumentToLegacyComposition } from './project-document';
+import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
 
-function layoutFixture(): { composition: Composition; document: ReturnType<typeof normalizeProjectDocument>['document'] } {
+function layoutFixture(): { composition: Composition; document: ReturnType<typeof compositionToEditorDocument>['document'] } {
   const composition: Composition = {
     ...emptyComposition(),
     video: { url: 'blob:main', durationSec: 8 },
@@ -13,10 +13,9 @@ function layoutFixture(): { composition: Composition; document: ReturnType<typeo
       { id: 'right-card', templateId: 'custom', slots: {}, startSec: 1, durationSec: 4, trackIndex: 7, box: { x: 0.7, y: 0.1, w: 0.2, h: 0.2 } },
     ],
   };
-  const document = normalizeProjectDocument({
+  const document = compositionToEditorDocument({
     projectId: 'layout-test',
-    value: composition,
-    context: {},
+    composition,
     videoSig: 'main-sig',
   }).document;
   document.timeline.tracks.push({
@@ -36,7 +35,7 @@ describe('native layout document edit', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const projected = projectDocumentToLegacyComposition({ projectId: 'layout-test', value: result.document });
+    const projected = projectDocumentToComposition(result.document);
     expect(projected.shots![0]).toMatchObject({ treatment: 'split-l', treatSize: 50, partnerBlockId: 'left-card' });
     expect(projected.blocks.map((block) => block.box)).toEqual([
       { x: 0.555, y: 0.075, w: 0.1825, h: 0.75 },

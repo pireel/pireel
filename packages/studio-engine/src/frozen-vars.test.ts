@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { GENERAL_THEME, effectiveThemeVars, varsDeclCss, themeVarsCss } from './theme';
-import { type Composition, assembleBlockHtml, assembleHtml, customBlock, captionBlock, freezeBlockVars, blockFreezesVars } from './composition';
+import { type Composition, assembleBlockHtml, assembleHtml, customBlock, captionBlock, freezeBlockVars, blockFreezesVars, compositionToEditorDocument } from './composition';
 import { runServerTool } from './server-tools';
 
 const comp = (over: Partial<Composition> = {}): Composition => ({
@@ -85,14 +85,15 @@ describe('scoped render override', () => {
 
 describe('offline funnel (runServerTool)', () => {
   it('stamps blocks touched offline before the comp is persisted', () => {
+    const composition = comp({ blocks: [cst()], palette: { accent: '#654321' } });
     const p = {
       id: 'p1',
       title: 't',
-      comp: comp({ blocks: [cst()], palette: { accent: '#654321' } }),
-      context: {},
+      comp: composition,
+      document: compositionToEditorDocument({ projectId: 'p1', composition: composition }).document,
       videoDurationSec: null,
     };
-    const out = runServerTool('move_block', { blockId: p.comp.blocks[0]!.id, startSec: 1 }, p as never);
+    const out = runServerTool('move_block', { blockId: p.comp.blocks[0]!.id, startSec: 1 }, p);
     expect(out.result.ok).toBe(true);
     expect(out.comp!.blocks[0]!.vars!.accent).toBe('#654321');
   });

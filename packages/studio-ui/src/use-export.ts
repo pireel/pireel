@@ -104,7 +104,6 @@ export function useStudioExport(deps: {
   /** Canonical document + runtime source fingerprints + options. Runtime URLs stay outside V2
    *  persistence, so they are included separately to invalidate a cached export after asset recovery. */
   const exportKey = (
-    c: Composition,
     document: EditorDocumentV2,
     plan: ReturnType<typeof editorDocumentRenderPlan>,
     opts: ExportRenderOpts,
@@ -112,7 +111,7 @@ export function useStudioExport(deps: {
     const resolvedSources = plan.tracks.flatMap((track) => track.clips.flatMap((entry) => (
       entry.resolvedSource ? [[entry.clipId, entry.resolvedSource]] : []
     )));
-    return `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(document)}|${JSON.stringify(resolvedSources)}`;
+    return `${videoFileRef.current ? fileSig(videoFileRef.current) : ''}|${JSON.stringify(opts)}|${JSON.stringify(document)}|${JSON.stringify(resolvedSources)}`;
   };
 
   /** WebCodecs is always required; main-source bytes are required only when a surviving clip
@@ -174,7 +173,7 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return { ok: false, error: noExportReason(c, plan) };
     }
-    const key = exportKey(c, document, plan, opts);
+    const key = exportKey(document, plan, opts);
     const name = filenameFor(opts);
     if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
       toast.success(t('common.downloadedPreviousExport'));
@@ -217,7 +216,7 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return null;
     }
-    const key = exportKey(c, document, plan, opts);
+    const key = exportKey(document, plan, opts);
     if (uploadedExportRef.current?.key === key) {
       // Same content already uploaded: reuse the direct link
       setPublishUrl(uploadedExportRef.current.url);
