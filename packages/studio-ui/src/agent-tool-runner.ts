@@ -16,7 +16,6 @@ import {
   type EditorDocumentV2,
   type CutTransitionEffect,
   type ShotFilter,
-  type ShotFramingPatch,
   type ShotTreatment,
   type TransitionDirection,
   type VideoShot,
@@ -47,6 +46,7 @@ import {
   shotId,
   listAddressedWords,
   narrationSourceSplitsAtEditedPoints,
+  patchNarrativeClips,
   resolveWordIds,
   wordRanges,
   wordRangesToEdited,
@@ -183,10 +183,6 @@ export interface AgentToolCtx {
   // Video track edits
   setCutTransition: (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
   resizeCutTransition: (shotId: string, durationSec: number) => void;
-  setShotTreatment: (sid: string, treatment: ShotTreatment) => void;
-  setShotFraming: (sid: string, patch: ShotFramingPatch) => void;
-  setShotFilter: (sid: string, f: ShotFilter | null) => void;
-  setShotAudio: (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
   audioMount: (file: File, label?: string, opts?: { startSec?: number }) => Promise<string | undefined>;
   audioPatch: (id: string, patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number; speed?: number; startSec?: number }) => void;
@@ -219,7 +215,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
+    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, setDenoise,
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -1335,7 +1331,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const shots = ensureShots(c);
             const applied = applyShotFramingInput({ ...c, shots }, input, shots);
             if ('error' in applied) return { ok: false, error: applied.error };
-            setComp(applied.comp);
+            const command = patchNarrativeClips(documentRef.current, applied.patches.map(({ shotId, patch }) => ({
+              clipId: shotId,
+              patch: { framing: patch },
+            })));
+            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            setDocument(command.document);
             const count = applied.updates.length;
             return {
               ok: true,
@@ -1360,7 +1361,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const s = findShot(input.shotId);
             if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             const tr = String(input.treatment) as ShotTreatment;
-            setShotTreatment(s.id, tr);
+            if (!SHOT_TREATMENTS.some((item) => item.id === tr)) return { ok: false, error: `invalid treatment: ${tr}` };
+            const command = patchNarrativeClips(documentRef.current, [{ clipId: s.id, patch: { framing: { treatment: tr } } }]);
+            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            setDocument(command.document);
             const name = SHOT_TREATMENTS.find((x) => x.id === tr)?.name ?? tr;
             return { ok: true, summary: t('workbench.framingChangedName', { name: t(name) }) };
           }
@@ -1433,7 +1437,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(num(input.saturate) != null ? { saturate: num(input.saturate) } : {}),
             };
             const css = shotFilterCss(f);
-            setShotFilter(s.id, css === 'none' ? null : f);
+            const command = patchNarrativeClips(documentRef.current, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
+            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            setDocument(command.document);
             return { ok: true, summary: css === 'none' ? t('workbench.resetColorGradeShot') : t('workbench.filtersAppliedCss', { css }) };
           }
           case 'set_shot_audio': {
@@ -1449,7 +1455,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
             };
             if (!Object.keys(patch).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
-            for (const s of hit) setShotAudio(s.id, patch);
+            const command = patchNarrativeClips(documentRef.current, hit.map((shot) => ({
+              clipId: shot.id,
+              patch: { audio: patch },
+            })));
+            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            setDocument(command.document);
             const bits = [
               ...('volumeDb' in patch ? [`${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
               ...('mute' in patch ? [patch.mute ? t('workbench.audioMuted') : t('workbench.audioUnmuted')] : []),

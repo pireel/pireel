@@ -7,6 +7,26 @@ import type {
   TimelineClipId,
   TrackId,
 } from '../types';
+import type { ShotFilter, ShotFramingPatch } from '../../composition-core';
+
+export interface ShotAudioPatch {
+  volumeDb?: number;
+  mute?: boolean;
+  fadeInSec?: number;
+  fadeOutSec?: number;
+}
+
+export interface NarrativeClipPatch {
+  framing?: ShotFramingPatch;
+  /** `null` and an all-neutral filter both remove the persisted grade. */
+  filter?: ShotFilter | null;
+  audio?: ShotAudioPatch;
+}
+
+export interface NarrativeClipPatchUpdate {
+  clipId: TimelineClipId;
+  patch: NarrativeClipPatch;
+}
 
 export interface InsertTrackInput {
   id: TrackId;
@@ -64,7 +84,8 @@ export type EditorCommand =
     atFrame: number;
     /** Linked partners split at the same timeline frame by default. */
     includeLinked?: boolean;
-  };
+  }
+  | { type: 'narrative.patch'; updates: NarrativeClipPatchUpdate[] };
 
 export type EditorCommandErrorCode =
   | 'invalid-command'

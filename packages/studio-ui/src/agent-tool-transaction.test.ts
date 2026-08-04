@@ -129,6 +129,27 @@ describe('Agent composition transaction boundary', () => {
     expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')?.clips[0]).toMatchObject({ startFrame: 30 });
   });
 
+  it('browser shot properties commit directly to V2 without collapsing a native gap', async () => {
+    const h = harness();
+    h.documentRef.current.timeline.tracks[0]!.clips[0]!.startFrame = 45;
+    h.documentRef.current.timeline.tracks.push({
+      id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 1, clips: [],
+    });
+    Object.assign(h.ctx, {
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'set_video_filter', { shotId: 's1', contrast: 1.25 });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.timeline.tracks[0]!.clips[0]).toMatchObject({
+      id: 's1', startFrame: 45, properties: { filter: { contrast: 1.25 } },
+    });
+    expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')).toBeTruthy();
+  });
+
   it('async failure preserves a later manual edit and removes only the tool ghost snapshot', async () => {
     const h = harness();
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });

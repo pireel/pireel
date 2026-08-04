@@ -30,6 +30,7 @@ import {
   type TransitionDirection,
   type ShotFilter,
   type ShotFramingPatch,
+  type NarrativeClipPatchUpdate,
   type ShotTreatment,
   type PersonFx,
   type TimelineSiblingLayers,
@@ -43,6 +44,7 @@ import {
   blockBgCss,
   captionLineSegments,
   narrationSourceSplitsAtEditedPoints,
+  patchNarrativeClips,
   customHasSurface,
   blockId,
   blockKind,
@@ -64,7 +66,6 @@ import {
   audioClipWindow,
   audioTrimPatch,
   patchAudioClip,
-  patchShotAudio,
   patchShotFraming,
   segmentFadeFn,
   shotsContiguous,
@@ -150,7 +151,7 @@ import { type ChatSituation, type StudioToolResult, STUDIO_TOOL_MAP, buildSituat
 import { useAgentBridge } from './use-agent-bridge';
 import { type VisualLabel, type VisualPrep, type VisualTimeline, analyzeVisual, clearVisualCache, finishVisualAnalysis, insertedClipSafeZone, prepareVisualAnalysis } from './visual';
 import { type SafeZone, detectFrameAt, geomNote } from './geometry';
-import { REF_WIDTH, normalizeDims, personFxFromFrame, shotSpan, syncVacancyPartner } from './workbench-utils';
+import { REF_WIDTH, normalizeDims, personFxFromFrame, shotSpan } from './workbench-utils';
 import { shotCountChange, canvasSizeOnlyChange, blockPatchableChange, capPosOnlyChange, sameExceptCapStyle, shiftBox, shotFramingOnlyChange, themeMountOnlyChange } from './comp-diff';
 import { BoxEditOverlay, CaptionEditOverlay } from './edit-overlays';
 import { BracketCutIcon, CardShapeControls, ExportOptRow, TimeReadout } from './workbench-controls';
@@ -2272,6 +2273,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   };
 
   /* ---------- Video track: shot slicing + shot framing ---------- */
+  const commitNarrativePatches = (updates: NarrativeClipPatchUpdate[]): boolean => {
+    const result = patchNarrativeClips(editorDocumentRef.current, updates);
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return false;
+    }
+    setEditorDocument(result.document);
+    return true;
+  };
   const selectShot = (id: string, additive = false) => {
     if (additive) {
       toggleShotSelect(id); // ⌘/Ctrl click: toggle in/out of the multi-select set
@@ -2284,14 +2294,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // One write path for panel + Agent: resolve/clamp first, drive the same live transform the exporter
     // later reads, then commit framing and its vacancy partner together.
     const cur = compRef.current.shots?.find((x) => x.id === sid);
-    if (cur) {
-      const next = patchShotFraming(cur, patch);
-      postPreview({ type: 'hf:shotVars', vars: shotTransformVars(next.treatment, next.treatSize, next.treatCrop, next.preciseFraming) });
-    }
-    setComp((c) => {
-      const shots = (c.shots ?? []).map((s) => (s.id === sid ? patchShotFraming(s, patch) : s));
-      return syncVacancyPartner({ ...c, shots }, sid);
-    });
+    if (!cur || !commitNarrativePatches([{ clipId: sid, patch: { framing: patch } }])) return;
+    const next = patchShotFraming(cur, patch);
+    postPreview({ type: 'hf:shotVars', vars: shotTransformVars(next.treatment, next.treatSize, next.treatCrop, next.preciseFraming) });
   };
   const setShotTreatment = (sid: string, treatment: ShotTreatment) => setShotFraming(sid, { treatment });
   /** Framing size (0–100, non-full types): video scale/proportion follows, and the other-half vacancy moves in sync. */
@@ -2314,17 +2319,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const setShotFilter = (sid: string, f: ShotFilter | null) => {
     const css = shotFilterCss(f ?? undefined);
     const sp = clipSpans(ensureShots(compRef.current)).find((x) => x.clip.id === sid);
+    if (!commitNarrativePatches([{ clipId: sid, patch: { filter: f } }])) return;
     if (sp && tRef.current >= sp.editedStart - 1e-3 && tRef.current < sp.editedEnd) {
       postPreview({ type: 'hf:shotVars', vars: { filter: css } });
     }
-    setComp((c) => ({
-      ...c,
-      shots: (c.shots ?? []).map((s) => {
-        if (s.id !== sid) return s;
-        const { filter: _drop, ...rest } = s;
-        return css === 'none' ? rest : { ...rest, filter: f! };
-      }),
-    }));
   };
   /** Live preview during grade drag (zero setState; setShotFilter commits only on release). */
   const previewShotFilter = (_sid: string, f: ShotFilter) => {
@@ -2332,7 +2330,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   };
   /** Per-shot audio commit (volume/mute): the engine-segment effect refeeds gains from comp.shots. */
   const setShotAudio = (sid: string, patch: { volumeDb?: number; mute?: boolean; fadeInSec?: number; fadeOutSec?: number }) => {
-    setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => (s.id === sid ? patchShotAudio(s, patch) : s)) }));
+    commitNarrativePatches([{ clipId: sid, patch: { audio: patch } }]);
   };
   /** Track-level mute state (the timeline's speaker icons). A track counts as muted when EVERY item on it
    *  is — no new field for it: silencing a track is silencing its contents, and per-item mute already
@@ -3353,7 +3351,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     pickVideoFile, registerLocalAsset, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
-    resizeCutTransition, setShotTreatment, setShotFraming, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
+    resizeCutTransition, splitAtPlayhead, trimAtPlayhead, deleteShot,
     audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
@@ -3606,8 +3604,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const shots = compRef.current.shots ?? [];
       if (!shots.length) return;
       const next = !shots.every((s) => s.audioMuted);
+      const result = patchNarrativeClips(editorDocumentRef.current, shots.map((shot) => ({
+        clipId: shot.id,
+        patch: { audio: { mute: next } },
+      })));
+      if (!result.ok) {
+        toast.error(result.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      setComp((c) => ({ ...c, shots: (c.shots ?? []).map((s) => patchShotAudio(s, { mute: next })) }));
+      setEditorDocument(result.document);
     },
     onToggleAudioMute: () => {
       const clips = compRef.current.audioTracks ?? [];

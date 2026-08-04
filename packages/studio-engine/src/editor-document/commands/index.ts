@@ -1,6 +1,7 @@
 export * from './clip-geometry';
 export * from './dispatcher';
 export * from './insert';
+export * from './narrative-patch';
 export * from './narration-range';
 export * from './narration-split';
 export * from './range';

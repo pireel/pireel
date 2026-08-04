@@ -1,6 +1,6 @@
 /** Pure workbench helpers: canvas dimension normalization, shot spans, frame → PersonFx mapping. */
 
-import { type Composition, type PersonFx, treatmentVacancyBox } from '@pireel/studio-engine/composition';
+import { type Composition, type PersonFx } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 
 /** personFx recommendation from a frame content pack (kebab string map) → runtime PersonFx. */
@@ -53,25 +53,4 @@ export function shotSpan(c: Composition, sid: string): { editedStart: number; sh
   const editedStart = sp?.editedStart ?? 0;
   const shotLen = sp ? sp.editedEnd - sp.editedStart : Math.max(0.1, shot.srcEnd - shot.srcStart);
   return { editedStart, shotLen };
-}
-
-/**
- * When framing has a vacancy (half-cut/corner-shrink) and the shot **already has** a partner block:
- * align it to the new vacancy box + full shot span.
- * **Update-only, never create** ("what goes in the other half" entry was cut; a partner can only come from a legacy link):
- * no vacancy (full/zoom) returns as-is — keep any existing partner block and link, don't auto-delete (avoids wiping user content).
- */
-export function syncVacancyPartner(c: Composition, sid: string): Composition {
-  const shots = c.shots ?? [];
-  const shot = shots.find((s) => s.id === sid);
-  if (!shot) return c;
-  const vac = treatmentVacancyBox(shot.treatment, shot.treatSize);
-  if (!vac) return c;
-  const existing = shot.partnerBlockId ? c.blocks.find((b) => b.id === shot.partnerBlockId) : null;
-  if (!existing) return c;
-  const span = shotSpan(c, sid)!;
-  return {
-    ...c,
-    blocks: c.blocks.map((b) => (b.id === existing.id ? { ...b, box: vac, startSec: span.editedStart, durationSec: Math.max(0.3, span.shotLen) } : b)),
-  };
 }

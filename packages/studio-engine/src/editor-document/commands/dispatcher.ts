@@ -1,5 +1,6 @@
 import type { EditorDocumentV2 } from '../types';
 import { insertEditorClips } from './insert';
+import { patchNarrativeClips } from './narrative-patch';
 import { splitEditorClip } from './split';
 import { removeEditorRange } from './range';
 import { insertEditorTrack, moveEditorTrack, patchEditorTrack, removeEditorTrack } from './tracks';
@@ -22,6 +23,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return removeEditorRange(document, command);
     case 'clip.split':
       return splitEditorClip(document, command);
+    case 'narrative.patch':
+      return patchNarrativeClips(document, command.updates);
     default: {
       const unreachable: never = command;
       return commandFailure(document, 'invalid-command', `Unsupported editor command: ${String(unreachable)}`);

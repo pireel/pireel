@@ -67,6 +67,8 @@ export interface AppliedShotFraming {
 export interface ShotFramingResult {
   comp: Composition;
   updates: AppliedShotFraming[];
+  /** Normalized intent patches, resolved to stable shot ids for direct V2 command dispatch. */
+  patches: { shotId: string; patch: ShotFramingPatch }[];
 }
 
 const SHOT_TREATMENT_IDS = new Set<ShotTreatment>(SHOT_TREATMENTS.map((item) => item.id));
@@ -165,6 +167,7 @@ export function applyShotFramingInput(
   const nextComp: Composition = { ...comp, blocks, shots: nextShots };
   return {
     comp: nextComp,
+    patches: resolved.map(({ shot, patch }) => ({ shotId: shot.id, patch })),
     updates: resolved.map(({ shot }) => {
       const next = nextShots.find((candidate) => candidate.id === shot.id)!;
       return {

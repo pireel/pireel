@@ -28,6 +28,7 @@ import {
   type TransitionDirection,
   type TimelineSiblingLayers,
   type VideoShot,
+  type NarrativeClipPatchUpdate,
   CAPTION_PRESETS,
   DIRECTIONAL_TRANSITIONS,
   MAX_TRANSITION_SEC,
@@ -46,6 +47,7 @@ import {
   audioClipWindow,
   audioTrimPatch,
   patchAudioClip,
+  patchNarrativeClips,
   patchShotAudio,
   splitAudioClipAt,
   blockId,
@@ -161,6 +163,29 @@ function shotsOf(p: ServerToolProject): VideoShot[] {
   if (p.comp.shots !== undefined) return p.comp.shots;
   const dur = p.comp.video?.durationSec ?? p.videoDurationSec ?? 0;
   return dur > 0 ? [{ id: shotId(), srcStart: 0, srcEnd: dur, treatment: 'full' }] : [];
+}
+
+type NativeNarrativePatchResult =
+  | { document: EditorDocumentV2; comp: Composition }
+  | { error: string; data?: unknown }
+  | null;
+
+function applyNativeNarrativePatches(
+  p: ServerToolProject,
+  updates: NarrativeClipPatchUpdate[],
+): NativeNarrativePatchResult {
+  if (!p.document) return null;
+  const command = patchNarrativeClips(p.document, updates);
+  if (!command.ok) {
+    return {
+      error: command.error.message,
+      data: { code: command.error.code, trackIds: command.error.trackIds },
+    };
+  }
+  return {
+    document: command.document,
+    comp: projectDocumentToLegacyComposition({ projectId: p.id, value: command.document }),
+  };
 }
 
 /** Offline situation snapshot: same shape as the browser's getChatBody (shared buildSituation), prefixed with the offline notice. */
@@ -422,6 +447,11 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const shots = shotsOf(p);
       const applied = applyShotFramingInput({ ...c, shots }, input, shots);
       if ('error' in applied) return { result: { ok: false, error: applied.error } };
+      const native = applyNativeNarrativePatches(p, applied.patches.map(({ shotId, patch }) => ({
+        clipId: shotId,
+        patch: { framing: patch },
+      })));
+      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       const count = applied.updates.length;
       return {
         result: {
@@ -429,7 +459,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           summary: count === 1 ? `Updated framing for shot ${applied.updates[0]!.shotId}` : `Updated framing for ${count} shots`,
           data: count === 1 ? applied.updates[0] : { updates: applied.updates },
         },
-        comp: applied.comp,
+        comp: native?.comp ?? applied.comp,
+        ...(native ? { document: native.document } : {}),
       };
     }
     case 'apply_layout': {
@@ -453,9 +484,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!s) return { result: { ok: false, error: 'shot not found' } };
       const t = String(input.treatment);
       if (!TREATMENTS.has(t)) return { result: { ok: false, error: `invalid treatment: ${t}` } };
+      const native = applyNativeNarrativePatches(p, [{ clipId: s.id, patch: { framing: { treatment: t as VideoShot['treatment'] } } }]);
+      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       return {
         result: { ok: true, summary: `Set shot framing to ${t}` },
-        comp: { ...c, shots: shots.map((x) => (x.id === s.id ? patchShotFraming(x, { treatment: t as VideoShot['treatment'] }) : x)) },
+        comp: native?.comp ?? { ...c, shots: shots.map((x) => (x.id === s.id ? patchShotFraming(x, { treatment: t as VideoShot['treatment'] }) : x)) },
+        ...(native ? { document: native.document } : {}),
       };
     }
     case 'set_video_filter': {
@@ -469,6 +503,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(num(input.saturate) != null ? { saturate: num(input.saturate) } : {}),
       };
       const css = shotFilterCss(f);
+      const native = applyNativeNarrativePatches(p, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
+      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       const next = shots.map((x) => {
         if (x.id !== s.id) return x;
         const { filter: _drop, ...rest } = x;
@@ -476,7 +512,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       });
       return {
         result: { ok: true, summary: css === 'none' ? 'Reset color grading for this shot' : `Applied color grading: ${css}` },
-        comp: { ...c, shots: next },
+        comp: native?.comp ?? { ...c, shots: next },
+        ...(native ? { document: native.document } : {}),
       };
     }
     case 'set_shot_audio': {
@@ -493,6 +530,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
       };
       if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass volumeDb / mute / fadeInSec / fadeOutSec' } };
+      const native = applyNativeNarrativePatches(p, hit.map((shot) => ({ clipId: shot.id, patch: { audio: patch } })));
+      if (native && 'error' in native) return { result: { ok: false, error: native.error, data: native.data } };
       const next = shots.map((s) => (ids.has(s.id) ? patchShotAudio(s, patch) : s));
       const bits = [
         ...('volumeDb' in patch ? [`volume ${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
@@ -500,7 +539,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       ];
       return {
         result: { ok: true, summary: `Audio on ${hit.length} shot${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
-        comp: { ...c, shots: next },
+        comp: native?.comp ?? { ...c, shots: next },
+        ...(native ? { document: native.document } : {}),
       };
     }
     case 'set_bgm': {

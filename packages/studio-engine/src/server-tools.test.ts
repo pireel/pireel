@@ -60,6 +60,48 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(moved.result.ok).toBe(true);
     expect(moved.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 165 });
   });
+  it('V2 镜头属性工具直接补丁原生片段，并保留主轨间隙与关联版式', () => {
+    const p = v2proj();
+    const primary = p.document!.timeline.tracks.find((track) => track.id === p.document!.semantics.primaryNarrativeTrackId)!;
+    for (const clip of primary.clips) clip.startFrame += 45;
+    const shot = primary.clips.find((clip) => clip.id === 's1')!;
+    if (shot.kind !== 'narrative') throw new Error('expected narrative clip');
+    shot.properties.partnerBlockId = 'b1';
+
+    const framing = runServerTool('set_shot_framing', { shotId: 's1', treatment: 'split-l', size: 40 }, p);
+    expect(framing.result.ok).toBe(true);
+    expect(framing.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 's1')).toMatchObject({
+      startFrame: 45,
+      properties: { treatment: 'split-l', treatSize: 40 },
+    });
+    expect(framing.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({
+      startFrame: 45,
+      durationFrames: 300,
+      block: { box: { x: 0.5, y: 0.06, w: 0.46, h: 0.78 } },
+    });
+
+    const filtered = runServerTool('set_video_filter', { shotId: 's1', brightness: 1.2 }, {
+      ...p,
+      comp: framing.comp!,
+      document: framing.document,
+    });
+    expect(filtered.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 's1')).toMatchObject({
+      startFrame: 45,
+      properties: { filter: { brightness: 1.2 } },
+    });
+  });
+  it('V2 framing 触及锁定的关联版式轨时整笔拒绝', () => {
+    const p = v2proj();
+    const primary = p.document!.timeline.tracks.find((track) => track.id === p.document!.semantics.primaryNarrativeTrackId)!;
+    const shot = primary.clips.find((clip) => clip.id === 's1')!;
+    if (shot.kind !== 'narrative') throw new Error('expected narrative clip');
+    shot.properties.partnerBlockId = 'b1';
+    p.document!.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'b1'))!.locked = true;
+    const framing = runServerTool('set_shot_treatment', { shotId: 's1', treatment: 'split-r' }, p);
+    expect(framing.result).toMatchObject({ ok: false, data: { code: 'track-locked' } });
+    expect(framing.document).toBeUndefined();
+    expect(shot.properties.treatment).toBe('full');
+  });
   it('get_state:积分护栏只带布尔行——没钱时明示别调计费工具,未知时整行省略', () => {
     const broke = runServerTool('get_state', {}, proj({ canGenerate: false }));
     expect(broke.result.state).toContain('credits EXHAUSTED');

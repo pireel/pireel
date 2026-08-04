@@ -70,6 +70,8 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `clip-geometry.ts` owns frame/source split and trim math;
 - `range.ts` owns lift/ripple, linked expansion, sync-lock and empty-lane pruning;
 - `insert.ts` owns overwrite/ripple insertion;
+- `split.ts` owns atomic clip/link-group subdivision;
+- `narrative-patch.ts` owns normalized framing, grade and shot-audio properties without exposing geometry;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
@@ -101,9 +103,12 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   by stable clip lineage plus source seconds, so splitting never collapses a V2 leading gap or targets
   the wrong reused source segment. Linked partners split atomically by default, including locked-lane
   rejection and matching link groups for the newly created right halves.
+- Manual panels, browser agents and offline MCP framing/filter/shot-audio edits now use one atomic
+  `narrative.patch` command. Framing partners align to native frame geometry, and a locked narrative
+  or graphics lane rejects the full update without losing V2-only gaps or tracks.
 
-Direct V2 preview/export/tool consumption remains a rollout gate, not schema work. The server adapter
-currently projects legacy tool input and remigrates its result;
+Direct V2 preview/export and consumption by the remaining compatibility tools are rollout gates, not
+schema work. The server adapter still projects and remigrates results for tools not yet cut over;
 that path must be removed before overlapping/gapped multi-track editing is exposed because V1 cannot
 round-trip those states. The remaining gates must reuse this document and command layer rather than
 introduce another model.
