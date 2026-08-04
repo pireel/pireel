@@ -34,6 +34,7 @@ import {
   blockKind,
   compReceiptDelta,
   canvasSizeFromInput,
+  editorDocumentRenderPlan,
   freeTrack,
   getCaptionPreset,
   isCaptionsOn,
@@ -55,6 +56,7 @@ import {
   totalDuration,
   validateComposition,
   validateEditorDocumentV2,
+  videoShotTimelineSpans,
   zoneOf,
 } from '@pireel/studio-engine/composition';
 import { type CutSeamEntry, finalizeCutSeams, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
@@ -106,6 +108,14 @@ function reviewMomentAttempts(compRef: object, compositionHash: string): Map<num
     byComposition.set(compositionHash, attempts);
   }
   return attempts;
+}
+
+function canonicalRenderTimeline(document: EditorDocumentV2) {
+  const plan = editorDocumentRenderPlan(document);
+  return {
+    durationSec: plan.durationSec,
+    placements: plan.narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec })),
+  };
 }
 
 /** Progress reporter fed to pipeline steps: pushes friendly text (and optional 0–1 fraction) to the tool's chat card. */
@@ -799,9 +809,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // vision model looks at the composed frames and the FINDINGS come back as text (issues JSON)
             const atsIn = Array.isArray(input.atSecs) ? (input.atSecs as unknown[]).map(Number).filter(Number.isFinite) : [];
             if (!atsIn.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
-            const dur = totalDuration(c);
+            const renderTimeline = canonicalRenderTimeline(documentRef.current);
+            const dur = renderTimeline.durationSec;
             const requestedAts = [...new Set(atsIn.map((x) => Math.min(Math.max(0, x), dur)))].slice(0, 18);
-            const compHash = compositionRevision(c).compositionHash;
+            const compHash = `${compositionRevision(c).compositionHash}:${JSON.stringify(renderTimeline.placements)}`;
             const momentAttempts = reviewMomentAttempts(compRef, compHash);
             const { allowedAtSecs: ats, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
             if (!ats.length) {
@@ -824,6 +835,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 report(t('workbench.reviewingFrameN', { i: i + 1, n: ats.length }));
                 const shot = await captureCompositionFrame({
                   comp: c,
+                  videoPlacements: renderTimeline.placements,
+                  timelineDurationSec: renderTimeline.durationSec,
                   videoFile: videoFileRef.current,
                   clipFiles: clipFilesRef.current,
                   atSec: at,
@@ -1912,8 +1925,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
       }
       case 'capture_frame': {
         // The external agent's "eye": capture a frame via the same render pipeline as export (BYO self-checks visuals after writing a block)
-        const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : tRef.current;
-        const momentAttempts = reviewMomentAttempts(compRef, compositionRevision(c2).compositionHash);
+        const renderTimeline = canonicalRenderTimeline(ctx.documentRef.current);
+        const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), renderTimeline.durationSec) : tRef.current;
+        const momentAttempts = reviewMomentAttempts(
+          compRef,
+          `${compositionRevision(c2).compositionHash}:${JSON.stringify(renderTimeline.placements)}`,
+        );
         if (!selectReviewMoments([at], momentAttempts).allowedAtSecs.length) {
           return {
             ok: false,
@@ -1923,14 +1940,23 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         }
         try {
           const label = `${Math.round(at * 10) / 10}s`;
-          const shot = await captureCompositionFrame({ comp: c2, videoFile: videoFileRef.current, clipFiles: clipFilesRef.current, atSec: at, burnLabel: label });
+          const shot = await captureCompositionFrame({
+            comp: c2,
+            videoPlacements: renderTimeline.placements,
+            timelineDurationSec: renderTimeline.durationSec,
+            videoFile: videoFileRef.current,
+            clipFiles: clipFilesRef.current,
+            atSec: at,
+            burnLabel: label,
+          });
           const b64 = shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1);
           // What the image SHOWS mapped back to what the agent can EDIT: overlay blocks visible at this
           // moment (with screen zone), the shot it lands in, and whether the caption layer is on
           const visBlocks = c2.blocks
             .filter((b) => !isSentenceCaption(b) && at >= b.startSec && at < b.startSec + b.durationSec)
             .map((b) => ({ id: b.id, kind: blockKind(b), ...(b.label ? { label: b.label } : {}), ...(b.box ? { zone: zoneOf(b.box) } : {}) }));
-          const span = clipSpans(c2.shots ?? []).find((sp) => at >= sp.editedStart - 1e-6 && at < sp.editedEnd + 1e-6);
+          const span = videoShotTimelineSpans(c2.shots ?? [], renderTimeline.placements)
+            .find((sp) => at >= sp.editedStart - 1e-6 && at < sp.editedEnd + 1e-6);
           const visible = {
             blocks: visBlocks,
             ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),

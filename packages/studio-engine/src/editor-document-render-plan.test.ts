@@ -1,0 +1,80 @@
+import { describe, expect, it } from 'vitest';
+import { assembleHtml, cutTransitions, emptyComposition, videoFrameTimelineBody, videoShotTimelineSpans, type VideoShot } from './composition';
+import { editorDocumentRenderPlan, emptyEditorDocumentV2 } from './editor-document';
+
+describe('EditorDocumentV2 render plan', () => {
+  it('preserves native gaps, empty lanes and deterministic stack order', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.main = { id: 'main', kind: 'video', locator: { localSig: 'sig' }, metadata: { durationSec: 4 } };
+    document.timeline.tracks[0]!.stackOrder = 2;
+    document.timeline.tracks[0]!.clips = [{
+      id: 'talk', kind: 'narrative', assetId: 'main', startFrame: 60, durationFrames: 120,
+      sourceInSec: 0, sourceOutSec: 4, properties: { treatment: 'full' }, enabled: true,
+    }];
+    document.timeline.tracks.push({
+      id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 1, clips: [],
+    });
+    document.timeline.tracks.push({
+      id: 'graphics', type: 'graphics', role: 'graphics', muted: false, hidden: false, locked: false,
+      syncLocked: true, stackOrder: 3, clips: [{
+        id: 'title', kind: 'graphic', startFrame: 240, durationFrames: 30, enabled: true,
+        anchor: { type: 'timeline' }, block: { templateId: 'custom', slots: { innerHtml: '<b>x</b>', timelineBody: '' } },
+      }],
+    });
+
+    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl: (asset) => `runtime:${asset.id}` });
+    expect(plan.tracks.map((track) => track.id)).toEqual(['broll', document.semantics.primaryNarrativeTrackId, 'graphics']);
+    expect(plan.tracks[0]!.clips).toEqual([]);
+    expect(plan.narrative[0]).toMatchObject({
+      clipId: 'talk', startFrame: 60, endFrame: 180, startSec: 2, endSec: 6,
+      resolvedSource: 'runtime:main',
+    });
+    expect(plan.durationFrames).toBe(270);
+    expect(plan.durationSec).toBe(9);
+  });
+
+  it('keeps an empty primary lane valid while other tracks determine duration', () => {
+    const document = emptyEditorDocumentV2({ fps: 24 });
+    document.timeline.tracks.push({
+      id: 'graphics', type: 'graphics', role: 'graphics', muted: false, hidden: false, locked: false,
+      syncLocked: true, stackOrder: 1, clips: [{
+        id: 'card', kind: 'graphic', startFrame: 24, durationFrames: 48, enabled: true,
+        anchor: { type: 'timeline' }, block: { templateId: 'custom', slots: { innerHtml: '', timelineBody: '' } },
+      }],
+    });
+    const plan = editorDocumentRenderPlan(document);
+    expect(plan.narrative).toEqual([]);
+    expect(plan.durationSec).toBe(3);
+  });
+
+  it('places framing at native starts and forbids transitions across a real gap', () => {
+    const shots: VideoShot[] = [
+      { id: 'a', srcStart: 0, srcEnd: 2, treatment: 'full' },
+      { id: 'b', srcStart: 2, srcEnd: 4, treatment: 'punch-in', transIn: { prevId: 'a', effect: 'fade', durationSec: 0.5 } },
+    ];
+    const placements = [
+      { shotId: 'a', startSec: 1, endSec: 3 },
+      { shotId: 'b', startSec: 4, endSec: 6 },
+    ];
+    expect(videoFrameTimelineBody(shots, placements)).toMatch(/\), 4\);/);
+    expect(cutTransitions(shots, placements)).toEqual([]);
+    expect(cutTransitions(shots, [placements[0]!, { ...placements[1]!, startSec: 3, endSec: 5 }])).toMatchObject([{ cut: 3, shotId: 'b' }]);
+  });
+
+  it('treats an explicit placement list as authoritative instead of reviving omitted shots', () => {
+    const shots: VideoShot[] = [
+      { id: 'stale', srcStart: 0, srcEnd: 2, treatment: 'full' },
+      { id: 'live', srcStart: 2, srcEnd: 4, treatment: 'punch-in' },
+    ];
+    expect(videoShotTimelineSpans(shots, [{ shotId: 'live', startSec: 5, endSec: 7 }])).toMatchObject([
+      { clip: { id: 'live' }, editedStart: 5, editedEnd: 7 },
+    ]);
+    expect(videoShotTimelineSpans(shots, [
+      { shotId: 'stale', startSec: 8, endSec: 10 },
+      { shotId: 'live', startSec: 5, endSec: 7 },
+    ]).map((span) => span.clip.id)).toEqual(['live', 'stale']);
+    expect(videoFrameTimelineBody(shots, [])).toBe('');
+    expect(assembleHtml({ ...emptyComposition(), shots }, undefined, [])).not.toContain('id="vidEl"');
+  });
+});

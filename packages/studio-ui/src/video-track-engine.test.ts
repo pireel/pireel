@@ -64,4 +64,27 @@ describe('VideoTrackEngine timeline-only clock', () => {
     engine.pause();
     expect(rafs.size).toBe(0);
   });
+
+  it('keeps an explicit leading video gap instead of compacting or skipping it', () => {
+    const engine = new VideoTrackEngine();
+    const ticks: number[] = [];
+    const blank = vi.fn();
+    engine.onTick = (t) => ticks.push(t);
+    engine.onBlank = blank;
+    engine.setSegments([{
+      key: 'unresolved-main', elKey: 'main', srcStart: 0, srcEnd: 0.2, timelineStart: 0.2, timelineEnd: 0.5,
+    }]);
+
+    expect(engine.durationSec).toBeCloseTo(0.5);
+    engine.play(0);
+    step(100);
+    expect(ticks.at(-1)).toBeCloseTo(0.1);
+    step(100);
+    expect(ticks.at(-1)).toBeCloseTo(0.2);
+    expect(blank).toHaveBeenCalled();
+    step(100);
+    step(100);
+    step(100);
+    expect(ticks.at(-1)).toBeCloseTo(0.5);
+  });
 });

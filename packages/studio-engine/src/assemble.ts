@@ -122,6 +122,13 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
       } catch (errS) {}
       return;
     }
+    if (d.type === 'hf:clearFrame') {
+      try { if (liveBmp && liveBmp.close) liveBmp.close(); } catch (errCL) {}
+      try { if (ghostBmp && ghostBmp.close) ghostBmp.close(); } catch (errCG) {}
+      liveBmp = null; ghostBmp = null; frozenBmp = null; window.__vidSrc = null;
+      try { ctx.clearRect(0, 0, W, H); } catch (errCC) {}
+      return;
+    }
     if (d.type !== 'hf:frame' || !d.frame) return;
     if (d.baked) {
       // pre-baked frame (0.5× same aspect ratio): just fill; compositing / freeze / bookkeeping all step aside
@@ -478,7 +485,11 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     return { html, timelineBody };
 }
 
-export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js'): string {
+export function assembleHtml(
+  comp: Composition,
+  gsapSrc = '/vendor/gsap.min.js',
+  videoPlacements?: readonly import('./composition-core').VideoShotTimelinePlacement[],
+): string {
   const { width: W, height: H } = comp;
   const theme = getTheme(comp.theme);
   // Background: use paper if the derived/theme-pack palette provided it (a frame's dark-theme preview must actually go dark), otherwise the theme default
@@ -487,13 +498,18 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
   const scripts: string[] = [];
 
   const videoShots = videoTrackShots(comp);
-  if (videoShots.length) {
+  const placedVideoShots = videoPlacements === undefined
+    ? videoShots
+    : videoShots.filter((shot) => videoPlacements.some((placement) => placement.shotId === shot.id));
+  if (placedVideoShots.length) {
     // Video track = a single <canvas> (canvas render mode, per the user's decision): decode/clock/audio all in the parent-layer engine
     // (video-track-engine), frames drawn as they're pushed via hf:frame. Document rebuild no longer recreates the decoder → the root cause of the whole
     // "decode zombie" class of problems is removed. The id stays vidEl: framing keyframe / shotVars / personCut selectors need zero changes.
     // Equal-footing: comp.video is just the first-loaded source — a clips-only comp (external inserts,
     // no "main") still gets the canvas; only a truly source-less comp skips it.
-    const editedDur = editedDuration(videoShots);
+    const editedDur = videoPlacements !== undefined
+      ? Math.max(...videoPlacements.map((placement) => placement.endSec))
+      : editedDuration(placedVideoShots);
     body.push(
       `<canvas id="vidEl" data-composition-id="vid" width="${n(comp.width)}" height="${n(comp.height)}" data-start="0" data-duration="${n(editedDur)}" data-track-index="0" ` +
         `style="position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;box-shadow:0 30px 90px rgba(0,0,0,0.45);"></canvas>`,
@@ -501,14 +517,14 @@ export function assembleHtml(comp: Composition, gsapSrc = '/vendor/gsap.min.js')
     // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
     scripts.push(
       videoFrameShim(
-        cutTransitions(videoShots).map((tr) => {
+        cutTransitions(placedVideoShots, videoPlacements).map((tr) => {
           const [dx, dy] = glDirection(tr.dir);
           return { cut: tr.cut, effect: tr.effect, half: tr.half, dx, dy };
         }),
       ),
     );
     // Framing timeline (in final-cut time) registered to vid → transforms applied to the canvas element, one canvas absorbing every segment's framing
-    const frameBody = videoFrameTimelineBody(videoShots);
+    const frameBody = videoFrameTimelineBody(placedVideoShots, videoPlacements);
     if (frameBody) {
       scripts.push(timelineScript('vid', frameBody));
     }

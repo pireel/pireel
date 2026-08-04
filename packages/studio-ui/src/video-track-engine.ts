@@ -19,6 +19,13 @@
  */
 
 import type { ShotPreciseFraming } from '@pireel/studio-engine/composition';
+import {
+  segmentSourceRate,
+  segmentSourceTimeAt,
+  segmentTimelineEnd,
+  segmentTimelineStart,
+  segmentTimelineTimeAt,
+} from './video-segment-time';
 
 export interface EngineSeg {
   /** Source key: 'main' or this segment's src (blob/remote URL). */
@@ -27,6 +34,9 @@ export interface EngineSeg {
   elKey: string;
   srcStart: number;
   srcEnd: number;
+  /** Native edited-timeline placement. Omit for the legacy contiguous fallback. */
+  timelineStart?: number;
+  timelineEnd?: number;
   /** Linear audio gain (shotGain of the shot; absent = 1, and >1 is a real boost — see setElGain). Segments of
    *  the same source share one element, so the value re-applies at every handoff, including the same-source
    *  roll-through swap that skips activateIdx. */
@@ -72,6 +82,7 @@ export class VideoTrackEngine {
   private srcIds = new Map<string, File | string>(); // source identity: File by reference, URL by string for idempotence checks
   private segs: EngineSeg[] = [];
   private starts: number[] = [];
+  private ends: number[] = [];
   private segmentTotal = 0;
   private timelineTotal = 0;
   private total = 0;
@@ -114,6 +125,7 @@ export class VideoTrackEngine {
   private tSmooth = -1;
 
   onFrame?: (frame: ImageBitmap, info: FrameInfo, frame2?: ImageBitmap | null) => void;
+  onBlank?: (t: number) => void;
   onTick?: (t: number) => void;
   onEnded?: () => void;
   /** Transition pre-bake provider (workbench): cut → decoded frame set; null = not baked/decoded (falls back to the ghost path).
@@ -202,7 +214,13 @@ export class VideoTrackEngine {
       this.segs.length === segs.length &&
       this.segs.every((s, i) => {
         const n = segs[i]!;
-        return n.key === s.key && n.elKey === s.elKey && Math.abs(n.srcStart - s.srcStart) < 1e-6 && Math.abs(n.srcEnd - s.srcEnd) < 1e-6;
+        const oldStart = this.starts[i] ?? 0;
+        const nextStart = segmentTimelineStart(n, oldStart);
+        return n.key === s.key && n.elKey === s.elKey
+          && Math.abs(n.srcStart - s.srcStart) < 1e-6
+          && Math.abs(n.srcEnd - s.srcEnd) < 1e-6
+          && Math.abs(nextStart - oldStart) < 1e-6
+          && Math.abs(segmentTimelineEnd(n, nextStart) - (this.ends[i] ?? oldStart)) < 1e-6;
       });
     if (sameShape) {
       const framingChanged = this.segs.some((s, i) => {
@@ -219,12 +237,18 @@ export class VideoTrackEngine {
     }
     this.segs = segs;
     this.starts = [];
-    let acc = 0;
+    this.ends = [];
+    let cursor = 0;
+    let maxEnd = 0;
     for (const s of segs) {
-      this.starts.push(acc);
-      acc += Math.max(0, s.srcEnd - s.srcStart);
+      const start = segmentTimelineStart(s, cursor);
+      const end = segmentTimelineEnd(s, start);
+      this.starts.push(start);
+      this.ends.push(end);
+      cursor = end;
+      maxEnd = Math.max(maxEnd, end);
     }
-    this.segmentTotal = acc;
+    this.segmentTotal = maxEnd;
     this.total = Math.max(this.segmentTotal, this.timelineTotal);
     this.curIdx = -1; // segment table changed: recompute the active one
     // segment table changed mid-playback (delete/trim/insert while playing): the rAF loop only knows
@@ -347,6 +371,8 @@ export class VideoTrackEngine {
     const dub = this.dubs.get(key);
     if (!dub) return false;
     this.setElGain(dub.el, gain);
+    dub.el.playbackRate = videoEl.playbackRate;
+    (dub.el as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = false;
     if (!dub.el.seeking && Math.abs(dub.el.currentTime - videoEl.currentTime) > 0.08) {
       try {
         dub.el.currentTime = videoEl.currentTime;
@@ -495,9 +521,14 @@ export class VideoTrackEngine {
     }
     const pre = t < w.cut;
     const other = pre ? this.segs[w.iB]! : this.segs[w.iA]!;
-    const srcT = pre ? Math.max(0, other.srcStart - (w.cut - t)) : other.srcEnd + (t - w.cut);
+    const otherIndex = pre ? w.iB : w.iA;
+    const ghostRate = segmentSourceRate(other, this.starts[otherIndex]!, this.ends[otherIndex]!);
+    const srcT = pre
+      ? Math.max(0, other.srcStart - (w.cut - t) * ghostRate)
+      : other.srcEnd + (t - w.cut) * ghostRate;
     const g = this.ghostFor(other.key, pre ? 'pre' : 'post');
     if (!g) return;
+    g.playbackRate = ghostRate > 1e-9 ? ghostRate : 1;
     if (this.activeGhost && this.activeGhost !== g && !this.activeGhost.paused) this.activeGhost.pause();
     this.activeGhost = g;
     const durCap = Number.isFinite(g.duration) && g.duration > 0 ? g.duration - 0.05 : Infinity;
@@ -519,8 +550,10 @@ export class VideoTrackEngine {
       const segA = this.segs[w.iA]!;
       const gp = this.ghostFor(segA.key, 'post');
       if (gp) {
+        const postRate = segmentSourceRate(segA, this.starts[w.iA]!, this.ends[w.iA]!);
+        gp.playbackRate = postRate > 1e-9 ? postRate : 1;
         const rolling = this.playing && t >= w.cut - 0.25;
-        const parkT = segA.srcEnd - (rolling ? Math.max(0, w.cut - t) : 0);
+        const parkT = segA.srcEnd - (rolling ? Math.max(0, w.cut - t) * postRate : 0);
         try {
           if (Math.abs(gp.currentTime - parkT) > 0.2 && !gp.seeking) gp.currentTime = parkT;
         } catch {
@@ -544,18 +577,27 @@ export class VideoTrackEngine {
 
   private segIndexAt(t: number): number {
     for (let i = 0; i < this.segs.length; i++) {
-      const len = Math.max(0, this.segs[i]!.srcEnd - this.segs[i]!.srcStart);
-      if (t < this.starts[i]! + len || i === this.segs.length - 1) return i;
+      if (t >= this.starts[i]! - 1e-6 && t < this.ends[i]! - 1e-6) return i;
     }
-    return this.segs.length - 1;
+    return -1;
   }
 
-  /** The playable segment at t (or the first one after it); -1 if all are dead. */
+  /** The playable segment covering t. Native gaps and unresolved clips return -1. */
   private playableAt(t: number): number {
-    if (!this.segs.length) return -1;
-    let i = this.segIndexAt(t);
-    for (; i < this.segs.length; i++) if (this.alive(i)) return i;
-    return -1;
+    const i = this.segIndexAt(t);
+    return i >= 0 && this.alive(i) ? i : -1;
+  }
+
+  private enterBlank(t: number): void {
+    this.curIdx = -1;
+    this.lastPush = null;
+    for (const el of this.els.values()) {
+      el.muted = true;
+      if (!el.paused) el.pause();
+    }
+    for (const ghost of this.ghosts.values()) if (!ghost.paused) ghost.pause();
+    for (const dub of this.dubs.values()) if (!dub.el.paused) dub.el.pause();
+    this.onBlank?.(t);
   }
 
   private activateIdx(i: number, srcT: number, wantPlay: boolean): void {
@@ -568,6 +610,8 @@ export class VideoTrackEngine {
     }
     const el = this.els.get(key);
     if (!el) return;
+    const rate = segmentSourceRate(this.segs[i]!, this.starts[i]!, this.ends[i]!);
+    el.playbackRate = rate > 1e-9 ? rate : 1;
     try {
       el.currentTime = Math.max(0, srcT);
     } catch {
@@ -592,7 +636,7 @@ export class VideoTrackEngine {
     const el = this.els.get(seg.key);
     if (!el || el.readyState < 2 || !el.videoWidth) return;
     const srcT = el.currentTime;
-    const t = tOverride ?? this.starts[this.curIdx]! + Math.max(0, srcT - seg.srcStart);
+    const t = tOverride ?? segmentTimelineTimeAt(seg, srcT, this.starts[this.curIdx]!, this.ends[this.curIdx]!);
     // inside the transition window (excluding warm-up), carry the other side's ghost frame; skip dedup (ghost is moving, push even if the main frame is same-position)
     const w = this.transitionWinAt(t);
     const inWin = !!w && t >= w.cut - w.half;
@@ -662,15 +706,14 @@ export class VideoTrackEngine {
     this.tSmooth = this.tEdited;
     const i = this.playableAt(this.tEdited);
     if (i < 0) {
-      this.curIdx = -1;
+      this.enterBlank(this.tEdited);
       this.syncGhost(this.tEdited);
       this.syncAudioClips(this.tEdited, this.playing, true);
       return;
     }
     const seg = this.segs[i]!;
     // seek into a dead window: degrade to showing the first frame of the next playable segment (same as the shim era, no freeze)
-    const inSeg = this.segIndexAt(this.tEdited) === i;
-    const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
+    const srcT = segmentSourceTimeAt(seg, this.tEdited, this.starts[i]!, this.ends[i]!);
     this.activateIdx(i, srcT, this.playing);
     const el = this.els.get(seg.key);
     if (!el) return;
@@ -694,12 +737,10 @@ export class VideoTrackEngine {
     this.playing = true;
     const i = this.playableAt(this.tEdited);
     if (i < 0) {
-      this.curIdx = -1;
+      this.enterBlank(this.tEdited);
     } else {
       const seg = this.segs[i]!;
-      const inSeg = this.segIndexAt(this.tEdited) === i;
-      const srcT = inSeg ? seg.srcStart + (this.tEdited - this.starts[i]!) : seg.srcStart;
-      if (!inSeg) this.tEdited = this.starts[i]!; // starting play in a dead window: begin at the next playable segment (skip)
+      const srcT = segmentSourceTimeAt(seg, this.tEdited, this.starts[i]!, this.ends[i]!);
       this.activateIdx(i, srcT, true);
     }
     this.syncAudioClips(this.tEdited, true, true); // hard-align the clips at play start
@@ -718,7 +759,7 @@ export class VideoTrackEngine {
       lastLoopAt = nowLoop;
       if (sg && el) {
         const ct = el.currentTime;
-        this.tEdited = this.starts[idx]! + Math.max(0, Math.min(ct, sg.srcEnd) - sg.srcStart);
+        this.tEdited = segmentTimelineTimeAt(sg, Math.min(ct, sg.srcEnd), this.starts[idx]!, this.ends[idx]!);
         // smooth clock: wall-clock advance + proportional pull-back (close 12% of the drift per frame).
         // Hard snap-back is reserved for real jumps (>250ms: seek/handoff) — a smaller threshold aliases:
         // when the media clock stutters, wall clock runs ahead, and once the threshold builds up it yanks
@@ -762,30 +803,26 @@ export class VideoTrackEngine {
         }
         const stalledAtTail = now - lastCtAt > 700 && ct >= segEnd - 0.6 && !el.seeking;
         if (ct >= segEnd - EPS || el.ended || stalledAtTail) {
-          // segment-tail handoff: find the next playable segment (skip dead windows); none = end of film
-          let nx = idx + 1;
-          for (; nx < this.segs.length; nx++) if (this.alive(nx)) break;
-          if (nx < this.segs.length) {
-            this.tEdited = this.starts[nx]!;
+          // Segment-tail handoff only rolls through an immediately adjacent native segment.
+          // A real gap (or unresolved segment) enters the timeline clock and clears the frame.
+          const boundary = this.ends[idx]!;
+          this.tEdited = Math.min(this.total, boundary);
+          const nx = this.playableAt(this.tEdited + 1e-6);
+          if (nx >= 0) {
             const nxSeg = this.segs[nx]!;
             if (nxSeg.key === sg.key && Math.abs(nxSeg.srcStart - sg.srcEnd) < 0.05 && !el.ended && !el.paused) {
               // continuous same-source split point (pure split, no footage removed): the element is already
               // playing right here — swap the active index without a seek so decode isn't interrupted (forcing
               // an in-place currentTime seek stalls 50–150ms, visible as a "flash/stutter" at the cut)
               this.curIdx = nx;
+              const nextRate = segmentSourceRate(nxSeg, this.starts[nx]!, this.ends[nx]!);
+              el.playbackRate = nextRate > 1e-9 ? nextRate : 1;
               this.setElGain(el, this.segGain(nx)); // roll-through skips activateIdx, but the two shots may carry different gains
             } else {
               this.activateIdx(nx, nxSeg.srcStart, true);
             }
-          } else if (this.total > this.segmentTotal + EPS) {
-            // Footage ended before the document: park only the video side and let the timeline
-            // clock continue for trailing graphics/audio. Calling pause() here would also stop BGM.
-            el.muted = true;
-            if (!el.paused) el.pause();
-            for (const g of this.ghosts.values()) if (!g.paused) g.pause();
-            for (const d of this.dubs.values()) if (!d.el.paused) d.el.pause();
-            this.curIdx = -1;
-            this.tEdited = Math.max(this.tEdited, this.segmentTotal);
+          } else if (this.tEdited < this.total - EPS) {
+            this.enterBlank(this.tEdited);
             this.tSmooth = Math.max(this.tSmooth, this.tEdited);
           } else {
             this.pause();
@@ -800,6 +837,15 @@ export class VideoTrackEngine {
         // wall time. This is the canonical path for graphics/audio-only projects.
         this.tEdited = Math.min(this.total, this.tEdited + dtWall);
         this.tSmooth = this.tEdited;
+        const nextVideo = this.playableAt(this.tEdited);
+        if (nextVideo >= 0) {
+          const nextSeg = this.segs[nextVideo]!;
+          this.activateIdx(
+            nextVideo,
+            segmentSourceTimeAt(nextSeg, this.tEdited, this.starts[nextVideo]!, this.ends[nextVideo]!),
+            true,
+          );
+        }
         this.onTick?.(this.tEdited);
         this.syncGhost(this.tEdited);
         this.syncAudioClips(this.tEdited, true);

@@ -35,6 +35,7 @@ import {
   type PersonFx,
   type TimelineSiblingLayers,
   type VideoShot,
+  type VideoShotTimelinePlacement,
   SHOT_TREATMENTS,
   STUDIO_FONTS_HREF,
   CAPTION_PRESETS,
@@ -51,6 +52,7 @@ import {
   videoFrameTimelineBody,
   BASE_CAPTION_FONT_PX,
   emptyComposition,
+  editorDocumentRenderPlan,
   freeTrack,
   getCaptionPreset,
   isCaptionsOn,
@@ -84,6 +86,7 @@ import {
   hasTimelineContent,
   hasVideoTrackContent,
   videoTrackShots,
+  videoShotTimelineSpans,
   treatmentVacancyBox,
   rippleRemoveSiblingLayers,
 } from '@pireel/studio-engine/composition';
@@ -101,6 +104,7 @@ import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlacehol
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
+import { segmentSourceRate } from './video-segment-time';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
@@ -202,6 +206,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     migrationContextRef: liveMigrationContextRef,
     prepareComposition: freezeBlockVars,
   });
+  const renderPlan = useMemo(() => editorDocumentRenderPlan(editorDocument), [editorDocument]);
+  const videoPlacements = useMemo<VideoShotTimelinePlacement[]>(() => renderPlan.narrative.map((entry) => ({
+    shotId: entry.clipId,
+    startSec: entry.startSec,
+    endSec: entry.endSec,
+  })), [renderPlan]);
+  const videoPlacementsRef = useRef(videoPlacements);
+  videoPlacementsRef.current = videoPlacements;
   // Block selection: selectedId = primary (anchor; floating toolbar/panels only act on a single block);
   // selectedBlockIds = full multi-select set (⌘-click/marquee, used for bulk delete). setSelectedId is wrapped
   // as a setter: every existing single-select site auto-normalizes the multi-select set to {id}/empty, no per-site
@@ -482,9 +494,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [showGeom, setShowGeom] = useState(false); // debug: overlay face/safe-zone geometry on the preview to verify the algorithm
   const [liveGeom, setLiveGeom] = useState<SafeZone | null>(null); // live single-frame detection (measure whichever frame you scrub to)
 
-  const duration = totalDuration(comp);
-  const hasVideoTrack = hasVideoTrackContent(comp);
-  const hasContent = hasTimelineContent(comp);
+  const duration = renderPlan.durationSec;
+  const hasVideoTrack = renderPlan.narrative.length > 0;
+  const hasContent = renderPlan.durationFrames > 0;
   // Canvas ratio: seeded by the FIRST inserted source (insertClipCore), overridable here; other
   // sources contain-fit into it (frame shim letterboxes, never crops).
   const CANVAS_RATIOS = [
@@ -542,7 +554,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }),
   });
   // Debug panel's assembled HTML is built only when the panel is open (don't stitch strings every frame during high-frequency setComp like dragging)
-  const assembled = useMemo(() => (showCode ? assembleHtml(previewCompOf(comp)) : ''), [comp, showCode]);
+  const assembled = useMemo(
+    () => (showCode ? assembleHtml(previewCompOf(comp), undefined, videoPlacements) : ''),
+    [comp, showCode, videoPlacements],
+  );
 
   // Test hook: readable snapshot of the narration script + visual analysis (also on window.__studio for devtools)
   const debugText = useMemo(() => {
@@ -682,6 +697,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         }
       }
     };
+    eng.onBlank = (t) => {
+      const w = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      w?.postMessage({ type: 'hf:clearFrame', t }, '*');
+    };
     eng.onTick = (t) => {
       if (!playingRef.current) return;
       tRef.current = t;
@@ -769,7 +788,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
   const audioExportRef = useRef<(() => { clip: AudioClip; file: File }[] | null) | null>(null);
   const denoiseExportRef = useRef<(() => Map<string, File> | null) | null>(null);
-  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({ compRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef });
+  const { exporting, publishing, exportPct, exportVideo, cancelExport, resetExport } = useStudioExport({
+    compRef,
+    documentRef: editorDocumentRef,
+    videoFileRef,
+    clipFilesRef,
+    audioExportRef,
+    denoiseExportRef,
+  });
   // Agent export task (export_video/track_export): compose + browser download runs via exportVideo, this only tracks task state;
   // exportPct mirrored into a ref for the progress query inside runStudioTool (the switch closure can't read state)
   const agentExportRef = useRef<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>({
@@ -799,7 +825,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!eng) return;
     // Equal-footing: real shots always feed the engine, main source or not (a clips-only comp must
     // render); the implicit whole-video single clip is only for a loaded main with no cuts yet.
-    const shots = videoTrackShots(comp);
+    const shotsById = new Map(videoTrackShots(comp).map((shot) => [shot.id, shot]));
+    const entries = renderPlan.narrative.flatMap((entry) => {
+      const shot = shotsById.get(entry.clipId);
+      return shot ? [{ entry, shot }] : [];
+    });
+    const shots = entries.map(({ shot }) => shot);
     for (const s of shots) {
       if (!s.src) continue;
       const f = clipFilesRef.current.get(s.src);
@@ -810,31 +841,33 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // that meet a non-contiguous neighbour. Preview drives it off the rAF clock, so a 30 ms ramp lands as
       // two or three volume steps rather than a smooth curve — coarse, but it's the same treatment at the
       // same seams, which is what keeps preview honest about the export.
-      shots.map((s, i) => {
+      entries.map(({ shot: s, entry }, i) => {
         const prev = shots[i - 1];
         const next = shots[i + 1];
         const fade = segmentFadeFn(
           s,
-          Math.max(0.01, s.srcEnd - s.srcStart),
-          !!prev && !shotsContiguous(prev, s),
-          !!next && !shotsContiguous(s, next),
+          Math.max(0.01, entry.durationSec),
+          !!prev && (!shotsContiguous(prev, s) || Math.abs(entries[i - 1]!.entry.endSec - entry.startSec) > 1e-3),
+          !!next && (!shotsContiguous(s, next) || Math.abs(entry.endSec - entries[i + 1]!.entry.startSec) > 1e-3),
         );
         return {
           key: s.src ?? 'main',
           elKey: s.src ? `clip_${s.id}` : 'main',
           srcStart: s.srcStart,
           srcEnd: s.srcEnd,
+          timelineStart: entry.startSec,
+          timelineEnd: entry.endSec,
           gain: shotGain(s),
           ...(s.preciseFraming?.coordinateSpace === 'source-normalized' ? { framing: s.preciseFraming } : {}),
           ...(fade ? { fadeAt: fade } : {}),
         };
       }),
     );
-    eng.setTransitions(cutTransitions(shots).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
+    eng.setTransitions(cutTransitions(shots, videoPlacements).map((tr) => ({ cut: tr.cut, half: tr.half }))); // window table for shadow decoding
     // A level-only respec keeps the frame it already shows — re-pushing one per pointer move while dragging
     // a volume slider is work nobody can see.
     if (shapeChanged && !playingRef.current) eng.refresh();
-  }, [comp.video, comp.shots]);
+  }, [comp, renderPlan, videoPlacements]);
   /** Transition pre-bake cache (same idea as Premiere's "render preview"): baked in the background to a webp frame
    *  sequence, decoded to bitmaps only near the window and discarded once past; the signature includes cut/duration/
    *  effect/direction/both sides' source times and file fingerprints — any relevant edit auto-invalidates. While baking,
@@ -845,13 +878,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const gen = ++bakeGenRef.current;
     const c = comp;
     if (!c.video || !videoFile) return;
-    const spans = clipSpans(ensureShots(c));
+    const shots = ensureShots(c);
+    const spans = videoShotTimelineSpans(shots, videoPlacements);
     const specs: (BakeSpec & { sig: string })[] = [];
-    for (const tr of cutTransitions(c.shots ?? [])) {
+    for (const tr of cutTransitions(shots, videoPlacements)) {
       const iB = spans.findIndex((sp, i) => i >= 1 && Math.abs(sp.editedStart - tr.cut) < 0.05);
       if (iB < 1) continue;
       const A = spans[iB - 1]!.clip;
       const B = spans[iB]!.clip;
+      const rateA = segmentSourceRate(A, spans[iB - 1]!.editedStart, spans[iB - 1]!.editedEnd);
+      const rateB = segmentSourceRate(B, spans[iB]!.editedStart, spans[iB]!.editedEnd);
       const fileA = A.src ? clipFilesRef.current.get(A.src) : videoFile;
       const fileB = B.src ? clipFilesRef.current.get(B.src) : videoFile;
       if (!fileA || !fileB) continue;
@@ -864,6 +900,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         tr.dir,
         A.srcEnd.toFixed(3),
         B.srcStart.toFixed(3),
+        rateA.toFixed(6),
+        rateB.toFixed(6),
         fileSig(fileA),
         fileSig(fileB),
         c.width,
@@ -879,8 +917,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         dir: tr.dir,
         fileA,
         aEnd: A.srcEnd,
+        rateA,
         fileB,
         bStart: B.srcStart,
+        rateB,
         ...(framingA ? { framingA } : {}),
         ...(framingB ? { framingB } : {}),
         compW: c.width,
@@ -911,7 +951,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }, 600);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, comp.video, videoFile, comp.width, comp.height]);
+  }, [comp.shots, comp.video, videoFile, comp.width, comp.height, videoPlacements]);
   // Decode when near / release when past (playhead-driven, provider reads synchronously; decodes 0.5× bitmaps, a 1s transition ≈ 60MB transient)
   useEffect(() => {
     const tick = () => {
@@ -1145,12 +1185,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // Only framing (treatment/treatSize) changed: don't rebuild the doc (rebuild = a blank video-canvas frame,
         // flickers on rapid switching); swap the vid timeline in place (identical to what a rebuild would bake), the
         // instant value was already applied via hf:shotVars
-        postPreview({ type: 'hf:vidTimeline', body: videoFrameTimelineBody(comp.shots ?? []) });
+        postPreview({ type: 'hf:vidTimeline', body: videoFrameTimelineBody(comp.shots ?? [], videoPlacements) });
         lastBuiltCompRef.current = comp;
         return;
       }
       lastBuiltCompRef.current = comp;
-      const doc = injectPreviewRuntime(assembleHtml(previewCompOf(comp)));
+      const doc = injectPreviewRuntime(assembleHtml(previewCompOf(comp), undefined, videoPlacements));
       if (doc !== bufsRef.current.docs[bufsRef.current.active]) {
         pendingSwitchRef.current = true; // swap pending: patch path steps aside
         setRebuilding(true);
@@ -1166,7 +1206,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       });
     }, fontsChanged || sizeOnly || cutOnly || capOnly || framingOnly || patchable ? 0 : 300);
     return () => clearTimeout(id);
-  }, [comp, fontsTick]);
+  }, [comp, fontsTick, videoPlacements]);
 
   // Pending background-buffer swap: ping/pong handshake state. The load event isn't trustworthy — the empty load of a
   // cleared buffer (srcdoc='') arrives late, and font blocking can make a half-loaded doc fire load first, which once
@@ -1462,7 +1502,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  previous shot): at most one per cut; on set, move the playhead to the transition-region start to see the effect.
    *  Duration reuses the existing value, default 1s; direction stored only for push/slide. */
   const setCutTransition = (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => {
-    const sp = clipSpans(ensureShots(compRef.current));
+    const sp = videoShotTimelineSpans(ensureShots(compRef.current), videoPlacements);
     const i = sp.findIndex((s, idx) => idx >= 1 && Math.abs(s.editedStart - cutSec) < 0.05);
     if (i < 1) return;
     const prevId = sp[i - 1]!.clip.id;
@@ -1494,10 +1534,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // If the cut disappears due to editing (no longer any shot boundary) → auto-close the transition panel
   useEffect(() => {
     if (floatWin !== 'transition' || transitionCut == null) return;
-    const bounds = clipSpans(comp.shots ?? []).map((sp) => sp.editedEnd);
+    const bounds = videoShotTimelineSpans(comp.shots ?? [], videoPlacements).map((sp) => sp.editedEnd);
     if (!bounds.slice(0, -1).some((b) => Math.abs(b - transitionCut) < 0.05)) setFloatWin(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatWin, transitionCut, comp.shots]);
+  }, [floatWin, transitionCut, comp.shots, videoPlacements]);
   // The media-anim panel depends on "a selected, filled media block": if selection is lost / switched to another block → auto-close back to chat
   useEffect(() => {
     if (floatWin !== 'anim') return;
@@ -2318,7 +2358,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  wait for the body swap. Fully neutral = drop the field entirely. */
   const setShotFilter = (sid: string, f: ShotFilter | null) => {
     const css = shotFilterCss(f ?? undefined);
-    const sp = clipSpans(ensureShots(compRef.current)).find((x) => x.clip.id === sid);
+    const sp = videoShotTimelineSpans(ensureShots(compRef.current), videoPlacements).find((x) => x.clip.id === sid);
     if (!commitNarrativePatches([{ clipId: sid, patch: { filter: f } }])) return;
     if (sp && tRef.current >= sp.editedStart - 1e-3 && tRef.current < sp.editedEnd) {
       postPreview({ type: 'hf:shotVars', vars: { filter: css } });
@@ -2725,7 +2765,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (fx) {
       setPersonFxRef.current?.(fx);
       const tNow = playhead.get();
-      const sp = clipSpans(compRef.current.shots ?? []).find((x) => tNow >= x.editedStart && tNow < x.editedEnd) ?? clipSpans(compRef.current.shots ?? [])[0];
+      const nativeSpans = videoShotTimelineSpans(compRef.current.shots ?? [], videoPlacementsRef.current);
+      const sp = nativeSpans.find((x) => tNow >= x.editedStart && tNow < x.editedEnd) ?? nativeSpans[0];
       const s = sp?.clip;
       if (s && !s.personMatte) {
         setComp((c) => ({ ...c, shots: (c.shots ?? []).map((x) => (x.id === s.id ? { ...x, personMatte: true } : x)) }));
@@ -4816,7 +4857,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                             })()
                           : floatWin === 'transition'
                             ? (() => {
-                                const i = transitionCut == null ? -1 : clipSpans(comp.shots ?? []).findIndex((sp) => Math.abs(sp.editedEnd - transitionCut) < 0.05);
+                                const i = transitionCut == null
+                                  ? -1
+                                  : videoShotTimelineSpans(comp.shots ?? [], videoPlacements).findIndex((sp) => Math.abs(sp.editedEnd - transitionCut) < 0.05);
                                 return t('tools.add_transition.label') + (i >= 0 ? t('workbench.betweenScenes', { a: i + 1, b: i + 2 }) : '');
                               })()
                             : (() => {
@@ -5027,8 +5070,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               )}
               {floatWin === 'transition' && transitionCut != null && (
                 <TransitionPanel
-                  effect={cutTransitions(comp.shots ?? []).find((tr) => Math.abs(tr.cut - transitionCut) < 0.05)?.effect ?? null}
-                  direction={cutTransitions(comp.shots ?? []).find((tr) => Math.abs(tr.cut - transitionCut) < 0.05)?.dir ?? 'left'}
+                  effect={cutTransitions(comp.shots ?? [], videoPlacements).find((tr) => Math.abs(tr.cut - transitionCut) < 0.05)?.effect ?? null}
+                  direction={cutTransitions(comp.shots ?? [], videoPlacements).find((tr) => Math.abs(tr.cut - transitionCut) < 0.05)?.dir ?? 'left'}
                   onPick={(ef, dir) => setCutTransition(transitionCut, ef, dir)}
                 />
               )}
@@ -5439,6 +5482,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         <div data-cap-keep className="contents">
         <StudioTimeline
           comp={comp}
+          videoPlacements={videoPlacements}
+          timelineDurationSec={duration}
           playing={playing}
           locateSignal={locateSignal}
           locateNear={locateNear}

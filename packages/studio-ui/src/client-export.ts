@@ -42,6 +42,7 @@ import {
   type ShotFilter,
   type ShotPreciseFraming,
   type TransitionDirection,
+  type VideoShotTimelinePlacement,
   assembleHtml,
   cutTransitions,
   parseClipInset,
@@ -53,15 +54,16 @@ import {
   totalDuration,
   validateComposition,
   videoTrackShots,
+  videoShotTimelineSpans,
 } from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
 import { mixAudioTrack } from './export-audio-mix';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
-import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { buildInlineFontCss } from './export-fonts';
 import { t } from './i18n';
 import { fingerprintReviewPixels, type ReviewFrameFingerprint } from './review-similarity';
+import { segmentSourceRate, segmentSourceTimeAt } from './video-segment-time';
 
 /** Export options (chosen in the dialog): res=short-side pixels (width for portrait), fps, format=container/codec. */
 export interface ExportRenderOpts {
@@ -83,6 +85,8 @@ interface ExpSeg {
   srcEnd: number;
   /** Source key: 'main' or an insert-clip key (clip_<shotId>), used only as the rigs/files Map key. */
   key: string;
+  timelineStart: number;
+  timelineEnd: number;
   /** Per-shot color grade (CSS filter string; 'none'/absent = no grade) — same shotFilterCss as the preview's #vidEl filter. */
   filter?: string;
   /** Linear audio gain 0..1 (shotGain of the shot; absent = 1). 0 = the segment contributes no audio samples at all. */
@@ -283,6 +287,8 @@ function framedClipPath(W: number, H: number, vs: { radius: number; inset: { t: 
 
 export interface ClientExportOpts {
   comp: Composition;
+  videoPlacements?: readonly VideoShotTimelinePlacement[];
+  timelineDurationSec?: number;
   /** Main-source bytes. Null is valid for graphics/audio-only and clips-only documents. */
   videoFile: File | null;
   /** Local insert-clip Files (key = blob URL, same source as workbench clipFilesRef). */
@@ -318,6 +324,8 @@ export interface CapturedCompositionFrame {
 
 export async function captureCompositionFrame(opts: {
   comp: Composition;
+  videoPlacements?: readonly VideoShotTimelinePlacement[];
+  timelineDurationSec?: number;
   videoFile: File | null;
   clipFiles: Map<string, File>;
   atSec: number;
@@ -337,7 +345,7 @@ export async function captureCompositionFrame(opts: {
   const even = (x: number) => Math.max(2, Math.round(x / 2) * 2);
   const outW = even(W * k);
   const outH = even(H * k);
-  const t = Math.max(0, Math.min(totalDuration(comp), opts.atSec));
+  const t = Math.max(0, Math.min(opts.timelineDurationSec ?? totalDuration(comp), opts.atSec));
 
   // Find which edited segment t falls in (same logic as export's segAt), open only that one source
   let rig: SourceRig | null = null;
@@ -345,10 +353,10 @@ export async function captureCompositionFrame(opts: {
   let sourceFraming: ShotPreciseFraming | undefined;
   const shots = videoTrackShots(comp);
   let file: File | null = null;
-  for (const sp of clipSpans(shots)) {
-    if (t >= sp.editedStart - 1e-6 && t < sp.editedEnd + 1e-6) {
+  for (const sp of videoShotTimelineSpans(shots, opts.videoPlacements)) {
+    if (t >= sp.editedStart - 1e-6 && t < sp.editedEnd - 1e-6) {
       const s = sp.clip as (typeof shots)[number] & { src?: string };
-      srcT = Math.min(s.srcEnd, s.srcStart + (t - sp.editedStart));
+      srcT = segmentSourceTimeAt(s, t, sp.editedStart, sp.editedEnd);
       file = s.src ? (opts.clipFiles.get(s.src) ?? null) : opts.videoFile;
       sourceFraming = s.preciseFraming?.coordinateSpace === 'source-normalized' ? s.preciseFraming : undefined;
       break;
@@ -362,7 +370,7 @@ export async function captureCompositionFrame(opts: {
     }
   }
 
-  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
+  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements)), W, H);
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
@@ -463,13 +471,13 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   const Sx = outW / W;
   const Sy = outH / H;
   const shots = videoTrackShots(comp);
-  const durationSec = Math.max(0.5, totalDuration(comp));
+  const durationSec = Math.max(0.5, opts.timelineDurationSec ?? totalDuration(comp));
 
   // Segment table (edited order) + each source's File
   const segs: ExpSeg[] = [];
   const files = new Map<string, File>();
   if (videoFile) files.set('main', videoFile);
-  const spans = clipSpans(shots);
+  const spans = videoShotTimelineSpans(shots, opts.videoPlacements);
   for (let i = 0; i < spans.length; i++) {
     const s = spans[i]!.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
     const filterCss = shotFilterCss(s.filter);
@@ -481,18 +489,19 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const next = spans[i + 1]?.clip as typeof s | undefined;
     const fadeFn = segmentFadeFn(
       s,
-      Math.max(0.01, s.srcEnd - s.srcStart),
-      !!prev && !shotsContiguous(prev, s),
-      !!next && !shotsContiguous(s, next),
+      Math.max(0.01, spans[i]!.editedEnd - spans[i]!.editedStart),
+      !!prev && (!shotsContiguous(prev, s) || Math.abs(spans[i - 1]!.editedEnd - spans[i]!.editedStart) > 1e-3),
+      !!next && (!shotsContiguous(s, next) || Math.abs(spans[i]!.editedEnd - spans[i + 1]!.editedStart) > 1e-3),
     );
     const fade = fadeFn ? { fadeAt: fadeFn } : {};
     const framing = s.preciseFraming?.coordinateSpace === 'source-normalized' ? { framing: s.preciseFraming } : {};
+    const placement = { timelineStart: spans[i]!.editedStart, timelineEnd: spans[i]!.editedEnd };
     if (!s.src) {
-      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...filter, ...gain, ...fade, ...framing });
+      segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: 'main', ...placement, ...filter, ...gain, ...fade, ...framing });
       continue;
     }
     const key = `clip_${s.id}`;
-    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...filter, ...gain, ...fade, ...framing });
+    segs.push({ srcStart: s.srcStart, srcEnd: s.srcEnd, key, ...placement, ...filter, ...gain, ...fade, ...framing });
     if (!files.has(key)) {
       const local = clipFiles.get(s.src);
       if (local) files.set(key, local);
@@ -530,7 +539,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   }
 
   // Overlay document + asset inlining
-  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp)), W, H);
+  const overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements)), W, H);
   try {
     await inlineImages(overlay.root);
     const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
@@ -555,33 +564,30 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const videoSource = new CanvasSource(canvas, { codec: render.format === 'webm' ? 'vp9' : 'avc', bitrate: QUALITY_HIGH });
     output.addVideoTrack(videoSource, { frameRate: FPS });
     const withClips = !!opts.audio?.length;
+    const needsTimelineMix = withClips || segs.some((segment) =>
+      Math.abs(segmentSourceRate(segment, segment.timelineStart, segment.timelineEnd) - 1) > 1e-6,
+    );
     const anyAudio = withClips || segs.some((s) => (s.gain ?? 1) > 0 && rigs.get(s.key)?.audio);
     // webm container can't hold aac, so audio switches to opus for that format
     const audioSource = anyAudio ? new AudioSampleSource({ codec: render.format === 'webm' ? 'opus' : 'aac', bitrate: QUALITY_MEDIUM }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
     await output.start();
 
-    // Edited time → segment + time within source (outside any segment / past the end: freeze on the last segment's final frame)
-    const segStarts: number[] = [];
-    {
-      let acc = 0;
-      for (const s of segs) {
-        segStarts.push(acc);
-        acc += Math.max(0, s.srcEnd - s.srcStart);
-      }
-    }
-    const videoTotal = segStarts.length ? segStarts[segStarts.length - 1]! + Math.max(0, segs.at(-1)!.srcEnd - segs.at(-1)!.srcStart) : 0;
-    const blankSeg: ExpSeg = { srcStart: 0, srcEnd: 0, key: '__blank' };
+    // Edited time → segment + time within source. Native gaps return the blank sentinel; they do
+    // not freeze the previous frame or jump forward to the next clip.
+    const segStarts = segs.map((segment) => segment.timelineStart);
+    const blankSeg: ExpSeg = { srcStart: 0, srcEnd: 0, key: '__blank', timelineStart: 0, timelineEnd: 0 };
     const segAt = (te: number): { seg: ExpSeg; srcT: number } => {
       if (!segs.length) return { seg: blankSeg, srcT: 0 };
-      const t = Math.max(0, Math.min(videoTotal, te));
-      for (let i = segs.length - 1; i >= 0; i--) {
-        if (t >= segStarts[i]! - 1e-6) {
-          const s = segs[i]!;
-          return { seg: s, srcT: Math.min(s.srcEnd, s.srcStart + (t - segStarts[i]!)) };
+      const t = Math.max(0, te);
+      for (let i = 0; i < segs.length; i++) {
+        const s = segs[i]!;
+        const end = s.timelineEnd;
+        if (t >= segStarts[i]! - 1e-6 && t < end - 1e-6) {
+          return { seg: s, srcT: segmentSourceTimeAt(s, t, segStarts[i]!, end) };
         }
       }
-      return { seg: segs[0]!, srcT: segs[0]!.srcStart };
+      return { seg: blankSeg, srcT: 0 };
     };
 
     // Cut transitions (true dual-stream, same math as the preview's videoFrameShim): the current frame
@@ -597,7 +603,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const ghostC = new OffscreenCanvas(outW, outH);
     const gctx = ghostC.getContext('2d')!;
     const trsX: { cut: number; half: number; effect: string; dir: string; preKey: string; postKey: string; segA: ExpSeg; segB: ExpSeg }[] = [];
-    for (const tr of cutTransitions(shots)) {
+    for (const tr of cutTransitions(shots, opts.videoPlacements)) {
       let iB = -1;
       for (let bi = 1; bi < segs.length; bi++) {
         if (Math.abs(segStarts[bi]! - tr.cut) < 0.05) {
@@ -613,8 +619,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       if (!fA || !fB) continue;
       const preKey = `g_pre_${trsX.length}`;
       const postKey = `g_post_${trsX.length}`;
-      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - tr.half), segB.srcStart + 0.2, W, H));
-      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + tr.half + 0.2, W, H));
+      const rateA = segmentSourceRate(segA, segA.timelineStart, segA.timelineEnd);
+      const rateB = segmentSourceRate(segB, segB.timelineStart, segB.timelineEnd);
+      rigs.set(preKey, await openSource(fB, Math.max(0, segB.srcStart - tr.half * rateB), segB.srcStart + 0.2 * rateB, W, H));
+      rigs.set(postKey, await openSource(fA, segA.srcEnd, segA.srcEnd + (tr.half + 0.2) * rateA, W, H));
       trsX.push({ cut: tr.cut, half: tr.half, effect: tr.effect, dir: tr.dir, preKey, postKey, segA, segB });
     }
     // gl-transitions mixer (output resolution; not built if there are no transitions)
@@ -627,7 +635,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     // sample stream; shadow sources are entirely export-private, so dispose their input too.
     const lastUse = new Map<string, number>();
     for (let si = 0; si < segs.length; si++) {
-      const end = segStarts[si]! + Math.max(0, segs[si]!.srcEnd - segs[si]!.srcStart);
+      const end = segs[si]!.timelineEnd;
       lastUse.set(segs[si]!.key, Math.max(lastUse.get(segs[si]!.key) ?? 0, end));
     }
     for (const x of trsX) {
@@ -700,7 +708,10 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const pre = tr ? t < tr.cut : false;
       const gseg = tr ? (pre ? tr.segB : tr.segA) : null;
       const gRig = tr ? rigs.get(pre ? tr.preKey : tr.postKey) : undefined;
-      const gSrcT = tr && gseg ? (pre ? Math.max(0, gseg.srcStart - (tr.cut - t)) : gseg.srcEnd + (t - tr.cut)) : 0;
+      const gRate = gseg ? segmentSourceRate(gseg, gseg.timelineStart, gseg.timelineEnd) : 1;
+      const gSrcT = tr && gseg
+        ? (pre ? Math.max(0, gseg.srcStart - (tr.cut - t) * gRate) : gseg.srcEnd + (t - tr.cut) * gRate)
+        : 0;
       const v0 = performance.now();
       const [overlayImg, sample, gSample] = await Promise.all([
         overlayP,
@@ -813,25 +824,31 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       );
     }
 
-    // Audio track. With audio clips: full mix on the 48k grid (narration resampled + each clip with the
-    // preview's exact envelope) — see export-audio-mix.ts. Without: concatenate in edited-segment order (main segment =
-    // narration audio, insert clip = its own), re-stamp timestamps.
+    // Audio track. Audio clips or a non-1× native placement use the 48k timeline mixer; exact 1×
+    // narration without lane clips keeps the cheaper timestamp-only passthrough.
     // Per-shot volume: gain 1 passes samples through untouched (byte-identical to before the feature existed); gain 0 contributes
     // nothing (a timestamp gap decodes as silence, same as a source without audio); anything between rewrites PCM (same shotGain as preview).
-    if (audioSource && withClips) {
+    if (audioSource && needsTimelineMix) {
       const audioTracks = new Map<string, NonNullable<SourceRig['audio']>>();
       for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
       const clips: { clip: AudioClip; buffer: AudioBuffer }[] = [];
-      for (const a of opts.audio!) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
+      for (const a of opts.audio ?? []) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
       await mixAudioTrack({
-        segs: segs.map((s) => ({ srcStart: s.srcStart, srcEnd: s.srcEnd, key: s.key, gain: s.gain ?? 1, fadeAt: s.fadeAt })),
+        segs: segs.map((s) => ({
+          srcStart: s.srcStart,
+          srcEnd: s.srcEnd,
+          key: s.key,
+          timelineStart: s.timelineStart,
+          timelineEnd: s.timelineEnd,
+          gain: s.gain ?? 1,
+          fadeAt: s.fadeAt,
+        })),
         audioTracks,
         clips,
         totalSec: durationSec,
         push: (sample) => audioSource.add(sample).then(() => sample.close()),
       });
     } else if (audioSource) {
-      let edited = 0;
       for (const s of segs) {
         const rig = rigs.get(s.key);
         const gain = s.gain ?? 1;
@@ -841,13 +858,12 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
           for await (const sample of asink.samples(s.srcStart, s.srcEnd)) {
             const base = sample.timestamp - s.srcStart; // segment-local seconds at this buffer's start
             const out = flat ? sample : scaleAudioSample(sample, (off) => gain * (s.fadeAt ? s.fadeAt(base + off) : 1));
-            out.setTimestamp(Math.max(0, edited + (sample.timestamp - s.srcStart)));
+            out.setTimestamp(Math.max(0, s.timelineStart + (sample.timestamp - s.srcStart)));
             await audioSource.add(out);
             if (out !== sample) out.close();
             sample.close();
           }
         }
-        edited += Math.max(0, s.srcEnd - s.srcStart);
       }
     }
 

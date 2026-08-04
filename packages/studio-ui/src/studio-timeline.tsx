@@ -21,17 +21,17 @@ import {
   type Block,
   type BlockKind,
   type Composition,
+  type VideoShotTimelinePlacement,
   blockKind,
   blockPreviewDoc,
   cutTransitions,
-  editedVideoDuration,
   MAX_TRANSITION_SEC,
   totalDuration,
   isSentenceCaption,
+  videoShotTimelineSpans,
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { shotFadeAt } from '@pireel/studio-engine/composition';
-import { spans as clipSpans } from '@pireel/studio-engine/trim';
 import { injectPreviewRuntime } from './sample-composition';
 import { KIND_META } from './kind-meta';
 import { t } from './i18n';
@@ -71,6 +71,10 @@ const SCENE_WAVE_H = 18;
 
 interface StudioTimelineProps {
   comp: Composition;
+  /** Canonical V2 placements. Omit only for legacy contiguous compositions. */
+  videoPlacements?: readonly VideoShotTimelinePlacement[];
+  /** Canonical document duration, including empty-primary graphics/audio regions. */
+  timelineDurationSec?: number;
   /** During playback: auto-scroll to follow the playhead when it leaves the viewport (stops if the user scrolls manually, until next play). */
   playing: boolean;
   /** Locate signal: each increment = scroll the timeline to the current playhead (transport readout, or a
@@ -206,6 +210,8 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
 
 function StudioTimelineImpl({
   comp,
+  videoPlacements,
+  timelineDurationSec,
   playing,
   locateSignal,
   locateNear,
@@ -254,12 +260,15 @@ function StudioTimelineImpl({
   mainLive = true,
   srcLive,
 }: StudioTimelineProps) {
-  const dur = totalDuration(comp);
-  const hasVideoLane = videoTrackShots(comp).length > 0;
-  const videoDur = hasVideoLane ? editedVideoDuration(comp) : 0; // edited video duration (filmstrip / scene track width)
-  const shots = useMemo(() => videoTrackShots(comp), [comp.video, comp.shots]);
-  // Scenes' spans on the **edited** timeline (clip source spans joined end to end)
-  const sceneSpans = useMemo(() => clipSpans(shots).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })), [shots]);
+  const dur = timelineDurationSec ?? totalDuration(comp);
+  const shots = useMemo(() => videoTrackShots(comp), [comp]);
+  // V2 placements are native timeline geometry: visible blank regions stay blank instead of being compacted.
+  const sceneSpans = useMemo(
+    () => videoShotTimelineSpans(shots, videoPlacements).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })),
+    [shots, videoPlacements],
+  );
+  const hasVideoLane = sceneSpans.length > 0;
+  const videoDur = hasVideoLane ? Math.max(...sceneSpans.map((span) => span.end)) : 0;
   /** Scene-card audio bands, precomputed per shot. These are the timeline's heaviest drawing by far — one
    *  path with up to WAVE_MAX_BARS sub-paths per card — and they depend only on the cut, the zoom and that
    *  shot's own audio. Building them inside the render meant every unrelated gesture that re-renders the
@@ -1200,7 +1209,7 @@ function StudioTimelineImpl({
                       z-30 is above scene cards, below the hover "+" (z-40) */}
                   {onOpenTransition &&
                     (() => {
-                      const trs = cutTransitions(shots);
+                      const trs = cutTransitions(shots, videoPlacements);
                       return sceneSpans.slice(0, -1).map(({ end }, i) => {
                         const tr = trs.find((t2) => Math.abs(t2.cut - end) < 0.05);
                         if (!tr) {

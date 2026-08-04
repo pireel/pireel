@@ -106,12 +106,24 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Manual panels, browser agents and offline MCP framing/filter/shot-audio edits now use one atomic
   `narrative.patch` command. Framing partners align to native frame geometry, and a locked narrative
   or graphics lane rejects the full update without losing V2-only gaps or tracks.
+- `editorDocumentRenderPlan` is the immutable render/read boundary: it preserves every lane (including
+  empty lanes), stable stack order, frame/second geometry, track flags and resolved asset metadata.
+  The workbench timeline, parent-side video engine, transition preview/bake, Agent frame capture and
+  browser export now use its native primary-narrative placements. Leading, middle and trailing gaps
+  remain real blank timeline regions; an explicit empty placement list cannot revive stale V1 shots.
+- `video-segment-time.ts` is the shared source/timeline mapper. Preview playback, transition handles,
+  frame capture, video export and narration mixing therefore respect V2 frame duration even when it
+  differs from the source trim duration; the old contiguous 1× behavior remains the explicit fallback.
+- Export takes one V2 document snapshot before encoding. Its cache key, placements and total duration
+  therefore describe the same revision even if editing continues while an export is running.
 
-Direct V2 preview/export and consumption by the remaining compatibility tools are rollout gates, not
-schema work. The server adapter still projects and remigrates results for tools not yet cut over;
-that path must be removed before overlapping/gapped multi-track editing is exposed because V1 cannot
-round-trip those states. The remaining gates must reuse this document and command layer rather than
-introduce another model.
+The next render gate is visual compositing for non-primary `visual` tracks (B-roll/PIP) plus applying
+track visibility/mute flags in the renderer. Primary-lane placement is native now, but overlapping
+visual tracks are intentionally not claimed as complete. Consumption by the remaining compatibility
+tools is also a rollout gate, not schema work. The server adapter still projects and remigrates results
+for tools not yet cut over; that path must be removed before overlapping multi-track editing is exposed
+because V1 cannot round-trip those states. The remaining gates must reuse this document, render plan
+and command layer rather than introduce another model.
 
 ## Rollout gates
 
@@ -119,7 +131,8 @@ The multi-track UI must not ship until all of these are true:
 
 - [x] persistence loads V1/V2 and writes only V2;
 - [x] live undo/redo snapshots V2, including cloud-history restore;
-- preview and export consume V2 or a tested read projection;
+- preview and export consume V2 or a tested read projection (primary native placement complete;
+  overlapping visual-track compositing and render flags remain);
 - browser and server tools use the same V2 command engine;
 - no command discovers primary narration via `tracks[0]`;
 - audio/graphics/captions follow one declared ripple and anchor policy;

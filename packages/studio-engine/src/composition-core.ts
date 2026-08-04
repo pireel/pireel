@@ -230,18 +230,42 @@ export const CUT_TRANSITION_EFFECTS: { id: CutTransitionEffect; name: string }[]
 /** Direction-bearing effects (panel shows direction buttons for these). */
 export const DIRECTIONAL_TRANSITIONS: ReadonlySet<CutTransitionEffect> = new Set(['directional', 'directionalwipe']);
 
+export interface VideoShotTimelinePlacement {
+  shotId: string;
+  startSec: number;
+  endSec: number;
+}
+
+function placedShotSpans(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]) {
+  if (placements === undefined) return spans(shots);
+  const byId = new Map(placements.map((placement) => [placement.shotId, placement]));
+  return shots.flatMap((clip, index) => {
+    const placement = byId.get(clip.id);
+    // Supplying placements opts into the V2 document as authority. A composition shot missing
+    // from that projection must not silently reappear through the legacy contiguous fallback.
+    if (!placement) return [];
+    return [{ clip, index, editedStart: placement.startSec, editedEnd: placement.endSec }];
+  }).sort((left, right) => left.editedStart - right.editedStart || left.index - right.index);
+}
+
+export function videoShotTimelineSpans(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]) {
+  return placedShotSpans(shots, placements);
+}
+
 /** Table of valid cut transitions (edited time): prevId must still be the immediately-preceding shot (deleting/trimming either side invalidates it),
  *  half is clamped by both neighboring shot lengths (transitions don't cross shots). Same convention for preview shim / export / timeline. */
 export function cutTransitions(
   shots: VideoShot[],
+  placements?: readonly VideoShotTimelinePlacement[],
 ): { cut: number; shotId: string; effect: CutTransitionEffect; half: number; dir: TransitionDirection }[] {
-  const sp = spans(shots);
+  const sp = placedShotSpans(shots, placements);
   const out: { cut: number; shotId: string; effect: CutTransitionEffect; half: number; dir: TransitionDirection }[] = [];
   for (let i = 1; i < sp.length; i++) {
     const s = sp[i]!.clip as VideoShot;
     const prev = sp[i - 1]!.clip as VideoShot;
     const tr = s.transIn;
     if (!tr || tr.prevId !== prev.id) continue;
+    if (Math.abs(sp[i]!.editedStart - sp[i - 1]!.editedEnd) > 1e-3) continue;
     const lenPrev = sp[i - 1]!.editedEnd - sp[i - 1]!.editedStart;
     const lenSelf = sp[i]!.editedEnd - sp[i]!.editedStart;
     const half = Math.min(Math.max(0.1, Math.min(MAX_TRANSITION_SEC, tr.durationSec) / 2), lenPrev, lenSelf);
@@ -686,8 +710,8 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
  * (see prompts/plan.ts FRAMING); framings on shot fragments the user hand-cut are executed as-is.
  * Registered to __timelines['vid'].
  */
-export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] {
-  const sp = spans(shots);
+export function videoFrameKeyframes(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]): { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] {
+  const sp = placedShotSpans(shots, placements);
   if (sp.length === 0) return [];
 
   // canvas render mode: the video track is **one canvas**; all segments' framings (including other-source inserts) are applied to it uniformly
@@ -711,11 +735,11 @@ export function videoFrameKeyframes(shots: VideoShot[]): { at: number; tr: ShotT
   return final;
 }
 
-export function videoFrameTimelineBody(shots: VideoShot[]): string {
-  const sp = spans(shots);
+export function videoFrameTimelineBody(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]): string {
+  const sp = placedShotSpans(shots, placements);
   if (sp.length === 0) return '';
   const total = sp[sp.length - 1]!.editedEnd;
-  const final = videoFrameKeyframes(shots);
+  const final = videoFrameKeyframes(shots, placements);
   if (!final.length) return '';
 
   const lines: string[] = [`tl.set('#vidEl', ${shotVars(final[0]!.tr, final[0]!.size, final[0]!.crop, final[0]!.precise)}, 0);`];

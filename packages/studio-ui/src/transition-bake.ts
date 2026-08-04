@@ -25,8 +25,10 @@ export interface BakeSpec {
   /** Both source files and their source times at the cut (A ends at aEnd, B starts at bStart). */
   fileA: File;
   aEnd: number;
+  rateA?: number;
   fileB: File;
   bStart: number;
+  rateB?: number;
   framingA?: ShotPreciseFraming;
   framingB?: ShotPreciseFraming;
   /** Canvas (comp) size — bake renders at 0.5×. */
@@ -65,11 +67,13 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
   const stageT = new OffscreenCanvas(W, H);
   const out = new OffscreenCanvas(W, H);
   const octx = out.getContext('2d')!;
+  const rateA = spec.rateA ?? 1;
+  const rateB = spec.rateB ?? 1;
   try {
-    const liveA = await open(spec.fileA, spec.aEnd - spec.half, spec.aEnd);
-    const ghostB = await open(spec.fileB, spec.bStart - spec.half, spec.bStart);
-    const ghostA = await open(spec.fileA, spec.aEnd, spec.aEnd + spec.half);
-    const liveB = await open(spec.fileB, spec.bStart, spec.bStart + spec.half);
+    const liveA = await open(spec.fileA, spec.aEnd - spec.half * rateA, spec.aEnd);
+    const ghostB = await open(spec.fileB, spec.bStart - spec.half * rateB, spec.bStart);
+    const ghostA = await open(spec.fileA, spec.aEnd, spec.aEnd + spec.half * rateA);
+    const liveB = await open(spec.fileB, spec.bStart, spec.bStart + spec.half * rateB);
     const [dx, dy] = glDirection(spec.dir);
     const frames: Blob[] = [];
     // Each side draws into its own stage; if sampling runs out of bounds (handle too short), reuse the last frame rather than aborting the bake
@@ -92,12 +96,12 @@ export async function bakeTransitionWindow(spec: BakeSpec, cancelled?: () => boo
       // from/to same convention as shim: before cut A live / B pre-roll, after cut A tail / B live
       haveF =
         (pre
-          ? await drawSide(liveA, spec.aEnd - (spec.cut - t), stageF, spec.framingA)
-          : await drawSide(ghostA, spec.aEnd + (t - spec.cut), stageF, spec.framingA)) || haveF;
+          ? await drawSide(liveA, spec.aEnd - (spec.cut - t) * rateA, stageF, spec.framingA)
+          : await drawSide(ghostA, spec.aEnd + (t - spec.cut) * rateA, stageF, spec.framingA)) || haveF;
       haveT =
         (pre
-          ? await drawSide(ghostB, spec.bStart - (spec.cut - t), stageT, spec.framingB)
-          : await drawSide(liveB, spec.bStart + (t - spec.cut), stageT, spec.framingB)) || haveT;
+          ? await drawSide(ghostB, spec.bStart - (spec.cut - t) * rateB, stageT, spec.framingB)
+          : await drawSide(liveB, spec.bStart + (t - spec.cut) * rateB, stageT, spec.framingB)) || haveT;
       if (!haveF || !haveT) return null; // can't even sample the first frame: this window can't be baked (media boundary)
       if (!mixer.render(stageF, stageT, spec.effect, p, dx, dy, `f${i}`, `t${i}`)) return null;
       octx.clearRect(0, 0, W, H);

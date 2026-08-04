@@ -18,6 +18,7 @@ export * from './commands/index';
 export * from './legacy-projection';
 export * from './legacy-edit-merge';
 export * from './migration';
+export * from './render-plan';
 export * from './time';
 export * from './types';
 export * from './validation';

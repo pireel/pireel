@@ -15,7 +15,13 @@
 
 import { useRef, useState, type MutableRefObject } from 'react';
 import { toast } from '@pireel/ui/toast';
-import { type AudioClip, type Composition, hasTimelineContent, videoTrackShots } from '@pireel/studio-engine/composition';
+import {
+  type AudioClip,
+  type Composition,
+  type EditorDocumentV2,
+  editorDocumentRenderPlan,
+  videoTrackShots,
+} from '@pireel/studio-engine/composition';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
@@ -69,6 +75,7 @@ const filenameFor = (o: ExportRenderOpts) => t('common.exportFilename', { res: o
 
 export function useStudioExport(deps: {
   compRef: MutableRefObject<Composition>;
+  documentRef: MutableRefObject<EditorDocumentV2>;
   videoFileRef: MutableRefObject<File | null>;
   /** Local insert-clip File table (key = blob URL); used by client compositing to fetch insert clips. */
   clipFilesRef?: MutableRefObject<Map<string, File>>;
@@ -77,7 +84,7 @@ export function useStudioExport(deps: {
   /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
   denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
 }) {
-  const { compRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
+  const { compRef, documentRef, videoFileRef, clipFilesRef, audioExportRef, denoiseExportRef } = deps;
   const [exporting, setExporting] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [exportPct, setExportPct] = useState(0);
@@ -91,23 +98,33 @@ export function useStudioExport(deps: {
 
   /** Full comp JSON + source fingerprint + options: if anything affecting the result changes, the key changes.
    *  (Insert clips appear as blob URLs in comp.shots, stable within a session, so they're naturally in the key.) */
-  const exportKey = (c: Composition, opts: ExportRenderOpts): string =>
-    `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(c)}`;
+  const exportKey = (c: Composition, document: EditorDocumentV2, opts: ExportRenderOpts): string =>
+    `${videoFileRef.current ? fileSig(videoFileRef.current) : (c.video?.url ?? '')}|${JSON.stringify(opts)}|${JSON.stringify(document)}`;
 
   /** WebCodecs is always required; main-source bytes are required only when a surviving clip
    *  actually references that source. Clips-only and graphics/audio-only documents need no main file. */
-  const needsMainSource = (c: Composition) => videoTrackShots(c).some((shot) => !shot.src);
-  const canClientExport = (c: Composition) =>
-    typeof window !== 'undefined' && 'VideoEncoder' in window && (!needsMainSource(c) || !!videoFileRef.current);
-  const noExportReason = (c: Composition) =>
-    needsMainSource(c) && !videoFileRef.current ? t('common.localSourceVideoMissing') : t('workbench.browserCannotExport');
+  const needsMainSource = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>) => {
+    const placedIds = new Set(plan.narrative.map((entry) => entry.clipId));
+    return videoTrackShots(c).some((shot) => placedIds.has(shot.id) && !shot.src);
+  };
+  const canClientExport = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>) =>
+    typeof window !== 'undefined' && 'VideoEncoder' in window && (!needsMainSource(c, plan) || !!videoFileRef.current);
+  const noExportReason = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>) =>
+    needsMainSource(c, plan) && !videoFileRef.current ? t('common.localSourceVideoMissing') : t('workbench.browserCannotExport');
 
   /** Get the finished-video blob for the current content: use the cache on hit, otherwise composite once client-side (reports progress, cancelable). */
-  const renderBlob = async (c: Composition, key: string, opts: ExportRenderOpts): Promise<Blob> => {
+  const renderBlob = async (
+    c: Composition,
+    plan: ReturnType<typeof editorDocumentRenderPlan>,
+    key: string,
+    opts: ExportRenderOpts,
+  ): Promise<Blob> => {
     const cached = lastExportRef.current;
     if (cached && cached.key === key && cached.blob) return cached.blob;
     const blob = await clientExportVideo({
       comp: c,
+      videoPlacements: plan.narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec })),
+      timelineDurationSec: plan.durationSec,
       videoFile: videoFileRef.current,
       clipFiles: clipFilesRef?.current ?? new Map(),
       audio: audioExportRef?.current?.() ?? null,
@@ -126,16 +143,20 @@ export function useStudioExport(deps: {
    *  saved filename and how the file was delivered. */
   async function exportVideo(opts: ExportRenderOpts, sinkUrl?: string): Promise<{ ok: boolean; filename?: string; error?: string } & Partial<ExportDelivery>> {
     const c = compRef.current;
-    if (!hasTimelineContent(c)) {
+    // Snapshot the canonical document once. Edits made while encoding belong to the next export;
+    // they must not change placements under an already-computed cache key.
+    const document = documentRef.current;
+    const plan = editorDocumentRenderPlan(document);
+    if (plan.durationFrames === 0) {
       toast.error(t('common.nothingToExport'));
       return { ok: false, error: t('common.nothingToExport') };
     }
     if (exporting || publishing) return { ok: false, error: t('common.exportAlreadyProgress') };
-    if (!canClientExport(c)) {
-      toast.error(noExportReason(c));
-      return { ok: false, error: noExportReason(c) };
+    if (!canClientExport(c, plan)) {
+      toast.error(noExportReason(c, plan));
+      return { ok: false, error: noExportReason(c, plan) };
     }
-    const key = exportKey(c, opts);
+    const key = exportKey(c, document, opts);
     const name = filenameFor(opts);
     if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
       toast.success(t('common.downloadedPreviousExport'));
@@ -146,7 +167,7 @@ export function useStudioExport(deps: {
     setExportPct(0);
     exportCancelRef.current = false;
     try {
-      const blob = await renderBlob(c, key, opts);
+      const blob = await renderBlob(c, plan, key, opts);
       const delivery = await deliverBlob(blob, name, sinkUrl);
       toast.success(delivery.delivered === 'local_sink' ? t('common.exportCompleteDelivered') : t('common.exportCompleteDownloadStarted'));
       return { ok: true, filename: name, ...delivery };
@@ -167,16 +188,18 @@ export function useStudioExport(deps: {
    *  Triggered on demand (only runs when "Publish" is clicked); if the same content was uploaded before, reuse the last link. Returns the public URL (null on failure/cancel). */
   async function publishVideo(opts: ExportRenderOpts): Promise<string | null> {
     const c = compRef.current;
-    if (!hasTimelineContent(c)) {
+    const document = documentRef.current;
+    const plan = editorDocumentRenderPlan(document);
+    if (plan.durationFrames === 0) {
       toast.error(t('common.nothingToExport'));
       return null;
     }
     if (exporting || publishing) return null;
-    if (!canClientExport(c)) {
-      toast.error(noExportReason(c));
+    if (!canClientExport(c, plan)) {
+      toast.error(noExportReason(c, plan));
       return null;
     }
-    const key = exportKey(c, opts);
+    const key = exportKey(c, document, opts);
     if (uploadedExportRef.current?.key === key) {
       // Same content already uploaded: reuse the direct link
       setPublishUrl(uploadedExportRef.current.url);
@@ -186,7 +209,7 @@ export function useStudioExport(deps: {
     setExportPct(0);
     exportCancelRef.current = false;
     try {
-      const blob = await renderBlob(c, key, opts);
+      const blob = await renderBlob(c, plan, key, opts);
       if (blob.size > MAX_PUBLISH_BYTES) {
         toast.error(t('common.exportTooLargeToPublish'));
         return null;

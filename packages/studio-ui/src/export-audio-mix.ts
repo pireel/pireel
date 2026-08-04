@@ -17,6 +17,12 @@
 import { AudioSample, AudioSampleSink } from 'mediabunny';
 import type { InputAudioTrack } from 'mediabunny';
 import { type AudioClip, audioClipGainAt, audioClipSrcTimeAt } from '@pireel/studio-engine/composition';
+import {
+  segmentSourceRate,
+  segmentSourceTimeAt,
+  segmentTimelineEnd,
+  segmentTimelineStart,
+} from './video-segment-time';
 
 export const MIX_RATE = 48000;
 export const MIX_CH = 2;
@@ -39,6 +45,8 @@ export interface MixSeg {
   srcStart: number;
   srcEnd: number;
   key: string;
+  timelineStart?: number;
+  timelineEnd?: number;
   /** Linear per-shot gain (shotGain); 0 = contributes nothing. */
   gain: number;
   /** Segment-local fade factor (shotFadeAt); absent = flat. */
@@ -72,11 +80,18 @@ class PcmStream {
   }
 
   /** Add this source's PCM over [srcT0, srcT0 + frames/MIX_RATE) into out (interleaved stereo) at outOffset frames. */
-  async read(srcT0: number, frames: number, out: Float32Array, outOffset: number, gainAt: (k: number) => number): Promise<void> {
+  async read(
+    srcT0: number,
+    frames: number,
+    out: Float32Array,
+    outOffset: number,
+    gainAt: (k: number) => number,
+    sourceRate = 1,
+  ): Promise<void> {
     for (let k = 0; k < frames; k++) {
       const gain = gainAt(k);
       if (gain <= 0) continue;
-      const srcT = srcT0 + k / MIX_RATE;
+      const srcT = srcT0 + k / MIX_RATE * sourceRate;
       await this.advanceTo(srcT);
       const c = this.cur;
       if (!c || srcT < c.start) continue; // gap → silence
@@ -120,14 +135,16 @@ export async function mixAudioTrack(args: {
     const to = Math.max(...mine.map((s) => s.srcEnd));
     readers.set(key, new PcmStream(track, Math.max(0, from - 0.1), to + 0.1));
   }
-  // Segment starts on the edited timeline
+  // Native timeline starts; missing values retain the legacy contiguous fallback.
   const segStarts: number[] = [];
-  {
-    let acc = 0;
-    for (const s of segs) {
-      segStarts.push(acc);
-      acc += Math.max(0, s.srcEnd - s.srcStart);
-    }
+  const segEnds: number[] = [];
+  let cursor = 0;
+  for (const s of segs) {
+    const start = segmentTimelineStart(s, cursor);
+    const end = segmentTimelineEnd(s, start);
+    segStarts.push(start);
+    segEnds.push(end);
+    cursor = end;
   }
   // Per-clip envelope precompute (same audioClipGainAt as preview)
   const envs = clips.map(({ clip }) => {
@@ -147,9 +164,8 @@ export async function mixAudioTrack(args: {
     // Narration: sub-ranges of this chunk per overlapping segment (few per chunk — no per-frame lookup)
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]!;
-      const len = Math.max(0, s.srcEnd - s.srcStart);
       const a = Math.max(t0, segStarts[i]!);
-      const b = Math.min(t0 + frames / MIX_RATE, segStarts[i]! + len);
+      const b = Math.min(t0 + frames / MIX_RATE, segEnds[i]!);
       if (b <= a) continue;
       const reader = readers.get(s.key);
       if (!reader || s.gain <= 0) continue;
@@ -157,7 +173,15 @@ export async function mixAudioTrack(args: {
       const n = Math.min(frames - outOffset, Math.round((b - a) * MIX_RATE));
       if (n <= 0) continue;
       const localAt = a - segStarts[i]!; // segment-local seconds where this chunk slice starts
-      await reader.read(s.srcStart + localAt, n, buf, outOffset, (k) => s.gain * (s.fadeAt ? s.fadeAt(localAt + k / MIX_RATE) : 1));
+      const sourceRate = segmentSourceRate(s, segStarts[i]!, segEnds[i]!);
+      await reader.read(
+        segmentSourceTimeAt(s, a, segStarts[i]!, segEnds[i]!),
+        n,
+        buf,
+        outOffset,
+        (k) => s.gain * (s.fadeAt ? s.fadeAt(localAt + k / MIX_RATE) : 1),
+        sourceRate,
+      );
     }
 
     // Audio clips (overlaps simply sum)
