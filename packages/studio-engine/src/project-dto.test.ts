@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Composition } from './composition';
-import { ackedFromDto, buildSaveWire, canonicalJson, diffOps, hashSection, mergeSaveIntoRow, sanitizeSavePayload, type ProjectSavePayload } from './project-dto';
+import { emptyPersistedProjectDocument } from './project-document';
+import { ackedFromDto, buildSaveWire, canonicalJson, diffOps, hashSection, mergeSaveIntoRow, rowToDto, rowToMeta, sanitizeSavePayload, type ProjectSavePayload } from './project-dto';
 
 /**
  * 增量保存线格式的契约钉(两级差分):
@@ -29,6 +30,33 @@ describe('canonicalJson', () => {
   it('undefined 按 JSON 语义(对象键剔除/数组元素 null)', () => {
     expect(canonicalJson({ a: undefined, b: 1 })).toBe('{"b":1}');
     expect(canonicalJson([undefined, 1])).toBe('[null,1]');
+  });
+});
+
+describe('persisted project DTO dual-read', () => {
+  const row = {
+    id: 'project-1',
+    title: 'legacy',
+    comp,
+    chat: [],
+    context: {},
+    videoSig: 'sig1',
+    videoDurationSec: '12.5',
+    coverThumb: null,
+    version: 7,
+    updatedAt: new Date(1000),
+  };
+
+  it('returns canonical V2 and a temporary V1 projection for an old row', () => {
+    const dto = rowToDto(row);
+    expect(dto.document.version).toBe(2);
+    expect(dto.comp).not.toHaveProperty('version');
+    expect(dto.version).toBe(7);
+  });
+
+  it('computes list counts from V2 without relying on V1 fields in storage', () => {
+    const dto = rowToDto(row);
+    expect(rowToMeta({ ...row, comp: dto.document })).toMatchObject({ blocks: 1, shots: 0 });
   });
 });
 
@@ -87,7 +115,9 @@ describe('buildSaveWire(分段)', () => {
 
   it('meta 段(videoSig/时长/title)独立于 comp', () => {
     const first = buildSaveWire(payload(), 3, null)!;
-    const r = buildSaveWire(payload({ videoSig: 'sig2' }), 4, first.acked)!;
+    // V2-native callers already carry the manifest. Changing row metadata alone must not remigrate
+    // a legacy Composition and accidentally churn the document section.
+    const r = buildSaveWire(payload({ comp: undefined, document: first.acked.values.comp, videoSig: 'sig2' }), 4, first.acked)!;
     expect(r.wire.videoSig).toBe('sig2');
     expect(r.wire.comp).toBeUndefined();
     expect(r.wire.compPatch).toBeUndefined();
@@ -123,7 +153,14 @@ describe('buildSaveWire(段内 JSON Patch)', () => {
 
   it('改动过大(补丁不比整段小)自动退回整段', () => {
     const first = buildSaveWire(payload({ comp: bigComp }), 1, null)!;
-    const rewritten = { ...bigComp, blocks: (bigComp.blocks as { id: string }[]).map((b, i) => ({ ...b, html: `<section>totally rewritten ${i} ${'x'.repeat(40)}</section>` })) } as unknown as Composition;
+    const rewritten = {
+      ...bigComp,
+      blocks: (bigComp.blocks as { id: string }[]).map((b, i) => ({
+        ...b,
+        id: `replacement-${i}`,
+        html: `<section>totally rewritten ${i} ${'x'.repeat(120)}</section>`,
+      })),
+    } as unknown as Composition;
     const r = buildSaveWire(payload({ comp: rewritten }), 2, first.acked)!;
     expect(r.wire.comp).toBeDefined();
     expect(r.wire.compPatch).toBeUndefined();
@@ -146,7 +183,7 @@ describe('buildSaveWire(段内 JSON Patch)', () => {
     expect(r.wire.compPatch).toBeDefined();
     expect(r.wire.comp).toBeUndefined();
     const patchBytes = JSON.stringify(r.wire.compPatch).length;
-    const fullBytes = canonicalJson({ ...compB, video: null }).length;
+    const fullBytes = canonicalJson(r.acked.values.comp).length;
     expect(patchBytes).toBeLessThan(fullBytes * 0.35); // 真实改动(1 add + ~70 条 no replace)远小于整段
     // 应用闭环
     const merged = mergeSaveIntoRow(
@@ -168,14 +205,17 @@ describe('buildSaveWire(段内 JSON Patch)', () => {
 
   it('diffOps 数组语义:删/插/改应用后等价,ops O(改动);无 id 数组走内容哈希', () => {
     const roundtrip = (a: unknown, b: unknown, maxOps: number) => {
-      const ops = diffOps(a, b);
+      const shell = emptyPersistedProjectDocument();
+      const base = { ...shell, semantics: { ...shell.semantics, plan: a } };
+      const target = { ...shell, semantics: { ...shell.semantics, plan: b } };
+      const ops = diffOps(base, target);
       expect(ops.length).toBeLessThanOrEqual(maxOps);
       const merged = mergeSaveIntoRow(
-        { title: 't', comp: a, chat: [], context: {}, videoSig: null, videoDurationSec: null, coverThumb: null },
-        sanitizeSavePayload({ baseVersion: 1, compPatch: ops, compHash: hashSection(canonicalJson({ ...(b as object), video: null })) })!,
+        { title: 't', comp: base, chat: [], context: {}, videoSig: null, videoDurationSec: null, coverThumb: null },
+        sanitizeSavePayload({ baseVersion: 1, compPatch: ops, compHash: hashSection(canonicalJson(target)) })!,
       );
       expect(merged).not.toBeNull();
-      expect(canonicalJson(merged!.comp)).toBe(canonicalJson({ ...(b as object), video: null }));
+      expect(canonicalJson(merged!.comp)).toBe(canonicalJson(target));
     };
     roundtrip({ w: [1, 2, 3, 4], video: null }, { w: [1, 2, 4], video: null }, 2);
     roundtrip({ w: [1, 2, 3, 4], video: null }, { w: [1, 9, 2, 3, 4], video: null }, 2);
@@ -202,9 +242,10 @@ describe('sanitizeSavePayload(差分语义)', () => {
     expect(p.baseVersion).toBe(5);
   });
 
-  it('带 comp 时 video 剥空;补丁形状校验', () => {
+  it('带 V1 comp 时迁移成 V2 单写;补丁形状校验', () => {
     const p = sanitizeSavePayload({ comp: { blocks: [], video: { x: 1 } }, compPatch: [{ op: 'replace', path: '/a', value: 1 }], chatPatch: 'garbage' })!;
-    expect((p.comp as { video: unknown }).video).toBeNull();
+    expect(p.comp?.version).toBe(2);
+    expect(p.comp).not.toHaveProperty('video');
     expect(p.compPatch).toHaveLength(1);
     expect(p.chatPatch).toBeUndefined();
   });
@@ -212,6 +253,11 @@ describe('sanitizeSavePayload(差分语义)', () => {
   it('非对象体非法', () => {
     expect(sanitizeSavePayload('x')).toBeNull();
     expect(sanitizeSavePayload(null)).toBeNull();
+  });
+
+  it('拒绝结构存在但引用不合法的 V2 全量文档', () => {
+    const document = emptyPersistedProjectDocument();
+    expect(sanitizeSavePayload({ comp: { ...document, timeline: { tracks: [] } } })).toBeNull();
   });
 });
 
@@ -279,20 +325,30 @@ describe('mergeSaveIntoRow', () => {
     expect(mergeSaveIntoRow(existing, p2)).toBeNull();
   });
 
-  it('comp 补丁应用后强制 video=null(补丁塞 video 也进不了库)', () => {
+  it('comp 补丁不能向 V2 顶层塞 legacy/runtime 字段', () => {
+    const base = emptyPersistedProjectDocument();
     const p = sanitizeSavePayload({
       baseVersion: 5,
       compPatch: [{ op: 'add', path: '/video', value: { evil: 1 } }],
-      compHash: hashSection(canonicalJson({ blocks: ['old'], video: { evil: 1 } })),
+      compHash: hashSection(canonicalJson({ ...base, video: { evil: 1 } })),
     })!;
-    const m = mergeSaveIntoRow({ ...existing, comp: { blocks: ['old'] } }, p)!;
-    expect(m).not.toBeNull();
-    expect((m.comp as { video: unknown }).video).toBeNull();
+    expect(mergeSaveIntoRow({ ...existing, comp: base }, p)).toBeNull();
   });
 
   it('坏补丁(路径不存在)→ null = need_full', () => {
     const p = sanitizeSavePayload({ baseVersion: 5, compPatch: [{ op: 'replace', path: '/nope/xx/yy', value: 1 }], compHash: 'x.y.1' })!;
     expect(mergeSaveIntoRow(existing, p)).toBeNull();
+  });
+
+  it('补丁哈希正确但破坏 V2 语义引用也拒绝', () => {
+    const base = emptyPersistedProjectDocument();
+    const target = { ...base, timeline: { tracks: [] } };
+    const p = sanitizeSavePayload({
+      baseVersion: 5,
+      compPatch: [{ op: 'replace', path: '/timeline/tracks', value: [] }],
+      compHash: hashSection(canonicalJson(target)),
+    })!;
+    expect(mergeSaveIntoRow({ ...existing, comp: base }, p)).toBeNull();
   });
 
   it('videoSig/coverThumb null 不覆盖非空;时长带值转 string', () => {

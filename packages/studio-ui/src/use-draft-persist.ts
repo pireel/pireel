@@ -13,8 +13,14 @@
  */
 
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
-import { type Composition, hasTimelineContent } from '@pireel/studio-engine/composition';
-import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
+import {
+  type Composition,
+  type EditorDocumentV2,
+  hasTimelineContent,
+  normalizeProjectDocument,
+  projectDocumentToLegacyComposition,
+} from '@pireel/studio-engine/composition';
+import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectContext, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
 const PREFIX = 'studio:draft:';
@@ -32,7 +38,10 @@ export interface StudioDraft {
   title?: string;
   /** First-frame thumbnail (jpeg dataURL, ~480 wide): project list card cover. Updated when the workbench thumbnail is ready. */
   coverThumb?: string;
-  comp: Composition; // video is always null (blobs aren't persistable)
+  /** Canonical persisted value. */
+  document: EditorDocumentV2;
+  /** Temporary in-memory read projection; omitted from localStorage writes. */
+  comp: Composition;
   videoSig: string | null;
   videoDurationSec: number | null;
   savedAt: number;
@@ -44,7 +53,18 @@ export interface StudioDraft {
   /** Edit-context cache (transcripts): captions are DERIVED from the transcript at runtime and never
    *  persisted as blocks, so the local draft must carry the transcript for offline / zero-backend
    *  (OSS shell) reopen — otherwise a refresh would lose the caption layer. */
-  context?: { asr?: unknown[]; clipAsr?: Record<string, unknown[]> };
+  context?: StudioProjectContext;
+}
+
+type StoredStudioDraft = Omit<StudioDraft, 'document' | 'comp'> & {
+  document?: EditorDocumentV2;
+  /** V1 local drafts written before the V2 cutover. */
+  comp?: Composition;
+};
+
+function writeDraft(draft: StudioDraft): void {
+  const { comp: _projection, ...stored } = draft;
+  window.localStorage.setItem(keyFor(draft.id), JSON.stringify(stored));
 }
 
 /** Raw read (no empty-content filter): list/rename need to read empty projects. */
@@ -52,8 +72,21 @@ function rawDraft(id: string): StudioDraft | null {
   try {
     const raw = window.localStorage.getItem(keyFor(id));
     if (!raw) return null;
-    const d = JSON.parse(raw) as StudioDraft;
-    return d?.comp ? d : null;
+    const stored = JSON.parse(raw) as StoredStudioDraft;
+    if (!stored || (!stored.document && !stored.comp)) return null;
+    const document = normalizeProjectDocument({
+      projectId: stored.id || id,
+      value: stored.document ?? stored.comp,
+      context: stored.context,
+      videoSig: stored.videoSig,
+      videoDurationSec: stored.videoDurationSec,
+    }).document;
+    return {
+      ...stored,
+      id: stored.id || id,
+      document,
+      comp: projectDocumentToLegacyComposition({ projectId: stored.id || id, value: document }),
+    };
   } catch {
     return null;
   }
@@ -115,9 +148,10 @@ export function listProjects(): ProjectMeta[] {
 /** New project: write an empty-shell draft first (otherwise an unsaved new project vanishes from the list). */
 export function createProject(comp: Composition, title = t('common.untitledProject')): string {
   const id = newProjectId();
-  const draft: StudioDraft = { id, title, comp: { ...comp, video: null }, videoSig: null, videoDurationSec: null, savedAt: Date.now() };
+  const document = normalizeProjectDocument({ projectId: id, value: comp }).document;
+  const draft: StudioDraft = { id, title, document, comp: projectDocumentToLegacyComposition({ projectId: id, value: document }), videoSig: null, videoDurationSec: null, savedAt: Date.now() };
   try {
-    window.localStorage.setItem(keyFor(id), JSON.stringify(draft));
+    writeDraft(draft);
   } catch {
     /* ignore */
   }
@@ -130,7 +164,7 @@ export function saveCoverThumb(id: string, thumb: string) {
   const d = rawDraft(id);
   if (!d) return;
   try {
-    window.localStorage.setItem(keyFor(id), JSON.stringify({ ...d, coverThumb: thumb }));
+    writeDraft({ ...d, coverThumb: thumb });
   } catch {
     /* ignore */
   }
@@ -140,7 +174,7 @@ export function renameProject(id: string, title: string) {
   const d = rawDraft(id);
   if (!d) return;
   try {
-    window.localStorage.setItem(keyFor(id), JSON.stringify({ ...d, title: title.trim() || d.title }));
+    writeDraft({ ...d, title: title.trim() || d.title });
   } catch {
     /* ignore */
   }
@@ -160,12 +194,22 @@ export function migrateLegacyDraft() {
   try {
     const raw = window.localStorage.getItem(LEGACY_KEY);
     if (!raw) return;
-    const d = JSON.parse(raw) as StudioDraft;
-    if (d?.comp && d.id && hasTimelineContent(d.comp)) {
-      window.localStorage.setItem(keyFor(d.id), JSON.stringify({ ...d, title: d.title || t('common.untitledProject') }));
+    const legacy = JSON.parse(raw) as StoredStudioDraft;
+    const document = legacy?.id && legacy.comp
+      ? normalizeProjectDocument({
+          projectId: legacy.id,
+          value: legacy.comp,
+          context: legacy.context,
+          videoSig: legacy.videoSig,
+          videoDurationSec: legacy.videoDurationSec,
+        }).document
+      : null;
+    const comp = document && legacy.id ? projectDocumentToLegacyComposition({ projectId: legacy.id, value: document }) : null;
+    if (document && comp && legacy.id && hasTimelineContent(comp)) {
+      writeDraft({ ...legacy, id: legacy.id, document, comp, title: legacy.title || t('common.untitledProject') });
       const chat = window.localStorage.getItem(LEGACY_CHAT_KEY);
-      if (chat && !window.localStorage.getItem(chatKeyFor(d.id))) {
-        window.localStorage.setItem(chatKeyFor(d.id), chat);
+      if (chat && !window.localStorage.getItem(chatKeyFor(legacy.id))) {
+        window.localStorage.setItem(chatKeyFor(legacy.id), chat);
         window.localStorage.removeItem(LEGACY_CHAT_KEY);
       }
     }
@@ -286,14 +330,14 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
  *  (server has no such row) clear the baseline and resend in full. Network/db unavailable returns 'skip' (local cache covers it). */
 export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'> {
   try {
-    const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
+    const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null, id);
     if (!built) return 'ok'; // all five sections unchanged: zero requests
     let r = await putWire(id, built.wire);
     let acked = built.acked;
     if (r.status === 422) {
       // need_full: server has no such row / the patch doesn't apply (base drifted) — clear baseline and resend all sections
       sectionCache.delete(id);
-      const full = buildSaveWire(p, projectVersion(id), null);
+      const full = buildSaveWire(p, projectVersion(id), null, id);
       if (!full) return 'skip';
       r = await putWire(id, full.wire);
       acked = full.acked;
@@ -341,11 +385,19 @@ export async function serverDeleteProject(id: string): Promise<void> {
 export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
   setProjectVersion(p.id, p.version);
   sectionCache.delete(p.id); // in-memory state swapped for the cloud version: diff baseline is void, next save aligns in full
+  const document = p.document ?? normalizeProjectDocument({
+    projectId: p.id,
+    value: p.comp,
+    context: p.context,
+    videoSig: p.videoSig,
+    videoDurationSec: p.videoDurationSec,
+  }).document;
   const draft: StudioDraft = {
     id: p.id,
     ...(p.title ? { title: p.title } : {}),
     ...(p.coverThumb ? { coverThumb: p.coverThumb } : {}),
-    comp: { ...p.comp, video: null },
+    document,
+    comp: projectDocumentToLegacyComposition({ projectId: p.id, value: document }),
     videoSig: p.videoSig,
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
@@ -355,7 +407,7 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
       : {}),
   };
   try {
-    window.localStorage.setItem(keyFor(p.id), JSON.stringify(draft));
+    writeDraft(draft);
   } catch {
     /* quota full: only affects next instant-open; the caller applying the return value directly is unaffected */
   }
@@ -366,7 +418,14 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
 /** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
  *  video down to sig/duration; preserve title as-is (renaming happens in the project list); read the first-frame
  *  thumbnail from a ref (keep the last one until ready, so it doesn't flicker away). Returns lastSavedAt for the workbench badge. */
-export function useDraftAutosave(comp: Composition, videoSig: string | null, projectId: string, coverThumbRef?: MutableRefObject<string | null>, contextOf?: () => StudioDraft['context']) {
+export function useDraftAutosave(
+  comp: Composition,
+  videoSig: string | null,
+  projectId: string,
+  coverThumbRef?: MutableRefObject<string | null>,
+  contextOf?: () => StudioDraft['context'],
+  documentOverride?: EditorDocumentV2,
+) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   // Boot-empty must not clobber a real draft, but "the user emptied a loaded project" is a legit
@@ -382,21 +441,29 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
       try {
         const prev = rawDraft(projectId);
         const cover = coverThumbRef?.current ?? prev?.coverThumb;
+        const context = contextOf?.();
+        const videoDurationSec = comp.video?.durationSec ?? prev?.videoDurationSec ?? null;
+        const document = documentOverride ?? normalizeProjectDocument({
+          projectId,
+          value: comp,
+          context,
+          videoSig,
+          videoDurationSec,
+          previousDocument: prev?.document,
+        }).document;
         const draft: StudioDraft = {
           id: projectId,
           ...(prev?.title ? { title: prev.title } : {}),
           ...(cover ? { coverThumb: cover } : {}),
-          comp: { ...comp, video: null },
+          document,
+          comp: projectDocumentToLegacyComposition({ projectId, value: document }),
           videoSig,
-          videoDurationSec: comp.video?.durationSec ?? null,
+          videoDurationSec,
           savedAt: Date.now(),
           baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
-          ...(() => {
-            const ctx = contextOf?.();
-            return ctx && (ctx.asr?.length || Object.keys(ctx.clipAsr ?? {}).length) ? { context: ctx } : {};
-          })(),
+          ...(context && (context.asr?.length || Object.keys(context.clipAsr ?? {}).length) ? { context } : {}),
         };
-        window.localStorage.setItem(keyFor(projectId), JSON.stringify(draft));
+        writeDraft(draft);
         setLastSavedAt(draft.savedAt);
       } catch {
         /* quota full / private mode: silent (a draft is a bonus, not a promise) */
@@ -405,6 +472,6 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [comp, videoSig, projectId]);
+  }, [comp, videoSig, projectId, documentOverride]);
   return { lastSavedAt };
 }

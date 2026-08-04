@@ -12,7 +12,7 @@ Editor Document V2 is Pireel's final multi-track persistence model. Its neutral 
 6. Transcript and scene semantics live above the timeline and refer to stable asset/clip IDs.
 7. Ripple, overwrite and lift will be document commands operating by track/clip ID and sync-lock policy. Feature code must not manually shift sibling arrays.
 8. Preview time belongs to the timeline. A video element may discipline the clock when present, but cannot be required for playback.
-9. V1 is dual-read/single-write during rollout: old data may be loaded, but new saves will write V2 once the persistence cutover lands.
+9. V1 is dual-read/V2-single-write during rollout: old rows and drafts may be loaded, but every new persistence write is V2.
 10. Multi-track UI is an exposure step, not a later schema change.
 
 ## Shape
@@ -45,7 +45,22 @@ Clip payloads remain typed:
 - DTO-level `videoSig` and `videoDurationSec`;
 - `context.asr`, `clipAsr`, `plan`, `media`, and `localAssets`.
 
-The migration is deterministic and idempotent. `projectV2ToLegacyComposition` is a temporary read projection for unchanged preview/export code; it cannot represent future overlapping or gapped primary-narrative clips and must not become a write path.
+The migration is deterministic and idempotent. `projectV2ToLegacyComposition` is a temporary read
+projection for unchanged panels/preview/export. A compatibility-panel write is reconciled by
+`legacy-edit-merge.ts` as a patch over its prior V2 authority; it is never accepted as a wholesale
+document replacement. This preserves empty/custom tracks, media clips, track flags, anchors, scenes
+and narrative gaps that the projection cannot express.
+
+`project-document.ts` is the shared persisted-data boundary. The historical `studio_projects.comp`
+column remains in place, but its value is now `Composition | EditorDocumentV2` on read and
+`EditorDocumentV2` on write. The cloud DTO and local draft carry canonical `document`; `comp` is a
+temporary, non-persisted compatibility view. Runtime `blob:`/`data:` locators and unknown top-level
+keys are removed before hashing or storage.
+
+The optional bulk backfill is `pnpm studio:migrate-documents-v2`. It is dry-run by default and
+requires `--apply`; it migrates project and undo-history rows, skips validation errors, and uses a
+version compare-and-swap guard for live projects. Lazy migration remains supported, so deployment
+does not require a stop-the-world backfill.
 
 ## Command boundary
 
@@ -68,18 +83,30 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Linked-clip expansion, sync-lock, locked-track atomic failure and semantic scene repair.
 - Empty-primary playback through a timeline clock, including graphics/audio-only documents.
 - V1 range deletion can produce an empty primary lane; browser/server/agent compatibility paths ripple sibling audio and blocks together.
+- Cloud rows and local drafts dual-read V1/V2 and single-write V2; DTOs expose canonical V2 plus a temporary V1 view.
+- Cloud undo history restores and rewrites V2, and offline MCP/analysis/import paths share one server adapter instead of casting stored JSON.
+- A dry-run-first bulk migration script covers both live project rows and undo history.
+- The workbench live store, local/cloud save payloads and undo/redo stacks now own V2 snapshots. Runtime
+  media URLs live in a separate asset-resolution map and are reattached only to the compatibility view.
+- Native UI mutations have a live `dispatchCommand` gateway; failed commands cannot publish partial state.
+- Legacy panels update only clips visible in their prior projection. V2-only tracks/clips and
+  unchanged native geometry survive subsequent compatibility edits, so the rollout remains additive.
 
-Persistence cutover, V2 undo/redo ownership and direct V2 preview/export consumption remain rollout gates, not schema work. They must reuse this document and command layer rather than introduce another model.
+Direct V2 preview/export/tool consumption remains a rollout gate, not schema work. The server adapter
+currently projects legacy tool input and remigrates its result;
+that path must be removed before overlapping/gapped multi-track editing is exposed because V1 cannot
+round-trip those states. The remaining gates must reuse this document and command layer rather than
+introduce another model.
 
 ## Rollout gates
 
 The multi-track UI must not ship until all of these are true:
 
-- persistence loads V1/V2 and writes only V2;
-- undo/redo snapshots V2;
+- [x] persistence loads V1/V2 and writes only V2;
+- [x] live undo/redo snapshots V2, including cloud-history restore;
 - preview and export consume V2 or a tested read projection;
 - browser and server tools use the same V2 command engine;
 - no command discovers primary narration via `tracks[0]`;
 - audio/graphics/captions follow one declared ripple and anchor policy;
-- graphics-only and audio-only playback use the timeline clock;
+- [x] graphics-only and audio-only playback use the timeline clock;
 - migration telemetry has no unresolved validation errors.

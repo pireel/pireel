@@ -16,6 +16,7 @@
 export * from './create';
 export * from './commands/index';
 export * from './legacy-projection';
+export * from './legacy-edit-merge';
 export * from './migration';
 export * from './time';
 export * from './types';

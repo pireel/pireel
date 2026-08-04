@@ -13,6 +13,7 @@ import {
   type Block,
   type CaptionStyle,
   type Composition,
+  type EditorDocumentV2,
   type CutTransitionEffect,
   type ShotFilter,
   type ShotFramingPatch,
@@ -116,6 +117,8 @@ export interface AgentToolCtx {
   // Composition state
   compRef: MutableRefObject<Composition>;
   setComp: (action: SetStateAction<Composition>) => void;
+  documentRef: MutableRefObject<EditorDocumentV2>;
+  setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   ensureShots: (c: Composition) => VideoShot[];
   /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
   projectId: string;
@@ -132,8 +135,8 @@ export interface AgentToolCtx {
   postPreview: (msg: Record<string, unknown>) => void;
   // Undo + generation lock
   pushUndoSnapshot: () => void;
-  undoStackRef: MutableRefObject<Composition[]>;
-  redoStackRef: MutableRefObject<Composition[]>;
+  undoStackRef: MutableRefObject<EditorDocumentV2[]>;
+  redoStackRef: MutableRefObject<EditorDocumentV2[]>;
   genIdsRef: MutableRefObject<ReadonlySet<string>>;
   markGenerating: (ids: string[], on: boolean) => void;
   // Sources + transcript
@@ -209,7 +212,7 @@ export interface AgentToolCtx {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
-    compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
+    compRef, setComp, documentRef, setDocument, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
@@ -1142,7 +1145,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (genIdsRef.current.size) return { ok: false, error: t('workbench.elementGeneratingUndoAfter') };
             const stack = undoStackRef.current;
             // A snapshot left by a tool that didn't change anything (returned failure/no-op) shares the current reference → dedup, doesn't count as a step
-            while (stack.length && stack[stack.length - 1] === compRef.current) stack.pop();
+            while (stack.length && stack[stack.length - 1] === documentRef.current) stack.pop();
             const prev = stack.pop();
             if (!prev) {
               // In-memory stack exhausted (page refreshed / device switched / long session) → cloud
@@ -1153,17 +1156,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const entry = await pull(ctx.projectId).catch(() => null);
               if (!entry) return { ok: false, error: t('workbench.nothingUndoCloudEmpty') };
               const restored = entry.comp as Composition;
-              redoStackRef.current.push(compRef.current);
-              setComp(restored);
+              redoStackRef.current.push(documentRef.current);
+              if (entry.document) setDocument(entry.document);
+              else setComp(restored);
               setSelectedId(null);
               setSelectedShotId(null);
               return withDelta({
                 ok: true,
-                summary: t('workbench.undidCloudVersion', { sec: (Math.round(totalDuration(restored) * 10) / 10).toFixed(1) }),
+                summary: t('workbench.undidCloudVersion', { sec: (Math.round(totalDuration(compRef.current) * 10) / 10).toFixed(1) }),
               });
             }
-            redoStackRef.current.push(compRef.current); // agent undo also feeds the redo line (redoable via ⇧⌘Z/button)
-            setComp(prev);
+            redoStackRef.current.push(documentRef.current); // agent undo also feeds the redo line (redoable via ⇧⌘Z/button)
+            setDocument(prev);
             setSelectedId(null);
             setSelectedShotId(null);
             return withDelta({ ok: true, summary: t('workbench.undidLastStep') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : '') });

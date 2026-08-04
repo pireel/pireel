@@ -29,6 +29,19 @@ export interface LegacyProjectForMigration {
   videoDurationSec?: number | null;
   fps?: number;
   canvasConfigured?: boolean;
+  /** Previous V2 authority when applying an edit made through the temporary V1 projection. */
+  previousDocument?: EditorDocumentV2;
+}
+
+function previousAssetForProjectionUrl(input: LegacyProjectForMigration, url: string | undefined): EditorMediaAsset | undefined {
+  if (!url?.startsWith('blob:pireel-offline/')) return undefined;
+  const encodedId = url.slice('blob:pireel-offline/'.length).split(/[?#]/, 1)[0];
+  if (!encodedId) return undefined;
+  try {
+    return input.previousDocument?.assets[decodeURIComponent(encodedId)];
+  } catch {
+    return undefined;
+  }
 }
 
 function managedCaptionBlock(block: Block): boolean {
@@ -39,7 +52,14 @@ function managedCaptionBlock(block: Block): boolean {
 
 function stripBlockPlacement(block: Block): GraphicBlockPayload {
   const { id: _id, startSec: _startSec, durationSec: _durationSec, trackIndex: _trackIndex, ...payload } = block;
-  return payload;
+  // Some pre-template projects (and a few early server-generated blocks) predate the required
+  // templateId/slots fields. The persisted-data boundary must accept those rows even though the
+  // current in-memory Composition type is stricter.
+  return {
+    ...payload,
+    templateId: typeof block.templateId === 'string' && block.templateId ? block.templateId : 'custom',
+    slots: block.slots && typeof block.slots === 'object' ? block.slots : {},
+  };
 }
 
 function stripMediaUrl(payload: GraphicBlockPayload): GraphicBlockPayload {
@@ -50,7 +70,7 @@ function stripMediaUrl(payload: GraphicBlockPayload): GraphicBlockPayload {
 }
 
 function captionSourceRef(block: Block, sourceToAssetId: Map<string, AssetId>, mainAssetId?: AssetId): CaptionSourceRef | undefined {
-  const ref = block.slots.ref as { src?: string | null; seg?: number; w0?: number; w1?: number } | undefined;
+  const ref = block.slots?.ref as { src?: string | null; seg?: number; w0?: number; w1?: number } | undefined;
   if (!ref || !Number.isInteger(ref.seg) || !Number.isInteger(ref.w0) || !Number.isInteger(ref.w1)) return undefined;
   const assetId = ref.src ? sourceToAssetId.get(ref.src) : mainAssetId;
   if (!assetId) return undefined;
@@ -109,7 +129,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
     : undefined;
   if (mainAssetId && comp.video?.url) sourceToAssetId.set(comp.video.url, mainAssetId);
 
-  const legacyShots: VideoShot[] = comp.shots !== undefined
+  const legacyShots: VideoShot[] = Array.isArray(comp.shots)
     ? comp.shots
     : hasImplicitMain
       ? [{ id: 'main', srcStart: 0, srcEnd: mainDuration!, treatment: 'full' }]
@@ -119,11 +139,13 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
   let cursorSec = 0;
   for (const [index, shot] of legacyShots.entries()) {
     const sourceDuration = Math.max(0, shot.srcEnd - shot.srcStart);
+    const previousAsset = previousAssetForProjectionUrl(input, shot.src);
     const locator = shot.src
       ? {
+          ...(previousAsset?.locator ?? {}),
           ...(shot.srcSig ? { localSig: shot.srcSig } : {}),
           ...(shot.srcSig && context.media?.clips?.[shot.srcSig]?.key ? { cloudKey: context.media.clips[shot.srcSig]!.key } : {}),
-          remoteUrl: shot.src,
+          ...(!previousAsset ? { remoteUrl: shot.src } : {}),
         }
       : mainLocator;
     const assetId = shot.src
@@ -180,9 +202,23 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
 
   for (const [lane, blocks] of [...regularBlocks.entries()].sort(([left], [right]) => left - right)) {
     const clips: GraphicTimelineClip[] = blocks.map((block, index) => {
-      const rawMedia = block.slots.media as { type?: 'image' | 'video'; url?: string } | undefined;
+      const rawMedia = block.slots?.media as { type?: 'image' | 'video'; url?: string } | undefined;
+      // Local image blocks historically persisted only a data/object URL plus their display label;
+      // the durable file signature lived in context.localAssets. Rejoin those halves before the
+      // runtime URL is stripped, otherwise the first V2 save would make the placed image unrestorable.
+      const localMedia = rawMedia && block.label
+        ? (context.localAssets ?? []).find((entry) => (
+            (entry.kind ?? 'video') === rawMedia.type && entry.label === block.label
+          ))
+        : undefined;
+      const previousAsset = previousAssetForProjectionUrl(input, rawMedia?.url);
       const assetId = rawMedia?.url && (rawMedia.type === 'image' || rawMedia.type === 'video')
-        ? upsertAsset(rawMedia.type, { remoteUrl: rawMedia.url }, `block-media:${block.id}`, {
+        ? upsertAsset(rawMedia.type, {
+            ...(previousAsset?.locator ?? {}),
+            ...(localMedia?.sig ? { localSig: localMedia.sig } : {}),
+            ...(localMedia?.sig && context.media?.clips?.[localMedia.sig]?.key ? { cloudKey: context.media.clips[localMedia.sig]!.key } : {}),
+            ...(!previousAsset ? { remoteUrl: rawMedia.url } : {}),
+          }, `block-media:${block.id}`, {
             label: block.label,
             metadata: {},
           })
@@ -250,10 +286,12 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
 
   if ((comp.audioTracks?.length ?? 0) > 0) {
     const clips: AudioTimelineClip[] = comp.audioTracks!.map((audio, index) => {
+      const previousAsset = previousAssetForProjectionUrl(input, audio.src);
       const locator = {
+        ...(previousAsset?.locator ?? {}),
         ...(audio.sig ? { localSig: audio.sig } : {}),
         ...(audio.sig && context.media?.clips?.[audio.sig]?.key ? { cloudKey: context.media.clips[audio.sig]!.key } : {}),
-        ...(audio.src ? { remoteUrl: audio.src } : {}),
+        ...(audio.src && !previousAsset ? { remoteUrl: audio.src } : {}),
       };
       const assetId = upsertAsset('audio', locator, `audio:${audio.id}`, {
         label: audio.label,
@@ -323,7 +361,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
     transcripts[assetId] = transcript;
   }
 
-  const hasLegacyContent = legacyShots.length > 0 || comp.blocks.length > 0 || (comp.audioTracks?.length ?? 0) > 0;
+  const hasLegacyContent = legacyShots.length > 0 || (comp.blocks?.length ?? 0) > 0 || (comp.audioTracks?.length ?? 0) > 0;
   const document: EditorDocumentV2 = {
     version: EDITOR_DOCUMENT_VERSION,
     canvas: {
@@ -333,7 +371,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       configured: input.canvasConfigured ?? (hasLegacyContent || comp.width !== 1080 || comp.height !== 1920),
     },
     appearance: {
-      theme: comp.theme,
+      theme: comp.theme ?? 'general',
       ...(comp.palette ? { palette: comp.palette } : {}),
       ...(comp.captionStyle ? { captionStyle: comp.captionStyle } : {}),
       ...(comp.frameId ? { frameId: comp.frameId } : {}),

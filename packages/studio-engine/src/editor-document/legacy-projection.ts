@@ -8,8 +8,12 @@ import type {
   NarrativeTimelineClip,
 } from './types';
 
-function projectedAssetUrl(asset: EditorMediaAsset, options?: LegacyProjectionOptions): string | undefined {
-  return options?.resolveAssetUrl?.(asset) ?? asset.locator.remoteUrl ?? undefined;
+function projectedAssetUrl(asset: EditorMediaAsset, options?: LegacyProjectionOptions, offlineFallback = true): string | undefined {
+  return options?.resolveAssetUrl?.(asset)
+    ?? asset.locator.remoteUrl
+    // Preserve source identity in the V1 compatibility view while bytes are offline. Existing
+    // recovery code treats blob URLs as unavailable and replaces them from localSig/cloudKey.
+    ?? (offlineFallback && (asset.locator.localSig || asset.locator.cloudKey) ? `blob:pireel-offline/${asset.id}` : undefined);
 }
 
 /** Temporary V2 -> V1 read adapter. It intentionally cannot represent visual gaps or overlapping narrative clips. */
@@ -18,7 +22,7 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
   const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
   const mainAssetId = document.semantics.primaryNarrativeAssetId;
   const mainAsset = mainAssetId ? document.assets[mainAssetId] : undefined;
-  const mainUrl = mainAsset ? projectedAssetUrl(mainAsset, options) : undefined;
+  const mainUrl = mainAsset ? projectedAssetUrl(mainAsset, options, false) : undefined;
   const mainDuration = mainAsset?.metadata.durationSec;
   const video: StudioVideo | null = mainAsset && mainUrl && isFinitePositive(mainDuration)
     ? {

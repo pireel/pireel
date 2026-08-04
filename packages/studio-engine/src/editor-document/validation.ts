@@ -9,7 +9,35 @@ import {
 } from './types';
 
 export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
-  return !!value && typeof value === 'object' && (value as { version?: unknown }).version === EDITOR_DOCUMENT_VERSION;
+  if (!value || typeof value !== 'object') return false;
+  const document = value as Partial<EditorDocumentV2>;
+  if (
+    document.version !== EDITOR_DOCUMENT_VERSION
+    || !document.canvas || typeof document.canvas !== 'object'
+    || !document.appearance || typeof document.appearance !== 'object'
+    || !document.assets || typeof document.assets !== 'object' || Array.isArray(document.assets)
+    || !document.timeline || !Array.isArray(document.timeline.tracks)
+    || !document.semantics || typeof document.semantics !== 'object'
+    || typeof document.semantics.primaryNarrativeTrackId !== 'string'
+    || !document.semantics.transcripts || typeof document.semantics.transcripts !== 'object' || Array.isArray(document.semantics.transcripts)
+    || !Array.isArray(document.semantics.scenes)
+  ) return false;
+  if (Object.values(document.assets).some((asset) => (
+    !asset || typeof asset !== 'object'
+    || !asset.locator || typeof asset.locator !== 'object'
+    || !asset.metadata || typeof asset.metadata !== 'object'
+  ))) return false;
+  if (document.timeline.tracks.some((track) => (
+    !track || typeof track !== 'object'
+    || !Array.isArray(track.clips)
+    || track.clips.some((clip) => (
+      !clip || typeof clip !== 'object'
+      || ('anchor' in clip && (!clip.anchor || typeof clip.anchor !== 'object'))
+    ))
+  ))) return false;
+  if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
+  if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
+  return true;
 }
 
 const allowedClipKinds: Record<EditorTrackType, Set<TimelineClip['kind']>> = {

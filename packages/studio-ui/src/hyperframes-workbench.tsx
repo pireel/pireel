@@ -24,6 +24,7 @@ import {
   type Block,
   type CaptionStyle,
   type Composition,
+  type EditorDocumentV2,
   type MediaRef,
   type CutTransitionEffect,
   type TransitionDirection,
@@ -157,11 +158,17 @@ import { useElementOps } from './use-element-ops';
 import { useBoxDrag } from './use-box-drag';
 import { useAgentContext } from './use-agent-context';
 import { useScriptCut } from './use-script-cut';
+import { useLiveProjectDocument } from './use-live-project-document';
+import type { LiveProjectMigrationContext } from './live-project-document';
 
 
 const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
 const RAIL_NAV_W = 48; // vertical primary-nav strip on the rail's outer edge; railW measures the CONTENT column only
-const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. custom block HTML)
+const UNDO_CAP = 20; // undo snapshot stack cap (each = canonical V2 document, incl. custom block payloads)
+const primaryNarrativeDurationSec = (document: EditorDocumentV2): number | null => {
+  const assetId = document.semantics.primaryNarrativeAssetId;
+  return assetId ? document.assets[assetId]?.metadata.durationSec ?? null : null;
+};
 // ⚠️ Temporary for testing: fill only the first N images to save LLM calls, rest stay as placeholders — **remove before launch**.
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
@@ -174,20 +181,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const localeRef = useRef(locale);
   localeRef.current = locale;
   const starter = useMemo(() => emptyComposition(), []);
-  const [comp, _setComp] = useState<Composition>(starter);
-  // setComp wrapper: also writes compRef synchronously — when agent tools/pipeline read-modify the composition
-  // **multiple times within the same tick** (under React 18 batching, state/plain refs only update after re-render),
-  // compRef is always current so a later write doesn't clobber an earlier one.
-  const compRef = useRef<Composition>(starter);
-  const setComp = useCallback((action: React.SetStateAction<Composition>) => {
-    // freezeBlockVars: every block entering the composition gets its current effective tokens stamped
-    // on (insertion-time look freeze — later theme mounts restyle only new blocks). Single client
-    // funnel: agent tools, panels, pipelines and cloud loads all pass through here. No-op (same ref)
-    // once everything is stamped.
-    const next = freezeBlockVars(typeof action === 'function' ? (action as (c: Composition) => Composition)(compRef.current) : action);
-    compRef.current = next;
-    _setComp(next);
-  }, []);
+  const liveMigrationContextRef = useRef<LiveProjectMigrationContext>({});
+  // V2 is the live authority. Existing panels still edit a runtime Composition view through this
+  // adapter; every setter advances documentRef synchronously, so batched Agent/UI writes cannot race.
+  const {
+    composition: comp,
+    compositionRef: compRef,
+    document: editorDocument,
+    documentRef: editorDocumentRef,
+    setComposition: setComp,
+    setDocument: setEditorDocument,
+    persistableDocument,
+  } = useLiveProjectDocument({
+    projectId,
+    initialComposition: starter,
+    migrationContextRef: liveMigrationContextRef,
+    prepareComposition: freezeBlockVars,
+  });
   // Block selection: selectedId = primary (anchor; floating toolbar/panels only act on a single block);
   // selectedBlockIds = full multi-select set (⌘-click/marquee, used for bulk delete). setSelectedId is wrapped
   // as a setter: every existing single-select site auto-normalizes the multi-select set to {id}/empty, no per-site
@@ -728,6 +738,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     localAssetIndexMutationRevRef.current += 1;
     setLocalAssetIndex(entries);
   }, [setLocalAssetIndex]);
+  // The V1 compatibility setter reads this synchronously. Keeping all migration-only metadata in
+  // one ref avoids coupling the live-document module to workbench feature refs.
+  liveMigrationContextRef.current = {
+    context: {
+      ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+      ...(Object.keys(clipAsrRef.current).length
+        ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([key, value]) => [key, sanitizeTranscriptSegs(value)])) }
+        : {}),
+      ...(planRef.current ? { plan: planRef.current } : {}),
+      ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
+      ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
+    },
+    videoSig: videoSigRef.current,
+    videoDurationSec: compRef.current.video?.durationSec ?? primaryNarrativeDurationSec(editorDocumentRef.current),
+  };
   /** Silently back up a source video to R2 (content-addressed, dup = instant); on success record the index and trigger a cloud sync. */
   const backupMediaToCloud = (file: File, sig: string, kind: 'video' | 'clip') => {
     void studioProviders().vault.backup(file, sig).then((r) => {
@@ -912,8 +937,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   filmstripRef.current = filmstrip;
   // Drag by holding a block body in preview: snapshot the box baseline on drag-start; boxDrag's dx/dy (comp px) are all relative to that baseline
   const boxDragRef = useRef<{ id: string; box: { x: number; y: number; w: number; h: number } } | null>(null);
-  const undoStackRef = useRef<Composition[]>([]); // snapshot stack before chat-tool changes (used by the undo tool; doesn't cover manual dragging)
-  const redoStackRef = useRef<Composition[]>([]); // undone states; any new edit (pushUndoSnapshot) discards the whole redo line
+  const undoStackRef = useRef<EditorDocumentV2[]>([]); // canonical V2 snapshots; runtime media URLs live outside history
+  const redoStackRef = useRef<EditorDocumentV2[]>([]); // undone states; any new edit (pushUndoSnapshot) discards the whole redo line
 
   // Revoke blob URLs on unmount (original video + all filmstrip frames)
   useEffect(() => () => {
@@ -1315,10 +1340,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // the transcripts so a zero-backend reopen (OSS shell / offline) can re-derive the caption layer.
   const canDeriveCaptions = (asrSentences?.length ?? 0) > 0 || Object.keys(clipAsr).length > 0;
   const compForSave = useMemo(() => stripDerivedCaptions(comp, canDeriveCaptions), [comp, canDeriveCaptions]);
+  const documentForSave = useMemo(
+    () => persistableDocument(compForSave),
+    // Context-only changes must rebuild the embedded V2 transcripts/plan/asset locators too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [persistableDocument, compForSave, editorDocument, asrSentences, clipAsr, cloudMediaRev, localAssetIndexRev, videoFile],
+  );
   useDraftAutosave(compForSave, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef, () => ({
     ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
     ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
-  }));
+  }), documentForSave);
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
   // active buffer to apply live (fitScale isn't in the preview doc, so the write-back doesn't trigger a rebuild — see the assembled comment)
@@ -2378,7 +2409,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   const pushUndoSnapshot = () => {
     if (displacedRef.current) reclaimWritership(); // every mutation passes here → the edit-intent hook of the single-writer handover
-    undoStackRef.current.push(compRef.current);
+    undoStackRef.current.push(editorDocumentRef.current);
     if (undoStackRef.current.length > UNDO_CAP) undoStackRef.current.shift();
     redoStackRef.current = []; // a new edit after undo → the old redo line no longer holds
   };
@@ -2964,14 +2995,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       return;
     }
     const stack = undoStackRef.current;
-    while (stack.length && stack[stack.length - 1] === compRef.current) stack.pop();
+    while (stack.length && stack[stack.length - 1] === editorDocumentRef.current) stack.pop();
     const prev = stack.pop();
     if (!prev) {
       toast.info(t('workbench.nothingUndo'));
       return;
     }
-    redoStackRef.current.push(compRef.current);
-    setComp(prev);
+    redoStackRef.current.push(editorDocumentRef.current);
+    setEditorDocument(prev);
     setSelectedId(null);
     setSelectedShotId(null);
     toast.success(t('workbench.undone') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : ''));
@@ -2987,9 +3018,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       toast.info(t('workbench.nothingRedo'));
       return;
     }
-    undoStackRef.current.push(compRef.current);
+    undoStackRef.current.push(editorDocumentRef.current);
     if (undoStackRef.current.length > UNDO_CAP) undoStackRef.current.shift();
-    setComp(next);
+    setEditorDocument(next);
     setSelectedId(null);
     setSelectedShotId(null);
     toast.success(t('workbench.redone') + (redoStackRef.current.length ? t('workbench.nMoreRedoSteps', { n: redoStackRef.current.length }) : ''));
@@ -3018,7 +3049,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const canUndo = (() => {
     const st = undoStackRef.current;
     let i = st.length - 1;
-    while (i >= 0 && st[i] === comp) i--;
+    while (i >= 0 && st[i] === editorDocument) i--;
     return i >= 0;
   })();
   const canRedo = redoStackRef.current.length > 0;
@@ -3277,7 +3308,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ]);
   };
   const agentToolCtx: AgentToolCtx = {
-    projectId,
+    projectId, documentRef: editorDocumentRef, setDocument: setEditorDocument,
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo,
@@ -3341,23 +3372,31 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const threads = readChatThreads(projectId);
       const indexContext = localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : undefined;
       return threads.length || indexContext
-        ? { chat: threads, ...(indexContext ? { context: indexContext } : {}), videoSig: null, videoDurationSec: null, coverThumb: null }
+        ? {
+            chat: threads,
+            ...(indexContext ? { context: indexContext } : {}),
+            videoSig: videoSigRef.current,
+            videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
+            coverThumb: coverThumbRef.current,
+          }
         : null;
     }
     const canDerive = (asrRef.current?.length ?? 0) > 0 || Object.keys(clipAsrRef.current).length > 0;
+    const context = {
+      // Persistence boundary: runtime derivation markers (cue/ref/si) never land in storage
+      ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+      ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
+      ...(planRef.current ? { plan: planRef.current } : {}),
+      ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
+      ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
+    };
+    const compositionForPersistence = { ...stripDerivedCaptions(c, canDerive), video: null };
     return {
-      comp: { ...stripDerivedCaptions(c, canDerive), video: null },
+      document: persistableDocument(compositionForPersistence),
       chat: readChatThreads(projectId),
-      context: {
-        // Persistence boundary: runtime derivation markers (cue/ref/si) never land in storage
-        ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
-        ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
-        ...(planRef.current ? { plan: planRef.current } : {}),
-        ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
-        ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
-      },
-      videoSig: videoFileRef.current ? (videoSigRef.current ?? fileSig(videoFileRef.current)) : null,
-      videoDurationSec: c.video?.durationSec ?? null,
+      context,
+      videoSig: videoSigRef.current ?? (videoFileRef.current ? fileSig(videoFileRef.current) : null),
+      videoDurationSec: c.video?.durationSec ?? primaryNarrativeDurationSec(editorDocumentRef.current),
       coverThumb: coverThumbRef.current,
     };
   }
@@ -3565,7 +3604,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // writing videoSig:null to the cloud row while the media is missing would destroy the
     // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
     if (d.videoSig && wantsMain) videoSigRef.current = d.videoSig;
-    setComp(() => ({ ...d.comp, video: null }));
+    setEditorDocument(d.document, { ...d.comp, video: null });
     // Local-draft transcript hydration (fill gaps only — in-memory state is fresher): captions are
     // derived from the transcript, so a zero-backend/offline reopen needs it from the draft.
     const dc = d.context as { asr?: AsrSegment[]; clipAsr?: Record<string, AsrSegment[]> } | undefined;
@@ -3787,7 +3826,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }, 1200);
     return () => window.clearTimeout(timer);
     // asrSentences/clipAsr are also deps: changes that touch only the transcript, not comp (like translations (sub)), must sync too
-  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced]);
+  }, [comp, editorDocument, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced]);
 
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff

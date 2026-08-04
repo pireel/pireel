@@ -20,6 +20,7 @@ export * from './receipt-delta';
 export * from './editing-primitives';
 export * from './editor-document';
 export * from './timeline-ripple';
+export * from './project-document';
 export * from './transcript-address';
 export * from './templates';
 export * from './assemble';
