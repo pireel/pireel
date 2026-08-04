@@ -91,6 +91,7 @@ import { type ExportRenderOpts, captureCompositionFrame } from './client-export'
 import { groupSimilarReviewFrames } from './review-similarity';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
+import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 
 const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
@@ -117,9 +118,11 @@ function canonicalRenderTimeline(
   resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined,
 ) {
   const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
+  const primary = primaryNarrativeRenderPlan(plan);
   return {
     durationSec: plan.durationSec,
-    placements: plan.narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec })),
+    placements: primary.activePlacements,
+    primaryHidden: primary.hidden,
     visualMediaClips: supplementalVisualMedia(plan),
   };
 }
@@ -843,6 +846,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const shot = await captureCompositionFrame({
                   comp: c,
                   videoPlacements: renderTimeline.placements,
+                  primaryVisualHidden: renderTimeline.primaryHidden,
                   visualMediaClips: renderTimeline.visualMediaClips,
                   timelineDurationSec: renderTimeline.durationSec,
                   videoFile: videoFileRef.current,
@@ -1951,6 +1955,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const shot = await captureCompositionFrame({
             comp: c2,
             videoPlacements: renderTimeline.placements,
+            primaryVisualHidden: renderTimeline.primaryHidden,
             visualMediaClips: renderTimeline.visualMediaClips,
             timelineDurationSec: renderTimeline.durationSec,
             videoFile: videoFileRef.current,

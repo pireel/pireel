@@ -46,6 +46,8 @@ export type TrackPatch = Partial<Pick<EditorTrack,
   'name' | 'muted' | 'hidden' | 'locked' | 'syncLocked' | 'stackOrder'
 >>;
 
+export type ClipPatch = Partial<Pick<TimelineClip, 'enabled'>>;
+
 type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip extends TimelineClip
   ? Omit<Clip, 'startFrame'> & { offsetFrames: number }
   : never;
@@ -57,6 +59,7 @@ export type EditorCommand =
   | { type: 'track.remove'; trackId: TrackId }
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
+  | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
   | {
     type: 'clips.insert';
     trackId: TrackId;

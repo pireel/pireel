@@ -27,6 +27,7 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { fileSig } from './media';
 import { ExportCanceled, type ExportRenderOpts, clientExportVideo } from './client-export';
 import { t } from './i18n';
+import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
 
 /** presign's hard cap (413 past it); intercept early to give a human message. */
@@ -116,7 +117,7 @@ export function useStudioExport(deps: {
   /** WebCodecs is always required; main-source bytes are required only when a surviving clip
    *  actually references that source. Clips-only and graphics/audio-only documents need no main file. */
   const needsMainSource = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>) => {
-    const placedIds = new Set(plan.narrative.map((entry) => entry.clipId));
+    const placedIds = new Set(primaryNarrativeRenderPlan(plan).activeEntries.map((entry) => entry.clipId));
     return videoTrackShots(c).some((shot) => placedIds.has(shot.id) && !shot.src);
   };
   const canClientExport = (c: Composition, plan: ReturnType<typeof editorDocumentRenderPlan>) =>
@@ -133,9 +134,12 @@ export function useStudioExport(deps: {
   ): Promise<Blob> => {
     const cached = lastExportRef.current;
     if (cached && cached.key === key && cached.blob) return cached.blob;
+    const primary = primaryNarrativeRenderPlan(plan);
     const blob = await clientExportVideo({
       comp: c,
-      videoPlacements: plan.narrative.map((entry) => ({ shotId: entry.clipId, startSec: entry.startSec, endSec: entry.endSec })),
+      videoPlacements: primary.activePlacements,
+      primaryVisualHidden: primary.hidden,
+      primaryAudioMuted: primary.muted,
       visualMediaClips: supplementalVisualMedia(plan),
       timelineDurationSec: plan.durationSec,
       videoFile: videoFileRef.current,

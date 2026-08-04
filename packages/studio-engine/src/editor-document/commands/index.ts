@@ -1,4 +1,5 @@
 export * from './clip-geometry';
+export * from './clip-patch';
 export * from './dispatcher';
 export * from './insert';
 export * from './narrative-patch';

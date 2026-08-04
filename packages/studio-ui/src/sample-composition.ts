@@ -342,6 +342,12 @@ export const PREVIEW_RUNTIME = `
     else if (d.type === 'hf:seekTimelines') { try { seekTimelines(Number(d.t) || 0); } catch (err) {} }
     else if (d.type === 'hf:play') { try { play(Number(d.t) || 0); } catch (err) {} }
     else if (d.type === 'hf:pause') { try { pause(); } catch (err) {} }
+    else if (d.type === 'hf:primaryVisibility') {
+      ['vidEl', 'personCut', 'personBg'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.style.visibility = d.hidden ? 'hidden' : '';
+      });
+    }
     else if (d.type === 'hf:shotVars' && d.vars) {
       // during framing-size drag: gsap.set the video framing transform directly (zero-setState contract, same as hf:capStyle);
       // on release the parent commits the comp, and the rebuilt timeline keyframes / inline transform match the final values here, so the switch has no jump.

@@ -16,12 +16,11 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeftRight, Eye, EyeOff, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
   type Composition,
-  type VideoShotTimelinePlacement,
   blockKind,
   blockPreviewDoc,
   cutTransitions,
@@ -33,6 +32,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import { shotFadeAt } from '@pireel/studio-engine/composition';
 import { injectPreviewRuntime } from './sample-composition';
+import type { NarrativeTimelinePlacement } from './primary-render-plan';
 import { KIND_META } from './kind-meta';
 import { t } from './i18n';
 import { playhead } from './playhead';
@@ -72,7 +72,7 @@ const SCENE_WAVE_H = 18;
 interface StudioTimelineProps {
   comp: Composition;
   /** Canonical V2 placements. Omit only for legacy contiguous compositions. */
-  videoPlacements?: readonly VideoShotTimelinePlacement[];
+  videoPlacements?: readonly NarrativeTimelinePlacement[];
   /** Canonical document duration, including empty-primary graphics/audio regions. */
   timelineDurationSec?: number;
   /** During playback: auto-scroll to follow the playhead when it leaves the viewport (stops if the user scrolls manually, until next play). */
@@ -147,6 +147,8 @@ interface StudioTimelineProps {
    *  own sound, or every clip on the music lane. A composition decision, so the export honours it. */
   videoMuted?: boolean;
   onToggleVideoMute?: () => void;
+  videoHidden?: boolean;
+  onToggleVideoHidden?: () => void;
   audioMuted?: boolean;
   onToggleAudioMute?: () => void;
   /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
@@ -208,6 +210,26 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
   );
 }
 
+function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!hidden}
+      title={hidden ? t('panels.showTrack') : t('panels.hideTrack')}
+      aria-label={hidden ? t('panels.showTrack') : t('panels.hideTrack')}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+      className={`hover:bg-panel-2 rounded p-0.5 transition ${hidden ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+    >
+      {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
+    </button>
+  );
+}
+
 function StudioTimelineImpl({
   comp,
   videoPlacements,
@@ -247,6 +269,8 @@ function StudioTimelineImpl({
   sourcePeaks,
   videoMuted,
   onToggleVideoMute,
+  videoHidden,
+  onToggleVideoHidden,
   audioMuted,
   onToggleAudioMute,
   selectedAudioId,
@@ -262,6 +286,14 @@ function StudioTimelineImpl({
 }: StudioTimelineProps) {
   const dur = timelineDurationSec ?? totalDuration(comp);
   const shots = useMemo(() => videoTrackShots(comp), [comp]);
+  const placementEnabled = useMemo(
+    () => new Map(videoPlacements?.map((placement) => [placement.shotId, placement.enabled] as const) ?? []),
+    [videoPlacements],
+  );
+  const activeVideoPlacements = useMemo(
+    () => videoPlacements?.filter((placement) => placement.enabled),
+    [videoPlacements],
+  );
   // V2 placements are native timeline geometry: visible blank regions stay blank instead of being compacted.
   const sceneSpans = useMemo(
     () => videoShotTimelineSpans(shots, videoPlacements).map((sp) => ({ shot: sp.clip, start: sp.editedStart, end: sp.editedEnd })),
@@ -916,6 +948,7 @@ function StudioTimelineImpl({
                   >
                     <Icon size={13} className={meta.dot} />
                     {k === 'video' && onToggleVideoMute && <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />}
+                    {k === 'video' && onToggleVideoHidden && <VisibilityToggle hidden={!!videoHidden} onToggle={onToggleVideoHidden} />}
                   </div>
                 );
               })}
@@ -1090,6 +1123,7 @@ function StudioTimelineImpl({
                   )}
                   {sceneSpans.map(({ shot, start, end }, i) => {
                     const sel = selectedShotIds.has(shot.id);
+                    const enabled = placementEnabled.get(shot.id) ?? true;
                     const shotLen = end - start;
                     const gapR = i < sceneSpans.length - 1 ? SHOT_GAP : 0; // hairline gap off the right edge, left edge stays time-accurate
                     const w = Math.max(8, x(shotLen) - gapR);
@@ -1124,7 +1158,8 @@ function StudioTimelineImpl({
                             setHoverBounds({ l: start, r: end });
                           }}
                           title={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
-                          className={`bg-ink/10 absolute top-3 bottom-2 overflow-hidden rounded text-left ${
+                          aria-disabled={!enabled}
+                          className={`bg-ink/10 absolute top-3 bottom-2 overflow-hidden rounded text-left ${!enabled ? 'opacity-45 grayscale ' : ''}${
                             dragged ? 'shadow-xl ring-2 ring-accent brightness-110' : sel ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'
                           }`}
                           style={{ left: x(start), width: w, ...(dragged ? { transform: `translateX(${shotDrag!.dx}px)`, zIndex: 45 } : {}) }}
@@ -1209,8 +1244,10 @@ function StudioTimelineImpl({
                       z-30 is above scene cards, below the hover "+" (z-40) */}
                   {onOpenTransition &&
                     (() => {
-                      const trs = cutTransitions(shots, videoPlacements);
+                      const trs = cutTransitions(shots, activeVideoPlacements);
                       return sceneSpans.slice(0, -1).map(({ end }, i) => {
+                        if (!(placementEnabled.get(sceneSpans[i]!.shot.id) ?? true)
+                          || !(placementEnabled.get(sceneSpans[i + 1]!.shot.id) ?? true)) return null;
                         const tr = trs.find((t2) => Math.abs(t2.cut - end) < 0.05);
                         if (!tr) {
                           return (

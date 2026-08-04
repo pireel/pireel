@@ -68,6 +68,7 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 
 - `tracks.ts` owns insert/remove/move/flags and semantic-lane invariants;
 - `clip-geometry.ts` owns frame/source split and trim math;
+- `clip-patch.ts` owns non-geometric clip state such as `enabled`;
 - `range.ts` owns lift/ripple, linked expansion, sync-lock and empty-lane pruning;
 - `insert.ts` owns overwrite/ripple insertion;
 - `split.ts` owns atomic clip/link-group subdivision;
@@ -122,16 +123,22 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   primary picture and below Pireel graphics/captions. Source trims and retimes use native V2 clip
   geometry, overlapping video audio joins the timeline mixer, and supplemental `hidden`, `enabled`
   and `muted` flags are enforced without deleting unavailable/offline assets from the document.
+- `primary-render-plan.ts` separates the primary lane's full editing geometry from its active media
+  projection. Disabled narration clips remain visible at their original timeline range but decode as
+  true gaps; primary `hidden` clears only picture and primary `muted` zeros only track audio. Preview,
+  transitions, Agent capture and browser export consume the active projection, while the timeline
+  consumes all placements. Track eye/speaker controls write native V2 flags, and the clip power
+  control uses the atomic `clip.patch` command instead of changing legacy shot payloads.
 
-The next render gate is independent `hidden`, `enabled` and `muted` behavior for the primary narrative,
-then a declared cross-type ordering rule if users are allowed to move visual media above arbitrary
-graphics/caption tracks. Supplemental B-roll/PIP compositing is native, but graphics and captions are
-currently a deliberate top overlay rather than participants in one arbitrary mixed-media z-stack.
-Consumption by the remaining compatibility tools is also a rollout gate, not schema work. The server
-adapter still projects and remigrates results for tools not yet cut over; that path must be removed
-before overlapping multi-track editing is exposed because V1 cannot round-trip those states. The
-remaining gates must reuse this document, render plan and command layer rather than introduce another
-model.
+The next render gate is applying native track/clip flags to V2 graphics, captions and audio without
+removing those items from the compatibility editing view, then a declared cross-type ordering rule if
+users are allowed to move visual media above arbitrary graphics/caption tracks. Supplemental B-roll/PIP
+compositing and primary flags are native, but graphics and captions are currently a deliberate top
+overlay rather than participants in one arbitrary mixed-media z-stack. Consumption by the remaining
+compatibility tools is also a rollout gate, not schema work. The server adapter still projects and
+remigrates results for tools not yet cut over; that path must be removed before overlapping multi-track
+editing is exposed because V1 cannot round-trip those states. The remaining gates must reuse this
+document, render plan and command layer rather than introduce another model.
 
 ## Rollout gates
 
@@ -139,8 +146,8 @@ The multi-track UI must not ship until all of these are true:
 
 - [x] persistence loads V1/V2 and writes only V2;
 - [x] live undo/redo snapshots V2, including cloud-history restore;
-- preview and export consume V2 or a tested read projection (native primary placement and
-  supplemental visual compositing complete; primary render flags and cross-type order remain);
+- preview and export consume V2 or a tested read projection (native primary placement/flags and
+  supplemental visual compositing complete; graphics/caption/audio flags and cross-type order remain);
 - browser and server tools use the same V2 command engine;
 - no command discovers primary narration via `tracks[0]`;
 - audio/graphics/captions follow one declared ripple and anchor policy;

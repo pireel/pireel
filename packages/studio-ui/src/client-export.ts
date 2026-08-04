@@ -168,6 +168,14 @@ function createOverlay(html: string, w: number, h: number): Promise<Overlay> {
   });
 }
 
+function applyPrimaryOverlayVisibility(overlay: Overlay, hidden: boolean | undefined): void {
+  if (!hidden) return;
+  for (const id of ['vidEl', 'personCut', 'personBg']) {
+    const element = overlay.doc.getElementById(id);
+    if (element) element.style.visibility = 'hidden';
+  }
+}
+
 /** Inline every in-block <img> as a data URI (foreignObject rasterization forbids external loads; cross-origin goes through the /api/media/fetch proxy). */
 async function inlineImages(root: HTMLElement): Promise<void> {
   const imgs = [...root.querySelectorAll('img')];
@@ -239,6 +247,8 @@ function framedClipPath(W: number, H: number, vs: { radius: number; inset: { t: 
 export interface ClientExportOpts {
   comp: Composition;
   videoPlacements?: readonly VideoShotTimelinePlacement[];
+  primaryVisualHidden?: boolean;
+  primaryAudioMuted?: boolean;
   visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   /** Main-source bytes. Null is valid for graphics/audio-only and clips-only documents. */
@@ -277,6 +287,7 @@ export interface CapturedCompositionFrame {
 export async function captureCompositionFrame(opts: {
   comp: Composition;
   videoPlacements?: readonly VideoShotTimelinePlacement[];
+  primaryVisualHidden?: boolean;
   visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   videoFile: File | null;
@@ -357,6 +368,7 @@ export async function captureCompositionFrame(opts: {
   let overlay: Overlay;
   try {
     overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
+    applyPrimaryOverlayVisibility(overlay, opts.primaryVisualHidden);
   } catch (error) {
     disposeCaptureSources();
     throw error;
@@ -381,8 +393,8 @@ export async function captureCompositionFrame(opts: {
     canvas.height = outH;
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(bg, 0, 0);
-    const sample = rig ? await sampleAt(rig, srcT) : null;
-    if (sample && rig) {
+    const sample = rig && !opts.primaryVisualHidden ? await sampleAt(rig, srcT) : null;
+    if (sample && rig && !opts.primaryVisualHidden) {
       const Sx = outW / W;
       const Sy = outH / H;
       ctx.setTransform(Sx, 0, 0, Sy, 0, 0);
@@ -480,7 +492,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const s = spans[i]!.clip as (typeof shots)[number] & { src?: string; filter?: ShotFilter };
     const filterCss = shotFilterCss(s.filter);
     const filter = filterCss === 'none' ? {} : { filter: filterCss };
-    const g = shotGain(s);
+    const g = opts.primaryAudioMuted ? 0 : shotGain(s);
     const gain = g === 1 ? {} : { gain: g };
     // Same envelope as the preview: own fades × seam micro-fades at edges that meet a non-contiguous neighbour
     const prev = spans[i - 1]?.clip as typeof s | undefined;
@@ -554,6 +566,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
 
     // Overlay document + asset inlining
     overlay = await createOverlay(injectPreviewRuntime(assembleHtml(comp, undefined, opts.videoPlacements, opts.visualMediaClips)), W, H);
+    applyPrimaryOverlayVisibility(overlay, opts.primaryVisualHidden);
   } catch (error) {
     for (const rig of rigs.values()) disposeSourceRig(rig);
     for (const input of dnInputs) void input.dispose();
@@ -625,7 +638,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
     const ghostC = new OffscreenCanvas(outW, outH);
     const gctx = ghostC.getContext('2d')!;
     const trsX: { cut: number; half: number; effect: string; dir: string; preKey: string; postKey: string; segA: ExpSeg; segB: ExpSeg }[] = [];
-    for (const tr of cutTransitions(shots, opts.videoPlacements)) {
+    for (const tr of opts.primaryVisualHidden ? [] : cutTransitions(shots, opts.videoPlacements)) {
       let iB = -1;
       for (let bi = 1; bi < segs.length; bi++) {
         if (Math.abs(segStarts[bi]! - tr.cut) < 0.05) {
@@ -753,7 +766,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const v0 = performance.now();
       const [overlayImg, sample, gSample, visualSamples] = await Promise.all([
         overlayP,
-        rig ? sampleAt(rig, srcT).then((s) => ((tm.video += performance.now() - v0), s)) : null,
+        rig && !opts.primaryVisualHidden ? sampleAt(rig, srcT).then((s) => ((tm.video += performance.now() - v0), s)) : null,
         gRig ? sampleAt(gRig, gSrcT) : null,
         visualSamplesP,
       ]);

@@ -1,4 +1,5 @@
 import type { EditorDocumentV2 } from '../types';
+import { patchEditorClip } from './clip-patch';
 import { insertEditorClips } from './insert';
 import { patchNarrativeClips } from './narrative-patch';
 import { splitEditorClip } from './split';
@@ -17,6 +18,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchEditorTrack(document, command.trackId, command.patch);
     case 'track.move':
       return moveEditorTrack(document, command.trackId, command.toIndex);
+    case 'clip.patch':
+      return patchEditorClip(document, command.trackId, command.clipId, command.patch);
     case 'clips.insert':
       return insertEditorClips(document, command);
     case 'range.remove':
