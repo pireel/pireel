@@ -24,6 +24,7 @@ export * from './timeline-ripple';
 export * from './canvas-document-edit';
 export * from './narration-document-edit';
 export * from './overlay-document-edit';
+export * from './overlay-track-edit';
 export * from './project-document';
 export * from './transcript-address';
 export * from './templates';

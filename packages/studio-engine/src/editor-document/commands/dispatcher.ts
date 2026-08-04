@@ -5,6 +5,8 @@ import { insertEditorClips } from './insert';
 import { relayManagedCaptionTrack } from './managed-captions';
 import { patchNarrativeClips } from './narrative-patch';
 import { patchOverlayClips } from './overlay-patch';
+import { moveOverlayClip } from './overlay-move';
+import { duplicateOverlayClip } from './overlay-duplicate';
 import { removeEditorClips } from './remove';
 import { splitEditorClip } from './split';
 import { removeEditorRange } from './range';
@@ -28,6 +30,10 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchEditorClip(document, command.trackId, command.clipId, command.patch);
     case 'overlay.patch':
       return patchOverlayClips(document, command.updates);
+    case 'overlay.move':
+      return moveOverlayClip(document, command.clipId, command.toTrackId);
+    case 'overlay.duplicate':
+      return duplicateOverlayClip(document, command.clipId, command.newClipId, command.startFrame, command.toTrackId);
     case 'captions.relay':
       return relayManagedCaptionTrack(document);
     case 'clips.remove':

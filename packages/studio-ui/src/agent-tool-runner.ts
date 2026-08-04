@@ -52,6 +52,7 @@ import {
   narrationSourceSplitsAtEditedPoints,
   patchNarrativeClips,
   removeOverlayDocumentClips,
+  duplicateOverlayDocumentClip,
   resolveWordIds,
   wordRanges,
   wordRangesToEdited,
@@ -793,17 +794,27 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             const at = typeof input.atSec === 'number' ? Math.max(0, input.atSec) : b.startSec + b.durationSec;
             const dupStart = Math.round(at * 100) / 100;
-            const nb: Block = {
-              ...b,
-              id: blockId('dup'),
+            const newClipId = blockId('dup');
+            const stackOrder = freeTrack(compRef.current.blocks, dupStart, b.durationSec, b.trackIndex);
+            const sourceTrack = documentRef.current.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
+            const sourceClip = sourceTrack?.clips.find((clip) => clip.id === b.id);
+            const target = sourceClip?.kind === 'caption'
+              ? sourceTrack
+              : documentRef.current.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+            const edit = duplicateOverlayDocumentClip({
+              document: documentRef.current,
+              clipId: b.id,
+              newClipId,
               startSec: dupStart,
-              trackIndex: freeTrack(compRef.current.blocks, dupStart, b.durationSec, b.trackIndex),
-              slots: { ...b.slots },
-            };
-            setComp((cc) => ({ ...cc, blocks: [...cc.blocks, nb] }));
+              ...(target
+                ? { toTrackId: target.id }
+                : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),
+            });
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            setDocument(edit.document);
             setSelectedShotId(null);
-            setSelectedId(nb.id);
-            return { ok: true, summary: t('workbench.duplicatedNameSecS', { name: bname(b), sec: r1(nb.startSec) }), data: { newBlockId: nb.id } };
+            setSelectedId(newClipId);
+            return { ok: true, summary: t('workbench.duplicatedNameSecS', { name: bname(b), sec: r1(dupStart) }), data: { newBlockId: newClipId } };
           }
           case 'add_transition': {
             const at = Number(input.atSec);

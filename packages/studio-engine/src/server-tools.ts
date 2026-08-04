@@ -47,6 +47,7 @@ import {
   projectDocumentToLegacyComposition,
   removeNarrationClipsWithoutRipple,
   removeOverlayDocumentClips,
+  duplicateOverlayDocumentClip,
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
@@ -492,6 +493,30 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const b = findBlock(input.blockId);
       if (!b) return { result: { ok: false, error: 'block not found' } };
       const at = typeof input.atSec === 'number' ? Math.max(0, input.atSec) : b.startSec + b.durationSec;
+      if (p.document) {
+        const newClipId = blockId('ai');
+        const stackOrder = freeTrack(c.blocks, at, b.durationSec, b.trackIndex);
+        const sourceTrack = p.document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === b.id));
+        const sourceClip = sourceTrack?.clips.find((clip) => clip.id === b.id);
+        const target = sourceClip?.kind === 'caption'
+          ? sourceTrack
+          : p.document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+        const edit = duplicateOverlayDocumentClip({
+          document: p.document,
+          clipId: b.id,
+          newClipId,
+          startSec: at,
+          ...(target
+            ? { toTrackId: target.id }
+            : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: `Duplicated "${bname(b)}"`, data: { newBlockId: newClipId } },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       const nb: Block = { ...b, id: blockId('ai'), startSec: at, trackIndex: freeTrack(c.blocks, at, b.durationSec) };
       return { result: { ok: true, summary: `Duplicated "${bname(b)}"`, data: { newBlockId: nb.id } }, comp: { ...c, blocks: [...c.blocks, nb] } };
     }

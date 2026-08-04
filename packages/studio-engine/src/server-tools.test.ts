@@ -68,6 +68,22 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(moved.document).toBeUndefined();
     expect(p.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 30 });
   });
+  it('V2 duplicate_block 创建原生片段并保留空轨身份', () => {
+    const p = v2proj();
+    p.document!.timeline.tracks.push({
+      id: 'empty-graphics', type: 'graphics', muted: false, hidden: true, locked: false,
+      syncLocked: false, stackOrder: 4, clips: [],
+    });
+    const duplicated = runServerTool('duplicate_block', { blockId: 'b1', atSec: 6 }, p);
+    expect(duplicated.result.ok).toBe(true);
+    const newBlockId = (duplicated.result.data as { newBlockId: string }).newBlockId;
+    expect(duplicated.document?.timeline.tracks.flatMap((track) => track.clips).find((item) => item.id === newBlockId)).toMatchObject({
+      kind: 'graphic', startFrame: 180, durationFrames: 90,
+    });
+    expect(duplicated.document?.timeline.tracks.find((track) => track.id === 'empty-graphics')).toMatchObject({
+      hidden: true, syncLocked: false, stackOrder: 4, clips: [],
+    });
+  });
   it('V2 画布工具走原生命令并保留投影之外的空轨', () => {
     const p = v2proj();
     p.document!.timeline.tracks.push({

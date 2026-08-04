@@ -721,12 +721,14 @@ function StudioTimelineImpl({
   // order (NLE convention, upper rows cover lower ones). The scene rail remains the semantic anchor.
   const sceneRail = hasVideoLane;
   const H0 = sceneRail ? SCENE_H : ROW_H;
-  // Only open a row for tracks that actually have non-caption blocks: sentence captions don't enter the timeline (pure computed output), and empty tracks no longer render empty rows
+  // Canonical graphics lanes remain visible even when empty. Legacy hosts without trackStates retain
+  // the blocks-derived fallback; V2 hosts get stable rows/targets from track identity and stack order.
   const overlayTracks = useMemo(() => {
     const set = new Set<number>();
+    for (const track of trackStates ?? []) if (track.type === 'graphics') set.add(track.stackOrder);
     for (const b of comp.blocks) if (b.trackIndex > 0 && !isSentenceCaption(b)) set.add(b.trackIndex);
     return [...set].sort((a, b) => b - a);
-  }, [comp.blocks]);
+  }, [comp.blocks, trackStates]);
   // Sentence captions get their own read-only "caption lane" (follows the transcript, no drag/trim, edited from the caption panel), always at the bottom
   const captionBlocks = useMemo(
     () => comp.blocks.filter(isSentenceCaption).sort((a, b) => a.startSec - b.startSec),
@@ -794,20 +796,32 @@ function StudioTimelineImpl({
   };
 
   // Gutter drag-reorder: the dragged row follows via translateY, the target slot draws an insert line, release commits the new display order
-  const [trackDrag, setTrackDrag] = useState<{ track: number; fromSlot: number; toSlot: number; dy: number } | null>(null);
+  const [trackDrag, setTrackDrag] = useState<{
+    track: number;
+    fromSlot: number;
+    toSlot: number;
+    fromIndex: number;
+    toIndex: number;
+    dy: number;
+  } | null>(null);
   const trackDragRef = useRef(trackDrag);
   trackDragRef.current = trackDrag;
   const startTrackDrag = (e: React.PointerEvent, track: number) => {
     if (overlayTracks.length <= 1) return; // only one overlay track, nothing to reorder (caption lane doesn't count)
     e.preventDefault();
     const fromSlot = dispIdx.get(track)!;
+    const fromIndex = overlayTracks.indexOf(track);
     const sy = e.clientY;
     const mv = (ev: PointerEvent) => {
       if (ev.buttons === 0) { up(); return; }
       const dy = ev.clientY - sy;
-      // Clamp the upper bound to the last real overlay track (= overlayTracks.length); the caption lane's slot rejects drops
-      const toSlot = Math.max(1, Math.min(overlayTracks.length, fromSlot + Math.round(dy / (ROW_H + ROW_GAP))));
-      setTrackDrag({ track, fromSlot, toSlot, dy });
+      const center = rowTop(track) + ROW_H / 2 + dy;
+      const others = overlayTracks.filter((candidate) => candidate !== track);
+      const toIndex = others.filter((candidate) => center > rowTop(candidate) + ROW_H / 2).length;
+      const before = others[toIndex];
+      const after = others[toIndex - 1];
+      const toSlot = before != null ? dispIdx.get(before)! : after != null ? dispIdx.get(after)! + 1 : fromSlot;
+      setTrackDrag({ track, fromSlot, toSlot, fromIndex, toIndex, dy });
     };
     const up = () => {
       window.removeEventListener('pointermove', mv);
@@ -815,10 +829,10 @@ function StudioTimelineImpl({
       window.removeEventListener('pointercancel', up);
       const td = trackDragRef.current;
       setTrackDrag(null);
-      if (td && td.toSlot !== td.fromSlot) {
+      if (td && td.toIndex !== td.fromIndex) {
         const order = overlayTracks.slice(); // overlay tracks top-to-bottom (excludes caption lane)
-        const [moved] = order.splice(td.fromSlot - 1, 1);
-        order.splice(td.toSlot - 1, 0, moved!);
+        const [moved] = order.splice(td.fromIndex, 1);
+        order.splice(td.toIndex, 0, moved!);
         onReorderTracks(order);
       }
     };

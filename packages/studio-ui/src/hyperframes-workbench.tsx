@@ -45,6 +45,8 @@ import {
   applyNarrationSplitCommands,
   removeNarrationClipsWithoutRipple,
   removeOverlayDocumentClips,
+  moveOverlayDocumentClip,
+  reorderOverlayDocumentTracks,
   assembleHtml,
   blockBgCss,
   captionLineSegments,
@@ -3720,34 +3722,47 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     onOpenShotSettings: openShotSettings,
     onMoveBlock: moveBlock,
     onResizeBlock: resizeBlock,
-    /** Move a block across tracks (drag the chip vertically to another component track): change trackIndex = change z (NLE convention);
-     *  an emptied track disappears automatically (timeline track rows are derived from blocks, no row to render = collapse). */
+    /** Move a block across stable native tracks. The emptied source lane remains in the document. */
     onMoveBlockTrack: (id: string, trackIndex: number) => {
       if (genLockToast(id)) return;
+      const target = editorDocumentRef.current.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === trackIndex);
+      if (!target) {
+        toast.error(t('workbench.elementNotFound'));
+        return;
+      }
+      const edit = moveOverlayDocumentClip({ document: editorDocumentRef.current, clipId: id, toTrackId: target.id });
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      setComp((c) => ({ ...c, blocks: c.blocks.map((b) => (b.id === id ? { ...b, trackIndex } : b)) }));
+      setEditorDocument(edit.document);
     },
-    /** Dragging a block into the gap between rows = fork a new track: insert a new track at the slot in top-to-bottom display
-     *  order, re-index the whole z table (same as onReorderTracks: index from 2, z=1 always the sentence-caption layer). An emptied old track disappears. */
+    /** Dragging into a row gap creates a first-class lane between its native stack neighbors. */
     onMoveBlockNewTrack: (id: string, slot: number) => {
       if (genLockToast(id)) return;
-      const c = compRef.current;
-      const order = [...new Set(c.blocks.filter((b) => b.trackIndex > 0 && !isSentenceCaption(b)).map((b) => b.trackIndex))].sort((a, b) => b - a);
-      const NEW = -1; // sentinel: new-track placeholder
-      order.splice(Math.max(0, Math.min(order.length, slot)), 0, NEW);
-      const K = order.length;
-      const z = new Map(order.map((tk, i) => [tk, K - i + 1]));
+      const graphics = editorDocumentRef.current.timeline.tracks
+        .filter((track) => track.type === 'graphics')
+        .sort((left, right) => right.stackOrder - left.stackOrder);
+      const insertAt = Math.max(0, Math.min(graphics.length, slot));
+      const above = graphics[insertAt - 1]?.stackOrder;
+      const below = graphics[insertAt]?.stackOrder;
+      const stackOrder = above == null
+        ? (below ?? 1) + 1
+        : below == null
+          ? (above > 1 ? (above + 1) / 2 : above - 1)
+          : (above + below) / 2;
+      const edit = moveOverlayDocumentClip({
+        document: editorDocumentRef.current,
+        clipId: id,
+        newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder },
+      });
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      setComp((cur) => ({
-        ...cur,
-        blocks: cur.blocks.map((b) =>
-          b.id === id
-            ? { ...b, trackIndex: z.get(NEW)! }
-            : b.trackIndex > 0 && !isSentenceCaption(b) && z.has(b.trackIndex)
-              ? { ...b, trackIndex: z.get(b.trackIndex)! }
-              : b,
-        ),
-      }));
+      setEditorDocument(edit.document);
     },
     onInsertClipAt: (t: number) => void insertLocalClipAt(t),
     onOpenTransition: openTransitionAt,
@@ -3802,15 +3817,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (track) patchTrackFlags(trackId, { hidden: !track.hidden });
     },
     onReorderTracks: (topToBottom: number[]) => {
-      // Timeline overlay tracks top-to-bottom = canvas z high-to-low (NLE convention): re-index z by the new display order.
-      // Index from 2 (top row = K+1): z=1 always the sentence-caption layer (hidden on the timeline, not reordered)
-      const K = topToBottom.length;
-      const map = new Map(topToBottom.map((tk, i) => [tk, K - i + 1]));
+      const graphics = editorDocumentRef.current.timeline.tracks.filter((track) => track.type === 'graphics');
+      const ids = topToBottom.map((stackOrder) => graphics.find((track) => track.stackOrder === stackOrder)?.id).filter((id): id is string => !!id);
+      const edit = reorderOverlayDocumentTracks(editorDocumentRef.current, ids);
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      setComp((c) => ({
-        ...c,
-        blocks: c.blocks.map((b) => (b.trackIndex > 0 && !isSentenceCaption(b) && map.has(b.trackIndex) ? { ...b, trackIndex: map.get(b.trackIndex)! } : b)),
-      }));
+      setEditorDocument(edit.document);
     },
   });
 

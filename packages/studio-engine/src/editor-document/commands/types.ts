@@ -76,6 +76,8 @@ export type EditorCommand =
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
   | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
   | { type: 'overlay.patch'; updates: OverlayClipPatchUpdate[] }
+  | { type: 'overlay.move'; clipId: TimelineClipId; toTrackId: TrackId }
+  | { type: 'overlay.duplicate'; clipId: TimelineClipId; newClipId: TimelineClipId; startFrame: number; toTrackId?: TrackId }
   | { type: 'captions.relay' }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
   | {

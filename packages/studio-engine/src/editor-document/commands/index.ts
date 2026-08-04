@@ -8,6 +8,8 @@ export * from './narrative-patch';
 export * from './narration-range';
 export * from './narration-split';
 export * from './overlay-patch';
+export * from './overlay-move';
+export * from './overlay-duplicate';
 export * from './range';
 export * from './remove';
 export * from './split';
