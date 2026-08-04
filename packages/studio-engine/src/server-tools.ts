@@ -67,6 +67,7 @@ import {
   shotFilterCss,
   shotId,
   splitShotsAtEditedPoints,
+  syncFrozenBlockVars,
   patchShotFraming,
   totalDuration,
   validateComposition,
@@ -287,18 +288,28 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
     }
     out.comp = next;
     if (p.document) {
-      const documentBase = out.document ?? p.document;
-      const projectionBase = out.document
-        ? projectDocumentToLegacyComposition({ projectId: p.id, value: out.document })
-        : p.comp;
-      out.document = normalizeProjectDocument({
-        projectId: p.id,
-        value: next,
-        context: out.context ?? p.context,
-        videoDurationSec: p.videoDurationSec,
-        previousDocument: documentBase,
-        previousProjection: projectionBase,
-      }).document;
+      if (out.document) {
+        const projected = projectDocumentToLegacyComposition({ projectId: p.id, value: out.document });
+        const frozenProjection = freezeBlockVars(projected);
+        if (JSON.stringify(next) !== JSON.stringify(frozenProjection)) {
+          return {
+            result: {
+              ok: false,
+              error: 'mutation rejected: native document and compatibility result diverged',
+            },
+          };
+        }
+        out.document = syncFrozenBlockVars(out.document, next.blocks);
+      } else {
+        out.document = normalizeProjectDocument({
+          projectId: p.id,
+          value: next,
+          context: out.context ?? p.context,
+          videoDurationSec: p.videoDurationSec,
+          previousDocument: p.document,
+          previousProjection: p.comp,
+        }).document;
+      }
       const documentIssues = validateEditorDocumentV2(out.document).filter((issue) => issue.severity === 'error');
       if (documentIssues.length) {
         return {

@@ -60,6 +60,7 @@ export type EditorCommand =
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
   | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
+  | { type: 'captions.relay' }
   | {
     type: 'clips.insert';
     trackId: TrackId;

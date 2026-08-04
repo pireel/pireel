@@ -23,38 +23,29 @@ export const inNarrationSource = (c: VideoShot): boolean => !c.src;
 /** Intermediate derived shape: an edited-timeline sentence fragment with si-stamped words + source pointer. */
 export type MappedSeg = Omit<AsrSegment, 'words'> & { words: CueWord[]; ref: CueRef };
 
-/** Map a source's transcript word times (that source's coords) onto the edited
- *  timeline (final coords) and drop words fully cut away — used when laying/re-
- *  laying captions: caption blocks live on the edited timeline, so after cutting
- *  you can't lay them by source time directly. */
-export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource, srcKey: string | null = null): MappedSeg[] {
+/** Map one transcript source through an arbitrary source-time → edited-time function. */
+export function mapTranscriptSegsToEdited(
+  segs: AsrSegment[],
+  mapSourceSec: (sourceSec: number) => number,
+  srcKey: string | null = null,
+): MappedSeg[] {
   const out: MappedSeg[] = [];
   for (const [segIdx, s] of segs.entries()) {
     const words: CueWord[] = (s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end))
       .map((w, wi) => {
-        const start = srcToEditedLoose(shots, w.start, inSrc);
-        const end = srcToEditedLoose(shots, w.end, inSrc);
+        const start = mapSourceSec(w.start);
+        const end = mapSourceSec(w.end);
         // Word width only shrinks, never grows: when a cut / insert lands mid-word,
-        // the loose mapping would swallow the whole inserted duration into the word
-        // (making word gaps seamless, so splitting can't detect it) — cap at the
-        // source-domain word width so the jump falls between words instead.
-        // si = the word's index within the source sentence (edit/translation write-back key).
+        // the loose mapping would swallow the whole inserted duration into the word.
         return { ...w, si: (w as CueWord).si ?? wi, start, end: Math.min(end, start + (w.end - w.start) + 0.05) };
       })
       .filter((w) => w.end - w.start > 0.03);
     if (!words.length) continue;
-    // Sentence broken up by editing (a segment from another source inserted
-    // between words): a big jump appears in edited time — split into multiple
-    // captions by the jump, each window hugging its own words. Without splitting,
-    // one caption spans the whole insert and stacks on the insert's own caption at
-    // the same anchor (observed: two lines of subtitles piled up). Word-delete
-    // edits produce no jump (time is compressed), so they're unaffected
     const groups: (typeof words)[] = [[words[0]!]];
     for (let i = 1; i < words.length; i++) {
       if (words[i]!.start - words[i - 1]!.end > 0.8) groups.push([words[i]!]);
       else groups[groups.length - 1]!.push(words[i]!);
     }
-    // Translation (sub) follows only the first group: when a sentence is split into several, re-laying the whole-sentence translation would stack two copies
     groups.forEach((g, gi) =>
       out.push({
         start: g[0]!.start,
@@ -69,6 +60,14 @@ export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (
     );
   }
   return out;
+}
+
+/** Map a source's transcript word times (that source's coords) onto the edited
+ *  timeline (final coords) and drop words fully cut away — used when laying/re-
+ *  laying captions: caption blocks live on the edited timeline, so after cutting
+ *  you can't lay them by source time directly. */
+export function mapSegsToEdited(segs: AsrSegment[], shots: VideoShot[], inSrc: (c: VideoShot) => boolean = inNarrationSource, srcKey: string | null = null): MappedSeg[] {
+  return mapTranscriptSegsToEdited(segs, (sourceSec) => srcToEditedLoose(shots, sourceSec, inSrc), srcKey);
 }
 
 /** All-source transcript → edited-timeline caption data: narration source + each inserted source mapped by its own predicate, sorted by edited time. */
@@ -109,19 +108,18 @@ function distributeSub(sub: string, weights: number[]): string[] {
  *  their own piece. No cut-staleness checks: whatever is stored gets shown (user-locked).
  *  opts.subLang = the CURRENT bilingual target: translations stamped with a DIFFERENT known language
  *  are stale (left over from a language switch) and are hidden; unstamped ones (legacy/BYO) show. */
-export function displayCues(
-  shots: VideoShot[],
-  narr: AsrSegment[] | null,
-  clipAsr: Record<string, AsrSegment[]>,
+export function displayCuesFromMappedSegs(
+  mapped: MappedSeg[],
+  sourceSegment: (ref: CueRef) => AsrSegment | undefined,
   opts?: { subLang?: string; canvasW?: number },
 ): DisplayCue[] {
   const budgetEm = Math.max(6, Math.floor(((DEFAULT_CAPTION_WIDTH_PCT / 100) * (opts?.canvasW ?? 1080) - BASE_CAPTION_FONT_PX) / BASE_CAPTION_FONT_PX));
   const out: DisplayCue[] = [];
-  for (const g of mappedCaptionSegs(shots, narr, clipAsr)) {
+  for (const g of mapped) {
     const words = g.words;
     if (!words.length) continue;
     const gRef = g.ref;
-    const srcSeg = gRef ? (gRef.src ? clipAsr[gRef.src] : narr)?.[gRef.seg] : undefined;
+    const srcSeg = gRef ? sourceSegment(gRef) : undefined;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
     // ONE line per cue, sized by the current editable canvas: budget = default box width in em
     // minus plate/safety — a 16:9 canvas holds a full
@@ -148,6 +146,19 @@ export function displayCues(
     }
   }
   return out;
+}
+
+export function displayCues(
+  shots: VideoShot[],
+  narr: AsrSegment[] | null,
+  clipAsr: Record<string, AsrSegment[]>,
+  opts?: { subLang?: string; canvasW?: number },
+): DisplayCue[] {
+  return displayCuesFromMappedSegs(
+    mappedCaptionSegs(shots, narr, clipAsr),
+    (ref) => (ref.src ? clipAsr[ref.src] : narr)?.[ref.seg],
+    opts,
+  );
 }
 
 /** Captions = a pure computation from the transcript: whenever the transcript

@@ -2,6 +2,7 @@ export * from './clip-geometry';
 export * from './clip-patch';
 export * from './dispatcher';
 export * from './insert';
+export * from './managed-captions';
 export * from './narrative-patch';
 export * from './narration-range';
 export * from './narration-split';

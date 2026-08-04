@@ -142,6 +142,9 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   captions from V1 migrate above the previous highest graphic track, preserving their old appearance
   without a permanent caption z-order exception. Person matte remains an explicit Pireel semantic
   sandwich over that neutral stack.
+- narration ripple edits now finish with the native `captions.relay` command. Managed captions map
+  transcript source seconds through V2 clip placement (including gaps and retiming), keep their lane
+  flags and anchors, and never remigrate the compatibility Composition back into the document.
 
 Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
 adapter still projects and remigrates results for tools not yet cut over; that path must be removed

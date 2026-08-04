@@ -1,18 +1,16 @@
 /** Semantic narration range edits shared by the live browser and offline MCP executor. */
 
 import type { AsrSegment } from './build-blocks';
-import { relayCaptionLayer } from './captions-relay';
 import {
+  applyEditorCommand,
   applyNarrationRangeCommands,
+  syncCaptionTranscripts,
   type EditorCommandError,
   type EditorCommandReceipt,
   type EditorDocumentV2,
   type NarrationSecondRange,
 } from './editor-document';
-import {
-  normalizeProjectDocument,
-  projectDocumentToLegacyComposition,
-} from './project-document';
+import { projectDocumentToLegacyComposition } from './project-document';
 import type { StudioProjectContext } from './project-dto';
 import type { Composition } from './composition-core';
 
@@ -20,9 +18,11 @@ export interface NarrationDocumentEditInput {
   projectId: string;
   document: EditorDocumentV2;
   ranges: readonly NarrationSecondRange[];
+  /** @deprecated Kept until all callers source transcript state exclusively from the V2 document. */
   context?: StudioProjectContext;
   mainTranscript: AsrSegment[] | null;
   clipTranscripts: Record<string, AsrSegment[]>;
+  /** @deprecated Native caption derivation reads document.canvas.width. */
   canvasWidth?: number;
 }
 
@@ -44,37 +44,21 @@ export type NarrationDocumentEditResult =
 export function applyNarrationDocumentEdit(input: NarrationDocumentEditInput): NarrationDocumentEditResult {
   const command = applyNarrationRangeCommands(input.document, input.ranges);
   if (!command.ok) return command;
-  const projected = projectDocumentToLegacyComposition({ projectId: input.projectId, value: command.document });
-  const composition: Composition = {
-    ...projected,
-    blocks: relayCaptionLayer(
-      projected.blocks,
-      projected.shots ?? [],
-      input.mainTranscript,
-      input.clipTranscripts,
-      { canvasW: input.canvasWidth ?? projected.width },
-    ),
-  };
-  const normalized = normalizeProjectDocument({
-    projectId: input.projectId,
-    value: composition,
-    context: input.context,
-    previousDocument: command.document,
-    previousProjection: projected,
-  });
-  const issue = normalized.issues.find((candidate) => candidate.severity === 'error');
-  if (issue) {
+  const transcriptDocument = syncCaptionTranscripts(command.document, input.mainTranscript, input.clipTranscripts);
+  const captions = applyEditorCommand(transcriptDocument, { type: 'captions.relay' });
+  if (!captions.ok) {
     return {
       ok: false,
       document: input.document,
-      error: { code: 'invalid-document', message: issue.message, path: issue.path },
+      error: captions.error,
     };
   }
+  const composition = projectDocumentToLegacyComposition({ projectId: input.projectId, value: captions.document });
   return {
     ok: true,
-    document: normalized.document,
+    document: captions.document,
     composition,
-    receipts: command.receipts,
+    receipts: [...command.receipts, captions.receipt],
     removedFrames: command.removedFrames,
   };
 }

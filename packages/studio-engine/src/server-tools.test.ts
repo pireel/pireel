@@ -77,7 +77,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(framing.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({
       startFrame: 45,
       durationFrames: 300,
-      block: { box: { x: 0.5, y: 0.06, w: 0.46, h: 0.78 } },
+      block: { box: { x: 0.5, y: 0.06, w: 0.46, h: 0.78 }, vars: expect.any(Object) },
     });
 
     const filtered = runServerTool('set_video_filter', { shotId: 's1', brightness: 1.2 }, {
@@ -266,9 +266,16 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       locked: false, syncLocked: true, stackOrder: 2,
       clips: [{ id: 'broll-clip', kind: 'media', assetId: 'broll', startFrame: 150, durationFrames: 60, sourceInSec: 0, sourceOutSec: 2, enabled: true }],
     });
+    p.document!.timeline.tracks.push({
+      id: 'empty-layout-lane', type: 'graphics', role: 'graphics', muted: false, hidden: true,
+      locked: false, syncLocked: false, stackOrder: 9, clips: [],
+    });
     const cut = runServerTool('cut_range', { fromSec: 0, toSec: 2 }, p);
     expect(cut.result.ok).toBe(true);
     expect(cut.document?.timeline.tracks.find((track) => track.id === 'broll-track')?.clips[0]).toMatchObject({ startFrame: 90 });
+    expect(cut.document?.timeline.tracks.find((track) => track.id === 'empty-layout-lane')).toMatchObject({
+      hidden: true, syncLocked: false, stackOrder: 9, clips: [],
+    });
 
     p.document!.timeline.tracks.find((track) => track.id === 'broll-track')!.locked = true;
     const rejected = runServerTool('cut_range', { fromSec: 0, toSec: 1 }, p);
