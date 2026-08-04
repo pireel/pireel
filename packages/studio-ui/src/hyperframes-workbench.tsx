@@ -41,8 +41,10 @@ import {
   applyEditorCommand,
   applyCanvasDocumentEdit,
   applyNarrationDocumentEdit,
+  applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
   removeNarrationClipsWithoutRipple,
+  removeOverlayDocumentClips,
   assembleHtml,
   blockBgCss,
   captionLineSegments,
@@ -2355,8 +2357,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
    *  removes the block instantly — going through setComp alone waits for the 300ms debounced rebuild + double-buffer swap, making delete feel sticky. */
   const removeBlock = (id: string) => {
     if (genLockToast(id)) return;
+    const edit = removeOverlayDocumentClips({ document: editorDocumentRef.current, clipIds: [id] });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
     postPreview({ type: 'hf:remove', id });
-    setComp((c) => ({ ...c, blocks: c.blocks.filter((b) => b.id !== id) }));
+    setEditorDocument(edit.document);
     setSelectedIdRaw((s) => (s === id ? null : s));
     setSelectedBlockIds((cur) => {
       if (!cur.has(id)) return cur;
@@ -2870,16 +2877,31 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Timeline block drag: move (clamped to [0, dur]) / trim both ends. Don't move a generating block (its time window was already fed to the worker)
   const moveBlock = (id: string, startSec: number) => {
     if (genLockToast(id)) return;
-    setComp((c) => ({ ...c, blocks: c.blocks.map((b) => (b.id === id ? { ...b, startSec: Math.max(0, Math.round(startSec * 100) / 100) } : b)) }));
+    const edit = applyOverlayDocumentEdits({
+      document: editorDocumentRef.current,
+      updates: [{ clipId: id, startSec: Math.max(0, Math.round(startSec * 100) / 100) }],
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    setEditorDocument(edit.document);
   };
   const resizeBlock = (id: string, startSec: number, durationSec: number) => {
     if (genLockToast(id)) return;
-    setComp((c) => ({
-      ...c,
-      blocks: c.blocks.map((b) =>
-        b.id === id ? { ...b, startSec: Math.max(0, Math.round(startSec * 100) / 100), durationSec: Math.max(0.3, Math.round(durationSec * 100) / 100) } : b,
-      ),
-    }));
+    const edit = applyOverlayDocumentEdits({
+      document: editorDocumentRef.current,
+      updates: [{
+        clipId: id,
+        startSec: Math.max(0, Math.round(startSec * 100) / 100),
+        durationSec: Math.max(0.3, Math.round(durationSec * 100) / 100),
+      }],
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    setEditorDocument(edit.document);
   };
   // Materialize the legacy pre-shots representation only. An explicit [] is a real empty track.
   const ensureShots = (c: Composition): VideoShot[] => videoTrackShots(c);
@@ -3175,10 +3197,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const targets = compRef.current.blocks.filter((b) => ids.has(b.id) && !isSentenceCaption(b) && !genIdsRef.current.has(b.id));
     if (targets.length === 0) return;
     if (targets.length === 1) return removeBlock(targets[0]!.id); // degrade to single delete (reuse instant-remove/guard)
-    pushUndoSnapshot();
     const kill = new Set(targets.map((b) => b.id));
+    const edit = removeOverlayDocumentClips({ document: editorDocumentRef.current, clipIds: [...kill] });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
+    pushUndoSnapshot();
     for (const b of targets) postPreview({ type: 'hf:remove', id: b.id }); // remove blocks from the frame instantly, don't wait for the debounced rebuild
-    setComp((c) => ({ ...c, blocks: c.blocks.filter((b) => !kill.has(b.id)) }));
+    setEditorDocument(edit.document);
     setSelectedIdRaw(null);
     setSelectedBlockIds(new Set());
     toast.success(t('workbench.deletedNElements', { n: targets.length }));
@@ -3512,7 +3539,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo,
     pickVideoFile, registerLocalAsset, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
-    neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
+    neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, setCutTransition,
     resizeCutTransition, splitAtPlayhead, trimAtPlayhead, deleteShot,
     audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer,

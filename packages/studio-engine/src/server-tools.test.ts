@@ -60,6 +60,14 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(moved.result.ok).toBe(true);
     expect(moved.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 165 });
   });
+  it('V2 覆盖层工具尊重原生轨道锁，不经兼容合并绕过', () => {
+    const p = v2proj();
+    p.document!.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'b1'))!.locked = true;
+    const moved = runServerTool('move_block', { blockId: 'b1', startSec: 5.5 }, p);
+    expect(moved.result).toMatchObject({ ok: false, data: { code: 'track-locked' } });
+    expect(moved.document).toBeUndefined();
+    expect(p.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 30 });
+  });
   it('V2 画布工具走原生命令并保留投影之外的空轨', () => {
     const p = v2proj();
     p.document!.timeline.tracks.push({

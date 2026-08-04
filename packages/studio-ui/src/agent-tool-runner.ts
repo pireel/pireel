@@ -28,6 +28,7 @@ import {
   applyCanvasDocumentEdit,
   applyCompositionLayout,
   applyNarrationDocumentEdit,
+  applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
   applyShotFramingInput,
   audioClipId,
@@ -50,6 +51,7 @@ import {
   listAddressedWords,
   narrationSourceSplitsAtEditedPoints,
   patchNarrativeClips,
+  removeOverlayDocumentClips,
   resolveWordIds,
   wordRanges,
   wordRangesToEdited,
@@ -209,9 +211,6 @@ export interface AgentToolCtx {
     opts?: ComposeMode,
   ) => Promise<ComposedBlock>;
   noteOf: (raw: string) => string;
-  // Block edits
-  moveBlock: (id: string, startSec: number) => void;
-  resizeBlock: (id: string, startSec: number, durationSec: number) => void;
   // Video track edits
   setCutTransition: (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
   resizeCutTransition: (shotId: string, durationSec: number) => void;
@@ -246,7 +245,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, setDenoise,
+    noteOf, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, setDenoise,
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -307,6 +306,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         if (!command.ok) return command;
         setDocument(command.document);
         return { ...command, composition: compRef.current };
+      };
+      const commitOverlayEdits = (updates: Parameters<typeof applyOverlayDocumentEdits>[0]['updates']) => {
+        const command = applyOverlayDocumentEdits({ document: documentRef.current, updates });
+        if (!command.ok) return command;
+        setDocument(command.document);
+        return command;
+      };
+      const commitOverlayRemoval = (clipIds: readonly string[]) => {
+        const command = removeOverlayDocumentClips({ document: documentRef.current, clipIds });
+        if (!command.ok) return command;
+        setDocument(command.document);
+        return command;
       };
       // Mutating tools push an undo snapshot first (except query/locate/pure-analysis/undo itself); cap 20
       // Generation lock: the target block is held by an image-fill/rewrite worker → refuse the change (it would be overwritten by the result, or leave the generation with stale data)
@@ -721,16 +732,24 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'move_block': {
             const b = findBlock(input.blockId);
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
-            moveBlock(b.id, Number(input.startSec));
-            return { ok: true, summary: t('workbench.movedNameSecS', { name: bname(b), sec: r1(input.startSec) }) };
+            const value = Number(input.startSec);
+            if (!Number.isFinite(value)) return { ok: false, error: 'invalid startSec' };
+            const startSec = Math.max(0, Math.round(value * 100) / 100);
+            const edit = commitOverlayEdits([{ clipId: b.id, startSec }]);
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            return { ok: true, summary: t('workbench.movedNameSecS', { name: bname(b), sec: r1(startSec) }) };
           }
           case 'resize_block': {
             const b = findBlock(input.blockId);
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             const s = Number(input.startSec);
             const d = Number(input.durationSec);
-            resizeBlock(b.id, s, d);
-            return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(s), to: r1(s + d) }) };
+            if (!Number.isFinite(s) || !Number.isFinite(d)) return { ok: false, error: 'invalid startSec/durationSec' };
+            const startSec = Math.max(0, Math.round(s * 100) / 100);
+            const durationSec = Math.max(0.3, Math.round(d * 100) / 100);
+            const edit = commitOverlayEdits([{ clipId: b.id, startSec, durationSec }]);
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(startSec), to: r1(startSec + durationSec) }) };
           }
           case 'place_block': {
             const b = findBlock(input.blockId);
@@ -739,7 +758,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!b.box) return { ok: false, error: t('workbench.blockHasNoBox') };
             const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
             if (!next) return { ok: false, error: t('workbench.placeNoDirective') };
-            setComp((cc) => ({ ...cc, blocks: cc.blocks.map((x) => (x.id === b.id ? next : x)) }));
+            const edit = commitOverlayEdits([{
+              clipId: b.id,
+              block: { box: next.box, contentBox: next.contentBox },
+            }]);
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             // Receipt hint (agent-facing, same convention as review_visuals' data.hint): overlapping
             // corner/split spans → say where the video band is before the agent parks a graphic on it.
             const framing = placementFramingNotes(ensureShots(c), next.startSec, next.durationSec);
@@ -748,8 +771,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'delete_block': {
             const b = findBlock(input.blockId);
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
+            const edit = commitOverlayRemoval([b.id]);
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             postPreview({ type: 'hf:remove', id: b.id });
-            setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((x) => x.id !== b.id) }));
             if (selectedIdRef.current === b.id) setSelectedId(null);
             return { ok: true, summary: t('workbench.deletedName', { name: bname(b) }) };
           }
@@ -758,8 +782,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!ids?.size) return { ok: false, error: t('workbench.missingBlockidsWhichElements') };
             const hit = c.blocks.filter((b) => ids.has(b.id));
             if (!hit.length) return { ok: false, error: t('workbench.elementsNotFound') };
+            const edit = commitOverlayRemoval(hit.map((block) => block.id));
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             hit.forEach((b) => postPreview({ type: 'hf:remove', id: b.id }));
-            setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => !ids.has(b.id)) }));
             if (selectedIdRef.current && ids.has(selectedIdRef.current)) setSelectedId(null);
             return { ok: true, summary: t('workbench.deletedNElements', { n: hit.length }) };
           }

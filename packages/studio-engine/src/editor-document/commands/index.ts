@@ -7,6 +7,7 @@ export * from './managed-captions';
 export * from './narrative-patch';
 export * from './narration-range';
 export * from './narration-split';
+export * from './overlay-patch';
 export * from './range';
 export * from './remove';
 export * from './split';

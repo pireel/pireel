@@ -38,6 +38,7 @@ import {
   applyCanvasDocumentEdit,
   applyCompositionLayout,
   applyNarrationDocumentEdit,
+  applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
   applyShotFramingInput,
   placementFramingNotes,
@@ -45,6 +46,7 @@ import {
   normalizeProjectDocument,
   projectDocumentToLegacyComposition,
   removeNarrationClipsWithoutRipple,
+  removeOverlayDocumentClips,
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
@@ -390,6 +392,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const s = Number(input.startSec);
       if (!Number.isFinite(s)) return { result: { ok: false, error: 'invalid startSec' } };
       const start = Math.max(0, Math.round(s * 100) / 100);
+      if (p.document) {
+        const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: b.id, startSec: start }] });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: `Moved "${bname(b)}" to ${r1(start)}s` },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return {
         result: { ok: true, summary: `Moved "${bname(b)}" to ${r1(start)}s` },
         comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, startSec: start } : x)) },
@@ -403,6 +414,18 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!Number.isFinite(s) || !Number.isFinite(d)) return { result: { ok: false, error: 'invalid startSec/durationSec' } };
       const start = Math.max(0, Math.round(s * 100) / 100);
       const dur = Math.max(0.3, Math.round(d * 100) / 100);
+      if (p.document) {
+        const edit = applyOverlayDocumentEdits({
+          document: p.document,
+          updates: [{ clipId: b.id, startSec: start, durationSec: dur }],
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: `Resized "${bname(b)}" to ${r1(start)}–${r1(start + dur)}s` },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return {
         result: { ok: true, summary: `Resized "${bname(b)}" to ${r1(start)}–${r1(start + dur)}s` },
         comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? { ...x, startSec: start, durationSec: dur } : x)) },
@@ -418,6 +441,18 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       // Receipt hint, not a remap: when the block's window overlaps a corner/split span, say where
       // the video band is so the agent notices before parking a graphic on the speaker.
       const framing = placementFramingNotes(shotsOf(p), next.startSec, next.durationSec);
+      if (p.document) {
+        const edit = applyOverlayDocumentEdits({
+          document: p.document,
+          updates: [{ clipId: b.id, block: { box: next.box, contentBox: next.contentBox } }],
+        });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return {
         result: { ok: true, summary: `Placed "${bname(b)}" at ${zoneOf(next.box!)}`, data: { box: next.box, ...(framing.length ? { hint: framing.join('; ') } : {}) } },
         comp: { ...c, blocks: c.blocks.map((x) => (x.id === b.id ? next : x)) },
@@ -426,6 +461,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'delete_block': {
       const b = findBlock(input.blockId);
       if (!b) return { result: { ok: false, error: 'block not found' } };
+      if (p.document) {
+        const edit = removeOverlayDocumentClips({ document: p.document, clipIds: [b.id] });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: `Deleted "${bname(b)}"` },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return { result: { ok: true, summary: `Deleted "${bname(b)}"` }, comp: { ...c, blocks: c.blocks.filter((x) => x.id !== b.id) } };
     }
     case 'delete_blocks': {
@@ -433,6 +477,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!ids?.size) return { result: { ok: false, error: 'missing blockIds' } };
       const hit = c.blocks.filter((b) => ids.has(b.id));
       if (!hit.length) return { result: { ok: false, error: 'blocks not found' } };
+      if (p.document) {
+        const edit = removeOverlayDocumentClips({ document: p.document, clipIds: hit.map((block) => block.id) });
+        if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        return {
+          result: { ok: true, summary: `Deleted ${hit.length} blocks` },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
       return { result: { ok: true, summary: `Deleted ${hit.length} blocks` }, comp: { ...c, blocks: c.blocks.filter((b) => !ids.has(b.id)) } };
     }
     case 'duplicate_block': {

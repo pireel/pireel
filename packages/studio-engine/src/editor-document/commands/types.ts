@@ -3,6 +3,7 @@ import type {
   EditorTrack,
   EditorTrackRole,
   EditorTrackType,
+  GraphicBlockPayload,
   TimelineClip,
   TimelineClipId,
   TrackId,
@@ -50,6 +51,17 @@ export type ClipPatch = Partial<Pick<TimelineClip, 'enabled'>>;
 
 export type CanvasPatch = Pick<EditorDocumentV2['canvas'], 'width' | 'height'>;
 
+export interface OverlayClipPatch {
+  startFrame?: number;
+  durationFrames?: number;
+  block?: Partial<GraphicBlockPayload>;
+}
+
+export interface OverlayClipPatchUpdate {
+  clipId: TimelineClipId;
+  patch: OverlayClipPatch;
+}
+
 type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip extends TimelineClip
   ? Omit<Clip, 'startFrame'> & { offsetFrames: number }
   : never;
@@ -63,6 +75,7 @@ export type EditorCommand =
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
   | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
+  | { type: 'overlay.patch'; updates: OverlayClipPatchUpdate[] }
   | { type: 'captions.relay' }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
   | {
