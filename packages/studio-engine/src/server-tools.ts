@@ -64,7 +64,7 @@ import {
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
-import { buildSituation, wrapSpokenTranscript } from './prompts';
+import { buildSituation, wrapAgentTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
@@ -228,7 +228,7 @@ function offlineTranscript(p: ServerToolProject): string {
     parts.push(segs?.length ? `${head}:\n${segs.map(row).join('\n')}` : `${head}: (no transcript stored)`);
   }
   const out = parts.join('\n');
-  return wrapSpokenTranscript(out.length > 4000 ? `${out.slice(0, 4000)}\n…(truncated)` : out);
+  return wrapAgentTranscript(out);
 }
 
 /** Execute one offline tool. Filter through SERVER_EXECUTABLE_TOOLS before calling. */

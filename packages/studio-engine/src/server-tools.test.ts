@@ -185,7 +185,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
         ],
       },
     });
-    const listed = runServerTool('list_words', {}, p);
+    const listed = runServerTool('list_words', { sentenceIndexes: [0] }, p);
     expect(listed.result.ok).toBe(true);
     const words = (listed.result.data as { words: { id: string }[] }).words;
     expect(words).toHaveLength(3);

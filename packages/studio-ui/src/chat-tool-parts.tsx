@@ -9,6 +9,7 @@ import type { Composition } from '@pireel/studio-engine/composition';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { GraphicsPreviewBody } from './chat-graphics-card';
+import { AssetSearchResultsBody } from './chat-asset-search-results';
 import { AskUserCard } from './chat-ask-card';
 import { ExportSettingsCard } from './chat-export-card';
 import { t } from './i18n';
@@ -203,15 +204,18 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   // Component-producing tools get a live preview strip: paged, lazy (current page only), skeleton while generating
   const preview =
     PREVIEW_TOOLS.has(id) && opts?.getComp ? <GraphicsPreviewBody toolId={id} part={part} getComp={opts.getComp} /> : null;
+  const assetResults = id === 'search_assets' && part.state === 'output-available'
+    ? <AssetSearchResultsBody output={part.output} />
+    : null;
   return (
     <div key={key}>
       {def.kind === 'card' ? (
         <ToolCard def={def} part={part}>
-          {preview}
+          {preview ?? assetResults}
         </ToolCard>
       ) : (
         <ToolBadge def={def} part={part}>
-          {preview}
+          {preview ?? assetResults}
         </ToolBadge>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AGENT_TRANSCRIPT_MAX_CHARS,
   AROLL_GUIDE,
   BLOCK_SYSTEM,
   CHAT_IDENTITY,
@@ -13,6 +14,7 @@ import {
   mcpInstructions,
   planWithActiveTheme,
   withActiveTheme,
+  wrapAgentTranscript,
 } from './index';
 
 describe('静态提示词完整性', () => {
@@ -37,6 +39,15 @@ describe('静态提示词完整性', () => {
 });
 
 describe('chat 缓存架构:system 静态、局势在消息里', () => {
+  it('普通长度口播稿完整进入上下文,只有超长稿明确标记截断', () => {
+    const ordinary = 'a'.repeat(12_000);
+    expect(wrapAgentTranscript(ordinary)).toContain(ordinary);
+    expect(wrapAgentTranscript(ordinary)).not.toContain('truncated');
+    const long = wrapAgentTranscript('b'.repeat(AGENT_TRANSCRIPT_MAX_CHARS + 1));
+    expect(long).toContain('truncated; use search_media');
+    expect(long).not.toContain('b'.repeat(AGENT_TRANSCRIPT_MAX_CHARS + 1));
+  });
+
   it('buildChatSystem 不含局势正文(identity 提到 <composition_state> 是在告诉模型它在消息里)', () => {
     for (const sys of [buildChatSystem(null, '- f1 · F1 — x'), buildChatSystem({ id: 'f1', title: 'F1' })]) {
       expect(sys).not.toContain('Edited duration:');

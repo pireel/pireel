@@ -26,7 +26,7 @@ import { beatsForWindow as beatsForWindowPure, insertPlanContexts } from '@piree
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { DraftPlan, PlanInsert } from '@pireel/studio-engine/plan';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { wrapSpokenTranscript } from '@pireel/studio-engine/prompts';
+import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import { type VisualTimeline, insertedClipSafeZone } from './visual';
 import type { StudioElementRef } from './studio-chat';
 import { t } from './i18n';
@@ -205,7 +205,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
     }
     const out = parts.join('\n');
-    return wrapSpokenTranscript(out.length > 4000 ? `${out.slice(0, 4000)}\n…(truncated)` : out);
+    return wrapAgentTranscript(out);
   };
   /** Fill in insert-source transcripts (triggered on demand by read_script — policy: when captions are off, only transcribe when the LLM needs it).
    *  Shares the busy/fail lists with the panel transcription effect: failures don't re-burn ASR, in-flight ones are awaited. */
