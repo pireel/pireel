@@ -251,7 +251,14 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
   let managedCaptionTrackId: string | undefined;
   if (captionBlocks.length) {
     managedCaptionTrackId = 'track_managed_captions';
-    const stackOrder = Math.max(1, ...captionBlocks.map((block) => block.trackIndex || 1));
+    // Legacy assembly always forced managed captions above every graphic. The native compositor is
+    // globally track-ordered, so migrate that visual guarantee into data instead of keeping a render
+    // special case. New projects may explicitly reorder the caption track afterwards.
+    const stackOrder = Math.max(
+      1,
+      ...captionBlocks.map((block) => block.trackIndex || 1),
+      ...regularBlocks.keys(),
+    ) + 1;
     const clips: CaptionTimelineClip[] = captionBlocks.map((block, index) => {
       const ref = captionSourceRef(block, sourceToAssetId, mainAssetId);
       return {

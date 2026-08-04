@@ -37,6 +37,7 @@ import {
 import {
   type AudioClip,
   type Composition,
+  type CompositionVisualLayer,
   type ShotFilter,
   type ShotPreciseFraming,
   type SupplementalVisualMediaClip,
@@ -70,6 +71,11 @@ import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl'
 import { injectPreviewRuntime } from './sample-composition';
 import { buildInlineFontCss } from './export-fonts';
 import { t } from './i18n';
+import {
+  browserVisualLayerPlan,
+  personMatteCompositingActive,
+  serializeBrowserOverlayElements,
+} from './browser-visual-layer-plan';
 import { fingerprintReviewPixels, type ReviewFrameFingerprint } from './review-similarity';
 import { segmentSourceRate, segmentSourceTimeAt } from './video-segment-time';
 
@@ -200,8 +206,6 @@ async function inlineImages(root: HTMLElement): Promise<void> {
     }),
   );
 }
-
-const XS = new XMLSerializer();
 
 function svgOpen(lw: number, lh: number, dw: number, dh: number, css: string): string {
   // SVG must be a data: URI (blob: taints the canvas, verified in the spike).
@@ -384,9 +388,17 @@ export async function captureCompositionFrame(opts: {
       'data:image/svg+xml;charset=utf-8,' +
         encodeURIComponent(svgOpen(W, H, outW, outH, overlay.headCss) + `<div xmlns="http://www.w3.org/1999/xhtml" id="root"></div>` + SVG_CLOSE),
     );
-    const overlayImg = await rasterize(
-      'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgOpen(W, H, outW, outH, css) + XS.serializeToString(overlay.root) + SVG_CLOSE),
-    );
+    const visualLayers = browserVisualLayerPlan(comp, activeVisuals, opts.videoPlacements);
+    const fullOverlayPass = personMatteCompositingActive(comp, opts.videoPlacements);
+    const overlayImages = await Promise.all(visualLayers.flatMap((layer) => layer.kind === 'html'
+      ? [rasterize(
+          'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+            svgOpen(W, H, outW, outH, css)
+            + serializeBrowserOverlayElements(overlay.root, overlay.doc, fullOverlayPass ? undefined : layer.blocks)
+            + SVG_CLOSE,
+          ),
+        )]
+      : []));
 
     const canvas = document.createElement('canvas');
     canvas.width = outW;
@@ -413,18 +425,24 @@ export async function captureCompositionFrame(opts: {
       const sample = await sampleAt(video.rig, video.srcT);
       if (sample) visualSamples.set(clipId, { sourceWidth: video.rig.sw, sourceHeight: video.rig.sh, sample });
     }
-    drawSupplementalVisualMedia({
-      ctx,
-      visuals: activeVisuals,
-      timelineTime: t,
-      imageBitmaps: visualImages,
-      videoSamples: visualSamples,
-      targetWidth: W,
-      targetHeight: H,
-      scaleX: outW / W,
-      scaleY: outH / H,
-    });
-    ctx.drawImage(overlayImg, 0, 0);
+    let htmlLayerIndex = 0;
+    for (const layer of visualLayers) {
+      if (layer.kind === 'media') {
+        drawSupplementalVisualMedia({
+          ctx,
+          visuals: layer.visuals,
+          timelineTime: t,
+          imageBitmaps: visualImages,
+          videoSamples: visualSamples,
+          targetWidth: W,
+          targetHeight: H,
+          scaleX: outW / W,
+          scaleY: outH / H,
+        });
+      } else {
+        ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+      }
+    }
     let localSimilarityFingerprint: ReviewFrameFingerprint | undefined;
     if (opts.localSimilarityFingerprint) {
       try {
@@ -687,27 +705,21 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       rig.it = null;
     };
 
-    // Overlay serialization only takes blocks "visible at this moment": seekTimelines already marks
-    // off-window blocks visibility:hidden, and skipping them leaves the hot-frame SVG doc with just a
-    // few blocks — parse/layout cost no longer scales with the project's total block count (serializing
-    // the whole root, an 11-minute project re-lays-out all several-hundred blocks on every hot frame).
-    const rootShell = XS.serializeToString(overlay.root.cloneNode(false));
-    const rootOpen = rootShell.endsWith('/>') ? `${rootShell.slice(0, -2)}>` : rootShell.slice(0, rootShell.lastIndexOf('</'));
-    const serializeVisible = (): string => {
-      let s = rootOpen;
-      for (const el of overlay.root.children) {
-        if ((el as HTMLElement).style?.visibility === 'hidden') continue;
-        s += XS.serializeToString(el);
-      }
-      return `${s}</div>`;
-    };
+    // HTML tracks are rasterized as explicit passes around native media tracks. Adjacent HTML tracks
+    // are coalesced by the shared layer plan, so ordinary projects still pay for one overlay bitmap.
+    const visualLayers = browserVisualLayerPlan(comp, visualMediaClips, opts.videoPlacements);
+    const htmlLayers = visualLayers.filter((layer): layer is Extract<CompositionVisualLayer, { kind: 'html' }> => layer.kind === 'html');
+    const fullOverlayPass = personMatteCompositingActive(comp, opts.videoPlacements);
+    const serializeHtmlLayers = () => htmlLayers.map((layer) => (
+      serializeBrowserOverlayElements(overlay.root, overlay.doc, fullOverlayPass ? undefined : layer.blocks)
+    ));
 
     const total = Math.max(1, Math.round(durationSec * FPS));
     // Overlay frame cache: during tween gaps / static caption periods the serialized string is identical
     // frame to frame → reuse the previous frame's bitmap, skipping parse and rasterization of the whole
     // data URI (with inlined fonts, MB-scale — the bulk of export time).
-    let lastSerial = '';
-    let lastOverlayImg: HTMLImageElement | null = null;
+    const lastSerials = htmlLayers.map(() => '');
+    const lastOverlayImages = htmlLayers.map<HTMLImageElement | null>(() => null);
     // Overlap encoding with next-frame prep: CanvasSource.add grabs the frame synchronously on call, and
     // the returned Promise is only encoder backpressure — the canvas is free to change once grabbed, and
     // we only await the backpressure right before the next frame's add.
@@ -728,16 +740,16 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       // separate <video>" era — the element doesn't exist → identity matrix → export loses insert-clip framing
       const el = overlay.doc.getElementById('vidEl');
       const vs = readTransform(overlay.win, el);
-      const serial = serializeVisible();
+      const serials = serializeHtmlLayers();
       tm.prep += performance.now() - tPrep;
-      const hot = serial !== lastSerial || !lastOverlayImg;
-      if (hot) tm.rasterN++;
-      const overlayP: Promise<HTMLImageElement> = hot
-        ? (() => {
-            const s0 = performance.now();
-            return rasterize(preEnc + encodeURIComponent(serial) + postEnc).then((img) => ((tm.raster += performance.now() - s0), img));
-          })()
-        : Promise.resolve(lastOverlayImg!);
+      const overlayP = Promise.all(serials.map((serial, index) => {
+        const hot = serial !== lastSerials[index] || !lastOverlayImages[index];
+        if (!hot) return Promise.resolve(lastOverlayImages[index]!);
+        tm.rasterN++;
+        const s0 = performance.now();
+        return rasterize(preEnc + encodeURIComponent(serial) + postEnc)
+          .then((img) => ((tm.raster += performance.now() - s0), img));
+      }));
 
       const tr = trsX.find((x) => t >= x.cut - x.half && t <= x.cut + x.half) ?? null;
       // Compute shadow sampling params first; the three decodes (overlay/current frame/shadow frame) are independent → parallel
@@ -764,14 +776,16 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         } : null;
       }));
       const v0 = performance.now();
-      const [overlayImg, sample, gSample, visualSamples] = await Promise.all([
+      const [overlayImages, sample, gSample, visualSamples] = await Promise.all([
         overlayP,
         rig && !opts.primaryVisualHidden ? sampleAt(rig, srcT).then((s) => ((tm.video += performance.now() - v0), s)) : null,
         gRig ? sampleAt(gRig, gSrcT) : null,
         visualSamplesP,
       ]);
-      lastSerial = serial;
-      lastOverlayImg = overlayImg;
+      for (let layerIndex = 0; layerIndex < serials.length; layerIndex++) {
+        lastSerials[layerIndex] = serials[layerIndex]!;
+        lastOverlayImages[layerIndex] = overlayImages[layerIndex]!;
+      }
       // bg / overlay are already rasterized at output resolution (outW×outH) → draw 1:1 with identity
       // transform (crisp text/graphics at 4K). The source video is still drawn in comp coordinates;
       // setTransform(Sx) maps the target rect to output size, drawImage scales straight from native frames.
@@ -840,30 +854,34 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         }
       }
       if (!mixed) vctx.drawImage(liveC, 0, 0);
-      // Supplemental V2 visual tracks composite bottom-to-top above the primary canvas and below
-      // the HTML graphics/caption overlay. Their array is already stack-order sorted by the adapter.
       const videoLayers = new Map<string, SampledVisualVideo>();
       for (const layer of visualSamples) {
         if (!layer) continue;
         videoLayers.set(layer.clipId, layer);
       }
-      drawSupplementalVisualMedia({
-        ctx: vctx,
-        visuals: visualMediaClips,
-        timelineTime: t,
-        imageBitmaps: visualImageBitmaps,
-        videoSamples: videoLayers,
-        targetWidth: W,
-        targetHeight: H,
-        scaleX: Sx,
-        scaleY: Sy,
-      });
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       const d0 = performance.now();
       ctx.drawImage(bg, 0, 0);
       ctx.drawImage(vidC, 0, 0);
-      ctx.drawImage(overlayImg, 0, 0);
+      let htmlLayerIndex = 0;
+      for (const layer of visualLayers) {
+        if (layer.kind === 'media') {
+          drawSupplementalVisualMedia({
+            ctx,
+            visuals: layer.visuals,
+            timelineTime: t,
+            imageBitmaps: visualImageBitmaps,
+            videoSamples: videoLayers,
+            targetWidth: W,
+            targetHeight: H,
+            scaleX: Sx,
+            scaleY: Sy,
+          });
+        } else {
+          ctx.drawImage(overlayImages[htmlLayerIndex++]!, 0, 0);
+        }
+      }
       tm.draw += performance.now() - d0;
       const e0 = performance.now();
       if (pendingAdd) await pendingAdd; // Previous frame's encode backpressure: only awaited here, so the next frame is already being prepared during encoding
@@ -890,7 +908,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       const pct = (x: number) => `${Math.round((x / 1000 / wall) * 100)}%`;
       console.info(
         `[export] ${total} frames/${durationSec.toFixed(1)}s → ${wall.toFixed(1)}s (${(durationSec / wall).toFixed(2)}x) · ` +
-          `raster ${pct(tm.raster)} (hot frames ${tm.rasterN}/${total}) · fetch ${pct(tm.video)} · layout ${pct(tm.prep)} · draw ${pct(tm.draw)} · encoder wait ${pct(tm.enc)}`,
+          `raster ${pct(tm.raster)} (hot passes ${tm.rasterN}) · fetch ${pct(tm.video)} · layout ${pct(tm.prep)} · draw ${pct(tm.draw)} · encoder wait ${pct(tm.enc)}`,
       );
     }
 

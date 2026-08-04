@@ -60,7 +60,7 @@ export interface EditorTrack {
   locked: boolean;
   /** Ripple edits affect this track when true. This is independent of editability (`locked`). */
   syncLocked: boolean;
-  /** Visual compositing order. Larger values render above smaller values. */
+  /** Global order across non-primary visual, graphics and caption tracks. Larger renders above smaller. */
   stackOrder: number;
   clips: TimelineClip[];
 }

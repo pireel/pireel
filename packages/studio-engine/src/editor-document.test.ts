@@ -143,7 +143,7 @@ describe('EditorDocument V2 migration', () => {
       ['track_primary_narrative', 'visual', 0],
       ['track_graphics_2', 'graphics', 2],
       ['track_graphics_3', 'graphics', 3],
-      ['track_managed_captions', 'caption', 1],
+      ['track_managed_captions', 'caption', 4],
     ]);
     expect(document.semantics.managedCaptionTrackId).toBe('track_managed_captions');
     const picture = document.timeline.tracks[1]!.clips[0]!;
@@ -154,7 +154,9 @@ describe('EditorDocument V2 migration', () => {
     expect(issues).toEqual([]);
 
     const projected = projectV2ToLegacyComposition(document);
-    expect(projected.blocks).toEqual(expect.arrayContaining(blocks));
+    expect(projected.blocks).toEqual(expect.arrayContaining(blocks.map((block) => (
+      block.id === 'cap' ? { ...block, trackIndex: 4 } : block
+    ))));
   });
 
   it('migrates audio-only documents without manufacturing video content', () => {

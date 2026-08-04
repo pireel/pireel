@@ -20,6 +20,7 @@ import {
 } from './composition-core';
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
+import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
 
 /* ============================ Assembly ============================ */
 
@@ -485,20 +486,6 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     return { html, timelineBody };
 }
 
-export interface SupplementalVisualMediaClip {
-  clipId: string;
-  trackId: string;
-  stackOrder: number;
-  kind: 'image' | 'video';
-  source: string;
-  startSec: number;
-  endSec: number;
-  sourceInSec: number;
-  sourceOutSec: number;
-  fit: 'contain' | 'cover';
-  muted: boolean;
-}
-
 export function assembleHtml(
   comp: Composition,
   gsapSrc = '/vendor/gsap.min.js',
@@ -548,12 +535,7 @@ export function assembleHtml(
     scripts.push('window.__parentClock = true;');
   }
 
-  // Non-primary visual tracks are independent layers. Images participate in the ordinary
-  // data-start visibility runtime; videos carry source/timeline mapping for the parent-clock
-  // runtime and remain real media elements only in preview (browser export composites them itself).
-  for (const visual of [...supplementalVisuals].sort((left, right) => (
-    left.stackOrder - right.stackOrder || left.startSec - right.startSec || left.clipId.localeCompare(right.clipId)
-  ))) {
+  const renderVisual = (visual: SupplementalVisualMediaClip) => {
     const id = `hf-visual-${visual.clipId}`;
     const duration = Math.max(0, visual.endSec - visual.startSec);
     const common = `id="${escapeAttr(id)}" data-composition-id="${escapeAttr(id)}" data-start="${n(visual.startSec)}" ` +
@@ -561,7 +543,7 @@ export function assembleHtml(
     const mediaStyle = `position:absolute;inset:0;width:100%;height:100%;object-fit:${visual.fit};`;
     if (visual.kind === 'image') {
       body.push(`<img class="comp hf-native-visual" ${common} src="${escapeAttr(visual.source)}" alt="" style="${mediaStyle}" />`);
-      continue;
+      return;
     }
     const rate = duration > 1e-9 ? Math.max(0, visual.sourceOutSec - visual.sourceInSec) / duration : 1;
     body.push(
@@ -569,20 +551,18 @@ export function assembleHtml(
       `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" data-source-rate="${n(rate)}" ` +
       `src="${escapeAttr(visual.source)}" preload="auto" playsinline ${visual.muted ? 'muted ' : ''}style="${mediaStyle}"></video>`,
     );
-  }
+  };
 
-  // Render after a stable sort by trackIndex: blocks carry no z-index, so DOM order = stacking → sorting makes the claim
-  // "higher data-track-index is on top" hold, regardless of comp.blocks insertion order; same track keeps original order.
-  // The transition layer (track 60) carries its own z-index:60 and is unaffected by this sort.
-  // Sort key: sentence captions are always topmost (captions are a readability must-have, not to be covered by components; per the user's decision),
-  // other blocks by trackIndex (DOM order = stacking)
-  const zKey = (b: Block) => (isSentenceCaption(b) ? Number.MAX_SAFE_INTEGER : b.trackIndex);
-  const ordered = [...comp.blocks].sort((a, b) => zKey(a) - zKey(b));
+  // One global bottom-to-top track plan, matching the browser-export compositor. Legacy captions
+  // migrate onto the highest track, so their previous topmost appearance is data rather than a
+  // renderer-only special case.
+  const layerPlan = compositionVisualLayerPlan(comp.blocks, supplementalVisuals);
+  const ordered = layerPlan.flatMap((layer) => layer.kind === 'html' ? layer.blocks : []);
   // Person sandwich: video → background-swap layer → [when person on top: all blocks] → #personCut matte canvas → [normal: all blocks].
   // Matting takes effect per segment (VideoShot.personMatte): the pipeline is installed only if any segment turned it on; outside those segments there's no mask, the canvas is
   // transparent and the background layer hidden, auto-reverting to the normal picture. Layer order (personFront) / stroke / background are global styles.
   const fx = comp.personFx;
-  const fxOn = videoShots.some((s) => s.personMatte);
+  const fxOn = placedVideoShots.some((s) => s.personMatte);
   const personFront = fxOn && !!fx?.personFront;
   // Block-level override: b.personLayer explicitly sets front/behind person; default follows the global personFront
   const isBehind = (b: Block) => (fxOn ? (b.personLayer ? b.personLayer === 'behind' : personFront) : false);
@@ -590,11 +570,12 @@ export function assembleHtml(
   const front = ordered.filter((b) => !isBehind(b));
   // If any block needs to sit behind the person, the matte canvas must exist (otherwise block-level 'behind' has nothing to sit under)
   const fxPipeline = fxOn && (personFront || (fx?.stroke?.width ?? 0) > 0 || !!fx?.bg || behind.length > 0);
-  if (fxPipeline && fx?.bg) {
+  const renderPersonBackground = () => {
+    if (!fx?.bg) return;
     // Background-swap layer covers the original video (display:none, lit only once the shim gets the first mask); the person is restored by the matte canvas above
     const bgStyle = fx.bg.type === 'color' ? `background:${escapeAttr(fx.bg.color)};` : `background:#000 center/cover no-repeat url('${escapeAttr(fx.bg.url)}');`;
     body.push(`<div id="personBg" style="position:absolute;inset:0;display:none;${bgStyle}"></div>`);
-  }
+  };
   // Global caption style: at render time it overrides sentence captions' preset/position/scale; the block's own slots are untouched
   // (style is global state, not baked into the block). RESOLVED here — storage is sparse, defaults come from the resolver.
   const cs = comp.captionStyle ? resolveCaptionStyle(comp) : undefined;
@@ -603,8 +584,19 @@ export function assembleHtml(
     body.push(r.html);
     scripts.push(timelineScript(b.id, r.timelineBody));
   };
-  for (const b of behind) renderOne(b);
-  if (fxPipeline) {
+  if (!fxPipeline) {
+    for (const layer of layerPlan) {
+      if (layer.kind === 'media') for (const visual of layer.visuals) renderVisual(visual);
+      else for (const block of layer.blocks) renderOne(block);
+    }
+  } else {
+    // Person matte is an intentional semantic sandwich over the neutral layer stack. Native media
+    // stays behind the extracted subject; block-level personLayer decides which HTML pass it joins.
+    for (const layer of layerPlan) {
+      if (layer.kind === 'media') for (const visual of layer.visuals) renderVisual(visual);
+    }
+    renderPersonBackground();
+    for (const b of behind) renderOne(b);
     // Matte canvas: pointer-events pass through (behind-person blocks stay clickable); transform is copied from the video by the shim each frame
     // 0–100 unitless → px (scaled by canvas resolution): feather at max ≈ W/45 (1080→24px), stroke at max ≈ W/30 (1080→36px)
     const featherPx = Math.round(((Math.max(0, Math.min(100, fx?.feather ?? 0)) / 100) * W) / 45 * 10) / 10;
@@ -617,8 +609,8 @@ export function assembleHtml(
         `style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transform-origin:center center;will-change:transform;"></canvas>`,
     );
     scripts.push(PERSON_CUT_SHIM);
+    for (const b of front) renderOne(b);
   }
-  for (const b of front) renderOne(b);
 
   return `<!doctype html>
 <html lang="zh">

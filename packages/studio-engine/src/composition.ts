@@ -16,6 +16,7 @@ export * from './audio-tracks';
 export * from './caption-presets';
 export * from './composition-core';
 export * from './source-framing';
+export * from './visual-layer-plan';
 export * from './receipt-delta';
 export * from './editing-primitives';
 export * from './editor-document';

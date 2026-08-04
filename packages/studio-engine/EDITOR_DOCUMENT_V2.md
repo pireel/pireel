@@ -14,6 +14,8 @@ Editor Document V2 is Pireel's final multi-track persistence model. Its neutral 
 8. Preview time belongs to the timeline. A video element may discipline the clock when present, but cannot be required for playback.
 9. V1 is dual-read/V2-single-write during rollout: old rows and drafts may be loaded, but every new persistence write is V2.
 10. Multi-track UI is an exposure step, not a later schema change.
+11. The semantic primary-narrative picture remains Pireel's base canvas. Every non-primary visual,
+    graphic and caption track shares one global bottom-to-top stack above it.
 
 ## Shape
 
@@ -134,15 +136,18 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
   graphics/captions on visible tracks and enabled audio with native track mute applied. Track and clip
   controls therefore never flatten per-item settings or delete hidden material from the V1 patch
   surface.
+- `visual-layer-plan.ts` is the shared bottom-to-top compositor plan across native image/video tracks
+  and compatibility HTML graphics/captions. Iframe preview, Agent capture and browser export all
+  consume the same interleaved passes; adjacent tracks using the same renderer are coalesced. Managed
+  captions from V1 migrate above the previous highest graphic track, preserving their old appearance
+  without a permanent caption z-order exception. Person matte remains an explicit Pireel semantic
+  sandwich over that neutral stack.
 
-The next render gate is a declared cross-type ordering rule if users are allowed to move visual media
-above arbitrary graphics/caption tracks. Supplemental B-roll/PIP compositing and all native render
-flags are enforced, but graphics and captions are currently a deliberate top overlay rather than
-participants in one arbitrary mixed-media z-stack. Consumption by the remaining compatibility tools is
-also a rollout gate, not schema work. The server adapter still projects and remigrates results for tools
-not yet cut over; that path must be removed before overlapping multi-track editing is exposed because V1
-cannot round-trip those states. The remaining gates must reuse this document, render plan and command
-layer rather than introduce another model.
+Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
+adapter still projects and remigrates results for tools not yet cut over; that path must be removed
+before overlapping multi-track editing is exposed because V1 cannot round-trip those states. The
+remaining gates must reuse this document, render plan and command layer rather than introduce another
+model.
 
 ## Rollout gates
 
@@ -150,8 +155,8 @@ The multi-track UI must not ship until all of these are true:
 
 - [x] persistence loads V1/V2 and writes only V2;
 - [x] live undo/redo snapshots V2, including cloud-history restore;
-- preview and export consume V2 or a tested read projection (native placement, compositing and render
-  flags complete; cross-type order remains);
+- [x] preview, Agent capture and browser export consume the same V2 placement, flags and cross-type
+  layer plan;
 - browser and server tools use the same V2 command engine;
 - no command discovers primary narration via `tracks[0]`;
 - audio/graphics/captions follow one declared ripple and anchor policy;

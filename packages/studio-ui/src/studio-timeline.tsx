@@ -717,8 +717,8 @@ function StudioTimelineImpl({
   const ticks = Math.floor(dur / step) + 1;
 
   // Track 0 = scene rail (taller when there's video); per-track height/offset.
-  // **Display order != track-number order**: overlay tracks sort by descending z (NLE convention, upper rows cover lower ones),
-  // captions (track 1, lowest z) naturally land at the bottom; gutter drag-reorder = recomputing z (onReorderTracks).
+  // **Display order != track-number order**: visual-output tracks sort by descending native stack
+  // order (NLE convention, upper rows cover lower ones). The scene rail remains the semantic anchor.
   const sceneRail = hasVideoLane;
   const H0 = sceneRail ? SCENE_H : ROW_H;
   // Only open a row for tracks that actually have non-caption blocks: sentence captions don't enter the timeline (pure computed output), and empty tracks no longer render empty rows
@@ -733,9 +733,17 @@ function StudioTimelineImpl({
     [comp.blocks],
   );
   const hasCaptions = captionBlocks.length > 0;
+  const captionStackOrder = trackStates?.find(
+    (track) => track.type === 'caption' && track.role === 'managedCaptions',
+  )?.stackOrder ?? 1;
   const displayTracks = useMemo(
-    () => (hasCaptions ? [0, ...overlayTracks, CAP_LANE] : [0, ...overlayTracks]),
-    [overlayTracks, hasCaptions],
+    () => [
+      0,
+      ...[...overlayTracks, ...(hasCaptions ? [CAP_LANE] : [])].sort((left, right) => (
+        (right === CAP_LANE ? captionStackOrder : right) - (left === CAP_LANE ? captionStackOrder : left)
+      )),
+    ],
+    [overlayTracks, hasCaptions, captionStackOrder],
   );
   const dispIdx = useMemo(() => new Map(displayTracks.map((tk, i) => [tk, i])), [displayTracks]);
   const rowH = (track: number) => (track === 0 ? H0 : ROW_H);

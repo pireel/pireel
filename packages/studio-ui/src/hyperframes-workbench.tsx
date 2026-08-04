@@ -1147,13 +1147,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // canvas (index math breaks), and mass additions (lay_out) are better served by one rebuild.
         const structuralN = patchable.added.length + patchable.pairs.filter((p) => p.replace || (p.slots && !echo.has(p.b.id))).length;
         const fxSplit = hasVideoTrack && (comp.shots ?? []).some((sh) => sh.personMatte);
-        if (structuralN === 0 || (!fxSplit && patchable.added.length <= 8)) {
+        if ((structuralN === 0 || (!fxSplit && patchable.added.length <= 8))
+          && !(supplementalVisuals.length > 0 && structuralN > 0)) {
           // Same comp variant the doc was assembled from (image thumbs, fitScale reset) — patched bytes must match a rebuild
           const pcomp = previewCompOf(renderComposition);
           const pblockOf = (id: string) => pcomp.blocks.find((x) => x.id === id);
-          // DOM order = stacking = blocks stable-sorted by (sentence captions topmost, else trackIndex) — mirror of the assembler
-          const zKey = (x: Block) => (isSentenceCaption(x) ? Number.MAX_SAFE_INTEGER : x.trackIndex);
-          const sorted = [...pcomp.blocks].sort((x, y) => zKey(x) - zKey(y));
+          // DOM order = native global track order. Structural patches with supplemental visual
+          // tracks take the full rebuild path above because their insertion indexes are interleaved.
+          const sorted = [...pcomp.blocks].sort((x, y) => x.trackIndex - y.trackIndex);
           const domIndexOf = (id: string) => sorted.findIndex((x) => x.id === id);
           const sendNode = (id: string, withIndex: boolean) => {
             const pb = pblockOf(id);
