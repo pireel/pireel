@@ -34,7 +34,7 @@ import { type Composition, type MediaRef } from '@pireel/studio-engine/compositi
 import { type GenAsset, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { BlockPreviewFrame } from './block-preview-card';
 import { type GenTemplate, localizedTemplatePrompt, TEMPLATES_BY_TYPE, zhCategory } from './gen-templates';
-import { ElementTemplateCard } from './gen-templates/element-card';
+import { ElementTemplateCard, ElementTemplatePreview } from './gen-templates/element-card';
 import { fmtDur, type PanelDragAsset, useAudioPreview } from './asset-card';
 import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory } from './official-assets-types';
 
@@ -850,72 +850,196 @@ function TemplateGallery({
   templates: GenTemplate[];
   onUse: (prompt: string) => void;
 }) {
+  const [preview, setPreview] = useState<GenTemplate | null>(null);
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {templates.map((t) => (
-        <TemplateCard key={t.id} type={type} t={t} onUse={onUse} />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        {templates.map((template) => (
+          <TemplateCard key={template.id} type={type} template={template} onUse={onUse} onPreview={() => setPreview(template)} />
+        ))}
+      </div>
+      {preview && (
+        <TemplatePreviewLightbox
+          type={type}
+          template={preview}
+          onClose={() => setPreview(null)}
+          onUse={(prompt) => {
+            setPreview(null);
+            onUse(prompt);
+          }}
+        />
+      )}
+    </>
   );
 }
 
-function TemplateCard({ type, t: tpl, onUse }: { type: AssetType; t: GenTemplate; onUse: (prompt: string) => void }) {
-  if (type === 'element') return <ElementTemplateCard template={tpl} onUse={onUse} />;
+function TemplateCard({
+  type,
+  template: tpl,
+  onUse,
+  onPreview,
+}: {
+  type: AssetType;
+  template: GenTemplate;
+  onUse: (prompt: string) => void;
+  onPreview: () => void;
+}) {
+  if (type === 'element') return <ElementTemplateCard template={tpl} onUse={onUse} onPreview={onPreview} />;
 
   const FallbackIcon = type === 'audio' ? Music2 : Film;
   const fallbackTone = type === 'audio' ? 'from-violet-700 via-indigo-800 to-slate-950' : 'from-neutral-700 to-neutral-900';
   const prompt = localizedTemplatePrompt(tpl, studioLocale());
+  const label = tpl.title ? t(tpl.title) : t(zhCategory(tpl.category));
   return (
-    <button
-      type="button"
-      title={prompt}
-      aria-label={`${tpl.title ? t(tpl.title) : ''} · ${t('chatGen.remix')}`}
-      onClick={() => onUse(prompt)}
-      className="border-line group relative block overflow-hidden rounded-lg border text-left"
-    >
-      {tpl.video ? (
-        // video template with a finished clip: looping mini video card (muted, plays on hover to save bandwidth); bare key uses 'original' to read the source directly
-        <video
-          src={imageThumb(tpl.video, 'original')}
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          className="aspect-[4/5] w-full bg-black object-cover"
-          onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-          onMouseLeave={(e) => {
-            e.currentTarget.pause();
-            e.currentTarget.currentTime = 0;
-          }}
-        />
-      ) : tpl.image ? (
-        <img src={imageThumb(tpl.image, 'list')} alt="" loading="lazy" className="aspect-[4/5] w-full bg-[#f3f3f0] object-cover" />
-      ) : (
-        // Text-only template: type-specific title card + prompt summary.
-        <div className={`flex aspect-[4/5] flex-col justify-between bg-gradient-to-br p-2.5 ${fallbackTone}`}>
-          <div className="flex items-center justify-between">
-            <FallbackIcon size={14} className="text-white/60" />
-            {type === 'audio' && (
-              <span className="flex h-3 items-end gap-px opacity-55" aria-hidden>
-                {[5, 10, 7, 12, 8, 4].map((h, i) => <i key={i} className="w-px rounded-full bg-white" style={{ height: h }} />)}
-              </span>
-            )}
+    <div className="border-line group relative overflow-hidden rounded-lg border">
+      <button
+        type="button"
+        title={prompt}
+        aria-label={`${label} · ${t('chatGen.previewTemplate')}`}
+        onClick={onPreview}
+        className="block w-full cursor-zoom-in text-left"
+      >
+        {tpl.video ? (
+          // video template with a finished clip: looping mini video card (muted, plays on hover to save bandwidth); bare key uses 'original' to read the source directly
+          <video
+            src={imageThumb(tpl.video, 'original')}
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            className="aspect-[4/5] w-full bg-black object-cover"
+            onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+            onMouseLeave={(e) => {
+              e.currentTarget.pause();
+              e.currentTarget.currentTime = 0;
+            }}
+          />
+        ) : tpl.image ? (
+          <img src={imageThumb(tpl.image, 'list')} alt="" loading="lazy" className="aspect-[4/5] w-full bg-[#f3f3f0] object-cover" />
+        ) : (
+          // Text-only template: type-specific title card + prompt summary.
+          <div className={`flex aspect-[4/5] flex-col justify-between bg-gradient-to-br p-2.5 ${fallbackTone}`}>
+            <div className="flex items-center justify-between">
+              <FallbackIcon size={14} className="text-white/60" />
+              {type === 'audio' && (
+                <span className="flex h-3 items-end gap-px opacity-55" aria-hidden>
+                  {[5, 10, 7, 12, 8, 4].map((h, i) => <i key={i} className="w-px rounded-full bg-white" style={{ height: h }} />)}
+                </span>
+              )}
+            </div>
+            <div>
+              <div className="text-[12px] font-medium leading-tight text-white">{label}</div>
+              <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-white/60">{prompt}</div>
+            </div>
           </div>
-          <div>
-            <div className="text-[12px] font-medium leading-tight text-white">{tpl.title ? t(tpl.title) : ''}</div>
-            <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-white/60">{prompt}</div>
-          </div>
-        </div>
-      )}
+        )}
+      </button>
       <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[9.5px] text-white">
         {t(zhCategory(tpl.category))}
       </span>
-      <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100 group-focus-within:bg-black/35 group-focus-within:opacity-100">
-        <span className="text-ink rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium">
-          {t('chatGen.remix')}
-        </span>
-      </span>
-    </button>
+      <button
+        type="button"
+        aria-label={`${label} · ${t('chatGen.remix')}`}
+        onClick={() => onUse(prompt)}
+        className="text-ink absolute bottom-1.5 right-1.5 rounded-md bg-white/90 px-2 py-1 text-[10.5px] font-medium opacity-0 shadow-sm transition hover:bg-white group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {t('chatGen.remix')}
+      </button>
+    </div>
+  );
+}
+
+/** Same interaction as Assets preview: card body opens a full-screen lightbox; the action remains explicit. */
+function TemplatePreviewLightbox({
+  type,
+  template,
+  onClose,
+  onUse,
+}: {
+  type: AssetType;
+  template: GenTemplate;
+  onClose: () => void;
+  onUse: (prompt: string) => void;
+}) {
+  const prompt = localizedTemplatePrompt(template, studioLocale());
+  const label = template.title ? t(template.title) : t(zhCategory(template.category));
+  const [ready, setReady] = useState(type === 'element');
+  const previewAspect = type === 'image' ? 4 / 5 : 16 / 9;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${label} · ${t('chatGen.previewTemplate')}`}
+      onClick={onClose}
+      className="fixed inset-0 z-[100] flex cursor-zoom-out flex-col items-center justify-center gap-3 bg-black/70 p-6"
+    >
+      <button
+        type="button"
+        aria-label={t('common.closePreview')}
+        onClick={onClose}
+        className="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full bg-black/45 text-white transition hover:bg-black/65"
+      >
+        <X size={16} />
+      </button>
+      <div
+        role="presentation"
+        onClick={(event) => event.stopPropagation()}
+        className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
+        style={{
+          width: type === 'element' ? 'min(calc(100vw - 3rem), 640px)' : `min(calc(100vw - 3rem), calc(78vh * ${previewAspect}))`,
+          aspectRatio: previewAspect,
+        }}
+      >
+        {!ready && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
+            <Loader2 size={26} className="animate-spin" />
+            <span className="text-[12px]">{t('panels.loading')}</span>
+          </div>
+        )}
+        {type === 'element' ? (
+          <div className="absolute left-1/2 top-1/2 w-40 -translate-x-1/2 -translate-y-1/2 scale-[3] md:scale-[4]">
+            <ElementTemplatePreview id={template.id} />
+          </div>
+        ) : template.video ? (
+          <video
+            src={imageThumb(template.video, 'original')}
+            controls
+            autoPlay
+            playsInline
+            onLoadedData={() => setReady(true)}
+            className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
+          />
+        ) : template.image ? (
+          <img
+            src={imageThumb(template.image, 'preview')}
+            alt={label}
+            onLoad={() => setReady(true)}
+            onError={() => setReady(true)}
+            className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center p-8 text-center text-sm text-white">{prompt}</div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onUse(prompt);
+        }}
+        className="bg-accent inline-flex items-center rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
+      >
+        {t('chatGen.remix')}
+      </button>
+    </div>
   );
 }
 

@@ -9,8 +9,43 @@ import { localizedTemplatePrompt, type GenTemplate } from './types';
  * The canonical card for a generated-component template. Both the generation panel and
  * Official Assets render this component so the preview and Remix behavior cannot drift.
  */
-export function ElementTemplateCard({ template, onUse }: { template: GenTemplate; onUse: (prompt: string) => void }) {
+export function ElementTemplateCard({
+  template,
+  onUse,
+  onPreview,
+}: {
+  template: GenTemplate;
+  onUse: (prompt: string) => void;
+  /** Generation panel only: card body previews; the bottom-right action keeps Remix direct. */
+  onPreview?: () => void;
+}) {
   const prompt = localizedTemplatePrompt(template, studioLocale());
+  if (onPreview) {
+    return (
+      <div className="border-line group relative w-full overflow-hidden rounded-lg border">
+        <button
+          type="button"
+          title={prompt}
+          aria-label={`${template.title ? t(template.title) : ''} · ${t('chatGen.previewTemplate')}`}
+          onClick={onPreview}
+          className="block w-full cursor-zoom-in text-left"
+        >
+          <ElementTemplatePreview id={template.id} />
+        </button>
+        <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[9.5px] text-white">
+          {t(template.category)}
+        </span>
+        <button
+          type="button"
+          aria-label={`${template.title ? t(template.title) : ''} · ${t('chatGen.remix')}`}
+          onClick={() => onUse(prompt)}
+          className="text-ink absolute bottom-1.5 right-1.5 rounded-md bg-white/90 px-2 py-1 text-[10.5px] font-medium opacity-0 shadow-sm transition hover:bg-white group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          {t('chatGen.remix')}
+        </button>
+      </div>
+    );
+  }
   return (
     <button
       type="button"
