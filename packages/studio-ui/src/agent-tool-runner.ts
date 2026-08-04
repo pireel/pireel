@@ -88,7 +88,7 @@ import type { StudioChatHandle } from './studio-chat';
 import { collectAssetSearchDocuments, searchOfficialAssetDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
 
-const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'search_assets', 'search_media', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'search_assets', 'search_media', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo'));
 const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
 
@@ -985,6 +985,116 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   : {}),
               },
             };
+          }
+          case 'list_voices': {
+            const params = new URLSearchParams({ refresh: 'true', limit: String(Math.min(100, Math.max(1, Number(input.limit) || 20))) });
+            if (input.language === 'zh' || input.language === 'en') params.set('language', input.language);
+            if (typeof input.query === 'string' && input.query.trim()) params.set('query', input.query.trim().slice(0, 100));
+            const res = await fetch(`/api/studio/voices?${params}`, { ...(signal ? { signal } : {}) });
+            const body = (await res.json().catch(() => ({}))) as { voices?: unknown[]; error?: string; detail?: string };
+            if (!res.ok || !body.voices) return { ok: false, error: body.detail || body.error || t('workbench.voiceListFailed') };
+            return { ok: true, summary: t('workbench.voicesAvailable', { n: body.voices.length }), data: { voices: body.voices } };
+          }
+          case 'clone_voice': {
+            report(t('workbench.cloningVoice'));
+            try {
+              const res = await fetch('/api/studio/voices', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ action: 'clone', ...input }),
+                ...(signal ? { signal } : {}),
+              });
+              const body = (await res.json().catch(() => ({}))) as {
+                voice?: { id: string; label: string; status: 'ready' | 'deploying' | 'failed'; [key: string]: unknown };
+                error?: string;
+                detail?: string;
+              };
+              if (!res.ok || !body.voice) return { ok: false, error: body.detail || body.error || t('workbench.voiceCloneFailed') };
+              return {
+                ok: true,
+                summary: body.voice.status === 'ready' ? t('workbench.voiceReady', { name: body.voice.label }) : t('workbench.voiceDeploying', { name: body.voice.label }),
+                data: { voice: body.voice, next: body.voice.status === 'ready' ? 'Use this voiceId with generate_speech.' : 'Call list_voices later before using it.' },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
+          case 'delete_voice': {
+            const res = await fetch('/api/studio/voices', {
+              method: 'DELETE',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ voiceId: input.voiceId }),
+              ...(signal ? { signal } : {}),
+            });
+            const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+            if (!res.ok) return { ok: false, error: body.detail || body.error || t('workbench.voiceDeleteFailed') };
+            return { ok: true, summary: t('workbench.voiceDeleted') };
+          }
+          case 'generate_speech': {
+            report(t('workbench.generatingSpeech'));
+            try {
+              const res = await fetch('/api/studio/speech', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(input),
+                ...(signal ? { signal } : {}),
+              });
+              const body = (await res.json().catch(() => ({}))) as {
+                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; charCount: number; estimatedDurationSec: number };
+                error?: string;
+                detail?: string;
+              };
+              if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || t('workbench.speechGenerationFailed') };
+              const asset = body.asset;
+              return {
+                ok: true,
+                summary: t('workbench.speechGenerated'),
+                data: {
+                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, ...(asset.label ? { label: asset.label } : {}) },
+                  model: asset.model,
+                  voiceId: asset.voiceId,
+                  voiceLabel: asset.voiceLabel,
+                  charCount: asset.charCount,
+                  estimatedDurationSec: asset.estimatedDurationSec,
+                  next: asset.estimatedDurationSec > 15
+                    ? 'This speech is longer than one lip_sync clip. Split the performance into deliberate <=15s sections before lip_sync.'
+                    : `For lip_sync, pass this asset url and durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.estimatedDurationSec)))}.`,
+                },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
+          case 'lip_sync': {
+            report(t('workbench.startingLipSync'));
+            try {
+              const res = await fetch('/api/studio/lip-sync', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ ...input, projectId }),
+                ...(signal ? { signal } : {}),
+              });
+              const body = (await res.json().catch(() => ({}))) as {
+                generation?: { creationId: string; status: 'pending'; spaceId: string; projectId: string; modelId: string; durationSec: number };
+                error?: string;
+                detail?: string;
+              };
+              if (!res.ok || !body.generation) return { ok: false, error: body.detail || body.error || t('workbench.lipSyncFailed') };
+              return {
+                ok: true,
+                summary: t('workbench.lipSyncStarted'),
+                data: {
+                  creationId: body.generation.creationId,
+                  status: body.generation.status,
+                  projectId: body.generation.projectId,
+                  modelId: body.generation.modelId,
+                  durationSec: body.generation.durationSec,
+                  next: 'The task is asynchronous and will appear in Generate > Video. Do not poll in this turn; use the resulting video asset in a later atomic edit after it succeeds.',
+                },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
           }
           case 'search_media': {
             const scope = input.scope === 'main' || input.scope === 'inserted' ? input.scope : 'all';

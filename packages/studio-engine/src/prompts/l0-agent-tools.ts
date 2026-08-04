@@ -358,6 +358,91 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       ['query'],
     ),
   },
+  /* ---------- reusable voice / portrait animation primitives ---------- */
+  {
+    id: 'list_voices',
+    kind: 'badge',
+    icon: '🔊',
+    label: 'tools.list_voices.label',
+    description:
+      "List available official and user-cloned voices, including stable voiceId, language, style, scene, readiness, and current default. Use language/query to avoid returning the entire catalog. Call this before generate_speech when the user asks for a specific voice or when you need to discover a cloned voice. It is server-direct and works with Studio closed.",
+    inputSchema: obj(
+      {
+        language: { type: 'string', enum: ['zh', 'en'], description: 'Optional supported-language filter.' },
+        query: { type: 'string', description: 'Optional name, vocal trait, or use-case search, such as 新闻播报 or warm.' },
+        limit: { type: 'number', description: 'Maximum results, default 20 and maximum 100.' },
+      },
+      [],
+    ),
+  },
+  {
+    id: 'clone_voice',
+    kind: 'card',
+    busyText: 'tools.clone_voice.busy',
+    icon: '🧬',
+    label: 'tools.clone_voice.label',
+    description:
+      "Create one reusable cloned voice from an audio asset already owned by the user. This is an atomic voice-asset operation and does not generate speech or video. SAFETY: call it only after the user explicitly confirms they own the voice or have permission to clone it; never infer consent. Pass the exact audioAssetId returned by list_assets/search_assets, not a guessed URL. A clean 3–30 second MP3/M4A/WAV sample works best. Deployment may be asynchronous; use list_voices later to check readiness.",
+    inputSchema: obj(
+      {
+        audioAssetId: { type: 'string', description: 'Owned audio asset id from list_assets/search_assets.' },
+        name: { type: 'string', description: 'User-facing name for this voice.' },
+        language: { type: 'string', enum: ['zh', 'en', 'fr', 'de', 'ja', 'ko', 'ru', 'pt', 'th', 'id', 'vi', 'it', 'es', 'ms', 'fil', 'ar'], description: 'Language spoken in the sample (default zh).' },
+        consentConfirmed: { type: 'boolean', description: 'Must be true only after explicit user confirmation of ownership/permission.' },
+        preprocess: { type: 'boolean', description: 'Enable denoise/enhancement for a noisy sample; leave false for a clean recording.' },
+      },
+      ['audioAssetId', 'name', 'consentConfirmed'],
+    ),
+  },
+  {
+    id: 'delete_voice',
+    kind: 'badge',
+    icon: '🗑️',
+    label: 'tools.delete_voice.label',
+    description: 'Permanently delete one user-cloned voice by its stable voiceId. System voices cannot be deleted. Ask for confirmation before deleting unless the same user message explicitly requested it.',
+    inputSchema: obj({ voiceId: { type: 'string', description: 'Cloned voiceId returned by list_voices.' } }, ['voiceId']),
+  },
+  {
+    id: 'generate_speech',
+    kind: 'card',
+    busyText: 'tools.generate_speech.busy',
+    icon: '🎙️',
+    label: 'tools.generate_speech.label',
+    description:
+      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This is an atomic media operation: it returns an audio asset/url and does NOT add it to the timeline or create a digital-human workflow. Keep user-supplied wording verbatim unless they explicitly ask for rewriting. Omit voiceId to use the user's default; call list_voices first when they request a particular system/cloned voice. For a speaking portrait/video, call this first, then pass the returned url to lip_sync. Long speech is allowed, but one lip_sync clip accepts at most 15 seconds, so split longer performances deliberately.",
+    inputSchema: obj(
+      {
+        text: { type: 'string', description: 'Exact text to speak (1–5000 characters).' },
+        voiceId: { type: 'string', description: 'Optional stable voiceId from list_voices. Omit for the user default.' },
+        speed: { type: 'number', description: 'Speaking speed multiplier, 0.5–2.0 (default 1).' },
+        instruction: { type: 'string', description: 'Optional natural-language delivery direction for emotion, dialect, role, or tone. Do not put replacement speech text here.' },
+        name: { type: 'string', description: 'Optional asset label shown in the library.' },
+      },
+      ['text'],
+    ),
+  },
+  {
+    id: 'lip_sync',
+    kind: 'card',
+    busyText: 'tools.lip_sync.busy',
+    icon: '👄',
+    label: 'tools.lip_sync.label',
+    description:
+      "Create ONE asynchronous lip-synced video task from an existing audio url plus exactly ONE portrait image OR source video (hosted video generation; CHARGES the user's Pireel account). This is an atomic media operation: it returns a pending creation id in the project's existing generation history and does NOT insert the result into the edit. Preserve identity, background, framing, and source performance; add only natural mouth motion, blinks, and subtle head movement. Compose it with generate_speech when TTS is needed; do not invent a monolithic digital-human action.",
+    inputSchema: obj(
+      {
+        audioUrl: { type: 'string', description: 'Audio asset url returned by generate_speech or found via search_assets/list_assets.' },
+        sourceImageUrl: { type: 'string', description: 'Portrait/source image url. Mutually exclusive with sourceVideoUrl.' },
+        sourceVideoUrl: { type: 'string', description: 'Source performance video url. Mutually exclusive with sourceImageUrl.' },
+        durationSec: { type: 'number', description: 'Output duration, integer 4–15 seconds. Use generate_speech.estimatedDurationSec when available; default 10.' },
+        aspectRatio: { type: 'string', enum: ['9:16', '16:9', '1:1'], description: 'Output aspect ratio (default 9:16).' },
+        resolution: { type: 'string', enum: ['480p', '720p', '1080p'], description: 'Output resolution (default 480p; choose higher only when requested).' },
+        modelId: { type: 'string', description: 'Optional enabled video catalog model id. Omit to prefer the configured Seedance model.' },
+        name: { type: 'string', description: 'Optional label for the pending generation.' },
+      },
+      ['audioUrl'],
+    ),
+  },
   {
     id: 'search_media',
     kind: 'badge',

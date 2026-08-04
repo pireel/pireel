@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, SlidersHorizontal, LayoutGrid, Scissors, Captions } from 'lucide-react';
+  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, AudioLines, Frame, Music, Undo2, Redo2, SlidersHorizontal, LayoutGrid, Scissors, Captions } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -5006,7 +5006,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 { v: 'captions', icon: Captions, label: 'panels.captions' },
                 { v: 'audio', icon: Music, label: 'panels.music' },
                 { v: 'gen', icon: Sparkles, label: 'common.generate' },
-                { v: 'avatar', icon: UserRound, label: 'workbench.avatar' },
+                { v: 'avatar', icon: AudioLines, label: 'workbench.avatar' },
                 // Themes tab hidden (per user 2026-07-19): the component library is already grouped by theme with its own tokens, mount themes via the chat selector
               ] as { v: 'assets' | 'script' | 'captions' | 'audio' | 'gen' | 'avatar'; icon: typeof LayoutGrid; label: string }[]
             ).map((n) => (

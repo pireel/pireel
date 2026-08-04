@@ -86,4 +86,8 @@ export const MCP_DESCRIPTION_OVERRIDES: Record<string, string> = {
   analyze_narration: `${CREDITS_WARNING}: plan_brief → generate the DraftPlan JSON → submit_plan.] Fallback: have Pireel's LLM plan scenes/framings/graphic briefs from the transcript.`,
   analyze_visual:
     "[Runs Pireel's hosted vision model and CHARGES the account — prefer the BYO flow: visual_brief → look at the returned frames yourself → submit_visual.] Fallback: analyze the footage (per-scene content type, person position, safe zones, palette; the face/geometry pass is free in-browser either way). lay_out uses it to place graphics away from the speaker.",
+  generate_speech:
+    "[CHARGES the user's Pireel account.] Generate a reusable spoken-audio asset from exact text and an optional stable voiceId from list_voices. Server-direct: works with Studio closed. Returns an audio url; compose it with lip_sync or another atomic action yourself.",
+  lip_sync:
+    "[CHARGES the user's Pireel account.] Start one asynchronous lip-sync generation from an audio url plus exactly one image/video. Server-direct: works with Studio closed and writes into the active project's generation history. It does not insert into the edit.",
 };

@@ -58,6 +58,20 @@ function toolIdOf(part: ToolPartLike): string {
   return part.type.startsWith('tool-') ? part.type.slice(5) : part.type;
 }
 
+function SpeechAssetBody({ output }: { output: unknown }) {
+  const data = output && typeof output === 'object' ? (output as { data?: unknown }).data : null;
+  const asset = data && typeof data === 'object' ? (data as { asset?: unknown }).asset : null;
+  if (!asset || typeof asset !== 'object') return null;
+  const row = asset as { url?: unknown; label?: unknown };
+  if (typeof row.url !== 'string' || !/^https?:\/\//i.test(row.url)) return null;
+  return (
+    <div className="border-line/70 border-t px-2.5 py-2">
+      {typeof row.label === 'string' && row.label ? <div className="text-ink-3 mb-1.5 truncate text-[11px]">{row.label}</div> : null}
+      <audio src={row.url} controls preload="metadata" className="h-8 w-full" />
+    </div>
+  );
+}
+
 /** Normalize tool-call status. */
 export function toolStatus(part: ToolPartLike): { kind: 'running' | 'done' | 'error'; text: string } {
   const out = part.output as StudioToolResult | undefined;
@@ -207,15 +221,18 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   const assetResults = id === 'search_assets' && part.state === 'output-available'
     ? <AssetSearchResultsBody output={part.output} />
     : null;
+  const speechAsset = id === 'generate_speech' && part.state === 'output-available'
+    ? <SpeechAssetBody output={part.output} />
+    : null;
   return (
     <div key={key}>
       {def.kind === 'card' ? (
         <ToolCard def={def} part={part}>
-          {preview ?? assetResults}
+          {preview ?? assetResults ?? speechAsset}
         </ToolCard>
       ) : (
         <ToolBadge def={def} part={part}>
-          {preview ?? assetResults}
+          {preview ?? assetResults ?? speechAsset}
         </ToolBadge>
       )}
     </div>

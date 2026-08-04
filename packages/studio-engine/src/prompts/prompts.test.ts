@@ -76,6 +76,16 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
   });
+  it('语音与口型同步是可组合原子能力,不是数字人大工具', () => {
+    const speech = STUDIO_TOOLS.find((tool) => tool.id === 'generate_speech')!;
+    const lipSync = STUDIO_TOOLS.find((tool) => tool.id === 'lip_sync')!;
+    expect(speech.kind).toBe('card');
+    expect(lipSync.kind).toBe('card');
+    expect((speech.inputSchema as { required: string[] }).required).toEqual(['text']);
+    expect((lipSync.inputSchema as { required: string[] }).required).toEqual(['audioUrl']);
+    expect(CHAT_IDENTITY).toContain('VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY');
+    expect(CHAT_IDENTITY).toContain('never look for or claim a monolithic digital-human workflow');
+  });
   it('画幅重构由 Agent 组合原语，不暴露完整功能工具', () => {
     expect(STUDIO_TOOLS.some((t) => ['auto_reframe', 'reframe_video'].includes(t.id))).toBe(false);
     expect(CHAT_IDENTITY).toContain('ASPECT REFRAMING IS A WORKFLOW, NOT A TOOL');
