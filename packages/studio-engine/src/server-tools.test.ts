@@ -84,6 +84,33 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       hidden: true, syncLocked: false, stackOrder: 4, clips: [],
     });
   });
+  it('V2 apply_layout 原子更新镜头与覆盖层且不重建原生轨道', () => {
+    const p = v2proj();
+    p.document!.timeline.tracks.push({
+      id: 'empty-graphics', type: 'graphics', muted: false, hidden: true, locked: false,
+      syncLocked: false, stackOrder: 4, clips: [],
+    });
+    const layout = runServerTool('apply_layout', {
+      layout: 'split-left-right', blockIds: ['b1'], shotId: 's1', videoPosition: 'left',
+    }, p);
+    expect(layout.result.ok).toBe(true);
+    expect(layout.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 's1')).toMatchObject({
+      kind: 'narrative', properties: { treatment: 'split-l', partnerBlockId: 'b1' },
+    });
+    expect(layout.document?.timeline.tracks.find((track) => track.id === 'empty-graphics')).toMatchObject({
+      hidden: true, syncLocked: false, stackOrder: 4, clips: [],
+    });
+
+    p.document!.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === 'b1'))!.locked = true;
+    const rejected = runServerTool('apply_layout', {
+      layout: 'split-left-right', blockIds: ['b1'], shotId: 's1', videoPosition: 'left',
+    }, p);
+    expect(rejected.result).toMatchObject({ ok: false, data: { code: 'track-locked' } });
+    expect(rejected.document).toBeUndefined();
+    expect(p.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 's1')).toMatchObject({
+      kind: 'narrative', properties: { treatment: 'full' },
+    });
+  });
   it('V2 画布工具走原生命令并保留投影之外的空轨', () => {
     const p = v2proj();
     p.document!.timeline.tracks.push({

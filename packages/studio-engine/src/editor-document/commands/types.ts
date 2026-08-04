@@ -19,6 +19,8 @@ export interface ShotAudioPatch {
 
 export interface NarrativeClipPatch {
   framing?: ShotFramingPatch;
+  /** Stable overlay identity occupying the framing vacancy; null deliberately clears the link. */
+  partnerBlockId?: TimelineClipId | null;
   /** `null` and an all-neutral filter both remove the persisted grade. */
   filter?: ShotFilter | null;
   audio?: ShotAudioPatch;

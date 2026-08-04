@@ -27,6 +27,7 @@ import {
   applyBlockPlacement,
   applyCanvasDocumentEdit,
   applyCompositionLayout,
+  applyLayoutDocumentEdit,
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
@@ -1430,16 +1431,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'apply_layout': {
             const layout = String(input.layout);
-            const applied = applyCompositionLayout({ ...c, shots: ensureShots(c) }, {
-              layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
-              blockIds: Array.isArray(input.blockIds) ? input.blockIds.map(String) : [],
-              ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
-              ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
+            const edit = applyLayoutDocumentEdit({
+              document: documentRef.current,
+              composition: { ...c, shots: ensureShots(c) },
+              layout: {
+                layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
+                blockIds: Array.isArray(input.blockIds) ? input.blockIds.map(String) : [],
+                ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
+                ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
+              },
             });
-            if ('error' in applied) return { ok: false, error: applied.error };
-            setComp(applied.comp);
-            if (applied.shotId) setSelectedShotId(applied.shotId);
-            return { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: applied.blockIds, ...(applied.shotId ? { shotId: applied.shotId } : {}), ...(applied.treatment ? { treatment: applied.treatment } : {}) } };
+            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            setDocument(edit.document);
+            if (edit.layout.shotId) setSelectedShotId(edit.layout.shotId);
+            return { ok: true, summary: `Applied ${layout} layout`, data: edit.layout };
           }
           case 'set_shot_treatment': {
             const s = findShot(input.shotId);

@@ -37,6 +37,7 @@ import {
   applyBlockPlacement,
   applyCanvasDocumentEdit,
   applyCompositionLayout,
+  applyLayoutDocumentEdit,
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
@@ -587,12 +588,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'apply_layout': {
       const layout = String(input.layout);
       const blockIds = Array.isArray(input.blockIds) ? input.blockIds.map(String) : [];
-      const applied = applyCompositionLayout({ ...c, shots: shotsOf(p) }, {
+      const layoutInput = {
         layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
         blockIds,
         ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
         ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
-      });
+      };
+      if (p.document) {
+        const edit = applyLayoutDocumentEdit({
+          document: p.document,
+          composition: { ...c, shots: shotsOf(p) },
+          layout: layoutInput,
+        });
+        if (!edit.ok) {
+          return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+        }
+        return {
+          result: { ok: true, summary: `Applied ${layout} layout`, data: edit.layout },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edit.document }),
+          document: edit.document,
+        };
+      }
+      const applied = applyCompositionLayout({ ...c, shots: shotsOf(p) }, layoutInput);
       if ('error' in applied) return { result: { ok: false, error: applied.error } };
       return {
         result: { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: applied.blockIds, ...(applied.shotId ? { shotId: applied.shotId } : {}), ...(applied.treatment ? { treatment: applied.treatment } : {}) } },

@@ -39,7 +39,7 @@ function narrativeProperties(shot: VideoShot): NarrativeTimelineClip['properties
 }
 
 function validatePatch(patch: NarrativeClipPatch): string | null {
-  if (!('framing' in patch) && !('filter' in patch) && !('audio' in patch)) return 'Narrative patch is empty.';
+  if (!('framing' in patch) && !('partnerBlockId' in patch) && !('filter' in patch) && !('audio' in patch)) return 'Narrative patch is empty.';
   if ('framing' in patch) {
     if (!patch.framing || typeof patch.framing !== 'object' || Array.isArray(patch.framing)) return 'framing must be an object.';
     const framing = patch.framing;
@@ -55,6 +55,10 @@ function validatePatch(patch: NarrativeClipPatch): string | null {
       && treatment != null && treatment !== 'full' && treatment !== 'punch-in') {
       return 'Precise framing is valid only for full or punch-in treatment.';
     }
+  }
+  if ('partnerBlockId' in patch && patch.partnerBlockId != null
+    && (typeof patch.partnerBlockId !== 'string' || !patch.partnerBlockId.trim())) {
+    return 'partnerBlockId must be a non-empty string or null.';
   }
   if ('filter' in patch && patch.filter != null) {
     if (typeof patch.filter !== 'object' || Array.isArray(patch.filter)) return 'filter must be an object or null.';
@@ -76,6 +80,10 @@ function validatePatch(patch: NarrativeClipPatch): string | null {
 function patchedNarrativeClip(clip: NarrativeTimelineClip, patch: NarrativeClipPatch): NarrativeTimelineClip {
   let shot = narrativeShot(clip);
   if (patch.framing) shot = patchShotFraming(shot, patch.framing);
+  if ('partnerBlockId' in patch) {
+    if (patch.partnerBlockId == null) delete shot.partnerBlockId;
+    else shot.partnerBlockId = patch.partnerBlockId;
+  }
   if ('filter' in patch) {
     const { filter: _filter, ...withoutFilter } = shot;
     shot = patch.filter && shotFilterCss(patch.filter) !== 'none'
@@ -131,6 +139,20 @@ export function patchNarrativeClips(
     }
     const patchError = validatePatch(update.patch);
     if (patchError) return commandFailure(document, 'invalid-command', patchError, { path: `updates[${index}].patch`, trackIds: [found.track.id] });
+    if (update.patch.partnerBlockId) {
+      const partner = clipLocations.get(update.patch.partnerBlockId);
+      if (!partner) {
+        return commandFailure(document, 'clip-not-found', `Partner overlay does not exist: ${update.patch.partnerBlockId}`, {
+          path: `updates[${index}].patch.partnerBlockId`,
+        });
+      }
+      if (partner.clip.kind !== 'graphic' && partner.clip.kind !== 'caption') {
+        return commandFailure(document, 'invalid-command', `Partner clip is not an overlay: ${update.patch.partnerBlockId}`, {
+          path: `updates[${index}].patch.partnerBlockId`,
+          trackIds: [partner.track.id],
+        });
+      }
+    }
     const next = patchedNarrativeClip(found.clip, update.patch);
     const resolvedTreatment = next.properties.treatment;
     if ((update.patch.framing?.scale != null || update.patch.framing?.anchorX != null || update.patch.framing?.anchorY != null)
@@ -142,7 +164,9 @@ export function patchNarrativeClips(
 
   const partnerNarrative = new Map<string, NarrativeTimelineClip>();
   for (const update of resolved) {
-    const partnerId = update.patch.framing ? update.next.properties.partnerBlockId : undefined;
+    const partnerId = update.patch.framing || 'partnerBlockId' in update.patch
+      ? update.next.properties.partnerBlockId
+      : undefined;
     if (partnerId && treatmentVacancyBox(update.next.properties.treatment, update.next.properties.treatSize)) {
       partnerNarrative.set(partnerId, update.next);
     }

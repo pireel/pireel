@@ -162,6 +162,9 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Overlay duplication, cross-track dragging, new-lane insertion and lane reorder now use native track
   ids. Empty graphics lanes remain visible/stable drag targets, and failed compound inserts roll back
   the provisional lane instead of leaking partial layout state.
+- Browser/server `apply_layout` now commits shot framing, its stable overlay partner link and every
+  normalized block box as one V2 transaction. A locked target lane rolls the whole coordinated layout
+  back, while empty/native lanes keep their identity, flags and stack order.
 
 Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
 adapter still projects and remigrates results for tools not yet cut over; that path must be removed

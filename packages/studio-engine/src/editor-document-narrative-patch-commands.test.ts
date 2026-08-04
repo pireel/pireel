@@ -70,4 +70,31 @@ describe('V2 narrative patch command', () => {
     expect(result).toMatchObject({ ok: false, document, error: { code: 'track-locked', trackIds: ['graphics'] } });
     expect(document.timeline.tracks[0]!.clips[0]).toMatchObject({ properties: { treatment: 'full' } });
   });
+
+  it('changes the stable partner link and validates the referenced overlay identity', () => {
+    const document = documentWithPartner();
+    document.timeline.tracks[1]!.clips.push({
+      id: 'other', kind: 'graphic', startFrame: 20, durationFrames: 40, enabled: true,
+      anchor: { type: 'timeline' }, block: { templateId: 'custom', slots: {} },
+    });
+    const result = applyEditorCommand(document, {
+      type: 'narrative.patch',
+      updates: [{ clipId: 'talk', patch: { framing: { treatment: 'split-r' }, partnerBlockId: 'other' } }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks[0]!.clips[0]).toMatchObject({ properties: { partnerBlockId: 'other' } });
+    expect(result.document.timeline.tracks[1]!.clips.find((clip) => clip.id === 'other')).toMatchObject({
+      startFrame: 45, durationFrames: 300,
+    });
+    expect(result.document.timeline.tracks[1]!.clips.find((clip) => clip.id === 'partner')).toMatchObject({
+      startFrame: 0, durationFrames: 30,
+    });
+
+    const missing = applyEditorCommand(document, {
+      type: 'narrative.patch',
+      updates: [{ clipId: 'talk', patch: { partnerBlockId: 'missing' } }],
+    });
+    expect(missing).toMatchObject({ ok: false, document, error: { code: 'clip-not-found' } });
+  });
 });
