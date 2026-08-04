@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { emptyComposition } from './composition';
-import { applyNarrationDocumentEdit } from './narration-document-edit';
+import { applyNarrationDocumentEdit, removeNarrationClipsWithoutRipple } from './narration-document-edit';
 import { normalizeProjectDocument } from './project-document';
 
 describe('semantic V2 narration edit', () => {
@@ -81,5 +81,53 @@ describe('semantic V2 narration edit', () => {
     expect(result.document.timeline.tracks.flatMap((track) => track.clips).some((clip) => (
       clip.kind === 'caption' && clip.sourceRef?.assetId === insertedAssetId
     ))).toBe(true);
+  });
+
+  it('empties narration without shifting independent lanes and clears only derived captions', () => {
+    const transcript: AsrSegment[] = [{ start: 0, end: 2, text: 'keep no speech' }];
+    const composition = {
+      ...emptyComposition(),
+      video: { url: 'blob:runtime-main', durationSec: 2 },
+      shots: [{ id: 'only', srcStart: 0, srcEnd: 2, treatment: 'full' as const }],
+      blocks: [
+        { id: 'caption', templateId: 'caption', slots: {}, startSec: 0, durationSec: 2, trackIndex: 3 },
+        { id: 'independent', templateId: 'custom', slots: {}, startSec: 4, durationSec: 2, trackIndex: 5 },
+      ],
+    };
+    const document = normalizeProjectDocument({ projectId: 'empty-test', value: composition, context: { asr: transcript }, videoSig: 'sig' }).document;
+    const result = removeNarrationClipsWithoutRipple({
+      projectId: 'empty-test', document, clipIds: ['only'], mainTranscript: transcript, clipTranscripts: {},
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.find((track) => track.id === result.document.semantics.primaryNarrativeTrackId)!.clips).toEqual([]);
+    expect(result.document.timeline.tracks.find((track) => track.id === result.document.semantics.managedCaptionTrackId)!.clips).toEqual([]);
+    expect(result.composition.blocks).toMatchObject([{ id: 'independent', startSec: 4, durationSec: 2, trackIndex: 5 }]);
+  });
+
+  it('syncs an inserted-only transcript before removing its final clip', () => {
+    const source = 'https://cdn.test/only-insert.mp4';
+    const transcript: AsrSegment[] = [{ start: 0, end: 2, text: 'insert only' }];
+    const composition = {
+      ...emptyComposition(),
+      shots: [{ id: 'insert-only', src: source, srcStart: 0, srcEnd: 2, treatment: 'full' as const }],
+      blocks: [{
+        id: 'insert-caption', templateId: 'caption',
+        slots: { ref: { src: source, seg: 0, w0: 0, w1: 1 } },
+        startSec: 0, durationSec: 2, trackIndex: 1,
+      }],
+    };
+    const document = normalizeProjectDocument({ projectId: 'insert-only-test', value: composition, context: {} }).document;
+    const insertedClip = document.timeline.tracks[0]!.clips[0];
+    if (insertedClip?.kind !== 'narrative') throw new Error('expected narrative clip');
+    const result = removeNarrationClipsWithoutRipple({
+      projectId: 'insert-only-test', document, clipIds: ['insert-only'],
+      mainTranscript: null, clipTranscripts: { [source]: transcript },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.semantics.transcripts[insertedClip.assetId]).toEqual(transcript);
+    expect(result.composition.shots).toEqual([]);
+    expect(result.composition.blocks).toEqual([]);
   });
 });

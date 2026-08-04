@@ -7,6 +7,7 @@ export * from './narrative-patch';
 export * from './narration-range';
 export * from './narration-split';
 export * from './range';
+export * from './remove';
 export * from './split';
 export * from './tracks';
 export * from './types';

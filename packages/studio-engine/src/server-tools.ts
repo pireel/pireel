@@ -43,6 +43,7 @@ import {
   narrationSourceSplitsAtEditedPoints,
   normalizeProjectDocument,
   projectDocumentToLegacyComposition,
+  removeNarrationClipsWithoutRipple,
   audioClipId,
   audioClipWindow,
   audioTrimPatch,
@@ -702,16 +703,18 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const layers: TimelineSiblingLayers = r.clips.length
         ? rippleRemoveSiblingLayers(c, r.removed[0], r.removed[1])
         : { blocks: c.blocks, ...(c.audioTracks ? { audioTracks: c.audioTracks } : {}) };
-      if (p.document && r.clips.length) {
-        const command = applyNarrationDocumentEdit({
+      if (p.document) {
+        const common = {
           projectId: p.id,
           document: p.document,
-          ranges: [{ fromSec: r.removed[0], toSec: r.removed[1] }],
           context: p.context,
           mainTranscript: asAsr(p.context.asr),
           clipTranscripts: clipAsrOf(p.context),
           canvasWidth: c.width,
-        });
+        };
+        const command = r.clips.length
+          ? applyNarrationDocumentEdit({ ...common, ranges: [{ fromSec: r.removed[0], toSec: r.removed[1] }] })
+          : removeNarrationClipsWithoutRipple({ ...common, clipIds: [String(input.shotId)] });
         if (!command.ok) {
           return { result: { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } } };
         }

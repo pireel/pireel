@@ -41,6 +41,7 @@ import {
   applyEditorCommand,
   applyNarrationDocumentEdit,
   applyNarrationSplitCommands,
+  removeNarrationClipsWithoutRipple,
   assembleHtml,
   blockBgCss,
   captionLineSegments,
@@ -2922,6 +2923,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     clipTranscripts: clipAsrRef.current,
     canvasWidth: compRef.current.width,
   });
+  const prepareNarrationClipRemoval = (clipIds: readonly string[]) => removeNarrationClipsWithoutRipple({
+    projectId,
+    document: editorDocumentRef.current,
+    clipIds,
+    context: liveMigrationContextRef.current.context,
+    mainTranscript: asrRef.current,
+    clipTranscripts: clipAsrRef.current,
+    canvasWidth: compRef.current.width,
+  });
 
   /** Cut: split the current shot in two at the playhead (content unchanged). Compute first, push the snapshot after —
    *  if it lands on a boundary and doesn't cut, don't touch the undo/redo stack (clearing the redo line without re-rendering would leave button states stale). */
@@ -3014,8 +3024,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setEditorDocument(edit.document);
     } else {
       // Emptying the primary lane intentionally preserves every independent sibling lane.
+      const edit = prepareNarrationClipRemoval([sid]);
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return { ok: false, error: edit.error.message };
+      }
       pushUndoSnapshot();
-      setComp((cur) => ({ ...cur, shots: [] }));
+      setEditorDocument(edit.document);
     }
     setSelectedShotId(null);
     applyT(r.removed[0]);
@@ -3032,8 +3047,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (targets.length === 0) return;
     if (targets.length === 1) return deleteShot(targets[0]!.clip.id); // degrade to single delete (reuse guard/landing point)
     if (targets.length === shots.length) {
+      const edit = prepareNarrationClipRemoval(targets.map((target) => target.clip.id));
+      if (!edit.ok) {
+        toast.error(edit.error.message);
+        return;
+      }
       pushUndoSnapshot();
-      setComp((cur) => ({ ...cur, shots: [] }));
+      setEditorDocument(edit.document);
       setSelectedShotId(null);
       applyT(0);
       toast.success(t('workbench.deletedNScenes', { n: targets.length }));

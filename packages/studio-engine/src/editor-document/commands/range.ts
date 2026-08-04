@@ -1,6 +1,7 @@
-import type { EditorDocumentV2, EditorTrack, SemanticScene, TimelineClip } from '../types';
+import type { EditorDocumentV2, EditorTrack } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
-import { clearRangeFromClip, clipEndFrame, clipOverlapsRange } from './clip-geometry';
+import { clearRangeFromClip, clipOverlapsRange } from './clip-geometry';
+import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
 
 export interface RemoveEditorRangeOptions {
@@ -47,55 +48,6 @@ function linkedClearTrackIds(
     }
   }
   return trackIds;
-}
-
-function updateScenes(
-  scenes: SemanticScene[],
-  removedIds: Set<string>,
-  splitPairs: Map<string, string[]>,
-): SemanticScene[] {
-  let changed = false;
-  const next = scenes.map((scene) => {
-    const clipIds = scene.clipIds.flatMap((id) => {
-      if (removedIds.has(id)) {
-        changed = true;
-        return [];
-      }
-      const splitIds = splitPairs.get(id);
-      if (!splitIds?.length) return [id];
-      changed = true;
-      return [id, ...splitIds];
-    });
-    return clipIds === scene.clipIds ? scene : { ...scene, clipIds };
-  });
-  return changed ? next : scenes;
-}
-
-function detachDanglingClipAnchors(
-  tracks: EditorTrack[],
-  survivingClipIds: Set<string>,
-): { tracks: EditorTrack[]; changedTrackIds: string[]; lockedTrackIds: string[] } {
-  const changedTrackIds: string[] = [];
-  const lockedTrackIds: string[] = [];
-  const nextTracks = tracks.map((track) => {
-    const hasDanglingAnchor = track.clips.some((clip) =>
-      'anchor' in clip && clip.anchor.type === 'clip' && !survivingClipIds.has(clip.anchor.clipId),
-    );
-    if (!hasDanglingAnchor) return track;
-    if (track.locked) {
-      lockedTrackIds.push(track.id);
-      return track;
-    }
-    changedTrackIds.push(track.id);
-    return {
-      ...track,
-      clips: track.clips.map((clip): TimelineClip => {
-        if (!('anchor' in clip) || clip.anchor.type !== 'clip' || survivingClipIds.has(clip.anchor.clipId)) return clip;
-        return { ...clip, anchor: { type: 'timeline' } };
-      }),
-    };
-  });
-  return { tracks: nextTracks, changedTrackIds, lockedTrackIds };
 }
 
 /**
@@ -181,7 +133,7 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
 
   let semantics = {
     ...document.semantics,
-    scenes: updateScenes(document.semantics.scenes, removedClipIds, splitPairs),
+    scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs),
   };
   if (managedCaptionTrackRemoved) {
     const { managedCaptionTrackId: _removed, ...withoutManagedCaptionTrack } = semantics;

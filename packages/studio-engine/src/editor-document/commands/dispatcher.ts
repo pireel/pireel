@@ -3,6 +3,7 @@ import { patchEditorClip } from './clip-patch';
 import { insertEditorClips } from './insert';
 import { relayManagedCaptionTrack } from './managed-captions';
 import { patchNarrativeClips } from './narrative-patch';
+import { removeEditorClips } from './remove';
 import { splitEditorClip } from './split';
 import { removeEditorRange } from './range';
 import { insertEditorTrack, moveEditorTrack, patchEditorTrack, removeEditorTrack } from './tracks';
@@ -23,6 +24,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return patchEditorClip(document, command.trackId, command.clipId, command.patch);
     case 'captions.relay':
       return relayManagedCaptionTrack(document);
+    case 'clips.remove':
+      return removeEditorClips(document, command);
     case 'clips.insert':
       return insertEditorClips(document, command);
     case 'range.remove':

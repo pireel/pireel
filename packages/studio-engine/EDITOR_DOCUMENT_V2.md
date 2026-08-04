@@ -71,10 +71,12 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `tracks.ts` owns insert/remove/move/flags and semantic-lane invariants;
 - `clip-geometry.ts` owns frame/source split and trim math;
 - `clip-patch.ts` owns non-geometric clip state such as `enabled`;
+- `remove.ts` owns exact identity deletion without moving surviving clips;
 - `range.ts` owns lift/ripple, linked expansion, sync-lock and empty-lane pruning;
 - `insert.ts` owns overwrite/ripple insertion;
 - `split.ts` owns atomic clip/link-group subdivision;
 - `narrative-patch.ts` owns normalized framing, grade and shot-audio properties without exposing geometry;
+- `managed-captions.ts` derives the semantic caption lane from V2 transcript and clip placement;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
@@ -87,7 +89,7 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Track CRUD/reordering plus lift, ripple, overwrite and ripple-insert commands.
 - Linked-clip expansion, sync-lock, locked-track atomic failure and semantic scene repair.
 - Empty-primary playback through a timeline clock, including graphics/audio-only documents.
-- V1 range deletion can produce an empty primary lane; browser/server/agent compatibility paths ripple sibling audio and blocks together.
+- Exact V2 clip removal can leave the required primary lane empty without shifting independent sibling lanes.
 - Cloud rows and local drafts dual-read V1/V2 and single-write V2; DTOs expose canonical V2 plus a temporary V1 view.
 - Cloud undo history restores and rewrites V2, and offline MCP/analysis/import paths share one server adapter instead of casting stored JSON.
 - A dry-run-first bulk migration script covers both live project rows and undo history.
@@ -99,7 +101,9 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Browser, manual timeline and offline-MCP narration range edits now share
   `applyNarrationDocumentEdit`: the V2 command ripples sync-locked/linked lanes atomically, then the
   semantic layer re-derives managed captions. This covers range/transcript cuts, word deletion and
-  ordinary trim/scene deletion; locked native lanes fail the whole edit.
+  ordinary trim/scene deletion; locked native lanes fail the whole edit. Deleting the final scene or
+  clearing all scenes instead uses exact `clips.remove`, retains every sibling position, clears only
+  derived managed captions and keeps the empty primary lane itself.
 - Agent transactions snapshot and validate both V2 and the runtime projection, so an error can roll
   back media lanes which `Composition` cannot see.
 - Shot splitting now uses the native `clip.split` command. Compatibility playhead points are resolved

@@ -336,6 +336,19 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const after = runServerTool('split_shot', { atSec: 5 }, { ...only, comp: deleted.comp! });
     expect(after.result.ok).toBe(false);
     expect(after.result.error).toContain('no video track');
+
+    const native = v2proj({ ...only, document: undefined });
+    native.document!.timeline.tracks.push({
+      id: 'empty-independent', type: 'graphics', role: 'graphics', muted: false, hidden: true,
+      locked: false, syncLocked: false, stackOrder: 8, clips: [],
+    });
+    const nativeDeleted = runServerTool('delete_shot', { shotId: 'only' }, native);
+    expect(nativeDeleted.result.ok).toBe(true);
+    expect(nativeDeleted.document?.timeline.tracks.find((track) => track.id === nativeDeleted.document?.semantics.primaryNarrativeTrackId)?.clips).toEqual([]);
+    expect(nativeDeleted.document?.timeline.tracks.find((track) => track.id === 'empty-independent')).toMatchObject({
+      hidden: true, syncLocked: false, stackOrder: 8, clips: [],
+    });
+    expect(nativeDeleted.comp?.blocks).toMatchObject([{ id: 'independent-overlay', startSec: 3, durationSec: 4 }]);
   });
   it('set_captions:有云端转写才能开;submit_plan 落 context 不落 comp', () => {
     const r = runServerTool('set_captions', { preset: 'ln-clean' }, proj());

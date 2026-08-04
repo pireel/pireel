@@ -83,9 +83,8 @@ export function relayManagedCaptionTrack(document: EditorDocumentV2): EditorComm
   const narrativeAssetIds = new Set(narrative.map((clip) => clip.assetId));
   const transcriptEntries = Object.entries(document.semantics.transcripts)
     .filter(([assetId, segments]) => narrativeAssetIds.has(assetId) && segments.length > 0);
-  const primaryTranscriptKnown = !!document.semantics.primaryNarrativeAssetId
-    && (document.semantics.transcripts[document.semantics.primaryNarrativeAssetId]?.length ?? 0) > 0;
-  if (!transcriptEntries.length && !(narrative.length === 0 && primaryTranscriptKnown)) {
+  const captionTruthKnown = Object.values(document.semantics.transcripts).some((segments) => segments.length > 0);
+  if (!transcriptEntries.length && !(narrative.length === 0 && captionTruthKnown)) {
     return { ok: true, document, receipt: emptyCommandReceipt('captions.relay') };
   }
 
