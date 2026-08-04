@@ -1,9 +1,12 @@
 import type {
   EditorDocumentV2,
+  EditorMediaAsset,
   EditorTrack,
   EditorTrackRole,
   EditorTrackType,
   GraphicBlockPayload,
+  AudioClipProperties,
+  AudioTimelineClip,
   TimelineClip,
   TimelineClipId,
   TrackId,
@@ -64,6 +67,20 @@ export interface OverlayClipPatchUpdate {
   patch: OverlayClipPatch;
 }
 
+/** Fully resolved audio state. Replacing properties lets normalized defaults remove stale fields. */
+export interface AudioTimelineClipPatch {
+  startFrame: number;
+  durationFrames: number;
+  sourceInSec: number;
+  sourceOutSec: number | null;
+  properties: AudioClipProperties;
+}
+
+export interface AudioTimelineClipPatchUpdate {
+  clipId: TimelineClipId;
+  patch: AudioTimelineClipPatch;
+}
+
 type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip extends TimelineClip
   ? Omit<Clip, 'startFrame'> & { offsetFrames: number }
   : never;
@@ -80,6 +97,8 @@ export type EditorCommand =
   | { type: 'overlay.patch'; updates: OverlayClipPatchUpdate[] }
   | { type: 'overlay.move'; clipId: TimelineClipId; toTrackId: TrackId }
   | { type: 'overlay.duplicate'; clipId: TimelineClipId; newClipId: TimelineClipId; startFrame: number; toTrackId?: TrackId }
+  | { type: 'audio.insert'; trackId: TrackId; clip: AudioTimelineClip; asset?: EditorMediaAsset }
+  | { type: 'audio.patch'; updates: AudioTimelineClipPatchUpdate[] }
   | { type: 'captions.relay' }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
   | {

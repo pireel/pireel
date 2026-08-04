@@ -35,6 +35,8 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  addAudioDocumentClip,
+  applyAudioDocumentEdits,
   applyCanvasDocumentEdit,
   applyCompositionLayout,
   applyLayoutDocumentEdit,
@@ -47,6 +49,7 @@ import {
   normalizeProjectDocument,
   projectDocumentToLegacyComposition,
   removeNarrationClipsWithoutRipple,
+  removeAudioDocumentClips,
   removeOverlayDocumentClips,
   duplicateOverlayDocumentClip,
   audioClipId,
@@ -56,6 +59,7 @@ import {
   patchNarrativeClips,
   patchShotAudio,
   splitAudioClipAt,
+  splitAudioDocumentClip,
   blockId,
   blockKind,
   compReceiptDelta,
@@ -692,6 +696,69 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.startSec === 'number' && Number.isFinite(input.startSec) ? { startSec: Math.max(0, input.startSec) } : {}),
         ...(typeof input.mute === 'boolean' ? { muted: input.mute } : {}),
       };
+      if (p.document) {
+        if (input.off === true) {
+          if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
+          if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };
+          const removed = removeAudioDocumentClips(p.document, trackIdIn ? [trackIdIn] : tracks.map((track) => track.id));
+          if (!removed.ok) return { result: { ok: false, error: removed.error.message, data: { code: removed.error.code, trackIds: removed.error.trackIds } } };
+          return {
+            result: { ok: true, summary: trackIdIn ? 'Removed the audio track' : 'Removed all audio tracks' },
+            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: removed.document }),
+            document: removed.document,
+          };
+        }
+        const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
+        if (urlIn) {
+          const clip = patchAudioClip({ id: audioClipId(), src: urlIn }, knobs);
+          const added = addAudioDocumentClip({ document: p.document, clip });
+          if (!added.ok) return { result: { ok: false, error: added.error.message, data: { code: added.error.code, trackIds: added.error.trackIds } } };
+          return {
+            result: { ok: true, summary: `Added an audio track (${r1(clip.volumeDb ?? -18)}dB)`, data: { trackId: clip.id } },
+            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: added.document }),
+            document: added.document,
+          };
+        }
+        const target = trackIdIn ? tracks.find((x) => x.id === trackIdIn) : tracks.length === 1 ? tracks[0] : null;
+        if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet — pass a url to add one' } };
+        if (!target) return { result: { ok: false, error: 'pass trackId (several tracks exist)' } };
+        const splitAt = Number(input.splitAtSec);
+        if (Number.isFinite(splitAt)) {
+          const split = splitAudioDocumentClip(p.document, target.id, splitAt);
+          if (!split.ok || !split.newClipId) {
+            return { result: { ok: false, error: split.ok ? 'audio split did not create a clip' : split.error.message } };
+          }
+          return {
+            result: { ok: true, summary: `Split the audio track at ${r1(splitAt)}s`, data: { trackId: target.id, newTrackId: split.newClipId } },
+            comp: projectDocumentToLegacyComposition({ projectId: p.id, value: split.document }),
+            document: split.document,
+          };
+        }
+        const head = Number(input.headSec);
+        const tail = Number(input.tailSec);
+        let trimmed = target;
+        if (Number.isFinite(head)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'left', Math.max(0, head)));
+        if (Number.isFinite(tail)) trimmed = patchAudioClip(trimmed, audioTrimPatch(trimmed, 'right', Math.max(0, tail)));
+        const trimming = trimmed !== target;
+        if (!Object.keys(knobs).length && !trimming) {
+          return { result: { ok: false, error: 'pass volumeDb / fadeInSec / fadeOutSec / speed / startSec / mute / headSec / tailSec / splitAtSec, or off:true' } };
+        }
+        const patch = {
+          ...(trimming ? {
+            startSec: trimmed.startSec,
+            inSec: trimmed.inSec,
+            outSec: trimmed.outSec,
+          } : {}),
+          ...knobs,
+        };
+        const edited = applyAudioDocumentEdits({ document: p.document, updates: [{ clipId: target.id, patch }] });
+        if (!edited.ok) return { result: { ok: false, error: edited.error.message, data: { code: edited.error.code, trackIds: edited.error.trackIds } } };
+        return {
+          result: { ok: true, summary: trimming ? 'Trimmed the audio track' : 'Adjusted the audio track' },
+          comp: projectDocumentToLegacyComposition({ projectId: p.id, value: edited.document }),
+          document: edited.document,
+        };
+      }
       if (input.off === true) {
         if (!tracks.length) return { result: { ok: false, error: 'no audio tracks yet' } };
         if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { result: { ok: false, error: 'audio track not found' } };

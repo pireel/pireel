@@ -32,7 +32,6 @@ import {
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
   applyShotFramingInput,
-  audioClipId,
   audioTrimPatch,
   blockId,
   blockKind,
@@ -57,7 +56,6 @@ import {
   resolveWordIds,
   wordRanges,
   wordRangesToEdited,
-  splitAudioClipAt,
   splitShotsAtEditedPoints,
   totalDuration,
   validateComposition,
@@ -218,8 +216,10 @@ export interface AgentToolCtx {
   resizeCutTransition: (shotId: string, durationSec: number) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
   audioMount: (file: File, label?: string, opts?: { startSec?: number }) => Promise<string | undefined>;
-  audioPatch: (id: string, patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number; speed?: number; startSec?: number }) => void;
-  audioRemove: (id: string) => void;
+  audioPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => { ok: boolean; error?: string };
+  audioRemove: (id: string) => { ok: boolean; error?: string };
+  audioRemoveMany: (ids: readonly string[]) => { ok: boolean; error?: string };
+  audioSplit: (id: string, atSec: number) => { ok: boolean; error?: string; newClipId?: string };
   /** Narration denoise (use-denoise.ts): strength = on/retune, null = off; bakes in the background. */
   setDenoise: (strength: number | null) => void;
   splitAtPlayhead: () => void;
@@ -247,7 +247,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
-    noteOf, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, setDenoise,
+    noteOf, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, audioRemoveMany, audioSplit, setDenoise,
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
@@ -1581,8 +1581,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (input.off === true) {
               if (!tracks.length) return { ok: false, error: t('workbench.noBgmYet') };
               if (trackIdIn && !tracks.some((x) => x.id === trackIdIn)) return { ok: false, error: t('workbench.audioTrackNotFound') };
-              if (trackIdIn) audioRemove(trackIdIn);
-              else for (const x of tracks) audioRemove(x.id);
+              const removed = trackIdIn ? audioRemove(trackIdIn) : audioRemoveMany(tracks.map((track) => track.id));
+              if (!removed.ok) return { ok: false, error: removed.error ?? t('workbench.audioTrackNotFound') };
               return { ok: true, summary: t('workbench.bgmRemoved') };
             }
             const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
@@ -1601,7 +1601,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const newId = await audioMount(f, undefined, typeof knobs.startSec === 'number' ? { startSec: knobs.startSec } : undefined);
               if (!newId) return { ok: false, error: t('workbench.musicGenFailed') };
               const { startSec: _s, ...rest } = knobs;
-              if (Object.keys(rest).length) audioPatch(newId, rest);
+              if (Object.keys(rest).length) {
+                const patched = audioPatch(newId, rest);
+                if (!patched.ok) return { ok: false, error: patched.error ?? t('workbench.passAudioKnobs') };
+              }
               const db = (compRef.current.audioTracks ?? []).find((x) => x.id === newId)?.volumeDb;
               return { ok: true, summary: t('workbench.bgmMounted', { db: db != null ? String(r1(db)) : String(-18) }), data: { trackId: newId } };
             }
@@ -1611,10 +1614,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Split changes the track COUNT, so it stands alone rather than combining with the knobs
             const splitAt = Number(input.splitAtSec);
             if (Number.isFinite(splitAt)) {
-              const halves = splitAudioClipAt(target, splitAt, audioClipId);
-              if (!halves) return { ok: false, error: t('workbench.movePlayheadToSplitAudio') };
-              setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === target.id ? halves : [x])) }));
-              return { ok: true, summary: t('workbench.bgmSplit'), data: { trackId: halves[0].id, newTrackId: halves[1].id } };
+              const split = audioSplit(target.id, splitAt);
+              if (!split.ok || !split.newClipId) return { ok: false, error: split.error ?? t('workbench.movePlayheadToSplitAudio') };
+              return { ok: true, summary: t('workbench.bgmSplit'), data: { trackId: target.id, newTrackId: split.newClipId } };
             }
             // Edge trims: same math as the lane's own handles (start + source in/out move together)
             const headSec = Number(input.headSec);
@@ -1624,7 +1626,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (Number.isFinite(tailSec)) trimPatch = { ...trimPatch, ...audioTrimPatch({ ...target, ...trimPatch }, 'right', Math.max(0, tailSec)) };
             const trimming = Object.keys(trimPatch).length > 0;
             if (!Object.keys(knobs).length && !trimming) return { ok: false, error: t('workbench.passAudioKnobs') };
-            audioPatch(target.id, { ...trimPatch, ...knobs });
+            const patched = audioPatch(target.id, { ...trimPatch, ...knobs });
+            if (!patched.ok) return { ok: false, error: patched.error ?? t('workbench.passAudioKnobs') };
             return { ok: true, summary: trimming ? t('workbench.bgmTrimmed') : t('workbench.bgmAdjusted') };
           }
           case 'insert_clip': {

@@ -80,6 +80,7 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `canvas.ts` owns deliberate output dimensions independently from track/media presence;
 - `overlay-patch.ts` owns stable-id timing and payload edits for graphics/caption clips;
 - `overlay-move.ts` and `overlay-duplicate.ts` own cross-lane identity placement and cloning;
+- `audio-insert.ts` and `audio-patch.ts` own durable audio placement plus coupled timeline/source/envelope state;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
@@ -165,6 +166,9 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - Browser/server `apply_layout` now commits shot framing, its stable overlay partner link and every
   normalized block box as one V2 transaction. A locked target lane rolls the whole coordinated layout
   back, while empty/native lanes keep their identity, flags and stack order.
+- Manual audio controls plus browser/server `set_bgm` now add durable assets and edit native audio clip
+  identities. Overlapping clips share lanes without overwrite, split seams suppress internal default
+  fades, locked lanes reject atomically, and deleting the last clip retains the user's empty audio lane.
 
 Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
 adapter still projects and remigrates results for tools not yet cut over; that path must be removed

@@ -26,6 +26,7 @@ export * from './narration-document-edit';
 export * from './overlay-document-edit';
 export * from './overlay-track-edit';
 export * from './layout-document-edit';
+export * from './audio-document-edit';
 export * from './project-document';
 export * from './transcript-address';
 export * from './templates';

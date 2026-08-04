@@ -1,5 +1,7 @@
 import type { EditorDocumentV2 } from '../types';
 import { patchEditorCanvas } from './canvas';
+import { insertAudioClip } from './audio-insert';
+import { patchAudioClips } from './audio-patch';
 import { patchEditorClip } from './clip-patch';
 import { insertEditorClips } from './insert';
 import { relayManagedCaptionTrack } from './managed-captions';
@@ -34,6 +36,10 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return moveOverlayClip(document, command.clipId, command.toTrackId);
     case 'overlay.duplicate':
       return duplicateOverlayClip(document, command.clipId, command.newClipId, command.startFrame, command.toTrackId);
+    case 'audio.insert':
+      return insertAudioClip(document, command.trackId, command.clip, command.asset);
+    case 'audio.patch':
+      return patchAudioClips(document, command.updates);
     case 'captions.relay':
       return relayManagedCaptionTrack(document);
     case 'clips.remove':

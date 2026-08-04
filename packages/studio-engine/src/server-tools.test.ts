@@ -518,6 +518,44 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // 轨外的分割点拒绝,不静默产出一条零长轨
     expect(runServerTool('set_bgm', { splitAtSec: 999 }, proj({ comp: withClip })).result.ok).toBe(false);
   });
+  it('V2 set_bgm 原生修改/分割/删除并保留空音频轨', () => {
+    const withClip: Composition = {
+      ...proj().comp,
+      audioTracks: [{ id: 'bed', src: 'https://cdn.pireel.com/bed.mp3', durationSec: 30 }],
+    };
+    const p = v2proj({ comp: withClip });
+    p.document!.timeline.tracks.push({
+      id: 'audio-empty', type: 'audio', role: 'music', muted: true, hidden: true, locked: false,
+      syncLocked: false, stackOrder: 0, clips: [],
+    });
+    const adjusted = runServerTool('set_bgm', { trackId: 'bed', volumeDb: -24, speed: 1.5 }, p);
+    expect(adjusted.result.ok).toBe(true);
+    expect(adjusted.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'bed')).toMatchObject({
+      kind: 'audio', durationFrames: 600, properties: { volumeDb: -24, speed: 1.5 },
+    });
+    expect(adjusted.document?.timeline.tracks.find((track) => track.id === 'audio-empty')).toMatchObject({
+      muted: true, hidden: true, syncLocked: false, clips: [],
+    });
+
+    const splitProject = { ...p, comp: adjusted.comp!, document: adjusted.document! };
+    const split = runServerTool('set_bgm', { trackId: 'bed', splitAtSec: 10 }, splitProject);
+    expect(split.result.ok).toBe(true);
+    const newId = (split.result.data as { newTrackId: string }).newTrackId;
+    expect(split.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === newId)).toMatchObject({
+      kind: 'audio', startFrame: 300, properties: { fadeInSec: 0, speed: 1.5 },
+    });
+
+    const removed = runServerTool('set_bgm', { off: true }, { ...p, comp: split.comp!, document: split.document! });
+    expect(removed.result.ok).toBe(true);
+    expect(removed.document?.timeline.tracks.filter((track) => track.type === 'audio')).toHaveLength(2);
+    expect(removed.document?.timeline.tracks.filter((track) => track.type === 'audio').every((track) => track.clips.length === 0)).toBe(true);
+
+    const locked = v2proj({ comp: withClip });
+    locked.document!.timeline.tracks.find((track) => track.type === 'audio')!.locked = true;
+    const rejected = runServerTool('set_bgm', { trackId: 'bed', volumeDb: -9 }, locked);
+    expect(rejected.result).toMatchObject({ ok: false, data: { code: 'track-locked' } });
+    expect(rejected.document).toBeUndefined();
+  });
   it('add_transition:内容级切点转场——挂后镜 transIn、prevId 锚前镜;非切点拒绝;none 移除;区内禁分割', () => {
     // proj 的切点在 10s(s1|s2)
     const r = runServerTool('add_transition', { atSec: 10.1, effect: 'crosszoom', durationSec: 2 }, proj());

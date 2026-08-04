@@ -122,14 +122,14 @@ export interface CaptionTimelineClip extends TimelineClipBase {
   anchor: TimelineAnchor;
 }
 
-type AudioProperties = Omit<AudioClip, 'id' | 'src' | 'sig' | 'durationSec' | 'startSec' | 'inSec' | 'outSec'>;
+export type AudioClipProperties = Omit<AudioClip, 'id' | 'src' | 'sig' | 'durationSec' | 'startSec' | 'inSec' | 'outSec'>;
 
 export interface AudioTimelineClip extends TimelineClipBase {
   kind: 'audio';
   assetId: AssetId;
   sourceInSec: number;
   sourceOutSec?: number;
-  properties: AudioProperties;
+  properties: AudioClipProperties;
   anchor: TimelineAnchor;
 }
 

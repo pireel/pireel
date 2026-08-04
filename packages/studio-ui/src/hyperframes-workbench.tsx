@@ -70,7 +70,6 @@ import {
   assembleBlockHtml,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
-  audioClipId,
   audioClipWindow,
   audioTrimPatch,
   patchShotFraming,
@@ -85,7 +84,6 @@ import {
   MAX_TRANSITION_SEC,
   cutTransitions,
   freezeBlockVars,
-  splitAudioClipAt,
   splitBlockedByTransition,
   totalDuration,
   hasTimelineContent,
@@ -2916,7 +2914,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     compRef,
     renderAudioTracks: renderComposition.audioTracks,
     timelineDurationSec: renderPlan.durationSec,
-    setComp,
+    documentRef: editorDocumentRef,
+    setDocument: setEditorDocument,
     videoFileRef,
     videoSigRef,
     videoEngineRef,
@@ -2980,13 +2979,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (audId) {
       const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
       if (!clip) return;
-      const halves = splitAudioClipAt(clip, tRef.current, audioClipId);
-      if (!halves) {
-        toast.error(t('workbench.movePlayheadToSplitAudio'));
-        return;
-      }
-      pushUndoSnapshot();
-      setComp((cur) => ({ ...cur, audioTracks: (cur.audioTracks ?? []).flatMap((x) => (x.id === audId ? halves : [x])) }));
+      const split = audioOps.splitClip(audId, tRef.current, pushUndoSnapshot);
+      if (!split.ok) toast.error(split.error ?? t('workbench.movePlayheadToSplitAudio'));
       return;
     }
     const shots = ensureShots(c);
@@ -3019,8 +3013,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         toast.error(t('workbench.movePlayheadToTrimAudio'));
         return { ok: false, error: t('workbench.movePlayheadToTrimAudio') };
       }
-      pushUndoSnapshot();
-      audioOps.patchClip(audId, audioTrimPatch(clip, side, tRef.current));
+      const edit = audioOps.patchClip(audId, audioTrimPatch(clip, side, tRef.current), pushUndoSnapshot);
+      if (!edit.ok) {
+        toast.error(edit.error ?? t('workbench.movePlayheadToTrimAudio'));
+        return { ok: false, error: edit.error };
+      }
       return { ok: true };
     }
     const shots = ensureShots(c);
@@ -3543,7 +3540,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, setCutTransition,
     resizeCutTransition, splitAtPlayhead, trimAtPlayhead, deleteShot,
-    audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
+    audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip,
+    audioRemoveMany: audioOps.removeClips, audioSplit: audioOps.splitClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
