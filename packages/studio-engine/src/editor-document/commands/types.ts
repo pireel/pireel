@@ -48,6 +48,8 @@ export type TrackPatch = Partial<Pick<EditorTrack,
 
 export type ClipPatch = Partial<Pick<TimelineClip, 'enabled'>>;
 
+export type CanvasPatch = Pick<EditorDocumentV2['canvas'], 'width' | 'height'>;
+
 type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip extends TimelineClip
   ? Omit<Clip, 'startFrame'> & { offsetFrames: number }
   : never;
@@ -55,6 +57,7 @@ type RelativeClipPlacement<Clip extends TimelineClip = TimelineClip> = Clip exte
 export type TimelineClipPlacement = RelativeClipPlacement;
 
 export type EditorCommand =
+  | { type: 'canvas.patch'; patch: CanvasPatch }
   | { type: 'track.insert'; track: InsertTrackInput; index?: number }
   | { type: 'track.remove'; trackId: TrackId }
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }

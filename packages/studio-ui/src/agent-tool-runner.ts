@@ -25,6 +25,7 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  applyCanvasDocumentEdit,
   applyCompositionLayout,
   applyNarrationDocumentEdit,
   applyNarrationSplitCommands,
@@ -229,7 +230,6 @@ export interface AgentToolCtx {
   setCaptionStyle: (patch: Partial<CaptionStyle>) => void;
   applyCaptionPreset: (preset: string) => Promise<void>;
   removeCaptionLayer: () => void;
-  relayCaptionLayer: (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null, canvasW?: number) => Block[];
   // Export
   agentExportRef: MutableRefObject<{ running: boolean; filename: string | null; error: string | null; delivered?: 'local_sink' | 'browser_download'; sinkError?: string }>;
   exportPctRef: MutableRefObject<number>;
@@ -248,7 +248,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
     noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, setDenoise,
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
-    removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
+    removeCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
       // Models mirror the chat's @id pill syntax into tool args ("blockIds":["@media55_…"]) — the id
       // lookup then misses and the first call of a batch reliably fails. Strip a leading @ from every
@@ -1358,9 +1358,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'set_canvas': {
             const size = canvasSizeFromInput(input);
             if (!size) return { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' };
-            if (size.width === c.width && size.height === c.height) return { ok: false, error: 'canvas already has that size' };
-            const shots = ensureShots(c);
-            setComp((cur) => ({ ...cur, ...size, blocks: relayCaptionLayer(cur.blocks, shots, asrRef.current, size.width) }));
+            const currentCanvas = documentRef.current.canvas;
+            if (size.width === currentCanvas.width && size.height === currentCanvas.height && currentCanvas.configured) {
+              return { ok: false, error: 'canvas already has that size' };
+            }
+            const edit = applyCanvasDocumentEdit({
+              projectId: ctx.projectId,
+              document: documentRef.current,
+              ...size,
+              mainTranscript: asrRef.current,
+              clipTranscripts: clipAsrRef.current,
+            });
+            if (!edit.ok) {
+              return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            }
+            setDocument(edit.document);
             return { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } };
           }
           case 'set_shot_framing': {

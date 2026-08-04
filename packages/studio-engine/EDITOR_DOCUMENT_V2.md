@@ -77,6 +77,7 @@ All V2 edits enter through `applyEditorCommand`. The command layer is split by r
 - `split.ts` owns atomic clip/link-group subdivision;
 - `narrative-patch.ts` owns normalized framing, grade and shot-audio properties without exposing geometry;
 - `managed-captions.ts` derives the semantic caption lane from V2 transcript and clip placement;
+- `canvas.ts` owns deliberate output dimensions independently from track/media presence;
 - `dispatcher.ts` is the single entry used by UI, agents and server tools.
 
 Commands are immutable and atomic. A command that touches a locked lane returns the original document unchanged. Receipts report affected tracks and removed/created/shifted clips so UI selection, undo and agent summaries do not infer changes from ad-hoc array diffs.
@@ -149,6 +150,10 @@ The compatibility-only `timeline-ripple.ts` applies matching interval geometry t
 - narration ripple edits now finish with the native `captions.relay` command. Managed captions map
   transcript source seconds through V2 clip placement (including gaps and retiming), keep their lane
   flags and anchors, and never remigrate the compatibility Composition back into the document.
+- Manual ratio changes plus browser and server `set_canvas` now share one V2 transaction:
+  `canvas.patch` marks explicit dimensions, then `captions.relay` reflows the managed lane against the
+  new width. A locked caption lane rejects the whole transaction, while unrelated empty/native lanes
+  remain untouched.
 
 Consumption by the remaining compatibility tools is the next rollout gate, not schema work. The server
 adapter still projects and remigrates results for tools not yet cut over; that path must be removed

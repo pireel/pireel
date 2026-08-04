@@ -35,6 +35,7 @@ import {
   VOLUME_DB_MAX,
   VOLUME_DB_MIN,
   applyBlockPlacement,
+  applyCanvasDocumentEdit,
   applyCompositionLayout,
   applyNarrationDocumentEdit,
   applyNarrationSplitCommands,
@@ -444,7 +445,37 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'set_canvas': {
       const size = canvasSizeFromInput(input);
       if (!size) return { result: { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' } };
-      if (size.width === c.width && size.height === c.height) return { result: { ok: false, error: 'canvas already has that size' } };
+      const currentCanvas = p.document?.canvas;
+      if (
+        size.width === (currentCanvas?.width ?? c.width)
+        && size.height === (currentCanvas?.height ?? c.height)
+        && (!currentCanvas || currentCanvas.configured)
+      ) {
+        return { result: { ok: false, error: 'canvas already has that size' } };
+      }
+      if (p.document) {
+        const edit = applyCanvasDocumentEdit({
+          projectId: p.id,
+          document: p.document,
+          ...size,
+          mainTranscript: asAsr(p.context.asr),
+          clipTranscripts: clipAsrOf(p.context),
+        });
+        if (!edit.ok) {
+          return {
+            result: {
+              ok: false,
+              error: edit.error.message,
+              data: { code: edit.error.code, trackIds: edit.error.trackIds },
+            },
+          };
+        }
+        return {
+          result: { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } },
+          comp: edit.composition,
+          document: edit.document,
+        };
+      }
       const shots = shotsOf(p);
       return {
         result: { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } },

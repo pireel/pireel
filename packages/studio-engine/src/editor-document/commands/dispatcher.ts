@@ -1,4 +1,5 @@
 import type { EditorDocumentV2 } from '../types';
+import { patchEditorCanvas } from './canvas';
 import { patchEditorClip } from './clip-patch';
 import { insertEditorClips } from './insert';
 import { relayManagedCaptionTrack } from './managed-captions';
@@ -12,6 +13,8 @@ import { commandFailure, type EditorCommand, type EditorCommandResult } from './
 /** Single mutation gateway for UI, agents, keyboard actions and server-side editing. */
 export function applyEditorCommand(document: EditorDocumentV2, command: EditorCommand): EditorCommandResult {
   switch (command.type) {
+    case 'canvas.patch':
+      return patchEditorCanvas(document, command.patch);
     case 'track.insert':
       return insertEditorTrack(document, command.track, command.index);
     case 'track.remove':

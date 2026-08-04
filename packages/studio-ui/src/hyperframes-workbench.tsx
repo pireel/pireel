@@ -39,6 +39,7 @@ import {
   STUDIO_FONTS_HREF,
   CAPTION_PRESETS,
   applyEditorCommand,
+  applyCanvasDocumentEdit,
   applyNarrationDocumentEdit,
   applyNarrationSplitCommands,
   removeNarrationClipsWithoutRipple,
@@ -534,9 +535,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [ratioOpen, setRatioOpen] = useState(false);
   const applyCanvasRatio = (w: number, h: number) => {
     setRatioOpen(false);
-    if (Math.abs(w / h - comp.width / comp.height) < 0.02) return;
+    if (Math.abs(w / h - comp.width / comp.height) < 0.02 && editorDocumentRef.current.canvas.configured) return;
+    const edit = applyCanvasDocumentEdit({
+      projectId,
+      document: editorDocumentRef.current,
+      width: w,
+      height: h,
+      mainTranscript: asrRef.current,
+      clipTranscripts: clipAsrRef.current,
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
+    }
     pushUndoSnapshot();
-    setComp((c) => ({ ...c, width: w, height: h }));
+    setEditorDocument(edit.document);
   };
   // Preview box scale: computed after `bufs` below (stage geometry follows the ACTIVE doc's canvas
   // dims, not the live comp — a ratio switch must change shape atomically WITH the buffer swap,
@@ -3502,7 +3515,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
     resizeCutTransition, splitAtPlayhead, trimAtPlayhead, deleteShot,
     audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
-    videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
+    videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
   const runStudioTool = (toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }) => runAgentStudioTool(agentToolCtx, toolId, input, opts);

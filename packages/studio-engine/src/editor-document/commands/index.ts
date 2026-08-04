@@ -1,3 +1,4 @@
+export * from './canvas';
 export * from './clip-geometry';
 export * from './clip-patch';
 export * from './dispatcher';

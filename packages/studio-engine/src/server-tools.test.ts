@@ -60,6 +60,20 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(moved.result.ok).toBe(true);
     expect(moved.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1')).toMatchObject({ startFrame: 165 });
   });
+  it('V2 画布工具走原生命令并保留投影之外的空轨', () => {
+    const p = v2proj();
+    p.document!.timeline.tracks.push({
+      id: 'empty-audio', type: 'audio', muted: true, hidden: true, locked: false,
+      syncLocked: false, stackOrder: 11, clips: [],
+    });
+    const canvas = runServerTool('set_canvas', { preset: 'landscape' }, p);
+    expect(canvas.result.ok).toBe(true);
+    expect(canvas.document?.canvas).toMatchObject({ width: 1920, height: 1080, configured: true });
+    expect(canvas.document?.timeline.tracks.find((track) => track.id === 'empty-audio')).toMatchObject({
+      muted: true, hidden: true, syncLocked: false, stackOrder: 11, clips: [],
+    });
+    expect([canvas.comp!.width, canvas.comp!.height]).toEqual([1920, 1080]);
+  });
   it('V2 镜头属性工具直接补丁原生片段，并保留主轨间隙与关联版式', () => {
     const p = v2proj();
     const primary = p.document!.timeline.tracks.find((track) => track.id === p.document!.semantics.primaryNarrativeTrackId)!;
