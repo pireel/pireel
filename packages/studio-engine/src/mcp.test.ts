@@ -25,6 +25,7 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     switchProject: vi.fn(async () => ({ ok: true, summary: 'switched', data: { projectId: 'p1' } })),
     renameProject: vi.fn(async () => ({ ok: true, summary: 'renamed', data: { projectId: 'p1', title: 'X' } })),
     listAssets: vi.fn(async () => ({ ok: true, summary: '1 assets in the library', data: { assets: [{ id: 'u1', kind: 'image', url: 'https://cdn.example/u1.png' }], project: {} } })),
+    searchAssets: vi.fn(async () => ({ ok: true, summary: '1 matching asset', data: { results: [{ assetId: 'u1', kind: 'image', scope: 'cloud' }] } })),
     ...overrides,
   };
 }
@@ -89,7 +90,7 @@ describe('MCP 协议处理', () => {
     expect(d.readEditingGuide).toHaveBeenCalled();
     expect(d.readFrame).toHaveBeenCalledWith('f1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['create_browser_handoff', 'create_project', 'get_icons', 'import_media', 'list_assets', 'list_frames', 'list_projects', 'read_editing_guide', 'read_frame', 'rename_project', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['create_browser_handoff', 'create_project', 'get_icons', 'import_media', 'list_assets', 'list_frames', 'list_projects', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);
@@ -100,6 +101,10 @@ describe('MCP 协议处理', () => {
     await handleMcpRequest({ id: 101, method: 'tools/call', params: { name: 'create_browser_handoff', arguments: { project_id: 'p2' } } }, d3);
     expect(d3.createBrowserHandoff).toHaveBeenCalledWith({ project_id: 'p2' });
     expect(d3.callBridge).not.toHaveBeenCalled();
+    const d4 = deps();
+    await handleMcpRequest({ id: 102, method: 'tools/call', params: { name: 'search_assets', arguments: { query: '口播配乐', kind: 'audio' } } }, d4);
+    expect(d4.searchAssets).toHaveBeenCalledWith({ query: '口播配乐', kind: 'audio' });
+    expect(d4.callBridge).not.toHaveBeenCalled();
   });
   it('桥工具带 kind 对应超时过桥;未知工具 -32602', async () => {
     const d = deps();

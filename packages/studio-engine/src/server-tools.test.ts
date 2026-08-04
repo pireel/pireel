@@ -75,6 +75,17 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(t2).toContain('1. [5–9s] 数据不会说谎。');
     expect(t2).not.toContain('[0–2s]'); // cue 粒度行不外泄
   });
+  it('search_media:标签页关闭时仍按稳定源时间检索云端转写,且不产生落库改动', () => {
+    const r = runServerTool('search_media', { query: '第二句话', scope: 'main' }, proj());
+    expect(r.result.ok).toBe(true);
+    expect(r.comp).toBeUndefined();
+    expect(r.context).toBeUndefined();
+    const data = r.result.data as { indexVersion: number; results: { segmentId: string; sourceStartSec: number; sourceEndSec: number; transcript: string }[] };
+    expect(data.indexVersion).toBe(1);
+    expect(data.results[0]).toMatchObject({ sourceStartSec: 5, sourceEndSec: 12, transcript: '第二句话' });
+    expect(data.results[0]!.segmentId).toMatch(/^media_main_/);
+    expect(SERVER_EXECUTABLE_TOOLS.has('search_media')).toBe(true);
+  });
   it('move_block/delete_block:改动经 comp 返回(路由落库),原 comp 不被原地改', () => {
     const p = proj();
     const r = runServerTool('move_block', { blockId: 'b1', startSec: 5.5 }, p);

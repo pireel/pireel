@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@pireel/ui/dropdown-menu';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
+import { officialStickerSearchTags } from '@pireel/studio-engine/asset-search';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
 import { kitSampleProps } from './kit-ui';
@@ -40,12 +41,12 @@ import {
 } from './asset-card';
 import { studioLocale, t } from './i18n';
 import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory, OfficialSticker } from './official-assets-types';
+import { searchOfficialAssetDocuments, type OfficialAssetSemanticResult } from './official-asset-search-client';
 
 type OfficialCategorySection = 'stickers' | 'audio';
 type OfficialSection = 'all' | 'components' | OfficialCategorySection;
 type OfficialDetail = { section: OfficialCategorySection; categoryId: string; label: string };
 type OfficialGenerationType = 'image' | 'video' | 'element' | 'audio';
-
 const GROUP_GRID_PREVIEW = 8;
 const GROUP_GRID_TWO_ROWS_PX = 196;
 const HIDDEN_STICKER_CATEGORY_IDS = new Set(['03_decorative-symbols/01_kenney-emotes']);
@@ -74,6 +75,8 @@ export function OfficialAssetsPanel({
   const [activeSection, setActiveSection] = useState<OfficialSection>('all');
   const [detail, setDetail] = useState<OfficialDetail | null>(null);
   const [query, setQuery] = useState('');
+  const [cloudSearch, setCloudSearch] = useState<(OfficialAssetSemanticResult & { key: string }) | null>(null);
+  const [searching, setSearching] = useState(false);
   const [stickerLimit, setStickerLimit] = useState(80);
   useEffect(() => {
     let gone = false;
@@ -97,6 +100,40 @@ export function OfficialAssetsPanel({
   const stickerCategories = (catalog?.stickerCategories ?? []).filter((category) => !HIDDEN_STICKER_CATEGORY_IDS.has(category.id));
   const bgmCategories = catalog?.bgmCategories ?? [];
   const locale = studioLocale();
+
+  const needle = query.trim().toLocaleLowerCase();
+  const searchKind = activeSection === 'components' ? 'element' : activeSection === 'stickers' ? 'image' : activeSection === 'audio' ? 'audio' : 'all';
+  const searchKey = `${searchKind}:${needle}`;
+  useEffect(() => {
+    if (!needle) {
+      setCloudSearch(null);
+      setSearching(false);
+      return;
+    }
+    let gone = false;
+    const controller = new AbortController();
+    const key = searchKey;
+    setCloudSearch(null);
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      searchOfficialAssetDocuments({ query: query.trim(), kind: searchKind, limit: 100, signal: controller.signal })
+        .then((body) => {
+          if (gone || !body) return;
+          setCloudSearch({ ...body, key });
+        })
+        .catch((error) => {
+          if (!(error instanceof DOMException && error.name === 'AbortError')) return undefined;
+        })
+        .finally(() => {
+          if (!gone) setSearching(false);
+        });
+    }, 160);
+    return () => {
+      gone = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [needle, query, searchKey, searchKind]);
 
   // Kit components: same overlay structure × the general theme's skin — theme tokens are baked
   // into innerHtml at block scope (data-hf-baked), so preview/insert/theme-swap all look identical.
@@ -122,21 +159,39 @@ export function OfficialAssetsPanel({
     });
   }, [locale]);
 
-  const needle = query.trim().toLocaleLowerCase();
   const includesQuery = (values: (string | undefined)[]) => !needle || values.some((value) => value?.toLocaleLowerCase().includes(needle));
-  const visibleComponentItems = kitItems.filter((item) => includesQuery([item.label, item.prompt, item.category]));
-  const visibleComponentTemplates = ELEMENT_TEMPLATES.filter((template) =>
-    includesQuery([
+  const cloudRanks = needle && cloudSearch?.key === searchKey
+    ? new Map(cloudSearch.results.map((result, index) => [result.assetId, index]))
+    : null;
+  const byCloudRank = <T,>(rows: T[], idOf: (row: T) => string): T[] =>
+    cloudRanks
+      ? rows.filter((row) => cloudRanks.has(idOf(row))).sort((a, b) => cloudRanks.get(idOf(a))! - cloudRanks.get(idOf(b))!)
+      : rows;
+  const visibleComponentItems = byCloudRank(
+    kitItems.filter((item) => cloudRanks ? true : includesQuery([item.label, item.prompt, item.category])),
+    (item) => item.id,
+  );
+  const visibleComponentTemplates = byCloudRank(
+    ELEMENT_TEMPLATES.filter((template) => cloudRanks ? true : includesQuery([
       template.title ? t(template.title) : undefined,
       localizedTemplatePrompt(template, locale),
       template.category,
-    ]),
+    ])),
+    (template) => `template:${template.id}`,
   );
-  const filteredStickers = (stickers ?? []).filter((item) =>
-    includesQuery([item.label, item.categoryLabel, item.categoryLabelEn, item.source, item.license, ...(item.tags ?? [])]),
+  const filteredStickers = byCloudRank(
+    (stickers ?? []).filter((item) => cloudRanks ? true : includesQuery([
+      item.label,
+      item.categoryLabel,
+      item.categoryLabelEn,
+      item.source,
+      item.license,
+      ...officialStickerSearchTags(item.label ?? item.categoryLabel, item.tags ?? []),
+    ])),
+    (item) => `sticker:${item.id}`,
   );
-  const filteredBgm = (bgm ?? []).filter((item) =>
-    includesQuery([
+  const filteredBgm = byCloudRank(
+    (bgm ?? []).filter((item) => cloudRanks ? true : includesQuery([
       item.label,
       item.artist,
       item.categoryLabel,
@@ -147,7 +202,8 @@ export function OfficialAssetsPanel({
       item.narrationFit,
       ...item.moods,
       ...item.useCases,
-    ]),
+    ])),
+    (item) => `bgm:${item.id}`,
   );
   const stickerGroups = stickerCategories
     .map((category) => ({ category, items: filteredStickers.filter((item) => item.category === category.id) }))
@@ -339,6 +395,25 @@ export function OfficialAssetsPanel({
       {t('panels.noMatchingAssetsTry')}
     </div>
   );
+  const generationType: OfficialGenerationType = activeSection === 'components' ? 'element' : activeSection === 'audio' ? 'audio' : 'image';
+  const searchEmpty = onOpenGeneration ? (
+    <div className="border-line bg-panel-2/40 flex flex-col items-center rounded-lg border border-dashed px-4 py-6 text-center">
+      <span className="bg-accent/10 text-accent mb-2 inline-flex size-8 items-center justify-center rounded-full">
+        <Sparkles size={14} />
+      </span>
+      <div className="text-ink text-[11.5px] font-medium">{t('panels.noOfficialSearchResults')}</div>
+      <div className="text-ink-4 mt-1 max-w-[260px] text-[10.5px] leading-relaxed">
+        {t('panels.generateOfficialSearchHint', { query: query.trim() })}
+      </div>
+      <button
+        type="button"
+        onClick={() => onOpenGeneration(generationType, query.trim())}
+        className="bg-accent mt-3 inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[10.5px] font-medium text-white transition hover:brightness-105 active:translate-y-px"
+      >
+        <Sparkles size={11} /> {t('panels.generateFromSearch')}
+      </button>
+    </div>
+  ) : noMatches;
   const componentsOverview =
     visibleComponentItems.length === 0 && visibleComponentTemplates.length === 0 ? (
       noMatches
@@ -394,6 +469,9 @@ export function OfficialAssetsPanel({
       : detail?.section === 'audio'
         ? detailBgm.length
         : null;
+  const visibleTotal = visibleComponentItems.length + visibleComponentTemplates.length + filteredStickers.length + filteredBgm.length;
+  const searchPending = Boolean(needle) && (catalog === null || (searching && visibleTotal === 0));
+  const searchHasNoResults = Boolean(needle) && !searchPending && visibleTotal === 0;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
@@ -452,7 +530,9 @@ export function OfficialAssetsPanel({
           </DropdownMenuContent>
         </DropdownMenu>
         <label className="border-line bg-panel-2 focus-within:border-accent relative block min-w-0 flex-1 rounded-md border transition">
-          <Search size={11} className="text-ink-4 pointer-events-none absolute left-2 top-1/2 -translate-y-1/2" />
+          {searching
+            ? <Loader2 size={11} className="text-ink-4 pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 animate-spin" />
+            : <Search size={11} className="text-ink-4 pointer-events-none absolute left-2 top-1/2 -translate-y-1/2" />}
           <input
             type="search"
             value={query}
@@ -465,7 +545,7 @@ export function OfficialAssetsPanel({
         {onOpenGeneration && (
           <button
             type="button"
-            onClick={() => onOpenGeneration('image')}
+            onClick={() => onOpenGeneration(generationType, query.trim() || undefined)}
             title={t('workbench.aiGenerate')}
             aria-label={t('workbench.aiGenerate')}
             className="border-line text-ink-2 hover:text-ink inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border px-2 text-[11px] transition"
@@ -490,17 +570,17 @@ export function OfficialAssetsPanel({
           </div>
         )}
 
-        {activeSection === 'all' && (
+        {searchPending ? loadingBox : searchHasNoResults ? searchEmpty : activeSection === 'all' && (
           <>
-            {section(t('panels.officialComponents'), null, componentsOverview, undefined, 'all-components')}
-            {section(t('panels.stickers'), null, stickersOverview, undefined, 'all-stickers')}
-            {section(t('panels.music'), null, audioOverview, undefined, 'all-audio')}
+            {(!needle || visibleComponentItems.length + visibleComponentTemplates.length > 0) && section(t('panels.officialComponents'), null, componentsOverview, undefined, 'all-components')}
+            {(!needle || filteredStickers.length > 0) && section(t('panels.stickers'), null, stickersOverview, undefined, 'all-stickers')}
+            {(!needle || filteredBgm.length > 0) && section(t('panels.music'), null, audioOverview, undefined, 'all-audio')}
           </>
         )}
 
-        {activeSection === 'components' && componentsOverview}
+        {!searchPending && !searchHasNoResults && activeSection === 'components' && componentsOverview}
 
-        {activeSection === 'stickers' &&
+        {!searchPending && !searchHasNoResults && activeSection === 'stickers' &&
           (stickers == null
             ? loadingBox
             : stickers.length === 0
@@ -524,7 +604,7 @@ export function OfficialAssetsPanel({
                   )
                 : stickersOverview)}
 
-        {activeSection === 'audio' &&
+        {!searchPending && !searchHasNoResults && activeSection === 'audio' &&
           (bgm == null
             ? loadingBox
             : bgm.length === 0
