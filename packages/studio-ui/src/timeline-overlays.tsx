@@ -3,7 +3,7 @@
 /** Playhead-store-subscribed timeline overlays: only these small components re-render at 60fps during playback. */
 
 import { usePlayheadT } from './playhead';
-import { SHOT_GAP } from './timeline-utils';
+import { SHOT_GAP, TIMELINE_ITEM_RADIUS } from './timeline-utils';
 
 /** Playhead cursor: subscribes to the playhead store — at 60fps during playback only this small
  *  component re-renders, not the whole timeline.
@@ -40,7 +40,7 @@ export function ActiveSceneRing({
   const gapR = active.end < lastEnd - 1e-3 ? SHOT_GAP : 0; // same rule as scene cards: hairline gap off the right edge
   return (
     <div
-      className="pointer-events-none absolute top-3 bottom-2 left-0 z-10 rounded ring-2 ring-white/70 will-change-transform"
+      className={`pointer-events-none absolute top-3 bottom-2 left-0 z-10 ring-2 ring-white/70 will-change-transform ${TIMELINE_ITEM_RADIUS}`}
       // Horizontal move via transform: if the ring's jump at cut points went through left it would log layout-shift + full-track reflow, landing exactly on the transition's peak frame
       style={{ transform: `translateX(${active.start * pps}px)`, width: Math.max(8, (active.end - active.start) * pps - gapR) }}
     />

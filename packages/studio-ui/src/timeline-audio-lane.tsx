@@ -22,7 +22,7 @@ import {
   audioClipWindow,
   audioTrimPatch,
 } from '@pireel/studio-engine/composition';
-import { AUDIO_ROW_H } from './timeline-utils';
+import { AUDIO_ROW_H, TIMELINE_ITEM_EDGE_RADIUS, TIMELINE_ITEM_RADIUS } from './timeline-utils';
 import { fadeBodyPath, waveBars } from './timeline-wave';
 import { t } from './i18n';
 
@@ -133,7 +133,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
             tabIndex={0}
             aria-disabled={disabledIds?.has(clip.id)}
             title={clip.label || t('panels.musicBed')}
-            className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden rounded-md border active:cursor-grabbing ${disabledIds?.has(clip.id) ? 'opacity-45 grayscale ' : ''}${
+            className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden border active:cursor-grabbing ${TIMELINE_ITEM_RADIUS} ${disabledIds?.has(clip.id) ? 'opacity-45 grayscale ' : ''}${
               selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
             }`}
             style={{ left: px(w.start), width, height: CHIP_H }}
@@ -225,7 +225,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
                     },
                   );
                 }}
-                className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${edge === 'left' ? 'left-0 rounded-l' : 'right-0 rounded-r'} ${
+                className={`absolute inset-y-0 w-1.5 cursor-ew-resize ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${
                   selected ? 'bg-white/50' : 'bg-white/0 group-hover/aud:bg-white/40'
                 }`}
               />
@@ -271,7 +271,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
         );
       })}
       {clips.length === 0 && (
-        <div className="border-accent/50 text-accent absolute inset-x-0 top-0.5 bottom-0.5 flex items-center justify-center gap-1.5 rounded-md border border-dashed text-[10px]">
+        <div className={`border-accent/50 text-accent absolute inset-x-0 top-0.5 bottom-0.5 flex items-center justify-center gap-1.5 border border-dashed text-[10px] ${TIMELINE_ITEM_RADIUS}`}>
           <Music size={11} /> {t('panels.dropAudioHere')}
         </div>
       )}

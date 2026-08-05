@@ -22,6 +22,14 @@ export const DEFAULT_PPS = 78;
 export const MIN_DUR = 0.3;
 export const SNAP_PX = 7;
 
+/** One compact radius for every piece of content placed on a timeline lane. Keep the matching
+ * edge-handle radii here too, so video, graphics, captions and audio cannot drift independently. */
+export const TIMELINE_ITEM_RADIUS = 'rounded-sm';
+export const TIMELINE_ITEM_EDGE_RADIUS = {
+  left: 'rounded-l-sm',
+  right: 'rounded-r-sm',
+} as const;
+
 /** Source-time-anchored filmstrip window (like a mainstream editor): tile k always covers source time
  *  [k,k+1)*tileDur; take tiles that intersect the window [srcStart,srcEnd). First tile's left
  *  can be negative (clipped by the card's overflow-hidden) — a split at 2.5 tiles gives 2.5

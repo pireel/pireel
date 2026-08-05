@@ -55,6 +55,8 @@ import {
   SCENE_PAD_T,
   SHOT_GAP,
   SNAP_PX,
+  TIMELINE_ITEM_EDGE_RADIUS,
+  TIMELINE_ITEM_RADIUS,
   TREATMENT_NAME,
   fmtTick,
   rulerStep,
@@ -1134,7 +1136,7 @@ function StudioTimelineImpl({
                         e.stopPropagation();
                         onInsertClipAt?.(0);
                       }}
-                      className="border-line text-ink-4 hover:border-line-2 hover:text-ink-2 absolute inset-x-2 top-1/2 flex h-7 -translate-y-1/2 items-center justify-center gap-1.5 rounded-md border border-dashed text-[10.5px] transition"
+                      className={`border-line text-ink-4 hover:border-line-2 hover:text-ink-2 absolute inset-x-2 top-1/2 flex h-7 -translate-y-1/2 items-center justify-center gap-1.5 border border-dashed text-[10.5px] transition ${TIMELINE_ITEM_RADIUS}`}
                     >
                       <Plus size={11} /> {t('panels.addMediaToMainTrack')}
                     </button>
@@ -1142,7 +1144,7 @@ function StudioTimelineImpl({
                   {/* Filmstrip base fill (fixed tile width, nearest source frame; like cloud editors). Not filled when there are scene cards —
                       the filmstrip gets clipped inside each card; otherwise the continuous base leaks through the cards' transparent rounded corners, hiding the corners/gaps */}
                   {sceneSpans.length === 0 && (
-                    <div className="bg-ink/10 pointer-events-none absolute top-3 bottom-2 left-0 overflow-hidden rounded ring-1 ring-white/10" style={{ width: x(videoDur) }}>
+                    <div className={`bg-ink/10 pointer-events-none absolute top-3 bottom-2 left-0 overflow-hidden ring-1 ring-white/10 ${TIMELINE_ITEM_RADIUS}`} style={{ width: x(videoDur) }}>
                       {filmTiles.map((tl, i) => (
                         // max-w-none: preflight's img max-width:100% is relative to the container, so a narrow card would squeeze tiles thin and expose gaps (same for all three tile spots)
                         <img key={i} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
@@ -1204,7 +1206,7 @@ function StudioTimelineImpl({
                           }}
                           title={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                           aria-disabled={!enabled}
-                          className={`bg-ink/10 absolute top-3 bottom-2 overflow-hidden rounded text-left ${!enabled ? 'opacity-45 grayscale ' : ''}${
+                          className={`bg-ink/10 absolute top-3 bottom-2 overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${!enabled ? 'opacity-45 grayscale ' : ''}${
                             dragged ? 'shadow-xl ring-2 ring-accent brightness-110' : sel ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'
                           }`}
                           style={{ left: x(start), width: w, ...(dragged ? { transform: `translateX(${shotDrag!.dx}px)`, zIndex: 45 } : {}) }}
@@ -1313,7 +1315,7 @@ function StudioTimelineImpl({
                                 e.stopPropagation();
                                 onOpenTransition(end, e.currentTarget.getBoundingClientRect());
                               }}
-                              className="absolute top-3 bottom-2 z-30 flex w-3.5 -translate-x-1/2 cursor-pointer items-center justify-center rounded-sm bg-black/40 text-white/75 transition hover:bg-black/65 hover:text-white"
+                              className={`absolute top-3 bottom-2 z-30 flex w-3.5 -translate-x-1/2 cursor-pointer items-center justify-center bg-black/40 text-white/75 transition hover:bg-black/65 hover:text-white ${TIMELINE_ITEM_RADIUS}`}
                               style={{ left: x(end) }}
                             >
                               <ArrowLeftRight size={10} />
@@ -1369,7 +1371,7 @@ function StudioTimelineImpl({
                                 e.stopPropagation();
                                 onOpenTransition(end, e.currentTarget.getBoundingClientRect());
                               }}
-                              className="bg-accent/30 ring-accent/70 hover:bg-accent/40 absolute inset-0 flex cursor-pointer items-center justify-center rounded-sm ring-1 transition"
+                              className={`bg-accent/30 ring-accent/70 hover:bg-accent/40 absolute inset-0 flex cursor-pointer items-center justify-center ring-1 transition ${TIMELINE_ITEM_RADIUS}`}
                             >
                               <span className="bg-accent flex h-4 w-4 items-center justify-center rounded-full text-white shadow">
                                 <ArrowLeftRight size={9} />
@@ -1424,7 +1426,7 @@ function StudioTimelineImpl({
                     title={b.label}
                     aria-disabled={disabledClipIds?.has(b.id)}
                     data-block-selection-keep={sel ? '' : undefined}
-                    className={`group absolute overflow-hidden rounded-md ring-1 ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
+                    className={`group absolute overflow-hidden ring-1 ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
                     style={{ left, width, top, height: ROW_H - 8 }}
                     onClick={(e) => e.stopPropagation()} // chip is selected via pointer; block bubbling so the background doesn't clear it
                     onMouseEnter={(e) => openHover(b, e.currentTarget)}
@@ -1507,7 +1509,7 @@ function StudioTimelineImpl({
                           onResizeBlock(b.id, ns, end - ns);
                         });
                       }}
-                      className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize rounded-l ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
+                      className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
                     />
                     {/* Right trim */}
                     <span
@@ -1518,7 +1520,7 @@ function StudioTimelineImpl({
                           onResizeBlock(b.id, b.startSec, ne - b.startSec);
                         });
                       }}
-                      className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize rounded-r ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
+                      className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
                     />
                   </div>
                 );
@@ -1539,7 +1541,7 @@ function StudioTimelineImpl({
                     key={b.id}
                     title={b.label || t('panels.captions')}
                     aria-disabled={disabledClipIds?.has(b.id)}
-                    className={`absolute overflow-hidden rounded-md bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20 ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
+                    className={`absolute overflow-hidden bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20 ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
                     style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
                     onClick={(e) => {
                       e.stopPropagation();
