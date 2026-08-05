@@ -151,6 +151,7 @@ export function AssetsPanel({
             comp={comp}
             onInsert={onInsert}
             onInsertKit={onInsertKit}
+            onInsertElement={onInsertElement}
             onDragAsset={onDragAsset}
             onOpenGeneration={onOpenGeneration}
             onUseAudio={onUseAudio}

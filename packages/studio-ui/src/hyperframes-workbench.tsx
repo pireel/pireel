@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { Play, Pause, FileVideo, Code2, Loader2, Wand2, Sparkles, Upload,
-  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, SlidersHorizontal, LayoutGrid, Scissors, Captions, Power } from 'lucide-react';
+  FlaskConical, ScanFace, MessageSquare, Image as ImageIcon, ChevronsLeft, ChevronsRight, Minus, Plus, Download, X, GripVertical, Trash2, Palette, RefreshCw, Save, SendToBack, BringToFront, ChevronUp, ChevronDown, UserRound, Frame, Music, Undo2, Redo2, LayoutGrid, Scissors, Captions, Power } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
 
 import { toast } from '@pireel/ui/toast';
@@ -145,10 +145,10 @@ import { DEFAULT_RENDER_OPTS, type ExportRenderOpts, captureCompositionFrame } f
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { GenChatPanel, type GenElementResult } from './gen-chat-panel';
 import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
-import { KitPropsPanel } from './kit-props-panel';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { AssetsPanel, type GenType, type PanelDragAsset } from './assets-panel';
 import { addElementEntry } from './element-history';
+import { migrateOfficialComponentPayloads } from './official-component-migration';
 import { type ScriptCut, ScriptPanel } from './script-panel';
 import { CaptionsPanel } from './captions-panel';
 import { FramePanel } from './frame-panel';
@@ -176,6 +176,7 @@ import { type AgentToolCtx, runStudioTool as runAgentStudioTool, runExternalTool
 import { useCaptionsOps } from './use-captions-ops';
 import { useClipInsert } from './use-clip-insert';
 import { useElementOps } from './use-element-ops';
+import { isBlockContentSyncable } from './component-content-sync';
 import { useBoxDrag } from './use-box-drag';
 import { useAgentContext } from './use-agent-context';
 import { useScriptCut } from './use-script-cut';
@@ -195,7 +196,7 @@ const primaryNarrativeDurationSec = (document: EditorDocumentV2): number | null 
 // Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
 /** Contextual tool panels (single instance, mutually exclusive, docked over the rail content). Generation is a primary-nav tab. */
-type FloatKind = 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'kitProps';
+type FloatKind = 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions';
 
 
 export function HyperframesWorkbench({ projectId, agentView = false }: { projectId: string; agentView?: boolean }) {
@@ -2710,6 +2711,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     return () => document.removeEventListener('mousedown', onDoc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selCapId]);
+  // Ordinary component selection follows the same spatial rule as desktop editors: the canvas
+  // and the selected timeline chip retain focus; clicking any other host-UI region clears it.
+  // Events inside the iframe stay in its own document and therefore never reach this listener.
+  useEffect(() => {
+    if (!selectedId || selCapId) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-block-selection-keep]')) return;
+      setSelectedId(null);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [selectedId, selCapId, setSelectedId]);
   /** Media dropped on the stage: hitting a component card (media block) present at the current moment = fill it; a miss = create a new component card centered on the drop point. */
   const handleAssetDrop = async (e: React.DragEvent) => {
     const a = dragAsset;
@@ -2801,15 +2815,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     openGeneration('element');
     toast.info(t('workbench.afterGeneratingClickInsert'));
   };
-  /** Template panel → insert a new block of that template at the playhead (default slot data, edit text after). */
-  // Kit block selected -> the props panel pops in the rail area (and follows the selection away).
-  useEffect(() => {
-    const b = selectedId ? compRef.current.blocks.find((x) => x.id === selectedId) : null;
-    const isKit = !!b?.templateId.startsWith('kit:');
-    if (isKit) setFloatWin('kitProps');
-    else if (floatWinRef.current === 'kitProps') setFloatWin(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  /** Template panel → insert a new block of that template at the playhead (default slot data, edit with AI after). */
   const insertTemplateBlock = (templateId: string, kitProps?: Record<string, unknown>) => {
     const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
     let base = newBlock(templateId, { startSec });
@@ -3897,17 +3903,20 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
+    const migrated = migrateOfficialComponentPayloads(d.document, d.comp);
+    const restoredDocument = migrated.document;
+    const restoredComposition = migrated.composition;
     // The source can remain in the media library while the explicit shots array is empty. Reconnect
     // its bytes for reuse, but videoTrackShots keeps the timeline empty instead of resurrecting it.
-    const wantsMain = (d.comp.shots ?? []).some((s) => !s.src) || (!(d.comp.shots ?? []).length && d.videoDurationSec != null);
+    const wantsMain = (restoredComposition.shots ?? []).some((s) => !s.src) || (!(restoredComposition.shots ?? []).length && d.videoDurationSec != null);
     // Keep the sig anchor even before (or without) the bytes: autosave reads videoSigRef, and
     // writing videoSig:null to the cloud row while the media is missing would destroy the
     // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
-    const primaryId = d.document.semantics.primaryNarrativeAssetId;
-    const mainSig = (primaryId ? d.document.assets[primaryId]?.locator.localSig : undefined) ?? d.videoSig;
+    const primaryId = restoredDocument.semantics.primaryNarrativeAssetId;
+    const mainSig = (primaryId ? restoredDocument.assets[primaryId]?.locator.localSig : undefined) ?? d.videoSig;
     if (mainSig && wantsMain) videoSigRef.current = mainSig;
-    setEditorDocument(d.document, { ...d.comp, video: null });
-    hydrateNativeSession(d.document, d.comp);
+    setEditorDocument(restoredDocument, { ...restoredComposition, video: null });
+    hydrateNativeSession(restoredDocument, restoredComposition);
     if (mainSig && wantsMain) {
       void loadLocalVideo(mainSig).then(async (f) => {
         if (f && pendingRestoreRef.current === d) {
@@ -3929,7 +3938,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         // the sig anchor stays so reconnect/autosave keep working.
       });
     }
-    void recoverLocalClips(d.comp.shots ?? []);
+    void recoverLocalClips(restoredComposition.shots ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrateNativeSession]);
   const autoRestoredRef = useRef(false);
@@ -4254,7 +4263,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <MessageSquare size={14} />
             </button>
           )}
-          <div ref={stageBoxRef} data-cap-keep className="relative" style={{ width: boxW, height: boxH }}>
+          <div ref={stageBoxRef} data-cap-keep data-block-selection-keep className="relative" style={{ width: boxW, height: boxH }}>
               {!hasContent && (
                 <button
                   type="button"
@@ -4614,27 +4623,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       </TooltipTrigger>
                       <TooltipContent>{agentView ? t('workbench.copyBlockReferenceAgent') : t('workbench.tellChatHowChange')}</TooltipContent>
                     </Tooltip>
-                    {/* Kit block: schema-generated props editor (the props ARE the block; edits re-render derived) */}
-                    {mb.templateId.startsWith('kit:') && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() => (floatWin === 'kitProps' ? setFloatWin(null) : openFloatAt('kitProps'))}
-                            className={`inline-flex items-center gap-1 rounded p-1 text-[11px] whitespace-nowrap ${floatWin === 'kitProps' ? 'text-ink bg-panel-2' : 'text-ink-3 hover:text-ink'}`}
-                          >
-                            <SlidersHorizontal size={13} /> {t('workbench.kitProps')}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>{t('workbench.kitPropsTip')}</TooltipContent>
-                      </Tooltip>
-                    )}
-                    {/* Sync content: one-click fill the data-edit text slots from the narration script in the block's time window (preset component = generic
-                        placeholder, this step matches it to real content after dropping; hidden when the OSS shell has no syncFill capability) */}
-                    {mb.templateId === 'custom' &&
-                      typeof (mb.slots as { innerHtml?: unknown }).innerHtml === 'string' &&
-                      ((mb.slots as { innerHtml: string }).innerHtml.includes('data-edit') || null) &&
-                      !!studioProviders().syncFill && (
+                    {/* Sync content: one capability across HTML data-edit slots and kit schema props. The provider still owns
+                        narration matching; hidden only when the selected block has no content contract or the shell has no syncFill capability. */}
+                    {isBlockContentSyncable(mb) && !!studioProviders().syncFill && (
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button
@@ -5023,8 +5014,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               <span className="text-ink truncate px-1 text-[12px] font-medium">
                 {floatWin === 'script'
                   ? t('workbench.smartScriptCut')
-                  : floatWin === 'kitProps'
-                  ? t('workbench.kitProps')
                   : floatWin === 'person'
                     ? t('workbench.portrait')
                     : floatWin === 'anim'
@@ -5277,19 +5266,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   }}
                 />
               )}
-              {floatWin === 'kitProps' &&
-                (() => {
-                  const b = selectedId ? comp.blocks.find((x) => x.id === selectedId) : null;
-                  if (!b || !b.templateId.startsWith('kit:')) return null; // auto-close effect takes over
-                  return (
-                    <KitPropsPanel
-                      block={b}
-                      onPatch={(props) => {
-                        patchOverlays([{ clipId: b.id, block: { slots: { ...b.slots, props } } }]);
-                      }}
-                    />
-                  );
-                })()}
               {floatWin === 'anim' &&
                 (() => {
                   const b = selectedId ? comp.blocks.find((x) => x.id === selectedId) : null;

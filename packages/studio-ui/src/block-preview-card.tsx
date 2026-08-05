@@ -31,6 +31,7 @@ export function BlockPreviewFrame({
   animate = false,
   replayKey,
   ground = 'checker',
+  fit = 'inset',
   focus,
   children,
 }: {
@@ -42,6 +43,8 @@ export function BlockPreviewFrame({
   height?: number;
   /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
   ground?: 'stage' | 'checker';
+  /** 'canvas' uses the entire preview viewport. 'inset' keeps the historical checkerboard margin. */
+  fit?: 'canvas' | 'inset';
   /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
   focus?: { x: number; y: number; w: number; h: number };
   /** Animated preview: true = auto-loop; 'hover' = play on hover, return to stable frame on leave;
@@ -90,8 +93,10 @@ export function BlockPreviewFrame({
     iframeRef.current?.contentWindow?.postMessage({ type: 'hf:blockAdd', blockId: block.id, html: r.html, timelineBody: r.timelineBody }, '*');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block, docKey]);
-  // In checker mode the component doesn't fill the cell: inset and centered so the checkerboard shows around it (filling would hide the "transparency is visible" cue)
-  const inset = ground === 'checker' ? 0.86 : 1;
+  // Most previews preserve the historical inset that makes transparency obvious. Component-library
+  // previews opt into full-canvas fit: opaque designs fill the card while transparent designs still
+  // show checkerboard through their own empty areas.
+  const inset = fit === 'canvas' ? 1 : ground === 'checker' ? 0.86 : 1;
   const h = height ?? Math.round(comp.height * (width / comp.width));
   // focus framing: pick scale from the piece's bounding box, align piece center to card center — list cards show the "piece itself", not the whole canvas
   // (contain-fit min() reduces to the old width-driven scale when h is aspect-derived)

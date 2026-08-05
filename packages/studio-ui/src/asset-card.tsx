@@ -10,15 +10,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image as ImageIcon, Loader2, Pause, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
-import type { Block, Composition, MediaRef } from '@pireel/studio-engine/composition';
+import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import type { GenElementResult } from './element-history';
-import { KitPropsPanel } from './kit-props-panel';
-import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
-import { BlockPreviewFrame } from './block-preview-card';
+import { componentPreviewModel, LibraryComponentPreview } from './component-preview';
 import { t } from './i18n';
-
-/** Static 16:9 canvas for previews that must not depend on the project comp (presets/kit). */
-export const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
 
 /** Unified shape for library entries (uploads / generated media / elements / official items all normalize here). */
 export interface LibraryItem {
@@ -208,79 +203,32 @@ export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: 
   );
 }
 
-/** Element card live preview: same render as the gen panel (freeze on the stable frame after entrance, loops only on hover).
- *  Cards are a fixed 120×68, so the tile is hard-sized to match (no responsive measuring). */
-export function ElementTile({ item, width = 120, height = 68 }: { item: LibraryItem; width?: number; height?: number }) {
-  const el = item.element!;
-  // Static HTML output: no GSAP (from-animations don't apply = frozen end state), zero iframe,
-  // zero rasterization; the #seedId selector scope lands directly in the main document without leaking styles
-  // (same technique as InlineBlockPreview). After mount, measure the content's true rect once (including rotate)
-  // to scale and center the piece in the card.
-  const holderRef = useRef<HTMLDivElement | null>(null);
-  const [fit, setFit] = useState<{ scale: number; dx: number; dy: number } | null>(null);
+/** Element card live preview shared by Assets and Generation. Every component is rendered through
+ * the same design-canvas preview contract, so thumbnails cannot drift by component type. */
+export function ElementTile({ item, width, height }: { item: LibraryItem; width?: number; height?: number }) {
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [measuredWidth, setMeasuredWidth] = useState(width ?? 120);
   useEffect(() => {
-    const holder = holderRef.current;
-    if (!holder) return;
-    const base = holder.getBoundingClientRect();
-    if (base.width < 2) return;
-    // Is holder pre-scaled to 0? No — measurement happens at scale(1) in a hidden state: see the visibility strategy below
-    let x0 = Infinity;
-    let y0 = Infinity;
-    let x1 = -Infinity;
-    let y1 = -Infinity;
-    for (const n of Array.from(holder.querySelectorAll('*')) as HTMLElement[]) {
-      if (n.tagName === 'STYLE') continue;
-      const r = n.getBoundingClientRect();
-      if (r.width < 2 || r.height < 2) continue;
-      // Near-full-bleed containers (#seed inset:0 / root .w fill layer) don't count as content, else the union always equals the whole canvas
-      if (r.width > base.width * 0.95 && r.height > base.height * 0.95) continue;
-      if (r.left < x0) x0 = r.left;
-      if (r.top < y0) y0 = r.top;
-      if (r.right > x1) x1 = r.right;
-      if (r.bottom > y1) y1 = r.bottom;
-    }
-    if (!Number.isFinite(x0) || x1 - x0 < 8) {
-      setFit({ scale: width / 1920, dx: 0, dy: (height - 1080 * (width / 1920)) / 2 });
-      return;
-    }
-    const pad = 24;
-    const bx = x0 - base.left - pad;
-    const by = y0 - base.top - pad;
-    const bw = x1 - x0 + pad * 2;
-    const bh = y1 - y0 + pad * 2;
-    const scale = Math.min((width * 0.9) / bw, (height * 0.9) / bh);
-    setFit({ scale, dx: width / 2 - (bx + bw / 2) * scale, dy: height / 2 - (by + bh / 2) * scale });
-  }, [item.id, width, height]);
+    if (width != null) return;
+    const shell = shellRef.current;
+    if (!shell) return;
+    const update = () => setMeasuredWidth(Math.max(1, Math.round(shell.getBoundingClientRect().width)));
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [width]);
+  const tileWidth = width ?? measuredWidth;
+  const tileHeight = height ?? Math.round((tileWidth * 9) / 16);
+  const model = useMemo(() => componentPreviewModel(item), [item]);
   return (
-    <div className="w-full overflow-hidden">
-      <div
-        className="relative overflow-hidden"
-        style={{
-          width,
-          height,
-          backgroundColor: '#ffffff',
-          backgroundImage:
-            'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
-          backgroundSize: '16px 16px',
-          backgroundPosition: '0 0,8px 8px',
-        }}
-      >
-        <div
-          ref={holderRef}
-          style={{
-            position: 'absolute',
-            left: fit ? fit.dx : -100000,
-            top: fit ? fit.dy : 0,
-            width: 1920,
-            height: 1080,
-            transform: `scale(${fit ? fit.scale : 1})`,
-            transformOrigin: 'top left',
-            pointerEvents: 'none',
-          }}
-        >
-          <div id={el.seedId} style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: el.innerHtml }} />
-        </div>
-      </div>
+    <div ref={shellRef} className="w-full overflow-hidden">
+      {model ? (
+        <LibraryComponentPreview model={model} width={tileWidth} height={tileHeight} />
+      ) : (
+        <div className="bg-panel-2" style={{ width: tileWidth, height: tileHeight }} />
+      )}
     </div>
   );
 }
@@ -392,34 +340,21 @@ export function AssetLightbox({
   item: LibraryItem;
   comp: Composition;
   onClose: () => void;
-  /** Kit items pass the props tuned in the lightbox; everything else inserts as-is. */
+  /** Kit items pass their preview props; everything else inserts as-is. */
   onInsert: (kitProps?: Record<string, unknown>) => void;
 }) {
-  // Kit preview is a real kit block on the same render path as the canvas — what you tune here is
-  // exactly what lands. Edits live in this state only: the library entry is never touched.
-  const [draft, setDraft] = useState<Record<string, unknown>>(() => (item.kit ? kitSampleProps(item.kit) : {}));
   const [replayKey, setReplayKey] = useState(0);
-  useEffect(() => setDraft(item.kit ? kitSampleProps(item.kit) : {}), [item.id, item.kit]);
-  const kitBlock = useMemo(
-    () =>
-      item.kit
-        ? {
-            id: `lb_${item.kit}`,
-            templateId: `kit:${item.kit}`,
-            slots: { props: draft },
-            startSec: 0,
-            durationSec: KIT_INSERT_DURATION,
-            trackIndex: 2,
-            box: { x: 0, y: 0, w: 1, h: 1 },
-            label: item.label,
-          }
-        : null,
-    [item.kit, item.label, draft],
+  const componentModel = useMemo(
+    () => (item.kind === 'element' ? componentPreviewModel(item, comp) : null),
+    [comp, item],
   );
   // Elements get a local iframe live preview, available immediately (no network load), so skip the ready placeholder
   const [ready, setReady] = useState(item.kind === 'element');
   // Size the placeholder box to the asset's true aspect ratio (element = canvas ratio; unknown dims default to 16:9)
-  const ar = item.kind === 'element' ? (item.element?.designW && item.element.designH ? item.element.designW / item.element.designH : comp.width / comp.height) : (arOf(item) ?? 16 / 9);
+  const ar = componentModel ? componentModel.comp.width / componentModel.comp.height : (arOf(item) ?? 16 / 9);
+  const componentWidth = componentModel
+    ? Math.max(240, Math.min(window.innerWidth - 96, Math.round(window.innerHeight * 0.78 * ar)))
+    : 0;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -436,56 +371,43 @@ export function AssetLightbox({
       className="fixed inset-0 z-[100] flex cursor-zoom-out flex-col items-center justify-center gap-3 bg-black/70 p-6"
     >
       <div className="flex max-w-full items-stretch gap-3">
-      <div
-        role="presentation"
-        onClick={(e) => e.stopPropagation()}
-        className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
-        // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
-        // (kit items reserve room for the props panel beside them)
-        style={{ aspectRatio: ar, width: `min(calc(100vw - ${kitBlock ? '22rem' : '6rem'}), calc(78vh * ${ar}))` }}
-      >
-        {!ready && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
-            <Loader2 size={26} className="animate-spin" />
-            <span className="text-[12px]">{t('panels.loading')}</span>
-          </div>
-        )}
-        {kitBlock ? (
-          <LightboxKit block={kitBlock} replayKey={replayKey} />
-        ) : item.kind === 'element' && item.element ? (
-          // Element live preview: auto-loops (same render as card hover, just always playing + larger)
-          <LightboxElement item={item} comp={comp} />
-        ) : item.kind === 'video' ? (
-          <video
-            src={item.insertUrl}
-            controls
-            autoPlay
-            playsInline
-            onLoadedData={() => setReady(true)}
-            className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
-          />
-        ) : (
-          <img
-            src={item.thumbSrc ? imageThumb(item.thumbSrc, 'preview') : item.insertUrl}
-            alt={item.label}
-            onLoad={() => setReady(true)}
-            onError={() => setReady(true)}
-            className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
-          />
-        )}
-      </div>
-      {kitBlock && (
         <div
           role="presentation"
           onClick={(e) => e.stopPropagation()}
-          className="bg-panel cursor-default overflow-y-auto rounded-lg shadow-2xl"
+          className="relative cursor-default overflow-hidden rounded-lg bg-black/60 shadow-2xl"
+          // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
+          style={{ aspectRatio: ar, width: `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
         >
-          <KitPropsPanel block={kitBlock} onPatch={setDraft} />
+          {!ready && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
+              <Loader2 size={26} className="animate-spin" />
+              <span className="text-[12px]">{t('panels.loading')}</span>
+            </div>
+          )}
+          {componentModel ? (
+            <LibraryComponentPreview model={componentModel} width={componentWidth} animate="manual" replayKey={replayKey} />
+          ) : item.kind === 'video' ? (
+            <video
+              src={item.insertUrl}
+              controls
+              autoPlay
+              playsInline
+              onLoadedData={() => setReady(true)}
+              className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
+            />
+          ) : (
+            <img
+              src={item.thumbSrc ? imageThumb(item.thumbSrc, 'preview') : item.insertUrl}
+              alt={item.label}
+              onLoad={() => setReady(true)}
+              onError={() => setReady(true)}
+              className={`h-full w-full object-contain ${ready ? '' : 'invisible'}`}
+            />
+          )}
         </div>
-      )}
       </div>
       <div className="flex items-center gap-2">
-        {kitBlock && (
+        {componentModel && (
           <button
             type="button"
             onClick={(e) => {
@@ -501,7 +423,7 @@ export function AssetLightbox({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onInsert(kitBlock ? draft : undefined);
+            onInsert(componentModel?.insertProps);
           }}
           className="bg-accent inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-medium text-white"
         >
@@ -510,31 +432,4 @@ export function AssetLightbox({
       </div>
     </div>
   );
-}
-
-/** Large kit preview: the block renders through the same assembler path the canvas uses, so the
- *  tuned result is exactly what gets inserted. Sized to the 16:9 component design canvas. */
-function LightboxKit({ block, replayKey }: { block: Block; replayKey: number }) {
-  const pc = STATIC_ELEMENT_PREVIEW_COMP;
-  const width = Math.max(240, Math.min(window.innerWidth - 352, Math.round(window.innerHeight * 0.78 * (pc.width / pc.height))));
-  // Frozen on the stable frame: prop edits re-render in place, and the entrance replays only when asked
-  return <BlockPreviewFrame comp={pc} block={block} width={width} animate="manual" replayKey={replayKey} />;
-}
-
-/** Lightbox element live preview: same render as ElementTile, larger + always looping (local iframe, available immediately). */
-function LightboxElement({ item, comp }: { item: LibraryItem; comp: Composition }) {
-  const el = item.element!;
-  // Render theme elements at their design size (1920×1080): a vertical project canvas would make text large and box small (px is relative to canvas width)
-  const pc = el.designW && el.designH ? { ...comp, width: el.designW, height: el.designH } : comp;
-  const width = Math.max(240, Math.min(window.innerWidth - 96, Math.round(window.innerHeight * 0.78 * (pc.width / pc.height))));
-  const previewBlock = {
-    id: el.seedId,
-    templateId: 'custom',
-    slots: { innerHtml: el.innerHtml, timelineBody: el.timelineBody },
-    startSec: 0,
-    durationSec: 3,
-    trackIndex: 2,
-    label: el.label,
-  };
-  return <BlockPreviewFrame comp={pc} block={previewBlock} width={width} animate />;
 }

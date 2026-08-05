@@ -13,6 +13,23 @@ import { type CaptionStyle, BASE_CAPTION_FONT_PX, getCaptionPreset } from '@pire
 import { t } from './i18n';
 import { startPointerDrag } from './drag-shell';
 
+export const BOX_SELECTION_OUTSET_PX = 6;
+
+/** Purely visual breathing room around a block; its center stays fixed so drag/rotate geometry is unchanged. */
+export function boxSelectionRect(
+  box: { x: number; y: number; w: number; h: number },
+  stageW: number,
+  stageH: number,
+  outset = BOX_SELECTION_OUTSET_PX,
+) {
+  return {
+    left: box.x * stageW - outset,
+    top: box.y * stageH - outset,
+    width: box.w * stageW + outset * 2,
+    height: box.h * stageH + outset * 2,
+  };
+}
+
 /**
  * Frame-level box manipulation shell for the selected block (geometry = the Block.box layout rectangle).
  * Crop vs. scale division (per user): the border thin strip = move; the mid-edge bar handles = trim that edge (opposite
@@ -55,15 +72,13 @@ export function BoxEditOverlay({
   const edge = 'pointer-events-auto absolute';
   // White-fill outlined dots/bars: readable on both light and dark frames
   const knob = 'pointer-events-auto absolute rounded-full border-2 border-accent bg-white shadow';
+  const selectionRect = boxSelectionRect(box, stageW, stageH);
   return (
     <div
       ref={overlayRef}
       className="pointer-events-none absolute z-30"
       style={{
-        left: box.x * stageW,
-        top: box.y * stageH,
-        width: box.w * stageW,
-        height: box.h * stageH,
+        ...selectionRect,
         // The whole selection box rotates with the component (handles hug the rotated card)
         transform: rotation ? `rotate(${rotation}deg)` : undefined,
         transformOrigin: 'center center',

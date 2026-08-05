@@ -1423,6 +1423,7 @@ function StudioTimelineImpl({
                     key={b.id}
                     title={b.label}
                     aria-disabled={disabledClipIds?.has(b.id)}
+                    data-block-selection-keep={sel ? '' : undefined}
                     className={`group absolute overflow-hidden rounded-md ring-1 ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
                     style={{ left, width, top, height: ROW_H - 8 }}
                     onClick={(e) => e.stopPropagation()} // chip is selected via pointer; block bubbling so the background doesn't clear it

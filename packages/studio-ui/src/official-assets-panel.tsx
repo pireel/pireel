@@ -26,8 +26,8 @@ import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitComponents, kitElement } from '@pireel/studio-engine/kit-templates';
 import { kitSampleProps } from './kit-ui';
-import { ELEMENT_TEMPLATES, localizedTemplatePrompt } from './gen-templates';
-import { ElementTemplateCard } from './gen-templates/element-card';
+import { ELEMENT_TEMPLATES } from './gen-templates';
+import type { GenElementResult } from './element-history';
 import {
   AssetCard,
   AssetLightbox,
@@ -39,6 +39,7 @@ import {
   useAudioPreview,
 } from './asset-card';
 import { studioLocale, t } from './i18n';
+import { officialComponentTemplateItem } from './official-component-templates';
 import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory, OfficialSticker } from './official-assets-types';
 
 type OfficialCategorySection = 'stickers' | 'audio';
@@ -55,6 +56,7 @@ export function OfficialAssetsPanel({
   comp,
   onInsert,
   onInsertKit,
+  onInsertElement,
   onDragAsset,
   onOpenGeneration,
   onUseAudio,
@@ -64,6 +66,8 @@ export function OfficialAssetsPanel({
   onInsert: (asset: MediaRef, label?: string, dims?: { w: number; h: number }) => void;
   /** Insert a kit component as a props-driven block; props override the sample defaults. */
   onInsertKit?: (component: string, props?: Record<string, unknown>) => void;
+  /** Insert a bundled component template directly into the current project. */
+  onInsertElement: (element: GenElementResult, prompt: string) => void;
   onDragAsset?: (asset: PanelDragAsset | null) => void;
   /** Open generation, optionally seeding a Remix template into its composer. */
   onOpenGeneration?: (type?: OfficialGenerationType, prompt?: string) => void;
@@ -121,16 +125,18 @@ export function OfficialAssetsPanel({
       };
     });
   }, [locale]);
+  const componentTemplateItems = useMemo(
+    () =>
+      ELEMENT_TEMPLATES.map((template) => officialComponentTemplateItem(template, locale)).filter(
+        (item): item is LibraryItem => item !== null,
+      ),
+    [locale],
+  );
 
   const needle = query.trim().toLocaleLowerCase();
   const includesQuery = (values: (string | undefined)[]) => !needle || values.some((value) => value?.toLocaleLowerCase().includes(needle));
-  const visibleComponentItems = kitItems.filter((item) => includesQuery([item.label, item.prompt, item.category]));
-  const visibleComponentTemplates = ELEMENT_TEMPLATES.filter((template) =>
-    includesQuery([
-      template.title ? t(template.title) : undefined,
-      localizedTemplatePrompt(template, locale),
-      template.category,
-    ]),
+  const visibleComponentItems = [...kitItems, ...componentTemplateItems].filter((item) =>
+    includesQuery([item.label, item.prompt, item.category]),
   );
   const filteredStickers = (stickers ?? []).filter((item) =>
     includesQuery([item.label, item.categoryLabel, item.categoryLabelEn, item.source, item.license, ...(item.tags ?? [])]),
@@ -185,6 +191,10 @@ export function OfficialAssetsPanel({
   const insertOf = (it: LibraryItem, kitProps?: Record<string, unknown>) => {
     if (it.kit) {
       onInsertKit?.(it.kit, kitProps);
+      return;
+    }
+    if (it.element) {
+      onInsertElement(it.element, it.prompt ?? it.label);
       return;
     }
     if (it.insertUrl) onInsert({ type: 'image', url: it.insertUrl }, it.label, dimsOf(it));
@@ -258,18 +268,6 @@ export function OfficialAssetsPanel({
     return kitGrid(items, previewOnly);
   };
 
-  const componentTemplateGrid = (
-    <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
-      {visibleComponentTemplates.map((template) => (
-        <ElementTemplateCard
-          key={template.id}
-          template={template}
-          onUse={(prompt) => onOpenGeneration?.('element', prompt)}
-        />
-      ))}
-    </div>
-  );
-
   const audioRows = (rows: OfficialBgm[], previewOnly = false) => (
     <div className="divide-line divide-y">
       {(previewOnly ? rows.slice(0, 2) : rows).map((b) => {
@@ -339,15 +337,7 @@ export function OfficialAssetsPanel({
       {t('panels.noMatchingAssetsTry')}
     </div>
   );
-  const componentsOverview =
-    visibleComponentItems.length === 0 && visibleComponentTemplates.length === 0 ? (
-      noMatches
-    ) : (
-      <div className="flex flex-col gap-2.5">
-        {visibleComponentItems.length > 0 && kitGrid(visibleComponentItems)}
-        {visibleComponentTemplates.length > 0 && componentTemplateGrid}
-      </div>
-    );
+  const componentsOverview = visibleComponentItems.length === 0 ? noMatches : kitGrid(visibleComponentItems);
   const stickersOverview =
     stickers == null
       ? loadingBox

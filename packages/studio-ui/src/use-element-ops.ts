@@ -28,8 +28,10 @@ import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { addElementEntry } from './element-history';
 import type { GenElementResult } from './gen-chat-panel';
+import { fitElementDesignBox } from './element-insert-geometry';
 import type { StudioChatHandle } from './studio-chat';
 import { t } from './i18n';
+import { componentContentSyncTarget } from './component-content-sync';
 
 export interface ElementOpsDeps {
   projectId: string;
@@ -225,25 +227,18 @@ export function useElementOps(deps: ElementOpsDeps) {
     // Reshape locally once, shared by both branches: inner container %-binding + font cq-ization (when backfilling into a component card, content also adapts to the card's box)
     const dW = el.designW ?? compRef.current.width;
     const dH = el.designH ?? compRef.current.height;
-    const geom = normalizeElementForInsert(el, dW, dH, { fullFluid: !!(el.designW && el.designH) });
+    const geom = el.insertFit === 'canvas'
+      ? { innerHtml: el.innerHtml, box: { x: 0, y: 0, w: 1, h: 1 } }
+      : normalizeElementForInsert(el, dW, dH, { fullFluid: !!(el.designW && el.designH) });
     if (el.designW && el.designH) {
-      // Design coords → canvas: first take the fit window inside the canvas at the design aspect ratio (same shape as the preview).
-      // Whole-page items (measured full-bleed) = the entire fit window; overlay items (measured their own small box) = map the small box into the fit window,
-      // so the selection box hugs the item itself rather than covering half the screen
-      const W = compRef.current.width;
-      const H = compRef.current.height;
-      const ar = el.designW / el.designH;
-      let w = 0.96;
-      let h = (W * w) / ar / H;
-      if (h > 0.96) {
-        h = 0.96;
-        w = (H * h * ar) / W;
-      }
-      const win = { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
-      const full = geom.box.w > 0.98 && geom.box.h > 0.98;
-      geom.box = full
-        ? win
-        : { x: win.x + geom.box.x * win.w, y: win.y + geom.box.y * win.h, w: geom.box.w * win.w, h: geom.box.h * win.h };
+      geom.box = fitElementDesignBox({
+        canvasW: compRef.current.width,
+        canvasH: compRef.current.height,
+        designW: el.designW,
+        designH: el.designH,
+        sourceBox: geom.box,
+        initialScale: el.insertScale,
+      });
     }
     // Independence baking: theme components carry data-hf-baked (theme tokens travel with them); other components snapshot
     // tokens into the block scope here — swapping themes / editing other components after insert doesn't affect it (user-defined
@@ -264,7 +259,12 @@ export function useElementOps(deps: ElementOpsDeps) {
           clipId: tb.id,
           block: {
             templateId: 'custom',
-            slots: { innerHtml: geom.innerHtml.replaceAll(el.seedId, tb.id), timelineBody: el.timelineBody.replaceAll(el.seedId, tb.id), ...(el.presetId ? { presetId: el.presetId } : {}) },
+            slots: {
+              innerHtml: geom.innerHtml.replaceAll(el.seedId, tb.id),
+              timelineBody: el.timelineBody.replaceAll(el.seedId, tb.id),
+              ...(el.presetId ? { presetId: el.presetId } : {}),
+              ...(el.presetVersion ? { presetVersion: el.presetVersion } : {}),
+            },
             label: el.label || prompt.slice(0, 12),
           },
         }],
@@ -287,7 +287,12 @@ export function useElementOps(deps: ElementOpsDeps) {
     const nb: Block = {
       id: newId,
       templateId: 'custom',
-      slots: { innerHtml: geom.innerHtml.replaceAll(el.seedId, newId), timelineBody: el.timelineBody.replaceAll(el.seedId, newId), ...(el.presetId ? { presetId: el.presetId } : {}) },
+      slots: {
+        innerHtml: geom.innerHtml.replaceAll(el.seedId, newId),
+        timelineBody: el.timelineBody.replaceAll(el.seedId, newId),
+        ...(el.presetId ? { presetId: el.presetId } : {}),
+        ...(el.presetVersion ? { presetVersion: el.presetVersion } : {}),
+      },
       startSec: at,
       durationSec: 3,
       trackIndex: freeTrack(compRef.current.blocks, at, 3),
@@ -358,18 +363,21 @@ export function useElementOps(deps: ElementOpsDeps) {
     setGenRefreshTick((n) => n + 1); // refetch the asset library so it's visible immediately
     toast.success(t('workbench.savedAsElementAssets'));
   };
-  /** Floating toolbar "sync content": one-click fill the component's data-edit text slots from the narration script in
-   *  the block's time window (preset component copy = generic placeholder, this step matches it to real content). Slots
-   *  are claimed by index in DOM order (keys may repeat); text replacement only touches textContent, layout/animation unchanged. */
+  /** Floating toolbar "sync content": one capability for HTML data-edit slots and schema-backed kit props. */
   const [syncBusyId, setSyncBusyId] = useState<string | null>(null);
   const syncBlockContent = async (b: Block) => {
     const fill = studioProviders().syncFill;
     if (!fill || syncBusyId) return;
-    const slots = b.slots as { innerHtml?: string };
-    if (typeof slots.innerHtml !== 'string') return;
-    const doc = new DOMParser().parseFromString(`<div id="__root">${slots.innerHtml}</div>`, 'text/html');
-    const nodes = Array.from(doc.querySelectorAll('#__root [data-edit]'));
-    const items = nodes.map((n, i) => ({ index: i, text: (n.textContent ?? '').trim() })).filter((x) => x.text);
+    const slots = b.slots as { innerHtml?: string; timelineBody?: string };
+    const kitTarget = componentContentSyncTarget(b);
+    let htmlDoc: Document | null = null;
+    let nodes: Element[] = [];
+    let items = kitTarget?.items ?? [];
+    if (!kitTarget && typeof slots.innerHtml === 'string') {
+      htmlDoc = new DOMParser().parseFromString(`<div id="__root">${slots.innerHtml}</div>`, 'text/html');
+      nodes = Array.from(htmlDoc.querySelectorAll('#__root [data-edit]'));
+      items = nodes.map((n, i) => ({ index: i, text: (n.textContent ?? '').trim() })).filter((x) => x.text);
+    }
     if (!items.length) {
       toast.error(t('workbench.elementNoFillableText'));
       return;
@@ -405,27 +413,14 @@ export function useElementOps(deps: ElementOpsDeps) {
           return `[${x.start.toFixed(2)}-${x.end.toFixed(2)}] ${x.text}${wl}`;
         })
         .join('\n');
-      const curTlb = (b.slots as { timelineBody?: string }).timelineBody ?? '';
-      const out = await fill(items, script, { html: slots.innerHtml, timeline: curTlb, id: b.id });
-      const byIndex = new Map(out.items.map((x) => [x.index, x.text]));
-      const byIndexAt = new Map(out.items.filter((x) => typeof x.at === 'number').map((x) => [x.index, x.at!]));
-      // Component = strong reference (per user): the LLM may restructure wholesale (a 3-item list grows to 4 per the script).
-      // html passing validation = full replacement; not given / not passing = fall back to slot patching (text only)
-      let nextHtml: string;
-      const okHtml =
-        typeof out.html === 'string' &&
-        out.html.includes('data-edit') &&
-        out.html.includes(`#${b.id}`) && // the style scope must still be this block's id (prevents cross-block leakage / lost scope)
-        !/<script/i.test(out.html);
-      if (okHtml) {
-        nextHtml = out.html!;
-      } else {
-        nodes.forEach((n, i) => {
-          const t = byIndex.get(i);
-          if (t) n.textContent = t;
-        });
-        nextHtml = doc.querySelector('#__root')!.innerHTML;
-      }
+      const curTlb = slots.timelineBody ?? '';
+      // HTML components may be structurally rewritten from their strong reference. Kit components
+      // keep their typed schema and derived renderer, so only their content props go to this endpoint.
+      const out = await fill(
+        items,
+        script,
+        kitTarget || typeof slots.innerHtml !== 'string' ? undefined : { html: slots.innerHtml, timeline: curTlb, id: b.id },
+      );
       // Sync timeline ① window alignment: prefer the span the LLM gives (it drops leading/trailing sentences unrelated to
       // the component — the previous "overlap-window min/max" pulled in unrelated leading segments, user hit this); fall back to the overlap window if not given
       const winLo = Math.min(...win.map((x) => x.start));
@@ -434,20 +429,38 @@ export function useElementOps(deps: ElementOpsDeps) {
       const spanTo = out.span ? Math.max(Math.min(out.span.to, winHi + 1), spanFrom + 1) : winHi;
       const newStart = Math.max(0, Math.round(spanFrom * 100) / 100);
       const newDur = Math.max(1.5, Math.round((spanTo - newStart) * 100) / 100);
-      // Sync timeline ② preset beats: each segment's main-slot new copy is located in the narration word stream → rebuild the timeline at its entrance moment
-      // (word-level timestamps are our edge; segments not found are left to the builder's default rhythm)
-      // Sync timeline ②: the LLM rewrites timelineBody directly by looking at the component's real HTML (generic — it
-      // targets whatever selectors it reads, not preset class names; the previous preset-enumerating builder was rejected by the user).
-      // Compile-validate with new Function before applying (bad syntax = keep the original timeline, content still syncs).
       let nextTlb: string | null = null;
-      if (out.timeline) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-implied-eval
-          new Function('tl', out.timeline);
-          nextTlb = out.timeline;
-        } catch {
-          /* compile failed: discard, keep the original timeline */
+      let nextSlots: Block['slots'];
+      if (kitTarget) {
+        nextSlots = { ...b.slots, props: kitTarget.apply(out.items) };
+      } else {
+        const byIndex = new Map(out.items.map((x) => [x.index, x.text]));
+        // Component = strong reference: HTML may grow/shrink repeated units. If the structural
+        // response is invalid, patch text nodes only and keep the authored layout and animation.
+        const okHtml =
+          typeof out.html === 'string' &&
+          out.html.includes('data-edit') &&
+          out.html.includes(`#${b.id}`) &&
+          !/<script/i.test(out.html);
+        let nextHtml = out.html ?? '';
+        if (!okHtml) {
+          nodes.forEach((n, i) => {
+            const text = byIndex.get(i);
+            if (text) n.textContent = text;
+          });
+          nextHtml = htmlDoc?.querySelector('#__root')?.innerHTML ?? slots.innerHtml ?? '';
         }
+        // Only authored HTML owns an editable timeline body. Kit motion is derived from typed props.
+        if (out.timeline) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-implied-eval
+            new Function('tl', out.timeline);
+            nextTlb = out.timeline;
+          } catch {
+            /* compile failed: discard, keep the original timeline */
+          }
+        }
+        nextSlots = { ...b.slots, innerHtml: nextHtml, ...(nextTlb ? { timelineBody: nextTlb } : {}) };
       }
       const edit = applyOverlayDocumentEdits({
         document: documentRef.current,
@@ -455,7 +468,7 @@ export function useElementOps(deps: ElementOpsDeps) {
           clipId: b.id,
           startSec: newStart,
           durationSec: newDur,
-          block: { slots: { ...b.slots, innerHtml: nextHtml, ...(nextTlb ? { timelineBody: nextTlb } : {}) } },
+          block: { slots: nextSlots },
         }],
       });
       if (!edit.ok) throw new Error(edit.error.message);

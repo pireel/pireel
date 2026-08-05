@@ -26,7 +26,7 @@ describe('预置默认时间轴选择器对账', () => {
 });
 
 describe('生成区组件模板', () => {
-  it('12 张模板卡使用唯一 ID，并可由生成区和官方素材复用同一个卡片组件', () => {
+  it('12 张模板卡使用唯一 ID，并由生成区和官方素材复用同一套可插入视觉定义', () => {
     expect(ELEMENT_TEMPLATES).toHaveLength(12);
     expect(new Set(ELEMENT_TEMPLATES.map((template) => template.id)).size).toBe(ELEMENT_TEMPLATES.length);
     expect(typeof ElementTemplateCard).toBe('function');

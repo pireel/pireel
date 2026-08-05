@@ -20,9 +20,17 @@ export interface GenElementResult {
   label: string;
   /** Presets carry a source id (stored in block slots): "sync content" uses it to rebuild the beat-timed timeline. */
   presetId?: string;
+  /** Versioned official-template payload; old inserted snapshots are migrated once instead of rendered through a compatibility path. */
+  presetVersion?: number;
   /** Design reference size (theme elements = 1920×1080): on insert, cq-ify against this and pick an in-canvas fit window rather than filling the screen. */
   designW?: number;
   designH?: number;
+  /** Library thumbnails normally fit the visible content. Full art-directed layouts opt into showing the complete design canvas. */
+  previewFit?: 'canvas';
+  /** Preserve the authored design canvas during insertion instead of measuring/fluidizing it as a small overlay. */
+  insertFit?: 'canvas';
+  /** Initial fraction of the aspect-fit design window. The authored canvas and selection box stay exactly aligned. */
+  insertScale?: number;
   /** Present = the element IS a kit component (themeless generation): insertion creates a
    *  props-driven kit block directly — no offscreen measurement, no cq-ization; innerHtml/
    *  timelineBody above are only the derived preview for the library card. */
