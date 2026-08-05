@@ -1,5 +1,6 @@
 /**
- * The gen panel's "Template" library: curated ready-to-reuse prompts; one click drops them into the input to generate.
+ * The gen panel's "Template" library: curated ready-to-reuse prompts. Card body previews;
+ * the explicit Remix action drops a localized prompt into the generator.
  *
  * - Image templates: pulled from the open-source leaderboard nanobanana-trending-prompts
  *   (jau123/nanobanana-trending-prompts), taking several high-scorers per common creator

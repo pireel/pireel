@@ -73,6 +73,11 @@ export function listAddressedWords(
   clips: Record<string, AsrSegment[]>,
   query: WordQuery = {},
 ): { words: AddressedWord[]; sourceToken: string; total: number; offset: number; hasMore: boolean } | { error: string } {
+  const hasSentenceSelection = !!query.sentenceIndexes?.length;
+  const hasTimeSelection = Number.isFinite(query.fromSec) && Number.isFinite(query.toSec) && query.toSec! > query.fromSec!;
+  if (!hasSentenceSelection && !hasTimeSelection) {
+    return { error: 'narrow transcript passage required: choose sentenceIndexes or a complete fromSec/toSec range from read_script/search_media first' };
+  }
   let source: string | null = null;
   let segments = main;
   if (query.shotId) {

@@ -9,6 +9,7 @@ import type { Composition } from '@pireel/studio-engine/composition';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
 import { GraphicsPreviewBody } from './chat-graphics-card';
+import { AssetSearchResultsBody } from './chat-asset-search-results';
 import { AskUserCard } from './chat-ask-card';
 import { ExportSettingsCard } from './chat-export-card';
 import { t } from './i18n';
@@ -55,6 +56,20 @@ const PREVIEW_TOOLS = new Set(['add_graphics', 'add_block', 'edit_block', 'dupli
 function toolIdOf(part: ToolPartLike): string {
   if (part.type === 'dynamic-tool') return part.toolName ?? '';
   return part.type.startsWith('tool-') ? part.type.slice(5) : part.type;
+}
+
+function SpeechAssetBody({ output }: { output: unknown }) {
+  const data = output && typeof output === 'object' ? (output as { data?: unknown }).data : null;
+  const asset = data && typeof data === 'object' ? (data as { asset?: unknown }).asset : null;
+  if (!asset || typeof asset !== 'object') return null;
+  const row = asset as { url?: unknown; label?: unknown };
+  if (typeof row.url !== 'string' || !/^https?:\/\//i.test(row.url)) return null;
+  return (
+    <div className="border-line/70 border-t px-2.5 py-2">
+      {typeof row.label === 'string' && row.label ? <div className="text-ink-3 mb-1.5 truncate text-[11px]">{row.label}</div> : null}
+      <audio src={row.url} controls preload="metadata" className="h-8 w-full" />
+    </div>
+  );
 }
 
 /** Normalize tool-call status. */
@@ -203,15 +218,21 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   // Component-producing tools get a live preview strip: paged, lazy (current page only), skeleton while generating
   const preview =
     PREVIEW_TOOLS.has(id) && opts?.getComp ? <GraphicsPreviewBody toolId={id} part={part} getComp={opts.getComp} /> : null;
+  const assetResults = id === 'search_assets' && part.state === 'output-available'
+    ? <AssetSearchResultsBody output={part.output} />
+    : null;
+  const speechAsset = id === 'generate_speech' && part.state === 'output-available'
+    ? <SpeechAssetBody output={part.output} />
+    : null;
   return (
     <div key={key}>
       {def.kind === 'card' ? (
         <ToolCard def={def} part={part}>
-          {preview}
+          {preview ?? assetResults ?? speechAsset}
         </ToolCard>
       ) : (
         <ToolBadge def={def} part={part}>
-          {preview}
+          {preview ?? assetResults ?? speechAsset}
         </ToolBadge>
       )}
     </div>

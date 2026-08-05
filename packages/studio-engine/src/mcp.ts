@@ -85,12 +85,23 @@ export interface McpDeps {
   /** Asset library enumeration (routing layer = query user_uploads role=general + the active project's sources).
    *  Server-direct so it works with the tab closed too. */
   listAssets: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Natural-language metadata search across local-index/cloud/official library scopes.
+   *  Server-direct so external agents do not need an open Studio tab. */
+  searchAssets: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Hosted TTS, server-direct so Studio need not be open. */
+  generateSpeech: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Voice inventory and cloning lifecycle, server-direct so Studio need not be open. */
+  listVoices: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  cloneVoice: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  deleteVoice: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Hosted asynchronous lip-sync generation in the active project's generation space. */
+  lipSync: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
 }
 
 /* ============================ Tool surface ============================ */
 
 /** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets']);
+export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
  *  get_state=state snapshot; apply_block/submit_plan=the validate-and-place surface for BYO generation output;
@@ -440,6 +451,12 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         if (name === 'switch_project') return toolResponse(raw.id, await deps.switchProject(args));
         if (name === 'rename_project') return toolResponse(raw.id, await deps.renameProject(args));
         if (name === 'list_assets') return toolResponse(raw.id, await deps.listAssets(args));
+        if (name === 'search_assets') return toolResponse(raw.id, await deps.searchAssets(args));
+        if (name === 'list_voices') return toolResponse(raw.id, await deps.listVoices(args));
+        if (name === 'clone_voice') return toolResponse(raw.id, await deps.cloneVoice(args));
+        if (name === 'delete_voice') return toolResponse(raw.id, await deps.deleteVoice(args));
+        if (name === 'generate_speech') return toolResponse(raw.id, await deps.generateSpeech(args));
+        if (name === 'lip_sync') return toolResponse(raw.id, await deps.lipSync(args));
         return toolResponse(raw.id, deps.readEditingGuide());
       }
 

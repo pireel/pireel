@@ -2,7 +2,7 @@
 
 /**
  * Shared building blocks for the assets library (My / Official scopes): the LibraryItem
- * shape, the fixed 120×68 grid card with its tiles (image/video/audio/element), the list-row
+ * shape, the responsive grid card with its tiles (image/video/audio/element), the list-row
  * thumb, drag-out payload wiring, the audio inline-preview hook, and the preview lightbox.
  * Panels own their data sources and handlers; everything visual and draggable lives here.
  */
@@ -15,6 +15,12 @@ import type { GenElementResult } from './element-history';
 import { componentPreviewModel, LibraryComponentPreview } from './component-preview';
 import { t } from './i18n';
 
+/** Compact card grid shared by asset and generation libraries.
+ * The 88px floor lets the padded generation panel keep three compact columns at its default width. */
+export const RESPONSIVE_ASSET_CARD_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(min(88px,100%),1fr))] gap-2';
+
+/** Static 16:9 canvas for previews that must not depend on the project comp (presets/kit). */
+export const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
 /** Unified shape for library entries (uploads / generated media / elements / official items all normalize here). */
 export interface LibraryItem {
   id: string;
@@ -263,7 +269,7 @@ export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: b
   );
 }
 
-/** Grid card: fixed 120×68 thumb + 24px title row; click to preview (audio: toggle playback),
+/** Grid card: responsive 16:9 thumb + 24px title row; click to preview (audio: toggle playback),
  *  draggable, hover shows insert (+) inside the thumb area and delete top-left. */
 export function AssetCard({
   item: it,

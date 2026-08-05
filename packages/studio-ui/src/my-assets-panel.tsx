@@ -70,6 +70,7 @@ import {
   triggerFolderInput,
   type FolderRestoreGroup,
 } from './local-asset-folders';
+import { useLocalVisualModel } from './local-visual-search-model';
 import { t } from './i18n';
 
 type KindFilter = 'all' | 'image' | 'video' | 'audio';
@@ -147,6 +148,31 @@ const readReg = (pid?: string): RegEntry[] => {
     return [];
   }
 };
+
+/** Ephemeral bottom status: mounting this component starts the fail-soft background download. It
+ * disappears as soon as the cache is ready (and stays out of the way when storage/network fails). */
+function LocalVisualSearchLoading() {
+  const model = useLocalVisualModel();
+  const downloading = model.phase === 'downloading';
+  const checking = model.phase === 'checking';
+  if (!downloading && !checking) return null;
+  const pct = Math.round(model.progress * 100);
+
+  return (
+    <div className="border-line bg-panel/95 shrink-0 border-t px-2.5 py-1.5" data-testid="local-visual-search-loading">
+      <div className="text-ink-3 flex items-center gap-1.5 text-[10px]">
+        <Loader2 size={11} className="text-accent animate-spin" />
+        <span className="min-w-0 flex-1 truncate">{t('panels.localVisualSearchPreparing')}</span>
+        {downloading ? <span className="text-ink-4 tabular-nums">{pct}%</span> : null}
+      </div>
+      {downloading ? (
+        <div className="bg-panel-2 mt-1 h-0.5 overflow-hidden rounded-full" aria-label={t('panels.localVisualSearchDownloadProgress')} aria-valuenow={pct} role="progressbar">
+          <div className="bg-accent h-full transition-[width]" style={{ width: `${pct}%` }} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /** Missing-source card (per-asset, dashed): click = restore access (permission re-grant / vault / re-pick), hover ✕ = drop. */
 function RestoreTile({ label, kind = 'video', onRestore, onDelete }: { label: string; kind?: LocalKind; onRestore: () => void; onDelete: () => void }) {
@@ -965,6 +991,7 @@ export function MyAssetsPanel({
           }}
         />
       </div>
+      <LocalVisualSearchLoading />
       {preview && (
         <AssetLightbox
           item={preview}

@@ -12,6 +12,7 @@
     "./block-preview-card": "./src/block-preview-card.tsx",
     "./captions-panel": "./src/captions-panel.tsx",
     "./chat-composer": "./src/chat-composer.tsx",
+    "./chat-asset-search-results": "./src/chat-asset-search-results.tsx",
     "./chat-cut-list": "./src/chat-cut-list.tsx",
     "./chat-format": "./src/chat-format.tsx",
     "./chat-graphics-card": "./src/chat-graphics-card.tsx",
