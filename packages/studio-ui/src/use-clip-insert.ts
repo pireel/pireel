@@ -26,6 +26,7 @@ import { type FilmstripFrame, extractFilmstrip, fileSig } from './media';
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { normalizeDims } from './workbench-utils';
 import { t } from './i18n';
+import { registerNarrativeSourceRuntime, type PrimaryNarrativeSourceRuntime } from './clip-source-runtime';
 
 export interface ClipInsertDeps {
   comp: Composition;
@@ -38,6 +39,7 @@ export interface ClipInsertDeps {
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2) => void;
   rememberAssetUrl: (assetId: string, url: string) => void;
+  onPrimarySource: (source: PrimaryNarrativeSourceRuntime) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
@@ -51,7 +53,7 @@ export interface ClipInsertDeps {
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
     comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, planRef, setPlan, documentRef, setDocument,
-    rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts, pickFile,
+    rememberAssetUrl, onPrimarySource, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts, pickFile,
     backupMediaToCloud, runTool,
   } = deps;
   const videoMetaOf = async (url: string): Promise<{ dur: number; w: number; h: number } | null> => {
@@ -148,8 +150,8 @@ export function useClipInsert(deps: ClipInsertDeps) {
     // contain-fit into it; the ratio picker can override afterwards.
     // Narrative structure changed: the old plan is void. A cached plan doesn't know about this beat, and a cached lay_out
     // would treat it as absent (scenes crossing the insert window / mismatched placeholders); re-planning is what treats the inserted clip as its own beat.
-    const at = nearestShotBound(documentRef.current, atWish);
-    if (file) clipFilesRef.current.set(url, file);
+    const documentBeforeInsert = documentRef.current;
+    const at = nearestShotBound(documentBeforeInsert, atWish);
     // srcSigOverride = the source already has a LOCAL identity (including image → 5s derived still):
     // persist bytes on-device and sync metadata only. Sig-less remote sources still use the legacy
     // cloud rendezvous so a fetched CDN asset does not turn into an unrecoverable document-local blob.
@@ -158,7 +160,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const nb: VideoShot = { id: shotId(), src: url, ...(sg ? { srcSig: sg } : {}), srcStart: 0, srcEnd: clipDur, treatment: 'full' };
     const dims = srcDims ? normalizeDims(srcDims.w, srcDims.h) : undefined;
     const edit = addNarrativeDocumentClip({
-      document: documentRef.current,
+      document: documentBeforeInsert,
       shot: nb,
       atSec: at,
       ...(dims ? { sourceWidth: dims.width, sourceHeight: dims.height } : {}),
@@ -166,6 +168,14 @@ export function useClipInsert(deps: ClipInsertDeps) {
     if (!edit.ok || !edit.assetId) {
       toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : edit.error.message);
       return '';
+    }
+    if (file && sg) {
+      registerNarrativeSourceRuntime({
+        documentBeforeInsert,
+        source: { file, url, sig: sg, durationSec: clipDur },
+        clipFiles: clipFilesRef.current,
+        onPrimarySource,
+      });
     }
     pushUndoSnapshot();
     setPlan(null);

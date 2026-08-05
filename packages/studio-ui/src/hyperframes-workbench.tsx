@@ -2146,6 +2146,31 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, [playing, duration, postPreview]);
 
   /* ---------- Pick a local video (no upload, blob preview) + ASR ---------- */
+  function activatePrimarySourceRuntime(source: { file: File; url: string; sig: string; durationSec: number }) {
+    if (objectUrlRef.current && objectUrlRef.current !== source.url) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = source.url;
+    setVideoFile(source.file);
+    videoSigRef.current = source.sig;
+
+    const gen = ++filmstripGenRef.current;
+    setFilmstrip((previous) => {
+      previous.forEach((frame) => URL.revokeObjectURL(frame.url));
+      return [];
+    });
+    void extractFilmstrip(
+      source.file,
+      source.durationSec,
+      Math.min(600, Math.max(8, Math.round(source.durationSec))),
+      (frame) => {
+        if (filmstripGenRef.current !== gen) {
+          URL.revokeObjectURL(frame.url);
+          return;
+        }
+        setFilmstrip((previous) => [...previous, frame].sort((left, right) => left.t - right.t));
+      },
+    ).catch(() => {});
+  }
+
   /** opts.asSig: a cloud-fetched File has a changed name/mtime so fileSig won't match the original sig — substitute the
    *  original sig, otherwise the draft-reconnect check fails and it's wiped as a "new project" (OPFS persistence/cloud backup also use the original sig). */
   async function pickVideoFile(file: File, opts?: { asSig?: string; reconnect?: boolean }) {
@@ -2161,11 +2186,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Adding the first main-source clip to a graphics/audio-only edit is an insertion, not a
       // project replacement. Preserve the work already built on the empty visual track.
       const preserveEmptyTrackEdit = !hasVideoTrackContent(compRef.current) && hasTimelineContent(compRef.current);
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       const url = URL.createObjectURL(file);
-      objectUrlRef.current = url;
-      setVideoFile(file);
-      videoSigRef.current = sig;
+      activatePrimarySourceRuntime({ file, url, sig, durationSec: p.durationSec || 30 });
 
       void saveLocalVideo(file, sig); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
       // Main video stays LOCAL (no auto R2 backup) — kept off deliberately; cross-device video
@@ -2226,22 +2248,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       playhead.set(0);
       setT(0);
       toast.success(t('workbench.loadedSize', { w: dims.width, h: dims.height }) + (p.durationSec ? ` · ${p.durationSec.toFixed(1)}s` : '') + (p.hasAudio ? '' : t('workbench.noAudioTrack')));
-      // Filmstrip: revoke old frame URLs, extract incrementally at a per-duration density (surface while decoding).
-      // extractFilmstrip has no abort → generation guard: after a swap, late frames from the old video are revoked and dropped, never mixed into the new filmstrip.
-      const gen = ++filmstripGenRef.current;
-      setFilmstrip((prev) => {
-        prev.forEach((f) => URL.revokeObjectURL(f.url));
-        return [];
-      });
-      // Density ~1 frame/sec (cap 600 ≈ 10 min without thinning): previously capped at 120 frames, so a few-minute clip
-      // stretched frame spacing to 2s+ — that's why hover tiles were "off by 2+ seconds" from the preview; surfaces incrementally, doesn't block interaction
-      void extractFilmstrip(file, dur, Math.min(600, Math.max(8, Math.round(dur))), (f) => {
-        if (filmstripGenRef.current !== gen) {
-          URL.revokeObjectURL(f.url);
-          return;
-        }
-        setFilmstrip((prev) => [...prev, f].sort((a, b) => a.t - b.t));
-      }).catch(() => {});
     } catch {
       toast.error(t('workbench.couldNotReadVideo'));
     } finally {
@@ -3544,6 +3550,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
     comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, planRef, setPlan,
     documentRef: editorDocumentRef, setDocument: setEditorDocument, rememberAssetUrl, setSelectedId,
+    onPrimarySource: activatePrimarySourceRuntime,
     setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts, pickFile,
     backupMediaToCloud, runTool: (toolId, input) => runToolRef.current(toolId, input),
   });
