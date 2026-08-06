@@ -90,7 +90,7 @@ function isProjectContextInput(value: unknown): value is Record<string, unknown>
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return Object.keys(record).every((key) => key === 'schemaVersion' || key === 'outputs')
-    && (record.schemaVersion === undefined || record.schemaVersion === STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION);
+    && record.schemaVersion === STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION;
 }
 
 /** Full project payload between client and server. */
@@ -212,6 +212,9 @@ export interface ProjectSaveWire {
   chat?: unknown[];
   chatPatch?: Operation[];
   chatHash?: string;
+  context?: StudioProjectContext;
+  contextPatch?: Operation[];
+  contextHash?: string;
   context?: StudioProjectContext;
   contextPatch?: Operation[];
   contextHash?: string;

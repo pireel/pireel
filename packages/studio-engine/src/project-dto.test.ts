@@ -140,6 +140,8 @@ describe('save request boundary', () => {
     expect(sanitizeSavePayload({ comp: document() })).toBeNull();
     expect(sanitizeSavePayload({ compPatch: [], compHash: 'legacy' })).toBeNull();
     expect(sanitizeSavePayload({ context: { asr: ['legacy'] } })).toBeNull();
+    expect(sanitizeSavePayload({ context: {} })).toBeNull();
+    expect(sanitizeSavePayload({ context: { schemaVersion: 2 } })?.context).toEqual({ schemaVersion: 2 });
   });
 
   it('rejects stale/corrupt patches and patched legacy top-level fields', () => {
