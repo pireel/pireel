@@ -19,7 +19,6 @@ import {
   resolveCaptionStyle,
   shotId,
 } from '@pireel/studio-engine/composition';
-import type { DraftPlan } from '@pireel/studio-engine/plan';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type FilmstripFrame, extractFilmstrip, fileSig } from './media';
@@ -34,8 +33,6 @@ export interface ClipInsertDeps {
   clipFilesRef: MutableRefObject<Map<string, File>>;
   cloudMediaRef: MutableRefObject<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>;
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
-  planRef: MutableRefObject<DraftPlan | null>;
-  setPlan: (p: DraftPlan | null) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2) => void;
   rememberAssetUrl: (assetId: string, url: string) => void;
@@ -52,7 +49,7 @@ export interface ClipInsertDeps {
 
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
-    comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, planRef, setPlan, documentRef, setDocument,
+    comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, setDocument,
     rememberAssetUrl, onPrimarySource, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts, pickFile,
     backupMediaToCloud, runTool,
   } = deps;
@@ -148,10 +145,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
   const insertClipCore = (url: string, clipDur: number, atWish: number, file?: File, srcDims?: { w: number; h: number } | null, srcSigOverride?: string | null): string => {
     // First source into an empty project DECIDES the canvas ratio (per user) — later sources
     // contain-fit into it; the ratio picker can override afterwards.
-    // Narrative structure changed: the old plan is void. A cached plan doesn't know about this beat, and a cached lay_out
-    // would treat it as absent (scenes crossing the insert window / mismatched placeholders); re-planning is what treats the inserted clip as its own beat.
     const documentBeforeInsert = documentRef.current;
     const at = nearestShotBound(documentBeforeInsert, atWish);
+    if (file) clipFilesRef.current.set(url, file);
     // srcSigOverride = the source already has a LOCAL identity (including image → 5s derived still):
     // persist bytes on-device and sync metadata only. Sig-less remote sources still use the legacy
     // cloud rendezvous so a fetched CDN asset does not turn into an unrecoverable document-local blob.
@@ -178,8 +174,6 @@ export function useClipInsert(deps: ClipInsertDeps) {
       });
     }
     pushUndoSnapshot();
-    setPlan(null);
-    planRef.current = null;
     rememberAssetUrl(edit.assetId, url);
     setDocument(edit.document);
     setSelectedId(null);

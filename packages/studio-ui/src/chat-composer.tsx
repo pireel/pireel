@@ -9,8 +9,10 @@ import { useLocale } from 'use-intl';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { SkillIcon } from '@pireel/ui/skill-icon';
 import type { Composition } from '@pireel/studio-engine/composition';
+import type { StudioScenarioSkillId } from '@pireel/studio-engine/scenario-skills';
 import { framePack, type SupportedLocale as Locale } from '@pireel/studio-frames/locales';
 import { InlineBlockPreview } from './block-preview-card';
+import { ChatSkillPicker } from './chat-skill-picker';
 import { coverBlock } from '@pireel/studio-frames/showcase-blocks';
 import type { FrameCatalogItem } from './use-frame-catalog';
 import { elementIcon, makeElementPill } from './chat-format';
@@ -31,6 +33,8 @@ export function Composer({
   placeholder,
   status,
   elements,
+  skillId,
+  onPickSkill,
   frame,
   frames,
   onPickFrame,
@@ -42,6 +46,9 @@ export function Composer({
   placeholder: string;
   status: ChatStatus;
   elements: StudioElementRef[];
+  /** Editorial scenario lens attached to this chat session. */
+  skillId: StudioScenarioSkillId;
+  onPickSkill: (id: StudioScenarioSkillId) => void;
   /** Frame attached to the current session (theme button highlights; tapping the same item in the picker removes it). */
   frame: AttachedFrame | null;
   /** Frame catalog for the theme picker. */
@@ -312,6 +319,12 @@ export function Composer({
             >
               <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
+            <ChatSkillPicker
+              editorRef={editorRef}
+              skillId={skillId}
+              disabled={isBusy}
+              onChange={onPickSkill}
+            />
           </div>
           {isBusy ? (
             <button

@@ -15,8 +15,12 @@ import {
   projectDocumentStats,
 } from './project-document';
 import { canonicalJson, hashSection } from './stable-json';
+import { normalizeProjectOutputs, type StudioProjectOutputs } from './project-outputs';
 
 export { canonicalJson, hashSection } from './stable-json';
+
+/** Increment only for destructive editor-context migrations that require stale tabs to reload. */
+export const STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION = 2;
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {
@@ -64,6 +68,31 @@ export interface ProjectCloudMediaIndex {
   clips?: Record<string, { key: string }>;
 }
 
+/** Project-level state that is intentionally outside the active V2 timeline. Media locators,
+ * transcripts and editing semantics live in EditorDocumentV2; this envelope only indexes the
+ * project's independently editable deliverables. */
+export interface StudioProjectContext {
+  schemaVersion: typeof STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION;
+  outputs?: StudioProjectOutputs;
+}
+
+export function sanitizeProjectContext(value: unknown): StudioProjectContext {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
+    ...(record.outputs ? { outputs: normalizeProjectOutputs(record.outputs) } : {}),
+  };
+}
+
+function isProjectContextInput(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).every((key) => key === 'schemaVersion' || key === 'outputs')
+    && (record.schemaVersion === undefined || record.schemaVersion === STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION);
+}
+
 /** Full project payload between client and server. */
 export interface StudioProjectDto {
   id: string;
@@ -71,6 +100,7 @@ export interface StudioProjectDto {
   /** Canonical persisted/editing document. */
   document: EditorDocumentV2;
   chat: unknown[];
+  context: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
@@ -96,6 +126,8 @@ export interface ProjectSavePayload {
   /** Absent for chat-only saves; the server keeps the current document or seeds an empty V2 row. */
   document?: EditorDocumentV2;
   chat: unknown[];
+  /** Project-level multi-output directory. */
+  context?: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
@@ -109,6 +141,7 @@ type Row = {
   title: string;
   comp: unknown;
   chat: unknown;
+  context?: unknown;
   videoSig: string | null;
   videoDurationSec: string | number | null;
   coverThumb: string | null;
@@ -125,6 +158,7 @@ export function rowToDto(r: Row): StudioProjectDto {
     title: r.title,
     document,
     chat: Array.isArray(r.chat) ? r.chat : [],
+    context: sanitizeProjectContext(r.context),
     videoSig: r.videoSig,
     videoDurationSec,
     coverThumb: r.coverThumb,
@@ -152,14 +186,14 @@ export function rowToMeta(r: Row): StudioProjectMeta {
 /* ==================== incremental save wire format ==================== */
 /*
  * The PUT body is a DIFF, two levels:
- *  1. Sectioning: the full payload splits into four sections (document/chat/coverThumb/meta);
+ *  1. Sectioning: the full payload splits into five sections (document/chat/context/coverThumb/meta);
  *     unchanged sections aren't sent, all-unchanged = zero request; on the server, ABSENT = unchanged,
  *     keeping the current stored value.
  *  2. Intra-section JSON Patch (RFC 6902, fast-json-patch): the client keeps a copy of the
  *     "last successfully saved value"; the changed big sections (document/chat) compare against
  *     it into an op list, and if that's smaller than the whole section (<60%) it sends the patch —
- *     dragging one block = one replace of a few hundred bytes, no more re-sending the whole 246KB.
- * Correctness anchor: document/chat patches carry a target canonical hash; the server verifies after
+ *     dragging one block = one replace of a few hundred bytes, no more re-sending the whole document.
+ * Correctness anchor: document/chat/context patches carry a target canonical hash; the server verifies after
  * applying, and on mismatch (base drifted / patch corrupt) → 422 need_full, the client clears the
  * baseline and re-sends the whole section — worst case degrades to full, never silently wrong.
  * The patch precondition = baseVersion optimistic concurrency: on 409 the client re-seeds the baseline (ackedFromDto) from
@@ -178,6 +212,12 @@ export interface ProjectSaveWire {
   chat?: unknown[];
   chatPatch?: Operation[];
   chatHash?: string;
+  context?: StudioProjectContext;
+  contextPatch?: Operation[];
+  contextHash?: string;
+  context?: StudioProjectContext;
+  contextPatch?: Operation[];
+  contextHash?: string;
   coverThumb?: string | null;
   title?: string;
   videoSig?: string | null;
@@ -187,13 +227,14 @@ export interface ProjectSaveWire {
 export interface SectionHashes {
   document: string;
   chat: string;
+  context: string;
   coverThumb: string;
   meta: string;
 }
 
 /** Diff baseline from the last successful save: values (JSON-clean, the base for patch diffs) + hashes (quick changed-or-not check). */
 export interface AckedSections {
-  values: { document: EditorDocumentV2; chat: unknown[] };
+  values: { document: EditorDocumentV2; chat: unknown[]; context: StudioProjectContext };
   hashes: SectionHashes;
 }
 
@@ -204,6 +245,7 @@ const metaHashOf = (title: string | null | undefined, videoSig: string | null, d
 export function ackedFromDto(p: {
   document: EditorDocumentV2;
   chat: unknown[];
+  context: StudioProjectContext;
   coverThumb: string | null;
   title: string;
   videoSig: string | null;
@@ -212,14 +254,17 @@ export function ackedFromDto(p: {
   const document = prepareEditorDocumentForPersistence(p.document);
   const documentCanon = canonicalJson(document);
   const chatCanon = canonicalJson(p.chat ?? []);
+  const contextCanon = canonicalJson(sanitizeProjectContext(p.context));
   return {
     values: {
       document: JSON.parse(documentCanon) as EditorDocumentV2,
       chat: JSON.parse(chatCanon) as unknown[],
+      context: JSON.parse(contextCanon) as StudioProjectContext,
     },
     hashes: {
       document: hashSection(documentCanon),
       chat: hashSection(chatCanon),
+      context: hashSection(contextCanon),
       coverThumb: hashSection(p.coverThumb ?? ''),
       meta: metaHashOf(p.title, p.videoSig, p.videoDurationSec),
     },
@@ -271,9 +316,14 @@ export function buildSaveWire(
   const document = p.document ? prepareEditorDocumentForPersistence(p.document) : null;
   const documentCanon = document ? canonicalJson(document) : null;
   const chatCanon = canonicalJson(p.chat ?? []);
+  const context = p.context ? sanitizeProjectContext(p.context) : null;
+  const contextCanon = context ? canonicalJson(context) : null;
   const hashes: SectionHashes = {
     document: documentCanon != null ? hashSection(documentCanon) : (acked?.hashes.document ?? hashSection(canonicalJson(emptyProjectDocument()))),
     chat: hashSection(chatCanon),
+    context: contextCanon != null
+      ? hashSection(contextCanon)
+      : (acked?.hashes.context ?? hashSection(canonicalJson(sanitizeProjectContext(null)))),
     coverThumb: hashSection(p.coverThumb ?? ''),
     meta: metaHashOf(p.title, p.videoSig, p.videoDurationSec),
   };
@@ -281,13 +331,16 @@ export function buildSaveWire(
   const values: AckedSections['values'] = {
     document: documentCanon != null ? (JSON.parse(documentCanon) as EditorDocumentV2) : (acked?.values.document ?? emptyProjectDocument()),
     chat: JSON.parse(chatCanon) as unknown[],
+    context: contextCanon != null
+      ? (JSON.parse(contextCanon) as StudioProjectContext)
+      : (acked?.values.context ?? sanitizeProjectContext(null)),
   };
   const wire: ProjectSaveWire = { documentSchemaVersion: 2, baseVersion };
   const w = wire as unknown as Record<string, unknown>;
   let changed = false;
 
   /** Big-section tri-state: unchanged → absent / has baseline and patch is smaller → send patch / else whole section. */
-  const emitBig = (key: 'document' | 'chat', canon: string, withHash: boolean) => {
+  const emitBig = (key: 'document' | 'chat' | 'context', canon: string, withHash: boolean) => {
     if (acked && acked.hashes[key] === hashes[key]) return;
     changed = true;
     if (acked) {
@@ -306,6 +359,7 @@ export function buildSaveWire(
   };
   if (documentCanon != null) emitBig('document', documentCanon, true);
   emitBig('chat', chatCanon, true);
+  if (contextCanon != null) emitBig('context', contextCanon, true);
 
   if (!acked || acked.hashes.coverThumb !== hashes.coverThumb) {
     wire.coverThumb = p.coverThumb;
@@ -345,7 +399,7 @@ export function sanitizeSavePayload(body: unknown): {
 } | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
-  if (['comp', 'compPatch', 'compHash', 'context', 'contextPatch'].some((key) => key in b)) return null;
+  if (['comp', 'compPatch', 'compHash'].some((key) => key in b)) return null;
   const dur = b.videoDurationSec;
   const videoSig = typeof b.videoSig === 'string' ? b.videoSig.slice(0, 200) : null;
   const videoDurationSec = typeof dur === 'number' && Number.isFinite(dur) ? dur : null;
@@ -356,14 +410,22 @@ export function sanitizeSavePayload(body: unknown): {
     if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
     document = prepared;
   }
+  let context: StudioProjectContext | undefined;
+  if ('context' in b) {
+    if (!isProjectContextInput(b.context)) return null;
+    context = sanitizeProjectContext(b.context);
+  }
   return {
     ...(typeof b.title === 'string' && b.title.trim() ? { title: b.title.slice(0, 120) } : {}),
     ...(document ? { document } : {}),
     ...(Array.isArray(b.chat) ? { chat: b.chat } : {}),
+    ...(context ? { context } : {}),
     ...(sanitizeOps(b.documentPatch) ? { documentPatch: sanitizeOps(b.documentPatch) } : {}),
     ...(sanitizeOps(b.chatPatch) ? { chatPatch: sanitizeOps(b.chatPatch) } : {}),
+    ...(sanitizeOps(b.contextPatch) ? { contextPatch: sanitizeOps(b.contextPatch) } : {}),
     ...(typeof b.documentHash === 'string' ? { documentHash: b.documentHash.slice(0, 64) } : {}),
     ...(typeof b.chatHash === 'string' ? { chatHash: b.chatHash.slice(0, 64) } : {}),
+    ...(typeof b.contextHash === 'string' ? { contextHash: b.contextHash.slice(0, 64) } : {}),
     videoSig,
     videoDurationSec,
     coverThumb: typeof b.coverThumb === 'string' ? b.coverThumb.slice(0, 500_000) : null,
@@ -396,6 +458,7 @@ export function mergeSaveIntoRow(
     title: string;
     document: unknown;
     chat: unknown;
+    context?: unknown;
     videoSig: string | null;
     videoDurationSec: string | number | null;
     coverThumb: string | null;
@@ -405,6 +468,7 @@ export function mergeSaveIntoRow(
   title: string;
   document: unknown;
   chat: unknown;
+  context: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: string | null;
   coverThumb: string | null;
@@ -432,11 +496,23 @@ export function mergeSaveIntoRow(
     chat = patched;
   }
 
+  let context = sanitizeProjectContext(existing.context);
+  if (p.context) context = sanitizeProjectContext(p.context);
+  else if (p.contextPatch) {
+    if (!p.contextHash) return null;
+    const patched = applySectionPatch(context, p.contextPatch);
+    if (patched === null) return null;
+    const prepared = sanitizeProjectContext(patched);
+    if (hashSection(canonicalJson(prepared)) !== p.contextHash) return null;
+    context = prepared;
+  }
+
   const exDur = existing.videoDurationSec;
   return {
     title: p.title ?? existing.title,
     document,
     chat,
+    context,
     // null doesn't overwrite non-empty: the saving tab may not have hydrated yet (its "absent" ≠ "user deleted")
     videoSig: p.videoSig ?? existing.videoSig,
     videoDurationSec: p.videoDurationSec != null ? String(p.videoDurationSec) : exDur == null ? null : String(exDur),

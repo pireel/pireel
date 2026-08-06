@@ -51,7 +51,7 @@ export interface ToolPartLike {
 }
 
 /** Tools whose receipt shows the component(s) they produced/changed as a live preview strip. */
-const PREVIEW_TOOLS = new Set(['add_graphics', 'add_block', 'edit_block', 'duplicate_block']);
+const PREVIEW_TOOLS = new Set(['add_block', 'edit_block', 'duplicate_block']);
 
 function toolIdOf(part: ToolPartLike): string {
   if (part.type === 'dynamic-tool') return part.toolName ?? '';
@@ -184,7 +184,7 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
           {live?.text || (def.busyText ? t(def.busyText) : t('chatGen.running'))}
         </div>
       )}
-      {/* Tool-specific extra body (e.g. the add_graphics live preview strip) */}
+      {/* Tool-specific extra body (e.g. a component preview strip) */}
       {children}
       {/* Progress bar: determinate with frac; indeterminate slider without (always something moving) */}
       {running &&

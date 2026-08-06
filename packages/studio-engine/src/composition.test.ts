@@ -420,7 +420,7 @@ describe('视频分镜片段 shots', () => {
   });
 
   it('videoFrameTimelineBody:碎镜取景(<1s)也照常执行 —— 设了就执行,渲染层没有最短停留合并', () => {
-    // "取景别停不足 1s"是给 LLM 分镜时的克制要求(prompts/plan.ts),用户手动剪的不管
+    // 自动编排应克制不足 1s 的取景闪烁，但用户的显式精确编辑按原样执行。
     const body = videoFrameTimelineBody([
       { id: 'a', srcStart: 0, srcEnd: 5, treatment: 'full' },
       { id: 'b', srcStart: 5, srcEnd: 5.8, treatment: 'corner-br' }, // 0.8s 碎镜

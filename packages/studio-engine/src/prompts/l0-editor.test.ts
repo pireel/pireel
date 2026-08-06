@@ -57,7 +57,7 @@ describe('what L0 deliberately does NOT share', () => {
       expect(MCP_INSTRUCTIONS).toContain(own);
       expect(EDITOR_MODEL).not.toContain(own);
     }
-    for (const own of ['DRAFT PIPELINE', 'REPLY STYLE']) {
+    for (const own of ['SKILLS AND ORCHESTRATION', 'REPLY STYLE']) {
       expect(CHAT_IDENTITY).toContain(own);
       expect(EDITOR_MODEL).not.toContain(own);
     }

@@ -16,7 +16,6 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     readFrame: vi.fn((id: string) => ({ ok: true, summary: id, data: { playbook: 'PB' } })),
     readEditingGuide: vi.fn(() => ({ ok: true, data: { guide: 'G' } })),
     assembleComposeBrief: vi.fn((_d: Record<string, unknown>, instruction: string) => ({ ok: true, data: { system: 'SYS', prompt: `P:${instruction}` } })),
-    assemblePlanBrief: vi.fn(() => ({ ok: true, data: { system: 'PSYS', prompt: 'PP' } })),
     lookupIcons: vi.fn(() => ({ ok: true, data: { icons: [], misses: [] } })),
     importMedia: vi.fn(async () => ({ ok: true, summary: 'imported', data: { projectId: 'p1' } })),
     createBrowserHandoff: vi.fn(async () => ({ ok: true, summary: 'handoff', data: { url: 'https://x/auth/handoff?code=c', project_id: 'p2' } })),
@@ -40,7 +39,7 @@ describe('MCP 工具面', () => {
     const names = new Set(buildMcpTools().map((t) => t.name));
     // chatOnly 工具(review_visuals 这类外包眼睛)不出现在 MCP 面——外部 agent 有自己的眼睛(capture_frame)
     for (const d of STUDIO_TOOLS) expect(names.has(d.id)).toBe(!d.chatOnly);
-    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'plan_brief', 'submit_plan', 'get_icons']) {
+    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'get_icons']) {
       expect(names.has(extra)).toBe(true);
     }
   });
@@ -49,8 +48,6 @@ describe('MCP 工具面', () => {
     for (const [id, byo] of [
       ['add_block', 'compose_block_brief'],
       ['edit_block', 'compose_block_brief'],
-      ['add_graphics', 'compose_block_brief'],
-      ['analyze_narration', 'plan_brief'],
     ] as const) {
       const t = tools.find((t) => t.name === id)!;
       expect(t.description).toContain('CHARGES');
@@ -67,7 +64,7 @@ describe('MCP 工具面', () => {
     expect(t.description).toContain('list_frames');
   });
   it('超时分档:card(浏览器里跑生成/分析)10 分钟,badge(即时)60 秒', () => {
-    expect(bridgeTimeoutMs('add_graphics')).toBe(600_000);
+    expect(bridgeTimeoutMs('analyze_visual')).toBe(600_000);
     expect(bridgeTimeoutMs('move_block')).toBe(60_000);
   });
 });
@@ -125,8 +122,8 @@ describe('MCP 协议处理', () => {
   });
   it('桥工具带 kind 对应超时过桥;未知工具 -32602', async () => {
     const d = deps();
-    await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'lay_out' } }, d);
-    expect(d.callBridge).toHaveBeenCalledWith('lay_out', {}, 600_000);
+    await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'analyze_visual' } }, d);
+    expect(d.callBridge).toHaveBeenCalledWith('analyze_visual', {}, 600_000);
     await handleMcpRequest({ id: 7, method: 'tools/call', params: { name: 'cut_narration', arguments: { ranges: [] } } }, d);
     expect(d.callBridge).toHaveBeenCalledWith('cut_narration', { ranges: [] }, 60_000);
     const r = await handleMcpRequest({ id: 8, method: 'tools/call', params: { name: 'nope' } }, d);
@@ -156,24 +153,13 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     expect(d.assembleComposeBrief).toHaveBeenCalledWith({ block: { id: 'b1' }, theme: 'general' }, '做张对比卡');
     expect((r!.result as { isError: boolean }).isError).toBe(false);
   });
-  it('compose_block_brief:占位自带设计规格,无 instruction 也能出简报;两者皆无则打回', async () => {
-    const d = deps({ callBridge: vi.fn(async () => ({ ok: true, data: { block: { id: 'p1' }, suggested_instruction: 'component: kpi …' } })) });
-    await handleMcpRequest({ id: 12, method: 'tools/call', params: { name: 'compose_block_brief', arguments: { blockId: 'p1' } } }, d);
-    expect(d.assembleComposeBrief).toHaveBeenCalledWith(expect.anything(), 'component: kpi …');
-    const d2 = deps({ callBridge: vi.fn(async () => ({ ok: true, data: { block: { id: 'b2' } } })) });
-    const r2 = await handleMcpRequest({ id: 13, method: 'tools/call', params: { name: 'compose_block_brief', arguments: {} } }, d2);
-    expect((r2!.result as { isError: boolean }).isError).toBe(true);
-    expect(d2.assembleComposeBrief).not.toHaveBeenCalled();
-  });
-  it('plan_brief:桥取 plan_context → 服务端组装;apply_block/submit_plan 过桥', async () => {
-    const d = deps({ callBridge: vi.fn(async () => ({ ok: true, data: { sentences: [] } })) });
-    await handleMcpRequest({ id: 14, method: 'tools/call', params: { name: 'plan_brief' } }, d);
-    expect(d.callBridge).toHaveBeenCalledWith('plan_context', {}, 60_000);
-    expect(d.assemblePlanBrief).toHaveBeenCalled();
+  it('compose_block_brief 无 instruction 会打回;apply_block 直接过桥', async () => {
+    const d = deps({ callBridge: vi.fn(async () => ({ ok: true, data: { block: { id: 'b2' } } })) });
+    const invalid = await handleMcpRequest({ id: 13, method: 'tools/call', params: { name: 'compose_block_brief', arguments: { blockId: 'b2' } } }, d);
+    expect((invalid!.result as { isError: boolean }).isError).toBe(true);
+    expect(d.assembleComposeBrief).not.toHaveBeenCalled();
     await handleMcpRequest({ id: 15, method: 'tools/call', params: { name: 'apply_block', arguments: { blockId: 'b1', raw: 'x' } } }, d);
     expect(d.callBridge).toHaveBeenCalledWith('apply_block', { blockId: 'b1', raw: 'x' }, 60_000);
-    await handleMcpRequest({ id: 16, method: 'tools/call', params: { name: 'submit_plan', arguments: { plan: '{}' } } }, d);
-    expect(d.callBridge).toHaveBeenCalledWith('submit_plan', { plan: '{}' }, 60_000);
   });
   it('get_icons 服务端直答(BLOCK_SYSTEM 引用的同名工具在 MCP 面可用);桥上下文失败原样透传', async () => {
     const d = deps();
@@ -181,9 +167,9 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     expect(d.lookupIcons).toHaveBeenCalledWith(['trending-up'], undefined);
     expect(d.callBridge).not.toHaveBeenCalled();
     const d2 = deps({ callBridge: vi.fn(async () => ({ ok: false, error: 'studio_not_open' })) });
-    const r = await handleMcpRequest({ id: 18, method: 'tools/call', params: { name: 'plan_brief' } }, d2);
+    const r = await handleMcpRequest({ id: 18, method: 'tools/call', params: { name: 'compose_block_brief', arguments: { instruction: 'x' } } }, d2);
     expect((r!.result as { isError: boolean }).isError).toBe(true);
-    expect(d2.assemblePlanBrief).not.toHaveBeenCalled();
+    expect(d2.assembleComposeBrief).not.toHaveBeenCalled();
   });
   it('capture_frame:截帧回 image content(agent 的眼睛)', async () => {
     const d = deps({ callBridge: vi.fn(async () => ({ ok: true, summary: '已截取 3s 处画面', image: { data: 'AAAA', mimeType: 'image/jpeg' } })) });
@@ -200,6 +186,7 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     const ins = (r!.result as { instructions: string }).instructions;
     expect(ins).toContain('YOU ARE THE MODEL');
     expect(ins).toContain('compose_block_brief');
-    expect(ins).toContain('submit_plan');
+    expect(ins).toContain('general tools');
+    expect(ins).not.toContain('submit_plan');
   });
 });

@@ -1233,7 +1233,7 @@ function EntryRow({
                 draggable
                 onDragStart={(ev) => {
                   ev.dataTransfer.effectAllowed = 'copy';
-                  onDragAsset?.({ type: 'image', url: a.url, label: e.prompt.slice(0, 12) || t('tools.add_graphics.label'), dims: ratioDims(e.ratio) });
+                  onDragAsset?.({ type: 'image', url: a.url, label: e.prompt.slice(0, 12) || t('workbench.graphic'), dims: ratioDims(e.ratio) });
                 }}
                 onDragEnd={() => onDragAsset?.(null)}
                 className="border-line group relative block shrink-0 overflow-hidden rounded-lg border"
@@ -1250,7 +1250,7 @@ function EntryRow({
             ))}
           </div>
           <div className="flex flex-wrap gap-1">
-            <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertMedia({ type: 'image', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('tools.add_graphics.label'), ratioDims(e.ratio))} />
+            <ActionChip icon={Plus} label={t('chatGen.insertIntoVideo')} onClick={() => onInsertMedia({ type: 'image', url: e.assets![0]!.url }, e.prompt.slice(0, 12) || t('workbench.graphic'), ratioDims(e.ratio))} />
             {onAddRef && <ActionChip icon={RefreshCw} label={t('chatGen.remix')} onClick={() => onAddRef(e.assets![0]!)} />}
           </div>
         </div>

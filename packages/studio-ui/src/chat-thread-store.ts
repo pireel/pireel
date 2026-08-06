@@ -3,6 +3,10 @@
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
 import type { AttachedFrame } from './studio-chat';
+import {
+  isStudioScenarioSkillId,
+  type StudioScenarioSkillId,
+} from '@pireel/studio-engine/scenario-skills';
 
 export interface StoredThread {
   id: string;
@@ -11,6 +15,8 @@ export interface StoredThread {
   updatedAt: number;
   /** Frame attached to the session (theme button highlight comes back when restoring the session). */
   frame?: AttachedFrame | null;
+  /** Editorial scenario lens attached to this session; missing on legacy threads means automatic routing. */
+  skillId?: StudioScenarioSkillId;
 }
 
 export function loadThreads(storageKey: string): StoredThread[] {
@@ -19,7 +25,11 @@ export function loadThreads(storageKey: string): StoredThread[] {
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return [];
     const arr = JSON.parse(raw) as StoredThread[];
-    return Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) return [];
+    return arr.map((thread) => ({
+      ...thread,
+      ...(isStudioScenarioSkillId(thread?.skillId) ? { skillId: thread.skillId } : { skillId: undefined }),
+    }));
   } catch {
     return [];
   }

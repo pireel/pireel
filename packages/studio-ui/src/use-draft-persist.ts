@@ -22,7 +22,16 @@ import {
   primaryNarrativeAsset,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
-import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
+import {
+  type AckedSections,
+  ackedFromDto,
+  buildSaveWire,
+  type ProjectSavePayload,
+  type ProjectSaveWire,
+  type StudioProjectContext,
+  type StudioProjectDto,
+  type StudioProjectMeta,
+} from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
 const PREFIX = 'studio:draft:';
@@ -52,6 +61,8 @@ export interface StudioDraft {
    *  open via local autosave, so comparing it would make every browser think it's newest, each using
    *  its own copy and overwriting the cloud. Old drafts lack this field = cloud wins. */
   baseVersion?: number | null;
+  /** Project-level multi-output directory. */
+  context?: StudioProjectContext;
 }
 
 type StoredStudioDraft = Omit<StudioDraft, 'comp'>;
@@ -83,7 +94,7 @@ function rawDraft(id: string): StudioDraft | null {
 /** Only a draft with timeline content counts as recoverable (including audio-only projects). */
 export function loadDraft(id: string): StudioDraft | null {
   const d = rawDraft(id);
-  if (!d || !hasTimelineContent(d.comp)) return null;
+  if (!d || (!hasTimelineContent(d.comp) && !d.context?.outputs?.inactive.length)) return null;
   return d;
 }
 
@@ -376,6 +387,7 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
     baseVersion: p.version,
+    ...(p.context && Object.keys(p.context).length ? { context: p.context } : {}),
   };
   try {
     writeDraft(draft);
@@ -395,6 +407,8 @@ export function useDraftAutosave(
   projectId: string,
   document: EditorDocumentV2,
   coverThumbRef?: MutableRefObject<string | null>,
+  contextOf?: () => StudioDraft['context'],
+  contextRevision?: unknown,
 ) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -403,7 +417,8 @@ export function useDraftAutosave(
   // "Emptied" = this hook saw content earlier in the session and now it's gone.
   const everContent = useRef(false);
   useEffect(() => {
-    const hasContent = hasTimelineContent(comp);
+    const context = contextOf?.();
+    const hasContent = hasTimelineContent(comp) || !!context?.outputs?.inactive.length;
     if (hasContent) everContent.current = true;
     if ((!hasContent && !everContent.current) || !projectId) return;
     if (timer.current) window.clearTimeout(timer.current);
@@ -422,6 +437,10 @@ export function useDraftAutosave(
           videoDurationSec,
           savedAt: Date.now(),
           baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
+          ...(() => {
+            const ctx = context;
+            return ctx && Object.keys(ctx).length ? { context: ctx } : {};
+          })(),
         };
         writeDraft(draft);
         setLastSavedAt(draft.savedAt);
@@ -432,6 +451,6 @@ export function useDraftAutosave(
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [comp, videoSig, projectId, document]);
+  }, [comp, videoSig, projectId, document, contextRevision]);
   return { lastSavedAt };
 }

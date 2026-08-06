@@ -6,19 +6,16 @@
  * any MCP client), but this does pure-function assembly only and knows nothing
  * about MCP — future internal chat, our own agent, or any other transport going
  * BYO gets briefs from here too. The LLM belongs to the caller; the quality
- * contract does not degrade: output still passes parseBlockResponse + lintBlock
- * (apply side) / parsePlan (submit side).
+ * contract does not degrade: output still passes parseBlockResponse + lintBlock.
  *
  * Shares the same prompt pure-functions as our own LLM path (BLOCK_SYSTEM/
- * withTheme/buildBlockPrompt, PLAN_SYSTEM/planWithActiveTheme/buildPlanPrompt);
+ * withTheme/buildBlockPrompt);
  * there is NO second prompt — the compose route's ACTIVE THEME assembly also
  * converges here (assembleComposeTheme) to prevent drift between two places.
  */
 
 import { type BlockEdit, type ComposeContext, type KitChoice, BLOCK_SYSTEM, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
-import { type PlanInsert, type PlanSentence, type PlanVisual, buildPlanPrompt } from './plan';
-import { PLAN_SYSTEM, buildKitSystem } from './prompts';
-import { planWithActiveTheme } from './prompts';
+import { buildKitSystem } from './prompts';
 import { type ThemeId, getTheme, themeForLlm } from './theme';
 import { isComponentId } from '@pireel/studio-kit';
 
@@ -109,27 +106,4 @@ export function interpretApplyRaw(raw: string): ApplyRawOutcome {
   if (k.custom) return { kind: 'custom', note: k.note };
   if (k.declined) return { kind: 'declined', note: k.note };
   return { kind: 'html' };
-}
-
-export interface PlanBriefInput {
-  sentences: PlanSentence[];
-  videoDurationSec?: number;
-  theme?: string;
-  visuals?: PlanVisual[];
-  inserts?: PlanInsert[];
-}
-
-/** Plan brief: uses the single-shot JSON contract (PLAN_SYSTEM, not our LLM's tool-loop variant);
- *  the caller generates the DraftPlan JSON and passes it raw back to submit_plan (parsePlan tolerantly reconciles it). */
-export function assemblePlanBrief(input: PlanBriefInput): { system: string; prompt: string } {
-  const theme = themeForLlm(getTheme(input.theme as ThemeId | undefined));
-  return {
-    system: planWithActiveTheme(PLAN_SYSTEM, theme),
-    prompt: buildPlanPrompt({
-      sentences: input.sentences,
-      videoDurationSec: input.videoDurationSec ?? input.sentences.at(-1)?.end ?? 0,
-      ...(input.visuals?.length ? { visuals: input.visuals } : {}),
-      ...(input.inserts?.length ? { inserts: input.inserts } : {}),
-    }),
-  };
 }

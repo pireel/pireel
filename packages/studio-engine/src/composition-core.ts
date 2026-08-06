@@ -711,7 +711,7 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
  *  1) One framing keyframe at each shot's start (framing always applies to the whole shot, one shot = one framing).
  *  2) Consecutive identical framings (same type + size) are deduped — adjacent split-off segments with the same framing are one state, no redundant tween.
  * Whatever is set gets executed, with **no minimum-hold merging** (user-set): "don't hold a framing under 1s" is a restraint asked of the LLM at shot-planning time
- * (see prompts/plan.ts FRAMING); framings on shot fragments the user hand-cut are executed as-is.
+ * Automated callers should avoid flickering sub-second framing changes; explicit user cuts are executed as-is.
  * Registered to __timelines['vid'].
  */
 export function videoFrameKeyframes(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]): { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] {
@@ -876,7 +876,7 @@ export function isSentenceCaption(block: Block): boolean {
   return blockKind(block) === 'caption' && !block.box;
 }
 
-/** One same-window box collision the lay_out/add_graphics receipts surface to the agent. */
+/** One same-window box collision surfaced to agents after placement or generation. */
 export interface BlockOverlapWarning {
   a: string;
   b: string;
@@ -886,7 +886,7 @@ export interface BlockOverlapWarning {
   coverage: number;
 }
 
-/** Deterministic same-window overlap check, reported in the lay_out / add_graphics receipts.
+/** Deterministic same-window overlap check, reported in placement and generation receipts.
  *  The agent's visual review samples atSecs it picks itself, so a colliding pair in an
  *  unsampled window ships silently (real incident: two closing cards stacked at the tail) —
  *  this closes that hole with zero LLM cost. Pairs of boxed overlay blocks (captions follow

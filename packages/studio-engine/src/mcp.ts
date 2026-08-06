@@ -63,8 +63,6 @@ export interface McpDeps {
   readEditingGuide: () => McpBridgeResult;
   /** BYO block brief: bridge-returned compose context + the agent's instruction → {system,prompt} (routing layer = briefs.assembleComposeBrief + frameRegistry). */
   assembleComposeBrief: (bridgeData: Record<string, unknown>, instruction: string) => McpBridgeResult;
-  /** BYO plan brief: bridge-returned plan context → {system,prompt} (routing layer = briefs.assemblePlanBrief). */
-  assemblePlanBrief: (bridgeData: Record<string, unknown>) => McpBridgeResult;
   /** Icon lookup (routing layer = icons.lookupIcons) — get_icons, referenced by BLOCK_SYSTEM in BYO generation, is available under the same name on the MCP surface. */
   lookupIcons: (names: string[], kind?: string) => McpBridgeResult;
   /** Local media import registration (routing layer = verify R2 object + write/create project row): after the agent
@@ -104,15 +102,14 @@ export interface McpDeps {
 export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
- *  get_state=state snapshot; apply_block/submit_plan=the validate-and-place surface for BYO generation output;
+ *  get_state=state snapshot; apply_block=the validate-and-place surface for BYO generation output;
  *  capture_frame=visual verification (returns a captured frame as image content so the agent can "see" its own edits).
- *  compose_block_brief/plan_brief are "bridge-fetch context + server-assemble" composite tools, dispatched separately. */
-export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'submit_plan', 'capture_frame', 'visual_brief', 'submit_visual']);
+ *  compose_block_brief is a "bridge-fetch context + server-assemble" composite tool, dispatched separately. */
+export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'visual_brief', 'submit_visual']);
 
 /** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
 export const MCP_BRIEF_TOOLS: Record<string, string> = {
   compose_block_brief: 'compose_context',
-  plan_brief: 'plan_context',
 };
 
 /** Bridge timeout for slow tools (generation/analysis in the browser, minutes-scale); instant ops get 60s. */
@@ -174,22 +171,23 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. The contract follows the project: THEMELESS projects get a component contract (answer = one ```json fence: {component, props} / {"custom": true} for a bespoke build / null for no graphic); projects with a theme attached get the markup contract (note + ```html + ```js — the theme playbook rides in the system). Pass format:"html" to force markup (e.g. after answering {"custom": true}). YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Targets: `blockId` of a pending placeholder (omit `instruction` — its design spec is the instruction); `blockId` of an existing block + `instruction` = rewrite; no blockId + `instruction` = new element at `atSec`. The default way to create/edit block content — charges no Pireel credits.',
+        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. The contract follows the project: THEMELESS projects get a component contract (answer = one ```json fence: {component, props} / {"custom": true} for a bespoke build / null for no graphic); projects with a theme attached get the markup contract (note + ```html + ```js — the theme playbook rides in the system). Pass format:"html" to force markup (e.g. after answering {"custom": true}). YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Pass `blockId` + `instruction` to rewrite an existing block; omit `blockId` and pass `instruction` + optional `atSec` to create one. The default way to create/edit block content — charges no Pireel credits.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          blockId: { type: 'string', description: 'Target block id (placeholder to fill, or existing block to rewrite). Omit for a new element.' },
+          blockId: { type: 'string', description: 'Existing block to rewrite. Omit for a new element.' },
           atSec: { type: 'number', description: 'New element only: timeline start seconds (defaults to playhead).' },
-          instruction: { type: 'string', description: 'What to build/change. Required unless targeting a placeholder.' },
+          instruction: { type: 'string', description: 'What to build or change.' },
           format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract (default follows the project: themeless → kit, themed → html). Use "html" after answering {"custom": true}.' },
         },
+        required: ['instruction'],
       },
     },
     {
       name: 'apply_block',
       description:
-        'Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text in whichever contract the brief carried (component json / fenced markup; a deliberate null on a placeholder removes the slot). On lint failure you get the issues back — fix ONLY those and re-apply. Placeholder blockId → fills it; existing blockId → overwrites; neither → inserts a new element.',
+        'Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text in whichever contract the brief carried (component json or fenced markup). On lint failure you get the issues back — fix ONLY those and re-apply. Existing blockId → overwrites; no blockId → inserts a new element.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -204,23 +202,6 @@ export function buildMcpTools(): McpToolDef[] {
       },
     },
     {
-      name: 'plan_brief',
-      description:
-        'Get the FULL narration-planning contract {system, prompt} (transcript sentences, per-sentence visual hints, inserted-clip context). YOU generate the DraftPlan JSON with your own model per the contract, then call submit_plan with it. Requires a transcript (extract_asr first). Default over analyze_narration — does NOT charge Pireel credits.',
-      inputSchema: EMPTY_SCHEMA,
-    },
-    {
-      name: 'submit_plan',
-      description:
-        'Submit the DraftPlan you generated from plan_brief (pass the JSON text or object as `plan`). It is coerced/validated (scene ranges clamped to the sentence count); on success the plan is stored and lay_out will storyboard from it. Rejected if no scenes survive validation — regenerate and resubmit.',
-      inputSchema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: { plan: { description: 'The DraftPlan JSON (object, or its raw text).' } },
-        required: ['plan'],
-      },
-    },
-    {
       name: 'visual_brief',
       description:
         'BYO visual analysis, step 1 of 2 (charges no Pireel credits — default over analyze_visual). The tab runs the free passes (scene cuts, safe zones, palette; can take a minute or two) and returns sparse sample frames as IMAGES with timestamps. LOOK at each frame and label it, then call submit_visual. If analysis already exists it says so — skip submitting.',
@@ -229,7 +210,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'submit_visual',
       description:
-        'BYO visual analysis, step 2 of 2: submit per-frame labels for the frames visual_brief returned (`index` matches the frames order; `desc` = short English sentence). The tab assembles the full visual timeline and lay_out uses it.',
+        'BYO visual analysis, step 2 of 2: submit per-frame labels for the frames visual_brief returned (`index` matches the frames order; `desc` = short English sentence). The tab assembles observations for framing, layout and review decisions.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -465,10 +446,8 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         const ctx = await deps.callBridge(MCP_BRIEF_TOOLS[name], args, BADGE_TIMEOUT_MS);
         if (!ctx.ok) return toolResponse(raw.id, ctx);
         const data = (ctx.data ?? {}) as Record<string, unknown>;
-        if (name === 'plan_brief') return toolResponse(raw.id, deps.assemblePlanBrief(data));
-        const suggested = typeof data.suggested_instruction === 'string' ? data.suggested_instruction : '';
-        const instruction = typeof args.instruction === 'string' && args.instruction.trim() ? args.instruction.trim() : suggested;
-        if (!instruction) return toolResponse(raw.id, { ok: false, error: 'instruction required (only placeholders carry their own design spec)' });
+        const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : '';
+        if (!instruction) return toolResponse(raw.id, { ok: false, error: 'instruction required' });
         const format = args.format === 'html' || args.format === 'kit' ? { format: args.format } : {};
         return toolResponse(raw.id, deps.assembleComposeBrief({ ...data, ...format }, instruction));
       }

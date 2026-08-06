@@ -22,7 +22,6 @@ import {
 import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/studio-engine/trim';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { DraftPlan } from '@pireel/studio-engine/plan';
 import type { ScriptCut } from './script-panel';
 import { t } from './i18n';
 
@@ -40,8 +39,6 @@ export interface ScriptCutDeps {
   setAsrSentences: (v: AsrSegment[] | null) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2) => void;
-  planRef: MutableRefObject<DraftPlan | null>;
-  setPlan: (plan: DraftPlan | null) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
@@ -53,7 +50,7 @@ export interface ScriptCutDeps {
 export function useScriptCut(deps: ScriptCutDeps) {
   const {
     projectId, comp, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
-    documentRef, setDocument, planRef, setPlan, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, stepAsr,
+    documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, stepAsr,
   } = deps;
   /** The script panel's scissors: delete a batch of (source, source-time range) (shared by delete-sentence / delete-silence
    *  / delete-filler; the mapping math is in trim.removeSrcRanges); grouped and computed per source (source timelines are
@@ -90,8 +87,6 @@ export function useScriptCut(deps: ScriptCutDeps) {
       return;
     }
     pushUndoSnapshot();
-    planRef.current = null;
-    setPlan(null);
     setDocument(document);
     setSelectedShotId(null);
     setSelectedId(null);
@@ -164,8 +159,6 @@ export function useScriptCut(deps: ScriptCutDeps) {
       return;
     }
     pushUndoSnapshot();
-    planRef.current = null;
-    setPlan(null);
     setDocument(document);
     setSelectedShotId(null);
     toast.success(t('workbench.msgUndoHint', { msg }));

@@ -6,10 +6,10 @@ export const SHELL_ZH: Record<string, string> = {
   'shell.nElements': '{n} 组件',
   'shell.newProject': '新建项目',
   'shell.nShots': '{n} 镜',
-  'shell.oneProjectPerVideo': '一个项目一条视频：分镜、取景、设计组件、字幕、导出。',
+  'shell.oneProjectManyOutputs': '一个项目可以容纳多段素材和多个可独立编辑的成片。',
   'shell.planningFailed': '规划失败',
   'shell.rename': '重命名',
   'shell.syncFailed': '同步失败',
   'shell.translationFailed': '翻译失败',
-  'shell.uploadVideoAiCuts': '上传一条视频，AI 分镜、生成组件、加字幕，浏览器里直接导出成片',
+  'shell.startWithMedia': '放入一段或多段素材，在 Chat 选择工作流，制作一个或多个成片',
 };

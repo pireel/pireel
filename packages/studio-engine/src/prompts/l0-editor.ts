@@ -19,10 +19,10 @@
  */
 
 /** What Studio is and what it edits. */
-export const EDITOR_MODEL = `Studio is a video editor for talking-head video. A composition has an editable output canvas (portrait, landscape, square, or custom); imported footage keeps source-normalized coordinates so changing the canvas does not change entity identity. Two kinds of element make up a composition:
-- OVERLAY BLOCKS: designed graphic fragments over the video (metric cards, comparisons, charts, flow/structure diagrams, callouts) plus optional subtitles. A block marked [placeholder] is an empty slot waiting to be filled.
-- VIDEO SHOTS: segments of the footage, each with a framing (treatment). Shot boundaries are hard jump cuts — visual variety comes from framing changes, not from transitions.
-Blocks are DATA, not documents: they carry content and parameters, and the composition is assembled from them. Never invent a block or shot id — use only ids that came from the state snapshot or a tool receipt.`;
+export const EDITOR_MODEL = `Studio is a multi-source video editor. A project can contain several independently editable outputs; tools always operate on the active output. Each output has an editable canvas (portrait, landscape, square, or custom), and imported footage keeps source-normalized coordinates so changing the canvas does not change entity identity. Two kinds of element make up an output composition:
+- OVERLAY BLOCKS: designed graphic fragments over the video (metric cards, comparisons, charts, flow/structure diagrams, callouts) plus optional subtitles.
+- VIDEO SHOTS: segments from the primary or inserted source media, each with its own source clock, framing and audio treatment. A plain shot boundary is a hard cut; transitions exist only when explicitly present in the composition.
+Blocks are DATA, not documents: they carry content and parameters, and the composition is assembled from them. Never invent a project, output, block or shot id — use only ids that came from the state snapshot or a tool receipt.`;
 
 /**
  * The untrusted-content boundary. Everything the editor holds — speech, captions, media names,

@@ -4,15 +4,11 @@ import {
   AROLL_GUIDE,
   BLOCK_SYSTEM,
   CHAT_IDENTITY,
-  PLAN_CORE,
-  PLAN_SYSTEM,
-  PLAN_SYSTEM_TOOLS,
   STUDIO_TOOLS,
   THEME_GENERAL_BRIEF,
   buildChatSystem,
   buildSituation,
   mcpInstructions,
-  planWithActiveTheme,
   withActiveTheme,
   wrapAgentTranscript,
 } from './index';
@@ -21,8 +17,6 @@ describe('静态提示词完整性', () => {
   const STATICS: Array<[name: string, s: string]> = [
     ['BLOCK_SYSTEM', BLOCK_SYSTEM],
     ['CHAT_IDENTITY', CHAT_IDENTITY],
-    ['PLAN_SYSTEM', PLAN_SYSTEM],
-    ['PLAN_SYSTEM_TOOLS', PLAN_SYSTEM_TOOLS],
     ['THEME_GENERAL_BRIEF', THEME_GENERAL_BRIEF],
   ];
   for (const [name, s] of STATICS) {
@@ -32,9 +26,10 @@ describe('静态提示词完整性', () => {
       expect(s).not.toMatch(/\{\{\w+\}\}/);
     });
   }
-  it('PLAN 两种输出契约共享同一个核心段', () => {
-    expect(PLAN_SYSTEM.startsWith(PLAN_CORE)).toBe(true);
-    expect(PLAN_SYSTEM_TOOLS.startsWith(PLAN_CORE)).toBe(true);
+  it('Skill 是编辑判断视角，工作流由通用工具组合', () => {
+    expect(CHAT_IDENTITY).toContain('selected Scenario Skill is an editorial lens');
+    expect(CHAT_IDENTITY).toContain('no scenario-specific plan/layout macro');
+    expect(STUDIO_TOOLS.some((tool) => ['analyze_narration', 'lay_out', 'add_graphics'].includes(tool.id))).toBe(false);
   });
 });
 
@@ -153,17 +148,11 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
 describe('主题装配', () => {
   it('无主题 = 原样返回(不加空壳段落)', () => {
     expect(withActiveTheme('SYS')).toBe('SYS');
-    expect(planWithActiveTheme('SYS')).toBe('SYS');
   });
   it('compose 主题包裹:含约束文案 + 主题内容', () => {
     const s = withActiveTheme('SYS', 'THEME_TOKENS');
     expect(s.startsWith('SYS\n\n')).toBe(true);
     expect(s).toContain('ACTIVE THEME (preset design system)');
     expect(s).toContain('THEME_TOKENS');
-  });
-  it('plan 主题包裹:lib 单发路径与 route 工具环路径共用同一份措辞', () => {
-    const s = planWithActiveTheme('SYS', 'THEME_TOKENS');
-    expect(s).toContain('plan within its tone');
-    expect(s.endsWith('THEME_TOKENS')).toBe(true);
   });
 });

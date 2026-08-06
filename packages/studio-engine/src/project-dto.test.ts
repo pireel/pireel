@@ -62,7 +62,7 @@ describe('strict V2 project DTO', () => {
     const dto = rowToDto(row);
     expect(dto.document.version).toBe(2);
     expect(dto).not.toHaveProperty('comp');
-    expect(dto).not.toHaveProperty('context');
+    expect(dto.context).toEqual({ schemaVersion: 2 });
     expect(rowToMeta(row)).toMatchObject({ blocks: 1, shots: 0 });
   });
 
@@ -167,7 +167,7 @@ describe('conflict baseline', () => {
   it('re-seeds from a server V2 DTO using the same canonical hashes', () => {
     const value = payload();
     const acked = ackedFromDto({
-      document: value.document!, chat: value.chat, coverThumb: value.coverThumb,
+      document: value.document!, chat: value.chat, context: { schemaVersion: 2 }, coverThumb: value.coverThumb,
       title: '未命名项目', videoSig: value.videoSig, videoDurationSec: value.videoDurationSec,
     });
     const next = buildSaveWire(value, 9, acked);

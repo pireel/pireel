@@ -1,5 +1,6 @@
 /**
- * L2 preset "spoken" — talking-head video, the only preset today.
+ * L2 preset "spoken" — graphics planning for speech-led video.
+ * Other scenario skills orchestrate the shared editor tools and may add their own presets.
  *
  * A preset owns two things: the editorial judgment for its domain (L3.1) and which components its
  * vocabulary contains (L4). Everything above it (the base contract, the props grammar) and the

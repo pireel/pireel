@@ -12,19 +12,19 @@
  */
 
 export const AROLL_GUIDE = `A-ROLL SPEECH-CLEANUP PLAYBOOK
-Editing JUDGMENT for cleaning up talking-head narration by the transcript. Read this ONCE before any speech cut, decide the boundaries, THEN cut. This is judgment, not new tools — execute with the tools you already have.
+Editing JUDGMENT for cleaning up talking-head narration by the transcript. Read this ONCE before judgment-based cleanup or selection; an exact passage the user explicitly identified does not need it. This is judgment, not new tools — execute with the tools you already have.
 
 HOW CUTS MAP TO TOOLS
 - Main narration: read_script gives sentences in SOURCE-video seconds. Remove spoken passages with cut_narration (pass those source-second ranges; it converts to the edited timeline, compresses overlays, and re-lays captions).
 - Inserted [clip X] segments: their own clock — cut with cut_range (edited seconds) or drop the whole segment with delete_shot.
 - Explain edits to the user by the actual spoken words ("cut the half-sentence that got re-recorded"), NEVER by [sN] / timestamps / clip ids — the user can't see those.
 
-WORKFLOW (any cleanup / tighten / de-filler request = run this end to end)
-1. Orient — read_script if the transcript isn't already in the conversation. Read the whole thing; understand the goal and the content structure, and reconstruct full sentences across ASR rows.
-2. Decide the removals by the rules below — for a long transcript work section by section. Collect EVERY source-second range to drop: hesitation fillers, failed retakes, false starts, abandoned fragments, dead pauses that belong to a removed attempt. Keep complete units; when unsure, don't add the range. FIRST look at the very first and very last rows — the recording's pre-roll and post-roll (see HEAD & TAIL); mid-body cleanup alone leaves that junk in.
-3. Apply them in ONE cut_narration call (ranges = the whole list) — it converts to the edited timeline, compresses overlays, and re-lays captions. Don't cut one range per call.
-4. Review — re-read what the viewer will now hear (broken logic, missing context, over/under-cut, wrong order); fix only clear problems, then tell the user what you cleaned up in plain words.
-- For plain cleanup / de-fillering, just run it. For aggressive shortening, restructuring, highlight/short-version, or a generated hook, confirm target length + structure + what to preserve with the user BEFORE step 3.
+DECISION POLICY — apply only the parts relevant to the user's requested scope; this guide does not authorize expanding a focused edit into a full cleanup.
+- Evidence: use read_script when the needed transcript is not already in the conversation. Read enough surrounding material to reconstruct complete ideas across ASR rows. For a requested full cleanup, inspect the whole transcript, including FIRST and LAST rows for recording pre/post-roll.
+- Judgment: choose SOURCE-second ranges using the rules below. Keep complete semantic units and keep uncertain material. For long transcripts, reason section by section instead of relying on word lists.
+- Application: batch related ranges into ONE cut_narration call when possible — it converts to the edited timeline, compresses overlays, and re-lays captions. Don't cut one range per call.
+- Review: for consequential cuts, re-read what the viewer now hears for broken logic, missing context, over-cutting, wrong order, or rushed delivery. Fix only clear problems and explain edits in plain words.
+- Confirm the outcome boundary before aggressive shortening, restructuring, highlight/short-version selection, or a generated hook when the user's target length, structure, or preservation intent is unclear.
 
 CORE PRINCIPLE
 Remove defects without changing meaning; make speech smoother, not harder. Prefer small local cuts over whole-sentence deletion. Good cleanup keeps the logic coherent, the expression clearer, the delivery natural, and preserves the speaker's intent, tone, and rhythm. When unsure whether a cut harms meaning, logic, or flow — keep it, or make a smaller cut.

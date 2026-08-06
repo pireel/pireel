@@ -6,7 +6,7 @@
  * Consumers: workbench (thin wrapper feeding refs) + server-executor (offline MCP:
  * when the tab is closed, cut_narration/set_captions run server-side, data from
  * studio_projects.context). Pure-module discipline: zero react/browser deps (same
- * tier as build-draft/build-blocks).
+ * tier as build-blocks).
  */
 
 import { cueChunks, wordsFromText } from './caption-fx';
@@ -220,36 +220,4 @@ export function beatsForWindow(
     }
   }
   return beats;
-}
-
-/** Inserted clips → planning context (pure, shared by both ends: workbench builds
- *  the planning input / server-executor validates sentence count in offline
- *  submit_plan). Anchor = the srcEnd of the nearest preceding main-source segment
- *  (main-source time domain, the plan's convention); sentences = the transcript
- *  sentences within that insert window (the clip's OWN source clock, index
- *  re-numbered from 0 within the window) — the input surface for equal-footing
- *  storyboarding, order = the clip index in the plan contract (1-based). */
-export function insertPlanContexts(
-  shots: VideoShot[],
-  clipAsr: Record<string, AsrSegment[]>,
-): { atSec: number; durationSec: number; text: string; sentences?: { index: number; start: number; end: number; text: string }[] }[] {
-  const out: { atSec: number; durationSec: number; text: string; sentences?: { index: number; start: number; end: number; text: string }[] }[] = [];
-  let prevMainEnd = 0;
-  for (const s of shots) {
-    if (!s.src) {
-      prevMainEnd = s.srcEnd;
-      continue;
-    }
-    const rows = (clipAsr[s.src] ?? [])
-      .filter((x) => x.text?.trim() && x.end > s.srcStart + 0.05 && x.start < s.srcEnd - 0.05)
-      .slice(0, 60)
-      .map((x, i) => ({ index: i, start: Math.round(x.start * 10) / 10, end: Math.round(x.end * 10) / 10, text: x.text.trim().slice(0, 160) }));
-    out.push({
-      atSec: Math.round(prevMainEnd * 10) / 10,
-      durationSec: Math.round((s.srcEnd - s.srcStart) * 10) / 10,
-      text: joinWords(rows.map((r) => r.text)).slice(0, 300),
-      ...(rows.length ? { sentences: rows } : {}),
-    });
-  }
-  return out;
 }
