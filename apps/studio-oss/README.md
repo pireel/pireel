@@ -13,8 +13,8 @@ pnpm --filter @pireel/studio-oss-shell dev
 
 ## What works out of the box
 
-- **Everything local**: import a video, edit the talking-head track, blocks,
-  captions, timeline, live preview — all in the browser. Drafts persist in
+- **Everything local**: import one or several video sources, edit shots, output
+  variants, blocks, captions, timeline and live preview — all in the browser. Drafts persist in
   `localStorage`, video bytes in OPFS. No account, no server.
 - **Client export**: WYSIWYG export runs on WebCodecs in Chromium.
 - **Frame themes**: the full frame catalog is served from the content package

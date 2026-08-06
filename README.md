@@ -2,12 +2,12 @@
 
 # Pireel Studio
 
-**An open-source, backend-free AI video editor for talking-head video.**
+**An open-source, backend-free AI video editor for multi-source, multi-output projects.**
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Import a clip, then keep or change its output canvas — editing, storyboarding,
-designed graphics, kinetic captions, themes, live preview, timeline and export
+Import one or more clips and create independently editable output variants —
+editing, storyboarding, designed graphics, kinetic captions, themes, live preview, timeline and export
 all run **fully in the browser**. No account, no server.
 
 <img src="https://cdn.pireel.com/static/landing/hero.png" alt="Pireel Studio editor" width="880" />
@@ -64,7 +64,7 @@ Dozens ship in `@pireel/studio-frames`; here are a few.
 
 ## What works with no backend
 
-- **Local editing**: talking-head track, blocks, captions, timeline, live
+- **Local editing**: multi-source video shots, output variants, blocks, captions, timeline, live
   preview — all client-side.
 - **Client export**: WYSIWYG export on WebCodecs (Chromium).
 - **Frame themes**: the full catalog is served from `@pireel/studio-frames`.

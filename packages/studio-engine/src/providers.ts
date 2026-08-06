@@ -11,7 +11,6 @@
  */
 
 import type { BlockEdit, ComposeContext, KitChoice } from './compose';
-import type { DraftPlan, PlanInsert, PlanSentence, PlanVisual } from './plan';
 import type { AsrSegment } from './build-blocks';
 import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
 
@@ -37,21 +36,6 @@ export interface BlockComposer {
   composeStream(req: ComposeRequest, onDelta?: (raw: string) => void): Promise<string>;
 }
 
-export interface PlanRequest {
-  sentences: PlanSentence[];
-  videoDurationSec: number;
-  /** Editable output canvas — split axis follows it (portrait → top/bottom, landscape → left/right). */
-  canvas?: { width: number; height: number };
-  theme?: string;
-  visuals?: PlanVisual[];
-  inserts?: PlanInsert[];
-}
-
-/** Plans scenes/framings/graphic briefs from the narration. */
-export interface NarrationPlanner {
-  plan(req: PlanRequest): Promise<DraftPlan>;
-}
-
 /** Speech → timed sentences (source-clock seconds). */
 export interface Transcriber {
   transcribe(file: File): Promise<AsrSegment[]>;
@@ -66,7 +50,7 @@ export interface MediaVault {
 /** Project persistence beyond the current device. */
 export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
-  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'>;
+  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'refresh' | 'skip'>;
   remove(id: string): Promise<void>;
 }
 
@@ -93,7 +77,6 @@ export interface ElementStore {
 
 export interface StudioProviders {
   composer: BlockComposer;
-  planner: NarrationPlanner;
   transcriber: Transcriber;
   vault: MediaVault;
   projects: ProjectStore;
@@ -123,7 +106,6 @@ export function unavailableProviders(hint = 'no provider configured — connect 
   const fail = (cap: string) => Promise.reject(new Error(`${cap} unavailable: ${hint}`));
   return {
     composer: { composeStream: () => fail('block composer') },
-    planner: { plan: () => fail('narration planner') },
     transcriber: { transcribe: () => fail('transcriber') },
     vault: { backup: async () => null, fetch: async () => null },
     projects: { load: async () => null, save: async () => 'skip', remove: async () => {} },

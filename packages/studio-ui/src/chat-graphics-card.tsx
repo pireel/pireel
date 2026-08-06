@@ -1,19 +1,17 @@
 'use client';
 
 /**
- * add_graphics receipt body: live preview of the batch, one component per page.
+ * Component-tool receipt body: live preview of produced or changed blocks, one per page.
  * - Pager sits bottom-right; only the CURRENT page mounts a preview iframe (flipping loads the next —
  *   a wall of sandboxed iframes in the chat column would be the timeline-thumbnail lesson all over again).
- * - A page whose block is still generating shows a skeleton; previews appear as fills land (re-render
- *   driven by the tool-progress store during the run, by the receipt part after it).
- * - Blocks the compose vetoed (slot removed) silently drop out of the page list.
+ * - Previews appear as results land (re-render driven by the tool-progress store during the run,
+ *   by the receipt part after it).
  * - LLM-generated markup previews ONLY through the BlockPreviewFrame sandbox (trust boundary).
  */
 
 import { useCallback, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Composition } from '@pireel/studio-engine/composition';
-import { isPlaceholder } from '@pireel/studio-engine/build-draft';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import { BlockPreviewFrame } from './block-preview-card';
 import { useToolProgress } from './tool-progress';
@@ -67,7 +65,6 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
   if (!blocks.length) return null;
   const cur = Math.min(page, blocks.length - 1);
   const block = blocks[cur]!;
-  const pending = isPlaceholder(block);
   const H = Math.round(Math.min(Math.max(w * 0.62, 120), 240));
   const focus = block.box
     ? { x: block.box.x * comp.width, y: block.box.y * comp.height, w: block.box.w * comp.width, h: block.box.h * comp.height }
@@ -75,19 +72,7 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
 
   return (
     <div ref={measureRef} className="border-line/70 border-t">
-      {w > 0 &&
-        (pending ? (
-          /* Skeleton: the slot exists but its design hasn't landed yet */
-          <div className="bg-panel-2 relative overflow-hidden" style={{ height: H }}>
-            <div className="absolute inset-0 flex flex-col justify-center gap-2 px-6">
-              <div className="bg-line/60 h-4 w-2/5 animate-pulse rounded" />
-              <div className="bg-line/60 h-8 w-3/5 animate-pulse rounded" />
-              <div className="bg-line/50 h-3 w-4/5 animate-pulse rounded" />
-            </div>
-          </div>
-        ) : (
-          <BlockPreviewFrame comp={comp} block={block} width={w} height={H} focus={focus} animate="hover" />
-        ))}
+      {w > 0 && <BlockPreviewFrame comp={comp} block={block} width={w} height={H} focus={focus} animate="hover" />}
       <div className="border-line/70 text-ink-3 flex items-center gap-2 border-t px-2.5 py-1 text-[11px]">
         <span className="truncate">{block.label ?? ''}</span>
         {blocks.length > 1 && (

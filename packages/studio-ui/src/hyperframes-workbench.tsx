@@ -3,10 +3,10 @@
 /**
  * Hyperframes workbench — block-based editing (pure browser, zero server).
  *
- * Model = continuous talking-head video (track 0) + overlay blocks on multiple tracks
+ * Model = primary and inserted video shots (track 0) + overlay blocks on multiple tracks
  * (captions/titles/transitions). Each block is a nested Hyperframes composition fragment;
  * assemble stitches full HTML fed to <iframe srcdoc> for live render.
- *  · Import talking-head video + one-click ASR → one highlighted caption block per sentence (shots).
+ *  · Import source media; speech-led edits can run ASR and map sentences to editable shots.
  *  · Multi-track timeline: click a block to select, chat on the right edits "this block" (per-block, cheap/precise).
  *  · Export via server-side headless Chrome (same assembled HTML, WYSIWYG, TODO wire up).
  */
@@ -87,13 +87,12 @@ import { clearToolProgress, setToolProgress } from './tool-progress';
 import { injectPreviewRuntime } from './sample-composition';
 import { playhead } from './playhead';
 import { type AsrSegment, captionBlocksFromAsr, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
-import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutFromPlan, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
+import { type Box as GraphicBox, pickGraphicBox } from '@pireel/studio-engine/graphics-layout';
 import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { VideoTrackEngine } from './video-track-engine';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
-import { type DraftPlan, type PlanInsert, parsePlan , unifiedPlanRows } from '@pireel/studio-engine/plan';
-import { beatsForWindow as beatsForWindowPure, displayCues, inNarrationSource, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
+import { displayCues, inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS } from './studio-timeline';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
@@ -110,9 +109,9 @@ import {
   setProjectVersion,
   useDraftAutosave,
 } from './use-draft-persist';
-import type { LocalAssetIndexEntry, StudioProjectDto } from '@pireel/studio-engine/project-dto';
+import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type LocalAssetIndexEntry, type StudioProjectDto } from '@pireel/studio-engine/project-dto';
 import { useGenerationLock } from './use-generation-lock';
-import { useDraftPipeline } from './use-draft-pipeline';
+import { useMediaAnalysis } from './use-media-analysis';
 import { useStudioExport } from './use-export';
 import { DEFAULT_RENDER_OPTS, type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
@@ -152,13 +151,14 @@ import { useElementOps } from './use-element-ops';
 import { useBoxDrag } from './use-box-drag';
 import { useAgentContext } from './use-agent-context';
 import { useScriptCut } from './use-script-cut';
+import { ProjectOutputSwitcher } from './project-output-switcher';
+import { useProjectOutputs } from './use-project-outputs';
+import { useProjectOutputRuntime } from './use-project-output-runtime';
 
 
 const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
 const RAIL_NAV_W = 48; // vertical primary-nav strip on the rail's outer edge; railW measures the CONTENT column only
 const UNDO_CAP = 20; // undo snapshot stack cap (each = full Composition, incl. custom block HTML)
-// ⚠️ Temporary for testing: fill only the first N images to save LLM calls, rest stay as placeholders — **remove before launch**.
-// Kept at top level so it isn't buried in a 400-line tool branch and shipped by accident.
 
 /** Contextual tool panels (single instance, mutually exclusive, docked over the rail content). Generation is a primary-nav tab. */
 type FloatKind = 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' | 'captions' | 'kitProps';
@@ -355,7 +355,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Generation lock (genIds/markGenerating/genLockToast) — see use-generation-lock.ts
   const { genIds, genIdsRef, markGenerating, genLockToast } = useGenerationLock();
   const [visual, setVisual] = useState<VisualTimeline | null>(null);
-  const [plan, setPlan] = useState<DraftPlan | null>(null);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   // Draft restore: read once on open (later autosave overwrites storage, but the offer holds a snapshot)
   const [draftOffer, setDraftOffer] = useState<StudioDraft | null>(() => (typeof window === 'undefined' ? null : loadDraft(projectId)));
@@ -545,19 +544,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         );
       }
     });
-    if (plan?.scenes.length) {
-      out.push('', `# scenes (${plan.scenes.length})`);
-      plan.scenes.forEach((s) => {
-        const g = s.graphic ? ` · ${s.graphic.data ?? s.graphic.brief}` : '';
-        const e = s.emphasis?.length ? ` · emphasis:${s.emphasis.join(' ')}` : '';
-        out.push(`[${s.from}-${s.to}] ${s.framing}${g}${e}`);
-      });
-    }
     return out.join('\n');
-  }, [asrSentences, visual, plan]);
+  }, [asrSentences, visual]);
   useEffect(() => {
-    (window as unknown as { __studio?: unknown }).__studio = { asr: asrSentences, visual, plan };
-  }, [asrSentences, visual, plan]);
+    (window as unknown as { __studio?: unknown }).__studio = { asr: asrSentences, visual };
+  }, [asrSentences, visual]);
   // Preview double-buffering: after a comp change the new doc loads in a **background iframe** (inject video/seek/
   // restore selection); it swaps atomically only when ready, keeping the old frame visible to the last moment —
   // eliminates the full-reload white flash (especially visible when a run of images completes).
@@ -595,8 +586,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   asrRef.current = asrSentences;
   const clipAsrRef = useRef<Record<string, AsrSegment[]>>({});
   clipAsrRef.current = clipAsr;
-  const planRef = useRef<DraftPlan | null>(null);
-  planRef.current = plan;
   const visualRef = useRef<VisualTimeline | null>(null);
   visualRef.current = visual;
   // BYO visual analysis (visual_brief/submit_visual): the prepared-brief intermediate state awaiting the agent's labels
@@ -694,7 +683,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const matteTrackRef = useRef<Map<string, MatteFrame[]>>(new Map());
   const matteAbortRef = useRef<AbortController | null>(null);
   const [matteState, setMatteState] = useState<MatteState>({ status: 'idle', done: 0, total: 0 });
-  const chatRef = useRef<StudioChatHandle | null>(null); // push the four-step "one-click render" progress to chat
+  const chatRef = useRef<StudioChatHandle | null>(null); // lets workbench actions coordinate with the active chat thread
   // Export (state + submit/poll/cancel) — see use-export.ts
   /** Files for locally-inserted clips (key = blob URL; the two split halves share one src so they share naturally):
    *  same "keep local, don't upload" mode as the main video, injected into preview via hf:clipFile and read directly
@@ -1031,7 +1020,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (!fontsChanged && patchable && !pendingSwitchRef.current) {
         const echo = iframeEditEchoRef.current;
         // Structural in-place patches (node add/replace): person-matte splits blocks around the matte
-        // canvas (index math breaks), and mass additions (lay_out) are better served by one rebuild.
+        // canvas (index math breaks), and large batches are better served by one rebuild.
         const structuralN = patchable.added.length + patchable.pairs.filter((p) => p.replace || (p.slots && !echo.has(p.b.id))).length;
         const fxSplit = hasVideoTrack && (comp.shots ?? []).some((sh) => sh.personMatte);
         if (structuralN === 0 || (!fxSplit && patchable.added.length <= 8)) {
@@ -1258,6 +1247,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // are only 96px wide, upscaling from them is blurry at any size (user feedback). A 960-wide jpeg is sharp enough for
   // retina cards (~440 CSS px).
   const coverThumbRef = useRef<string | null>(null);
+  const getActiveOutputState = useCallback(
+    () => ({
+      comp: compRef.current,
+      videoSig: videoSigRef.current ?? (videoFileRef.current ? fileSig(videoFileRef.current) : null),
+      videoDurationSec: compRef.current.video?.durationSec ?? null,
+      coverThumb: coverThumbRef.current,
+    }),
+    [],
+  );
+  const projectOutputs = useProjectOutputs(getActiveOutputState);
   useEffect(() => {
     if (!videoFile) return;
     let alive = true;
@@ -1309,10 +1308,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // the transcripts so a zero-backend reopen (OSS shell / offline) can re-derive the caption layer.
   const canDeriveCaptions = (asrSentences?.length ?? 0) > 0 || Object.keys(clipAsr).length > 0;
   const compForSave = useMemo(() => stripDerivedCaptions(comp, canDeriveCaptions), [comp, canDeriveCaptions]);
-  useDraftAutosave(compForSave, videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null), projectId, coverThumbRef, () => ({
-    ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
-    ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
-  }));
+  useDraftAutosave(
+    compForSave,
+    videoSigRef.current ?? (videoFile ? fileSig(videoFile) : null),
+    projectId,
+    coverThumbRef,
+    () => ({
+      schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
+      ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
+      ...(Object.keys(clipAsrRef.current).length
+        ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) }
+        : {}),
+      outputs: projectOutputs.outputsRef.current,
+    }),
+    projectOutputs.outputs,
+  );
 
   // autofit: preview measures each block's overflow → write back Block.fitScale (for export), and push hf:fit to the
   // active buffer to apply live (fitScale isn't in the preview doc, so the write-back doesn't trigger a rebuild — see the assembled comment)
@@ -2032,18 +2042,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
       const dur = p.durationSec || 30;
       const pr = pendingRestoreRef.current;
-      // Swap video: clear pipeline products (else tools reuse the old plan/visual and skip recompute).
+      // Swap video: clear media-analysis products so tools do not reuse observations from another source.
       // NOT on a same-video draft-restore reconnect: cloud hydration (hydrateContextRefs) already put the
-      // transcript/plan back, and wiping here left the captions/script panels empty while the timeline
+      // transcript back, and wiping here left the captions/script panels empty while the timeline
       // showed captions — the products belong to this very video, keep them (user hit this).
       // reconnect: per-asset restore of the main source mid-session — same preserve semantics as a draft reconnect
       const sameVideoRestore = !!(pr && pr.videoSig && sig === pr.videoSig) || !!opts?.reconnect;
       if (!sameVideoRestore) {
         setAsrSentences(null);
-        setPlan(null);
         setVisual(null);
         asrRef.current = null;
-        planRef.current = null;
         visualRef.current = null;
       }
       resetExport();
@@ -2099,28 +2107,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }
 
   // Extract audio → upload → ASR (in-memory + persistent cache by file fingerprint, transcribe each video once)
-  // Current video (for build-draft): blob preview URL + canvas dimensions. Read the latest via ref.
+  // Current video metadata. Read the latest via ref.
   function currentVideo() {
     const c = compRef.current;
     return c.video ? { url: c.video.url, durationSec: c.video.durationSec, width: c.width, height: c.height } : null;
   }
 
-  // Three render-pipeline steps (stepAsr/stepPlan/stepVisual, in-flight deduped) — see use-draft-pipeline.ts
-  // Planning context for inserted clips: the implementation lands in the ref after ensureClipTranscripts is defined
-  // (that code depends on later closures like matteFileForShot); this stub is empty for now, and by the time stepPlan runs it reads the real one
-  const insertedClipsForPlanRef = useRef<() => Promise<PlanInsert[]>>(() => Promise.resolve([]));
-  const { stepAsr, stepPlan, stepVisual } = useDraftPipeline({
+  // Independent transcript and visual-analysis capabilities (in-flight deduped).
+  const { stepAsr, stepVisual } = useMediaAnalysis({
     videoFileRef,
-    compRef,
     asrRef,
-    planRef,
     visualRef,
     setAsrSentences,
-    setPlan,
     setVisual,
     setComp,
     currentVideo,
-    getInsertedClips: () => insertedClipsForPlanRef.current(),
   });
 
   // Debug hook: clear the visual-analysis cache + rerun (same video returns cache instantly by default; use this to re-measure analysis)
@@ -2176,7 +2177,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   };
 
   /** Generate/edit a block + static-check loop: on failure, feed the issues back for one fix round (bad output as the base, fix only the problems);
-   *  if hard errors (unscoped CSS/script/non-determinism) remain after the fix → throw — better to keep a placeholder, bad CSS pollutes the whole doc. */
+   *  if hard errors (unscoped CSS/script/non-determinism) remain after the fix → throw instead of committing CSS that pollutes the whole document. */
   const composeBlockChecked = useCallback(
     async (
       seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
@@ -2458,7 +2459,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       durationSec: dur,
       box: mediaBoxFor(dims),
       trackIndex: freeTrack(compRef.current.blocks, startSec, dur),
-      label: label || (media.type === 'video' ? t('chatGen.videoClip') : t('tools.add_graphics.label')),
+      label: label || (media.type === 'video' ? t('chatGen.videoClip') : t('workbench.graphic')),
     });
     const b: Block = { ...base, slots: { media } };
     setComp((c) => ({ ...c, blocks: [...c.blocks, b] }));
@@ -3189,10 +3190,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const seen = new Set<string>();
     return raw.filter(([, v]) => !seen.has(v.toLowerCase()) && (seen.add(v.toLowerCase()), true));
   })();
-  // Agent-facing context (roster / situation snapshot / transcript / draft backfill) — see use-agent-context.ts.
-  const { chatElements, getChatBody, transcriptForAgent, ensureClipTranscripts, restoreDraftContext, beatsForWindow, graphicsRoster, neighborsFrom } = useAgentContext({
-    comp, compRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, planRef, visualRef, videoSigRef,
-    videoFileRef, clipAsrRef, clipFilesRef, clipAsrBusyRef, clipAsrFailRef, insertedClipsForPlanRef,
+  // Agent-facing context (roster / situation snapshot / transcript) — see use-agent-context.ts.
+  const { chatElements, getChatBody, transcriptForAgent, ensureClipTranscripts } = useAgentContext({
+    comp, compRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, visualRef, videoSigRef,
+    videoFileRef, clipAsrRef, clipAsrBusyRef, clipAsrFailRef,
     setClipAsr, matteFileForShot,
   });
   // Live comp accessor for chat receipt previews: stable identity (StudioChat is memo'd), reads the ref —
@@ -3236,10 +3237,56 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, []);
   // Clip insertion (multi-source main track) — see use-clip-insert.ts. Same runTool ref indirection as captions.
   const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
-    comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, planRef, setPlan, setComp, setSelectedId,
+    comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, setComp, setSelectedId,
     setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, ensureClipTranscripts, relayCaptionLayer, pickFile,
     backupMediaToCloud, runTool: (toolId, input) => runToolRef.current(toolId, input),
   });
+  const resetForOutputChange = useCallback(() => {
+    setPlaying(false);
+    videoEngineRef.current?.pause();
+    setSelectedId(null);
+    setSelectedShotId(null);
+    setSelectedAudioId(null);
+    setCodeBlockId(null);
+    setFloatWinRaw(null);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    tRef.current = 0;
+    playhead.set(0);
+    setT(0);
+  }, [setSelectedId, setSelectedShotId]);
+  const outputRuntime = useProjectOutputRuntime({
+    projectId,
+    activeId: projectOutputs.outputs.active.id,
+    switchTo: projectOutputs.switchTo,
+    duplicate: projectOutputs.duplicate,
+    setComp,
+    videoFileRef,
+    videoSigRef,
+    coverThumbRef,
+    pendingRestoreRef,
+    setVideoFile,
+    pickVideoFile,
+    recoverLocalClips,
+    resetEditor: resetForOutputChange,
+  });
+  const outputTabs = [
+    {
+      ...projectOutputs.outputs.active,
+      coverThumb: coverThumbRef.current,
+      durationSec: totalDuration(comp) || comp.video?.durationSec || null,
+    },
+    ...projectOutputs.outputs.inactive.map((output) => ({ ...output, durationSec: output.videoDurationSec })),
+  ].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
+  const switchOutput = (id: string) => {
+    void outputRuntime.switchOutput(id).then((changed) => {
+      if (changed) toast.success(t('workbench.outputSwitched'));
+    });
+  };
+  const duplicateOutput = () => {
+    outputRuntime.duplicateOutput(t('workbench.outputN', { n: outputTabs.length + 1 }));
+    toast.success(t('workbench.outputDuplicated'));
+  };
   // Element generation / block element ops (gen panel, floating toolbar) — see use-element-ops.ts.
   const { generateElementStandalone, insertGeneratedElement, bumpBlockLayer, togglePersonLayer, saveBlockAsElement, syncBlockContent, syncBusyId, mentionAsset } = useElementOps({
     projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef, setComp, setSelectedId, setSelectedShotId,
@@ -3263,14 +3310,44 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       ...localAssetIndexRef.current.filter((item) => item.sig !== entry.sig),
     ]);
   };
+  const listProjectOutputsForAgent = () =>
+    outputTabs.map((output) => ({
+      id: output.id,
+      title: output.title || t('workbench.outputN', { n: output.order + 1 }),
+      active: output.id === projectOutputs.outputs.active.id,
+      order: output.order,
+      durationSec: output.durationSec,
+      ...(output.skill ? { skill: output.skill } : {}),
+    }));
+  const createProjectOutputForAgent = (title: string, skill?: string) => {
+    const created = outputRuntime.duplicateOutput(title, skill);
+    return { id: created.id, title: created.title || title };
+  };
+  const renameProjectOutputForAgent = (id: string, title: string) => {
+    if (!outputTabs.some((output) => output.id === id)) return false;
+    projectOutputs.rename(id, title);
+    return true;
+  };
+  const deleteProjectOutputForAgent = (id: string) => {
+    if (id === projectOutputs.outputs.active.id || !projectOutputs.outputs.inactive.some((output) => output.id === id)) return false;
+    projectOutputs.remove(id);
+    return true;
+  };
+  const switchProjectOutputForAgent = (id: string) =>
+    id === projectOutputs.outputs.active.id ? Promise.resolve(true) : outputRuntime.switchOutput(id);
   const agentToolCtx: AgentToolCtx = {
     projectId,
+    listProjectOutputs: listProjectOutputsForAgent,
+    createProjectOutput: createProjectOutputForAgent,
+    switchProjectOutput: switchProjectOutputForAgent,
+    renameProjectOutput: renameProjectOutputForAgent,
+    deleteProjectOutput: deleteProjectOutputForAgent,
     compRef, setComp, ensureShots, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo,
-    pickVideoFile, registerLocalAsset, localAssetIndexRef, ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, setPlan,
-    visualRef, visualBriefRef, applyVisualResult, restoreDraftContext, insertedClipsForPlanRef, graphicsRoster,
-    neighborsFrom, beatsForWindow, composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
+    pickVideoFile, registerLocalAsset, localAssetIndexRef, ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual,
+    visualRef, visualBriefRef, applyVisualResult,
+    composeBlockChecked, noteOf, moveBlock, resizeBlock, setCutTransition,
     resizeCutTransition, setShotTreatment, setShotFraming, setShotFilter, setShotAudio, splitAtPlayhead, trimAtPlayhead, deleteShot,
     audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip, setDenoise: denoiseOps.setDenoise,
     videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer, relayCaptionLayer,
@@ -3287,7 +3364,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     projectId,
     // LIVE header names the project this tab edits: an agent that switch_project'd for offline work must not
     // assume the bridge follows — bridge tools always hit the OPEN tab. The id line lets it detect the mismatch.
-    getState: () => `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`,
+    getState: () => {
+      const outputs = listProjectOutputsForAgent();
+      const activeOutput = outputs.find((output) => output.active)!;
+      return `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\nActive output: ${activeOutput.id} · ${activeOutput.title} (${outputs.length} total; use list_outputs/switch_output for deliverables).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`;
+    },
     onDisplaced: () => {
       if (displacedRef.current) return;
       displacedRef.current = true;
@@ -3302,8 +3383,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       toast.info(t('workbench.displacedByAnotherWindow'));
     },
     onExternalCall: (tool, result) => {
-      if (tool === 'get_state' || tool === 'compose_context' || tool === 'plan_context') return; // pure queries don't interrupt
-      const EXTERNAL_LABELS: Record<string, string> = { apply_block: 'workbench.externalBlockApply', submit_plan: 'workbench.externalPlan' };
+      if (tool === 'get_state' || tool === 'compose_context') return; // pure queries don't interrupt
+      const EXTERNAL_LABELS: Record<string, string> = { apply_block: 'workbench.externalBlockApply' };
       const label = t(STUDIO_TOOL_MAP[tool]?.label ?? EXTERNAL_LABELS[tool] ?? tool);
       if (result.ok) toast.info(result.summary ? t('workbench.externalAgentLabelSummary', { label, summary: result.summary }) : t('workbench.externalAgentLabel', { label }));
       else toast.error(t('workbench.externalAgentLabelFailed', { label, error: result.error ?? t('workbench.unknownError') }));
@@ -3326,9 +3407,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // (chat-only payload — the comp section is NOT sent, so an empty canvas can never clobber a
       // cloud comp; the server seeds an empty comp on first insert). No threads either → nothing to save.
       const threads = readChatThreads(projectId);
-      const indexContext = localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : undefined;
-      return threads.length || indexContext
-        ? { chat: threads, ...(indexContext ? { context: indexContext } : {}), videoSig: null, videoDurationSec: null, coverThumb: null }
+      const lightweightContext = {
+        schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
+        ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
+        outputs: projectOutputs.outputsRef.current,
+      };
+      return threads.length || projectOutputs.outputsRef.current.inactive.length || localAssetIndexKnownRef.current
+        ? { chat: threads, context: lightweightContext, videoSig: null, videoDurationSec: null, coverThumb: null }
         : null;
     }
     const canDerive = (asrRef.current?.length ?? 0) > 0 || Object.keys(clipAsrRef.current).length > 0;
@@ -3336,14 +3421,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       comp: { ...stripDerivedCaptions(c, canDerive), video: null },
       chat: readChatThreads(projectId),
       context: {
+        schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
         // Persistence boundary: runtime derivation markers (cue/ref/si) never land in storage
         ...(asrRef.current?.length ? { asr: sanitizeTranscriptSegs(asrRef.current) } : {}),
         ...(Object.keys(clipAsrRef.current).length ? { clipAsr: Object.fromEntries(Object.entries(clipAsrRef.current).map(([k, v]) => [k, sanitizeTranscriptSegs(v)])) } : {}),
-        ...(planRef.current ? { plan: planRef.current } : {}),
         ...(cloudMediaRef.current.video || cloudMediaRef.current.clips ? { media: cloudMediaRef.current } : {}),
         ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
+        outputs: projectOutputs.outputsRef.current,
       },
-      videoSig: videoFileRef.current ? (videoSigRef.current ?? fileSig(videoFileRef.current)) : null,
+      videoSig: getActiveOutputState().videoSig,
       videoDurationSec: c.video?.durationSec ?? null,
       coverThumb: coverThumbRef.current,
     };
@@ -3545,6 +3631,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // OPFS local library hit → the main video auto-reconnects (via the existing pendingRestore check); inserted clips revive by srcSig.
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
+    projectOutputs.hydrate(d.context?.outputs);
+    coverThumbRef.current = d.coverThumb ?? null;
     // The main-source anchor only counts when the draft's comp actually REFERENCES a main source:
     // src-less shots, or an uncut whole-main comp (no shots but a recorded main duration). A stale
     // anchor on a clips-only/emptied comp must be ignored — honoring it would resurrect a deleted
@@ -3620,7 +3708,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (autoRestoredRef.current) return;
     autoRestoredRef.current = true;
     setDraftOffer(null);
-    // Edit-context hydration (device switch/refresh): transcript/media index/plan fetched back from the cloud, no re-burning ASR / re-planning.
+    // Edit-context hydration (device switch/refresh): transcript and media index fetched back from the cloud, with no repeated ASR.
     // Only fill gaps — this session's existing in-memory state is the fresher truth. Backfill even when the cloud arrives late after losing the race (see below):
     // this tab autosaving with empty asr / empty media index would progressively blank the cloud context.
     const hydrateContextRefs = (rc: StudioProjectDto['context'] | undefined) => {
@@ -3636,17 +3724,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         setAsrSentences(rc.asr);
       }
       if (rc.clipAsr && !Object.keys(clipAsrRef.current).length) clipAsrRef.current = rc.clipAsr;
-      if (rc.plan && !planRef.current) {
-        try {
-          const p = parsePlan(JSON.stringify(rc.plan), rc.asr?.length ?? asrRef.current?.length ?? 0);
-          if (p.scenes.length) {
-            planRef.current = p;
-            setPlan(p);
-          }
-        } catch {
-          /* discard the bad plan, just re-plan */
-        }
-      }
     };
     // Cloud project → straight into the workbench: use the in-memory draft returned by cacheProjectLocally directly, not
     // read back from localStorage — if the quota is full the write silently fails and you read a stale old draft, which autosave then writes back to the cloud.
@@ -3751,7 +3828,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Cloud sync (debounced): coalesce one PUT 1.2s after comp or the session changes. The cloud-authoritative write-back —
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).
   // The payload mirrors the edit context to the cloud: the offline MCP executor (when the tab is closed) relies on it for
-  // read_script / cut_narration caption re-lay / set_captions / plan; only keys that exist in memory are reported —
+  // read_script / cut_narration caption re-lay / set_captions; only keys that exist in memory are reported —
   // missing keys are merged and kept by the server per key, not wiped (projects.$id). See buildCloudPayload.
   // Single-writer: a displaced tab (bridge close 4000) does not autosave at all, and never rebase-retries a 409 —
   // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
@@ -3764,6 +3841,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (!payload) return;
       cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
         const r = await studioProviders().projects.save(projectId, payload);
+        if (r === 'refresh') {
+          toast.info(t('workbench.projectSchemaRefresh'));
+          window.setTimeout(() => window.location.reload(), 1200);
+          return;
+        }
         if (r !== 'conflict') return;
         if (displacedRef.current) return; // read-only tabs drop conflicted batches instead of fighting
         // The 409 already refreshed baseVersion to the store's latest: resend this batch immediately to truly enforce "last write wins".
@@ -3777,7 +3859,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }, 1200);
     return () => window.clearTimeout(timer);
     // asrSentences/clipAsr are also deps: changes that touch only the transcript, not comp (like translations (sub)), must sync too
-  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced]);
+  }, [comp, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced, projectOutputs.outputs]);
 
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
@@ -3790,6 +3872,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (!payload) return;
       cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
         const r = await studioProviders().projects.save(projectId, payload).catch(() => 'skip' as const);
+        if (r === 'refresh') {
+          window.location.reload();
+          return;
+        }
         if (r === 'conflict' && !displacedRef.current) void studioProviders().projects.save(projectId, payload);
       });
     };
@@ -3897,6 +3983,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             No overflow-hidden: the floating toolbar must follow a component past the stage edge without being clipped (frame clipping is on the inner stage layer) */}
         <div ref={previewAreaRef} className="bg-panel-2 relative flex min-h-0 min-w-0 flex-1 items-center justify-center p-3">
+          <ProjectOutputSwitcher
+            outputs={outputTabs}
+            activeId={projectOutputs.outputs.active.id}
+            label={t('workbench.outputSwitcher')}
+            duplicateLabel={t('workbench.duplicateOutput')}
+            outputName={(n) => t('workbench.outputN', { n })}
+            switching={outputRuntime.switching}
+            onSwitch={switchOutput}
+            onDuplicate={duplicateOutput}
+          />
           {/* Canvas-ratio picker (bottom-right): the ratio is a project decision — seeded by the first
               inserted source, switchable here; sources contain-fit so switching never crops content. */}
           {hasVideoTrack && (

@@ -19,7 +19,6 @@ import {
   shotId,
 } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
-import type { DraftPlan } from '@pireel/studio-engine/plan';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type FilmstripFrame, extractFilmstrip, fileSig } from './media';
@@ -34,8 +33,6 @@ export interface ClipInsertDeps {
   cloudMediaRef: MutableRefObject<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>;
   asrRef: MutableRefObject<AsrSegment[] | null>;
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
-  planRef: MutableRefObject<DraftPlan | null>;
-  setPlan: (p: DraftPlan | null) => void;
   setComp: (action: SetStateAction<Composition>) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
@@ -51,7 +48,7 @@ export interface ClipInsertDeps {
 
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
-    comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, planRef, setPlan, setComp, setSelectedId,
+    comp, compRef, clipFilesRef, cloudMediaRef, asrRef, clipAsrRef, setComp, setSelectedId,
     setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, ensureClipTranscripts, relayCaptionLayer, pickFile,
     backupMediaToCloud, runTool,
   } = deps;
@@ -148,10 +145,6 @@ export function useClipInsert(deps: ClipInsertDeps) {
     // First source into an empty project DECIDES the canvas ratio (per user) — later sources
     // contain-fit into it; the ratio picker can override afterwards.
     const firstSource = !compRef.current.video && !(compRef.current.shots?.length);
-    // Narrative structure changed: the old plan is void. A cached plan doesn't know about this beat, and a cached lay_out
-    // would treat it as absent (scenes crossing the insert window / mismatched placeholders); re-planning is what treats the inserted clip as its own beat.
-    setPlan(null);
-    planRef.current = null;
     const shots = ensureShots(compRef.current);
     const { at, idx } = nearestShotBound(shots, atWish);
     if (file) clipFilesRef.current.set(url, file);

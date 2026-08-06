@@ -31,6 +31,10 @@ import { X, Sparkles, MessageSquarePlus, History } from 'lucide-react';
 import type { UIMessage } from 'ai';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import type { Composition } from '@pireel/studio-engine/composition';
+import {
+  STUDIO_AUTO_SKILL_ID,
+  type StudioScenarioSkillId,
+} from '@pireel/studio-engine/scenario-skills';
 import { useFrameCatalog } from './use-frame-catalog';
 import { mid } from './chat-format';
 import { ChatThread } from './chat-thread';
@@ -136,10 +140,10 @@ export const StudioChat = memo(
   const threadsRef = useRef(threads);
   threadsRef.current = threads;
   const onSnapshot = useCallback(
-    (messages: UIMessage[], frame: AttachedFrame | null) => {
+    (messages: UIMessage[], frame: AttachedFrame | null, skillId: StudioScenarioSkillId) => {
       if (messages.length === 0) return;
       const title = firstUserText(messages).slice(0, 24) || t('chatGen.newConversation');
-      const next: StoredThread = { id: activeId, title, messages, updatedAt: Date.now(), frame };
+      const next: StoredThread = { id: activeId, title, messages, updatedAt: Date.now(), frame, skillId };
       const merged = [next, ...threadsRef.current.filter((t) => t.id !== activeId)];
       setThreads(merged);
       saveThreads(storageKey, merged);
@@ -231,6 +235,7 @@ export const StudioChat = memo(
         threadId={activeId}
         initialMessages={restoredMessages}
         initialFrame={active?.frame ?? null}
+        initialSkillId={active?.skillId ?? STUDIO_AUTO_SKILL_ID}
         frames={frames}
         onFrameApplied={onFrameApplied}
         runTool={runTool}

@@ -1,5 +1,5 @@
 /**
- * blockOverlapWarnings — deterministic same-window collision receipt for lay_out/add_graphics.
+ * blockOverlapWarnings — deterministic same-window collision receipt for placement/generation.
  * The first fixture is the real incident: two closing cards sharing 88→90.2s, the farewell
  * card's lower half buried under the lottery card, and the agent's sampled review never
  * looked at that window.

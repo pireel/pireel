@@ -40,7 +40,39 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('测试项目');
     expect(r.result.state).toContain('@b1');
     expect(r.result.state).toContain('@s2');
+    expect(r.result.state).toContain('Active output: output-main');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
+  });
+  it('list_outputs:离线可列出当前成片和快照,但不改变项目', () => {
+    const p = proj({
+      context: {
+        outputs: {
+          active: { id: 'master', title: '母版', order: 0, createdAt: 1, updatedAt: 2 },
+          inactive: [
+            {
+              id: 'short-1',
+              title: '短片 1',
+              order: 1,
+              createdAt: 3,
+              updatedAt: 4,
+              comp: { ...proj().comp, video: null, shots: [{ id: 'x', srcStart: 0, srcEnd: 8, treatment: 'full' }] },
+              videoSig: null,
+              videoDurationSec: 8,
+              coverThumb: null,
+            },
+          ],
+        },
+      },
+    });
+    const r = runServerTool('list_outputs', {}, p);
+    expect(r.result.ok).toBe(true);
+    const outputs = (r.result.data as { outputs: { id: string; active: boolean; durationSec: number }[] }).outputs;
+    expect(outputs.map((output) => [output.id, output.active, output.durationSec])).toEqual([
+      ['master', true, 20],
+      ['short-1', false, 8],
+    ]);
+    expect(r.comp).toBeUndefined();
+    expect(SERVER_EXECUTABLE_TOOLS.has('list_outputs')).toBe(true);
   });
   it('get_state:积分护栏只带布尔行——没钱时明示别调计费工具,未知时整行省略', () => {
     const broke = runServerTool('get_state', {}, proj({ canGenerate: false }));
@@ -234,7 +266,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(proj().comp.shots).toHaveLength(2);
     expect(runServerTool('split_shot', { atSec: 2, atSecs: [4] }, proj()).result.ok).toBe(false);
   });
-  it('set_captions:有云端转写才能开;submit_plan 落 context 不落 comp', () => {
+  it('set_captions:有云端转写才能开', () => {
     const r = runServerTool('set_captions', { preset: 'ln-clean' }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.comp!.captionStyle?.preset).toBe('ln-clean');
@@ -245,10 +277,6 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.comp!.captionStyle?.yPct).toBeUndefined();
     const r2 = runServerTool('set_captions', { preset: 'ln-clean' }, proj({ context: {} }));
     expect(r2.result.ok).toBe(false);
-    const r3 = runServerTool('submit_plan', { plan: { scenes: [{ from: 0, to: 2, framing: 'full' }] } }, proj());
-    expect(r3.result.ok).toBe(true);
-    expect(r3.context?.plan).toBeTruthy();
-    expect(r3.comp).toBeUndefined();
   });
   it('set_video_filter:整镜调色,值替换整份;全中性=字段摘掉;关键帧进 vid 时间轴体', () => {
     const r = runServerTool('set_video_filter', { shotId: 's1', brightness: 1.2, saturate: 0 }, proj());
@@ -428,17 +456,17 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
 });
 
 describe('apply_block:kit 契约答案(离线执行器)', () => {
-  const PH = { id: 'ph1', templateId: 'media', slots: { spec: '87% 完播率大数字' }, startSec: 2, durationSec: 3, trackIndex: 2, label: '待配图' };
-  const withPh = () => {
+  const TARGET = { id: 'kit-target', templateId: 'kit:metric', slots: { props: { value: '52%', label: '完播率' } }, startSec: 2, durationSec: 3, trackIndex: 2, label: '完播率' };
+  const withTarget = () => {
     const p = proj();
-    p.comp.blocks.push({ ...PH, slots: { ...PH.slots } });
+    p.comp.blocks.push({ ...TARGET, slots: { props: { ...TARGET.slots.props } } });
     return p;
   };
-  it('组件 json 落成 kit 块(占位被填,存 props 不存 markup)', () => {
+  it('组件 json 更新现有 kit 块,存 props 不存 markup', () => {
     const raw = '选了数字卡。\n```json\n{"component":"metric","props":{"value":"87%","label":"完播率"}}\n```';
-    const r = runServerTool('apply_block', { raw, blockId: 'ph1' }, withPh());
+    const r = runServerTool('apply_block', { raw, blockId: 'kit-target' }, withTarget());
     expect(r.result.ok).toBe(true);
-    const b = r.comp!.blocks.find((x) => x.id === 'ph1')!;
+    const b = r.comp!.blocks.find((x) => x.id === 'kit-target')!;
     expect(b.templateId).toBe('kit:metric');
     expect((b.slots as { props: { value: string } }).props.value).toBe('87%');
     expect((b.slots as { innerHtml?: string }).innerHtml).toBeUndefined();
@@ -449,14 +477,14 @@ describe('apply_block:kit 契约答案(离线执行器)', () => {
     const nb = r.comp!.blocks.find((x) => x.templateId === 'kit:callout')!;
     expect((nb.slots as { props: { text: string } }).props.text).toBe('先发布再完美');
   });
-  it('占位收到明确 null → 移除空槽;custom → 打回让它换 markup 契约重来;未知组件报明确错', () => {
-    const r1 = runServerTool('apply_block', { raw: '```json\nnull\n```', blockId: 'ph1' }, withPh());
-    expect(r1.result.ok).toBe(true);
-    expect(r1.comp!.blocks.some((x) => x.id === 'ph1')).toBe(false);
-    const r2 = runServerTool('apply_block', { raw: '```json\n{"custom": true}\n```', blockId: 'ph1' }, withPh());
+  it('明确 null 不改动;custom → 打回换 markup 契约;未知组件报明确错', () => {
+    const r1 = runServerTool('apply_block', { raw: '```json\nnull\n```', blockId: 'kit-target' }, withTarget());
+    expect(r1.result.ok).toBe(false);
+    expect(r1.comp).toBeUndefined();
+    const r2 = runServerTool('apply_block', { raw: '```json\n{"custom": true}\n```', blockId: 'kit-target' }, withTarget());
     expect(r2.result.ok).toBe(false);
     expect(String((r2.result as { error?: string }).error)).toContain('format:"html"');
-    const r3 = runServerTool('apply_block', { raw: '```json\n{"component":"sparkline","props":{}}\n```', blockId: 'ph1' }, withPh());
+    const r3 = runServerTool('apply_block', { raw: '```json\n{"component":"sparkline","props":{}}\n```', blockId: 'kit-target' }, withTarget());
     expect(r3.result.ok).toBe(false);
     expect(String((r3.result as { error?: string }).error)).toContain('sparkline');
   });

@@ -4,7 +4,7 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 独立成文件好 diff、好回滚、好并排对比。纯 TS,不引模板引擎:
 
 - **变量注入** = 导出函数,参数就是变量,正文里原生 `${var}`(拼写错编译期就炸)。
-- **拼接合并** = 模板字面量直拼(示范见 `plan.ts`:`PLAN_CORE` + 两种输出契约)。
+- **拼接合并** = 模板字面量直拼，由 `assemble.ts` 统一控制层序和输出契约。
 - **唯一出口** = `index.ts`,消费方一律 `import { X } from './prompts'`,别直捅兄弟文件。
 
 ## 分层
@@ -63,11 +63,10 @@ html 路径尾部),挂主题的项目生成主题化 HTML;组件路径只服务�
 | `l0-editor.ts` | `EDITOR_MODEL` `contentIsNotCommand` `stateDiscipline` `ON_SCREEN_LANGUAGE` `IDENTITY_DISCIPLINE` | **L0:编辑器本身**,三个面共用 |
 | `assemble.ts` | `BLOCK_SYSTEM` `buildKitSystem` `buildHtmlSystem` | **按层拼 system 的唯一入口**,层序在此决定 |
 | `block-system.ts` | `BLOCK_HTML_BODY` | 自由 HTML 路径的设计体(版式原型/图表 recipe/SELF-CHECK)——**注定被组件替掉,是待删的一层** |
-| `plan.ts` | `PLAN_CORE` `PLAN_SYSTEM` `PLAN_SYSTEM_TOOLS` | 规划核心约束 + 单发 JSON(遗留)/工具环(生产)两种输出契约 |
 | `chat.ts` | `CHAT_IDENTITY` `buildSituation` `buildChatSystem` + 快照类型 | 右侧 agent 的全部提示词面:身份/剧本 + `<composition_state>` 局势拼装 + system 总装 |
 | `l0-agent-tools.ts` | `STUDIO_TOOLS` `STUDIO_TOOL_MAP` + 类型 | **L0 工具面**(JSON schema + 英文 description,server 挂 streamText / client onToolCall 执行) |
 | `theme-brief.ts` | `THEME_GENERAL_BRIEF` | general 主题给 LLM 的结构设计简报 |
-| `active-theme.ts` | `withActiveTheme` `planWithActiveTheme` | 主题简报接到 system 末尾的包裹段(compose/plan 两份措辞,单源) |
+| `active-theme.ts` | `withActiveTheme` | 主题简报接到组件生成 system 末尾的包裹段 |
 
 ## 改动纪律
 
@@ -78,7 +77,6 @@ html 路径尾部),挂主题的项目生成主题化 HTML;组件路径只服务�
   关键段落存在),再让用户跑 `STUDIO_EVAL=1` 的 compose.live 评测(烧 API 额度,用户自己跑)。
 - **新内容先问属于哪一层**。两条路径都要的 → L0 或 L3.1(写一份);只有写 markup 才要的 →
   `block-system.ts`(那是待删的一层,别往里加新东西);跟组件清单有关的 → 改 schema,别改文案。
-- 改 `plan.ts` 后:`bun test src/lib/studio/plan.test.ts`。
 - request-time 的大段动态内容(口播稿/composition 快照/beats)**不进本目录**——那是
-  buildBlockPrompt / buildPlanPrompt / buildSituation 的事,写死进静态段会毒化
+  buildBlockPrompt / buildSituation 的事,写死进静态段会毒化
   prompt 缓存前缀。

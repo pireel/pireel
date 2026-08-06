@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GENERAL_THEME, getTheme, themeForLlm, themeVarsCss } from './theme';
 import { composeBlock } from './compose';
-import { planDraft } from './plan';
 
 describe('themeForLlm', () => {
   it('= brief + 自动拼的 token 表(单一来源 vars)+ 背景', () => {
@@ -47,7 +46,7 @@ function spyModel() {
   };
 }
 
-describe('主题注进 compose/plan 的 system', () => {
+describe('主题注进 compose 的 system', () => {
   const theme = themeForLlm(getTheme('general'));
 
   it('composeBlock 注入主题', async () => {
@@ -55,12 +54,6 @@ describe('主题注进 compose/plan 的 system', () => {
     await composeBlock(m, { block: { id: 'b1', kind: 'caption', innerHtml: '<div></div>', timelineBody: '' }, instruction: '换效果', theme });
     expect(m.seen[0]).toContain('ACTIVE THEME');
     expect(m.seen[0]).toContain('--accent: #d8472f;');
-  });
-
-  it('planDraft 注入主题', async () => {
-    const m = spyModel();
-    await planDraft(m, { sentences: [{ index: 0, text: '钩子', start: 0, end: 1 }], videoDurationSec: 1, theme });
-    expect(m.seen[0]).toContain('ACTIVE THEME');
   });
 
   it('不传 theme 时 system 不含主题段', async () => {

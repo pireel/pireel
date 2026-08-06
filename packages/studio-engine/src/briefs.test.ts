@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assembleComposeBrief, assembleComposeTheme, assemblePlanBrief, interpretApplyRaw } from './briefs';
+import { assembleComposeBrief, assembleComposeTheme, interpretApplyRaw } from './briefs';
 
 describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', () => {
   it('路由随项目:无主题 → 组件契约(json 三态),挂主题 → markup 契约(playbook 进 system)', () => {
@@ -34,11 +34,6 @@ describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', ()
     expect(t).toContain('FRAME DESIGN LANGUAGE');
     expect(t).toContain('THE FRAME WINS');
     expect(t).toContain('FRAME BODY');
-  });
-  it('plan 简报:单发 JSON 契约(非工具环变体),句子进 prompt', () => {
-    const b = assemblePlanBrief({ sentences: [{ index: 0, text: '大家好', start: 0, end: 1.2 }], theme: 'general' });
-    expect(b.prompt).toContain('大家好');
-    expect(b.system.length).toBeGreaterThan(100);
   });
 });
 

@@ -3,7 +3,7 @@
  * workbench. Extracted from hyperframes-workbench.tsx — the workbench builds an AgentToolCtx from its own
  * state/handlers and delegates here; the tool semantics are unchanged. runStudioTool is the shared surface
  * (internal chat + bridge fallback); runExternalTool adds the BYO-brain-only operations (compose_context /
- * apply_block / capture_frame / plan_context / submit_plan) and falls back to runStudioTool for the rest.
+ * apply_block / capture_frame) and falls back to runStudioTool for the rest.
  */
 
 import type { MutableRefObject, SetStateAction } from 'react';
@@ -56,11 +56,9 @@ import { type CutSeamEntry, finalizeCutSeams, removeEditedInterval, removeEdited
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
-import { isPlaceholder, layoutFromPlan, placeholderSpec } from '@pireel/studio-engine/build-draft';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
-import { type DraftPlan, type PlanInsert, parsePlan, unifiedPlanRows } from '@pireel/studio-engine/plan';
 import { inNarrationSource } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
@@ -88,8 +86,9 @@ import type { StudioChatHandle } from './studio-chat';
 import { collectAssetSearchDocuments, searchOfficialAssetDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
 
-const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'search_assets', 'search_media', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_narration', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
-const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo'));
+const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'switch_output', 'rename_output', 'delete_output']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'search_assets', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
+const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
 
 function reviewMomentAttempts(compRef: object, compositionHash: string): Map<number, number> {
@@ -121,6 +120,12 @@ export interface AgentToolCtx {
   ensureShots: (c: Composition) => VideoShot[];
   /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
   projectId: string;
+  // Project deliverables (outside Composition undo: switching changes which composition is checked out)
+  listProjectOutputs: () => { id: string; title: string; active: boolean; order: number; durationSec: number | null; skill?: string }[];
+  createProjectOutput: (title: string, skill?: string) => { id: string; title: string };
+  switchProjectOutput: (id: string) => Promise<boolean>;
+  renameProjectOutput: (id: string, title: string) => boolean;
+  deleteProjectOutput: (id: string) => boolean;
   // Selection + playhead
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
@@ -154,21 +159,13 @@ export interface AgentToolCtx {
   localAssetIndexRef: MutableRefObject<LocalAssetIndexEntry[]>;
   ensureClipTranscripts: () => Promise<void>;
   transcriptForAgent: () => string;
-  // Draft pipeline (ASR / plan / visual)
+  // Independent transcript and visual observations
   stepAsr: (report?: Report) => Promise<AsrSegment[]>;
-  stepPlan: (report?: Report) => Promise<DraftPlan>;
   stepVisual: (report?: Report) => Promise<VisualTimeline | null>;
-  planRef: MutableRefObject<DraftPlan | null>;
-  setPlan: (p: DraftPlan | null) => void;
   visualRef: MutableRefObject<VisualTimeline | null>;
   visualBriefRef: MutableRefObject<VisualPrep | null>;
   applyVisualResult: (vis: VisualTimeline) => void;
-  restoreDraftContext: (draft: Composition, vis: VisualTimeline | null) => Promise<Composition>;
-  insertedClipsForPlanRef: MutableRefObject<() => Promise<PlanInsert[]>>;
   // Graphics generation
-  graphicsRoster: () => { id: string; desc: string }[];
-  neighborsFrom: (roster: { id: string; desc: string }[], selfId: string) => string[] | undefined;
-  beatsForWindow: (startSec: number, durationSec: number) => { text: string; start: number; end: number }[];
   composeBlockChecked: (
     seed: { id: string; kind: string; innerHtml: string; timelineBody: string; label?: string; boxPx?: { w: number; h: number }; durationSec?: number; beats?: { text: string; start: number; end: number }[]; neighbors?: string[] },
     instruction: string,
@@ -213,11 +210,12 @@ export interface AgentToolCtx {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
-    compRef, setComp, ensureShots, projectId, setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
+    compRef, setComp, ensureShots, projectId, listProjectOutputs, createProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
+    setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
     markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
-    ensureClipTranscripts, transcriptForAgent, stepAsr, stepPlan, stepVisual, planRef, visualRef, visualBriefRef,
-    applyVisualResult, restoreDraftContext, graphicsRoster, neighborsFrom, beatsForWindow, composeBlockChecked,
+    ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual, visualRef, visualBriefRef,
+    applyVisualResult, composeBlockChecked,
     noteOf, moveBlock, resizeBlock, setCutTransition, resizeCutTransition, setShotTreatment, setShotFilter, setShotAudio, audioMount, audioPatch, audioRemove, setDenoise,
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     removeCaptionLayer, relayCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
@@ -278,13 +276,43 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         switch (toolId) {
+          case 'list_outputs': {
+            const outputs = listProjectOutputs();
+            return { ok: true, summary: t('workbench.outputCount', { n: outputs.length }), data: { outputs } };
+          }
+          case 'create_output': {
+            const title = typeof input.title === 'string' ? input.title.trim() : '';
+            if (!title) return { ok: false, error: t('workbench.outputTitleRequired') };
+            const created = createProjectOutput(title, typeof input.skill === 'string' ? input.skill : undefined);
+            return { ok: true, summary: t('workbench.outputCreatedNamed', { title: created.title }), data: { output_id: created.id, active: true } };
+          }
+          case 'switch_output': {
+            const id = typeof input.output_id === 'string' ? input.output_id : '';
+            if (!id) return { ok: false, error: t('workbench.outputIdRequired') };
+            const changed = await switchProjectOutput(id);
+            if (!changed) return { ok: false, error: t('workbench.outputNotFoundOrActive') };
+            return { ok: true, summary: t('workbench.outputSwitched'), data: { output_id: id, active: true } };
+          }
+          case 'rename_output': {
+            const id = typeof input.output_id === 'string' ? input.output_id : '';
+            const title = typeof input.title === 'string' ? input.title.trim() : '';
+            if (!id || !title) return { ok: false, error: t('workbench.outputIdTitleRequired') };
+            if (!renameProjectOutput(id, title)) return { ok: false, error: t('workbench.outputNotFound') };
+            return { ok: true, summary: t('workbench.outputRenamedNamed', { title }) };
+          }
+          case 'delete_output': {
+            const id = typeof input.output_id === 'string' ? input.output_id : '';
+            if (!id) return { ok: false, error: t('workbench.outputIdRequired') };
+            if (!deleteProjectOutput(id)) return { ok: false, error: t('workbench.outputDeleteInactiveOnly') };
+            return { ok: true, summary: t('workbench.outputDeleted') };
+          }
           case 'extract_asr': {
             if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
               const segs = await race(stepAsr(report));
               if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
-              // Transcribe inserted clips too — the agent's script must include them (otherwise in the one-click-render chat
-              // it only saw the main-video script, and answering "what did the inserted clip say" needs a later read; user hit this)
+              // Transcribe inserted clips too so the agent sees every source, including when the
+              // user immediately asks what an inserted clip says.
               if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
               // The full text enters the feed with the receipt (injected once, cached after): the situation snapshot doesn't carry the script
               return { ok: true, summary: t('workbench.transcribedNLines', { n: segs.length }), data: { transcript: transcriptForAgent() } };
@@ -392,15 +420,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
             };
           }
-          case 'analyze_narration': {
-            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
-            try {
-              const plan = await stepPlan(report);
-              return { ok: true, summary: t('workbench.plannedNScenes', { n: plan.scenes?.length ?? 0 }) };
-            } finally {
-              clearToolProgress(toolId);
-            }
-          }
           case 'analyze_visual': {
             if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
@@ -481,197 +500,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               summary: t('workbench.visualAnalysisDoneByo', { segs: vis.segments.length, cuts: vis.cuts.length }),
               data: { status: 'done', ...visualTimelineForAgent(vis) },
             };
-          }
-          case 'lay_out': {
-            const v = currentVideo();
-            if (!v || !videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
-            try {
-              const segs = await race(stepAsr(report));
-              if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
-              // Planning ‖ visual analysis in parallel (visual is the long pole, progress driven by it)
-              const [plan, vis] = await race(Promise.all([stepPlan(report), stepVisual(report)]));
-              report(t('workbench.cuttingShots'));
-              const draft = await restoreDraftContext(
-                layoutFromPlan(plan, { video: v, sentences: segs, ...(vis ? { cuts: vis.cuts, visual: vis } : {}) }),
-                vis,
-              );
-              if (stopped()) throw abortErr(); // stop before the write: analyses stay cached, the storyboard is not applied
-              setComp(draft);
-              setSelectedId(null);
-              setSelectedShotId(null);
-              applyT(0);
-              const slots = draft.blocks.filter(isPlaceholder).length;
-              // Deterministic collision receipt: the visual review samples only the atSecs the agent
-              // picks, so a colliding pair in an unsampled window ships silently — report it as data.
-              const overlaps = blockOverlapWarnings(draft.blocks);
-              // Don't resend the situation snapshot within the round: the new structure's ids come with the receipt, so later add_graphics/focus can target precisely
-              return {
-                ok: true,
-                summary: slots
-                  ? t('workbench.shotsDoneWithSlots', { shots: draft.shots?.length ?? 0, slots })
-                  : t('workbench.shotsDoneNoSlots', { shots: draft.shots?.length ?? 0 }),
-                data: {
-                  shots: (draft.shots ?? []).map((s, i) => ({ id: s.id, index: i + 1, srcStart: s.srcStart, srcEnd: s.srcEnd, treatment: s.treatment })),
-                  placeholderBlocks: draft.blocks.filter(isPlaceholder).map((b) => ({ id: b.id, label: b.label })),
-                  ...(overlaps.length ? { overlaps, overlapHint: 'these block pairs share a time window and their boxes collide — separate them (place_block) and re-review those atSecs' } : {}),
-                },
-              };
-            } finally {
-              clearToolProgress(toolId);
-            }
-          }
-          case 'add_graphics': {
-            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
-            if (genIdsRef.current.size) return { ok: false, error: t('workbench.graphicsRewriteAlreadyProgress') };
-            const lockedIds: string[] = []; // placeholders locked by this run; finally unlocks as a fallback (an exception break leaves no deadlock)
-            try {
-              // Do the shot layout first if there are none (placeholders not yet placed). The setComp wrapper writes compRef synchronously, so reading here gets the new draft (no more empty-handed old blocks)
-              if (!compRef.current.blocks.some(isPlaceholder)) {
-                report(t('workbench.cuttingShotsFirst'));
-                const v = currentVideo();
-                const segs = await race(stepAsr(report));
-                if (!v || !segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
-                const [plan, vis] = await race(Promise.all([stepPlan(report), stepVisual(report)]));
-                // Same backfill as lay_out: preserve design state + reinsert inserted clips (this path was a simplified duplicate before,
-                // so saying "add graphics" right after inserting a clip would drop the whole inserted clip)
-                const draft = await restoreDraftContext(
-                  layoutFromPlan(plan, { video: v, sentences: segs, ...(vis ? { cuts: vis.cuts, visual: vis } : {}) }),
-                  vis,
-                );
-                if (stopped()) throw abortErr(); // same as lay_out: don't apply the storyboard after a stop
-                setComp(draft);
-              }
-              let allSlots = compRef.current.blocks.filter(isPlaceholder);
-              // Optional blockIds: only (re)fill the specified placeholders (the agent's "redo the 3rd one" doesn't run everything).
-              // An EMPTY array means "all" (models regularly send [] instead of omitting the field) — never treat it as a filter.
-              const wantList = Array.isArray(input.blockIds) ? (input.blockIds as unknown[]).map(String) : null;
-              const wantIds = wantList?.length ? new Set(wantList) : null;
-              if (wantIds) {
-                // Explicit ids may also name FILLED components → regenerate them in place. What "redo"
-                // covers is the model's call (user intent lives there); the tool only makes it expressible.
-                const regen = compRef.current.blocks.filter(
-                  (b) => wantIds.has(b.id) && !isPlaceholder(b) && (b.templateId === 'custom' || b.templateId.startsWith('kit:')),
-                );
-                allSlots = [...allSlots.filter((b) => wantIds.has(b.id)), ...regen];
-              }
-              if (!allSlots.length) {
-                if (wantIds) {
-                  // Stale ids (a fresh lay_out renumbers the slots): name the CURRENT pending ids in the
-                  // receipt so the model can retarget instead of declaring the state out of sync and giving up
-                  const pending = compRef.current.blocks.filter(isPlaceholder).map((b) => b.id);
-                  return {
-                    ok: false,
-                    error: pending.length
-                      ? t('workbench.specifiedBlocksNotGraphicPending', { ids: pending.join(', ') })
-                      : t('workbench.specifiedBlocksNotGraphic'),
-                  };
-                }
-                // Shots ran but not a single placeholder landed → be honest: the plan didn't produce fillable graphics, it's not a "do the layout first" case
-                const p = planRef.current;
-                return {
-                  ok: false,
-                  error: p
-                    ? t('workbench.shotsDoneButNo', { n: p.scenes.length })
-                    : t('workbench.noGraphicPlaceholdersCut'),
-                };
-              }
-              const slots = allSlots; // fill all placeholders at once (the original test-phase 10-item cap was removed)
-              // Lock on enqueue (blocks awaiting generation can't be edited either), unlock each block the moment it finishes (or fails)
-              lockedIds.push(...slots.map((s) => s.id));
-              markGenerating(lockedIds, true);
-              // Concurrent image fill (blocks are independent, wall-clock ≈ 1/CONCURRENCY): a worker pool grabs from the queue, errors are skipped without spoiling the batch
-              const CONCURRENCY = 3;
-              let done = 0;
-              let failed = 0;
-              let skipped = 0; // deliberate model vetoes (moment carries nothing) — slots removed, not failures
-              const queue = [...slots];
-              // Neighbor list (component + gist, in time order): fed to each compose so the model actively differs from adjacent components (anti-monotony).
-              // Takes the graphic slots of the whole composition (placeholders + already-filled custom) — even when re-filling one, it can see what's around it.
-              const roster = graphicsRoster();
-              // Warm up insert-source transcripts: an insert-window placeholder's beats need its own source's sentences (a cold cache = missing beats)
-              if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
-              // blockIds ride along on every progress update (the store replaces entries wholesale):
-              // the chat card uses them to preview the batch live while it generates
-              const slotIds = slots.map((s) => s.id);
-              report(t('workbench.graphics0Total', { total: slots.length }), 0, { blockIds: slotIds });
-              const fillOne = async (slot: Block) => {
-                const boxPx = slot.box
-                  ? { w: Math.round(slot.box.w * compRef.current.width), h: Math.round(slot.box.h * compRef.current.height) }
-                  : undefined;
-                // Narration sentences within this placeholder's time window → local-time beats (logic in beatsForWindow, shared with BYO compose_context)
-                const beats = beatsForWindow(slot.startSec, slot.durationSec);
-                const neighbors = neighborsFrom(roster, slot.id);
-                const seed = { id: slot.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: slot.label ?? t('workbench.graphic'), durationSec: slot.durationSec, ...(boxPx ? { boxPx } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) };
-                // Themed projects generate HTML: the theme is a prose description the model builds
-                // from (playbook via frameId), not a skin on the JSON components. Kit = themeless.
-                // Regenerating a filled component whose original spec is gone (legacy fills dropped it):
-                // redesign from the beats instead — content is in them, the old design is being replaced.
-                const spec =
-                  placeholderSpec(slot) ||
-                  'Redesign the overlay component for this moment from the narration beats — the previous design is being replaced, take a fresh angle.';
-                // race: a stop mustn't wait out a 10s+ compose — the late result is discarded and the
-                // slot stays a placeholder (nothing lands after the user pressed stop)
-                const parsed = await race(composeBlockChecked(seed, spec, undefined, compRef.current.frameId ? undefined : { kit: true }));
-                if (stopped()) return;
-                if (parsed.declined) {
-                  // compose's veto over the plan: with the actual sentences in hand, this moment has
-                  // nothing a graphic can say — remove the empty shell rather than leaving it in the
-                  // composition forever. A REGEN veto keeps the existing component instead: never
-                  // delete user-visible work because a redo pass found nothing better to say.
-                  skipped += 1;
-                  if (isPlaceholder(slot)) setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((b) => b.id !== slot.id) }));
-                  return;
-                }
-                // Keep the original spec in slots across the fill (composedBlockFields replaces slots
-                // wholesale): a later "redo this component" regenerates from the same design intent.
-                const fields = composedBlockFields(parsed);
-                const keepSpec = placeholderSpec(slot);
-                setComp((cc) => ({
-                  ...cc,
-                  blocks: cc.blocks.map((b) => (b.id === slot.id ? { ...b, ...fields, slots: { ...fields.slots, ...(keepSpec ? { spec: keepSpec } : {}) } } : b)),
-                }));
-              };
-              const worker = async () => {
-                for (;;) {
-                  if (stopped()) return; // block boundary = safe stop point; the in-flight fill lands whole
-                  const slot = queue.shift();
-                  if (!slot) return;
-                  try {
-                    await fillOne(slot);
-                  } catch (e) {
-                    failed += 1;
-                    console.warn('[studio] graphic fill failed', slot.id, e);
-                  }
-                  markGenerating([slot.id], false); // unlock on result, don't wait for the whole batch
-                  done += 1;
-                  report(t('workbench.graphicsDoneTotalLabel', { done, total: slots.length, label: (slot.label ?? '').slice(0, 12) }), done / slots.length, { blockIds: slotIds });
-                }
-              };
-              await Promise.all(Array.from({ length: Math.min(CONCURRENCY, slots.length) }, worker));
-              // Stopped mid-batch: report the honest partial state — what landed stays, the rest are
-              // still placeholders the next round can fill. Zero landed = plain stop receipt.
-              if (stopped()) {
-                const filled = done - failed - skipped;
-                if (filled <= 0) throw abortErr();
-                return withDelta({ ok: true, summary: t('workbench.graphicsStoppedPartial', { done: filled, total: slots.length }), data: { blocks: slotIds } });
-              }
-              const okCount = slots.length - failed - skipped;
-              // Same deterministic collision receipt as lay_out (boxes can also collide when refilling
-              // into an already-busy composition) — computed on the final state after all fills landed.
-              const overlaps = blockOverlapWarnings(compRef.current.blocks);
-              return {
-                ok: okCount > 0 || skipped > 0,
-                summary:
-                  t('workbench.filledNDesignGraphics', { n: okCount }) +
-                  (skipped ? t('workbench.nSlotsSkippedNothingToSay', { n: skipped }) : '') +
-                  (failed ? t('workbench.nFailedPlaceholdersRemain', { n: failed }) : ''),
-                data: { blocks: slotIds, ...(overlaps.length ? { overlaps, overlapHint: 'these block pairs share a time window and their boxes collide — separate them (place_block) and re-review those atSecs' } : {}) },
-                ...(okCount === 0 && skipped === 0 ? { error: t('workbench.allGraphicsFailedTry') } : {}),
-              };
-            } finally {
-              markGenerating(lockedIds, false);
-              clearToolProgress(toolId);
-            }
           }
           case 'move_block': {
             const b = findBlock(input.blockId);
@@ -774,7 +602,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 trackIndex: b.trackIndex,
                 box: b.box ?? null,
                 fitScale: b.fitScale ?? null,
-                ...(isPlaceholder(b) ? { placeholder: true, spec: placeholderSpec(b).slice(0, 300) } : {}),
                 innerHtml: cap(rendered.innerHtml, 1600),
                 timelineBody: cap(rendered.timelineBody, 800),
               },
@@ -1926,19 +1753,17 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
 }
 
 export function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
-  if (QUERY_TOOLS.has(toolId)) return runStudioToolInner(ctx, toolId, input, opts);
+  if (QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)) return runStudioToolInner(ctx, toolId, input, opts);
   return runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
 }
 
   /** External-agent-only bridge operations (MCP-only, invisible to the internal chat) — the browser half of the BYO-brain contract:
-   *  compose_context/plan_context fetch live context (the server briefs assemble the prompt, the external model generates itself),
-   *  apply_block/submit_plan receive the output and run it through the **same** validation as the in-house path (parseBlockResponse+lintBlock /
-   *  parsePlan) before landing state — swap the LLM, the quality contract doesn't degrade. Other tools fall back to runStudioTool. */
+   *  compose_context fetches live context; apply_block receives the model output and runs it through
+   *  the same parseBlockResponse+lintBlock validation as the in-house path. Other tools fall back to runStudioTool. */
 async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
     compRef, setComp, setSelectedId, setSelectedShotId, applyT, tRef, pushUndoSnapshot, genIdsRef, videoFileRef,
-    clipFilesRef, asrRef, currentVideo, planRef, setPlan, visualRef, insertedClipsForPlanRef, graphicsRoster,
-    neighborsFrom, beatsForWindow,
+    clipFilesRef, asrRef,
   } = ctx;
     const c2 = compRef.current;
     switch (tool) {
@@ -1950,21 +1775,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const b = c2.blocks.find((x) => x.id === bid);
           if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
           if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
-          if (isPlaceholder(b)) {
-            const boxPx = b.box ? { w: Math.round(b.box.w * c2.width), h: Math.round(b.box.h * c2.height) } : undefined;
-            const beats = beatsForWindow(b.startSec, b.durationSec);
-            const neighbors = neighborsFrom(graphicsRoster(), b.id);
-            return {
-              ok: true,
-              summary: t('workbench.fetchedPlaceholderContext'),
-              data: {
-                ...base,
-                block: { id: b.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: b.label ?? t('workbench.graphic'), durationSec: b.durationSec, ...(boxPx ? { boxPx } : {}) },
-                context: { ...(script ? { script } : {}), ...(beats.length ? { beats } : {}), ...(neighbors ? { neighbors } : {}) },
-                suggested_instruction: placeholderSpec(b),
-              },
-            };
-          }
           return {
             ok: true,
             summary: t('workbench.fetchedBlockContext'),
@@ -1991,7 +1801,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         const target = bid ? c2.blocks.find((x) => x.id === bid) : undefined;
         if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
-        const fb = target && !isPlaceholder(target) ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
+        const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
         // Stable applyId (same fix as the offline executor in server-tools): an unknown bid IS the
         // new-block id — compose_context minted it for the brief, or a lint receipt handed it back.
         // Reuse it so the generated CSS's #id scope survives the retry instead of chasing a fresh
@@ -2007,7 +1817,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             setSelectedShotId(null);
             setSelectedId(target.id);
             applyT(Math.max(0, target.startSec + 0.01));
-            return { ok: true, summary: isPlaceholder(target) ? t('workbench.filledLabel', { label: target.label ?? t('workbench.graphic') }) : t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id } };
+            return { ok: true, summary: t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id } };
           }
           const kAt = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
           const kDur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
@@ -2033,11 +1843,6 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: 'the model chose a bespoke build — call compose_block_brief again with format:"html" for the markup contract, generate against it, then apply_block with that raw text' };
         }
         if (shape.kind === 'declined') {
-          if (target && isPlaceholder(target)) {
-            pushUndoSnapshot();
-            setComp((cc) => ({ ...cc, blocks: cc.blocks.filter((x) => x.id !== target.id) }));
-            return { ok: true, summary: t('workbench.slotRemovedNothingToSay'), data: { removedBlockId: target.id } };
-          }
           return { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' };
         }
         const parsed = parseBlockResponse(raw, fb);
@@ -2057,7 +1862,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           setSelectedShotId(null);
           setSelectedId(target.id);
           applyT(Math.max(0, target.startSec + 0.01));
-          return { ok: true, summary: isPlaceholder(target) ? t('workbench.filledLabel', { label: target.label ?? t('workbench.graphic') }) : t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id, ...warnings } };
+          return { ok: true, summary: t('workbench.updatedLabel', { label: target.label?.slice(0, 10) || blockKind(target) }), data: { blockId: target.id, ...warnings } };
         }
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
         const dur = typeof input.durationSec === 'number' && input.durationSec >= 0.3 ? input.durationSec : 3;
@@ -2114,54 +1919,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
       }
-      case 'plan_context': {
-        const segs = asrRef.current;
-        if (!segs?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
-        const vis = visualRef.current;
-        const visuals = vis?.segments.length
-          ? segs.map((s, i) => {
-              const mid = (s.start + s.end) / 2;
-              const seg = vis.segments.find((x) => mid >= x.start - 0.01 && mid < x.end + 0.01) ?? vis.segments.at(-1)!;
-              return { index: i, content: seg.label.content, safe: seg.label.safe };
-            })
-          : undefined;
-        const inserts = await insertedClipsForPlanRef.current().catch(() => [] as PlanInsert[]);
-        return {
-          ok: true,
-          summary: t('workbench.fetchedPlanningContext'),
-          data: {
-            sentences: segs.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
-            videoDurationSec: currentVideo()?.durationSec ?? 0,
-            theme: c2.theme,
-            ...(visuals ? { visuals } : {}),
-            ...(inserts.length ? { inserts } : {}),
-          },
-        };
-      }
-      case 'submit_plan': {
-        if (!asrRef.current?.length) return { ok: false, error: t('workbench.runAsrFirst') };
-        const text = typeof input.plan === 'string' ? input.plan : JSON.stringify(input.plan ?? {});
-        // Unified narrative stream (same interleaving given to the agent in plan_context): global-line-number scenes are decomposed back into main/insert segments at the assembly layer
-        const insCtx = await insertedClipsForPlanRef.current().catch(() => [] as PlanInsert[]);
-        const planRows = unifiedPlanRows(asrRef.current.map((x, i) => ({ index: i, text: x.text, start: x.start, end: x.end })), insCtx);
-        let p: DraftPlan;
-        try {
-          p = parsePlan(text, planRows);
-        } catch (e) {
-          return { ok: false, error: t('workbench.planParsingFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
-        }
-        if (!p.scenes.length) return { ok: false, error: t('workbench.noValidScenesCheck') };
-        pushUndoSnapshot();
-        planRef.current = p;
-        setPlan(p);
-        return { ok: true, summary: t('workbench.planReceivedNScenes', { n: p.scenes.length }), data: { scenes: p.scenes.length } };
-      }
       default:
         return runStudioTool(ctx, tool, input);
     }
 }
 
 export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
-  if (QUERY_TOOLS.has(tool) || tool === 'compose_context' || tool === 'capture_frame' || tool === 'plan_context') return runExternalToolInner(ctx, tool, input);
+  if (QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool) || tool === 'compose_context' || tool === 'capture_frame') return runExternalToolInner(ctx, tool, input);
   return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input));
 }

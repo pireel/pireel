@@ -2,9 +2,8 @@
 
 /**
  * Agent-facing context builders: @-mentionable element roster, per-message situation snapshot,
- * machine-facing transcript, on-demand insert-source transcription, draft-context backfill for
- * re-layout (design state + inserted clips + per-scene placeholders), narration beats and the
- * graphics roster for anti-monotony. Extracted from hyperframes-workbench.tsx — bodies verbatim.
+ * machine-facing transcript, on-demand insert-source transcription, narration beats, and the
+ * graphics roster for anti-monotony.
  */
 
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -21,13 +20,10 @@ import {
   totalDuration,
 } from '@pireel/studio-engine/composition';
 import { narrationRowMarks, spans as clipSpans } from '@pireel/studio-engine/trim';
-import { type Box as GraphicBox, dropPlaceholdersInWindows, insertedClipPlaceholder, isPlaceholder, layoutInsertWindow, pickGraphicBox, placeholderSpec } from '@pireel/studio-engine/build-draft';
-import { beatsForWindow as beatsForWindowPure, insertPlanContexts } from '@pireel/studio-engine/captions-relay';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { DraftPlan, PlanInsert } from '@pireel/studio-engine/plan';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
-import { type VisualTimeline, insertedClipSafeZone } from './visual';
+import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
 import { t } from './i18n';
 
@@ -38,23 +34,20 @@ export interface AgentContextDeps {
   selectedShotIdRef: MutableRefObject<string | null>;
   tRef: MutableRefObject<number>;
   asrRef: MutableRefObject<AsrSegment[] | null>;
-  planRef: MutableRefObject<DraftPlan | null>;
   visualRef: MutableRefObject<VisualTimeline | null>;
   videoSigRef: MutableRefObject<string | null>;
   videoFileRef: MutableRefObject<File | null>;
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
-  clipFilesRef: MutableRefObject<Map<string, File>>;
   clipAsrBusyRef: MutableRefObject<Set<string>>;
   clipAsrFailRef: MutableRefObject<Set<string>>;
-  insertedClipsForPlanRef: MutableRefObject<() => Promise<PlanInsert[]>>;
   setClipAsr: (fn: (m: Record<string, AsrSegment[]>) => Record<string, AsrSegment[]>) => void;
   matteFileForShot: (s: VideoShot) => Promise<{ key: string; file: File; upTo: number } | null>;
 }
 
 export function useAgentContext(deps: AgentContextDeps) {
   const {
-    comp, compRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, planRef, visualRef, videoSigRef,
-    videoFileRef, clipAsrRef, clipFilesRef, clipAsrBusyRef, clipAsrFailRef, insertedClipsForPlanRef,
+    comp, compRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, visualRef, videoSigRef,
+    videoFileRef, clipAsrRef, clipAsrBusyRef, clipAsrFailRef,
     setClipAsr, matteFileForShot,
   } = deps;
   /* ---------- chat agent: can @ components + request context + client-executed tools ---------- */
@@ -136,7 +129,6 @@ export function useAgentContext(deps: AgentContextDeps) {
           kind: blockKind(b),
           startSec: b.startSec,
           durationSec: b.durationSec,
-          ...(isPlaceholder(b) ? { placeholder: true } : {}),
           ...(b.box ? { box: b.box } : {}),
         })),
         // Each shot carries its final-cut span (the addressing clock for cut_range/split/trim/add_block) + an insert-source short tag
@@ -163,7 +155,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       selected: sel,
       playheadSec: tRef.current,
       // Pipeline state: so the agent doesn't blindly rerun, nor claim a transcript that doesn't exist
-      pipeline: { asr: !!asrRef.current?.length, plan: !!planRef.current, visual: !!visualRef.current },
+      pipeline: { asr: !!asrRef.current?.length, visual: !!visualRef.current },
       // Main-video byte-mount state: the project should have a video (has shots / has sig) but bytes aren't ready → tell the agent explicitly
       // (a handoff-just-opened tab is often in the OPFS miss → cloud fetch window; the data plane is complete)
       ...((videoSigRef.current || (c.shots ?? []).length) && !videoFileRef.current ? { videoBytesReady: false } : {}),
@@ -245,118 +237,5 @@ export function useAgentContext(deps: AgentContextDeps) {
     }
   };
 
-  // Inserted clip → planning context: anchor = the srcEnd of the nearest preceding main-source segment (main-source time domain, the plan's clock);
-  // text = the transcribed sentences within that insert window (the two split halves of the same source share the whole transcript, filtered by window)
-  insertedClipsForPlanRef.current = async () => {
-    const shots = compRef.current.shots ?? [];
-    if (!shots.some((s) => s.src)) return [];
-    await ensureClipTranscripts(); // transcribe on demand (busy/fail lists handled internally, no re-burning ASR)
-    // Pure function in captions-relay (same as the offline executor): carrying sentences = the input surface for equal-standing shots
-    return insertPlanContexts(shots, clipAsrRef.current);
-  };
-
-  /** Context backfill for the shot draft (shared by lay_out and add_graphics's "shots first" to prevent drift between the two):
-   *  1) design state preserved across rebuilds: frame (the user's explicit design system) > frame-derived palette; global caption style;
-   *  2) multi-source main track: inserted clips are the body of the video and must not be overwritten by re-layout — insert them
-   *     back at the nearest boundary at their original final-cut position, blocks after shift along (same mirror logic as manual
-   *     insert), each insert window lands its image placeholder per **its own narration** (equal-standing, per user; main-source
-   *     placeholders that slide into the window are dropped to avoid mismatched briefs); placeholder positions use the inserted
-   *     clip's own geometry analysis (local File + MediaPipe, avoiding faces), falling back to a fixed box on unavailable/failure. */
-  const restoreDraftContext = async (draft: Composition, vis: VisualTimeline | null): Promise<Composition> => {
-    const keep = compRef.current;
-    if (draft.video && keep.video) {
-      draft.video = {
-        ...draft.video,
-        ...(keep.video.sourceWidth ? { sourceWidth: keep.video.sourceWidth } : {}),
-        ...(keep.video.sourceHeight ? { sourceHeight: keep.video.sourceHeight } : {}),
-      };
-    }
-    if (keep.frameId) {
-      draft.frameId = keep.frameId;
-      if (keep.palette) draft.palette = keep.palette;
-    } else if (vis?.palette) {
-      draft.palette = vis.palette;
-    }
-    if (keep.captionStyle) draft.captionStyle = keep.captionStyle;
-    const inserted = clipSpans(keep.shots ?? []).filter((sp) => sp.clip.src);
-    if (inserted.length && draft.shots?.length) {
-      // The transcript cache may be cold (a plan cache hit doesn't trigger insert-source transcription) — fill it before inserting back,
-      // otherwise speech is empty and the inserted clip can't land its own image placeholder
-      await ensureClipTranscripts();
-      let shots2 = draft.shots;
-      let blocks2 = draft.blocks;
-      const planCtx = insertPlanContexts(keep.shots ?? [], clipAsrRef.current); // same enumeration as the planning input (clip index = subscript + 1)
-      const extraBlocks: Block[] = []; // per-scene placeholders produced by equal-standing shots
-      const insertWins: { start: number; end: number; speech: string; planned?: boolean; layout?: { box: GraphicBox; hasFace: boolean } }[] = [];
-      for (const [k, sp] of inserted.entries()) {
-        const bounds = [0, ...clipSpans(shots2).map((x) => x.editedEnd)];
-        let idx = 0;
-        let at = 0;
-        let best = Infinity;
-        bounds.forEach((b, i) => {
-          const d = Math.abs(b - sp.editedStart);
-          if (d < best) {
-            best = d;
-            at = b;
-            idx = i;
-          }
-        });
-        const len = sp.editedEnd - sp.editedStart;
-        shots2 = [...shots2.slice(0, idx), sp.clip, ...shots2.slice(idx)];
-        blocks2 = blocks2.map((b) => (b.startSec >= at - 1e-3 ? { ...b, startSec: b.startSec + len } : b));
-        const speech = (clipAsrRef.current[sp.clip.src!] ?? [])
-          .filter((x) => x.end > sp.clip.srcStart + 0.05 && x.start < sp.clip.srcEnd - 0.05)
-          .map((x) => x.text)
-          .join('');
-        // Inserted-clip geometry position (P1④ multi-source equal-standing): only run if there's a local File (a few frames of
-        // MediaPipe, free and fast; remote/dead links aren't fetched, just fall back). Failure / no MediaPipe → undefined = always the fallback box, never breaks the shot chain.
-        let layout: { box: GraphicBox; hasFace: boolean } | undefined;
-        try {
-          const f = sp.clip.src ? clipFilesRef.current.get(sp.clip.src) : undefined;
-          if (f) {
-            const zone = await insertedClipSafeZone(f, sp.clip.srcStart, sp.clip.srcEnd);
-            if (zone) layout = { box: pickGraphicBox(zone.rects, zone.face ? [zone.face] : []), hasFace: !!zone.face };
-          }
-        } catch {
-          /* geometry analysis failed → fall back to the status quo (FULL_GRAPHIC_BOX) */
-        }
-        // Equal-standing shots: the plan gave this inserted clip its own scenes (clip index = enumeration subscript + 1) → slice
-        // shots + framing + per-scene placeholders; if it doesn't line up (no plan / no sentences / can't slice) fall back to the whole-clip single-beat old path
-        const planned = planRef.current?.inserts?.find((x) => x.clip === k + 1);
-        const sentences = planCtx[k]?.sentences;
-        let sliced: { shots: VideoShot[]; blocks: Block[] } | null = null;
-        if (planned?.scenes.length && sentences?.length) {
-          sliced = layoutInsertWindow({ win: { start: at, end: at + len }, clip: sp.clip, sentences, scenes: planned.scenes, layout, canvas: { w: draft.width, h: draft.height } });
-        }
-        if (sliced) {
-          shots2 = [...shots2.slice(0, idx), ...sliced.shots, ...shots2.slice(idx + 1)]; // replace the whole clip just inserted
-          extraBlocks.push(...sliced.blocks);
-        }
-        insertWins.push({ start: at, end: at + len, speech, ...(sliced ? { planned: true } : {}), ...(layout ? { layout } : {}) });
-      }
-      draft.shots = shots2;
-      const insertPh = insertWins.filter((w) => !w.planned).map((w) => insertedClipPlaceholder(w, w.speech, w.layout)).filter((b): b is Block => !!b);
-      draft.blocks = [...dropPlaceholdersInWindows(blocks2, insertWins), ...insertPh, ...extraBlocks];
-    }
-    return draft;
-  };
-
-  /** Narration beats within a placeholder/component window (pure function in captions-relay, used on both ends), thin wrapper feeding refs. */
-  const beatsForWindow = (startSec: number, durationSec: number): { text: string; start: number; end: number }[] =>
-    beatsForWindowPure(compRef.current.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
-  /** Roster of graphic slots in the same video (placeholders + filled custom, in time order) — fed to compose for anti-monotony. */
-  const graphicsRoster = (): { id: string; desc: string }[] => {
-    const describeSlot = (b: Block) => {
-      const comp = /component: ([a-z-]+)/.exec(placeholderSpec(b))?.[1];
-      return `${comp ? `[${comp}] ` : ''}${b.label ?? ''}`.trim() || '(fragment)';
-    };
-    return compRef.current.blocks
-      .filter((b) => isPlaceholder(b) || b.templateId === 'custom')
-      .sort((a, b) => a.startSec - b.startSec)
-      .map((b, i) => ({ id: b.id, desc: `${i + 1}. ${describeSlot(b)}` }));
-  };
-  /** roster → neighbor list from a block's perspective (self marked «THIS»); a single block has no neighbors. */
-  const neighborsFrom = (roster: { id: string; desc: string }[], selfId: string): string[] | undefined =>
-    roster.length > 1 ? roster.map((r) => (r.id === selfId ? `${r.desc}  «THIS»` : r.desc)) : undefined;
-  return { chatElements, getChatBody, transcriptForAgent, ensureClipTranscripts, restoreDraftContext, beatsForWindow, graphicsRoster, neighborsFrom };
+  return { chatElements, getChatBody, transcriptForAgent, ensureClipTranscripts };
 }

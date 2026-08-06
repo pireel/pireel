@@ -10,8 +10,12 @@ import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
 import { type Composition, emptyComposition } from './composition';
 import { canonicalJson, hashSection } from './stable-json';
+import type { StudioProjectOutputs } from './project-outputs';
 
 export { canonicalJson, hashSection } from './stable-json';
+
+/** Increment only for destructive editor-context migrations that require stale tabs to reload. */
+export const STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION = 2;
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {
@@ -54,12 +58,11 @@ export interface LocalAssetIndexEntry {
 }
 
 /** Server-operable editing context (fuel for the offline MCP executor): client autosave mirrors
- *  it up alongside comp. plan stored loosely (shape is normalized by parsePlan on the use side);
- *  video bytes still never persisted. */
+ *  it up alongside comp. Video bytes still never persist here. */
 export interface StudioProjectContext {
+  schemaVersion?: number;
   asr?: TranscriptSegment[];
   clipAsr?: Record<string, TranscriptSegment[]>;
-  plan?: unknown;
   /** Index into the cloud byte rendezvous (R2): main video / inserted sources sig→key (the bytes
    *  live in R2, content-addressed). Cross-device retrieval and future offline ASR / cloud render look up here. */
   media?: {
@@ -68,6 +71,9 @@ export interface StudioProjectContext {
   };
   /** Metadata only — never file bytes. Used to render per-asset restore cards across browsers. */
   localAssets?: LocalAssetIndexEntry[];
+  /** Multi-deliverable project state. The top-level project comp is the checked-out output; inactive
+   *  outputs are video-free snapshots so every existing edit primitive can keep operating on comp. */
+  outputs?: StudioProjectOutputs;
 }
 
 /** Full project payload between client and server. */
@@ -103,7 +109,7 @@ export interface ProjectSavePayload {
    *  the server keeps its current comp (merge) or seeds an empty one (first insert). Chat and canvas sync independently. */
   comp?: Composition;
   chat: unknown[];
-  /** Editing context (asr/clipAsr/plan/media): needed by the offline executor and cross-device retrieval. */
+  /** Editing context (asr/clipAsr/media): needed by the offline executor and cross-device retrieval. */
   context?: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: number | null;

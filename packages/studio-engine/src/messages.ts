@@ -1,7 +1,7 @@
 /**
  * studio-engine's own message catalogs (slug key → copy). zh is the source of truth —
  * every key exists here; en mirrors it. i18n.ts registers both at import.
- * Keys: engine.* (template/caption-preset/build-draft labels) and tools.<id>.label|busy
+ * Keys: engine.* (template/caption-preset labels) and tools.<id>.label|busy
  * (chat tool cards; rendered with t() in studio-chat).
  */
 
@@ -26,7 +26,6 @@ export const ZH_ENGINE: Record<string, string> = {
   'engine.kit.props': '组件参数',
   'engine.effect': '效果',
   'engine.goldCream': '米底金字',
-  'engine.graphicPending': '待生成组件',
   'engine.gsapTimelineBody': 'GSAP 动画体',
   'engine.heading': '小标题',
   'engine.imageVideo': '图片/视频',
@@ -49,11 +48,7 @@ export const ZH_ENGINE: Record<string, string> = {
   'engine.yellowTape': '黄条黑字',
   'tools.add_block.busy': '构思并编写这个组件…',
   'tools.add_block.label': '加组件',
-  'tools.add_graphics.busy': '组件生成中…',
-  'tools.add_graphics.label': '生成组件',
   'tools.add_transition.label': '转场',
-  'tools.analyze_narration.busy': '通读文稿、规划场景…',
-  'tools.analyze_narration.label': '分析口播稿',
   'tools.ask_user.label': '请你选择',
   'tools.analyze_visual.busy': '逐帧分析画面…',
   'tools.analyze_visual.label': '分析画面',
@@ -81,8 +76,11 @@ export const ZH_ENGINE: Record<string, string> = {
   'tools.get_block.label': '查看组件',
   'tools.insert_clip.busy': '拉取并插入片段…',
   'tools.insert_clip.label': '插入片段',
-  'tools.lay_out.busy': '铺分镜结构、落占位…',
-  'tools.lay_out.label': '分镜',
+  'tools.list_outputs.label': '查看成片',
+  'tools.create_output.label': '新建成片',
+  'tools.switch_output.label': '切换成片',
+  'tools.rename_output.label': '重命名成片',
+  'tools.delete_output.label': '删除成片',
   'tools.list_assets.label': '素材清单',
   'tools.search_assets.label': '搜索素材库',
   'tools.search_media.label': '搜索项目片段',
@@ -142,7 +140,6 @@ export const EN_ENGINE: Record<string, string> = {
   'engine.kit.props': 'Component props',
   'engine.effect': 'Effect',
   'engine.goldCream': 'Gold on cream',
-  'engine.graphicPending': 'Graphic pending',
   'engine.gsapTimelineBody': 'GSAP timeline body',
   'engine.heading': 'Heading',
   'engine.imageVideo': 'Image / video',
@@ -165,11 +162,7 @@ export const EN_ENGINE: Record<string, string> = {
   'engine.yellowTape': 'Yellow tape',
   'tools.add_block.busy': 'Designing this element…',
   'tools.add_block.label': 'Add element',
-  'tools.add_graphics.busy': 'Generating components…',
-  'tools.add_graphics.label': 'Components',
   'tools.add_transition.label': 'Transition',
-  'tools.analyze_narration.busy': 'Reading the script, planning scenes…',
-  'tools.analyze_narration.label': 'Analyze transcript',
   'tools.ask_user.label': 'Your choice',
   'tools.analyze_visual.busy': 'Analyzing frames…',
   'tools.analyze_visual.label': 'Analyze frame',
@@ -197,8 +190,11 @@ export const EN_ENGINE: Record<string, string> = {
   'tools.get_block.label': 'Inspect block',
   'tools.insert_clip.busy': 'Fetching and inserting B-roll…',
   'tools.insert_clip.label': 'Insert B-roll',
-  'tools.lay_out.busy': 'Laying out shots and placeholders…',
-  'tools.lay_out.label': 'Cut shots',
+  'tools.list_outputs.label': 'List outputs',
+  'tools.create_output.label': 'New output',
+  'tools.switch_output.label': 'Switch output',
+  'tools.rename_output.label': 'Rename output',
+  'tools.delete_output.label': 'Delete output',
   'tools.list_assets.label': 'List assets',
   'tools.search_assets.label': 'Search asset library',
   'tools.search_media.label': 'Search project media',

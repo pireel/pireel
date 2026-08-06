@@ -14,7 +14,16 @@
 
 import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 import type { Composition } from '@pireel/studio-engine/composition';
-import { type AckedSections, ackedFromDto, buildSaveWire, type ProjectSavePayload, type ProjectSaveWire, type StudioProjectDto, type StudioProjectMeta } from '@pireel/studio-engine/project-dto';
+import {
+  type AckedSections,
+  ackedFromDto,
+  buildSaveWire,
+  type ProjectSavePayload,
+  type ProjectSaveWire,
+  type StudioProjectContext,
+  type StudioProjectDto,
+  type StudioProjectMeta,
+} from '@pireel/studio-engine/project-dto';
 import { t } from './i18n';
 
 const PREFIX = 'studio:draft:';
@@ -44,7 +53,7 @@ export interface StudioDraft {
   /** Edit-context cache (transcripts): captions are DERIVED from the transcript at runtime and never
    *  persisted as blocks, so the local draft must carry the transcript for offline / zero-backend
    *  (OSS shell) reopen — otherwise a refresh would lose the caption layer. */
-  context?: { asr?: unknown[]; clipAsr?: Record<string, unknown[]> };
+  context?: StudioProjectContext;
 }
 
 /** Raw read (no empty-content filter): list/rename need to read empty projects. */
@@ -62,7 +71,7 @@ function rawDraft(id: string): StudioDraft | null {
 /** Only a draft with content counts as recoverable (opening an empty project = fresh workbench, no recovery bar). */
 export function loadDraft(id: string): StudioDraft | null {
   const d = rawDraft(id);
-  if (!d || (!d.comp.blocks?.length && !d.comp.shots?.length)) return null;
+  if (!d || (!d.comp.blocks?.length && !d.comp.shots?.length && !d.context?.outputs?.inactive.length)) return null;
   return d;
 }
 
@@ -284,7 +293,7 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
  *  Sends the last-read baseVersion; on 409 (someone else wrote a newer version) record the new version and return
  *  'conflict' (caller retries immediately; section hashes not advanced = same sections resend). On 422 need_full
  *  (server has no such row) clear the baseline and resend in full. Network/db unavailable returns 'skip' (local cache covers it). */
-export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'skip'> {
+export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'refresh' | 'skip'> {
   try {
     const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
     if (!built) return 'ok'; // all five sections unchanged: zero requests
@@ -303,7 +312,7 @@ export async function serverSaveProject(id: string, p: ProjectSavePayload): Prom
       // full state — so the immediate retry's diff is computed against server truth (sections others changed
       // but we didn't touch won't get overwritten; section-level convergence). Don't write back to local UI —
       // the in-memory user edits are this session's truth.
-      const { project } = (await r.json()) as { project: StudioProjectDto };
+      const { project, refreshRequired } = (await r.json()) as { project: StudioProjectDto; refreshRequired?: boolean };
       if (project) {
         setProjectVersion(id, project.version);
         try {
@@ -312,6 +321,7 @@ export async function serverSaveProject(id: string, p: ProjectSavePayload): Prom
           sectionCache.delete(id);
         }
       }
+      if (refreshRequired) return 'refresh';
       return 'conflict';
     }
     if (!r.ok) return 'skip';
@@ -350,9 +360,7 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
     videoDurationSec: p.videoDurationSec,
     savedAt: p.updatedAt,
     baseVersion: p.version,
-    ...(p.context?.asr?.length || Object.keys(p.context?.clipAsr ?? {}).length
-      ? { context: { ...(p.context?.asr?.length ? { asr: p.context.asr } : {}), ...(Object.keys(p.context?.clipAsr ?? {}).length ? { clipAsr: p.context!.clipAsr } : {}) } }
-      : {}),
+    ...(p.context && Object.keys(p.context).length ? { context: p.context } : {}),
   };
   try {
     window.localStorage.setItem(keyFor(p.id), JSON.stringify(draft));
@@ -366,7 +374,14 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
 /** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
  *  video down to sig/duration; preserve title as-is (renaming happens in the project list); read the first-frame
  *  thumbnail from a ref (keep the last one until ready, so it doesn't flicker away). Returns lastSavedAt for the workbench badge. */
-export function useDraftAutosave(comp: Composition, videoSig: string | null, projectId: string, coverThumbRef?: MutableRefObject<string | null>, contextOf?: () => StudioDraft['context']) {
+export function useDraftAutosave(
+  comp: Composition,
+  videoSig: string | null,
+  projectId: string,
+  coverThumbRef?: MutableRefObject<string | null>,
+  contextOf?: () => StudioDraft['context'],
+  contextRevision?: unknown,
+) {
   const timer = useRef<number | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   // Boot-empty must not clobber a real draft, but "the user emptied a loaded project" is a legit
@@ -374,7 +389,8 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
   // "Emptied" = this hook saw content earlier in the session and now it's gone.
   const everContent = useRef(false);
   useEffect(() => {
-    const hasContent = comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0;
+    const context = contextOf?.();
+    const hasContent = comp.blocks.length > 0 || (comp.shots?.length ?? 0) > 0 || !!context?.outputs?.inactive.length;
     if (hasContent) everContent.current = true;
     if ((!hasContent && !everContent.current) || !projectId) return;
     if (timer.current) window.clearTimeout(timer.current);
@@ -392,8 +408,8 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
           savedAt: Date.now(),
           baseVersion: projectVersion(projectId) ?? prev?.baseVersion ?? null,
           ...(() => {
-            const ctx = contextOf?.();
-            return ctx && (ctx.asr?.length || Object.keys(ctx.clipAsr ?? {}).length) ? { context: ctx } : {};
+            const ctx = context;
+            return ctx && Object.keys(ctx).length ? { context: ctx } : {};
           })(),
         };
         window.localStorage.setItem(keyFor(projectId), JSON.stringify(draft));
@@ -405,6 +421,6 @@ export function useDraftAutosave(comp: Composition, videoSig: string | null, pro
     return () => {
       if (timer.current) window.clearTimeout(timer.current);
     };
-  }, [comp, videoSig, projectId]);
+  }, [comp, videoSig, projectId, contextRevision]);
   return { lastSavedAt };
 }

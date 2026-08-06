@@ -3,8 +3,8 @@
 /**
  * Pro multi-track timeline (Google Vids style).
  *
- * Track 0 = talking-head video: filmstrip base with shot slices on top (each with its own
- *   camera treatment; boundary = jump cut, no transition semantics).
+ * Track 0 = primary and inserted video: filmstrip base with shot slices on top (each with its own
+ *   camera treatment; a plain boundary is a hard cut and transitions are explicit elements).
  *   Track >=1 = overlay elements (captions/title/stat/list/transition...): each block has a
  *   type icon + label (shows time range when selected), is draggable whole, trimmable at both
  *   ends, and clickable to open in the right-side chat.

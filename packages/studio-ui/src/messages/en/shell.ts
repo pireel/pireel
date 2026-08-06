@@ -6,10 +6,10 @@ export const SHELL_EN: Record<string, string> = {
   'shell.nElements': '{n} elements',
   'shell.newProject': 'New project',
   'shell.nShots': '{n} shots',
-  'shell.oneProjectPerVideo': 'One project per video: shots, framing, elements, captions, export.',
+  'shell.oneProjectManyOutputs': 'One project can hold many sources and independently editable outputs.',
   'shell.planningFailed': 'Planning failed',
   'shell.rename': 'Rename',
   'shell.syncFailed': 'Sync failed',
   'shell.translationFailed': 'Translation failed',
-  'shell.uploadVideoAiCuts': 'Upload a video — AI cuts shots, adds components and captions, then export right in the browser',
+  'shell.startWithMedia': 'Add one clip or many, choose a workflow in Chat, and build one or several finished cuts',
 };

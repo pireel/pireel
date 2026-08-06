@@ -4,7 +4,7 @@
  * Organization: one prompt per .ts file (prompts change often; separate files
  * diff and revert cleanly). Variable injection = function params + native ${}
  * (compile-time safety net); concatenation = template-literal splicing
- * (see plan.ts: core section + two output contracts). Consumers always import
+ * Consumers always import
  * from here, never poke sibling files directly.
  *
  * How to extend:
@@ -27,10 +27,9 @@ export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotComm
 export { L1_PROPS_SPEC } from './l1-props-spec';
 export { catalogSection } from './l4-catalog';
 export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
-export { PLAN_CORE, PLAN_SYSTEM, PLAN_SYSTEM_TOOLS } from './plan';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';
-export { withActiveTheme, planWithActiveTheme } from './active-theme';
+export { withActiveTheme } from './active-theme';
 // Tool contracts (schema + English description; server attaches streamText / client executes via onToolCall)
 export * from './l0-agent-tools';
 export { AROLL_GUIDE } from './aroll-guide';

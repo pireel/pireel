@@ -1,16 +1,15 @@
 /**
  * Offline MCP executor — when the tab is closed, pure-data tools operate directly
- * on studio_projects' comp + context (asr/clipAsr/plan) server-side, so the
+ * on studio_projects' comp + context (asr/clipAsr) server-side, so the
  * bridge's studio_not_open is no longer a dead end. Shares the SAME pure functions
  * with the browser's runStudioTool (trim/captions-relay/build-blocks/composition),
  * one semantics, no second implementation.
  *
  * Coverage = "editing an already-produced project": block add/delete/edit/move,
- * cutting, captions, BYO (compose_context/apply_block/plan_context/submit_plan),
+ * cutting, captions, BYO (compose_context/apply_block),
  * read script, snapshot. Does NOT cover browser-only tools: extract_asr,
  * analyze_visual (video bytes not in the cloud), capture_frame, add_block/
- * edit_block/add_graphics (our own LLM generation, browser drives compose),
- * lay_out (needs restoreDraftContext's media restore), focus_element (pure UI state).
+ * edit_block (our own LLM generation, browser drives compose), focus_element (pure UI state).
  * undo IS offline-capable, but lives in the ROUTE (it walks the cloud history ring —
  * DB territory, and this module stays pure).
  *
@@ -63,14 +62,13 @@ import {
 } from './composition';
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
-import { type DraftPlan, parsePlan, unifiedPlanRows } from './plan';
 import { buildSituation, wrapAgentTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type CutSeamEntry, deleteClipById, finalizeCutSeams, narrationRowMarks, removeEditedInterval, removeEditedRange, spans as clipSpans, srcToEditedLoose, tightenCutRanges, trimLeftAtEdited, trimRightAtEdited } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
-import { beatsForWindow, displayCues, inNarrationSource, insertPlanContexts, relayCaptionLayer } from './captions-relay';
-import { isPlaceholder, placeholderSpec } from './build-draft';
+import { displayCues, inNarrationSource, relayCaptionLayer } from './captions-relay';
 import { ensureTemplatesRegistered } from './templates';
+import { normalizeProjectOutputs } from './project-outputs';
 import { listAddressedWords, resolveWordIds, wordRanges, wordRangesToEdited } from './transcript-address';
 import { searchProjectMedia } from './media-search';
 
@@ -101,6 +99,7 @@ export interface ServerToolOutcome {
 /** The set of offline-executable tools (route uses this to decide between fallback and returning studio_not_open as-is). */
 export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'get_state',
+  'list_outputs',
   'read_script',
   'search_media',
   'list_words',
@@ -129,8 +128,6 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'remove_captions',
   'set_caption_translations',
   'apply_block',
-  'submit_plan',
-  'plan_context',
   'compose_context',
 ]);
 
@@ -154,6 +151,7 @@ function shotsOf(p: ServerToolProject): VideoShot[] {
 /** Offline situation snapshot: same shape as the browser's getChatBody (shared buildSituation), prefixed with the offline notice. */
 function offlineState(p: ServerToolProject): string {
   const c = p.comp;
+  const outputs = normalizeProjectOutputs(p.context.outputs);
   const tag = new Map<string, string>();
   for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
   const cs = isCaptionsOn(c) ? resolveCaptionStyle(c) : null;
@@ -179,7 +177,6 @@ function offlineState(p: ServerToolProject): string {
         kind: blockKind(b),
         startSec: b.startSec,
         durationSec: b.durationSec,
-        ...(isPlaceholder(b) ? { placeholder: true } : {}),
         ...(b.box ? { box: b.box } : {}),
       })),
       shots: clipSpans(c.shots ?? []).map((sp, i) => ({
@@ -197,10 +194,10 @@ function offlineState(p: ServerToolProject): string {
         ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
       })),
     },
-    pipeline: { asr: !!p.context.asr?.length, plan: !!p.context.plan, visual: false },
+    pipeline: { asr: !!p.context.asr?.length, visual: false },
     ...(typeof p.canGenerate === 'boolean' ? { canGenerate: p.canGenerate } : {}),
   });
-  return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}). Video-dependent tools (extract_asr, analyze_visual, capture_frame, lay_out, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
+  return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}).\nActive output: ${outputs.active.id} · ${outputs.active.title || `Output ${outputs.active.order + 1}`} (${outputs.inactive.length + 1} total; opening the studio is currently required to switch outputs). Video-dependent tools (extract_asr, analyze_visual, capture_frame, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
 }
 
 /** Offline transcript (same format as the browser's transcriptForAgent). */
@@ -264,6 +261,28 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
   switch (tool) {
     case 'get_state':
       return { result: { ok: true, state: offlineState(p) } };
+    case 'list_outputs': {
+      const outputs = normalizeProjectOutputs(p.context.outputs);
+      const rows = [
+        {
+          ...outputs.active,
+          title: outputs.active.title || `Output ${outputs.active.order + 1}`,
+          active: true,
+          durationSec: totalDuration(p.comp),
+        },
+        ...outputs.inactive.map((output) => ({
+          id: output.id,
+          title: output.title || `Output ${output.order + 1}`,
+          order: output.order,
+          createdAt: output.createdAt,
+          updatedAt: output.updatedAt,
+          ...(output.skill ? { skill: output.skill } : {}),
+          active: false,
+          durationSec: totalDuration(output.comp),
+        })),
+      ].sort((a, b) => a.order - b.order);
+      return { result: { ok: true, summary: `${rows.length} outputs in this project (cloud)`, data: { outputs: rows } } };
+    }
     case 'read_script': {
       if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
       return { result: { ok: true, summary: 'Read transcript (cloud)', data: { transcript: offlineTranscript(p) } } };
@@ -832,7 +851,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         const slots = { props: shape.props };
         if (target) {
           return {
-            result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id } },
+            result: { ok: true, summary: `Updated "${bname(target)}"`, data: { blockId: target.id } },
             comp: { ...c, blocks: c.blocks.map((x) => (x.id === target.id ? { ...x, templateId: `kit:${shape.component}`, slots } : x)) },
           };
         }
@@ -858,13 +877,9 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         return { result: { ok: false, error: 'the model chose a bespoke build — call compose_block_brief again with format:"html" for the markup contract, generate against it, then apply_block with that raw text' } };
       }
       if (shape.kind === 'declined') {
-        if (target && isPlaceholder(target)) {
-          // The moment deserves no graphic: remove the empty slot instead of leaving a shell.
-          return { result: { ok: true, summary: `Removed "${target.label ?? 'graphic'}" — the model judged this moment needs no graphic`, data: { removedBlockId: target.id } }, comp: { ...c, blocks: c.blocks.filter((x) => x.id !== target.id) } };
-        }
         return { result: { ok: false, error: 'the model answered null (no graphic) — nothing was changed; delete_block the target yourself if you agree' } };
       }
-      const fb = target && !isPlaceholder(target) ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
+      const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
       const parsed = parseBlockResponse(raw, fb);
       const issues = lintBlock({ blockId: applyId, innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody });
       const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
@@ -880,7 +895,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const warnings = issues.length ? { warnings: issues.map((i) => i.message) } : {};
       if (target) {
         return {
-          result: { ok: true, summary: isPlaceholder(target) ? `Filled "${target.label ?? 'graphic'}"` : `Updated "${bname(target)}"`, data: { blockId: target.id, ...warnings } },
+          result: { ok: true, summary: `Updated "${bname(target)}"`, data: { blockId: target.id, ...warnings } },
           comp: {
             ...c,
             blocks: c.blocks.map((x) => (x.id === target.id ? { ...x, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } : x)),
@@ -900,41 +915,6 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
       return { result: { ok: true, summary: 'Added block', data: { newBlockId: nb.id, ...warnings } }, comp: { ...c, blocks: [...c.blocks, nb] } };
     }
-    case 'submit_plan': {
-      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project (the plan is anchored to sentence indexes)' } };
-      const text = typeof input.plan === 'string' ? input.plan : JSON.stringify(input.plan ?? {});
-      // Unified narrative stream (same interleaving pure function as the browser's plan_context): global-row-number scenes are decomposed back into main/inserted segments at the assembly layer
-      const insCtx = insertPlanContexts(p.comp.shots ?? [], clipAsrOf(p.context));
-      const planRows = unifiedPlanRows(
-        (p.context.asr ?? []).map((x, i) => ({ index: i, text: x.text, start: x.start, end: x.end })),
-        insCtx,
-      );
-      let plan: DraftPlan;
-      try {
-        plan = parsePlan(text, planRows);
-      } catch (e) {
-        return { result: { ok: false, error: `failed to parse plan: ${e instanceof Error ? e.message : String(e)}` } };
-      }
-      if (!plan.scenes.length) return { result: { ok: false, error: 'no valid scenes — regenerate and resubmit' } };
-      return {
-        result: { ok: true, summary: `Plan received · ${plan.scenes.length} scenes (lay_out needs the studio tab open to run)`, data: { scenes: plan.scenes.length } },
-        context: { ...p.context, plan },
-      };
-    }
-    case 'plan_context': {
-      if (!p.context.asr?.length) return { result: { ok: false, error: 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
-      return {
-        result: {
-          ok: true,
-          summary: 'Fetched plan context (cloud; no visual hints)',
-          data: {
-            sentences: p.context.asr.map((s, i) => ({ index: i, text: s.text, start: s.start, end: s.end })),
-            videoDurationSec: p.comp.video?.durationSec ?? p.videoDurationSec ?? 0,
-            theme: c.theme,
-          },
-        },
-      };
-    }
     case 'compose_context': {
       const script = (p.context.asr ?? []).map((s) => s.text).join('');
       const base = { theme: c.theme, ...(c.palette ? { palette: c.palette } : {}), ...(c.frameId ? { frameId: c.frameId } : {}) };
@@ -942,22 +922,6 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (bid) {
         const b = findBlock(bid);
         if (!b) return { result: { ok: false, error: 'block not found' } };
-        if (isPlaceholder(b)) {
-          const boxPx = b.box ? { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } : undefined;
-          const beats = beatsForWindow(shotsOf(p), asAsr(p.context.asr), clipAsrOf(p.context), b.startSec, b.durationSec);
-          return {
-            result: {
-              ok: true,
-              summary: 'Fetched placeholder context (cloud)',
-              data: {
-                ...base,
-                block: { id: b.id, kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: b.label ?? 'graphic', durationSec: b.durationSec, ...(boxPx ? { boxPx } : {}) },
-                context: { ...(script ? { script } : {}), ...(beats.length ? { beats } : {}) },
-                suggested_instruction: placeholderSpec(b),
-              },
-            },
-          };
-        }
         return {
           result: {
             ok: true,

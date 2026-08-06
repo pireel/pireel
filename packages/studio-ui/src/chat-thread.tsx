@@ -14,6 +14,7 @@ import { Conversation, ConversationContent, ConversationEmptyState, Conversation
 import { Suggestion } from '@pireel/ui/ai-elements/suggestion';
 import { Message, MessageContent, MessageResponse } from '@pireel/ui/ai-elements/message';
 import { type ChatSituation, buildSituation } from '@pireel/studio-engine/prompts';
+import type { StudioScenarioSkillId } from '@pireel/studio-engine/scenario-skills';
 import { STUDIO_AGENT_EXECUTION_LIMITS, studioAgentTurnUsage } from '@pireel/studio-engine/agent-execution-budget';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { FrameCatalogItem } from './use-frame-catalog';
@@ -33,6 +34,7 @@ export function ChatThread({
   threadId,
   initialMessages,
   initialFrame,
+  initialSkillId,
   frames,
   onFrameApplied,
   runTool,
@@ -45,13 +47,14 @@ export function ChatThread({
   threadId: string;
   initialMessages: UIMessage[];
   initialFrame: AttachedFrame | null;
+  initialSkillId: StudioScenarioSkillId;
   frames: FrameCatalogItem[];
   onFrameApplied?: (frame: AttachedFrame) => void;
   runTool: StudioChatProps['runTool'];
   getBody: StudioChatProps['getBody'];
   getComp?: StudioChatProps['getComp'];
   elements: StudioElementRef[];
-  onSnapshot: (messages: UIMessage[], frame: AttachedFrame | null) => void;
+  onSnapshot: (messages: UIMessage[], frame: AttachedFrame | null, skillId: StudioScenarioSkillId) => void;
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
 }) {
   const runToolRef = useRef(runTool);
@@ -70,6 +73,9 @@ export function ChatThread({
   const [frame, setFrame] = useState<AttachedFrame | null>(initialFrame);
   const frameRef = useRef(frame);
   frameRef.current = frame;
+  const [skillId, setSkillId] = useState<StudioScenarioSkillId>(initialSkillId);
+  const skillRef = useRef(skillId);
+  skillRef.current = skillId;
   const onFrameAppliedRef = useRef(onFrameApplied);
   onFrameAppliedRef.current = onFrameApplied;
   /** Attach a frame (shared by panel/theme button): besides session state, also notifies the workbench to apply the theme palette to comp. */
@@ -78,13 +84,16 @@ export function ChatThread({
     onFrameAppliedRef.current?.(f);
   }, []);
 
-  // body carries only frameId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
+  // body carries session-level frameId + skillId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
   // the route materializes it into a <composition_state> part) — stable history bytes are what let the prompt cache hit
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: studioProviders().chatEndpoint ?? '/api/studio/chat',
-        body: () => (frameRef.current ? { frameId: frameRef.current.id } : {}),
+        body: () => ({
+          ...(frameRef.current ? { frameId: frameRef.current.id } : {}),
+          skillId: skillRef.current,
+        }),
       }),
     [],
   );
@@ -144,7 +153,7 @@ export function ChatThread({
       mountedRef.current = true;
       return;
     }
-    if (status === 'ready' || status === 'error') onSnapshot(messagesRef.current, frameRef.current);
+    if (status === 'ready' || status === 'error') onSnapshot(messagesRef.current, frameRef.current, skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === 'streaming' || status === 'submitted';
@@ -184,7 +193,7 @@ export function ChatThread({
   }, [status, messages]);
   useEffect(() => {
     if (!busy) return;
-    const t = setInterval(() => onSnapshot(messagesRef.current, frameRef.current), 2000);
+    const t = setInterval(() => onSnapshot(messagesRef.current, frameRef.current, skillRef.current), 2000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy]);
@@ -203,7 +212,7 @@ export function ChatThread({
       } catch {
         /* already ended */
       }
-      onSnapshot(messagesRef.current, frameRef.current);
+      onSnapshot(messagesRef.current, frameRef.current, skillRef.current);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -218,9 +227,15 @@ export function ChatThread({
 
   // Attaching/detaching a frame also persists (only if there are messages; an empty session shouldn't enter history)
   useEffect(() => {
-    if (messagesRef.current.length > 0) onSnapshot(messagesRef.current, frame);
+    if (messagesRef.current.length > 0) onSnapshot(messagesRef.current, frame, skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame]);
+
+  // Skill is session state like the attached frame: changing it affects future turns and survives history switching.
+  useEffect(() => {
+    if (messagesRef.current.length > 0) onSnapshot(messagesRef.current, frameRef.current, skillId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillId]);
 
   const run = useCallback(
     (text: string) => {
@@ -310,11 +325,9 @@ export function ChatThread({
                 title={t('chatGen.greeting')}
                 description={t('chatGen.emptyStateIntro')}
               />
-              {/* Onboarding: the film pipeline is entirely agent-driven, one tap = one sentence sent */}
-              {/* Not using Suggestions (horizontal scrollbar): quick prompts wrap across lines instead.
+              {/* Not using Suggestions (horizontal scrollbar): starter prompts wrap across lines instead.
                   Click = fill into the input (editable/deletable, send authority stays with the user), doesn't send directly */}
               <div className="flex max-w-full flex-wrap items-center justify-center gap-2 px-3">
-                <Suggestion suggestion={t('chatGen.autoCreateHint')} onClick={fillComposer} />
                 <Suggestion suggestion={t('chatGen.cutShotsFirst')} onClick={fillComposer} />
                 <Suggestion suggestion={t('chatGen.transcribeToEdit')} onClick={fillComposer} />
               </div>
@@ -442,6 +455,8 @@ export function ChatThread({
           placeholder={t('chatGen.sayWhatAddChange')}
           status={status}
           elements={elements}
+          skillId={skillId}
+          onPickSkill={setSkillId}
           frame={frame}
           frames={frames}
           onPickFrame={applyFrame}
