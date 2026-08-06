@@ -26,7 +26,7 @@ function proj(over: Partial<ServerToolProject> & { transcript?: TranscriptSegmen
     id: 'p1',
     title: '测试项目',
     comp,
-    context: { schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION },
+    context: { schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION } as const,
     videoDurationSec: 20,
     ...projectOverrides,
   };

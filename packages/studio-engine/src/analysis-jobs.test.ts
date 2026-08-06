@@ -151,6 +151,7 @@ describe('edit proposal evaluation', () => {
       title: 'P1',
       comp: candidate,
       document: compositionToEditorDocument({ projectId: 'p1', composition: candidate }).document,
+      context: { schemaVersion: 2 },
       videoDurationSec: 10,
     };
     const out = runServerTool(operation.tool, operation.input, project);

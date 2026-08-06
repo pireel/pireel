@@ -135,7 +135,12 @@ import {
   setProjectVersion,
   useDraftAutosave,
 } from './use-draft-persist';
-import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type LocalAssetIndexEntry, type StudioProjectDto } from '@pireel/studio-engine/project-dto';
+import {
+  STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
+  type LocalAssetIndexEntry,
+  type ProjectSavePayload,
+  type StudioProjectDto,
+} from '@pireel/studio-engine/project-dto';
 import { useGenerationLock } from './use-generation-lock';
 import { useMediaAnalysis } from './use-media-analysis';
 import { useStudioExport } from './use-export';
@@ -3710,7 +3715,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict).
    *  Tri-state: full payload / chat-only (empty canvas but threads exist, so the document section is
    *  absent and a just-opened tab cannot blank cloud state) / null (nothing worth saving). */
-  function buildCloudPayload() {
+  function buildCloudPayload(): ProjectSavePayload | null {
     const c = compRef.current;
     if (!projectId) return null;
     const hasContent = hasTimelineContent(c);

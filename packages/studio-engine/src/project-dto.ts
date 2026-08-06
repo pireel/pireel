@@ -215,12 +215,6 @@ export interface ProjectSaveWire {
   context?: StudioProjectContext;
   contextPatch?: Operation[];
   contextHash?: string;
-  context?: StudioProjectContext;
-  contextPatch?: Operation[];
-  contextHash?: string;
-  context?: StudioProjectContext;
-  contextPatch?: Operation[];
-  contextHash?: string;
   coverThumb?: string | null;
   title?: string;
   videoSig?: string | null;
@@ -394,6 +388,9 @@ export function sanitizeSavePayload(body: unknown): {
   chat?: unknown[];
   chatPatch?: Operation[];
   chatHash?: string;
+  context?: StudioProjectContext;
+  contextPatch?: Operation[];
+  contextHash?: string;
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
