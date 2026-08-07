@@ -5,9 +5,10 @@
  *  - My assets (the current project's LOCAL media, never uploaded)  → my-assets-panel
  *  - Official assets (kit components + stickers + BGM)              → official-assets-panel
  *  - Cloud assets (uploads + generated media + saved elements)      → cloud-assets-panel
- * The scope is a segmented switch (persisted). "My" stays mounted so imported blob URLs and
- * scroll survive scope hops; "Official"/"Cloud" mount on first visit (one manifest/library
- * fetch) and then also stay. Card/tile/lightbox primitives live in asset-card.
+ * The scope is a segmented switch. Every Studio session starts from the project's local media;
+ * "My" stays mounted so imported blob URLs and scroll survive scope hops; "Official"/"Cloud"
+ * mount on first visit (one manifest/library fetch) and then also stay. Card/tile/lightbox
+ * primitives live in asset-card.
  */
 
 import { useState } from 'react';
@@ -23,7 +24,6 @@ import { t } from './i18n';
 export type { PanelDragAsset } from './asset-card';
 export type GenType = 'image' | 'video' | 'element' | 'audio';
 
-const SCOPE_KEY = 'studio.assetsPanel.scope';
 type Scope = 'mine' | 'official' | 'cloud';
 
 export function AssetsPanel({
@@ -85,21 +85,13 @@ export function AssetsPanel({
   /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
-  const [scope, setScope] = useState<Scope>(() => {
-    const v = typeof window !== 'undefined' ? window.localStorage.getItem(SCOPE_KEY) : null;
-    return v === 'official' || v === 'cloud' ? v : 'mine';
-  });
+  const [scope, setScope] = useState<Scope>('mine');
   const [officialMounted, setOfficialMounted] = useState(scope === 'official');
   const [cloudMounted, setCloudMounted] = useState(scope === 'cloud');
   const pick = (s: Scope) => {
     setScope(s);
     if (s === 'official') setOfficialMounted(true);
     if (s === 'cloud') setCloudMounted(true);
-    try {
-      window.localStorage.setItem(SCOPE_KEY, s);
-    } catch {
-      /* private mode can't write; scope just resets next session */
-    }
   };
 
   return (

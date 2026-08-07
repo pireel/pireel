@@ -32,3 +32,31 @@ export function captionTranscriptsByAsset(
   }
   return bridged;
 }
+
+/** Project document → browser runtime transcript refs after an engine-owned re-layout rewrites
+ * cueLayout/cueTexts. Runtime source URLs are recovered through the projected shot's clip id. */
+export function captionTranscriptsFromDocument(
+  document: EditorDocumentV2,
+  composition: Composition,
+  currentClipTranscripts: Readonly<Record<string, AsrSegment[]>>,
+): { main: AsrSegment[] | null; clips: Record<string, AsrSegment[]> } {
+  const primary = document.timeline.tracks.find(
+    (track) => track.id === document.semantics.primaryNarrativeTrackId,
+  );
+  const assetIdByClipId = new Map(
+    (primary?.clips ?? [])
+      .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative')
+      .map((clip) => [clip.id, clip.assetId] as const),
+  );
+  const clips = { ...currentClipTranscripts };
+  for (const shot of composition.shots ?? []) {
+    if (!shot.src) continue;
+    const assetId = assetIdByClipId.get(shot.id);
+    const segments = assetId ? document.semantics.transcripts[assetId] : undefined;
+    if (segments) clips[shot.src] = segments as AsrSegment[];
+  }
+  const main = document.semantics.primaryNarrativeAssetId
+    ? document.semantics.transcripts[document.semantics.primaryNarrativeAssetId] as AsrSegment[] | undefined
+    : undefined;
+  return { main: main ?? null, clips };
+}

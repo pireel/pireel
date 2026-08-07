@@ -2,8 +2,8 @@
 
 /**
  * Stage box-drag handlers for the selected block: edge stretch, corner scale, grip move, rotate.
- * All follow ghost semantics — a dashed box (setGhostRect, direct DOM) follows the pointer, content
- * never updates live, and one commit lands on release via the rebuild-free patch channel.
+ * Every gesture previews geometry directly inside the iframe while the solid selection shell follows
+ * the pointer. React/document state still commits only once on release via the rebuild-free patch channel.
  * Extracted from hyperframes-workbench.tsx — bodies verbatim.
  */
 
@@ -12,6 +12,7 @@ import { type Block, type Composition, type EditorDocumentV2, applyOverlayDocume
 import { toast } from '@pireel/ui/toast';
 import { startPointerDrag } from './drag-shell';
 import { shiftBox } from './comp-diff';
+import { boxSelectionRect } from './edit-overlays';
 
 export interface BoxDragDeps {
   /** Canvas→stage uniform scale (comp px → stage px). */
@@ -44,9 +45,22 @@ export function useBoxDrag(deps: BoxDragDeps) {
     }
     setDocument(edit.document);
   };
+  /** Keep the one solid selection shell on the same live geometry as the iframe content.
+   *  React still commits only on pointer-up; these four DOM writes avoid a second, stale baseline box. */
+  const previewSelectionRect = (box: { x: number; y: number; w: number; h: number }) => {
+    const overlay = rotateOverlayRef.current;
+    const stage = stageBoxRef.current?.getBoundingClientRect();
+    if (!overlay || !stage) return;
+    const rect = boxSelectionRect(box, stage.width, stage.height);
+    overlay.style.left = `${rect.left}px`;
+    overlay.style.top = `${rect.top}px`;
+    overlay.style.width = `${rect.width}px`;
+    overlay.style.height = `${rect.height}px`;
+  };
   /** Edge-handle stretch (same as caption line width, per user: change the box size on this axis, content reflows to fill,
    *  no crop, no locked ratio): the opposite edge is anchored; contentBox resets to = box (old crop semantics are dropped,
-   *  legacy cropped blocks reset to full-fill on one drag). The process writes directly in the iframe via hf:boxSize (zero React re-render), one commit on release. */
+   *  legacy cropped blocks reset to full-fill on one drag). The process writes directly to the iframe and solid selection shell
+   *  (zero React re-render), then commits once on release. */
   const edgeDrag = (e: React.PointerEvent, blk: Block, side: 'l' | 'r' | 't' | 'b') => {
     if (!blk.box) return;
     const box0 = blk.box;
@@ -71,7 +85,8 @@ export function useBoxDrag(deps: BoxDragDeps) {
           g.h = Math.max(0.03, box0.h - dy);
           g.y = box0.y + box0.h - g.h;
         }
-        setGhostRect(g); // ghost follows the pointer, content doesn't update live (applied once on release via the rebuild-free channel)
+        previewSelectionRect(g);
+        postPreview({ type: 'hf:boxSize', blockId: blk.id, ...g, cx: 0, cy: 0, cw: 1, ch: 1, s: 1 });
       },
       onEnd: () => {
         setBodyDragging(false);
@@ -121,7 +136,8 @@ export function useBoxDrag(deps: BoxDragDeps) {
             g.y = box0.y + box0.h - g.h;
           }
         }
-        setGhostRect(g); // ghost follows the pointer, content doesn't update live (applied once on release via the rebuild-free channel)
+        previewSelectionRect(g);
+        postPreview({ type: 'hf:boxSize', blockId: blk.id, ...g, cx: 0, cy: 0, cw: 1, ch: 1, s: 1 });
       },
       onEnd: () => {
         setBodyDragging(false);
@@ -132,8 +148,8 @@ export function useBoxDrag(deps: BoxDragDeps) {
     });
   };
 
-  /** Floating toolbar drag handle: parent-side ghost semantics (like edge/corner handles) — dashed box follows the pointer
-   *  + center snap guides, content doesn't move live, one shiftBox commit on release (applied via the rebuild-free channel). */
+  /** Floating toolbar drag handle: dashed box + component content follow the pointer with center snap guides;
+   *  the canonical box still receives one shiftBox commit on release. */
   const gripDrag = (e: React.PointerEvent, gripBlockId: string) => {
     const blk = compRef.current.blocks.find((b) => b.id === gripBlockId);
     const box0 = blk?.box;
@@ -143,6 +159,10 @@ export function useBoxDrag(deps: BoxDragDeps) {
     let dxn = 0;
     let dyn = 0;
     startPointerDrag(e, {
+      onStart: () => {
+        dragCursorRef.current = '';
+        setBodyDragging(true);
+      },
       onFrame: (dx, dy) => {
         dxn = dx / sr.width;
         dyn = dy / sr.height;
@@ -154,9 +174,12 @@ export function useBoxDrag(deps: BoxDragDeps) {
         if (snapX) dxn = 0.5 - (box0.x + box0.w / 2);
         if (snapY) dyn = 0.5 - (box0.y + box0.h / 2);
         setGuideVis(snapX, snapY);
-        setGhostRect({ x: box0.x + dxn, y: box0.y + dyn, w: box0.w, h: box0.h });
+        const moved = { x: box0.x + dxn, y: box0.y + dyn, w: box0.w, h: box0.h };
+        previewSelectionRect(moved);
+        postPreview({ type: 'hf:boxSize', blockId: blk.id, ...moved });
       },
       onEnd: () => {
+        setBodyDragging(false);
         setGuideVis(false, false);
         setGhostRect(null);
         if (dxn || dyn) patchBlock(blk.id, { box: shiftBox(blk, dxn, dyn).box });

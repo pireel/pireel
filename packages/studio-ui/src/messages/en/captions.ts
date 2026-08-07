@@ -23,6 +23,8 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.remove': 'Remove',
   'captions.removeAllCaptionsUndoable': 'Remove all captions (undoable)',
   'captions.retranslateLine': 'Retranslate this line',
+  'captions.relayout': 'Re-layout captions',
+  'captions.relayoutHint': 'Regenerate cue boundaries for the current canvas and font size (undoable)',
   'captions.styles': 'Styles',
   'captions.transcribeFirst': 'Transcribe first',
   'captions.translateTranscriptIntoLang': 'Translate the transcript into {lang} as a second caption line',

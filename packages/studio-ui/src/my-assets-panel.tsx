@@ -836,7 +836,6 @@ export function MyAssetsPanel({
               type="button"
               onClick={() => void pickImport()}
               disabled={importing}
-              title={t('panels.localOnlyHint')}
               className="border-line text-ink-2 hover:text-ink inline-flex h-[24px] shrink-0 items-center gap-1 whitespace-nowrap rounded-l-md border px-2 text-[11px] disabled:opacity-40"
             >
               {importing ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
@@ -879,11 +878,16 @@ export function MyAssetsPanel({
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {!hasAny ? (
-          <div className="border-line text-ink-4 flex w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed py-10">
-            <Upload size={18} />
-            <div className="text-[11.5px]">{t('panels.noLocalAssets')}</div>
-            <div className="text-ink-4 text-[10.5px]">{t('panels.localOnlyHint')}</div>
-          </div>
+          <button
+            type="button"
+            onClick={() => void pickImport()}
+            disabled={importing}
+            aria-label={t('panels.import')}
+            className="border-line text-ink-4 hover:border-accent/60 hover:text-ink focus-visible:ring-accent flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed py-10 transition-colors focus-visible:outline-none focus-visible:ring-1 disabled:cursor-wait disabled:opacity-60"
+          >
+            {importing ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+            <span className="text-[11.5px]">{t('panels.noLocalAssets')}</span>
+          </button>
         ) : !hasVisible ? (
           <div className="text-ink-4 flex h-24 items-center justify-center px-4 text-center text-[11px]">{t('panels.noMatchingAssetsTry')}</div>
         ) : (

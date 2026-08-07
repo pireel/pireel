@@ -298,7 +298,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
   /** Dragging a library image/video onto the main track = insert a clip (per user 2026-07-17, reversing "video-into-main-track
    *  was cut" — what was cut back then was OS file drops; library assets have direct links and caching, so the experience holds).
    *  Bytes first via the asset direct link (CDN CORS is allowed), falling back to the /api/media/fetch same-origin proxy; then
-   *  the same insertClipCore as the "+" button (local persistence/caption auto-follow reused). */
+   *  the same insertClipCore as local first-media insertion (local persistence/caption auto-follow reused). */
   const insertLibraryClipAt = async (a: MediaRef & { label?: string; sig?: string | null; dims?: { w: number; h: number } }, at: number) => {
     setClipPending(at);
     try {
@@ -400,9 +400,10 @@ export function useClipInsert(deps: ClipInsertDeps) {
       setClipPending(null);
     }
   };
-  /** Shot-boundary "+": pick a local video or image → insert at that split point. Images become
-   *  5-second still clips, matching library-drop semantics. Source bytes stay local. */
-  const insertLocalClipAt = async (at: number) => {
+  /** Empty-main-track CTA: pick the first local video or image. Images become 5-second still clips,
+   *  matching library-drop semantics. Existing timelines add clips through the asset panel. */
+  const insertInitialLocalMedia = async () => {
+    const at = 0;
     const sourceFile = await pickFile('video/*,image/*');
     if (!sourceFile) return;
     setClipPending(at);
@@ -427,5 +428,5 @@ export function useClipInsert(deps: ClipInsertDeps) {
       setClipPending(null);
     }
   };
-  return { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips };
+  return { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertInitialLocalMedia, clipPending, clipStrips };
 }

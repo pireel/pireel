@@ -3,6 +3,7 @@
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
 import type { AttachedFrame } from './studio-chat';
+import { stripLeakedToolProtocolText } from '@pireel/studio-engine/tool-protocol-text';
 import {
   isStudioScenarioSkillId,
   type StudioScenarioSkillId,
@@ -43,20 +44,34 @@ export function saveThreads(storageKey: string, threads: StoredThread[]) {
   }
 }
 
-/** Sanitize an interrupted session on restore: in a snapshot persisted mid-stream, a tool part may be stuck in "input arrived/still streaming"
- *  state — after restore there's no onToolCall to continue it, so without sanitizing the card spins forever. Mark it as an interrupted error;
- *  keep half-finished text parts as-is (whatever already streamed out is history). */
+/** Sanitize a restored session: an interrupted tool can no longer continue, and provider-native tool
+ *  protocol accidentally persisted as assistant text must never become visible history. */
 export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
   return messages.map((m) => {
     if (m.role !== 'assistant') return m;
     const parts = (m.parts ?? []).map((p) => {
-      const tp = p as { type: string; state?: string };
+      const tp = p as { type: string; state?: string; text?: string };
+      if (tp.type === 'text' && typeof tp.text === 'string') {
+        const text = stripLeakedToolProtocolText(tp.text);
+        if (text !== tp.text) return { ...p, text } as typeof p;
+      }
       if (tp.type.startsWith('tool-') && (tp.state === 'input-streaming' || tp.state === 'input-available')) {
         return { ...p, state: 'output-error', errorText: t('chatGen.generationInterrupted') } as typeof p;
       }
       return p;
     });
     return { ...m, parts };
+  });
+}
+
+/** The renderer intentionally hides reasoning and step markers. A completed assistant message
+ * containing only those parts is therefore an empty response and must offer a visible retry. */
+export function assistantMessageHasRenderableOutput(message: UIMessage): boolean {
+  if (message.role !== 'assistant') return true;
+  return (message.parts ?? []).some((part) => {
+    const candidate = part as { type?: string; text?: string };
+    if (candidate.type === 'text') return !!candidate.text?.trim();
+    return candidate.type === 'dynamic-tool' || !!candidate.type?.startsWith('tool-');
   });
 }
 

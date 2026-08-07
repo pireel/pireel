@@ -74,6 +74,7 @@ import {
   newBlock,
   primaryNarrativeAsset,
   primaryNarrativeClips,
+  pruneUnusedEditorAssets,
   projectDocumentToComposition,
   renderBlock,
   assembleBlockHtml,
@@ -173,7 +174,8 @@ import { type VisualLabel, type VisualPrep, type VisualTimeline, analyzeVisual, 
 import { type SafeZone, detectFrameAt, geomNote } from './geometry';
 import { REF_WIDTH, normalizeDims, personFxFromFrame, shotSpan } from './workbench-utils';
 import { shotCountChange, canvasSizeOnlyChange, blockPatchableChange, capPosOnlyChange, sameExceptCapStyle, shiftBox, shotFramingOnlyChange, themeMountOnlyChange } from './comp-diff';
-import { BoxEditOverlay, CaptionEditOverlay } from './edit-overlays';
+import { BoxEditOverlay, CaptionEditOverlay, boxSelectionRect } from './edit-overlays';
+import { blockDisplayTitle } from './block-display-title';
 import { BracketCutIcon, CardShapeControls, ExportOptRow, TimeReadout } from './workbench-controls';
 import { type AgentToolCtx, runStudioTool as runAgentStudioTool, runExternalTool as runAgentExternalTool } from './agent-tool-runner';
 import { useCaptionsOps } from './use-captions-ops';
@@ -185,10 +187,12 @@ import { useAgentContext } from './use-agent-context';
 import { useScriptCut } from './use-script-cut';
 import { useLiveProjectDocument } from './use-live-project-document';
 import type { LiveProjectPersistenceMetadata } from './live-project-document';
-import { nativeProjectLocalAssets, nativeProjectSessionMetadata } from './native-project-session';
-import { ProjectOutputSwitcher } from './project-output-switcher';
+import { nativeProjectSessionMetadata, nativeProjectSharedLocalAssets } from './native-project-session';
+import { ProjectOutputSwitcher, type OutputBatchState } from './project-output-switcher';
 import { useProjectOutputs } from './use-project-outputs';
 import { useProjectOutputRuntime } from './use-project-output-runtime';
+import { videoPickSuccessNotices, type VideoPickOptions } from './video-pick-feedback';
+import { DEFAULT_KIT_ELEMENT_BOX, fitEditableBoxIntoSafeArea, withEditableBlockGeometry } from './editable-block-geometry';
 
 
 const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
@@ -271,9 +275,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [selectedId, setSelectedIdRaw] = useState<string | null>(null);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(() => new Set());
   const setSelectedId = useCallback((id: string | null) => {
+    if (id) {
+      const block = compRef.current.blocks.find((candidate) => candidate.id === id);
+      if (block) {
+        const editable = withEditableBlockGeometry(block, compRef.current.width, compRef.current.height);
+        if (editable !== block) {
+          patchOverlays([{
+            clipId: block.id,
+            block: { templateId: editable.templateId, slots: editable.slots, box: editable.box },
+          }]);
+        }
+      }
+    }
     setSelectedIdRaw(id);
     setSelectedBlockIds(id ? new Set([id]) : new Set());
-  }, []);
+  }, [compRef, patchOverlays]);
   const selectedBlockIdsRef = useRef<Set<string>>(selectedBlockIds);
   selectedBlockIdsRef.current = selectedBlockIds;
   // Shot selection: selectedShotId = primary (anchor; framing/matte panels only act on a single shot);
@@ -382,10 +398,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       return;
     }
     el.style.display = 'block';
-    el.style.left = `${g.x * sr.width}px`;
-    el.style.top = `${g.y * sr.height}px`;
-    el.style.width = `${g.w * sr.width}px`;
-    el.style.height = `${g.h * sr.height}px`;
+    const rect = boxSelectionRect(g, sr.width, sr.height);
+    el.style.left = `${rect.left}px`;
+    el.style.top = `${rect.top}px`;
+    el.style.width = `${rect.width}px`;
+    el.style.height = `${rect.height}px`;
   }, []);
   // Full-screen shield cursor during parent-side handle drag (shield rendered at the stage): set the resize cursor per drag type
   const dragCursorRef = useRef('default');
@@ -748,6 +765,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             ...(info.baked ? { baked: true } : {}),
             ...(info.sourceWidth ? { sourceWidth: info.sourceWidth } : {}),
             ...(info.sourceHeight ? { sourceHeight: info.sourceHeight } : {}),
+            ...(info.sourceWidth2 ? { sourceWidth2: info.sourceWidth2 } : {}),
+            ...(info.sourceHeight2 ? { sourceHeight2: info.sourceHeight2 } : {}),
             t: info.t,
             elKey: info.elKey,
             srcT: info.srcT,
@@ -873,6 +892,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Export dialog: options persist (remembers last choice within this session), only runs on confirm
   const [exportOpen, setExportOpen] = useState(false);
   const [exportOpts, setExportOpts] = useState<ExportRenderOpts>(DEFAULT_RENDER_OPTS);
+  const [batchExportPending, setBatchExportPending] = useState(false);
 
   // Engine source sync: swap source whenever the main video File changes (the resident element only swaps src, the decode session doesn't churn with doc rebuilds)
   useEffect(() => {
@@ -1323,37 +1343,50 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ping();
   }, []);
 
+  /** Align a freshly-booted doc to the current playhead/selection/fit — the same set of messages the
+   *  load handler used to send, now shared by the load path and the runtime boot beacon. */
+  const alignBackground = useCallback((idx: 0 | 1) => {
+    const w = iframesRef.current[idx]?.contentWindow;
+    const post = (msg: Record<string, unknown>) => {
+      try {
+        w?.postMessage(msg, '*');
+      } catch {
+        /* not ready */
+      }
+    };
+    // canvas render mode: video frames pushed by the parent engine (hf:frame), no longer inject the File into the doc
+    post({ type: 'hf:seek', t: tRef.current });
+    post({ type: 'hf:primaryVisibility', hidden: primaryHiddenRef.current });
+    post({ type: 'hf:selectBlock', blockId: selectedIdRef.current });
+    // Force-show mechanism retired: a selected block's visibility is guaranteed by "select → move playhead to its
+    // settled moment" (parent selectedId effect); the seeked playhead on load is itself a visible moment, so no need
+    // to replay a force-show message to the new doc.
+    // fitScale isn't in the doc → after load, push the known autofit scale in
+    const fits: Record<string, number> = {};
+    for (const b of compRef.current.blocks) if (b.fitScale && b.fitScale < 0.999) fits[b.id] = b.fitScale;
+    if (Object.keys(fits).length) post({ type: 'hf:fit', fits });
+  }, []);
+
   /** A buffer finished loading: inject video/seek/restore selection; if it's the background buffer, start the ping handshake (swap only after pong). */
   const onBufLoad = useCallback(
     (idx: 0 | 1) => {
       if (!bufsRef.current.docs[idx]) return; // empty load of a cleared old buffer (srcdoc=''), ignore
-      const w = iframesRef.current[idx]?.contentWindow;
-      const post = (msg: Record<string, unknown>) => {
-        try {
-          w?.postMessage(msg, '*');
-        } catch {
-          /* not ready */
-        }
-      };
-      // canvas render mode: video frames pushed by the parent engine (hf:frame), no longer inject the File into the doc
-      post({ type: 'hf:seek', t: tRef.current });
-      post({ type: 'hf:primaryVisibility', hidden: primaryHiddenRef.current });
-      post({ type: 'hf:selectBlock', blockId: selectedIdRef.current });
-      // Force-show mechanism retired: a selected block's visibility is guaranteed by "select → move playhead to its
-      // settled moment" (parent selectedId effect); the seeked playhead on load is itself a visible moment, so no need
-      // to replay a force-show message to the new doc.
-      // fitScale isn't in the doc → after load, push the known autofit scale in
-      const fits: Record<string, number> = {};
-      for (const b of compRef.current.blocks) if (b.fitScale && b.fitScale < 0.999) fits[b.id] = b.fitScale;
-      if (Object.keys(fits).length) post({ type: 'hf:fit', fits });
       if (idx !== bufsRef.current.active) {
+        alignBackground(idx);
         startSwitchPing(idx, bufsRef.current.docs[idx]);
         return;
       }
       // The active buffer's own load (first load / video swap): resume playback if playing
-      if (playingRef.current) post({ type: 'hf:play', t: tRef.current });
+      alignBackground(idx);
+      if (playingRef.current) {
+        try {
+          iframesRef.current[idx]?.contentWindow?.postMessage({ type: 'hf:play', t: tRef.current }, '*');
+        } catch {
+          /* not ready */
+        }
+      }
     },
-    [startSwitchPing],
+    [startSwitchPing, alignBackground],
   );
 
   // In-preview edit bridge: write a block's slot back (supports items.N array paths).
@@ -1478,6 +1511,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     () => ({
       schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
       outputs: projectOutputs.outputsRef.current,
+      ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
     }),
     projectOutputs.outputs,
   );
@@ -1540,7 +1574,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // (FloatKind 'code'/ElementSourceEditor/draft settlement) is kept; to restore the entry later: set the baseline
   // codeOrigRef + setCodeBlockId(id) + setFloatWin('code'), and pin the playhead to a stable frame.
   /** Open the right-side chat area (right side is chat only; other panels dock in the asset rail). */
-  const openChat = () => setPanelOpen(true);
+  const openChat = useCallback(() => setPanelOpen(true), []);
+  const closeChat = useCallback(() => setPanelOpen(false), []);
   /** Open a tool panel (docked in the full asset rail column). The anchor param is kept for signature compatibility
    *  across entries but no longer used for positioning after docking; clicking outside doesn't close it (a docked
    *  panel is a persistent region, not a popover) — toggling is on the trigger button itself. */
@@ -1750,6 +1785,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               /* ignore */
             }
           }, 120);
+        } else if (d.nonce === 'boot' && fromBack) {
+          // Runtime boot beacon (scripts parsed, gsap loaded, listener installed): start the swap handshake
+          // NOW instead of waiting for the iframe load event. The load event waits for every eager media
+          // image in the doc, which kept "updating…" stuck on image-heavy comps and re-requested all
+          // thumbnails before the swap could settle. The ping handshake still proves liveness before swap;
+          // images that are still loading just pop in after.
+          const idx = bufsRef.current.active === 0 ? 1 : 0;
+          if (!switchPingRef.current && bufsRef.current.docs[idx]) {
+            alignBackground(idx);
+            startSwitchPing(idx, bufsRef.current.docs[idx]);
+          }
         }
         return;
       }
@@ -2181,7 +2227,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
   /** opts.asSig: a cloud-fetched File has a changed name/mtime so fileSig won't match the original sig — substitute the
    *  original sig, otherwise the draft-reconnect check fails and it's wiped as a "new project" (OPFS persistence/cloud backup also use the original sig). */
-  async function pickVideoFile(file: File, opts?: { asSig?: string; reconnect?: boolean }) {
+  async function pickVideoFile(file: File, opts?: VideoPickOptions) {
     if (!file.type.startsWith('video/') && !/\.(mp4|mov|webm|m4v)$/i.test(file.name)) {
       toast.error(t('workbench.chooseVideoFile'));
       return;
@@ -2210,6 +2256,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // showed captions — the products belong to this very video, keep them (user hit this).
       // reconnect: per-asset restore of the main source mid-session — same preserve semantics as a draft reconnect
       const sameVideoRestore = !!(pr && pr.videoSig && sig === pr.videoSig) || !!opts?.reconnect;
+      const successNotices = videoPickSuccessNotices(sameVideoRestore, opts);
       if (!sameVideoRestore) {
         setAsrSentences(null);
         setVisual(null);
@@ -2225,7 +2272,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const assetId = editorDocumentRef.current.semantics.primaryNarrativeAssetId;
         if (assetId) rememberAssetUrl(assetId, url);
         setEditorDocument(editorDocumentRef.current);
-        toast.success(t('workbench.originalVideoReconnectedDraft'));
+        if (successNotices.reconnected) toast.success(t('workbench.originalVideoReconnectedDraft'));
       } else {
         if (pr) pendingRestoreRef.current = null; // picked a different video = give up reconnecting, treat as new project
         // A real source swap keeps the historical "new edit" behavior; filling an empty track keeps
@@ -2253,7 +2300,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       tRef.current = 0;
       playhead.set(0);
       setT(0);
-      toast.success(t('workbench.loadedSize', { w: dims.width, h: dims.height }) + (p.durationSec ? ` · ${p.durationSec.toFixed(1)}s` : '') + (p.hasAudio ? '' : t('workbench.noAudioTrack')));
+      if (successNotices.loaded) {
+        toast.success(t('workbench.loadedSize', { w: dims.width, h: dims.height }) + (p.durationSec ? ` · ${p.durationSec.toFixed(1)}s` : '') + (p.hasAudio ? '' : t('workbench.noAudioTrack')));
+      }
     } catch {
       toast.error(t('workbench.couldNotReadVideo'));
     } finally {
@@ -2597,8 +2646,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       media.type === 'video' ? videoDims(media.url) : imageDims(imageThumb(media.url, 'strip')),
       new Promise<null>((res) => setTimeout(() => res(null), 1500)),
     ]);
-  /** Media block placeholder box: height set from natural aspect ratio (image/video alike, cover = contain, no crop, no letterbox), portrait images pulled in so they don't reach the top;
-   *  no dimensions → 0.72×0.4 fallback. center defaults to canvas center. */
+  /** Media block placeholder box: height set from natural aspect ratio (image/video alike, cover = contain, no crop, no letterbox).
+   *  Initial PiP placement is clamped to the shared platform-safe area; later manual movement remains unrestricted. */
   const mediaBoxFor = (dims: { w: number; h: number } | null, center?: { x: number; y: number }) => {
     let w = 0.72;
     let h = 0.4;
@@ -2613,7 +2662,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     const cx = center?.x ?? 0.5;
     const cy = center?.y ?? 0.5;
-    return { x: Math.min(Math.max(cx - w / 2, 0.02), 1 - w - 0.02), y: Math.min(Math.max(cy - h / 2, 0.02), 1 - h - 0.02), w, h };
+    return fitEditableBoxIntoSafeArea({ x: cx - w / 2, y: cy - h / 2, w, h }, compRef.current.width, compRef.current.height);
   };
   /** Panel media selected → insert a media-slot block (PiP) at the playhead, and select it for immediate drag/duration tuning.
    *  Measure image/video aspect ratio first, then land the block to scale — the loading placeholder is the right size from the start, no default-box-then-jump.
@@ -2831,7 +2880,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       base = {
         ...base,
         slots: { ...base.slots, props: kitProps ?? kitSampleProps(templateId.slice(4)) },
-        box: { x: 0.07, y: 0.34, w: 0.86, h: 0.3 },
+        box: { ...DEFAULT_KIT_ELEMENT_BOX },
         durationSec: KIT_INSERT_DURATION,
       };
     }
@@ -3165,6 +3214,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       .filter((sp) => (isMain ? !sp.clip.src : sp.clip.src === src))
       .sort((a, b) => b.editedStart - a.editedStart); // end first: earlier spans' coords stay valid
     if (spans.length === 0 && !isMain) return;
+    const removedClipIds = new Set(spans.map((span) => span.clip.id));
+    const primaryTrack = editorDocumentRef.current.timeline.tracks.find(
+      (track) => track.id === editorDocumentRef.current.semantics.primaryNarrativeTrackId,
+    );
+    const deletedAssetIds = new Set((primaryTrack?.clips ?? []).flatMap((clip) => (
+      clip.kind === 'narrative' && removedClipIds.has(clip.id) ? [clip.assetId] : []
+    )));
+    if (isMain && editorDocumentRef.current.semantics.primaryNarrativeAssetId) {
+      deletedAssetIds.add(editorDocumentRef.current.semantics.primaryNarrativeAssetId);
+    }
     const firstStart = spans.length ? spans[spans.length - 1]!.editedStart : 0;
     const common = {
       projectId,
@@ -3183,7 +3242,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       return;
     }
     pushUndoSnapshot();
-    setEditorDocument(edit.document);
+    const cleaned = pruneUnusedEditorAssets(edit.document, [...deletedAssetIds]);
+    setEditorDocument(cleaned.document);
     // Drop the source's cloud byte-rendezvous index too — otherwise the next boot resurrects the
     // deleted source from the R2 vault (loadLocalVideo miss → vault hit → source re-appears).
     const deadSigs = new Set(spans.map((sp) => sp.clip.srcSig).filter(Boolean) as string[]);
@@ -3196,6 +3256,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (isMain) {
       setVideoFile(null);
       videoSigRef.current = null;
+      asrRef.current = null;
+      setAsrSentences(null);
+      visualRef.current = null;
+      setVisual(null);
       if (cloudMediaRef.current.video) cloudMediaRef.current = { ...cloudMediaRef.current, video: undefined };
     }
     setSelectedShotId(null);
@@ -3273,6 +3337,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     redoStackRef.current.push(editorDocumentRef.current);
     setEditorDocument(prev);
+    // Transcript caches are runtime mirrors of V2. A caption-copy undo must restore them from the
+    // same snapshot immediately; otherwise the caption relay effect would write the newer text back
+    // over the restored document on the next render.
+    activateOutputDocumentRef.current(prev, compRef.current);
     setSelectedId(null);
     setSelectedShotId(null);
     toast.success(t('workbench.undone') + (stack.length ? t('workbench.nMoreUndoSteps', { n: stack.length }) : ''));
@@ -3291,6 +3359,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     undoStackRef.current.push(editorDocumentRef.current);
     if (undoStackRef.current.length > UNDO_CAP) undoStackRef.current.shift();
     setEditorDocument(next);
+    activateOutputDocumentRef.current(next, compRef.current);
     setSelectedId(null);
     setSelectedShotId(null);
     toast.success(t('workbench.redone') + (redoStackRef.current.length ? t('workbench.nMoreRedoSteps', { n: redoStackRef.current.length }) : ''));
@@ -3503,10 +3572,21 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     return raw.filter(([, v]) => !seen.has(v.toLowerCase()) && (seen.add(v.toLowerCase()), true));
   })();
   // Agent-facing context (roster / situation snapshot / transcript) — see use-agent-context.ts.
+  const getActiveOutputForAgent = () => {
+    const current = projectOutputs.outputsRef.current;
+    const ordered = [current.active, ...current.inactive].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
+    const position = Math.max(0, ordered.findIndex((output) => output.id === current.active.id)) + 1;
+    return {
+      id: current.active.id,
+      title: current.active.title || t('workbench.untitledOutput'),
+      position,
+      total: ordered.length,
+    };
+  };
   const { chatElements, getChatBody, transcriptForAgent, ensureClipTranscripts } = useAgentContext({
     comp, compRef, documentRef: editorDocumentRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, visualRef, videoSigRef,
     videoFileRef, clipAsrRef, clipAsrBusyRef, clipAsrFailRef,
-    setClipAsr, matteFileForShot,
+    setClipAsr, matteFileForShot, getActiveOutput: getActiveOutputForAgent,
   });
   // Live comp accessor for chat receipt previews: stable identity (StudioChat is memo'd), reads the ref —
   // the chat card re-renders off the tool-progress store, not off comp state.
@@ -3519,7 +3599,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Caption ops (style / line edits / preset re-lay / bilingual) — see use-captions-ops.ts. runTool goes through a
   // ref because the dispatcher ctx below needs the hook's outputs first (the tools only run from async handlers).
   const runToolRef = useRef<(toolId: string, input: Record<string, unknown>) => Promise<StudioToolResult>>(() => Promise.resolve({ ok: false, error: 'not ready' }));
-  const { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, removeCaptionLayer } = useCaptionsOps({
+  const { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer } = useCaptionsOps({
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
     setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef,
     documentRef: editorDocumentRef, setDocument: setEditorDocument, ensureShots, stepAsr, refreshAsr,
@@ -3544,7 +3624,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Clip insertion (multi-source main track) — see use-clip-insert.ts. Same runTool ref indirection as captions.
-  const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertLocalClipAt, clipPending, clipStrips } = useClipInsert({
+  const { videoDurationOf, insertClipCore, recoverLocalClips, reconnectIndexedSource, insertLibraryClipAt, insertInitialLocalMedia, clipPending, clipStrips } = useClipInsert({
     comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef,
     documentRef: editorDocumentRef, setDocument: setEditorDocument, rememberAssetUrl, setSelectedId,
     onPrimarySource: activatePrimarySourceRuntime,
@@ -3561,6 +3641,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     setFloatWinRaw(null);
     undoStackRef.current = [];
     redoStackRef.current = [];
+    chatRef.current?.clearElementPills();
     tRef.current = 0;
     playhead.set(0);
     setT(0);
@@ -3569,7 +3650,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     projectId,
     activeId: projectOutputs.outputs.active.id,
     switchTo: projectOutputs.switchTo,
-    duplicate: projectOutputs.duplicate,
+    create: projectOutputs.create,
+    listOutputIds: () => [
+      projectOutputs.outputsRef.current.active,
+      ...projectOutputs.outputsRef.current.inactive,
+    ].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt).map((output) => output.id),
+    remove: projectOutputs.remove,
     setDocument: setEditorDocument,
     getComposition: () => compRef.current,
     onDocumentActivated: (document, composition) => activateOutputDocumentRef.current(document, composition),
@@ -3594,13 +3680,101 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     })),
   ].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
   const switchOutput = (id: string) => {
-    void outputRuntime.switchOutput(id).then((changed) => {
-      if (changed) toast.success(t('workbench.outputSwitched'));
+    void outputRuntime.switchOutput(id);
+  };
+  const createOutput = () => {
+    outputRuntime.createOutput('');
+  };
+  const requestDeleteOutput = (id: string) => {
+    const output = outputTabs.find((item) => item.id === id);
+    if (!output || outputTabs.length <= 1) return;
+    const title = output.title || t('workbench.untitledOutput');
+    void (async () => {
+      const ok = await confirm({
+        title: t('workbench.deleteOutputConfirmTitle'),
+        description: t('workbench.deleteOutputConfirmDescription', { title }),
+        confirmLabel: t('workbench.deleteOutput'),
+        tone: 'danger',
+      });
+      if (ok) await outputRuntime.deleteOutput(id);
+    })();
+  };
+  // ---- Expanded output list: selection + sequential batch export ----
+  const [outputsExpanded, setOutputsExpanded] = useState(false);
+  const [outputSelected, setOutputSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [outputBatch, setOutputBatch] = useState<OutputBatchState | null>(null);
+  const outputBatchCancelRef = useRef(false);
+  // The batch loop spans many renders (each switch/export re-renders); refs keep it reading the
+  // CURRENT callbacks/state instead of the closures captured when the loop started.
+  const activeOutputIdRef = useRef(projectOutputs.outputs.active.id);
+  activeOutputIdRef.current = projectOutputs.outputs.active.id;
+  const switchOutputFnRef = useRef(outputRuntime.switchOutput);
+  switchOutputFnRef.current = outputRuntime.switchOutput;
+  const exportVideoFnRef = useRef(exportVideo);
+  exportVideoFnRef.current = exportVideo;
+  const toggleOutputsExpanded = () => {
+    if (outputBatch?.running) return;
+    const next = !outputsExpanded;
+    setOutputsExpanded(next);
+    if (!next) {
+      setOutputSelected(new Set());
+      setOutputBatch(null);
+    }
+  };
+  const toggleOutputSelect = (id: string) => {
+    setOutputSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
-  const duplicateOutput = () => {
-    outputRuntime.duplicateOutput(t('workbench.outputN', { n: outputTabs.length + 1 }));
-    toast.success(t('workbench.outputDuplicated'));
+  const runBatchExport = () => {
+    if (outputBatch?.running || exporting) return;
+    if (!batchExportTargets().length) return;
+    // Same config step as the normal export flow: the dialog's start button runs startBatchExport.
+    setBatchExportPending(true);
+    setExportOpen(true);
+  };
+  // Batch target = selected outputs, or every output when nothing is selected; empty versions
+  // (no video / no duration) are skipped automatically.
+  const batchExportTargets = () => {
+    const selectedIds = outputTabs.map((o) => o.id).filter((id) => outputSelected.has(id));
+    const base = selectedIds.length ? selectedIds : outputTabs.map((o) => o.id);
+    return outputTabs.filter((o) => base.includes(o.id) && o.durationSec).map((o) => o.id);
+  };
+  const startBatchExport = (opts: ExportRenderOpts) => {
+    const ids = batchExportTargets();
+    if (!ids.length || outputBatch?.running) return;
+    setExportOpen(false);
+    setBatchExportPending(false);
+    outputBatchCancelRef.current = false;
+    setPlaying(false);
+    setOutputBatch({ running: true, total: ids.length, done: 0, currentId: null, doneIds: [], failedIds: [] });
+    void (async () => {
+      const doneIds: string[] = [];
+      const failedIds: string[] = [];
+      for (const id of ids) {
+        if (outputBatchCancelRef.current) break;
+        setOutputBatch((s) => (s ? { ...s, currentId: id } : s));
+        let ok = id === activeOutputIdRef.current || (await switchOutputFnRef.current(id));
+        if (outputBatchCancelRef.current) break;
+        if (ok) {
+          const r = await exportVideoFnRef.current(opts);
+          if (outputBatchCancelRef.current && !r.ok) break; // canceled mid-render: don't count it as failed
+          ok = !!r.ok;
+        }
+        (ok ? doneIds : failedIds).push(id);
+        setOutputBatch((s) =>
+          s ? { ...s, done: doneIds.length + failedIds.length, currentId: null, doneIds: [...doneIds], failedIds: [...failedIds] } : s,
+        );
+      }
+      setOutputBatch((s) => (s ? { ...s, running: false, currentId: null } : s));
+    })();
+  };
+  const cancelBatchExport = () => {
+    outputBatchCancelRef.current = true;
+    cancelExport();
   };
   // Element generation / block element ops (gen panel, floating toolbar) — see use-element-ops.ts.
   const { generateElementStandalone, insertGeneratedElement, bumpBlockLayer, togglePersonLayer, saveBlockAsElement, syncBlockContent, syncBusyId, mentionAsset } = useElementOps({
@@ -3628,34 +3802,36 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     ]);
   };
   const listProjectOutputsForAgent = () =>
-    outputTabs.map((output) => ({
+    outputTabs.map((output, index) => ({
       id: output.id,
-      title: output.title || t('workbench.outputN', { n: output.order + 1 }),
+      position: index + 1,
+      title: output.title || t('workbench.untitledOutput'),
       active: output.id === projectOutputs.outputs.active.id,
-      order: output.order,
       durationSec: output.durationSec,
       ...(output.skill ? { skill: output.skill } : {}),
     }));
   const createProjectOutputForAgent = (title: string, skill?: string) => {
-    const created = outputRuntime.duplicateOutput(title, skill);
+    const created = outputRuntime.createOutput(title, skill);
     return { id: created.id, title: created.title || title };
+  };
+  const duplicateProjectOutputForAgent = (title: string) => {
+    const duplicated = projectOutputs.duplicate(title);
+    return { id: duplicated.id, title: duplicated.title || title };
   };
   const renameProjectOutputForAgent = (id: string, title: string) => {
     if (!outputTabs.some((output) => output.id === id)) return false;
     projectOutputs.rename(id, title);
     return true;
   };
-  const deleteProjectOutputForAgent = (id: string) => {
-    if (id === projectOutputs.outputs.active.id || !projectOutputs.outputs.inactive.some((output) => output.id === id)) return false;
-    projectOutputs.remove(id);
-    return true;
-  };
+  const deleteProjectOutputForAgent = (id: string) => outputRuntime.deleteOutput(id);
   const switchProjectOutputForAgent = (id: string) =>
     id === projectOutputs.outputs.active.id ? Promise.resolve(true) : outputRuntime.switchOutput(id);
   const agentToolCtx: AgentToolCtx = {
     projectId, documentRef: editorDocumentRef, resolveAssetUrl, setDocument: setEditorDocument,
     listProjectOutputs: listProjectOutputsForAgent,
+    resolveProjectOutput: projectOutputs.resolve,
     createProjectOutput: createProjectOutputForAgent,
+    duplicateProjectOutput: duplicateProjectOutputForAgent,
     switchProjectOutput: switchProjectOutputForAgent,
     renameProjectOutput: renameProjectOutputForAgent,
     deleteProjectOutput: deleteProjectOutputForAgent,
@@ -3667,7 +3843,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     resizeCutTransition, splitAtPlayhead, trimAtPlayhead, deleteShot,
     audioMount: audioOps.mountAudioFile, audioPatch: audioOps.patchClip, audioRemove: audioOps.removeClip,
     audioRemoveMany: audioOps.removeClips, audioSplit: audioOps.splitClip, setDenoise: denoiseOps.setDenoise,
-    videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, removeCaptionLayer,
+    videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset, relayoutCaptions, removeCaptionLayer,
     agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   };
   const runStudioTool = (toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }) => runAgentStudioTool(agentToolCtx, toolId, input, opts);
@@ -3684,7 +3860,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     getState: () => {
       const outputs = listProjectOutputsForAgent();
       const activeOutput = outputs.find((output) => output.active)!;
-      return `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\nActive output: ${activeOutput.id} · ${activeOutput.title} (${outputs.length} total; use list_outputs/switch_output for deliverables).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`;
+      return `<composition_state>\nLIVE — the studio tab is open on project ${projectId}; bridge tools edit THIS project (switch_project only retargets OFFLINE mode).\nActive output: #${activeOutput.position} · ${activeOutput.id} · ${activeOutput.title} (${outputs.length} total; use list_outputs/switch_output for deliverables).\n${buildSituation(getChatBody() as ChatSituation)}\n</composition_state>`;
     },
     onDisplaced: () => {
       if (displacedRef.current) return;
@@ -3736,6 +3912,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             context: {
               schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
               outputs: projectOutputs.outputsRef.current,
+              ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
             },
             videoSig: videoSigRef.current,
             videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
@@ -3750,6 +3927,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       context: {
         schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
         outputs: projectOutputs.outputsRef.current,
+        ...(localAssetIndexKnownRef.current ? { localAssets: localAssetIndexRef.current } : {}),
       },
       videoSig: videoSigRef.current ?? (videoFileRef.current ? fileSig(videoFileRef.current) : null),
       videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
@@ -3768,7 +3946,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const c = compRef.current;
     if (selectedId) {
       const b = c.blocks.find((x) => x.id === selectedId);
-      if (b) el = { id: b.id, label: b.label?.slice(0, 16) || blockKind(b), kind: blockKind(b), isShot: false };
+      if (b) el = { id: b.id, label: blockDisplayTitle(b), kind: blockKind(b), isShot: false };
     } else if (selectedShotId) {
       const i = (c.shots ?? []).findIndex((s) => s.id === selectedShotId);
       if (i >= 0) el = { id: selectedShotId, label: t('workbench.shotN', { n: i + 1 }), kind: 'shot', isShot: true };
@@ -3898,7 +4076,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       pushUndoSnapshot();
       setEditorDocument(edit.document);
     },
-    onInsertClipAt: (t: number) => void insertLocalClipAt(t),
+    onAddInitialMedia: () => void insertInitialLocalMedia(),
     onOpenTransition: openTransitionAt,
     onResizeTransition: resizeCutTransition,
     onDropAsset: (t: number) => {
@@ -3970,11 +4148,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const hydrateNativeSession = useCallback((document: EditorDocumentV2, composition?: Composition, replace = false) => {
     const metadata = nativeProjectSessionMetadata(document, composition);
     if (replace || (!cloudMediaRef.current.video && !cloudMediaRef.current.clips)) cloudMediaRef.current = metadata.cloudMedia;
-    if (metadata.localAssets.length || !localAssetIndexKnownRef.current) {
-      const merged = new Map(metadata.localAssets.map((entry) => [entry.sig, entry]));
-      for (const entry of localAssetIndexRef.current) merged.set(entry.sig, entry);
-      setLocalAssetIndex([...merged.values()]);
-    }
     if (replace || (metadata.mainTranscript?.length && !asrRef.current?.length)) {
       asrRef.current = metadata.mainTranscript ?? null;
       setAsrSentences(metadata.mainTranscript ?? null);
@@ -3983,12 +4156,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       clipAsrRef.current = metadata.clipTranscripts;
       setClipAsr(metadata.clipTranscripts);
     }
-  }, [setLocalAssetIndex]);
+  }, []);
   activateOutputDocumentRef.current = (document, composition) => hydrateNativeSession(document, composition, true);
 
   const applyDraft = useCallback((d: StudioDraft) => {
     pendingRestoreRef.current = d;
     projectOutputs.hydrate(d.context?.outputs);
+    setLocalAssetIndex(nativeProjectSharedLocalAssets(d.document, d.context));
     coverThumbRef.current = d.coverThumb ?? null;
     const migrated = migrateOfficialComponentPayloads(d.document, d.comp);
     const restoredDocument = migrated.document;
@@ -4130,7 +4304,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           const mutationRev = localAssetIndexMutationRevRef.current;
           const remote = await studioProviders().projects.load(projectId);
           if (dead || ticket !== request || mutationRev !== localAssetIndexMutationRevRef.current) return;
-          if (remote) setLocalAssetIndex(nativeProjectLocalAssets(remote.document));
+          if (remote) setLocalAssetIndex(nativeProjectSharedLocalAssets(remote.document, remote.context));
         });
       }, 1800);
     };
@@ -4282,7 +4456,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               onFrameApplied={onFrameApplied}
               storageKey={chatKeyFor(projectId)}
               onThreadsChange={bumpChatRev}
-              onClose={() => setPanelOpen(false)}
+              onClose={closeChat}
             />
           </div>
         </div>
@@ -4307,17 +4481,37 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         <div className="flex min-h-0 min-w-0 flex-1">
         {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             No overflow-hidden: the floating toolbar must follow a component past the stage edge without being clipped (frame clipping is on the inner stage layer) */}
-        <div ref={previewAreaRef} className="bg-panel-2 relative flex min-h-0 min-w-0 flex-1 items-center justify-center p-3">
-          <ProjectOutputSwitcher
-            outputs={outputTabs}
-            activeId={projectOutputs.outputs.active.id}
-            label={t('workbench.outputSwitcher')}
-            duplicateLabel={t('workbench.duplicateOutput')}
-            outputName={(n) => t('workbench.outputN', { n })}
-            switching={outputRuntime.switching}
-            onSwitch={switchOutput}
-            onDuplicate={duplicateOutput}
-          />
+        <div className="bg-panel-2 flex min-h-0 min-w-0 flex-1 flex-col p-3">
+          {/* Output tabs own a real header row (flow layout: it grows in place when the list is
+              expanded to two rows, and the preview area's fit observer reclaims the rest). z-40:
+              the expand toggle hangs below the pill into the canvas region. */}
+          <div className="relative z-40 mb-2 flex w-full shrink-0 justify-center pt-2">
+            <ProjectOutputSwitcher
+              outputs={outputTabs}
+              activeId={projectOutputs.outputs.active.id}
+              label={t('workbench.outputSwitcher')}
+              newLabel={t('workbench.newOutput')}
+              deleteLabel={t('workbench.deleteOutput')}
+              untitledLabel={t('workbench.untitledOutput')}
+              expandLabel={t('workbench.expandOutputs')}
+              collapseLabel={t('workbench.collapseOutputs')}
+              expanded={outputsExpanded}
+              switching={outputRuntime.switching}
+              selected={outputSelected}
+              batch={outputBatch}
+              exportPct={exportPct}
+              onSwitch={switchOutput}
+              onCreate={createOutput}
+              onDelete={requestDeleteOutput}
+              onToggleExpanded={toggleOutputsExpanded}
+              onToggleSelect={toggleOutputSelect}
+              onExportSelected={runBatchExport}
+              onCancelBatch={cancelBatchExport}
+            />
+          </div>
+          {/* Only the remaining canvas region participates in fit measurement; otherwise the new
+              header height would be counted as drawable space and push the stage below the fold. */}
+          <div ref={previewAreaRef} className="relative flex min-h-0 min-w-0 w-full flex-1 items-center justify-center">
           {/* Canvas-ratio picker (bottom-right): the ratio is a project decision — seeded by the first
               inserted source, switchable here; sources contain-fit so switching never crops content. */}
           <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
@@ -4375,7 +4569,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 >
                   {busyImport ? <Loader2 size={24} className="animate-spin" /> : <Upload size={24} />}
                   <div className="text-[12px] font-medium">{busyImport ? t('workbench.reading') : t('workbench.startWithAnyMedia')}</div>
-                  <div className="text-ink-4 text-center text-[10.5px]">{t('workbench.emptyCanvasHint')}</div>
                 </button>
               )}
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
@@ -4453,22 +4646,27 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   // is analytic — same splitter as the render, so it tracks font-size changes instantly.
                   const csSel = resolveCaptionStyle(comp);
                   const selWords = (sb.slots.words ?? []) as { text: string; start: number; end: number }[];
-                  const mainLines = sb.slots.cue === true && selWords.length ? Math.max(1, captionLineSegments(selWords, getCaptionPreset(csSel.preset), csSel.wPct ?? 56, csSel.scale, comp.width).length) : 1;
+                  const mainPresetSel0 = getCaptionPreset(csSel.preset);
+                  const mainPresetSel = csSel.bg === undefined ? mainPresetSel0 : { ...mainPresetSel0, bg: csSel.bg ?? undefined };
+                  const mainLines = sb.slots.cue === true && selWords.length ? Math.max(1, captionLineSegments(selWords, mainPresetSel, csSel.wPct ?? 56, csSel.scale, comp.width, { bold: csSel.bold }).length) : 1;
                   const subStyleSel = (() => {
                     const base = resolveSubCaptionStyle(comp);
                     if (csSel.sub?.yPct != null) return base; // explicit anchor: bottom convention already
                     // Default follow-under-main: the derived bottom accounts for ONE line — push it down for extra lines
                     const subText0 = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
                     if (!subText0) return base;
-                    const subP0 = getCaptionPreset(base.preset);
-                    const n0 = Math.max(1, captionLineSegments(wordsFromText(subText0, 0, 1), subP0, base.wPct ?? 56, base.scale, comp.width).length);
+                    const subPBase = getCaptionPreset(base.preset);
+                    const subP0 = base.bg === undefined ? subPBase : { ...subPBase, bg: base.bg ?? undefined };
+                    const n0 = Math.max(1, captionLineSegments(wordsFromText(subText0, 0, 1), subP0, base.wPct ?? 56, base.scale, comp.width, { bold: base.bold }).length);
                     if (n0 <= 1) return base;
                     const subFs0 = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * base.scale));
                     const extra = (subFs0 * 1.35 + Math.round(subFs0 * 0.15)) * (n0 - 1);
                     return { ...base, yPct: Math.min(99, base.yPct + (extra / comp.height) * 100) };
                   })();
                   const subText = typeof sb.slots.sub === 'string' ? sb.slots.sub : '';
-                  const subLines = subText ? Math.max(1, captionLineSegments(wordsFromText(subText, 0, 1), getCaptionPreset(subStyleSel.preset), subStyleSel.wPct ?? 56, subStyleSel.scale, comp.width).length) : 1;
+                  const subPresetSel0 = getCaptionPreset(subStyleSel.preset);
+                  const subPresetSel = subStyleSel.bg === undefined ? subPresetSel0 : { ...subPresetSel0, bg: subStyleSel.bg ?? undefined };
+                  const subLines = subText ? Math.max(1, captionLineSegments(wordsFromText(subText, 0, 1), subPresetSel, subStyleSel.wPct ?? 56, subStyleSel.scale, comp.width, { bold: subStyleSel.bold }).length) : 1;
                   return (
                     <>
                     {/* Selection sub-target: clicking the main line shows the main handles, the translation line shows the translation handles (two instances of the same component, never overlaid) */}
@@ -5054,6 +5252,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   </div>
                 </div>
               )}
+          </div>
           </div>
         </div>
 
@@ -5652,7 +5851,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setExportOpen(true)}
+                onClick={() => { setBatchExportPending(false); setExportOpen(true); }}
                 disabled={exporting || publishing || !hasContent}
                 className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
               >
@@ -5662,10 +5861,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </TooltipTrigger>
             <TooltipContent>{t('tools.export_video.label')}</TooltipContent>
           </Tooltip>
-          <Dialog open={exportOpen} onOpenChange={(v) => { if (!v && exporting) return; setExportOpen(v); }}>
+          <Dialog open={exportOpen} onOpenChange={(v) => { if (!v && exporting) return; setExportOpen(v); if (!v) setBatchExportPending(false); }}>
             <DialogContent className="max-w-[320px]" showCloseButton={!exporting}>
               <DialogHeader>
-                <DialogTitle>{t('tools.export_video.label')}</DialogTitle>
+                <DialogTitle>{batchExportPending ? `${t('workbench.batchExport')} · ${batchExportTargets().length}` : t('tools.export_video.label')}</DialogTitle>
               </DialogHeader>
               {exporting ? (
                 // Export dialog stays open: progress lives here, only "cancel export" can close it (overlay/Esc are blocked)
@@ -5723,8 +5922,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <button
                   type="button"
                   onClick={() => {
-                    // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
-                    void exportVideo(exportOpts).finally(() => setExportOpen(false));
+                    if (batchExportPending) {
+                      void startBatchExport(exportOpts);
+                    } else {
+                      // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
+                      void exportVideo(exportOpts).finally(() => setExportOpen(false));
+                    }
                   }}
                   className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
                 >

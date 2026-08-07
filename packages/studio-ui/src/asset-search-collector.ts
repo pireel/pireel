@@ -1,6 +1,6 @@
 'use client';
 
-import { bgmSearchTags, officialStickerSearchTags, type AssetSearchDocument } from '@pireel/studio-engine/asset-search';
+import { bgmSearchTags, officialStickerSearchTags, type AssetSearchDocument, type AssetSearchScope } from '@pireel/studio-engine/asset-search';
 import { kitComponents } from '@pireel/studio-engine/kit-templates';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { studioProviders } from '@pireel/studio-engine/providers';
@@ -29,7 +29,14 @@ const validDims = (w: number | null | undefined, h: number | null | undefined) =
 
 /** Gather all searchable library metadata available to an open Studio tab. Every request is
  * fail-soft so the local/kit portions still work in the zero-backend OSS shell. */
-export async function collectAssetSearchDocuments(projectId: string, localAssets: readonly LocalAssetIndexEntry[]): Promise<AssetSearchDocument[]> {
+export async function collectAssetSearchDocuments(
+  projectId: string,
+  localAssets: readonly LocalAssetIndexEntry[],
+  scope: AssetSearchScope = 'all',
+): Promise<AssetSearchDocument[]> {
+  const includeMine = scope === 'all' || scope === 'mine';
+  const includeCloud = scope === 'all' || scope === 'cloud';
+  const includeOfficial = scope === 'all' || scope === 'official';
   const getUploads = (kind: 'image' | 'video' | 'audio') =>
     fetch(`/api/me/materials?tab=global&kind=${kind}&limit=200`)
       .then((response) => (response.ok ? response.json() : null))
@@ -37,19 +44,19 @@ export async function collectAssetSearchDocuments(projectId: string, localAssets
       .catch(() => [] as MaterialItem[]);
 
   const [images, videos, audio, genImages, genVideos, genAudio, syncedElements, official] = await Promise.all([
-    getUploads('image'),
-    getUploads('video'),
-    getUploads('audio'),
-    listStudioGens(projectId, 'image', 100).catch(() => []),
-    listStudioGens(projectId, 'video', 100).catch(() => []),
-    listStudioGens(projectId, 'audio', 100).catch(() => []),
-    studioProviders().elements?.list(projectId).catch(() => null) ?? Promise.resolve(null),
-    fetch('/api/studio/official-assets')
+    includeCloud ? getUploads('image') : Promise.resolve([] as MaterialItem[]),
+    includeCloud ? getUploads('video') : Promise.resolve([] as MaterialItem[]),
+    includeCloud ? getUploads('audio') : Promise.resolve([] as MaterialItem[]),
+    includeCloud ? listStudioGens(projectId, 'image', 100).catch(() => []) : Promise.resolve([]),
+    includeCloud ? listStudioGens(projectId, 'video', 100).catch(() => []) : Promise.resolve([]),
+    includeCloud ? listStudioGens(projectId, 'audio', 100).catch(() => []) : Promise.resolve([]),
+    includeCloud ? (studioProviders().elements?.list(projectId).catch(() => null) ?? Promise.resolve(null)) : Promise.resolve(null),
+    includeOfficial ? fetch('/api/studio/official-assets')
       .then((response): Promise<OfficialAssetsResponse> => (response.ok ? (response.json() as Promise<OfficialAssetsResponse>) : Promise.resolve({})))
-      .catch(() => ({} as OfficialAssetsResponse)),
+      .catch(() => ({} as OfficialAssetsResponse)) : Promise.resolve({} as OfficialAssetsResponse),
   ]);
 
-  const docs: AssetSearchDocument[] = localAssets.map((entry) => ({
+  const docs: AssetSearchDocument[] = (includeMine ? localAssets : []).map((entry) => ({
     assetId: `local:${entry.sig}`,
     scope: 'mine',
     kind: entry.kind ?? 'video',
@@ -96,7 +103,7 @@ export async function collectAssetSearchDocuments(projectId: string, localAssets
     }));
   }
 
-  const localElements = loadElementEntries(projectId);
+  const localElements = includeCloud ? loadElementEntries(projectId) : [];
   const elements = syncedElements
     ? [...syncedElements, ...localElements.filter((local) => !syncedElements.some((cloud) => cloud.id === local.id))]
     : localElements;
@@ -155,31 +162,36 @@ export async function collectAssetSearchDocuments(projectId: string, localAssets
     });
   }
 
-  for (const component of Object.keys(kitComponents)) {
-    docs.push({
-      assetId: `kit:${component}`,
-      scope: 'official',
-      kind: 'element',
-      origin: 'kit',
-      label: t(`engine.kit.${component}`),
-      fields: { tags: ['kit', 'component', '组件'] },
-      availability: 'ready',
-      locator: { component },
-    });
-  }
-  const locale = studioLocale();
-  for (const template of ELEMENT_TEMPLATES) {
-    const prompt = localizedTemplatePrompt(template, locale);
-    docs.push({
-      assetId: `template:${template.id}`,
-      scope: 'official',
-      kind: 'element',
-      origin: 'template',
-      label: template.title ? t(template.title) : template.id,
-      fields: { category: template.category, prompt },
-      availability: 'ready',
-      locator: { templateId: template.id, prompt },
-    });
+  if (includeOfficial) {
+    for (const [component, definition] of Object.entries(kitComponents)) {
+      docs.push({
+        assetId: `kit:${component}`,
+        scope: 'official',
+        kind: 'element',
+        origin: 'kit',
+        label: t(`engine.kit.${component}`),
+        fields: {
+          tags: ['kit', 'component', '组件', ...definition.searchTerms],
+          description: definition.summary,
+        },
+        availability: 'ready',
+        locator: { component },
+      });
+    }
+    const locale = studioLocale();
+    for (const template of ELEMENT_TEMPLATES) {
+      const prompt = localizedTemplatePrompt(template, locale);
+      docs.push({
+        assetId: `template:${template.id}`,
+        scope: 'official',
+        kind: 'element',
+        origin: 'template',
+        label: template.title ? t(template.title) : template.id,
+        fields: { category: template.category, prompt },
+        availability: 'ready',
+        locator: { templateId: template.id, prompt },
+      });
+    }
   }
   return docs;
 }

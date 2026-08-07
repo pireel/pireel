@@ -8,13 +8,15 @@
  * Line editing: click a line = seek the video to its spot + edit IN PLACE on the same node
  * (contentEditable; background-only editing state — no border, no size change, zero jitter). Edits
  * write back to the TRANSCRIPT (single source of truth: captions re-lay, agents' read_script and the
- * script panel all see the fix; timing untouched, word timing redistributed proportionally). With
+ * script panel all see the fix; timing untouched). The editable DOM stays local for the entire input
+ * session and publishes once on blur/Enter, so IME/native undo never triggers transcript re-tokenizing
+ * while the user is still typing. With
  * bilingual on, each row shows the translation line + a per-line retranslate button; translations
  * only change when the user asks (the retranslate button / a full re-translate) — never automatically.
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Bold, Check, ChevronDown, Languages, Loader2 } from 'lucide-react';
+import { Bold, Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
 import { Switch } from '@pireel/ui/switch';
 import { t } from './i18n';
 import {
@@ -89,6 +91,7 @@ export interface CaptionStyleCtl {
 export function CaptionsPanel({
   comp,
   onPickPreset,
+  onRelayout,
   onRemove,
   styleCtl,
   translation,
@@ -105,6 +108,8 @@ export function CaptionsPanel({
   comp: Composition;
   /** Click a style card: globally swap the preset for all sentence-level captions (if none exist yet, lays a layer from the voiceover script). */
   onPickPreset: (presetId: string) => void;
+  /** Explicitly regenerate cue boundaries from current canvas/font metrics. */
+  onRelayout?: () => void;
   /** Remove the whole sentence-level caption layer + clear global style. */
   onRemove: () => void;
   /** Per-line (main / translation) style state + patch callbacks. */
@@ -117,9 +122,8 @@ export function CaptionsPanel({
   rows?: CaptionLineRow[];
   /** Row under the playhead (highlight + auto-scroll target). */
   activeKey?: string | null;
-  /** Write an edited line back to the transcript (timing untouched). phase: 'live' = debounced
-   *  keystroke (canvas updates in real time, no retranslate yet) · 'commit' = blur/Enter ·
-   *  'revert' = Esc restored the original text. */
+  /** Write an edited line back to the transcript (timing untouched). The panel publishes only
+   *  `commit`; `revert` is retained for callers that want to observe Esc. */
   onEditLine?: (row: CaptionLineRow, text: string, phase?: 'live' | 'commit' | 'revert') => void;
   /** Manually edit a cue's translation (bilingual second row); null clears it. Same phases as onEditLine. */
   onEditSubLine?: (row: CaptionLineRow, text: string | null, phase?: 'live' | 'commit' | 'revert') => void;
@@ -175,14 +179,6 @@ export function CaptionsPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingKey, editingPart]);
-  /** Live path: every keystroke goes straight into the real pipeline (transcript → caption re-lay →
-   *  preview) — the canvas caption follows the typing with no debounce (user-locked; the frozen-vdom
-   *  editing node keeps the caret safe under per-keystroke re-renders). */
-  const scheduleLive = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
-    const next = (el.textContent ?? '').replace(/\s+/g, ' ').trim();
-    if (part === 'sub') onEditSubLine?.(row, next || null, 'live');
-    else if (next) onEditLine?.(row, next, 'live');
-  };
   const commit = (row: CaptionLineRow, el: HTMLElement, part: 'text' | 'sub') => {
     setEditingKey(null);
     const frozen = frozenTextRef.current;
@@ -231,6 +227,17 @@ export function CaptionsPanel({
                   onChange={(v) => (v ? onPickPreset(styleCtl.main.preset) : onRemove())}
                 />
               }
+              trailing={hasCaptions && onRelayout ? (
+                <button
+                  type="button"
+                  onClick={onRelayout}
+                  title={t('captions.relayoutHint')}
+                  aria-label={t('captions.relayout')}
+                  className="border-line text-ink-3 hover:border-accent hover:text-ink flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
+                >
+                  <RefreshCw size={12} />
+                </button>
+              ) : undefined}
             />
             {/* Translation row (right under the main line): language dropdown first, then the same
                 style controls once a language is active. Replaces the old bottom "bilingual" strip. */}
@@ -305,7 +312,6 @@ export function CaptionsPanel({
                     setEditingPart('text');
                     setEditingKey(row.key);
                   }}
-                  onInput={(e) => editing && scheduleLive(row, e.currentTarget, 'text')}
                   onBlur={(e) => editing && commit(row, e.currentTarget, 'text')}
                   onKeyDown={(e) => {
                     if (!editing) return;
@@ -342,7 +348,6 @@ export function CaptionsPanel({
                       setEditingPart('sub');
                       setEditingKey(row.key);
                     }}
-                    onInput={(e) => editingSub && scheduleLive(row, e.currentTarget, 'sub')}
                     onBlur={(e) => editingSub && commit(row, e.currentTarget, 'sub')}
                     onKeyDown={(e) => {
                       if (!editingSub) return;
@@ -394,7 +399,7 @@ const BG_SWATCHES = ['#101114', '#FFFFFF', '#FF2E4D', '#FFD24D', '#3F6DF6'];
 
 /** One compact style row (main line / translation line): preset picker + font size + text color + backdrop.
  *  All pickers are on-demand popovers — nothing takes permanent panel space. */
-function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset, onPatch }: {
+function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden, onPreset, onPatch }: {
   label: string;
   /** Resolved current style for this line. */
   style: CaptionStyle;
@@ -404,6 +409,8 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
   isSub?: boolean;
   /** Rendered between the label and the style controls (the translation row's language dropdown). */
   leading?: React.ReactNode;
+  /** Optional row action after the style controls. */
+  trailing?: React.ReactNode;
   /** Hide the style controls (translation row before a language is active — only label + leading show). */
   styleHidden?: boolean;
   /** Preset picked (null = follow main; only offered on the translation row). */
@@ -526,6 +533,7 @@ function StyleRow({ label, style, active, isSub, leading, styleHidden, onPreset,
       )}
       </>
       )}
+      {trailing}
     </div>
   );
 }

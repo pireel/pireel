@@ -2,15 +2,18 @@
 
 import { useCallback, useRef, useState } from 'react';
 import {
+  createBlankProjectOutput,
   createProjectOutputs,
   deleteInactiveProjectOutput,
-  duplicateProjectOutput,
+  duplicateActiveProjectOutput,
   normalizeProjectOutputs,
   renameProjectOutput,
+  resolveProjectOutputId,
   switchProjectOutput,
   type ActiveProjectOutputState,
   type StudioProjectOutputSnapshot,
   type StudioProjectOutputs,
+  type ProjectOutputReference,
 } from '@pireel/studio-engine/project-outputs';
 
 /** State-only controller for a project's deliverables. Runtime video reconnection belongs to the
@@ -44,9 +47,18 @@ export function useProjectOutputs(getActiveState: () => ActiveProjectOutputState
     [getActiveState, setOutputs],
   );
 
-  const duplicate = useCallback(
+  const create = useCallback(
     (title: string, skill?: string): StudioProjectOutputSnapshot => {
-      const result = duplicateProjectOutput(outputsRef.current, getActiveState(), title, skill);
+      const result = createBlankProjectOutput(outputsRef.current, getActiveState(), title, skill);
+      setOutputs(result.outputs);
+      return result.target;
+    },
+    [getActiveState, setOutputs],
+  );
+
+  const duplicate = useCallback(
+    (title: string): StudioProjectOutputSnapshot => {
+      const result = duplicateActiveProjectOutput(outputsRef.current, getActiveState(), title);
       setOutputs(result.outputs);
       return result.target;
     },
@@ -63,5 +75,10 @@ export function useProjectOutputs(getActiveState: () => ActiveProjectOutputState
     [setOutputs],
   );
 
-  return { outputs, outputsRef, hydrate, switchTo, duplicate, rename, remove };
+  const resolve = useCallback(
+    (reference: ProjectOutputReference, defaultToActive = true) => resolveProjectOutputId(outputsRef.current, reference, defaultToActive),
+    [],
+  );
+
+  return { outputs, outputsRef, hydrate, switchTo, create, duplicate, rename, remove, resolve };
 }

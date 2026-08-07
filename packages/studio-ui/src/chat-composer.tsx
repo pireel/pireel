@@ -21,6 +21,8 @@ import type { AttachedFrame, StudioElementRef } from './studio-chat';
 
 export interface ComposerHandle {
   insertElementPill(el: StudioElementRef | null): void;
+  /** Drop all element references when the active output changes; ids are scoped to one output. */
+  clearElementPills(): void;
   /** Append text at the end and focus (used by the generate panel's "@reference"): fill only, don't send. */
   insertText(text: string): void;
   /** Replace the whole box with text and focus (used by quick prompts): tapping different prompts swaps, doesn't concatenate. */
@@ -213,6 +215,18 @@ export function Composer({
             root.appendChild(document.createTextNode(' '));
           }
         }
+        recomputeEmpty();
+      },
+      clearElementPills: () => {
+        const root = editorRef.current;
+        if (!root) return;
+        root.querySelectorAll('[data-ref-id]').forEach((node) => {
+          const next = node.nextSibling;
+          if (next?.nodeType === Node.TEXT_NODE && next.textContent?.startsWith(' ')) {
+            next.textContent = next.textContent.slice(1);
+          }
+          node.remove();
+        });
         recomputeEmpty();
       },
       setText: (text: string) => {

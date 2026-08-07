@@ -650,6 +650,11 @@ export const PREVIEW_RUNTIME = `
     if (document.fonts && document.fonts.ready && document.fonts.ready.then) document.fonts.ready.then(triggerFit);
     else triggerFit();
   } catch (e) { triggerFit(); }
+  // Boot beacon: scripts parsed, gsap loaded, message listener installed. The parent starts the
+  // background-buffer swap handshake on THIS signal instead of the iframe load event — the load event
+  // waits for every eager media image in the doc, which kept "updating…" stuck until the last
+  // thumbnail arrived (and re-requested them all on each rebuild). Images arriving later just pop in.
+  try { fpost({ type: 'pong', nonce: 'boot' }); } catch (e) {}
 })();
 </script>
 <script>
@@ -751,8 +756,9 @@ export const PREVIEW_RUNTIME = `
     if (snapX) dx = W / 2 - (r.left + r.width / 2);
     if (snapY) dy = H / 2 - (r.top + r.height / 2);
     nudge.dx = dx; nudge.dy = dy;
-    // ghost semantics (same as the caption handle, user's intent): content doesn't move live, only the displacement is reported — the parent draws a dashed ghost that tracks the drag,
-    // and on release boxDragEnd commits once (the rebuild-free channel pushes the final value back to this doc in one shot)
+    // Move the visible component in this document immediately. The parent only mirrors the dashed
+    // selection ghost/guides during the gesture and commits the canonical box once on release.
+    nudge.el.style.translate = (nudge.bx + dx) + 'px ' + (nudge.by + dy) + 'px';
     post({ type: 'boxDrag', blockId: nudge.id, dx: dx, dy: dy, snapX: snapX, snapY: snapY });
   }
   function endNudge() {
@@ -881,11 +887,12 @@ export const PREVIEW_RUNTIME = `
       }
     }
     else if (d.type === 'hf:boxSize') {
-      // parent edge/corner-handle crop: during the gesture only edit geometry in this doc (zero React re-render), the parent commits Block.box in one shot on release.
-      // the container (crop window) moves, and the content layer [data-hf-content] compensates inversely in sync (cx/cy/cw/ch, % relative to the window) —
-      // the content stays anchored to the canvas, and whichever edge you drag is the edge you crop
+      // Parent move/edge/corner handles preview geometry in this doc (zero React re-render), then
+      // commit Block.box once on release. A canonical box patch also clears a temporary body-drag
+      // translate, so the committed left/top become the single source of truth without a visual jump.
       var sel2 = d.blockId ? document.querySelector('[data-composition-id="' + d.blockId + '"]') : null;
       if (sel2) {
+        sel2.style.translate = '';
         sel2.style.width = (Number(d.w) * 100) + '%';
         sel2.style.height = (Number(d.h) * 100) + '%';
         if (d.x != null) sel2.style.left = (Number(d.x) * 100) + '%';

@@ -1,5 +1,5 @@
 import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import type { LocalAssetIndexEntry, TranscriptSegment } from '@pireel/studio-engine/project-dto';
+import type { LocalAssetIndexEntry, StudioProjectContext, TranscriptSegment } from '@pireel/studio-engine/project-dto';
 
 export interface NativeProjectSessionMetadata {
   mainTranscript: TranscriptSegment[] | null;
@@ -34,19 +34,26 @@ export function nativeProjectSessionMetadata(
 
   const cloudClips: Record<string, { key: string }> = {};
   const localAssets: LocalAssetIndexEntry[] = [];
+  const referencedAssetIds = new Set(
+    document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (
+      'assetId' in clip && clip.assetId ? [clip.assetId] : []
+    ))),
+  );
   for (const asset of Object.values(document.assets)) {
     const sig = asset.locator.localSig;
     const key = asset.locator.cloudKey;
     if (sig && key && asset.id !== primaryAssetId) cloudClips[sig] = { key };
-    if (sig && asset.library) {
+    // A pre-v3 document may not have library metadata on imported footage. If a local source is
+    // still used by this output it belongs to the project media directory regardless.
+    if (sig && (asset.library || referencedAssetIds.has(asset.id))) {
       localAssets.push({
         sig,
         label: asset.label ?? sig,
         kind: asset.kind,
         w: asset.metadata.width ?? null,
         h: asset.metadata.height ?? null,
-        ...(asset.library.folder ? { folder: asset.library.folder } : {}),
-        createdAt: asset.library.createdAt,
+        ...(asset.library?.folder ? { folder: asset.library.folder } : {}),
+        createdAt: asset.library?.createdAt ?? 0,
       });
     }
   }
@@ -67,4 +74,24 @@ export function nativeProjectSessionMetadata(
 
 export function nativeProjectLocalAssets(document: EditorDocumentV2): LocalAssetIndexEntry[] {
   return nativeProjectSessionMetadata(document).localAssets;
+}
+
+/** Project-level media directory. The root context owns explicit library entries. Local sources
+ * that are still referenced by any output are always merged in, so pre-v3 footage cannot vanish
+ * merely because its asset record predates library metadata. The next autosave writes the union. */
+export function nativeProjectSharedLocalAssets(
+  activeDocument: EditorDocumentV2,
+  context?: StudioProjectContext,
+): LocalAssetIndexEntry[] {
+  const documents = [activeDocument, ...(context?.outputs?.inactive.map((output) => output.document) ?? [])];
+  const merged = new Map<string, LocalAssetIndexEntry>(
+    (context?.localAssets ?? []).map((entry) => [entry.sig, entry]),
+  );
+  for (const document of documents) {
+    for (const entry of nativeProjectLocalAssets(document)) {
+      const previous = merged.get(entry.sig);
+      if (!previous || entry.createdAt >= previous.createdAt) merged.set(entry.sig, entry);
+    }
+  }
+  return [...merged.values()].sort((left, right) => right.createdAt - left.createdAt);
 }

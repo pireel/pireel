@@ -71,6 +71,8 @@ export interface StudioChatHandle {
   startProgress(): ProgressHandle;
   /** Called by the workbench on selection change: pass an element → input shows a "currently selected" pill; pass null → remove it. */
   insertElementPill(el: StudioElementRef | null): void;
+  /** Clear every draft @ reference when switching outputs. */
+  clearElementPills(): void;
   /** Workbench pushes a user message directly. Silently dropped while streaming. */
   send(text: string): void;
   /** Only fill a piece of text into the input without sending (used by the generate panel's "@reference" for assets). */
@@ -163,6 +165,7 @@ export const StudioChat = memo(
       startProgress: () =>
         innerRef.current?.startProgress() ?? { step() {}, finish() {}, fail() {} },
       insertElementPill: (el) => innerRef.current?.insertElementPill(el),
+      clearElementPills: () => innerRef.current?.clearElementPills(),
       send: (text) => innerRef.current?.send(text),
       insertText: (text) => innerRef.current?.insertText(text),
       focusInput: () => innerRef.current?.focusInput(),

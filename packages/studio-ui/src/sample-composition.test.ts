@@ -9,4 +9,10 @@ describe('preview runtime', () => {
       expect(() => new Function(script)).not.toThrow();
     }
   });
+
+  it('moves component content live while preserving one-shot parent commits', () => {
+    expect(PREVIEW_RUNTIME).toContain("nudge.el.style.translate = (nudge.bx + dx)");
+    expect(PREVIEW_RUNTIME).toContain("sel2.style.translate = ''");
+    expect(PREVIEW_RUNTIME).toContain("post({ type: 'boxDragEnd'");
+  });
 });

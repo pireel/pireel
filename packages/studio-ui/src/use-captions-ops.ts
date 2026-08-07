@@ -22,13 +22,14 @@ import {
   resolveSubCaptionStyle,
 } from '@pireel/studio-engine/composition';
 import { type AsrSegment, applyCaptionTranslations } from '@pireel/studio-engine/build-blocks';
+import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { t } from './i18n';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
-import { captionTranscriptsByAsset } from './caption-transcript-bridge';
+import { captionTranscriptsByAsset, captionTranscriptsFromDocument } from './caption-transcript-bridge';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
 export interface CaptionsOpsDeps {
@@ -86,11 +87,14 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   /** Caption re-lay/mapping: the pure functions live in captions-relay (reused by the offline MCP executor); this is a thin wrapper feeding refs. */
   const mappedCaptionSegs = (shots: VideoShot[], narr: AsrSegment[] | null): AsrSegment[] => relayMappedCaptionSegs(shots, narr, clipAsrRef.current);
   const relayCaptionLayer = (blocks: Block[], shots: VideoShot[], segs: AsrSegment[] | null, canvasW = compRef.current.width): Block[] =>
-    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, { subLang: resolveCaptionStyle(compRef.current).sub?.lang, canvasW });
-  /** Edit one caption line's TEXT (captions panel). Single source of truth = the transcript: the fix
-   *  reaches caption re-lay, read_script/agents and the script panel at once. Timing untouched; word
-   *  timing redistributed proportionally within the sentence (wordsFromText — karaoke presets keep working).
-   *  No auto-retranslate (user-locked): translations only change when the user asks. */
+    relayCaptionLayerPure(blocks, shots, segs, clipAsrRef.current, {
+      subLang: resolveCaptionStyle(compRef.current).sub?.lang,
+      canvasW,
+      style: compRef.current.captionStyle,
+    });
+  /** Edit one caption line's audience-facing copy. ASR text/words stay immutable; cueTexts stores a
+   *  source-word-range override which also locks this cue's start/end boundary. Input stays entirely
+   *  local and this writer runs once on commit, never against provisional IME text. */
   const [captionLineBusyKey, setCaptionLineBusyKey] = useState<string | null>(null);
   /** Source-sentence word list a cue range indexes into (materialized deterministically when ASR words are absent). */
   const baseWordsOf = (seg: AsrSegment) => (seg.words?.length ? seg.words : wordsFromText(seg.text, seg.start, seg.end));
@@ -105,7 +109,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     const base = baseWordsOf(seg);
     const w0 = Math.max(0, Math.min(range.w0, base.length - 1));
     const w1 = Math.max(w0, Math.min(range.w1, base.length - 1));
-    const cueText = joinWords(base.slice(w0, w1 + 1).map((w) => w.text));
+    const cueText = seg.cueTexts?.[`${w0}:${w1}`] ?? joinWords(base.slice(w0, w1 + 1).map((w) => w.text));
     if (!cueText) return;
     const key = `${src ?? 'main'}:${index}:${w0}`;
     setCaptionLineBusyKey(key);
@@ -126,45 +130,44 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCaptionLineBusyKey((k) => (k === key ? null : k));
     }
   };
-  /** Edit one display cue's TEXT: splice the cue's word range inside its source sentence (the
-   *  transcript stays the single source of truth; the sentence text is rebuilt from its words).
-   *  Blocks re-derive reactively — no manual re-lay. The edit drops this cue's stored per-cue
-   *  translation and any later ones of the same sentence (their range keys shift with the word
-   *  count); the sentence-level sub just redistributes over the new words. */
-  const editCaptionLine = (row: CaptionLineRow, nextText: string, _phase: 'live' | 'commit' | 'revert' = 'commit') => {
+  /** Edit one display cue's copy and publish the cue lock + managed caption relay atomically. */
+  const editCaptionLine = (row: CaptionLineRow, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
+    if (phase !== 'commit') return;
     const src = row.src;
     const segs = src ? clipAsrRef.current[src] : asrRef.current;
-    const old = segs?.[row.index];
-    if (!old || !nextText) return;
-    const base = old.words?.length ? old.words : wordsFromText(old.text, old.start, old.end);
-    const w0 = Math.max(0, Math.min(row.w0, base.length - 1));
-    const w1 = Math.max(w0, Math.min(row.w1, base.length - 1));
-    const oldCueText = joinWords(base.slice(w0, w1 + 1).map((w) => w.text));
-    const changed = nextText !== oldCueText;
-    if (changed) {
-      const replaced = wordsFromText(nextText, base[w0]!.start, base[w1]!.end);
-      if (!replaced.length) return;
-      const nextWords = [...base.slice(0, w0), ...replaced, ...base.slice(w1 + 1)];
-      // Keep only translations of ranges fully BEFORE the edit; the edited range and everything after shift.
-      const keptSubs = Object.fromEntries(
-        Object.entries(old.cueSubs ?? {}).filter(([k]) => {
-          const b = Number(k.split(':')[1]);
-          return Number.isFinite(b) && b < w0;
-        }),
-      );
-      const nextSeg: AsrSegment = { ...old, text: joinWords(nextWords.map((w) => w.text)), words: nextWords };
-      if (Object.keys(keptSubs).length) nextSeg.cueSubs = keptSubs;
-      else delete nextSeg.cueSubs;
-      const next = segs.map((s, i) => (i === row.index ? nextSeg : s));
-      if (src) {
-        const m = { ...clipAsrRef.current, [src]: next };
-        clipAsrRef.current = m;
-        setClipAsr(m);
-      } else {
-        asrRef.current = next;
-        setAsrSentences(next);
-      }
+    if (!segs?.[row.index] || !nextText.trim()) return;
+    // Snapshot every currently materialized cue in this sentence. Locking only the edited range
+    // would let the untouched tail rebalance around it on relay, which is still a hidden re-segment.
+    const items = captionLineRows
+      .filter((candidate) => candidate.src === row.src && candidate.index === row.index)
+      .map((candidate) => ({
+        index: candidate.index,
+        w0: candidate.w0,
+        w1: candidate.w1,
+        text: candidate.key === row.key ? nextText : candidate.text,
+        lock: true,
+      }));
+    const next = applyCaptionTextEdits(segs, items);
+    if (next === segs) return;
+    const nextClipAsr = src ? { ...clipAsrRef.current, [src]: next } : clipAsrRef.current;
+    const edit = applyCaptionDocumentEdit({
+      document: documentRef.current,
+      mainTranscript: src ? asrRef.current : next,
+      clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return;
     }
+    pushUndoSnapshot();
+    if (src) {
+      clipAsrRef.current = nextClipAsr;
+      setClipAsr(nextClipAsr);
+    } else {
+      asrRef.current = next;
+      setAsrSentences(next);
+    }
+    setDocument(edit.document);
   };
   /** Captions panel empty-state "extract captions": run ASR in place (no style applied — the user
    *  may just want to edit lines; picking a style later re-lays from this transcript). */
@@ -195,7 +198,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   /** Manually edit one display cue's TRANSLATION (bilingual second row): stored per-cue on the source
    *  sentence (cueSubs["w0:w1"]); no auto-retranslate — the user's wording wins (only editing the
    *  SOURCE re-triggers translation). null = clear this cue's translation. Blocks re-derive reactively. */
-  const editCaptionSubLine = (row: CaptionLineRow, text: string | null, _phase: 'live' | 'commit' | 'revert' = 'commit') => {
+  const editCaptionSubLine = (row: CaptionLineRow, text: string | null, phase: 'live' | 'commit' | 'revert' = 'commit') => {
+    if (phase !== 'commit') return;
     const src = row.src;
     const segs = src ? clipAsrRef.current[src] : asrRef.current;
     const old = segs?.[row.index];
@@ -227,6 +231,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     comp,
     generating: capGenBusy,
     onPickPreset: applyCaptionPreset,
+    onRelayout: relayoutCaptions,
     onRemove: removeCaptionLayer,
     // Per-line style controls (main / translation): resolved current styles + patch callbacks.
     // Patches with an explicit undefined clear that override; sub patches deep-merge into captionStyle.sub.
@@ -264,10 +269,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         }
       : undefined,
   });
-  /** Clicking a style card in the captions panel: **always re-lay the whole layer from the narration script** (segmentation/
-   *  mapping are deterministic post-processing and shouldn't reuse old blocks — old blocks may predate a segmentation-algorithm change;
-   *  the transcript is the single source of truth, and word replacements are recorded there too). Auto-run ASR if there's no transcript;
-   *  if there's no transcript but old captions exist (a loaded legacy draft), degrade to style-only. */
+  /** Clicking a style card changes the global look and relays the managed lane while preserving its
+   *  materialized cueLayout. Auto-run ASR only when no transcript exists; boundary regeneration is
+   *  deliberately reserved for the explicit re-layout action. */
   const captionGenBusyRef = useRef(false);
   const [capGenBusy, setCapGenBusy] = useState(false); // used by the panel's "generating captions" overlay (the ref only prevents re-entry, doesn't trigger render)
   const applyCaptionPreset = async (preset: string, stylePatch: Partial<CaptionStyle> = {}) => {
@@ -339,7 +343,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
             && t < (clip.startFrame + clip.durationFrames) / edit.document.canvas.fps);
         if (!within) applyT(output.firstCaptionStartSec + 0.01);
       }
-      toast.success(has ? t('workbench.reLaidCaptionsFrom') : t('workbench.laidNCaptionsFrom', { n: output.captionCount }));
+      if (!has) toast.success(t('workbench.laidNCaptionsFrom', { n: output.captionCount }));
     } catch (e) {
       console.warn('[studio] apply caption preset failed', e);
       setCaptionStyle({ preset }); // on transcription failure, at least swap the style
@@ -370,11 +374,41 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     });
     toast.success(t('workbench.removedCaptions'));
   };
+  /** Explicit re-layout: regenerate boundaries from current canvas/font metrics, remap corrected
+   * copy onto those ranges, then immediately freeze the new layout. Deliberately no success toast. */
+  const relayoutCaptions = () => {
+    if (!isCaptionsOn(compRef.current)) return { ok: false, error: t('workbench.thereNoCaptionsRight') };
+    const edit = applyCaptionDocumentEdit({
+      document: documentRef.current,
+      relayout: true,
+      mainTranscript: null,
+      clipTranscripts: {},
+    });
+    if (!edit.ok) {
+      toast.error(edit.error.message);
+      return { ok: false, error: edit.error.message };
+    }
+    const transcripts = captionTranscriptsFromDocument(edit.document, compRef.current, clipAsrRef.current);
+    pushUndoSnapshot();
+    asrRef.current = transcripts.main;
+    clipAsrRef.current = transcripts.clips;
+    setAsrSentences(transcripts.main);
+    setClipAsr(transcripts.clips);
+    setDocument(edit.document);
+    return { ok: true };
+  };
   const captionLineRows = useMemo<CaptionLineRow[]>(() => {
     // Rows = the SAME derivation the canvas renders (displayCues): one row = one on-screen line, by
-    // construction. NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed —
-    // caption editing must keep working in the missing-media state (browser switch / cleared storage).
-    return displayCues(ensureShots(comp), asrSentences, clipAsr, { subLang: resolveCaptionStyle(comp).sub?.lang, canvasW: comp.width })
+    // construction. Read document-owned cueLayout first: browser transcript refs can legitimately
+    // lag a style transaction, but the list must never show different boundaries from the canvas.
+    // NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed.
+    const documentTranscripts = captionTranscriptsFromDocument(documentRef.current, comp, clipAsr);
+    const narr = documentTranscripts.main?.length ? documentTranscripts.main : asrSentences;
+    return displayCues(ensureShots(comp), narr, documentTranscripts.clips, {
+      subLang: resolveCaptionStyle(comp).sub?.lang,
+      canvasW: comp.width,
+      style: comp.captionStyle,
+    })
       .filter((c) => c.ref)
       .map((c) => ({
         key: `${c.ref!.src ?? 'main'}:${c.ref!.seg}:${c.ref!.w0}`,
@@ -388,7 +422,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         dur: Math.max(0.1, c.end - c.start),
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, comp.width, comp.height, asrSentences, clipAsr]);
+  }, [comp.shots, comp.width, comp.height, comp.captionStyle, asrSentences, clipAsr]);
   /* ---------- Bilingual translation (the captions panel "bilingual" section): translations come from the in-house LLM
      (providers.translate; the OSS shell's default hides this section), data lands via the same set_caption_translations executor (undo/re-lay shared). ---------- */
   const translateCaptionsTo = async (target: string) => {
@@ -451,5 +485,5 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setCapTransBusy(false);
     }
   };
-  return { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, removeCaptionLayer };
+  return { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer };
 }

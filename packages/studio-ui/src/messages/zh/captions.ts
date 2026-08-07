@@ -23,6 +23,8 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.remove': '移除',
   'captions.removeAllCaptionsUndoable': '移除全部字幕(可撤销)',
   'captions.retranslateLine': '重新翻译这句',
+  'captions.relayout': '重新排版',
+  'captions.relayoutHint': '按当前画布和字号重新划分字幕（可撤销）',
   'captions.styles': '样式',
   'captions.transcribeFirst': '先提取口播稿',
   'captions.translateTranscriptIntoLang': '把口播稿翻成{lang},作为第二行字幕',

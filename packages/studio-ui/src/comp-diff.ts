@@ -183,7 +183,9 @@ export function blockPatchableChange(a: Composition | null, b: Composition): { p
     }
     if (p.geom || p.timing || p.style || p.slots || p.kitProps || p.replace) pairs.push(p);
   }
-  if (!pairs.length && !removed.length && !added.length) return null;
+  // A blocks-array update that only changes ignored metadata (fitScale/label) is still a valid
+  // no-op patch. Returning null would incorrectly fall through to a full double-buffer rebuild —
+  // most visibly after resize, when measureFit writes fitScale after the live geometry commit.
   return { pairs, removed, added };
 }
 

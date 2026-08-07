@@ -5,6 +5,7 @@ import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/compos
 import type { StudioProjectOutputSnapshot } from '@pireel/studio-engine/project-outputs';
 import { loadLocalVideo } from './local-media';
 import type { StudioDraft } from './use-draft-persist';
+import { outputSwitchVideoPickOptions, type VideoPickOptions } from './video-pick-feedback';
 
 /** Reconnects browser-only media when the checked-out deliverable changes. The project-output
  * controller owns persisted snapshots; this hook owns the intentionally separate runtime layer. */
@@ -12,7 +13,9 @@ export function useProjectOutputRuntime(deps: {
   projectId: string;
   activeId: string;
   switchTo: (id: string) => StudioProjectOutputSnapshot | null;
-  duplicate: (title: string, skill?: string) => StudioProjectOutputSnapshot;
+  create: (title: string, skill?: string) => StudioProjectOutputSnapshot;
+  listOutputIds: () => string[];
+  remove: (id: string) => void;
   setDocument: (document: EditorDocumentV2) => void;
   getComposition: () => Composition;
   onDocumentActivated?: (document: EditorDocumentV2, composition: Composition) => void;
@@ -21,7 +24,7 @@ export function useProjectOutputRuntime(deps: {
   coverThumbRef: MutableRefObject<string | null>;
   pendingRestoreRef: MutableRefObject<StudioDraft | null>;
   setVideoFile: (file: File | null) => void;
-  pickVideoFile: (file: File, opts?: { asSig?: string; reconnect?: boolean }) => Promise<void>;
+  pickVideoFile: (file: File, opts?: VideoPickOptions) => Promise<void>;
   recoverLocalClips: (shots: NonNullable<Composition['shots']>) => Promise<void> | void;
   resetEditor: () => void;
 }) {
@@ -60,7 +63,7 @@ export function useProjectOutputRuntime(deps: {
         if (wantsMain && mainSig) {
           deps.videoSigRef.current = mainSig;
           const file = previousSig === mainSig && previousFile ? previousFile : await loadLocalVideo(mainSig);
-          if (file) await deps.pickVideoFile(file, { asSig: mainSig, reconnect: true });
+          if (file) await deps.pickVideoFile(file, outputSwitchVideoPickOptions(mainSig));
           else deps.setVideoFile(null);
         } else {
           deps.pendingRestoreRef.current = null;
@@ -76,14 +79,36 @@ export function useProjectOutputRuntime(deps: {
     [deps, switching],
   );
 
-  const duplicateOutput = useCallback(
+  const createOutput = useCallback(
     (title: string, skill?: string) => {
-      const target = deps.duplicate(title, skill);
+      const target = deps.create(title, skill);
       deps.resetEditor();
+      deps.coverThumbRef.current = null;
+      deps.pendingRestoreRef.current = null;
+      deps.videoSigRef.current = null;
+      deps.setVideoFile(null);
+      deps.setDocument(target.document);
+      const composition = deps.getComposition();
+      deps.onDocumentActivated?.(target.document, composition);
       return target;
     },
     [deps],
   );
 
-  return { switching, switchOutput, duplicateOutput };
+  const deleteOutput = useCallback(
+    async (id: string): Promise<boolean> => {
+      const ids = deps.listOutputIds();
+      const index = ids.indexOf(id);
+      if (index < 0 || ids.length <= 1) return false;
+      if (id === deps.activeId) {
+        const fallbackId = ids[index + 1] ?? ids[index - 1];
+        if (!fallbackId || !(await switchOutput(fallbackId))) return false;
+      }
+      deps.remove(id);
+      return true;
+    },
+    [deps, switchOutput],
+  );
+
+  return { switching, switchOutput, createOutput, deleteOutput };
 }

@@ -71,6 +71,11 @@ export interface FrameInfo {
   framing2?: ShotPreciseFraming;
   sourceWidth?: number;
   sourceHeight?: number;
+  /** Display dimensions for the transition's secondary frame. ImageBitmap may expose the coded
+   *  surface (for example landscape pixels plus rotation metadata), so the iframe must not infer
+   *  presentation geometry from frame2.width/frame2.height. */
+  sourceWidth2?: number;
+  sourceHeight2?: number;
 }
 
 const EPS = 0.04;
@@ -91,6 +96,10 @@ export class VideoTrackEngine {
   private raf = 0;
   private curIdx = -1; // active segment index (-1 = none)
   private bitmapInflight = false;
+  /** Browser video frames may expose coded (pre-rotation) bitmap dimensions. Cache whether each
+   *  resident decoder needs a display-oriented canvas normalization; the common path stays zero-copy. */
+  private bitmapModes = new WeakMap<HTMLVideoElement, { width: number; height: number; normalize: boolean }>();
+  private bitmapStages = new WeakMap<HTMLVideoElement, HTMLCanvasElement>();
   private lastPush: { key: string; srcT: number } | null = null;
   private seekGen = 0;
   // Ghost decode for cut transitions: inside the window the "other side" frame is supplied by a
@@ -152,6 +161,8 @@ export class VideoTrackEngine {
     const prev = this.els.get(key);
     if (source == null) {
       if (prev) {
+        this.bitmapModes.delete(prev);
+        this.bitmapStages.delete(prev);
         prev.remove();
         this.els.delete(key);
       }
@@ -176,6 +187,8 @@ export class VideoTrackEngine {
     const url = typeof source === 'string' ? source : URL.createObjectURL(source);
     if (prev) {
       if (prev.dataset.hfSrcTag === url) return; // idempotent
+      this.bitmapModes.delete(prev);
+      this.bitmapStages.delete(prev);
       const old = this.urls.get(key);
       if (old) URL.revokeObjectURL(old);
       this.urls.delete(key);
@@ -675,7 +688,7 @@ export class VideoTrackEngine {
     const ghostReady = !!g && g.readyState >= 2 && !!g.videoWidth;
     if (!ghostReady && this.lastPush && this.lastPush.key === seg.key && Math.abs(this.lastPush.srcT - srcT) < 1 / 60) return;
     this.bitmapInflight = true;
-    Promise.all([createImageBitmap(el), ghostReady ? createImageBitmap(g!).catch(() => null) : Promise.resolve(null)]).then(
+    Promise.all([this.displayBitmap(el), ghostReady ? this.displayBitmap(g!).catch(() => null) : Promise.resolve(null)]).then(
       ([bmp, bmp2]) => {
         this.bitmapInflight = false;
         this.lastPush = { key: seg.key, srcT };
@@ -690,6 +703,8 @@ export class VideoTrackEngine {
             sourceHeight: el.videoHeight,
             ...(seg.framing ? { framing: seg.framing } : {}),
             ...(bmp2 && other?.framing ? { framing2: other.framing } : {}),
+            ...(bmp2 && g?.videoWidth ? { sourceWidth2: g.videoWidth } : {}),
+            ...(bmp2 && g?.videoHeight ? { sourceHeight2: g.videoHeight } : {}),
           },
           bmp2,
         );
@@ -698,6 +713,45 @@ export class VideoTrackEngine {
         this.bitmapInflight = false;
       },
     );
+  }
+
+  /** Produce a bitmap in the video's display coordinate space. Most sources return the video
+   *  bitmap directly. For phone footage whose ImageBitmap still exposes the encoded landscape
+   *  surface while videoWidth/videoHeight are portrait, normalize through a correctly-sized canvas.
+   *  That one-time mismatch decision is cached per resident decoder. */
+  private async displayBitmap(el: HTMLVideoElement): Promise<ImageBitmap> {
+    const width = el.videoWidth;
+    const height = el.videoHeight;
+    const mode = this.bitmapModes.get(el);
+    if (mode?.width === width && mode.height === height && mode.normalize) {
+      return this.normalizedBitmap(el, width, height);
+    }
+    const bitmap = await createImageBitmap(el);
+    const normalize = bitmap.width !== width || bitmap.height !== height;
+    this.bitmapModes.set(el, { width, height, normalize });
+    if (!normalize) return bitmap;
+    try {
+      const normalized = await this.normalizedBitmap(el, width, height);
+      bitmap.close();
+      return normalized;
+    } catch {
+      return bitmap;
+    }
+  }
+
+  private normalizedBitmap(el: HTMLVideoElement, width: number, height: number): Promise<ImageBitmap> {
+    let canvas = this.bitmapStages.get(el);
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      this.bitmapStages.set(el, canvas);
+    }
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return Promise.reject(new Error('2D canvas is unavailable.'));
+    context.clearRect(0, 0, width, height);
+    context.drawImage(el, 0, 0, width, height);
+    return createImageBitmap(canvas);
   }
 
   /** Paused seek: park the active element, push one frame after seeked. */

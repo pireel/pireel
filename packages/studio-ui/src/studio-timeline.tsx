@@ -12,17 +12,15 @@
  *   draggable playhead.
  *
  * All x are measured relative to the content layer (contentRef); snaps to whole seconds /
- * shot cut points / other block edges / playhead.
+ * shot cut points / block, caption and audio edges / playhead.
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Eye, EyeOff, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
-  type Block,
   type BlockKind,
   type Composition,
   blockKind,
-  blockPreviewDoc,
   cutTransitions,
   MAX_TRANSITION_SEC,
   totalDuration,
@@ -31,9 +29,9 @@ import {
   videoTrackShots,
 } from '@pireel/studio-engine/composition';
 import { shotFadeAt } from '@pireel/studio-engine/composition';
-import { injectPreviewRuntime } from './sample-composition';
 import type { NarrativeTimelinePlacement } from './primary-render-plan';
 import { KIND_META } from './kind-meta';
+import { blockDisplayTitle } from './block-display-title';
 import { t } from './i18n';
 import { playhead } from './playhead';
 import type { FilmstripFrame } from './media';
@@ -45,7 +43,6 @@ import {
   MAX_PPS,
   MIN_DUR,
   MIN_PPS,
-  PREVIEW_W,
   ROW_GAP,
   AUDIO_ROW_H,
   ROW_H,
@@ -54,7 +51,6 @@ import {
   SCENE_PAD_B,
   SCENE_PAD_T,
   SHOT_GAP,
-  SNAP_PX,
   TIMELINE_ITEM_EDGE_RADIUS,
   TIMELINE_ITEM_RADIUS,
   TREATMENT_NAME,
@@ -62,8 +58,9 @@ import {
   rulerStep,
   stripTiles,
 } from './timeline-utils';
-import { ActiveSceneRing, PlayheadCursor } from './timeline-overlays';
+import { ActiveSceneRing, HoverCursor, PlayheadCursor } from './timeline-overlays';
 import { AudioLane } from './timeline-audio-lane';
+import { draggedPlayheadSecond, snapTimelineSecond, timelineSnapPoints } from './timeline-snap';
 import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
 
 export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
@@ -176,8 +173,8 @@ interface StudioTimelineProps {
   mainLive?: boolean;
   /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
   srcLive?: (src: string) => boolean;
-  /** Shot boundary "+": insert a local video at that edited-time (workbench pops a file picker -> upload -> insert into main track). */
-  onInsertClipAt?: (t: number) => void;
+  /** Empty-main-track CTA: pick the first local image/video. Existing timelines add clips from the asset panel. */
+  onAddInitialMedia?: () => void;
   /** Shot boundary transition hotspot: click to pick a transition effect in the shared popover (cutSec = that boundary's edited-time). */
   onOpenTransition?: (cutSec: number, anchor: DOMRect) => void;
   /** Transition handles drag on both sides (symmetric): commit the new total duration (sec, <=4). */
@@ -210,7 +207,6 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
       type="button"
       role="switch"
       aria-checked={muted}
-      title={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
       aria-label={muted ? t('panels.unmuteTrack') : t('panels.muteTrack')}
       onPointerDown={(e) => e.stopPropagation()} // the row itself starts a track drag
       onClick={(e) => {
@@ -230,7 +226,6 @@ function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () 
       type="button"
       role="switch"
       aria-checked={!hidden}
-      title={hidden ? t('panels.showTrack') : t('panels.hideTrack')}
       aria-label={hidden ? t('panels.showTrack') : t('panels.hideTrack')}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
@@ -293,7 +288,7 @@ function StudioTimelineImpl({
   selectedAudioId,
   onSelectAudio,
   onOpenMusicPanel,
-  onInsertClipAt,
+  onAddInitialMedia,
   onOpenTransition,
   onResizeTransition,
   clipPendingAt,
@@ -359,10 +354,8 @@ function StudioTimelineImpl({
   const tileDur = thumbW / pps; // source duration one tile covers
   const filmTiles = useMemo(() => stripTiles(filmstrip ?? [], 0, videoDur, tileDur, pps), [filmstrip, videoDur, tileDur, pps]);
 
-  const [hover, setHover] = useState<{ block: Block; left: number; top: number } | null>(null); // hover element preview
   const [guide, setGuide] = useState<number | null>(null); // snap alignment guide while dragging (sec)
   const [dropHint, setDropHint] = useState<{ t: number; clip: boolean } | null>(null); // insert-point marker during asset drag (clip = hovering main track, drop = insert a clip)
-  const [hoverBounds, setHoverBounds] = useState<{ l: number; r: number } | null>(null); // hovered shot card: show "+" at both ends to insert a local video
   const [trDrag, setTrDrag] = useState<{ cut: number; half: number } | null>(null); // live half-width while dragging a transition handle (symmetric)
   const [marquee, setMarquee] = useState<{ l: number; r: number } | null>(null); // scene-track marquee rectangle (content px)
   const laneRef = useRef<HTMLDivElement | null>(null); // scene-track DOM (content-coordinate base, moves with scroll)
@@ -374,7 +367,6 @@ function StudioTimelineImpl({
   const [hoverT, setHoverT] = useState<number | null>(null); // hover time (center preview jumps to this frame + draw hover vertical line)
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draggingRef = useRef(false); // while dragging: let hover-seek yield (avoid double seek)
   const hoverRaf = useRef(0); // hover rAF coalescing
   const hoverXRef = useRef(0); // latest hover screen x
@@ -402,66 +394,33 @@ function StudioTimelineImpl({
   const scrubEnterRef = useRef<{ x: number; y: number; ts: number } | null>(null);
   const scrubArmedRef = useRef(false);
 
-  const openHover = (block: Block, el: HTMLElement) => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    hoverTimer.current = setTimeout(() => {
-      const r = el.getBoundingClientRect();
-      setHover({ block, left: r.left, top: r.top });
-    }, 220);
-  };
-  const closeHover = () => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    setHover(null);
-  };
-  useEffect(() => () => {
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-  }, []);
-  const hoverDoc = useMemo(() => (hover ? injectPreviewRuntime(blockPreviewDoc(comp, hover.block, { ground: 'checker' })) : ''), [hover, comp]);
-  const previewScale = PREVIEW_W / comp.width;
-  const previewH = Math.round(comp.height * previewScale);
-
   const W = Math.max(320, dur * pps);
   const x = useCallback((s: number) => s * pps, [pps]);
 
-  // Snap points: whole seconds + shot cut points (start + end) + other blocks' two ends. The playhead changes every frame, so it's not in memo; read live from the store at snap time.
+  // Static snap points include every visible clip edge. The playhead changes every frame, so it is
+  // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
-    const pts: number[] = [];
-    for (let s = 0; s <= dur; s += 1) pts.push(s);
-    for (const sp of sceneSpans) {
-      pts.push(sp.start);
-      pts.push(sp.end);
-    }
-    for (const b of comp.blocks) {
-      pts.push(b.startSec);
-      pts.push(b.startSec + b.durationSec);
-    }
-    return pts;
-  }, [dur, sceneSpans, comp.blocks]);
+    return timelineSnapPoints(dur, sceneSpans, comp.blocks, comp.audioTracks ?? []);
+  }, [dur, sceneSpans, comp.blocks, comp.audioTracks]);
   const snap = useCallback(
     (sec: number, exclude?: number[]) => {
-      const tol = SNAP_PX / pps;
-      let best = sec;
-      let bestD = tol;
-      let hit: number | null = null;
-      for (const p of [...snapPoints, playhead.get()]) {
-        if (exclude?.some((e) => Math.abs(e - p) < 1e-3)) continue;
-        const d = Math.abs(p - sec);
-        if (d < bestD) {
-          bestD = d;
-          best = p;
-          hit = p;
-        }
-      }
-      setGuide(hit); // hit a snap point -> light up the alignment guide
-      return Math.round(best * 100) / 100;
+      const result = snapTimelineSecond(sec, snapPoints, { pps, dynamicPoints: [playhead.get()], exclude });
+      setGuide(result.hit); // hit a snap point -> light up the alignment guide
+      return result.second;
     },
     [snapPoints, pps],
   );
+  const snapPlayhead = useCallback((second: number, lockedPoint: number | null) => {
+    const result = snapTimelineSecond(second, snapPoints, { pps, lockedPoint });
+    setGuide(result.hit);
+    return result;
+  }, [pps, snapPoints]);
 
   // Content layer's left edge (changes with scroll); recompute each frame while dragging
   const contentLeft = () => contentRef.current?.getBoundingClientRect().left ?? 0;
   // stable identities: the music lane is memoized, and a fresh closure per render would defeat that
-  const secAt = useCallback((clientX: number) => Math.max(0, Math.min(dur, (clientX - (contentRef.current?.getBoundingClientRect().left ?? 0)) / pps)), [dur, pps]);
+  const rawSecAt = useCallback((clientX: number) => (clientX - (contentRef.current?.getBoundingClientRect().left ?? 0)) / pps, [pps]);
+  const secAt = useCallback((clientX: number) => Math.max(0, Math.min(dur, rawSecAt(clientX))), [dur, rawSecAt]);
   /** Shared marquee engine (scene track / element track): anchor in content coordinates (base moves with scroll, x0/y0 stay fixed in content coords),
    *  end point recomputed each frame from base's **live** rect -> supports edge auto-scroll throughout; keeps scrolling via rAF even when the pointer sits still at the edge.
    *  baseRef = coordinate-base DOM; draggedRef = whether it became a drag; onDrag = draw rectangle; onCommit = hit test; onClick = pure click (no drag). */
@@ -562,6 +521,9 @@ function StudioTimelineImpl({
   // which is what lets a playhead/trim drag keep advancing past the visible window. draggingRef makes hover-seek yield.
   const drag = useCallback((e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => {
     e.preventDefault();
+    // A drag owns the timeline preview/guide until release. Clear any resting hover cursor immediately
+    // instead of leaving its yellow line frozen behind the moving playhead or clip handle.
+    endScrubRef.current();
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); // keep receiving move/up even outside the window
     } catch {
@@ -618,6 +580,32 @@ function StudioTimelineImpl({
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
   }, []);
+
+  /** Ruler seeking and full-height cursor dragging share a per-gesture magnetic lock. */
+  const onRulerPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    let snapLock: number | null = null;
+    const seek = (clientX: number) => {
+      const result = snapPlayhead(secAt(clientX), snapLock);
+      snapLock = result.hit;
+      onSeek(result.second);
+    };
+    seek(e.clientX);
+    drag(e, (clientX) => seek(clientX));
+  }, [drag, onSeek, secAt, snapPlayhead]);
+  const onPlayheadPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    // Keep the exact side-of-line grab offset, but clamp only AFTER subtracting it. Clamping the
+    // pointer first made one endpoint unreachable whenever the user grabbed off the line's centre.
+    const grabOffset = rawSecAt(e.clientX) - playhead.get();
+    let snapLock: number | null = null;
+    drag(e, (clientX) => {
+      const result = snapPlayhead(draggedPlayheadSecond(rawSecAt(clientX), grabOffset, dur), snapLock);
+      snapLock = result.hit;
+      onSeek(result.second);
+    });
+  }, [drag, dur, onSeek, rawSecAt, snapPlayhead]);
 
   // Cmd + wheel zoom (zoom value is controlled by the transport slider)
   useEffect(() => {
@@ -723,8 +711,8 @@ function StudioTimelineImpl({
   // order (NLE convention, upper rows cover lower ones). The scene rail remains the semantic anchor.
   const sceneRail = hasVideoLane;
   const H0 = sceneRail ? SCENE_H : ROW_H;
-  // Canonical graphics lanes remain visible even when empty. Legacy hosts without trackStates retain
-  // the blocks-derived fallback; V2 hosts get stable rows/targets from track identity and stack order.
+  // V2 graphics lanes are native identities and published empty lanes are pruned automatically.
+  // Legacy hosts without trackStates retain the blocks-derived fallback.
   const overlayTracks = useMemo(() => {
     const set = new Set<number>();
     for (const track of trackStates ?? []) if (track.type === 'graphics') set.add(track.stackOrder);
@@ -986,7 +974,6 @@ function StudioTimelineImpl({
                   <div
                     key={track}
                     onPointerDown={track > 0 ? (e) => startTrackDrag(e, track) : undefined}
-                    title={track > 0 ? t('panels.dragReorderTrackStacking') : undefined}
                     className={`flex items-center gap-1 px-2 text-[11px] ${track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
                     style={{ height: rowH(track), marginTop: track === 0 ? 0 : ROW_GAP, transform: dragging ? `translateY(${trackDrag!.dy}px)` : undefined }}
                   >
@@ -1072,10 +1059,7 @@ function StudioTimelineImpl({
               className="border-line bg-panel text-ink-4 sticky top-0 z-[45] cursor-ew-resize select-none border-b text-[9px]"
               style={{ height: RULER_H }}
               onClick={(e) => e.stopPropagation()} // dragging the ruler to seek doesn't clear selection
-              onPointerDown={(e) => {
-                onSeek(secAt(e.clientX));
-                drag(e, (cx) => onSeek(secAt(cx)));
-              }}
+              onPointerDown={onRulerPointerDown}
             >
               {Array.from({ length: ticks }, (_, i) => {
                 const s = i * step;
@@ -1127,14 +1111,14 @@ function StudioTimelineImpl({
 
               {/* Track 0 is persistent document structure: it remains a drop target when empty, like a
                   conventional NLE. With clips it expands into the scene rail. */}
-              <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }} onMouseLeave={() => setHoverBounds(null)}>
+              <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }}>
                   {!hasVideoLane && (
                     <button
                       type="button"
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
-                        onInsertClipAt?.(0);
+                        onAddInitialMedia?.();
                       }}
                       className={`border-line text-ink-4 hover:border-line-2 hover:text-ink-2 absolute inset-x-2 top-1/2 flex h-7 -translate-y-1/2 items-center justify-center gap-1.5 border border-dashed text-[10.5px] transition ${TIMELINE_ITEM_RADIUS}`}
                     >
@@ -1147,7 +1131,7 @@ function StudioTimelineImpl({
                     <div className={`bg-ink/10 pointer-events-none absolute top-3 bottom-2 left-0 overflow-hidden ring-1 ring-white/10 ${TIMELINE_ITEM_RADIUS}`} style={{ width: x(videoDur) }}>
                       {filmTiles.map((tl, i) => (
                         // max-w-none: preflight's img max-width:100% is relative to the container, so a narrow card would squeeze tiles thin and expose gaps (same for all three tile spots)
-                        <img key={i} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
+                        <img key={i} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
                       ))}
                       {(filmstrip ?? []).length === 0 && <div className="h-full w-full bg-gradient-to-r from-accent/20 to-accent/8" />}
                     </div>
@@ -1200,11 +1184,7 @@ function StudioTimelineImpl({
                             onSelectShot(shot.id, additive);
                           }}
                           onDoubleClick={(e) => e.stopPropagation()}
-                          onMouseEnter={() => {
-                            if (draggingRef.current) return; // a reorder/trim drag sweeping over other cards: don't pop the boundary "+"
-                            setHoverBounds({ l: start, r: end });
-                          }}
-                          title={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
+                          aria-label={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                           aria-disabled={!enabled}
                           className={`bg-ink/10 absolute top-3 bottom-2 overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${!enabled ? 'opacity-45 grayscale ' : ''}${
                             dragged ? 'shadow-xl ring-2 ring-accent brightness-110' : sel ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'
@@ -1221,7 +1201,7 @@ function StudioTimelineImpl({
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 return stripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
-                                  <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
+                                  <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                                 ));
                               })()}
                             </div>
@@ -1232,7 +1212,7 @@ function StudioTimelineImpl({
                           ) : (
                             <>
                               {stripTiles(filmstrip ?? [], shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
-                                <img key={ti} data-film-tile src={tl.url} alt="" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
+                                <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                               ))}
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
                             </>
@@ -1275,7 +1255,7 @@ function StudioTimelineImpl({
                               e.stopPropagation();
                               onOpenShotSettings(shot.id);
                             }}
-                            title={t('panels.framingName', { name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
+                            aria-label={t('panels.framingName', { name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                             className={`cursor-pointer rounded px-1.5 py-0.5 text-[9px] font-medium leading-[14px] shadow ${
                               hasTreatment ? 'bg-accent/90 text-white' : 'bg-black/55 text-white/80 hover:text-white'
                             }`}
@@ -1301,7 +1281,6 @@ function StudioTimelineImpl({
                             <button
                               key={`tr-${i}`}
                               type="button"
-                              title={t('panels.addTransition')}
                               aria-label={t('panels.addTransition')}
                               onMouseEnter={() => {
                                 if (draggingRef.current) return; // don't grab hover-scrub while dragging
@@ -1330,7 +1309,6 @@ function StudioTimelineImpl({
                         const handle = (side: -1 | 1) => (
                           <div
                             role="none"
-                            title={t('panels.dragAdjustDurationSymmetric')}
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               drag(
@@ -1364,7 +1342,6 @@ function StudioTimelineImpl({
                           >
                             <button
                               type="button"
-                              title={t('panels.transitionSecSClick', { sec: (half * 2).toFixed(1) })}
                               aria-label={t('panels.editTransition')}
                               onPointerDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
@@ -1383,25 +1360,6 @@ function StudioTimelineImpl({
                         );
                       });
                     })()}
-                  {/* "+" at the hovered shot's leading/trailing boundaries: click to insert a local video at that split point (upload -> insert into main track) */}
-                  {hoverBounds && onInsertClipAt && !assetDragging && clipPendingAt == null &&
-                    [hoverBounds.l, hoverBounds.r].map((b, bi) => (
-                      <button
-                        key={bi}
-                        type="button"
-                        title={t('panels.insertLocalVideoHere')}
-                        aria-label={t('panels.insertLocalVideoHere')}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onInsertClipAt(b);
-                        }}
-                        className="bg-accent absolute top-1/2 z-40 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow hover:brightness-110"
-                        style={{ left: x(b) }}
-                      >
-                        <Plus size={12} />
-                      </button>
-                    ))}
               </div>
 
               {/* Overlay element chip: type icon + label + time when selected; whole-block drag + trim at both ends */}
@@ -1423,22 +1381,17 @@ function StudioTimelineImpl({
                 return (
                   <div
                     key={b.id}
-                    title={b.label}
                     aria-disabled={disabledClipIds?.has(b.id)}
                     data-block-selection-keep={sel ? '' : undefined}
                     className={`group absolute overflow-hidden ring-1 ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale ' : ''}${crossing ? 'z-40 shadow-lg ring-2 brightness-110' : 'transition'} ${sel ? meta.chipSel : meta.chip}`}
                     style={{ left, width, top, height: ROW_H - 8 }}
                     onClick={(e) => e.stopPropagation()} // chip is selected via pointer; block bubbling so the background doesn't clear it
-                    onMouseEnter={(e) => openHover(b, e.currentTarget)}
-                    onMouseLeave={closeHover}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
-                      closeHover();
                       onSelect(b.id); // positioning was already done by the single click (stop where you clicked); double-click no longer jumps to the block start
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      closeHover();
                       const additive = e.metaKey || e.ctrlKey; // Cmd/Ctrl multi-select
                       const at = secAt(e.clientX); // time at press point: on click the playhead stops here
                       const grab = at - b.startSec;
@@ -1492,7 +1445,7 @@ function StudioTimelineImpl({
                   >
                     <div className="pointer-events-none flex h-full items-center gap-1 px-2">
                       <Icon size={11} className={`${meta.dot} shrink-0`} />
-                      <span className="text-ink truncate text-[10px] font-medium">{b.label || t(meta.label)}</span>
+                      <span className="text-ink truncate text-[10px] font-medium">{blockDisplayTitle(b)}</span>
                       {sel && width > 92 && (
                         <span className="text-ink-3 ml-auto shrink-0 font-mono text-[9px] tabular-nums">
                           {b.startSec.toFixed(1)}–{(b.startSec + b.durationSec).toFixed(1)}
@@ -1539,7 +1492,6 @@ function StudioTimelineImpl({
                 captionBlocks.map((b) => (
                   <div
                     key={b.id}
-                    title={b.label || t('panels.captions')}
                     aria-disabled={disabledClipIds?.has(b.id)}
                     className={`absolute overflow-hidden bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20 ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
                     style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
@@ -1582,7 +1534,6 @@ function StudioTimelineImpl({
               {guide != null && (
                 <div className="pointer-events-none absolute top-0 bottom-0 z-40" style={{ left: x(guide) }}>
                   <div className="absolute top-0 bottom-0 w-px bg-accent/90" style={{ boxShadow: '0 0 6px rgba(63,75,232,0.55)' }} />
-                  <div className="absolute -top-0.5 left-1 rounded bg-accent px-1 font-mono text-[9px] leading-[13px] text-white">{guide.toFixed(2)}s</div>
                 </div>
               )}
 
@@ -1608,61 +1559,17 @@ function StudioTimelineImpl({
             </div>
 
             {/* Hover vertical line (spans ruler + tracks; center preview jumps to that frame in sync) */}
-            {hoverT != null && <div className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-white/35" style={{ left: x(hoverT) }} />}
+            {hoverT != null && <HoverCursor second={hoverT} pps={pps} />}
 
             {/* Playhead: spans ruler + tracks, bright line + top dot (subscribes to the playhead store, only this component moves each frame).
                 Not drawn on an empty project — a red line hanging on empty tracks looks broken */}
-            {(hasVideoLane || comp.blocks.length > 0) && <PlayheadCursor pps={pps} />}
+            {(hasVideoLane || comp.blocks.length > 0 || audioClips.length > 0) && <PlayheadCursor pps={pps} onPointerDown={onPlayheadPointerDown} />}
           </div>
 
           {/* Right breathing room: the last block's selection ring bleed isn't clipped by the scroll container's right edge */}
           <div className="shrink-0" style={{ width: EDGE_PAD }} />
         </div>
       </div>
-
-
-      {/* Hover element preview (fixed screen coords, floats above the chip) */}
-      {hover && (
-        <div
-          className="border-line bg-panel pointer-events-none fixed z-50 overflow-hidden rounded-lg border shadow-2xl"
-          style={{
-            left: Math.max(8, Math.min(hover.left, (typeof window !== 'undefined' ? window.innerWidth : 9999) - PREVIEW_W - 8 - 2)),
-            top: hover.top - previewH - 10,
-            width: PREVIEW_W + 2,
-          }}
-        >
-          <div
-            className="relative"
-            style={{
-              width: PREVIEW_W,
-              height: previewH,
-              // Transparency checkerboard (screen pixels; same as block-preview-card, drawing it into the scaled doc would blur it)
-              backgroundColor: '#ffffff',
-              backgroundImage:
-                'linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%),linear-gradient(45deg,#d7dbe0 25%,transparent 25%,transparent 75%,#d7dbe0 75%)',
-              backgroundSize: '16px 16px',
-              backgroundPosition: '0 0,8px 8px',
-            }}
-          >
-            <iframe
-              title="element-preview"
-              srcDoc={hoverDoc}
-              sandbox="allow-scripts"
-              style={{
-                position: 'absolute',
-                left: Math.round(PREVIEW_W * 0.07),
-                top: Math.round(previewH * 0.07),
-                width: comp.width,
-                height: comp.height,
-                border: 0,
-                transform: `scale(${previewScale * 0.86})`,
-                transformOrigin: 'top left',
-              }}
-            />
-          </div>
-          <div className="text-ink-3 truncate px-2 py-1 text-[10px]">{hover.block.label || blockKind(hover.block)}</div>
-        </div>
-      )}
     </div>
   );
 }

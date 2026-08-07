@@ -7,12 +7,13 @@
  * - BlockKindFooter: KIND_META icon + label footer.
  */
 
-import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp, renderBlock } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { injectPreviewRuntime } from './sample-composition';
+import { injectPreviewContentBoundsReporter, type PreviewContentBounds } from './preview-content-bounds';
 import { KIND_META } from './kind-meta';
-import { t } from './i18n';
+import { blockDisplayTitle } from './block-display-title';
 
 /** Transparency checkerboard (drawn at screen-pixel scale on the container; drawing it into the scaled document blurs it — learned the hard way). */
 const CHECKER_STYLE: CSSProperties = {
@@ -33,6 +34,7 @@ export function BlockPreviewFrame({
   ground = 'checker',
   fit = 'inset',
   focus,
+  focusContent = false,
   children,
 }: {
   comp: Composition;
@@ -47,6 +49,8 @@ export function BlockPreviewFrame({
   fit?: 'canvas' | 'inset';
   /** Focus box (design-canvas px): given = show only this block (piece centered and enlarged, used by component list cards); omitted = whole canvas shrunk. */
   focus?: { x: number; y: number; w: number; h: number };
+  /** Measure painted descendants inside a full-canvas custom block and frame the piece itself. */
+  focusContent?: boolean;
   /** Animated preview: true = auto-loop; 'hover' = play on hover, return to stable frame on leave;
    *  'manual' = frozen on the stable frame, replayed only via replayKey. Default freezes the stable frame. */
   animate?: boolean | 'hover' | 'manual';
@@ -59,7 +63,6 @@ export function BlockPreviewFrame({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // Re-render the doc only when this block (or theme/canvas size/palette) changes — deliberately not depending on the whole comp,
   // otherwise any edit would reload the entire wall of iframes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const docLoop = animate === 'manual' ? 'hover' : animate; // same doc shape: paused, message-driven
   // The document is rebuilt only for STRUCTURAL changes (different block, template, canvas, theme,
   // ground, loop mode, timing/box). Content edits — the props panel, in-place text — patch the one
@@ -75,11 +78,42 @@ export function BlockPreviewFrame({
     String(docLoop),
     block.durationSec,
     JSON.stringify(block.box ?? null),
+    String(focusContent),
   ].join('|');
   const latest = useRef(block);
   latest.current = block;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const doc = useMemo(() => injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground })), [docKey]);
+  const doc = useMemo(
+    () => {
+      const base = injectPreviewRuntime(blockPreviewDoc(comp, latest.current, { loop: docLoop, ground }));
+      return focusContent ? injectPreviewContentBoundsReporter(base, block.id) : base;
+    },
+    // `docKey` deliberately fingerprints only structural composition fields; depending on the
+    // full composition would reload every iframe when an unrelated block changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [block.id, docKey, focusContent],
+  );
+  const [measuredFocus, setMeasuredFocus] = useState<PreviewContentBounds | null>(null);
+  useEffect(() => setMeasuredFocus(null), [docKey]);
+  useEffect(() => {
+    if (!focusContent) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data as { type?: unknown; blockId?: unknown; rect?: Partial<PreviewContentBounds> } | null;
+      if (!data || data.type !== 'hf:previewContentBounds' || data.blockId !== block.id) return;
+      const rect = data.rect;
+      const next = rect && [rect.x, rect.y, rect.w, rect.h].every((value) => typeof value === 'number' && Number.isFinite(value))
+        ? { x: rect.x!, y: rect.y!, w: Math.max(1, rect.w!), h: Math.max(1, rect.h!) }
+        : null;
+      if (!next) return;
+      setMeasuredFocus((previous) =>
+        previous && Math.abs(previous.x - next.x) < 0.5 && Math.abs(previous.y - next.y) < 0.5 && Math.abs(previous.w - next.w) < 0.5 && Math.abs(previous.h - next.h) < 0.5
+          ? previous
+          : next,
+      );
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [block.id, focusContent]);
   // Content patch: assembled against the same mini-composition the document used, so a patched node
   // is byte-identical to what a rebuild would have produced.
   const patchedKey = useRef(docKey);
@@ -100,9 +134,10 @@ export function BlockPreviewFrame({
   const h = height ?? Math.round(comp.height * (width / comp.width));
   // focus framing: pick scale from the piece's bounding box, align piece center to card center — list cards show the "piece itself", not the whole canvas
   // (contain-fit min() reduces to the old width-driven scale when h is aspect-derived)
-  const scale = focus ? Math.min((width * inset) / focus.w, (h * inset) / focus.h) : Math.min(width / comp.width, h / comp.height) * inset;
-  const padX = focus ? Math.round(width / 2 - (focus.x + focus.w / 2) * scale) : Math.round((width - comp.width * scale) / 2);
-  const padY = focus ? Math.round(h / 2 - (focus.y + focus.h / 2) * scale) : Math.round((h - comp.height * scale) / 2);
+  const framedFocus = focus ?? (focusContent ? measuredFocus ?? undefined : undefined);
+  const scale = framedFocus ? Math.min((width * inset) / framedFocus.w, (h * inset) / framedFocus.h) : Math.min(width / comp.width, h / comp.height) * inset;
+  const padX = framedFocus ? Math.round(width / 2 - (framedFocus.x + framedFocus.w / 2) * scale) : Math.round((width - comp.width * scale) / 2);
+  const padY = framedFocus ? Math.round(h / 2 - (framedFocus.y + framedFocus.h / 2) * scale) : Math.round((h - comp.height * scale) / 2);
   // The sandboxed iframe (opaque origin) can't reach __hfPreview, so hover play control goes through postMessage
   const setLoop = (on: boolean, once = false) => iframeRef.current?.contentWindow?.postMessage({ type: 'hf-loop', on, once }, '*');
   // Replay on demand. Skips the initial mount (the doc already opens on the stable frame) and
@@ -118,14 +153,14 @@ export function BlockPreviewFrame({
   }, [replayKey]);
   return (
     <div
-      className={`relative ${ground === 'checker' ? '' : 'bg-black/40'}`}
+      className={`relative overflow-hidden ${ground === 'checker' ? '' : 'bg-black/40'}`}
       style={{ width, height: h, ...(ground === 'checker' ? CHECKER_STYLE : {}) }}
       onPointerEnter={animate === 'hover' ? () => setLoop(true) : undefined}
       onPointerLeave={animate === 'hover' ? () => setLoop(false) : undefined}
     >
       <iframe
         ref={iframeRef}
-        title={block.label || t(KIND_META[blockKind(block)].label)}
+        title={blockDisplayTitle(block)}
         srcDoc={doc}
         sandbox="allow-scripts"
         tabIndex={-1}
@@ -144,7 +179,7 @@ export function BlockKindFooter({ block }: { block: Block }) {
   return (
     <div className="flex items-center gap-1 px-1.5 py-1">
       <Icon size={11} className={`${meta.dot} shrink-0`} />
-      <span className="text-ink truncate text-[10px]">{block.label || t(meta.label)}</span>
+      <span className="text-ink truncate text-[10px]">{blockDisplayTitle(block)}</span>
     </div>
   );
 }

@@ -146,6 +146,33 @@ describe('Agent composition transaction boundary', () => {
     expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')).toBeTruthy();
   });
 
+  it('Chat add_block inserts an editable box instead of a boxless visual', async () => {
+    const h = harness();
+    Object.assign(h.ctx, {
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      setSelectedId: () => {},
+      setSelectedShotId: () => {},
+      applyT: () => {},
+      tRef: { current: 0 },
+      composeBlockChecked: async () => ({
+        innerHtml: '<div>42</div>',
+        timelineBody: '',
+        note: 'created',
+      }),
+      noteOf: () => '',
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'add_block', { instruction: 'show 42' });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.compRef.current.blocks).toHaveLength(1);
+    expect(h.compRef.current.blocks[0]).toMatchObject({
+      templateId: 'custom',
+      box: { x: 0.14, y: 0.3, w: 0.72, h: 0.4 },
+    });
+  });
+
   it('async failure preserves a later manual edit and removes only the tool ghost snapshot', async () => {
     const h = harness();
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });

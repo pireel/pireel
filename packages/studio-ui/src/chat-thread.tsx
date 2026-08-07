@@ -21,6 +21,7 @@ import type { FrameCatalogItem } from './use-frame-catalog';
 import { mid, PiAvatar, ThinkingDots, renderTextWithElementPills } from './chat-format';
 import { renderToolPart, renderToolPartGroup, toolStatus, type ToolPartLike } from './chat-tool-parts';
 import { Composer, type ComposerHandle } from './chat-composer';
+import { assistantMessageHasRenderableOutput } from './chat-thread-store';
 import { t } from './i18n';
 import type {
   AttachedFrame,
@@ -294,6 +295,9 @@ export function ChatThread({
       insertElementPill(el) {
         composerRef.current?.insertElementPill(el);
       },
+      clearElementPills() {
+        composerRef.current?.clearElementPills();
+      },
       send(text) {
         run(text);
       },
@@ -379,6 +383,11 @@ export function ChatThread({
               // Reasoning parts are hidden (leaked-internals feel) — a streaming reasoning phase must
               // therefore SHOW the dots, or the model looks dead while it thinks.
               const thinking = m.role === 'assistant' && isLast && busy && !lastToolRunning && !lastTextLive;
+              const emptyCompletedAssistant =
+                m.role === 'assistant'
+                && isLast
+                && status === 'ready'
+                && !assistantMessageHasRenderableOutput(m);
               return (
                 <Message key={m.id} from={m.role}>
                   <div className="flex items-start gap-2">
@@ -413,6 +422,19 @@ export function ChatThread({
                         return null;
                       })}
                       {thinking && <ThinkingDots />}
+                      {emptyCompletedAssistant && (
+                        <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
+                          <X size={12} className="shrink-0 text-destructive" />
+                          <span className="min-w-0 flex-1 text-destructive">{t('chatGen.requestFailed')}</span>
+                          <button
+                            type="button"
+                            onClick={() => void regenerate()}
+                            className="text-ink-2 hover:bg-line hover:text-ink shrink-0 rounded px-1.5 py-0.5 font-medium"
+                          >
+                            {t('common.retry')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </Message>

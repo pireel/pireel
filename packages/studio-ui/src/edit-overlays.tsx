@@ -3,8 +3,8 @@
 /**
  * Stage edit overlays: the selection/handle chrome drawn OVER the preview iframe.
  * BoxEditOverlay = the selected block's box shell (move/trim/scale/rotate handles);
- * CaptionEditOverlay = global caption position/size handles. Both follow ghost semantics —
- * content never updates live during a drag; the commit applies once on release.
+ * CaptionEditOverlay = global caption position/size handles. Component content and its solid shell
+ * update live through direct DOM/message channels; canonical state still commits once on release.
  */
 
 import { useRef, useState } from 'react';
@@ -35,9 +35,8 @@ export function boxSelectionRect(
  * Crop vs. scale division (per user): the border thin strip = move; the mid-edge bar handles = trim that edge (opposite
  * edge anchored, content anchored to canvas, no reflow); the corner dots = proportional scale (window/content/font all ×k, diagonal anchored).
  * Font size itself isn't tuned here (that's the font's job).
- * The drag itself isn't here — unified ghost semantics (like caption handles, per user): the baseline solid line stays,
- * the dashed ghost follows the pointer (setGhostRect writes DOM directly), content doesn't update live, and after committing
- * to Block on release it's applied once via the rebuild-free channel (see workbench's gripDrag/edgeDrag/scaleDrag and the boxDrag message handling).
+ * The drag itself isn't here: the parent moves this solid shell and the iframe content together without React state per frame,
+ * then commits Block once through the rebuild-free channel on release (see use-box-drag.ts).
  * Hollow inside (pointer-events:none) — doesn't block click-to-select / click-text-to-edit inside the iframe.
  */
 export function BoxEditOverlay({

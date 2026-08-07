@@ -132,7 +132,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
             role="button"
             tabIndex={0}
             aria-disabled={disabledIds?.has(clip.id)}
-            title={clip.label || t('panels.musicBed')}
+            aria-label={clip.label || t('panels.musicBed')}
             className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden border active:cursor-grabbing ${TIMELINE_ITEM_RADIUS} ${disabledIds?.has(clip.id) ? 'opacity-45 grayscale ' : ''}${
               selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
             }`}
@@ -256,7 +256,6 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
                         },
                       );
                     }}
-                    title={t(edge === 'in' ? 'panels.fadeIn' : 'panels.fadeOut')}
                     className={`absolute z-10 flex cursor-ew-resize items-center justify-center transition-opacity ${selected ? '' : 'opacity-0 group-hover/aud:opacity-100'}`}
                     style={{ left: kx - 7, top: CHIP_LABEL_H + KNEE_LANE_Y - 7, width: 14, height: 14 }}
                   >

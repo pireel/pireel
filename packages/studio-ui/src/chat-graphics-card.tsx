@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import { BlockPreviewFrame } from './block-preview-card';
+import { blockDisplayTitle } from './block-display-title';
 import { useToolProgress } from './tool-progress';
 import type { ToolPartLike } from './chat-tool-parts';
 import { t } from './i18n';
@@ -24,7 +25,7 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
   // deliberately memo-isolated from workbench re-renders).
   const prog = useToolProgress(toolId);
   const out = part.output as StudioToolResult | undefined;
-  const outData = out?.data as { blocks?: unknown; blockId?: unknown } | undefined;
+  const outData = out?.data as { blocks?: unknown; blockId?: unknown; newBlockId?: unknown } | undefined;
   const inp = part.input as { blockId?: unknown; blockIds?: unknown } | undefined;
   // Message parts keep what the model actually sent, which may carry the chat's @id pill prefix —
   // strip it here like the tool runner does, or an @-called tool renders no preview.
@@ -33,7 +34,7 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
   const single = (v: unknown) => (typeof v === 'string' && v ? [deAt(v)] : null);
   // Batch tools carry ids in the receipt/progress; single-component tools (edit/duplicate/add) name
   // their target in the input — the chain covers both from the moment the call starts.
-  const resolved = arr(outData?.blocks) ?? single(outData?.blockId) ?? prog?.blockIds ?? arr(inp?.blockIds) ?? single(inp?.blockId) ?? [];
+  const resolved = arr(outData?.blocks) ?? single(outData?.blockId) ?? single(outData?.newBlockId) ?? prog?.blockIds ?? arr(inp?.blockIds) ?? single(inp?.blockId) ?? [];
   // Sticky: at completion there is a frame where progress is already cleared but the receipt hasn't
   // applied yet — without this the ids collapse to empty and the strip flickers to nothing (the
   // "gone until refresh" report). A batch's ids never change once known, so remembering them is safe.
@@ -65,6 +66,7 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
   if (!blocks.length) return null;
   const cur = Math.min(page, blocks.length - 1);
   const block = blocks[cur]!;
+  const title = blockDisplayTitle(block);
   const H = Math.round(Math.min(Math.max(w * 0.62, 120), 240));
   const focus = block.box
     ? { x: block.box.x * comp.width, y: block.box.y * comp.height, w: block.box.w * comp.width, h: block.box.h * comp.height }
@@ -72,9 +74,9 @@ export function GraphicsPreviewBody({ toolId, part, getComp }: { toolId: string;
 
   return (
     <div ref={measureRef} className="border-line/70 border-t">
-      {w > 0 && <BlockPreviewFrame comp={comp} block={block} width={w} height={H} focus={focus} animate="hover" />}
+      {w > 0 && <BlockPreviewFrame comp={comp} block={block} width={w} height={H} focus={focus} focusContent={!focus} animate="hover" />}
       <div className="border-line/70 text-ink-3 flex items-center gap-2 border-t px-2.5 py-1 text-[11px]">
-        <span className="truncate">{block.label ?? ''}</span>
+        <span className="truncate" title={title}>{title}</span>
         {blocks.length > 1 && (
           <span className="ml-auto inline-flex shrink-0 items-center gap-0.5">
             <button

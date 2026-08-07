@@ -27,6 +27,8 @@ import { studioProviders } from '@pireel/studio-engine/providers';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
+import { agentElementRosterKey, buildAgentElementRoster } from './agent-element-roster';
+import { blockDisplayTitle } from './block-display-title';
 import { t } from './i18n';
 
 export interface AgentContextDeps {
@@ -45,26 +47,21 @@ export interface AgentContextDeps {
   clipAsrFailRef: MutableRefObject<Set<string>>;
   setClipAsr: (fn: (m: Record<string, AsrSegment[]>) => Record<string, AsrSegment[]>) => void;
   matteFileForShot: (s: VideoShot) => Promise<{ key: string; file: File; upTo: number } | null>;
+  getActiveOutput: () => { id: string; title: string; position: number; total: number };
 }
 
 export function useAgentContext(deps: AgentContextDeps) {
   const {
     comp, compRef, documentRef, selectedIdRef, selectedShotIdRef, tRef, asrRef, visualRef, videoSigRef,
     videoFileRef, clipAsrRef, clipAsrBusyRef, clipAsrFailRef,
-    setClipAsr, matteFileForShot,
+    setClipAsr, matteFileForShot, getActiveOutput,
   } = deps;
   /* ---------- chat agent: can @ components + request context + client-executed tools ---------- */
   // Memo by **content key** (not array identity): box drag etc. changes the blocks array identity every frame but id/label/kind
   // don't change — keeping elements identity stable so the memoized StudioChat doesn't re-render every frame.
-  const chatElemsKey = [
-    comp.blocks.map((b) => `${b.id}${b.templateId}${b.label ?? ''}`).join(''),
-    (comp.shots ?? []).map((s) => s.id).join(''),
-  ].join('');
+  const chatElemsKey = agentElementRosterKey(comp.blocks, comp.shots ?? []);
   const chatElements = useMemo<StudioElementRef[]>(
-    () => [
-      ...compRef.current.blocks.map((b) => ({ id: b.id, label: b.label?.slice(0, 16) || blockKind(b), kind: blockKind(b), isShot: false })),
-      ...(compRef.current.shots ?? []).map((s, i) => ({ id: s.id, label: t('workbench.shotN', { n: i + 1 }), kind: 'shot', isShot: true })),
-    ],
+    () => buildAgentElementRoster(compRef.current.blocks, compRef.current.shots ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chatElemsKey],
   );
@@ -99,12 +96,13 @@ export function useAgentContext(deps: AgentContextDeps) {
     let sel: { id: string; type: 'block' | 'shot'; label?: string; kind?: string } | null = null;
     if (selectedIdRef.current) {
       const b = c.blocks.find((x) => x.id === selectedIdRef.current);
-      if (b) sel = { id: b.id, type: 'block', label: b.label, kind: blockKind(b) };
+      if (b) sel = { id: b.id, type: 'block', label: blockDisplayTitle(b), kind: blockKind(b) };
     } else if (selectedShotIdRef.current) {
       const i = (c.shots ?? []).findIndex((s) => s.id === selectedShotIdRef.current);
       if (i >= 0) sel = { id: selectedShotIdRef.current, type: 'shot', label: `Shot #${i + 1}`, kind: 'shot' };
     }
     return {
+      output: getActiveOutput(),
       composition: {
         durationSec: totalDuration(c),
         width: c.width,
@@ -126,9 +124,11 @@ export function useAgentContext(deps: AgentContextDeps) {
           }
         : {}),
         ...(c.audioDenoise ? { denoise: { strength: c.audioDenoise.strength } } : {}),
-        blocks: c.blocks.map((b) => ({
+        // Sentence captions are a derived rendering of one logical caption layer. The layer state
+        // above is the useful context; enumerating every cue bloats and destabilizes every turn.
+        blocks: c.blocks.filter((b) => !isSentenceCaption(b)).map((b) => ({
           id: b.id,
-          label: b.label,
+          label: blockDisplayTitle(b),
           kind: blockKind(b),
           startSec: b.startSec,
           durationSec: b.durationSec,
@@ -171,7 +171,10 @@ export function useAgentContext(deps: AgentContextDeps) {
    *  source-file seconds, annotated with the owning shot id). Machine-facing English; shared by the extract_asr receipt and read_script. */
   const transcriptForAgent = (): string => {
     const rd = (x: number) => Math.round(x * 10) / 10;
-    const row = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`;
+    const copy = (s: AsrSegment) => s.captionText && s.captionText !== s.text
+      ? `${s.captionText} 〈ASR: ${s.text}〉`
+      : s.text;
+    const row = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${copy(s)}`;
     const parts: string[] = [];
     const main = asrRef.current ?? [];
     // Derived CURRENT truth, not the source table: rows carry their edit state (removed/partly cut,
@@ -182,7 +185,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       (c: { src?: string }) => !c.src,
       primaryNarrativeAsset(documentRef.current)?.metadata.durationSec,
     );
-    const mainRow = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${s.text}${marks.rows[i]!.gapNote}`;
+    const mainRow = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${copy(s)}${marks.rows[i]!.gapNote}`;
     const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
     parts.push(
       `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,

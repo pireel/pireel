@@ -32,6 +32,7 @@ import { fitElementDesignBox } from './element-insert-geometry';
 import type { StudioChatHandle } from './studio-chat';
 import { t } from './i18n';
 import { componentContentSyncTarget } from './component-content-sync';
+import { fitEditableBoxIntoSafeArea, normalizeElementForInsert } from './editable-block-geometry';
 
 export interface ElementOpsDeps {
   projectId: string;
@@ -98,125 +99,6 @@ export function useElementOps(deps: ElementOpsDeps) {
   };
   /** History card "insert": re-scope the id then land at the playhead (the same asset can be inserted multiple times, selectors don't collide).
    *  If there's an empty component block waiting to be filled (elementTargetRef recorded by aiFillBlock), prefer filling it — keeping its time window/box/track. */
-  /** Local reshaping before component insert (without an LLM round-trip), the user-defined container/text separation semantics:
-   *  - **inner container tracks the box's real size**: top-level visible elements' width/height (and absolute-position offsets)
-   *    are bound to container %; corner handles scale proportionally, edge handles on one axis, it changes as the container does (not a whole-transform scale);
-   *  - **text then follows the resulting size**: font-size/line-height px are calibrated to the natural size at insert as
-   *    min(cqw,cqh) container-query units — font size = original × min(width ratio, height ratio), pure CSS, instant during
-   *    drag, no glyph stretching;
-   *  - normalization of absurd sizes (over-canvas shrunk back / too-small enlarged) is reflected directly in the box choice, content %/cq follows automatically.
-   *  Rendered and measured offscreen at canvas size (container id = seedId; the component's <style> only takes effect scoped to #seedId);
-   *  offset geometry is immune to transform (entry animation doesn't pollute it). If unmeasurable → as-is + default centered box;
-   *  extreme overflow still has the autofit safety net. */
-  const normalizeElementForInsert = (el: GenElementResult, W: number, H: number, opts?: { fullFluid?: boolean }): { innerHtml: string; box: { x: number; y: number; w: number; h: number } } => {
-    const fallback = { innerHtml: el.innerHtml, box: { x: 0.14, y: 0.3, w: 0.72, h: 0.4 } };
-    try {
-      const host = document.createElement('div');
-      host.style.cssText = `position:fixed;left:-100000px;top:0;width:${W}px;height:${H}px;overflow:hidden;visibility:hidden;pointer-events:none;`;
-      const root = document.createElement('div');
-      root.id = el.seedId;
-      root.style.cssText = 'position:absolute;inset:0;';
-      root.innerHTML = el.innerHtml;
-      host.appendChild(root);
-      document.body.appendChild(host);
-      try {
-        const rectOf = (n: HTMLElement) => {
-          let x = n.offsetLeft;
-          let y = n.offsetTop;
-          let p = n.offsetParent as HTMLElement | null;
-          while (p && p !== host) {
-            x += p.offsetLeft;
-            y += p.offsetTop;
-            p = p.offsetParent as HTMLElement | null;
-          }
-          return { x, y, w: n.offsetWidth, h: n.offsetHeight };
-        };
-        const tops: { node: HTMLElement; rect: { x: number; y: number; w: number; h: number } }[] = [];
-        const walk = (node: HTMLElement, depth: number) => {
-          for (const k of Array.from(node.children) as HTMLElement[]) {
-            if (k.tagName === 'STYLE' || k.tagName === 'SCRIPT') continue;
-            const w = k.offsetWidth;
-            const h = k.offsetHeight;
-            if (w < 2 || h < 2) continue;
-            if (w > W * 0.92 && h > H * 0.92 && depth < 4) walk(k, depth + 1);
-            else tops.push({ node: k, rect: rectOf(k) });
-          }
-        };
-        walk(root, 0);
-        if (!tops.length) return fallback;
-        const x0 = Math.min(...tops.map((t2) => t2.rect.x));
-        const y0 = Math.min(...tops.map((t2) => t2.rect.y));
-        const x1 = Math.max(...tops.map((t2) => t2.rect.x + t2.rect.w));
-        const y1 = Math.max(...tops.map((t2) => t2.rect.y + t2.rect.h));
-        const nbW = x1 - x0;
-        const nbH = y1 - y0;
-        if (nbW < W * 0.03 || nbH < H * 0.02) return fallback; // measured absurdly small = untrustworthy
-        // Components that basically fill the canvas keep their original layout semantics (full-canvas box, content unchanged);
-        // fullFluid (whole-page theme components) is the exception: full pages are also fully cq-ized — calibrated to the design size, content scales proportionally no matter how small the box shrinks
-        const fullBleed = nbW > W * 0.95 && nbH > H * 0.95;
-        if (fullBleed && !opts?.fullFluid) return { innerHtml: el.innerHtml, box: { x: 0, y: 0, w: 1, h: 1 } };
-        const pad = fullBleed ? 0 : Math.min(W, H) * 0.025; // breathing room: font-measurement error / shadow margin
-        const natW = fullBleed ? W : nbW + pad * 2; // natural container size (= box px without normalization): the calibration base for % and cq
-        const natH = fullBleed ? H : nbH + pad * 2;
-        const pc = (v: number) => `${Math.round(v * 1000) / 10}%`;
-        for (const { node, rect } of fullBleed ? [] : tops) {
-          // Top-level visible element: size bound to container % — it changes its real size as the container (blue box) does
-          node.style.width = pc(rect.w / natW);
-          node.style.height = pc(rect.h / natH);
-          if (getComputedStyle(node).position === 'absolute') {
-            // Absolutely-positioned top-level element: convert the offset to % too; clear right/bottom anchors to avoid stretching from a double constraint with the new left/top
-            node.style.left = pc((rect.x - x0 + pad) / natW);
-            node.style.top = pc((rect.y - y0 + pad) / natH);
-            node.style.right = 'auto';
-            node.style.bottom = 'auto';
-          }
-        }
-        // Full fluidization: all px in CSS contexts (<style> and style="") are calibrated to the natural size as min(cqw,cqh).
-        // At box = natural size every value is identical; a proportional corner drag = font/padding/radius/SVG sizes all ×k, the skeleton holds;
-        // a single-edge widen = min picks the unchanged height ratio, so font/padding stay put, the container's real width grows, text reflows.
-        // ≤2px thin lines are kept (a hairline shrunk to sub-pixel goes blurry); @container/@media condition lines are protected (no cq units allowed in the condition).
-        const cq = (n: number) => `min(${Math.round((n / natW) * 100000) / 1000}cqw,${Math.round((n / natH) * 100000) / 1000}cqh)`;
-        // Negative px (like right:-14px for decorations outside the card): a textual '-min(...)' is invalid CSS and the
-        // whole positioning is dropped by the browser (the culprit behind the Botanical stamp falling to the bottom-left); negatives use max(-a,-b), mirroring the positive min scaling semantics
-        const ncq = (n: number) => `max(${-(Math.round((n / natW) * 100000) / 1000)}cqw,${-(Math.round((n / natH) * 100000) / 1000)}cqh)`;
-        const fluidCss = (css: string) => {
-          const guards: string[] = [];
-          return css
-            .replace(/@(?:container|media|supports)[^{]*/g, (m) => {
-              guards.push(m);
-              return `@@HFG${guards.length - 1}@@`;
-            })
-            .replace(/(-?\d+(?:\.\d+)?)px/gi, (m, n: string) => {
-              const v = parseFloat(n);
-              if (Math.abs(v) <= 2) return m;
-              return v > 0 ? cq(v) : ncq(-v);
-            })
-            .replace(/@@HFG(\d+)@@/g, (_m, i: string) => guards[Number(i)]!);
-        };
-        const html = root.innerHTML
-          .replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_m, attrs: string, css: string) => `<style${attrs}>${fluidCss(css)}</style>`)
-          .replace(/style="([^"]*)"/gi, (_m, css: string) => `style="${fluidCss(css)}"`);
-        // Wrap in a container-query base (container-type:size): cqw/cqh always relative to the component container, not the canvas
-        const wrapped = `<div style="position:absolute;inset:0;container-type:size;">\n${html}\n</div>`;
-        if (fullBleed) return { innerHtml: wrapped, box: { x: 0, y: 0, w: 1, h: 1 } };
-        // Size normalization is just the box choice: over-canvas shrunk back to a sensible scale, too-small bumped up a notch, content %/cq follows automatically
-        let k = 1;
-        if (nbW > 0.88 * W || nbH > 0.8 * H) k = Math.min((0.78 * W) / nbW, (0.7 * H) / nbH);
-        else if (nbW < 0.22 * W && nbH < 0.22 * H) k = Math.min((0.4 * W) / nbW, (0.35 * H) / nbH);
-        k = Math.max(0.3, Math.min(2.5, k));
-        const bw = Math.min(W, natW * k);
-        const bh = Math.min(H, natH * k);
-        const bx = Math.max(0, Math.min(W - bw, x0 + nbW / 2 - bw / 2)); // placed concentrically, clamped back into the canvas
-        const by = Math.max(0, Math.min(H - bh, y0 + nbH / 2 - bh / 2));
-        const r4 = (v: number) => Math.round(v * 10000) / 10000;
-        return { innerHtml: wrapped, box: { x: r4(bx / W), y: r4(by / H), w: r4(bw / W), h: r4(bh / H) } };
-      } finally {
-        host.remove();
-      }
-    } catch {
-      return fallback;
-    }
-  };
   const insertGeneratedElement = (el: GenElementResult, prompt: string, atSec?: number) => {
     // Kit elements skip the whole HTML insertion pipeline (offscreen measurement, cq-ization,
     // token baking): the block stores props and the component computes sizes from its real box.
@@ -239,6 +121,9 @@ export function useElementOps(deps: ElementOpsDeps) {
         sourceBox: geom.box,
         initialScale: el.insertScale,
       });
+    }
+    if (el.insertFit !== 'canvas') {
+      geom.box = fitEditableBoxIntoSafeArea(geom.box, compRef.current.width, compRef.current.height);
     }
     // Independence baking: theme components carry data-hf-baked (theme tokens travel with them); other components snapshot
     // tokens into the block scope here — swapping themes / editing other components after insert doesn't affect it (user-defined

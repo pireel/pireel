@@ -62,7 +62,7 @@ describe('canonical live project document', () => {
     expect(session.state.document).toBe(before);
   });
 
-  it('applies native V2 commands and preserves runtime media resolution', () => {
+  it('prunes published empty lanes while preserving runtime media resolution', () => {
     const session = createLiveProjectDocumentSession('project-1', {
       ...emptyComposition(),
       video: { url: 'blob:runtime-main', durationSec: 4 },
@@ -73,13 +73,13 @@ describe('canonical live project document', () => {
       track: { id: 'track_broll', type: 'visual', role: 'broll' },
     });
     expect(result.ok).toBe(true);
-    expect(session.state.document.timeline.tracks.map((track) => track.id)).toContain('track_broll');
+    expect(session.state.document.timeline.tracks.map((track) => track.id)).not.toContain('track_broll');
     const mainAsset = session.state.document.assets[session.state.document.semantics.primaryNarrativeAssetId!];
     expect(resolveLiveAssetUrl(session, mainAsset!)).toBe('blob:runtime-main');
     expect(session.state.composition.video?.url).toBe('blob:runtime-main');
     const canvas = applyCommandToLiveProject(session, { type: 'canvas.patch', patch: { width: 720, height: 1920 } });
     expect(canvas.ok).toBe(true);
-    expect(session.state.document.timeline.tracks.map((track) => track.id)).toContain('track_broll');
+    expect(session.state.document.timeline.tracks.map((track) => track.id)).not.toContain('track_broll');
   });
 
   it('does not publish a failed V2 command', () => {

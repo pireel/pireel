@@ -16,6 +16,7 @@ import {
   applyEditorDocumentPersistenceMetadata,
   freezeEditorDocumentBlockVars,
   prepareEditorDocumentForPersistence,
+  pruneEmptyNonPrimaryTracks,
   compositionToEditorDocument,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
@@ -140,7 +141,8 @@ export function applyDocumentToLiveProject(
   document: EditorDocumentV2,
   runtimeComposition?: Composition,
 ): LiveProjectDocumentState {
-  const canonical = freezeEditorDocumentBlockVars(prepareEditorDocumentForPersistence(document));
+  const prepared = freezeEditorDocumentBlockVars(prepareEditorDocumentForPersistence(document));
+  const canonical = pruneEmptyNonPrimaryTracks(prepared).document;
   if (runtimeComposition) rememberCompositionRuntimeUrls(canonical, runtimeComposition, session.runtimeAssetUrls);
   const composition = runtimeComposition ?? projectRuntimeComposition(session, canonical);
   session.state = { document: canonical, composition };
