@@ -38,6 +38,16 @@ export interface AsrSegment {
   sub?: string;
   /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
   cueSubs?: Record<string, string>;
+  /** Full caption copy after manual cue edits. The spoken transcript in `text` and ASR word timing
+   *  remain immutable; this field lets read_script/chat expose the audience-facing wording without
+   *  turning a spelling correction into a transcript re-tokenization. */
+  captionText?: string;
+  /** Audience-facing copy overrides keyed by source word range "w0:w1". Copy and layout are kept
+   *  separate so an explicit re-layout can move cue boundaries without losing spelling fixes. */
+  cueTexts?: Record<string, string>;
+  /** Stable display-cue boundaries, each encoded as source word range "w0:w1". Once materialized,
+   *  ordinary style/copy edits preserve these ranges; only an explicit re-layout replaces them. */
+  cueLayout?: string[];
   /** Target language sub/cueSubs were translated INTO. Unset = unknown (legacy / BYO agent writes) —
    *  displayed as-is; when both this and the current target language are known and differ, the
    *  translation is treated as stale and hidden (mixed-language second lines are worse than none). */
@@ -62,7 +72,7 @@ export interface CueWord extends TranscriptWord {
 
 /** One DERIVED display cue (one on-screen caption line; output of displayCues, re-computed per change).
  *  Never persisted — sanitizeTranscriptSegs strips the runtime fields at the storage boundary. */
-export interface DisplayCue extends Omit<AsrSegment, 'words' | 'cueSubs'> {
+export interface DisplayCue extends Omit<AsrSegment, 'words' | 'cueSubs' | 'captionText' | 'cueTexts' | 'cueLayout'> {
   words: CueWord[];
   cue: true;
   /** Source-sentence pointer for edit/translation write-back (absent only for ref-less legacy inputs). */
@@ -168,7 +178,13 @@ export function captionBlocksFromAsr(segments: (AsrSegment | DisplayCue)[], opts
   const blocks = segments
     .filter((s) => s.text && s.text.trim())
     .map((s) => {
-      const words = s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end);
+      const sourceWords = s.words?.length ? s.words : wordsFromText(s.text, s.start, s.end);
+      // A manually edited cue keeps its source-word ref/start/end, but its render words belong to
+      // the audience-facing copy. Re-tokenizing INSIDE this fixed window drives karaoke only; it
+      // never feeds cue derivation and therefore cannot move either neighboring boundary.
+      const words = s.cue && s.text.trim() !== joinWords(sourceWords.map((word) => word.text)).trim()
+        ? wordsFromText(s.text, s.start, s.end)
+        : sourceWords;
       const ref = (s as DisplayCue).ref;
       // Derived cues get a deterministic id from their source pointer: re-derivations keep the same id
       // (selection, preview double-buffer diffing and hf:* messages stay stable). Non-alnum chars in the

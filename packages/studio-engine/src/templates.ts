@@ -24,7 +24,8 @@ import { type CaptionPreset, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from
 import { t } from './i18n';
 import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { BASE_CAPTION_FONT_PX, CAPTION_WEIGHT_BOLD, CAPTION_WEIGHT_REGULAR } from './caption-presets';
-import { chunkWordsBalanced, estWordEm, latinJoin, measureTextPx, wordsFromText } from './caption-fx';
+import { latinJoin, wordsFromText } from './caption-fx';
+import { captionFontCss as presetFontCss, captionLineSegments } from './caption-layout-metrics';
 
 /* ============================ template render impls ============================ */
 
@@ -126,21 +127,6 @@ function renderCaption(slots: Slots, id: string): Rendered {
   return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv, slots.cue === true);
 }
 
-/** Preset font → CSS font-family (serif → Noto Serif SC, mono → theme --font-num, default → theme body). */
-function presetFontCss(p: CaptionPreset): string {
-  if (p.font === 'serif') return `'Noto Serif SC','Songti SC',serif`;
-  if (p.font === 'mono') return 'var(--font-num)';
-  return 'var(--font-body)';
-}
-
-/** Concrete font stack for canvas width measurement (CSS vars can't be used in canvas font;
- *  matches what the document actually loads: --font-body=Noto Sans SC / --font-num=IBM Plex Mono, see theme.ts). */
-function presetFontFamilies(p: CaptionPreset): string {
-  if (p.font === 'serif') return "'Noto Serif SC','Songti SC',serif";
-  if (p.font === 'mono') return "'IBM Plex Mono',ui-monospace,monospace";
-  return "'Noto Sans SC','PingFang SC',sans-serif";
-}
-
 /**
  * Preset captions: emphasis = highlight each word as it's spoken (color change / underline
  * slide-in / color-block pop); line = whole sentence fades in as a clean caption, no per-word
@@ -161,28 +147,8 @@ function presetFontFamilies(p: CaptionPreset): string {
  *   inter-word flex gap = round(fs×0.18), n−1 for n words: accounted precisely as "one per word, one added back from budget".
  *   word width = canvas measureText actual (pretext-style, italic/weight/size/font-stack match
  *     render; the measuring document must load the same fonts, see STUDIO_FONTS_HREF); node/test
- *     env has no canvas → glyph-class estimate table fallback, always taking the larger of the two
- *     (rather cut early than overflow into a wrap).
+ *     env has no canvas → deterministic glyph-class estimate table fallback.
  */
-
-export function captionLineSegments(words: FxWord[], p: CaptionPreset, wPct: number, scale: number, canvasW = 1080): FxWord[][] {
-  const fs = Math.max(10, Math.round(BASE_CAPTION_FONT_PX * scale));
-  const gapPx = 0; // CJK-adjacent words render with NO spacing (subtitle convention — the old 0.18em decorative gap read as scattered text)
-  const spPx = Math.round(fs * 0.3); // real space width at Latin word boundaries (render .sp)
-  const padPx = p.bg ? Math.round(fs * 0.42) * 2 : 0;
-  const canvasFont = `${p.italic ? 'italic ' : ''}${CAPTION_WEIGHT_REGULAR} ${fs}px ${presetFontFamilies(p)}`;
-  const wordPx = (t: string) => {
-    const est = estWordEm(t) * fs;
-    const m = measureTextPx(t, canvasFont);
-    return m == null ? est : Math.max(m, est); // take the larger: estimate is the floor, canvas only tightens never loosens
-  };
-  const extra = new Map<FxWord, number>();
-  words.forEach((w, i) => {
-    if (i < words.length - 1 && latinJoin(w.text, words[i + 1]!.text)) extra.set(w, spPx);
-  });
-  const budgetPx = (wPct / 100) * canvasW - padPx - fs * 0.15;
-  return chunkWordsBalanced(words, Math.max(fs * 2, budgetPx + gapPx), (w) => wordPx(w.text) + gapPx + (extra.get(w) ?? 0));
-}
 
 function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean } = {}, cue = false): Rendered {
   // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
@@ -199,7 +165,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
   // line — standard subtitle look; at scale 1 a cue fits one line so the stack is a single line);
   // legacy sentence blocks keep the old one-line-at-a-time rotation.
-  const segs = captionLineSegments(words, p, wPct, scale, canvasW);
+  const segs = captionLineSegments(words, p, wPct, scale, canvasW, { bold: ov.bold });
   let wIdx = 0;
   const segHtml = segs
     .map((g, si) => {

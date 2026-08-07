@@ -5,6 +5,16 @@ function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly
   return left === right || JSON.stringify(left ?? []) === JSON.stringify(right);
 }
 
+/** Browser transcript refs can lag cuts/style transactions. Once the document owns a materialized
+ * cue layout it is authoritative; explicit unlocking happens inside applyCaptionDocumentEdit. */
+function withDocumentLayout(existing: readonly AsrSegment[] | undefined, incoming: readonly AsrSegment[]): AsrSegment[] {
+  return incoming.map((segment, index) => (
+    existing?.[index]?.cueLayout === undefined
+      ? segment
+      : { ...segment, cueLayout: existing[index]!.cueLayout }
+  ));
+}
+
 /**
  * Fold temporary browser/server transcript inputs into V2 semantic ownership before a native
  * managed-caption command runs. Asset identity, not track position or a projected shot URL, is the
@@ -38,14 +48,19 @@ export function syncCaptionTranscripts(
   let changed = false;
   const transcripts = { ...document.semantics.transcripts };
   const mainAssetId = document.semantics.primaryNarrativeAssetId;
-  if (mainAssetId && mainTranscript?.length && !sameTranscript(transcripts[mainAssetId], mainTranscript)) {
-    transcripts[mainAssetId] = [...mainTranscript];
-    changed = true;
+  if (mainAssetId && mainTranscript?.length) {
+    const merged = withDocumentLayout(transcripts[mainAssetId] as AsrSegment[] | undefined, mainTranscript);
+    if (!sameTranscript(transcripts[mainAssetId], merged)) {
+      transcripts[mainAssetId] = merged;
+      changed = true;
+    }
   }
   for (const [sourceKey, segments] of Object.entries(clipTranscripts)) {
     const assetId = assetBySourceKey.get(sourceKey);
-    if (!assetId || !narrativeAssetIds.has(assetId) || !segments.length || sameTranscript(transcripts[assetId], segments)) continue;
-    transcripts[assetId] = [...segments];
+    if (!assetId || !narrativeAssetIds.has(assetId) || !segments.length) continue;
+    const merged = withDocumentLayout(transcripts[assetId] as AsrSegment[] | undefined, segments);
+    if (sameTranscript(transcripts[assetId], merged)) continue;
+    transcripts[assetId] = merged;
     changed = true;
   }
   if (!changed) return document;

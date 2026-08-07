@@ -72,6 +72,25 @@ export interface AssetSearchResponse {
   };
 }
 
+/** Keep Agent receipts action-oriented. Long prompts are useful while ranking documents, but once
+ * an element has matched its stable component/template/element id is the only content a later
+ * atomic action needs. Returning the authored prompt again wastes context and turns catalog copy
+ * into conversation input. Media results keep their prompt metadata because it describes the
+ * generated asset itself rather than an insertable component definition. */
+export function compactAssetSearchElementResults(results: readonly AssetSearchResult[]): AssetSearchResult[] {
+  return results.map((result) => {
+    if (result.kind !== 'element') return result;
+    const { fields: _allFields, locator: _allLocator, ...base } = result;
+    const { prompt: _fieldPrompt, ...fields } = result.fields ?? {};
+    const { prompt: _locatorPrompt, ...locator } = result.locator ?? {};
+    return {
+      ...base,
+      ...(Object.keys(fields).length ? { fields } : {}),
+      ...(Object.keys(locator).length ? { locator } : {}),
+    };
+  });
+}
+
 const KIND_ALIASES: Record<AssetDocumentKind, string> = {
   image: 'image photo picture still graphic sticker 图片 图像 照片 配图 贴纸',
   video: 'video clip footage b roll b-roll 视频 片段 素材 空镜',

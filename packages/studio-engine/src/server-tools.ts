@@ -89,15 +89,17 @@ import {
   videoShotTimelineSpans,
 } from './composition';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
+import { resolveCaptionSentenceEdits } from './caption-sentence-edit';
 import { parseBlockResponse } from './compose';
 import { HARD_LINT_CODES, lintBlock } from './block-lint';
 import { buildSituation, wrapAgentTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type CutSeamEntry, finalizeCutSeams, narrationRowMarks, spans as clipSpans, tightenCutRanges } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
+import { applyCaptionTextEdits } from './caption-text-edit';
 import { ensureTemplatesRegistered } from './templates';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-search';
-import { normalizeProjectOutputs } from './project-outputs';
+import { normalizeProjectOutputs, projectOutputPositionMap } from './project-outputs';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -155,7 +157,9 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'delete_words',
   'add_transition',
   'set_captions',
+  'relayout_captions',
   'remove_captions',
+  'edit_caption_text',
   'set_caption_translations',
   'apply_block',
   'compose_context',
@@ -212,10 +216,17 @@ function applyNativeNarrativePatches(
 function offlineState(p: ServerToolProject): string {
   const c = p.comp;
   const outputs = normalizeProjectOutputs(p.context.outputs);
+  const activePosition = [...projectOutputPositionMap(outputs)].find(([, id]) => id === outputs.active.id)?.[0] ?? 1;
   const tag = new Map<string, string>();
   for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
   const cs = isCaptionsOn(c) ? resolveCaptionStyle(c) : null;
   const situation = buildSituation({
+    output: {
+      id: outputs.active.id,
+      title: outputs.active.title || 'Untitled output',
+      position: activePosition,
+      total: outputs.inactive.length + 1,
+    },
     composition: {
       durationSec: totalDuration(c),
       width: c.width,
@@ -260,19 +271,22 @@ function offlineState(p: ServerToolProject): string {
     },
     ...(typeof p.canGenerate === 'boolean' ? { canGenerate: p.canGenerate } : {}),
   });
-  return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}).\nActive output: ${outputs.active.id} · ${outputs.active.title || `Output ${outputs.active.order + 1}`} (${outputs.inactive.length + 1} total; opening the studio is currently required to switch outputs). Video-dependent tools (extract_asr, analyze_visual, capture_frame, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
+  return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}). Switching outputs still requires an open studio tab. Video-dependent tools (extract_asr, analyze_visual, capture_frame, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
 }
 
 /** Offline transcript (same format as the browser's transcriptForAgent). */
 function offlineTranscript(p: ServerToolProject): string {
   const rd = (x: number) => Math.round(x * 10) / 10;
-  const row = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${s.text}`;
+  const copy = (s: TranscriptSegment) => s.captionText && s.captionText !== s.text
+    ? `${s.captionText} 〈ASR: ${s.text}〉`
+    : s.text;
+  const row = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${copy(s)}`;
   const parts: string[] = [];
   // Same derived-current-truth marks as the browser transcript — the two surfaces must tell one story
   const main = mainTranscriptOf(p);
   const primaryAssetId = p.document.semantics.primaryNarrativeAssetId;
   const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src, primaryAssetId ? p.document.assets[primaryAssetId]?.metadata.durationSec : undefined);
-  const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${s.text}${marks.rows[i]!.gapNote}`;
+  const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${copy(s)}${marks.rows[i]!.gapNote}`;
   const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
   parts.push(
     `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,
@@ -355,24 +369,26 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       return { result: { ok: true, state: offlineState(p) } };
     case 'list_outputs': {
       const outputs = normalizeProjectOutputs(p.context.outputs);
-      const rows = [
+      const ordered = [
         {
-          ...outputs.active,
-          title: outputs.active.title || `Output ${outputs.active.order + 1}`,
+          output: outputs.active,
           active: true,
           durationSec: totalDuration(p.comp),
         },
         ...outputs.inactive.map((output) => ({
-          id: output.id,
-          title: output.title || `Output ${output.order + 1}`,
-          order: output.order,
-          createdAt: output.createdAt,
-          updatedAt: output.updatedAt,
-          ...(output.skill ? { skill: output.skill } : {}),
+          output,
           active: false,
           durationSec: editorDocumentRenderPlan(output.document).durationSec,
         })),
-      ].sort((a, b) => a.order - b.order);
+      ].sort((a, b) => a.output.order - b.output.order || a.output.createdAt - b.output.createdAt);
+      const rows = ordered.map(({ output, active, durationSec }, index) => ({
+        id: output.id,
+        position: index + 1,
+        title: output.title || 'Untitled output',
+        active,
+        durationSec,
+        ...(output.skill ? { skill: output.skill } : {}),
+      }));
       return { result: { ok: true, summary: `${rows.length} outputs in this project (cloud)`, data: { outputs: rows } } };
     }
     case 'read_script': {
@@ -890,6 +906,13 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         document: command.document,
       };
     }
+    case 'remove_silence':
+      return {
+        result: {
+          ok: false,
+          error: 'remove_silence requires the live Studio tab so it can analyze the source audio bytes on-device',
+        },
+      };
     case 'cut_range':
     case 'cut_narration': {
       if (!hasPrimaryNarrativeClips(p.document)) return { result: { ok: false, error: 'no video track yet' } };
@@ -1027,6 +1050,57 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: 'Removed captions' },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
+    }
+    case 'relayout_captions': {
+      if (!isCaptionsOn(c)) return { result: { ok: false, error: 'no captions right now' } };
+      const edit = applyCaptionDocumentEdit({
+        document: p.document,
+        relayout: true,
+        mainTranscript: null,
+        clipTranscripts: {},
+      });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: 'Re-laid captions for the current canvas and font size' },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
+      };
+    }
+    case 'edit_caption_text': {
+      const items = (Array.isArray(input.items) ? input.items : [])
+        .map((item) => {
+          const value = (item ?? {}) as Record<string, unknown>;
+          return { index: Number(value.index), text: typeof value.text === 'string' ? value.text.trim() : '' };
+        })
+        .filter((item) => Number.isInteger(item.index) && item.index >= 0 && item.text.length > 0);
+      if (!items.length) return { result: { ok: false, error: 'items empty/invalid (expected {index, text}[], where index is the read_script line number and text is the complete corrected sentence)' } };
+      const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
+      const assetId = shotIdIn
+        ? primaryNarrativeClips(p.document).find((clip) => clip.id === shotIdIn)?.assetId
+        : p.document.semantics.primaryNarrativeAssetId;
+      if (!assetId) return { result: { ok: false, error: shotIdIn ? 'shot not found' : 'primary narrative asset not found' } };
+      const segments = p.document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+      if (!segments?.length) return { result: { ok: false, error: shotIdIn ? 'this clip has no transcript' : 'no transcript in the cloud project — open the studio tab and run extract_asr first' } };
+      const bad = items.filter((item) => item.index >= segments.length);
+      if (bad.length) return { result: { ok: false, error: `index out of range: ${bad.map((item) => item.index).join(', ')} (this transcript has ${segments.length} lines; see read_script for line numbers)` } };
+      const resolved = resolveCaptionSentenceEdits(p.document, assetId, items);
+      if (!resolved.ok) return { result: { ok: false, error: resolved.error } };
+      const next = applyCaptionTextEdits(segments, resolved.items);
+      if (next === segments) return { result: { ok: true, summary: 'Caption text already matches' } };
+      const document = {
+        ...p.document,
+        semantics: {
+          ...p.document.semantics,
+          transcripts: { ...p.document.semantics.transcripts, [assetId]: next },
+        },
+      };
+      const edit = applyCaptionDocumentEdit({ document, mainTranscript: null, clipTranscripts: {} });
+      if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      return {
+        result: { ok: true, summary: `Updated ${items.length} caption lines` },
         comp: projectDocumentToComposition(edit.document),
         document: edit.document,
       };

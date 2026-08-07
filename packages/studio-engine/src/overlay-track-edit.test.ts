@@ -48,7 +48,7 @@ describe('overlay track transactions', () => {
     expect(second.document.timeline.tracks.filter((track) => track.type === 'graphics' && track.stackOrder === 5)).toHaveLength(1);
   });
 
-  it('creates a new lane and moves a clip without pruning the source, then reorders empty lanes', () => {
+  it('creates a new lane, moves the clip and prunes every empty graphics lane', () => {
     const document = documentWithGraphics();
     const moved = moveOverlayDocumentClip({
       document,
@@ -57,17 +57,10 @@ describe('overlay track transactions', () => {
     });
     expect(moved.ok).toBe(true);
     if (!moved.ok) return;
-    expect(moved.document.timeline.tracks.find((track) => track.id === 'low')).toMatchObject({ stackOrder: 2, clips: [] });
+    expect(moved.document.timeline.tracks.find((track) => track.id === 'low')).toBeUndefined();
+    expect(moved.document.timeline.tracks.find((track) => track.id === 'high')).toBeUndefined();
     expect(moved.document.timeline.tracks.find((track) => track.id === 'middle')).toMatchObject({ stackOrder: 5, clips: [{ id: 'card' }] });
-
-    const reordered = reorderOverlayDocumentTracks(moved.document, ['low', 'middle', 'high']);
-    expect(reordered.ok).toBe(true);
-    if (!reordered.ok) return;
-    expect(Object.fromEntries(reordered.document.timeline.tracks.filter((track) => track.type === 'graphics').map((track) => [track.id, track.stackOrder]))).toEqual({
-      low: 8,
-      middle: 5,
-      high: 2,
-    });
+    expect(moved.document.timeline.tracks.filter((track) => track.type === 'graphics').map((track) => track.id)).toEqual(['middle']);
   });
 
   it('rolls back a newly inserted lane when the following duplicate command fails', () => {

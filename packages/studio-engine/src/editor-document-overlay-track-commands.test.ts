@@ -36,19 +36,18 @@ function documentWithTracks(): EditorDocumentV2 {
 }
 
 describe('EditorDocument V2 overlay lane commands', () => {
-  it('moves a stable identity while retaining an empty source lane and clip metadata', () => {
+  it('moves a stable identity, prunes the emptied source lane and retains clip metadata', () => {
     const document = documentWithTracks();
     const result = applyEditorCommand(document, { type: 'overlay.move', clipId: 'card', toTrackId: 'graphics-high' });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.document.timeline.tracks.find((track) => track.id === 'graphics-low')).toMatchObject({
-      hidden: true, syncLocked: false, stackOrder: 2, clips: [],
-    });
+    expect(result.document.timeline.tracks.find((track) => track.id === 'graphics-low')).toBeUndefined();
     expect(result.document.timeline.tracks.find((track) => track.id === 'graphics-high')).toMatchObject({
       muted: true,
       clips: [{ id: 'card', startFrame: 30, durationFrames: 60, anchor: { type: 'clip', clipId: 'anchor', offsetFrames: 3 } }],
     });
     expect(document.timeline.tracks.find((track) => track.id === 'graphics-low')!.clips).toHaveLength(1);
+    expect(result.receipt.removedTrackIds).toEqual(['graphics-low']);
   });
 
   it('duplicates payload and anchors onto a target lane without sharing mutable slot objects', () => {

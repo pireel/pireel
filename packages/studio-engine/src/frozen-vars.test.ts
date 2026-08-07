@@ -91,7 +91,7 @@ describe('offline funnel (runServerTool)', () => {
       title: 't',
       comp: composition,
       document: compositionToEditorDocument({ projectId: 'p1', composition: composition }).document,
-      context: { schemaVersion: 2 as const },
+      context: { schemaVersion: 3 as const },
       videoDurationSec: null,
     };
     const out = runServerTool('move_block', { blockId: p.comp.blocks[0]!.id, startSec: 1 }, p);

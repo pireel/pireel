@@ -147,7 +147,7 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
   };
 }
 
-/** Move an overlay to an existing or newly-created lane, retaining the empty source lane. */
+/** Move an overlay to an existing or newly-created lane; an emptied source lane is pruned. */
 export function moveOverlayDocumentClip(input: MoveOverlayDocumentClipInput): OverlayDocumentEditResult {
   const target = insertTargetTrack(input.document, input);
   if (!target.ok) return target;

@@ -11,6 +11,7 @@
  * say" are the same rules; two copies would drift the moment one is tuned.
  */
 
+import { components } from '@pireel/studio-kit';
 import { ON_SCREEN_LANGUAGE } from '../l0-editor';
 
 /** L3.1 — how to decide what goes on screen in a talking-head piece. */
@@ -65,7 +66,7 @@ export const SPOKEN_PRESET: Preset = {
   id: 'spoken',
   title: 'Talking-head',
   editorial: SPOKEN_EDITORIAL,
-  // Every component today. A second preset is what will make this list mean something — until then
-  // it stays exhaustive rather than pretending to a curation nobody has done.
-  components: ['metric', 'kpi', 'comparison', 'chart', 'steps', 'callout', 'lowerThird', 'title'],
+  // The default preset searches the full registry. Adding a component therefore grows only the
+  // retrieval index; it does not require a second hand-maintained list or enlarge every prompt.
+  components: Object.keys(components),
 };

@@ -57,7 +57,8 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('测试项目');
     expect(r.result.state).toContain('@b1');
     expect(r.result.state).toContain('@s2');
-    expect(r.result.state).toContain('Active output: output-main');
+    expect(r.result.state).toContain('Active output: #1 "Untitled output"');
+    expect(r.result.state).toContain('stable id output-main');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
   });
   it('V2 项目上的工具直接补丁原生块，不丢 canonical document', () => {
@@ -213,11 +214,12 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     });
     const r = runServerTool('list_outputs', {}, p);
     expect(r.result.ok).toBe(true);
-    const outputs = (r.result.data as { outputs: { id: string; active: boolean; durationSec: number }[] }).outputs;
-    expect(outputs.map((output) => [output.id, output.active, output.durationSec])).toEqual([
-      ['master', true, 20],
-      ['short-1', false, 8],
+    const outputs = (r.result.data as { outputs: { id: string; position: number; active: boolean; durationSec: number }[] }).outputs;
+    expect(outputs.map((output) => [output.position, output.id, output.active, output.durationSec])).toEqual([
+      [1, 'master', true, 20],
+      [2, 'short-1', false, 8],
     ]);
+    expect(outputs.every((output) => !('order' in output))).toBe(true);
     expect(r.comp).toBeUndefined();
     expect(SERVER_EXECUTABLE_TOOLS.has('list_outputs')).toBe(true);
   });
@@ -399,9 +401,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const cut = runServerTool('cut_range', { fromSec: 0, toSec: 2 }, p);
     expect(cut.result.ok).toBe(true);
     expect(cut.document?.timeline.tracks.find((track) => track.id === 'broll-track')?.clips[0]).toMatchObject({ startFrame: 90 });
-    expect(cut.document?.timeline.tracks.find((track) => track.id === 'empty-layout-lane')).toMatchObject({
-      hidden: true, syncLocked: false, stackOrder: 9, clips: [],
-    });
+    expect(cut.document?.timeline.tracks.find((track) => track.id === 'empty-layout-lane')).toBeUndefined();
 
     p.document!.timeline.tracks.find((track) => track.id === 'broll-track')!.locked = true;
     const rejected = runServerTool('cut_range', { fromSec: 0, toSec: 1 }, p);
@@ -471,9 +471,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const nativeDeleted = runServerTool('delete_shot', { shotId: 'only' }, native);
     expect(nativeDeleted.result.ok).toBe(true);
     expect(nativeDeleted.document?.timeline.tracks.find((track) => track.id === nativeDeleted.document?.semantics.primaryNarrativeTrackId)?.clips).toEqual([]);
-    expect(nativeDeleted.document?.timeline.tracks.find((track) => track.id === 'empty-independent')).toMatchObject({
-      hidden: true, syncLocked: false, stackOrder: 8, clips: [],
-    });
+    expect(nativeDeleted.document?.timeline.tracks.find((track) => track.id === 'empty-independent')).toBeUndefined();
     expect(nativeDeleted.comp?.blocks).toMatchObject([{ id: 'independent-overlay', startSec: 3, durationSec: 4 }]);
   });
   it('set_captions:有云端转写才能开', () => {
@@ -512,6 +510,33 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(translated.document!.timeline.tracks.find((track) => track.id === captionTrackId)!.clips.some((clip) => (
       clip.kind === 'caption' && clip.block.slots.sub === 'First sentence'
     ))).toBe(true);
+
+    const corrected = runServerTool('edit_caption_text', {
+      items: [{ index: 0, text: '修正后的第一句话' }],
+    }, { ...p, comp: translated.comp!, document: translated.document! });
+    expect(corrected.result.ok).toBe(true);
+    expect(corrected.document!.semantics.transcripts[mainAssetId]![0]).toMatchObject({
+      start: 0,
+      end: 5,
+      captionText: '修正后的第一句话',
+    });
+    expect(corrected.document!.semantics.transcripts[mainAssetId]![0]!.text).toBe(
+      translated.document!.semantics.transcripts[mainAssetId]![0]!.text,
+    );
+    expect(corrected.document!.semantics.transcripts[mainAssetId]![0]!.words).toEqual(
+      translated.document!.semantics.transcripts[mainAssetId]![0]!.words,
+    );
+    expect(corrected.document!.semantics.transcripts[mainAssetId]![0]!.sub).toBeUndefined();
+    expect(corrected.document!.timeline.tracks.find((track) => track.id === captionTrackId)!.clips.some((clip) => (
+      clip.kind === 'caption' && clip.block.label === '修正后的第一句话'
+    ))).toBe(true);
+    const relaid = runServerTool('relayout_captions', {}, { ...p, comp: corrected.comp!, document: corrected.document! });
+    expect(relaid.result.ok).toBe(true);
+    expect(relaid.document!.semantics.transcripts[mainAssetId]![0]).toMatchObject({
+      captionText: '修正后的第一句话',
+      cueLayout: expect.any(Array),
+    });
+    expect(runServerTool('edit_caption_text', { items: [{ index: 99, text: 'x' }] }, p).result).toMatchObject({ ok: false });
 
     const lockedProject = { ...p, comp: enabled.comp!, document: enabled.document! };
     lockedProject.document.timeline.tracks.find((track) => track.id === captionTrackId)!.locked = true;
@@ -613,7 +638,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // 轨外的分割点拒绝,不静默产出一条零长轨
     expect(runServerTool('set_bgm', { splitAtSec: 999 }, proj({ comp: withClip })).result.ok).toBe(false);
   });
-  it('V2 set_bgm 原生修改/分割/删除并保留空音频轨', () => {
+  it('V2 set_bgm 原生修改/分割/删除并清理空音频轨', () => {
     const withClip: Composition = {
       ...proj().comp,
       audioTracks: [{ id: 'bed', src: 'https://cdn.pireel.com/bed.mp3', durationSec: 30 }],
@@ -642,8 +667,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
 
     const removed = runServerTool('set_bgm', { off: true }, { ...p, comp: split.comp!, document: split.document! });
     expect(removed.result.ok).toBe(true);
-    expect(removed.document?.timeline.tracks.filter((track) => track.type === 'audio')).toHaveLength(2);
-    expect(removed.document?.timeline.tracks.filter((track) => track.type === 'audio').every((track) => track.clips.length === 0)).toBe(true);
+    expect(removed.document?.timeline.tracks.filter((track) => track.type === 'audio')).toEqual([]);
 
     const locked = v2proj({ comp: withClip });
     locked.document!.timeline.tracks.find((track) => track.type === 'audio')!.locked = true;
@@ -733,7 +757,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect((r3.result.data as { newBlockId: string }).newBlockId).toBe(handed);
   });
   it('不支持的工具明确拒绝(路由据 SERVER_EXECUTABLE_TOOLS 预筛,这里兜底)', () => {
-    for (const id of ['set_canvas', 'set_shot_framing', 'apply_layout', 'list_words', 'delete_words']) {
+    for (const id of ['set_canvas', 'set_shot_framing', 'apply_layout', 'list_words', 'delete_words', 'relayout_captions']) {
       expect(SERVER_EXECUTABLE_TOOLS.has(id)).toBe(true);
     }
     expect(SERVER_EXECUTABLE_TOOLS.has('extract_asr')).toBe(false);

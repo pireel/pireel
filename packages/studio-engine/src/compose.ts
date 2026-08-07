@@ -15,7 +15,7 @@
  * the instruction's language).
  */
 
-import { BLOCK_SYSTEM, withActiveTheme } from './prompts';
+import { BLOCK_SYSTEM, buildHtmlSystem, retrieveComponentCandidates, withActiveTheme } from './prompts';
 
 /** Minimal chat shape (matches @/lib/models ModelRouter.chat). */
 interface ChatHint {
@@ -186,8 +186,18 @@ export function parseKitResponse(text: string): { choice: KitChoice | null; note
 
 export async function composeBlock(
   models: ChatCapable,
-  args: { block: BlockEdit; instruction: string; context?: ComposeContext; hint?: ChatHint; theme?: string; lang?: string },
+  args: { block: BlockEdit; instruction: string; context?: ComposeContext; hint?: ChatHint; theme?: string; lang?: string; presetId?: string },
 ): Promise<{ innerHtml: string; timelineBody: string; note: string }> {
-  const r = await models.chat({ system: withTheme(BLOCK_SYSTEM, args.theme), prompt: buildBlockPrompt(args), hint: args.hint ?? HINT });
+  const candidateComponents = retrieveComponentCandidates({
+    instruction: args.instruction,
+    block: args.block,
+    ...(args.context ? { context: args.context } : {}),
+    ...(args.presetId ? { presetId: args.presetId } : {}),
+  });
+  const system = buildHtmlSystem({
+    componentIds: candidateComponents,
+    ...(args.presetId ? { presetId: args.presetId } : {}),
+  });
+  const r = await models.chat({ system: withTheme(system, args.theme), prompt: buildBlockPrompt(args), hint: args.hint ?? HINT });
   return parseBlockResponse(r.text, { innerHtml: args.block.innerHtml, timelineBody: args.block.timelineBody });
 }

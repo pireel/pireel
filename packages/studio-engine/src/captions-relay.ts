@@ -9,13 +9,14 @@
  * tier as build-blocks).
  */
 
-import { cueChunks, wordsFromText } from './caption-fx';
-import { BASE_CAPTION_FONT_PX } from './caption-presets';
-import { DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
+import { wordsFromText } from './caption-fx';
+import { getCaptionPreset } from './caption-presets';
+import { type CaptionStyle, DEFAULT_CAPTION_WIDTH_PCT } from './composition-core';
 import { type Block, type VideoShot, isSentenceCaption } from './composition';
 import { spans as clipSpans, srcToEditedLoose } from './trim';
 import { type AsrSegment, type CueRef, type CueWord, type DisplayCue, captionBlocksFromAsr } from './build-blocks';
 import { joinWords } from './caption-fx';
+import { captionLineSegments } from './caption-layout-metrics';
 
 /** Source-domain predicate: the narration/transcript timeline belongs to the narration source (segments without a src field). */
 export const inNarrationSource = (c: VideoShot): boolean => !c.src;
@@ -98,9 +99,66 @@ function distributeSub(sub: string, weights: number[]): string[] {
   return out;
 }
 
+interface LockedCueRange {
+  key: string;
+  startPos: number;
+  endPos: number;
+}
+
+function lockedCueRanges(words: readonly CueWord[], keys: readonly string[] | undefined): LockedCueRange[] {
+  if (!keys?.length) return [];
+  const positionBySourceIndex = new Map(words.map((word, position) => [word.si ?? position, position] as const));
+  const ranges: LockedCueRange[] = [];
+  for (const key of keys) {
+    const [startRaw, endRaw] = key.split(':');
+    const sourceStart = Number(startRaw);
+    const sourceEnd = Number(endRaw);
+    if (!Number.isInteger(sourceStart) || !Number.isInteger(sourceEnd) || sourceStart < 0 || sourceEnd < sourceStart) continue;
+    const startPos = positionBySourceIndex.get(sourceStart);
+    const endPos = positionBySourceIndex.get(sourceEnd);
+    if (startPos == null || endPos == null || endPos < startPos) continue;
+    // A cut through the middle of an edited cue invalidates that layout lock for this fragment. Do
+    // not stretch the user's copy over non-contiguous surviving words.
+    let contiguous = endPos - startPos === sourceEnd - sourceStart;
+    for (let position = startPos; contiguous && position <= endPos; position += 1) {
+      contiguous = (words[position]!.si ?? position) === sourceStart + position - startPos;
+    }
+    if (contiguous) ranges.push({ key, startPos, endPos });
+  }
+  return ranges.sort((left, right) => left.startPos - right.startPos || left.endPos - right.endPos);
+}
+
+/** Automatic cueing fills untouched gaps; manually edited cue ranges remain indivisible. */
+function cueChunksRespectingLocks(
+  words: CueWord[],
+  layoutKeys: readonly string[] | undefined,
+  split: (words: CueWord[]) => CueWord[][],
+): CueWord[][] {
+  const locks = lockedCueRanges(words, layoutKeys);
+  if (!locks.length) return split(words);
+  const chunks: CueWord[][] = [];
+  let position = 0;
+  for (const lock of locks) {
+    if (lock.startPos < position) continue;
+    if (lock.startPos > position) chunks.push(...split(words.slice(position, lock.startPos)));
+    chunks.push(words.slice(lock.startPos, lock.endPos + 1));
+    position = lock.endPos + 1;
+  }
+  if (position < words.length) chunks.push(...split(words.slice(position)));
+  return chunks;
+}
+
+export interface DisplayCueOptions {
+  subLang?: string;
+  canvasW?: number;
+  /** Sparse persisted caption style; defaults are applied here to match rendering. */
+  style?: Partial<CaptionStyle>;
+}
+
 /** DISPLAY CUES — the single derivation both the caption blocks and the panel's line list consume,
  *  so "one row = one on-screen line" holds by construction. Per source sentence: take the words that
- *  survive the edit (mapSegsToEdited), then split by visual width (cueChunks). Each cue carries
+ *  survive the edit (mapSegsToEdited), then split by the renderer's real font metrics. cueLayout
+ *  ranges are indivisible locks: editing wording never moves that cue's boundary. Each cue carries
  *  ref {src, seg, w0, w1} pointing back into the source sentence for edit/translation write-back.
  *  Cue translation: the group's stored sub (fragment-range key cueSubs["gw0:gw1"], else the
  *  whole-sentence sub) is DISTRIBUTED across the group's cues by word share — the second line
@@ -111,9 +169,19 @@ function distributeSub(sub: string, weights: number[]): string[] {
 export function displayCuesFromMappedSegs(
   mapped: MappedSeg[],
   sourceSegment: (ref: CueRef) => AsrSegment | undefined,
-  opts?: { subLang?: string; canvasW?: number },
+  opts?: DisplayCueOptions,
 ): DisplayCue[] {
-  const budgetEm = Math.max(6, Math.floor(((DEFAULT_CAPTION_WIDTH_PCT / 100) * (opts?.canvasW ?? 1080) - BASE_CAPTION_FONT_PX) / BASE_CAPTION_FONT_PX));
+  const style = opts?.style;
+  let preset = getCaptionPreset(style?.preset);
+  if (style?.bg !== undefined) preset = { ...preset, bg: style.bg ?? undefined };
+  const split = (words: CueWord[]) => captionLineSegments(
+    words,
+    preset,
+    style?.wPct ?? DEFAULT_CAPTION_WIDTH_PCT,
+    style?.scale ?? 1,
+    opts?.canvasW ?? 1080,
+    { bold: style?.bold },
+  );
   const out: DisplayCue[] = [];
   for (const g of mapped) {
     const words = g.words;
@@ -121,21 +189,22 @@ export function displayCuesFromMappedSegs(
     const gRef = g.ref;
     const srcSeg = gRef ? sourceSegment(gRef) : undefined;
     const subFresh = !srcSeg?.subLang || !opts?.subLang || srcSeg.subLang === opts.subLang;
-    // ONE line per cue, sized by the current editable canvas: budget = default box width in em
-    // minus plate/safety — a 16:9 canvas holds a full
-    // single-line subtitle (~21em ≈ 42 latin chars ≈ 21 zh chars), portrait ≈11 zh chars. Geometry,
-    // not language, decides the cue size.
-    const chunks = cueChunks(words, { maxEm: budgetEm });
+    // An explicit empty cueLayout means "temporarily unlocked" during a controlled re-layout.
+    // Missing cueLayout falls back to cueTexts for drafts written by the short-lived combined
+    // copy/layout format; every new write persists the two concerns separately.
+    const layoutKeys = srcSeg?.cueLayout ?? (srcSeg?.cueTexts ? Object.keys(srcSeg.cueTexts) : undefined);
+    const chunks = cueChunksRespectingLocks(words, layoutKeys, split);
     const groupSub = subFresh ? (srcSeg?.cueSubs?.[`${gRef?.w0}:${gRef?.w1}`] ?? srcSeg?.sub) : undefined;
     const pieces = groupSub ? distributeSub(groupSub, chunks.map((c) => c.length)) : undefined;
     for (const [ci, c] of chunks.entries()) {
       const w0 = c[0]!.si ?? 0;
       const w1 = c[c.length - 1]!.si ?? 0;
+      const text = srcSeg?.cueTexts?.[`${w0}:${w1}`] ?? joinWords(c.map((w) => w.text));
       const sub = subFresh ? (srcSeg?.cueSubs?.[`${w0}:${w1}`] ?? pieces?.[ci]) : undefined;
       out.push({
         start: c[0]!.start,
         end: Math.max(c[c.length - 1]!.end, c[0]!.start + 0.3),
-        text: joinWords(c.map((w) => w.text)),
+        text,
         words: c,
         cue: true,
         ...(g.lang ? { lang: g.lang } : {}),
@@ -152,7 +221,7 @@ export function displayCues(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
   clipAsr: Record<string, AsrSegment[]>,
-  opts?: { subLang?: string; canvasW?: number },
+  opts?: DisplayCueOptions,
 ): DisplayCue[] {
   return displayCuesFromMappedSegs(
     mappedCaptionSegs(shots, narr, clipAsr),
@@ -170,7 +239,7 @@ export function relayCaptionLayer(
   shots: VideoShot[],
   narr: AsrSegment[] | null,
   clipAsr: Record<string, AsrSegment[]>,
-  opts?: { subLang?: string; canvasW?: number },
+  opts?: DisplayCueOptions,
 ): Block[] {
   if (!blocks.some(isSentenceCaption)) return blocks;
   const cues = displayCues(shots, narr, clipAsr, opts);

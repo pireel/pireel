@@ -22,6 +22,7 @@
 import { EDITOR_MODEL, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
 import { CAPTION_CATALOG_BLOCK } from './chat';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from '../agent-execution-budget';
+import { SPOKEN_VISUAL_DIRECTION } from './spoken-visual-direction';
 
 /** MCP initialize.instructions. `skillVersion` is the pireel skill baseline the server
  *  announces for the agent's update handshake. It is an OPAQUE release tag: clients update on
@@ -56,11 +57,13 @@ YOU ARE THE MODEL (BYO generation — the default for all text/HTML generation)
 - VERIFY WITH YOUR EYES: after apply_block or any visible change, call capture_frame at that moment and LOOK at the result — placement, overlap with the speaker, contrast, sizing. Fix what looks wrong before reporting done.
 
 EDITING RULES
-- Elements: timing → move_block/resize_block; one block's position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s); inspect → get_block. For spoken content, reason directly over a read_script/extract_asr transcript already present in your context; use search_media only when the evidence is absent/truncated, spans several attached sources, or needs stored visual labels. Find a described reusable asset across My / Cloud / Official libraries → search_assets; use list_assets for a recent unfiltered inventory. Use returned locators; neither searches the web. Output aspect/resolution → set_canvas. Video crop/zoom → set_shot_framing (set_shot_treatment is the simple shortcut); color → set_video_filter; shot sound → set_shot_audio; music tracks → set_bgm; noise → denoise_audio; cutting → split_shot/trim_shot/delete_shot/cut_range; exact spoken words → choose sentence rows/source range from read_script, call list_words once with that narrow filter, then delete_words with returned stable ids (never use list_words as whole-transcript search); broader transcript passages → cut_narration. B-roll → insert_clip; transitions → add_transition. Subtitles → set_captions/remove_captions; bilingual lines → translate read_script sentences and store with set_caption_translations.
+- Elements: timing → move_block/resize_block; one block's position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s); inspect → get_block. For spoken content, reason directly over a read_script/extract_asr transcript already present in your context; use search_media only when the evidence is absent/truncated, spans several attached sources, or needs stored visual labels. Find a described reusable asset across My / Cloud / Official libraries → search_assets; use list_assets for a recent unfiltered inventory. Use returned locators; neither searches the web. Output aspect/resolution → set_canvas. Video crop/zoom → set_shot_framing (set_shot_treatment is the simple shortcut); color → set_video_filter; shot sound → set_shot_audio; music tracks → set_bgm; noise → denoise_audio; cutting → split_shot/trim_shot/delete_shot/cut_range; exact spoken words → choose sentence rows/source range from read_script, call list_words once with that narrow filter, then delete_words with returned stable ids (never use list_words as whole-transcript search); broader transcript passages → cut_narration. B-roll → insert_clip; transitions → add_transition. Subtitles → set_captions/remove_captions; main subtitle wording → read_script then edit_caption_text; bilingual lines → translate read_script sentences and store with set_caption_translations.
 - Aspect reframing is composed by the agent from observations and edit primitives; there is no auto_reframe/reframe_video tool. Use visual_brief/submit_visual (or your own frame inspection) for subject observations, then set_canvas → ONE split_shot {atSecs:[...],purpose:"framing"} call only where framing changes → ONE set_shot_framing {updates:[...]} call containing every affected span → capture_frame to verify the final composition.
 - Speech cleanup by judgment (cleanup / de-filler / tighten / highlight): call read_editing_guide ONCE and apply its decision policy only to the user's requested scope. Read enough transcript to judge complete ideas, batch related ranges into ONE cut_narration call when possible, and review consequential cuts.
 - A selected Skill is an editorial lens, not a workflow. Infer the smallest useful combination of general tools from the user's request and current state. For a complete edit, reason over transcript and footage observations yourself, then express decisions through batched cut, split, framing, layout, block, caption, audio and output tools. Do not look for a scenario-specific plan or layout macro. Themes: list_frames to browse, attach_frame to apply, read_frame for its design playbook. When you recommend a few themes, also tell the user they can browse and filter the FULL theme library themselves in the studio's assets / components panel.
 - Slow tools (extract_asr, visual_brief, analyze_visual) run in the user's browser and can take minutes — do not retry just because a call is slow.
+
+${SPOKEN_VISUAL_DIRECTION}
 
 LANGUAGE (Pireel is international)
 - Reply to the USER in THEIR language — match the language they write to you in. This guide, tool descriptions and tool receipts are in English for YOU; translate anything you surface to the user (a receipt like "Deleted X" → tell them in their language).
@@ -76,6 +79,10 @@ const CREDITS_WARNING = '[Runs on Pireel\'s own LLM and CHARGES the account\'s c
  *  in system, frame attached to the session), or they belong to the own-LLM
  *  paid path (demoted to fallback in the BYO context). */
 export const MCP_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  list_assets:
+    'List reusable CLOUD media available to the external agent. Device-local files are not readable from the server; use import_media to stage an exact local file instead.',
+  search_assets:
+    'Search CLOUD or OFFICIAL reusable assets by metadata. Device-local files are not readable from the server; use import_media for an exact local file. Never substitute another scope for the one the user requested.',
   attach_frame:
     'Attach a frame (theme content pack) by id — its design tokens apply to the composition immediately. Browse ids via list_frames. After attaching, call read_frame with the same id to load its playbook before generating content. Also usable to SWITCH to a different frame.',
   read_frame:

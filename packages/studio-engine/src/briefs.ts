@@ -14,8 +14,8 @@
  * converges here (assembleComposeTheme) to prevent drift between two places.
  */
 
-import { type BlockEdit, type ComposeContext, type KitChoice, BLOCK_SYSTEM, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
-import { buildKitSystem } from './prompts';
+import { type BlockEdit, type ComposeContext, type KitChoice, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
+import { buildHtmlSystem, buildKitSystem, retrieveComponentCandidates } from './prompts';
 import { type ThemeId, getTheme, themeForLlm } from './theme';
 import { isComponentId } from '@pireel/studio-kit';
 
@@ -43,6 +43,8 @@ export interface ComposeBriefInput {
   palette?: Record<string, string>;
   frame?: FrameContent | null;
   lang?: string;
+  /** Domain preset constrains the searchable component vocabulary before query-time retrieval. */
+  presetId?: string;
   /** Override the routing (an agent answered {"custom": true} and needs the markup contract for a
    *  themeless project; or wants to fill props on a themed one). Default: frame ? html : kit. */
   format?: 'kit' | 'html';
@@ -54,12 +56,20 @@ export interface ComposeBriefInput {
  *  the raw output back to apply_block. Routing mirrors the in-app client: a themed project
  *  generates HTML (the theme is a prose description the model builds from); a themeless one fills
  *  a component's typed props. The returned `format` names which contract the text will follow. */
-export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string; format: 'kit' | 'html' } {
+export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string; format: 'kit' | 'html'; candidateComponents: string[] } {
   const format = input.format ?? (input.frame ? 'html' : 'kit');
+  const candidateComponents = retrieveComponentCandidates({
+    instruction: input.instruction,
+    block: input.block,
+    ...(input.context ? { context: input.context } : {}),
+    ...(input.kitCurrent ? { current: input.kitCurrent } : {}),
+    ...(input.presetId ? { presetId: input.presetId } : {}),
+  });
   if (format === 'kit') {
     return {
       format,
-      system: buildKitSystem(),
+      candidateComponents,
+      system: buildKitSystem({ componentIds: candidateComponents, ...(input.presetId ? { presetId: input.presetId } : {}) }),
       prompt: buildKitPrompt({
         block: input.block,
         instruction: input.instruction,
@@ -71,7 +81,11 @@ export function assembleComposeBrief(input: ComposeBriefInput): { system: string
   }
   return {
     format,
-    system: withTheme(BLOCK_SYSTEM, assembleComposeTheme(input.theme, input.palette, input.frame)),
+    candidateComponents,
+    system: withTheme(
+      buildHtmlSystem({ componentIds: candidateComponents, ...(input.presetId ? { presetId: input.presetId } : {}) }),
+      assembleComposeTheme(input.theme, input.palette, input.frame),
+    ),
     prompt: buildBlockPrompt({
       block: input.block,
       instruction: input.instruction,

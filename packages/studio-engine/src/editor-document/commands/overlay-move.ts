@@ -1,5 +1,6 @@
 import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
+import { pruneEmptyNonPrimaryTracks } from '../prune-empty-tracks';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
 
 type OverlayClip = Extract<TimelineClip, { kind: 'graphic' | 'caption' }>;
@@ -43,10 +44,12 @@ export function moveOverlayClip(
     if (track.id === target.id) return { ...track, clips: [...track.clips, clip] };
     return track;
   });
-  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks } };
+  const pruned = pruneEmptyNonPrimaryTracks({ ...document, timeline: { ...document.timeline, tracks } });
+  const next = pruned.document;
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
   const receipt = emptyCommandReceipt('overlay.move');
-  receipt.affectedTrackIds = [source.id, target.id];
+  receipt.affectedTrackIds = [...new Set([source.id, target.id, ...pruned.removedTrackIds])];
+  receipt.removedTrackIds = pruned.removedTrackIds;
   return { ok: true, document: next, receipt };
 }

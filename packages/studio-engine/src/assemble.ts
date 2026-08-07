@@ -50,25 +50,30 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var TRS = ${JSON.stringify(transitions)};
   var MIX = null;
   try { MIX = (${GL_MIXER_SRC})(W, H, ${JSON.stringify(TRANSITION_GLSL)}); } catch (eM) {}
-  var liveBmp = null, ghostBmp = null, liveFraming = null, ghostFraming = null, lastT = -1, ghostAtT = -1, bakedWinCut = -1;
+  var liveBmp = null, ghostBmp = null, liveFraming = null, ghostFraming = null;
+  var liveSourceW = 0, liveSourceH = 0, ghostSourceW = 0, ghostSourceH = 0;
+  var lastT = -1, ghostAtT = -1, bakedWinCut = -1;
   var liveVer = 0, ghostVer = 0, stagedLiveVer = -1, stagedGhostVer = -1;
   var frozen = null, frozenCut = null, ghostWarned = false;
   var mkStage = function () { var s = document.createElement('canvas'); s.width = W; s.height = H; return s; };
   var stageLive = mkStage(), stageGhost = mkStage();
   var sourceRect = (${SOURCE_DRAW_RECT_FUNCTION});
-  var cover = function (stage, bmp, framing) {
+  var cover = function (stage, bmp, framing, sourceW, sourceH) {
     var g = stage.getContext('2d');
-    var r = sourceRect(bmp.width, bmp.height, W, H, framing);
+    var r = sourceRect(sourceW || bmp.width, sourceH || bmp.height, W, H, framing);
     g.clearRect(0, 0, W, H);
     g.drawImage(bmp, r.x, r.y, r.width, r.height);
     return stage;
   };
   // per-source staging + version: if the frame is unchanged, redraw only — skip re-cover/re-upload (clock-driven per-tick recompositing is what hits 60fps)
-  var SL = function () { if (stagedLiveVer !== liveVer) { cover(stageLive, liveBmp, liveFraming); stagedLiveVer = liveVer; } return stageLive; };
-  var SG = function () { if (stagedGhostVer !== ghostVer) { cover(stageGhost, ghostBmp, ghostFraming); stagedGhostVer = ghostVer; } return stageGhost; };
-  var drawPlain = function (bmp, framing) {
+  var SL = function () { if (stagedLiveVer !== liveVer) { cover(stageLive, liveBmp, liveFraming, liveSourceW, liveSourceH); stagedLiveVer = liveVer; } return stageLive; };
+  var SG = function () { if (stagedGhostVer !== ghostVer) { cover(stageGhost, ghostBmp, ghostFraming, ghostSourceW, ghostSourceH); stagedGhostVer = ghostVer; } return stageGhost; };
+  var drawPlain = function (bmp, framing, sourceW, sourceH) {
     if (!bmp) return;
-    var r = sourceRect(bmp.width, bmp.height, W, H, framing);
+    // videoWidth/videoHeight are the browser's DISPLAY dimensions. ImageBitmap.width/height can
+    // still be the coded surface for phone footage carrying rotation metadata; using that 16:9
+    // surface to place a 9:16 picture both letterboxes it and deforms the subject.
+    var r = sourceRect(sourceW || bmp.width, sourceH || bmp.height, W, H, framing);
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(bmp, r.x, r.y, r.width, r.height);
   };
@@ -86,10 +91,10 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
       // side switch: ghosts arriving before the cut are B's pre-roll; after the cut "from" should be A's tail — old-side frames are discarded,
       // and until the new-side ghost arrives the frozen last frame of A holds (content stays continuous, no flicker). Ghost frames whose
       // arrival time is past the cut are already new-side (the engine's ghostFresh gate verified this) — don't kill them by mistake
-      if (ghostBmp && ghostAtT < tr.cut) { try { ghostBmp.close(); } catch (eX) {} ghostBmp = null; ghostFraming = null; }
+      if (ghostBmp && ghostAtT < tr.cut) { try { ghostBmp.close(); } catch (eX) {} ghostBmp = null; ghostFraming = null; ghostSourceW = 0; ghostSourceH = 0; }
     }
     lastT = t;
-    if (!tr) { bakedWinCut = -1; drawPlain(liveBmp, liveFraming); return; }
+    if (!tr) { bakedWinCut = -1; drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH); return; }
     // this window is now owned by baked frames: the old dual-stream compositing steps aside entirely (don't draw into inter-frame gaps either — that layers up into strobe)
     if (bakedWinCut === tr.cut) return;
     var p = Math.min(1, Math.max(0, (t - (tr.cut - tr.half)) / (2 * tr.half))); // 0=window start, 1=end
@@ -105,7 +110,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
       ctx.drawImage(MIX.canvas, 0, 0, W, H);
       return;
     }
-    drawPlain(liveBmp, liveFraming); // GL unavailable / ghost not warm and no frozen frame: hard cut
+    drawPlain(liveBmp, liveFraming, liveSourceW, liveSourceH); // GL unavailable / ghost not warm and no frozen frame: hard cut
   };
   // current frame's source info (personCut needs it for the mask): elKey='main'|clip_<shotId>, srcT=time within that source file
   window.__vidSrc = null;
@@ -126,7 +131,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     if (d.type === 'hf:clearFrame') {
       try { if (liveBmp && liveBmp.close) liveBmp.close(); } catch (errCL) {}
       try { if (ghostBmp && ghostBmp.close) ghostBmp.close(); } catch (errCG) {}
-      liveBmp = null; ghostBmp = null; frozenBmp = null; window.__vidSrc = null;
+      liveBmp = null; ghostBmp = null; liveSourceW = 0; liveSourceH = 0; ghostSourceW = 0; ghostSourceH = 0; frozen = null; frozenCut = null; window.__vidSrc = null;
       try { ctx.clearRect(0, 0, W, H); } catch (errCC) {}
       return;
     }
@@ -146,17 +151,23 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     }
     try {
       if (liveBmp && liveBmp.close) { try { liveBmp.close(); } catch (errC) {} }
-      liveBmp = d.frame; liveFraming = d.framing || null; liveVer++;
+      liveBmp = d.frame; liveFraming = d.framing || null;
+      liveSourceW = Number(d.sourceWidth) || d.frame.width;
+      liveSourceH = Number(d.sourceHeight) || d.frame.height;
+      liveVer++;
       if (d.frame2) {
         if (ghostBmp && ghostBmp.close) { try { ghostBmp.close(); } catch (errG) {} }
-        ghostBmp = d.frame2; ghostFraming = d.framing2 || null; ghostVer++;
+        ghostBmp = d.frame2; ghostFraming = d.framing2 || null;
+        ghostSourceW = Number(d.sourceWidth2) || d.frame2.width;
+        ghostSourceH = Number(d.sourceHeight2) || d.frame2.height;
+        ghostVer++;
         ghostAtT = typeof d.t === 'number' ? d.t : lastT;
       } else if (ghostBmp) {
         // discard ghost frame once out of the window (if missing inside the window, reuse the last one — a tiny stutter beats a flicker cut)
         var t0 = typeof d.t === 'number' ? d.t : lastT;
         var inWin = false;
         for (var wi = 0; wi < TRS.length; wi++) { if (t0 >= TRS[wi].cut - TRS[wi].half && t0 <= TRS[wi].cut + TRS[wi].half) { inWin = true; break; } }
-        if (!inWin) { try { ghostBmp.close(); } catch (errG2) {} ghostBmp = null; ghostFraming = null; }
+        if (!inWin) { try { ghostBmp.close(); } catch (errG2) {} ghostBmp = null; ghostFraming = null; ghostSourceW = 0; ghostSourceH = 0; }
       }
       render(typeof d.t === 'number' ? d.t : lastT);
       window.__vidSrc = { elKey: d.elKey || 'main', srcT: typeof d.srcT === 'number' ? d.srcT : 0, w: d.sourceWidth || d.frame.width, h: d.sourceHeight || d.frame.height, framing: liveFraming };

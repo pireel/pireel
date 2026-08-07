@@ -22,6 +22,38 @@ describe('sourceDrawRect', () => {
     );
   });
 
+  it('预览帧按视频展示尺寸绘制，不被带旋转元数据的编码面误导成 16:9', () => {
+    const draws: unknown[][] = [];
+    let onMessage: ((event: { data: Record<string, unknown> }) => void) | undefined;
+    const context = {
+      clearRect: () => {},
+      drawImage: (...args: unknown[]) => draws.push(args),
+    };
+    const mainCanvas = { width: 1080, height: 1920, getContext: () => context };
+    const documentLike = {
+      getElementById: (id: string) => (id === 'vidEl' ? mainCanvas : null),
+      createElement: () => ({ width: 0, height: 0, getContext: (kind: string) => (kind === '2d' ? context : null) }),
+    };
+    const windowLike: Record<string, unknown> = {
+      addEventListener: (type: string, listener: (event: { data: Record<string, unknown> }) => void) => {
+        if (type === 'message') onMessage = listener;
+      },
+    };
+    new Function('window', 'document', videoFrameShim([]))(windowLike, documentLike);
+    const codedLandscapeFrame = { width: 1920, height: 1080, close: () => {} };
+    onMessage?.({
+      data: {
+        type: 'hf:frame',
+        frame: codedLandscapeFrame,
+        sourceWidth: 1080,
+        sourceHeight: 1920,
+        t: 0,
+      },
+    });
+
+    expect(draws.at(-1)).toEqual([codedLandscapeFrame, 0, 0, 1080, 1920]);
+  });
+
   it('source-normalized 能取回横屏源两侧且不露边', () => {
     const left = sourceDrawRect(1920, 1080, 1080, 1920, { scale: 1, anchorX: 0.15, anchorY: 0.5, coordinateSpace: 'source-normalized' });
     const right = sourceDrawRect(1920, 1080, 1080, 1920, { scale: 1, anchorX: 0.85, anchorY: 0.5, coordinateSpace: 'source-normalized' });

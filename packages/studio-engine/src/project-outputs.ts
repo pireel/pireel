@@ -1,4 +1,4 @@
-import { isEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
+import { emptyEditorDocumentV2, isEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
 
 /** One editable deliverable inside a Studio project. The active deliverable stays in the
  * project's top-level document; inactive deliverables are self-contained V2 snapshots. */
@@ -29,6 +29,12 @@ export interface ActiveProjectOutputState {
   videoSig: string | null;
   videoDurationSec: number | null;
   coverThumb: string | null;
+}
+
+export interface ProjectOutputReference {
+  id?: string;
+  /** One-based position in the current UI order. Positions are dynamic; ids are durable. */
+  position?: number;
 }
 
 const DEFAULT_OUTPUT_ID = 'output-main';
@@ -106,6 +112,30 @@ export function listProjectOutputs(outputs: StudioProjectOutputs, state: ActiveP
   return [captureActiveOutput(outputs, state, outputs.active.updatedAt), ...outputs.inactive].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
 }
 
+/** Current ordinal map for natural-language references such as "the second output". Recompute for
+ * every operation: positions may change after deletion, while the mapped ids never do. */
+export function projectOutputPositionMap(outputs: StudioProjectOutputs): ReadonlyMap<number, string> {
+  const ordered = [outputs.active, ...outputs.inactive].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
+  return new Map(ordered.map((output, index) => [index + 1, output.id]));
+}
+
+/** Resolve either a durable id or a live one-based position. When both are supplied they must agree. */
+export function resolveProjectOutputId(
+  outputs: StudioProjectOutputs,
+  reference: ProjectOutputReference,
+  defaultToActive = true,
+): string | null {
+  const ids = new Set([outputs.active.id, ...outputs.inactive.map((output) => output.id)]);
+  const id = reference.id?.trim() || null;
+  const positionId = Number.isInteger(reference.position) && (reference.position ?? 0) > 0
+    ? projectOutputPositionMap(outputs).get(reference.position!) ?? null
+    : null;
+  if (id && positionId) return id === positionId && ids.has(id) ? id : null;
+  if (id) return ids.has(id) ? id : null;
+  if (reference.position != null) return positionId;
+  return defaultToActive ? outputs.active.id : null;
+}
+
 export function switchProjectOutput(
   outputs: StudioProjectOutputs,
   state: ActiveProjectOutputState,
@@ -127,8 +157,9 @@ export function switchProjectOutput(
 
 const outputId = (now: number) => `output-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-/** Duplicate the current deliverable and check out the copy immediately (the original becomes an inactive snapshot). */
-export function duplicateProjectOutput(
+/** Create and check out an empty deliverable while snapshotting the current one. Canvas format is
+ * project-level working context, so it carries forward; timeline content and media do not. */
+export function createBlankProjectOutput(
   outputs: StudioProjectOutputs,
   state: ActiveProjectOutputState,
   title: string,
@@ -145,7 +176,48 @@ export function duplicateProjectOutput(
     updatedAt: now,
     ...(skill?.trim() ? { skill: skill.trim().slice(0, 80) } : {}),
   };
-  const target: StudioProjectOutputSnapshot = { ...current, ...meta };
+  const empty = emptyEditorDocumentV2({
+    width: state.document.canvas.width,
+    height: state.document.canvas.height,
+    fps: state.document.canvas.fps,
+    theme: state.document.appearance.theme,
+  });
+  const target: StudioProjectOutputSnapshot = {
+    ...meta,
+    document: {
+      ...empty,
+      canvas: { ...empty.canvas, configured: state.document.canvas.configured },
+    },
+    videoSig: null,
+    videoDurationSec: null,
+    coverThumb: null,
+  };
+  return { outputs: { active: meta, inactive: [...outputs.inactive, current] }, target };
+}
+
+/** Copy the active deliverable into a new stable output id and check out the copy. This is
+ * intentionally separate from blank creation so callers cannot confuse "new" with "duplicate". */
+export function duplicateActiveProjectOutput(
+  outputs: StudioProjectOutputs,
+  state: ActiveProjectOutputState,
+  title: string,
+  now = Date.now(),
+): { outputs: StudioProjectOutputs; target: StudioProjectOutputSnapshot } {
+  const current = captureActiveOutput(outputs, state, now);
+  const order = Math.max(outputs.active.order, ...outputs.inactive.map((item) => item.order), -1) + 1;
+  const meta: StudioProjectOutputMeta = {
+    id: outputId(now),
+    title: title.trim().slice(0, 80),
+    order,
+    createdAt: now,
+    updatedAt: now,
+    ...(outputs.active.skill ? { skill: outputs.active.skill } : {}),
+  };
+  const target: StudioProjectOutputSnapshot = {
+    ...current,
+    ...meta,
+    document: storedOutputDocument(current.document),
+  };
   return { outputs: { active: meta, inactive: [...outputs.inactive, current] }, target };
 }
 

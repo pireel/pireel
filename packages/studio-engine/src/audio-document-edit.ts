@@ -227,7 +227,7 @@ export function applyAudioDocumentEdits(input: AudioDocumentPatchInput): AudioDo
   return { ok: true, document: command.document, receipts: [command.receipt] };
 }
 
-/** Remove exact audio identities across lanes while retaining empty lane layout. */
+/** Remove exact audio identities across lanes; lanes disappear when their final clip is removed. */
 export function removeAudioDocumentClips(document: EditorDocumentV2, clipIds: readonly string[]): AudioDocumentEditResult {
   const ids = [...new Set(clipIds)];
   if (!ids.length) return failure(document, 'invalid-command', 'At least one audio clip id is required.', { path: 'clipIds' });

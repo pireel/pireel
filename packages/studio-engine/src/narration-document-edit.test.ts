@@ -72,9 +72,7 @@ describe('semantic V2 narration edit', () => {
     if (!result.ok) return;
     expect(insertedAssetId).toBeTruthy();
     expect(result.document.semantics.transcripts[insertedAssetId!]).toEqual(insertedTranscript);
-    expect(result.document.timeline.tracks.find((track) => track.id === 'untouched-graphics')).toMatchObject({
-      hidden: true, syncLocked: false, stackOrder: 7, clips: [],
-    });
+    expect(result.document.timeline.tracks.find((track) => track.id === 'untouched-graphics')).toBeUndefined();
     expect(result.document.timeline.tracks.flatMap((track) => track.clips).some((clip) => (
       clip.kind === 'caption' && clip.sourceRef?.assetId === insertedAssetId
     ))).toBe(true);
@@ -100,6 +98,23 @@ describe('semantic V2 narration edit', () => {
     expect(result.document.timeline.tracks.find((track) => track.id === result.document.semantics.primaryNarrativeTrackId)!.clips).toEqual([]);
     expect(result.document.timeline.tracks.find((track) => track.id === result.document.semantics.managedCaptionTrackId)!.clips).toEqual([]);
     expect(result.composition.blocks).toMatchObject([{ id: 'independent', startSec: 4, durationSec: 2, trackIndex: 5 }]);
+  });
+
+  it('allows deleting a source whose narration track is already empty', () => {
+    const composition = {
+      ...emptyComposition(),
+      video: { url: 'blob:runtime-main', durationSec: 2 },
+      shots: [],
+    };
+    const document = compositionToEditorDocument({ projectId: 'empty-source-test', composition, videoSig: 'sig' }).document;
+    const result = removeNarrationClipsWithoutRipple({
+      projectId: 'empty-source-test', document, clipIds: [], mainTranscript: null, clipTranscripts: {},
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.composition.shots).toEqual([]);
+    expect(result.receipts[0]).toMatchObject({ commandType: 'clips.remove', removedClipIds: [] });
   });
 
   it('syncs an inserted-only transcript before removing its final clip', () => {

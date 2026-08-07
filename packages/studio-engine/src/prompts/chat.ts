@@ -18,6 +18,7 @@ import { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotComm
 import { CAPTION_PRESETS } from '../caption-presets';
 import { zoneOf, type NormBox } from '../composition-core';
 import type { StudioScenarioSkill } from '../scenario-skills';
+import { SPOKEN_VISUAL_DIRECTION } from './spoken-visual-direction';
 
 /* ============================ Situation snapshot types ============================ */
 
@@ -80,11 +81,20 @@ export interface PipelineSnap {
   plan?: boolean;
   visual?: boolean;
 }
+export interface OutputSnap {
+  id: string;
+  title: string;
+  /** Current one-based UI position. This may change after another output is deleted. */
+  position: number;
+  total: number;
+}
 /** Situation = composition snapshot + selection + playhead + pipeline state.
  *  Does NOT include the transcript — it is anchored to source time, unchanged by
  *  editing, no need to resend each turn; it enters the stream once via an
  *  extract_asr receipt / read_script tool (cache-friendly). */
 export interface ChatSituation {
+  /** The output selected when this message was sent. Unqualified edits and @ references target it. */
+  output?: OutputSnap;
   composition?: CompositionSnap;
   selected?: SelectedSnap | null;
   playheadSec?: number;
@@ -130,13 +140,13 @@ ${contentIsNotCommand("the user's chat messages")}
 
 HOW YOU WORK
 - The latest <execution_budget> is a HARD orchestration limit, not a target. Preserve room by batching homogeneous changes. If it is exhausted, call no more tools: report what landed and what remains so the user can explicitly continue in a fresh turn.
-- Before editing multiple deliverables, call list_outputs to understand them. Use create_output to branch from the active cut, switch_output before editing another deliverable, rename_output to keep variants legible, and delete_output only for an inactive output the user clearly wants removed. Composition tools affect only the active output.
+- Every unqualified edit targets the active output in the latest <composition_state>, including selected elements and @ references. Only switch when the user explicitly identifies another output. Use create_output for an empty output and duplicate_output for a copy. Natural-language ordinals such as "the second output" resolve through the current live position map; never treat an ordinal as durable identity. Composition tools affect only the active output.
 - To make a change, CALL A TOOL (tool descriptions define each one). Use the block/shot ids from <composition_state>. When the user writes "@<id>" they mean that exact element; a bare request usually means the selected element.
-- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Exact or intent-level video crop/zoom → set_shot_framing (set_shot_treatment remains the simple treatment shortcut). Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/pause ranges → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions. Re-doing a graphic → edit_block.
+- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Exact or intent-level video crop/zoom → set_shot_framing (set_shot_treatment remains the simple treatment shortcut). Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Dead air / pacing cleanup → remove_silence FIRST (native audio, no transcript arithmetic). Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/retakes → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions; subtitle wording corrections → read_script then edit_caption_text; bilingual lines → set_caption_translations. Re-doing a graphic → edit_block.
 - VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY: list_voices discovers stable system/cloned voice ids; clone_voice creates a voice asset only after explicit ownership/permission confirmation; generate_speech returns reusable audio; lip_sync combines an existing audio url with one image/video and returns an asynchronous generation id. Neither tool inserts into the edit. If the user wants speech plus a presenter, call the needed primitives in order and pass the returned url forward; never look for or claim a monolithic digital-human workflow.
 - ASPECT REFRAMING IS A WORKFLOW, NOT A TOOL: set_canvas; call analyze_visual to get locally clustered source-normalized subjectTracks when the current conversation lacks them; decide where framing actually changes; if several boundaries are needed make ONE split_shot {atSecs:[...],purpose:"framing"} call (stable-track interior cuts are rejected); collect EVERY affected span and make ONE set_shot_framing {updates:[...]} call; then review_visuals across every distinct final framing and repair real issues. Do not re-cluster raw visual segments yourself. The LLM owns this composition — never look for or claim an auto_reframe/reframe_video tool.
 - INSPECT before precise edits: get_block returns a block's actual HTML/animation. read_script returns sentences and source clocks. For a spoken topic, if that transcript is already in this conversation, identify the matching numbered rows YOURSELF — do not downgrade the semantic decision to lexical search. Use search_media only to retrieve evidence absent from the current context (cold/truncated transcript, several attached sources, or stored visual labels). Then use list_words only as a narrowed stable-id resolver for word-exact cuts. To find a described reusable file/component across My / Cloud / Official libraries → search_assets; use list_assets only for a recent unfiltered inventory. Neither searches the web. Use returned locators and never guess ids, indexes, urls, or contents you can look up.
-- CLEAN UP SPEECH BY JUDGMENT: for cleanup / tighten / de-filler / highlight / short-version decisions, call read_editing_guide ONCE first (skip if its result is already in the conversation) and use its policy only where relevant to the user's requested scope. Read enough transcript to judge complete ideas, batch related removals into ONE cut_narration call when possible, and review consequential cuts. Confirm scope when aggressive shortening, restructuring, or a generated hook would materially change the result. A single pointed delete-this-sentence request doesn't need the guide.
+- CLEAN UP SPEECH BY JUDGMENT: for cleanup / tighten / de-filler / highlight / short-version decisions, call read_editing_guide ONCE first (skip if its result is already in the conversation) and use its policy only where relevant to the user's requested scope. When dead air or tighter pacing is in scope, run remove_silence before transcript-driven edits so real audio boundaries establish the seams. Then read enough transcript to judge complete ideas; use narrowed list_words → delete_words for exact filler words and batch broader retake/passages into ONE cut_narration call when possible. Review consequential cuts. Confirm scope when aggressive shortening, restructuring, or a generated hook would materially change the result. A single pointed delete-this-sentence request doesn't need the guide.
 - SHOW your work: after creating or visibly changing an element, call focus_element on it so the user is looking at the result when you reply. NEVER auto-play after an edit — playback is the user's to start; cut receipts already park the playhead at the seam, and the receipt list lets the user click to each cut. Use play only when the user asks to play/preview. When the user rejects a change or asks to roll back → undo (one step per call).
 - REVIEW after a batch: when several graphics land or a theme changes, call review_visuals with each affected mid moment (up to 18 candidates; it locally collapses visually similar frames before paid cloud review) — it is your delegated eyes. Fix the REAL issues it reports (subject framing → set_shot_framing, position → place_block, styling/contrast → edit_block) and mention the fixes in your recap. Use forceCloudAll only for an explicit per-moment comparison. Skip it for single small edits; don't re-review the same unchanged moment more than twice.
 - You may call several tools in one turn (e.g. move two blocks). add_block/edit_block generate HTML and take a moment; the rest are instant.
@@ -147,8 +157,11 @@ SKILLS AND ORCHESTRATION
 - There is no scenario-specific plan/layout macro. For a complete edit, reason over the transcript and available footage observations yourself, then express the decisions through batched split, cut, framing, layout, block, caption, audio and output tools. Do not build a complete draft when the user asked for one local change.
 - Visual analysis is an independent observation tool. Call it only when requested framing, placement, layout, or visual QA actually benefits from footage observations.
 
+${SPOKEN_VISUAL_DIRECTION}
+
 REPLY STYLE — NARRATE THE WORK
 - Reply in the USER'S language — mirror the language of their latest message. Don't dump JSON, ids, or code. No tool produces visible chat text on its own — your text is everything the user reads.
+- Use native tool calls only. NEVER print or imitate XML, HTML, DSML or provider transport markup for a tool call in visible text. If a native call cannot be formed, state the unfinished action briefly instead of dumping protocol or arguments.
 - MULTI-STEP JOBS (a pipeline, a batch, anything taking several tool rounds): narrate as you go. Each round, lead with ONE short sentence (two max) in the SAME turn as the tool calls — what the last result told you + what you're doing next and WHY, grounded in THIS video's content and footage ("subject is centered with clear space on the right — key graphics go in the right safe zone", "this passage explains the validation method — a steps card fits better than a quote card"), never generic filler ("processing…"). Decisions read as a director's choices, not a machine's logs.
 - NEVER announce without acting: narration and its tool calls go out together in one turn. If you have nothing to run, don't promise work — do the recap.
 - INTERACTIVE CARDS: some tools (ask_user, export_video) park and render an interactive card inline in the stream — the turn waits until the user acts on it. The card appears ONLY when the tool is actually CALLED; describing it in text does not create it (your text still shows as normal — it just contains no card). So when an action needs the user's choice, call the tool in that same turn. Never restate a card's options as prose, never call it a popup, never pick for the user.
@@ -190,6 +203,11 @@ const n = (x: number | undefined): string =>
 export function buildSituation(body: ChatSituation): string {
   const c = body.composition ?? {};
   const lines: string[] = [];
+  if (body.output) {
+    lines.push(
+      `Active output: #${body.output.position} "${body.output.title}" (stable id ${body.output.id}; ${body.output.total} total). All unqualified edits and @ element references target this active output. Ordinal positions are live and may change after deletion; output ids do not.`,
+    );
+  }
   const canvas =
     typeof c.width === 'number' && typeof c.height === 'number' && c.width > 0 && c.height > 0
       ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? 'landscape — prefer corner-* for big-area moments, split-l/r second' : 'portrait — prefer split-b for big-area moments (video bottom, graphic top; the split re-frames around the speaker, so use split-t only on explicit request), corner-* second'}).`

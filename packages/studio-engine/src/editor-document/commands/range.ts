@@ -1,5 +1,6 @@
 import type { EditorDocumentV2, EditorTrack } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
+import { pruneEmptyNonPrimaryTracks } from '../prune-empty-tracks';
 import { clearRangeFromClip, clipOverlapsRange } from './clip-geometry';
 import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
@@ -117,35 +118,21 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
   tracks = detached.tracks;
   for (const id of detached.changedTrackIds) changedTrackIds.add(id);
 
-  const removedTrackIds: string[] = [];
-  let managedCaptionTrackRemoved = false;
-  if (options.pruneEmptyTracks) {
-    tracks = tracks.filter((track) => {
-      const shouldPrune = changedTrackIds.has(track.id)
-        && track.clips.length === 0
-        && track.id !== document.semantics.primaryNarrativeTrackId;
-      if (!shouldPrune) return true;
-      removedTrackIds.push(track.id);
-      if (track.id === document.semantics.managedCaptionTrackId) managedCaptionTrackRemoved = true;
-      return false;
-    });
-  }
-
-  let semantics = {
+  const semantics = {
     ...document.semantics,
     scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs),
   };
-  if (managedCaptionTrackRemoved) {
-    const { managedCaptionTrackId: _removed, ...withoutManagedCaptionTrack } = semantics;
-    semantics = withoutManagedCaptionTrack;
-  }
-  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks }, semantics };
+  const pruned = pruneEmptyNonPrimaryTracks(
+    { ...document, timeline: { ...document.timeline, tracks }, semantics },
+    { preserveManagedCaptions: !options.pruneEmptyTracks },
+  );
+  const next = pruned.document;
   const outputIssue = validateEditorDocumentV2(next).find((issue) => issue.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
 
   const receipt = emptyCommandReceipt('range.remove');
-  receipt.affectedTrackIds = [...changedTrackIds];
-  receipt.removedTrackIds = removedTrackIds;
+  receipt.affectedTrackIds = [...new Set([...changedTrackIds, ...pruned.removedTrackIds])];
+  receipt.removedTrackIds = pruned.removedTrackIds;
   receipt.removedClipIds = [...removedClipIds];
   receipt.createdClipIds = createdClipIds;
   receipt.shiftedClipIds = shiftedClipIds;

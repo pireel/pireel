@@ -37,6 +37,20 @@ function testDocument(): EditorDocumentV2 {
 }
 
 describe('EditorDocument V2 exact clip removal', () => {
+  it('treats an empty clip batch as an idempotent no-op', () => {
+    const document = testDocument();
+    const result = applyEditorCommand(document, {
+      type: 'clips.remove', trackId: document.semantics.primaryNarrativeTrackId,
+      clipIds: [], includeLinked: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      document,
+      receipt: { commandType: 'clips.remove', removedClipIds: [] },
+    });
+  });
+
   it('removes only named clips, retains the required empty primary lane and detaches surviving anchors', () => {
     const document = testDocument();
     document.timeline.tracks[0]!.clips = [narrative('remove-me', 0), narrative('overlap-stays', 30)];

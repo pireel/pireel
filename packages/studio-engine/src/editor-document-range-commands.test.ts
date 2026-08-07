@@ -130,7 +130,7 @@ describe('EditorDocument V2 range commands', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.document.timeline.tracks[0]!.clips).toEqual([]);
-    expect(result.document.timeline.tracks.find((candidate) => candidate.id === 'graphics')!.clips).toEqual([]);
+    expect(result.document.timeline.tracks.find((candidate) => candidate.id === 'graphics')).toBeUndefined();
     expect(result.document.timeline.tracks.find((candidate) => candidate.id === 'dialogue')!.clips[0]).toMatchObject({
       id: 'dialogue-audio',
       startFrame: 0,
@@ -161,7 +161,7 @@ describe('EditorDocument V2 range commands', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.document.timeline.tracks.find((candidate) => candidate.id === 'linked-graphics')!.clips).toEqual([]);
+    expect(result.document.timeline.tracks.find((candidate) => candidate.id === 'linked-graphics')).toBeUndefined();
     expect(result.document.timeline.tracks.find((candidate) => candidate.id === 'free-graphics')!.clips).toHaveLength(1);
   });
 

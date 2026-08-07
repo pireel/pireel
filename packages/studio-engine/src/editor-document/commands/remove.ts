@@ -1,5 +1,6 @@
 import type { EditorDocumentV2, EditorTrack } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
+import { pruneEmptyNonPrimaryTracks } from '../prune-empty-tracks';
 import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
 
@@ -19,7 +20,10 @@ export function removeEditorClips(
   const track = document.timeline.tracks.find((candidate) => candidate.id === options.trackId);
   if (!track) return commandFailure(document, 'track-not-found', `Track does not exist: ${options.trackId}`, { trackIds: [options.trackId] });
   const requestedIds = [...new Set(options.clipIds)];
-  if (!requestedIds.length) return commandFailure(document, 'invalid-command', 'At least one clip id is required.', { path: 'clipIds' });
+  // Batch removal is intentionally idempotent. Asset deletion can legitimately reach this command
+  // after its last timeline reference has already gone; an empty batch means there is nothing left
+  // to detach, not that the delete operation failed.
+  if (!requestedIds.length) return { ok: true, document, receipt: emptyCommandReceipt('clips.remove') };
   const missingIds = requestedIds.filter((id) => !track.clips.some((clip) => clip.id === id));
   if (missingIds.length) {
     return commandFailure(document, 'clip-not-found', `Clip does not exist on track ${options.trackId}: ${missingIds.join(', ')}`, { path: 'clipIds', trackIds: [options.trackId] });
@@ -53,7 +57,7 @@ export function removeEditorClips(
   }
   tracks = detached.tracks;
   const affectedTrackIds = new Set([...touchedTracks.map((candidate) => candidate.id), ...detached.changedTrackIds]);
-  const next: EditorDocumentV2 = {
+  let next: EditorDocumentV2 = {
     ...document,
     timeline: { ...document.timeline, tracks },
     semantics: {
@@ -61,10 +65,13 @@ export function removeEditorClips(
       scenes: updateScenesForClipChanges(document.semantics.scenes, removedIds),
     },
   };
+  const pruned = pruneEmptyNonPrimaryTracks(next);
+  next = pruned.document;
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
   const receipt = emptyCommandReceipt('clips.remove');
-  receipt.affectedTrackIds = [...affectedTrackIds];
+  receipt.affectedTrackIds = [...new Set([...affectedTrackIds, ...pruned.removedTrackIds])];
+  receipt.removedTrackIds = pruned.removedTrackIds;
   receipt.removedClipIds = [...removedIds];
   return { ok: true, document: next, receipt };
 }

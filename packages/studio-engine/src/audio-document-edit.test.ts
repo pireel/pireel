@@ -13,7 +13,7 @@ function emptyDocument() {
 }
 
 describe('native audio document edits', () => {
-  it('adds overlapping clips with durable asset reuse, patches coupled geometry and retains the empty lane after removal', () => {
+  it('adds overlapping clips with durable asset reuse, patches coupled geometry and prunes the empty lane after removal', () => {
     const initial = emptyDocument();
     const first = addAudioDocumentClip({
       document: initial,
@@ -49,7 +49,7 @@ describe('native audio document edits', () => {
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
     expect(projectDocumentToComposition(removed.document).audioTracks).toBeUndefined();
-    expect(removed.document.timeline.tracks.find((track) => track.type === 'audio')).toMatchObject({ clips: [], role: 'music' });
+    expect(removed.document.timeline.tracks.find((track) => track.type === 'audio')).toBeUndefined();
   });
 
   it('splits without adding default fades at the internal seam', () => {

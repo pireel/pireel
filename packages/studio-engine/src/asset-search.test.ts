@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { bgmSearchTags, officialStickerSearchTags, searchAssetLibrary, type AssetSearchDocument } from './asset-search';
+import {
+  bgmSearchTags,
+  compactAssetSearchElementResults,
+  officialStickerSearchTags,
+  searchAssetLibrary,
+  type AssetSearchDocument,
+} from './asset-search';
 
 const docs: AssetSearchDocument[] = [
   {
@@ -17,7 +23,8 @@ const docs: AssetSearchDocument[] = [
   },
   {
     assetId: 'tpl_1', scope: 'official', kind: 'element', origin: 'template', label: '三步流程', createdAt: 0,
-    fields: { prompt: '生成一个三步流程组件', tags: ['process', '步骤'] }, locator: { templateId: 'three-steps' },
+    fields: { prompt: '生成一个三步流程组件', tags: ['process', '步骤'] },
+    locator: { templateId: 'three-steps', prompt: '生成一个三步流程组件' },
   },
 ];
 
@@ -56,5 +63,23 @@ describe('searchAssetLibrary', () => {
     if ('error' in result) return;
     expect(result.results.map((item) => item.assetId)).toEqual(['tpl_1']);
     expect(searchAssetLibrary(docs, { query: '  ' })).toEqual({ error: 'query required' });
+  });
+
+  it('uses element prompts for ranking without repeating them in Agent receipts', () => {
+    const result = searchAssetLibrary(docs, { query: '三步流程', kind: 'element' });
+    expect('error' in result).toBe(false);
+    if ('error' in result) return;
+    expect(result.results[0]).toMatchObject({
+      fields: { prompt: '生成一个三步流程组件' },
+      locator: { templateId: 'three-steps' },
+    });
+
+    expect(compactAssetSearchElementResults(result.results)[0]).toMatchObject({
+      assetId: 'tpl_1',
+      fields: { tags: ['process', '步骤'] },
+      locator: { templateId: 'three-steps' },
+    });
+    expect(compactAssetSearchElementResults(result.results)[0]?.fields?.prompt).toBeUndefined();
+    expect(compactAssetSearchElementResults(result.results)[0]?.locator?.prompt).toBeUndefined();
   });
 });

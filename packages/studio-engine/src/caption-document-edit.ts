@@ -2,6 +2,11 @@
 
 import type { AsrSegment } from './build-blocks';
 import {
+  clearManagedCaptionLayout,
+  lockManagedCaptionLayout,
+  remapCaptionCopyToManagedLayout,
+} from './caption-layout-state';
+import {
   applyEditorCommand,
   syncCaptionTranscripts,
   type CaptionStylePatch,
@@ -13,6 +18,9 @@ import {
 export interface CaptionDocumentEditInput {
   document: EditorDocumentV2;
   patch?: CaptionStylePatch;
+  /** Explicit user/agent action: discard the current cue boundaries and regenerate them from the
+   *  current canvas/font metrics. Corrected caption copy is remapped onto the new ranges. */
+  relayout?: boolean;
   mainTranscript: readonly AsrSegment[] | null;
   clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
 }
@@ -43,7 +51,9 @@ function captionsOn(document: EditorDocumentV2): boolean {
  * transcript sync and provisional lane creation together.
  */
 export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): CaptionDocumentEditResult {
-  let document = syncCaptionTranscripts(input.document, input.mainTranscript, input.clipTranscripts);
+  // Existing managed clips are already user-visible layout truth. Snapshot them before any style
+  // patch so drafts created before cueLayout was introduced do not silently reflow on first touch.
+  let document = lockManagedCaptionLayout(syncCaptionTranscripts(input.document, input.mainTranscript, input.clipTranscripts));
   const receipts: EditorCommandReceipt[] = [];
   const nextOn = input.patch?.on ?? captionsOn(document);
   if (nextOn && !document.semantics.managedCaptionTrackId) {
@@ -86,7 +96,17 @@ export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): Capti
     return { ok: true, document, receipts };
   }
 
+  if (input.relayout) document = clearManagedCaptionLayout(document);
   const relaid = applyEditorCommand(document, { type: 'captions.relay' });
   if (!relaid.ok) return { ok: false, document: input.document, error: relaid.error };
-  return { ok: true, document: relaid.document, receipts: [...receipts, relaid.receipt] };
+  document = relaid.document;
+  receipts.push(relaid.receipt);
+  if (input.relayout) {
+    document = remapCaptionCopyToManagedLayout(document);
+    const copyRelaid = applyEditorCommand(document, { type: 'captions.relay' });
+    if (!copyRelaid.ok) return { ok: false, document: input.document, error: copyRelaid.error };
+    document = copyRelaid.document;
+    receipts.push(copyRelaid.receipt);
+  }
+  return { ok: true, document: lockManagedCaptionLayout(document), receipts };
 }

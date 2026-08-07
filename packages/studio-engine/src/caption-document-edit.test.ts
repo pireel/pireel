@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
+import { applyCaptionTextEdits } from './caption-text-edit';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
 
@@ -47,6 +48,7 @@ describe('native caption lifecycle transaction', () => {
     const captionTrack = result.document.timeline.tracks.find((track) => track.id === result.document.semantics.managedCaptionTrackId)!;
     expect(captionTrack).toMatchObject({ type: 'caption', role: 'managedCaptions', locked: false });
     expect(captionTrack.clips.length).toBeGreaterThan(0);
+    expect(result.document.semantics.transcripts[result.document.semantics.primaryNarrativeAssetId!]![0]!.cueLayout).toEqual(['0:3']);
     expect(result.document.appearance.captionStyle).toMatchObject({ on: true, preset: 'ln-clean', yPct: 82, scale: 1.2 });
     expect(result.document.appearance.captionStyle).not.toHaveProperty('color');
     expect(result.document.appearance.captionStyle).not.toHaveProperty('bg');
@@ -60,6 +62,48 @@ describe('native caption lifecycle transaction', () => {
     });
     expect(rerun.ok).toBe(true);
     if (rerun.ok) expect(rerun.document).toBe(result.document);
+  });
+
+  it('explicit re-layout replaces boundary locks while retaining corrected caption copy', () => {
+    const corrected = applyCaptionTextEdits(transcript, [{ index: 0, text: 'ONE two three four', lock: true }]);
+    const initial = applyCaptionDocumentEdit({
+      document: captionFixture(), patch: { on: true, preset: 'ln-clean' }, mainTranscript: corrected, clipTranscripts: {},
+    });
+    expect(initial.ok).toBe(true);
+    if (!initial.ok) return;
+    const result = applyCaptionDocumentEdit({
+      document: initial.document,
+      patch: { wPct: 10 },
+      relayout: true,
+      mainTranscript: corrected,
+      clipTranscripts: {},
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const segment = result.document.semantics.transcripts[result.document.semantics.primaryNarrativeAssetId!]![0]!;
+    expect(segment.captionText).toBe('ONE two three four');
+    expect(segment.cueLayout!.length).toBeGreaterThan(1);
+    expect(Object.keys(segment.cueTexts ?? {})).toEqual([segment.cueLayout![0]]);
+  });
+
+  it('adopts pre-cueLayout managed clips before a style change instead of silently reflowing them', () => {
+    const enabled = applyCaptionDocumentEdit({
+      document: captionFixture(), patch: { on: true, preset: 'ln-clean' }, mainTranscript: transcript, clipTranscripts: {},
+    });
+    expect(enabled.ok).toBe(true);
+    if (!enabled.ok) return;
+    const assetId = enabled.document.semantics.primaryNarrativeAssetId!;
+    delete enabled.document.semantics.transcripts[assetId]![0]!.cueLayout;
+    const track = enabled.document.timeline.tracks.find((candidate) => candidate.id === enabled.document.semantics.managedCaptionTrackId)!;
+    const before = track.clips.map((clip) => clip.kind === 'caption' ? clip.sourceRef : undefined);
+    const styled = applyCaptionDocumentEdit({
+      document: enabled.document, patch: { wPct: 10 }, mainTranscript: null, clipTranscripts: {},
+    });
+    expect(styled.ok).toBe(true);
+    if (!styled.ok) return;
+    const afterTrack = styled.document.timeline.tracks.find((candidate) => candidate.id === styled.document.semantics.managedCaptionTrackId)!;
+    expect(afterTrack.clips.map((clip) => clip.kind === 'caption' ? clip.sourceRef : undefined)).toEqual(before);
+    expect(styled.document.semantics.transcripts[assetId]![0]!.cueLayout).toEqual(['0:3']);
   });
 
   it('turns captions off without deleting their lane or remembered style', () => {

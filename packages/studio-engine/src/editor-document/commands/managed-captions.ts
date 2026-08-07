@@ -108,6 +108,7 @@ export function relayManagedCaptionTrack(document: EditorDocumentV2): EditorComm
   };
   const cues = displayCuesFromMappedSegs(mapped, sourceSegment, {
     canvasW: document.canvas.width,
+    style: document.appearance.captionStyle,
     ...(document.appearance.captionStyle?.sub?.lang ? { subLang: document.appearance.captionStyle.sub.lang } : {}),
   });
   const blocks = captionBlocksFromAsr(cues);

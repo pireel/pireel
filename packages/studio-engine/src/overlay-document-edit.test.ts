@@ -20,7 +20,7 @@ function documentWithOverlays() {
 }
 
 describe('stable-id overlay document edits', () => {
-  it('changes timing/placement without remapping lanes, then removes across lanes without pruning them', () => {
+  it('changes timing/placement without remapping lanes, then prunes lanes emptied by removal', () => {
     const document = documentWithOverlays();
     const trackByClip = new Map(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, track.id])));
     const patched = applyOverlayDocumentEdits({
@@ -46,11 +46,9 @@ describe('stable-id overlay document edits', () => {
     expect(removed.ok).toBe(true);
     if (!removed.ok) return;
     expect(projectDocumentToComposition(removed.document).blocks).toEqual([]);
-    expect(removed.document.timeline.tracks.find((track) => track.id === trackByClip.get('lower'))).toMatchObject({ clips: [] });
-    expect(removed.document.timeline.tracks.find((track) => track.id === trackByClip.get('upper'))).toMatchObject({ clips: [] });
-    expect(removed.document.timeline.tracks.find((track) => track.id === 'empty-graphics')).toMatchObject({
-      hidden: true, syncLocked: false, stackOrder: 20, clips: [],
-    });
+    expect(removed.document.timeline.tracks.find((track) => track.id === trackByClip.get('lower'))).toBeUndefined();
+    expect(removed.document.timeline.tracks.find((track) => track.id === trackByClip.get('upper'))).toBeUndefined();
+    expect(removed.document.timeline.tracks.find((track) => track.id === 'empty-graphics')).toBeUndefined();
   });
 
   it('returns the original document when a removal batch includes a locked lane', () => {

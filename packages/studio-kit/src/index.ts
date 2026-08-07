@@ -47,6 +47,9 @@ export interface ComponentDef {
   defaults: Record<string, unknown>;
   /** One-line purpose, for building component-catalog prompts. */
   summary: string;
+  /** Compact bilingual retrieval vocabulary. This is index metadata, never copied wholesale into
+   * a generation prompt; adding a component requires declaring how natural-language requests find it. */
+  searchTerms: readonly string[];
   render: (id: string, props: unknown, ctx: RenderCtx) => RenderResult;
   /** Schema gate — used when a blueprint stages the component instead of a built-in variant. */
   parse?: (props: unknown) => Record<string, unknown>;
@@ -59,6 +62,7 @@ export const components = {
     jsonSchema: metricSchema.jsonSchema,
     defaults: metricSchema.defaults,
     summary: 'One headline number with kicker, note and trend — hero-number, split-editorial or badge staging.',
+    searchTerms: ['metric', 'number', 'statistic', 'percentage', 'rate', 'growth', 'score', '数据', '数字', '大数字', '百分比', '比率', '增长', '指标'],
     render: renderMetric,
     parse: metricSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -66,6 +70,7 @@ export const components = {
     jsonSchema: calloutSchema.jsonSchema,
     defaults: calloutSchema.defaults,
     summary: 'A spoken punchline set as type — poster keyword, pull-quote or verdict stamp.',
+    searchTerms: ['callout', 'quote', 'keyword', 'statement', 'verdict', 'insight', 'warning', 'punchline', '观点', '金句', '关键词', '结论', '洞察', '警告', '强调'],
     render: renderCallout,
     parse: calloutSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -73,6 +78,7 @@ export const components = {
     jsonSchema: lowerThirdSchema.jsonSchema,
     defaults: lowerThirdSchema.defaults,
     summary: 'Broadcast-style title+subtitle strip with an accent device — six display styles, entrance and exit choreographed.',
+    searchTerms: ['lower third', 'name', 'identity', 'speaker', 'person', 'job title', 'byline', '姓名', '人名', '人物', '身份', '职位', '署名', '下三分之一'],
     render: renderLowerThird,
     parse: lowerThirdSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -80,6 +86,7 @@ export const components = {
     jsonSchema: kpiSchema.jsonSchema,
     defaults: kpiSchema.defaults,
     summary: '2–4 numbers that belong together — hairline grid or one horizontal strip, counted up.',
+    searchTerms: ['kpi', 'metrics', 'dashboard', 'statistics', 'multiple numbers', 'data group', '指标组', '多指标', '多个数字', '数据组', '仪表盘'],
     render: renderKpi,
     parse: kpiSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -87,6 +94,7 @@ export const components = {
     jsonSchema: comparisonSchema.jsonSchema,
     defaults: comparisonSchema.defaults,
     summary: 'A vs B with a stance — split columns with a VS chip, or a typographic showdown; the winner takes the accent.',
+    searchTerms: ['comparison', 'compare', 'versus', 'vs', 'before after', 'pros cons', '对比', '比较', '左右对比', '优劣', '方案对比', '前后对比'],
     render: renderComparison,
     parse: comparisonSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -94,6 +102,7 @@ export const components = {
     jsonSchema: chartSchema.jsonSchema,
     defaults: chartSchema.defaults,
     summary: 'A hand-built chart from real data — ranking bars, rising columns or a share donut, one accented series.',
+    searchTerms: ['chart', 'graph', 'bar chart', 'column chart', 'donut', 'ranking', 'trend', 'data visualization', '图表', '柱状图', '条形图', '环形图', '排名', '趋势', '数据可视化'],
     render: renderChart,
     parse: chartSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -101,6 +110,7 @@ export const components = {
     jsonSchema: stepsSchema.jsonSchema,
     defaults: stepsSchema.defaults,
     summary: 'An ordered sequence revealed at presenter rhythm — numbered list, pipeline nodes or a timeline spine.',
+    searchTerms: ['steps', 'process', 'timeline', 'sequence', 'list', 'workflow', 'roadmap', '步骤', '流程', '时间轴', '顺序', '列表', '工作流', '路线图'],
     render: renderSteps,
     parse: stepsSchema.parse as (p: unknown) => Record<string, unknown>,
   },
@@ -108,6 +118,7 @@ export const components = {
     jsonSchema: titleSchema.jsonSchema,
     defaults: titleSchema.defaults,
     summary: 'Opener / chapter / closer card — hero statement, indexed section marker, or outro with a CTA chip.',
+    searchTerms: ['title', 'opener', 'chapter', 'section', 'closer', 'outro', 'headline', 'cta', '标题', '开场', '章节', '章节页', '结尾', '片尾', '行动号召'],
     render: renderTitle,
     parse: titleSchema.parse as (p: unknown) => Record<string, unknown>,
   },

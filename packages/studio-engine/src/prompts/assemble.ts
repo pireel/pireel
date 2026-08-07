@@ -6,7 +6,7 @@
  *
  *   fragment contract     never changes (this stack's base; the editor's own is on the agent side)
  *   L1 props grammar      never changes
- *   L4 vocabulary         changes when the preset changes
+ *   L4 vocabulary         changes with the retrieved component candidates (bounded)
  *   L3.1 editorial        changes when the preset changes
  *   output contract       changes with the generation path
  *   L3.2 theme voice      changes whenever the user switches themes  ← last, on purpose
@@ -20,6 +20,17 @@ import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
 import { catalogSection, componentNormsSection } from './l4-catalog';
 import { getPreset } from './presets';
+
+interface ComponentSystemOptions {
+  presetId?: string;
+  /** Retrieved query-time subset. Omit only for catalog inspection/tests; production generation
+   * should always pass the candidates selected for the current editing moment. */
+  componentIds?: string[];
+}
+
+function componentIdsFor(options?: ComponentSystemOptions): string[] {
+  return options?.componentIds ?? getPreset(options?.presetId).components;
+}
 
 /** Path-specific output contract — the only part of the stack that knows what the answer looks like. */
 const KIT_OUTPUT = `OUTPUT
@@ -41,20 +52,20 @@ After the note line, in THIS order:
  *  HTML instead: the theme is a prose description for the model (its character, palette, layout
  *  language), and the model builds themed markup from it plus the component norms — see
  *  buildHtmlSystem + withActiveTheme, which carry the frame playbook. Components stay unthemed. */
-export function buildKitSystem(opts?: { presetId?: string }): string {
+export function buildKitSystem(opts?: ComponentSystemOptions): string {
   const preset = getPreset(opts?.presetId);
-  return [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(preset.components), preset.editorial, KIT_OUTPUT].join('\n\n');
+  return [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(componentIdsFor(opts)), preset.editorial, KIT_OUTPUT].join('\n\n');
 }
 
 /** The free-form path's system prompt. Same base contract and L3.1 as the component path — only
  *  the capability layer and the output contract differ, which is the whole claim of the stack. */
-export function buildHtmlSystem(opts?: { presetId?: string }): string {
+export function buildHtmlSystem(opts?: ComponentSystemOptions): string {
   const preset = getPreset(opts?.presetId);
   // The house component types ride in DERIVED — the themed path and the component path speak the
   // same vocabulary from the same schemas (a theme restyles these types, it doesn't rename them).
-  return [FRAGMENT_CONTRACT, BLOCK_HTML_BODY, componentNormsSection(preset.components), preset.editorial, HTML_OUTPUT].join('\n\n');
+  return [FRAGMENT_CONTRACT, BLOCK_HTML_BODY, componentNormsSection(componentIdsFor(opts)), preset.editorial, HTML_OUTPUT].join('\n\n');
 }
 
 /** The default free-form system (spoken preset) — the theme brief is appended by withActiveTheme,
  *  which is that path's L3.2: it carries the token table, because this path writes CSS. */
-export const BLOCK_SYSTEM = buildHtmlSystem();
+export const BLOCK_SYSTEM = buildHtmlSystem({ componentIds: [] });

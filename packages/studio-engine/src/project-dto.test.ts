@@ -62,13 +62,29 @@ describe('strict V2 project DTO', () => {
     const dto = rowToDto(row);
     expect(dto.document.version).toBe(2);
     expect(dto).not.toHaveProperty('comp');
-    expect(dto.context).toEqual({ schemaVersion: 2 });
-    expect(rowToMeta(row)).toMatchObject({ blocks: 1, shots: 0 });
+    expect(dto.context).toEqual({ schemaVersion: 3 });
   });
 
   it('rejects V1 rows instead of normalizing them at runtime', () => {
     expect(() => rowToDto({ ...row, comp: { width: 1080, height: 1920, blocks: [] } })).toThrow(/not V2/);
-    expect(() => rowToMeta({ ...row, comp: { width: 1080, height: 1920, blocks: [] } })).toThrow(/not V2/);
+  });
+
+  it('builds list metadata without reading the project document', () => {
+    expect(rowToMeta({
+      id: row.id,
+      title: row.title,
+      videoDurationSec: row.videoDurationSec,
+      coverThumb: row.coverThumb,
+      version: row.version,
+      updatedAt: row.updatedAt,
+    })).toEqual({
+      id: 'project-1',
+      title: 'native',
+      videoDurationSec: 12.5,
+      coverThumb: null,
+      version: 7,
+      updatedAt: 1000,
+    });
   });
 });
 
@@ -141,7 +157,20 @@ describe('save request boundary', () => {
     expect(sanitizeSavePayload({ compPatch: [], compHash: 'legacy' })).toBeNull();
     expect(sanitizeSavePayload({ context: { asr: ['legacy'] } })).toBeNull();
     expect(sanitizeSavePayload({ context: {} })).toBeNull();
-    expect(sanitizeSavePayload({ context: { schemaVersion: 2 } })?.context).toEqual({ schemaVersion: 2 });
+    expect(sanitizeSavePayload({ context: { schemaVersion: 2 } })).toBeNull();
+    expect(sanitizeSavePayload({
+      context: {
+        schemaVersion: 3,
+        localAssets: [
+          { sig: 'shared.mp4:9:1', label: 'shared.mp4', kind: 'video', createdAt: 9 },
+          { sig: 'shared.mp4:9:1', label: 'duplicate', createdAt: 1 },
+          { nope: true },
+        ],
+      },
+    })?.context).toEqual({
+      schemaVersion: 3,
+      localAssets: [{ sig: 'shared.mp4:9:1', label: 'shared.mp4', kind: 'video', createdAt: 9 }],
+    });
   });
 
   it('rejects stale/corrupt patches and patched legacy top-level fields', () => {
@@ -169,7 +198,7 @@ describe('conflict baseline', () => {
   it('re-seeds from a server V2 DTO using the same canonical hashes', () => {
     const value = payload();
     const acked = ackedFromDto({
-      document: value.document!, chat: value.chat, context: { schemaVersion: 2 }, coverThumb: value.coverThumb,
+      document: value.document!, chat: value.chat, context: { schemaVersion: 3 }, coverThumb: value.coverThumb,
       title: '未命名项目', videoSig: value.videoSig, videoDurationSec: value.videoDurationSec,
     });
     const next = buildSaveWire(value, 9, acked);

@@ -3,7 +3,7 @@
  * talking-head workflow.
  *
  * Design rules (modelled after a professional NLE's Timeline -> Track[] -> Clip[] shape):
- *  - tracks and clips are valid when empty; no media kind is required for the document to exist;
+ *  - the primary track is valid when empty; non-primary tracks are created transactionally with content;
  *  - every placed item has an explicit timeline position;
  *  - media identity lives in the asset manifest, never in a special "main video" field;
  *  - primary narration, managed captions and music are semantic roles, not magic track indexes;
@@ -18,6 +18,8 @@ export * from './commands/index';
 export * from './caption-transcript-sync';
 export * from './frozen-block-vars';
 export * from './legacy-projection';
+export * from './prune-empty-tracks';
+export * from './prune-unused-assets';
 export * from './read-model';
 export * from './transcript-address';
 export * from './render-plan';

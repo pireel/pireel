@@ -10,17 +10,24 @@ import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
 import { isEditorDocumentV2, validateEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
 import {
+  isProjectContextInput,
+  sanitizeProjectContext,
+  type LocalAssetIndexEntry,
+  type StudioProjectContext,
+} from './project-context';
+import {
   emptyProjectDocument,
   prepareEditorDocumentForPersistence,
-  projectDocumentStats,
 } from './project-document';
 import { canonicalJson, hashSection } from './stable-json';
-import { normalizeProjectOutputs, type StudioProjectOutputs } from './project-outputs';
+export {
+  sanitizeProjectContext,
+  STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
+  type LocalAssetIndexEntry,
+  type StudioProjectContext,
+} from './project-context';
 
 export { canonicalJson, hashSection } from './stable-json';
-
-/** Increment only for destructive editor-context migrations that require stale tabs to reload. */
-export const STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION = 2;
 
 /** Transcript sentence (source seconds; same shape as the client AsrSegment, declared independently here to avoid a lib→features reverse dependency). */
 export interface TranscriptSegment {
@@ -36,61 +43,22 @@ export interface TranscriptSegment {
   sub?: string;
   /** Per-cue translations keyed by word range "w0:w1" (UI translate flow / set_caption_translations with a range). */
   cueSubs?: Record<string, string>;
+  /** Audience-facing full caption copy after manual cue edits; source transcript text stays unchanged. */
+  captionText?: string;
+  /** User-locked cue copy keyed by the source word range "w0:w1". */
+  cueTexts?: Record<string, string>;
+  /** Stable display-cue boundaries encoded as source word ranges "w0:w1". */
+  cueLayout?: string[];
   /** Target language sub/cueSubs were translated into (unset = unknown/legacy — displayed as-is). */
   subLang?: string;
   /** Short-lived extraction-cueing scheme flag (desegmentCues merges these back into sentences on load). */
   cue?: boolean;
 }
 
-/** Metadata-only index of a project-local asset. The original bytes stay on the user's device;
- *  syncing this small record lets another browser show the asset and guide the user to reselect it. */
-export interface LocalAssetIndexEntry {
-  sig: string;
-  label: string;
-  /** Absent on legacy entries = video. */
-  kind?: 'video' | 'image' | 'audio';
-  w?: number | null;
-  h?: number | null;
-  /** Folder imports share one logical source. The directory handle itself is device-local;
-   *  this cloud-safe path metadata lets another browser re-authorize the root once and recover
-   *  every indexed file beneath it. */
-  folder?: {
-    id: string;
-    name: string;
-    path: string;
-  };
-  createdAt: number;
-}
-
 /** Cloud byte rendezvous for native V2 assets. */
 export interface ProjectCloudMediaIndex {
   video?: { sig: string; key: string };
   clips?: Record<string, { key: string }>;
-}
-
-/** Project-level state that is intentionally outside the active V2 timeline. Media locators,
- * transcripts and editing semantics live in EditorDocumentV2; this envelope only indexes the
- * project's independently editable deliverables. */
-export interface StudioProjectContext {
-  schemaVersion: typeof STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION;
-  outputs?: StudioProjectOutputs;
-}
-
-export function sanitizeProjectContext(value: unknown): StudioProjectContext {
-  const record = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-  return {
-    schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
-    ...(record.outputs ? { outputs: normalizeProjectOutputs(record.outputs) } : {}),
-  };
-}
-
-function isProjectContextInput(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  return Object.keys(record).every((key) => key === 'schemaVersion' || key === 'outputs')
-    && record.schemaVersion === STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION;
 }
 
 /** Full project payload between client and server. */
@@ -113,8 +81,6 @@ export interface StudioProjectMeta {
   id: string;
   title: string;
   videoDurationSec: number | null;
-  blocks: number;
-  shots: number;
   coverThumb: string | null;
   version: number;
   updatedAt: number;
@@ -149,6 +115,11 @@ type Row = {
   updatedAt: Date;
 };
 
+type ProjectMetaRow = Pick<
+  Row,
+  'id' | 'title' | 'videoDurationSec' | 'coverThumb' | 'version' | 'updatedAt'
+>;
+
 export function rowToDto(r: Row): StudioProjectDto {
   const videoDurationSec = r.videoDurationSec == null ? null : Number(r.videoDurationSec);
   if (!isEditorDocumentV2(r.comp)) throw new Error(`project document is not V2: ${r.id}`);
@@ -167,16 +138,11 @@ export function rowToDto(r: Row): StudioProjectDto {
   };
 }
 
-export function rowToMeta(r: Row): StudioProjectMeta {
-  if (!isEditorDocumentV2(r.comp)) throw new Error(`project document is not V2: ${r.id}`);
-  const document = prepareEditorDocumentForPersistence(r.comp);
-  const stats = projectDocumentStats(document);
+export function rowToMeta(r: ProjectMetaRow): StudioProjectMeta {
   return {
     id: r.id,
     title: r.title,
     videoDurationSec: r.videoDurationSec == null ? null : Number(r.videoDurationSec),
-    blocks: stats.blocks,
-    shots: stats.shots,
     coverThumb: r.coverThumb,
     version: r.version,
     updatedAt: r.updatedAt.getTime(),

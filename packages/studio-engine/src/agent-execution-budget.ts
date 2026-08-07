@@ -9,7 +9,6 @@
 export const STUDIO_AGENT_EXECUTION_LIMITS = {
   toolCallsPerTurn: 24,
   modelRoundsPerTurn: 12,
-  outputTokensPerRound: 8192,
   proposalOperations: 32,
   proposalSplitCalls: 1,
   splitPointsPerCall: 24,

@@ -154,6 +154,30 @@ describe('displayCues(铺设期派生:剪辑后词流 → 一屏一行,列表与
 });
 
 describe('displayCues 几何驱动的 cue 尺寸(画布跟原视频,恒单行)', () => {
+  it('人工 cueTexts 锁定已有词范围，改再长也不改变 cue 数量和时间边界', () => {
+    const words = Array.from({ length: 24 }, (_, index) => ({ text: `字${index}`, start: index * 0.2, end: index * 0.2 + 0.2 }));
+    const segment: AsrSegment = { start: 0, end: 4.8, text: words.map((word) => word.text).join(''), words };
+    const baseline = displayCues(oneShot(4.8), [segment], {}, { canvasW: 1080 });
+    expect(baseline.length).toBeGreaterThan(1);
+    const first = baseline[0]!;
+    const cueTexts = Object.fromEntries(baseline.map((cue) => [
+      `${cue.ref!.w0}:${cue.ref!.w1}`,
+      cue === first ? '这是一条人工修改后明显更长但绝不能重新分段的字幕' : cue.text,
+    ]));
+    const edited = displayCues(oneShot(4.8), [{
+      ...segment,
+      captionText: '这是一条人工修改后明显更长但绝不能重新分段的字幕',
+      cueTexts,
+    }], {}, { canvasW: 1080 });
+
+    expect(edited.map((cue) => cue.ref)).toEqual(baseline.map((cue) => cue.ref));
+    expect(edited.map(({ start, end }) => ({ start, end }))).toEqual(baseline.map(({ start, end }) => ({ start, end })));
+    expect(edited[0]!.text).toBe('这是一条人工修改后明显更长但绝不能重新分段的字幕');
+    const block = captionBlocksFromAsr([edited[0]!])[0]!;
+    expect(block.label).toBe(edited[0]!.text);
+    expect((block.slots.words as { text: string }[]).map((word) => word.text).join('')).toBe(edited[0]!.text);
+  });
+
   it('横屏画布(1920 宽):英文整句单行 cue(~42 字符),不再 3-4 词碎块', () => {
     const en = 'The most important piece of advice I would give to founders is do not overthink it';
     const cues = displayCues(oneShot(10), [{ start: 0, end: 10, text: en, lang: 'en' }], {}, { canvasW: 1920 });
