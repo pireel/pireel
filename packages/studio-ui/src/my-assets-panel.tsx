@@ -40,6 +40,7 @@ import {
   type LibraryItem,
   type PanelDragAsset,
   type PanelMediaAsset,
+  RESPONSIVE_ASSET_CARD_GRID,
   dimsOf,
   dragPropsFor,
   useAudioPreview,
@@ -891,7 +892,7 @@ export function MyAssetsPanel({
         ) : !hasVisible ? (
           <div className="text-ink-4 flex h-24 items-center justify-center px-4 text-center text-[11px]">{t('panels.noMatchingAssetsTry')}</div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
+          <div className={RESPONSIVE_ASSET_CARD_GRID}>
             {visibleImports.map((it) => (
                 <AssetCard
                   key={it.id}

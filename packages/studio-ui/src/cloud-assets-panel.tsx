@@ -35,6 +35,7 @@ import {
   type LibraryItem,
   type PanelDragAsset,
   type PanelMediaAsset,
+  RESPONSIVE_ASSET_CARD_GRID,
   dimsOf,
   dragPropsFor,
   useAudioPreview,
@@ -475,9 +476,9 @@ export function CloudAssetsPanel({
             )}
           </div>
         ) : (
-          // Uniform grid: fixed 120×68 cards (the rail's DEFAULT width is computed to fit whole
-          // columns); thumbnails letterbox non-16:9 media centered and fully visible.
-          <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">{shown.map(gridCard)}</div>
+          // Shared responsive grid (same as Official/Generation): compact 88px floor that
+          // stretches to fill the panel; thumbnails letterbox non-16:9 media centered.
+          <div className={RESPONSIVE_ASSET_CARD_GRID}>{shown.map(gridCard)}</div>
         )}
       </div>
 
