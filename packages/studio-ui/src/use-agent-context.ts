@@ -152,6 +152,7 @@ export function useAgentContext(deps: AgentContextDeps) {
             ...(sp.clip.treatSize != null ? { size: sp.clip.treatSize } : {}),
             ...(sp.clip.treatCrop != null ? { crop: sp.clip.treatCrop } : {}),
             ...(sp.clip.preciseFraming ? { ...sp.clip.preciseFraming } : {}),
+            ...(sp.clip.mediaFraming ? { mediaFraming: sp.clip.mediaFraming } : {}),
             ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
             ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
           }));

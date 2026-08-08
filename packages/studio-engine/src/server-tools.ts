@@ -44,6 +44,9 @@ import {
   applyNarrationSplitCommands,
   normalizeNarrationSplitPoints,
   applyShotFramingInput,
+  applyVideoClipSettingsPatches,
+  applyMediaCropInput,
+  applyMediaTransformInput,
   placementFramingNotes,
   editorDocumentRenderPlan,
   projectDocumentToComposition,
@@ -72,6 +75,7 @@ import {
   narrativeTrimRangeAtTimelineSecond,
   primaryNarrativeClips,
   listDocumentAddressedWords,
+  mediaVideoClipEntries,
   resolveDocumentWordIds,
   documentWordRanges,
   documentWordRangesToTimeline,
@@ -100,6 +104,7 @@ import { applyCaptionTextEdits } from './caption-text-edit';
 import { ensureTemplatesRegistered } from './templates';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-search';
 import { normalizeProjectOutputs, projectOutputPositionMap } from './project-outputs';
+import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -131,6 +136,27 @@ export interface ServerToolOutcome {
 /** The set of offline-executable tools (route uses this to decide between fallback and returning studio_not_open as-is). */
 export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'get_state',
+  'get_timeline',
+  'register_media',
+  'inspect_media',
+  'organize_media',
+  'swap_clip_media',
+  'add_texts',
+  'update_text',
+  'add_clips',
+  'insert_clips',
+  'move_clips',
+  'remove_clips',
+  'split_clips',
+  'set_clip_properties',
+  'set_media_transform',
+  'set_media_crop',
+  'set_keyframes',
+  'manage_tracks',
+  'manage_clip_links',
+  'sync_clips',
+  'get_transcript',
+  'get_beat_grid',
   'list_outputs',
   'read_script',
   'search_media',
@@ -261,6 +287,7 @@ function offlineState(p: ServerToolProject): string {
         ...(sp.clip.treatSize != null ? { size: sp.clip.treatSize } : {}),
         ...(sp.clip.treatCrop != null ? { crop: sp.clip.treatCrop } : {}),
         ...(sp.clip.preciseFraming ? { ...sp.clip.preciseFraming } : {}),
+        ...(sp.clip.mediaFraming ? { mediaFraming: sp.clip.mediaFraming } : {}),
         ...(sp.clip.src ? { source: tag.get(sp.clip.src) } : {}),
         ...(sp.clip.audioMuted ? { audioMuted: true } : sp.clip.volumeDb != null ? { volumeDb: sp.clip.volumeDb } : {}),
       })),
@@ -363,6 +390,17 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
   const c = p.comp;
   const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
   const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
+
+  if (AGENT_TIMELINE_TOOL_IDS.has(tool)) {
+    const outcome = runAgentTimelineTool(p.document, tool, input);
+    if (!outcome.ok) return { result: { ok: false, error: outcome.error, ...(outcome.data !== undefined ? { data: outcome.data } : {}) } };
+    if (!outcome.document) return { result: { ok: true, summary: outcome.summary, ...(outcome.data !== undefined ? { data: outcome.data } : {}) } };
+    return {
+      result: { ok: true, summary: outcome.summary, ...(outcome.data !== undefined ? { data: outcome.data } : {}) },
+      comp: projectDocumentToComposition(outcome.document),
+      document: outcome.document,
+    };
+  }
 
   switch (tool) {
     case 'get_state':
@@ -609,14 +647,22 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
     }
     case 'set_shot_framing': {
-      const shots = shotsOf(p);
+      const primaryShots = shotsOf(p);
+      const mediaEntries = mediaVideoClipEntries(p.document);
+      const explicitlyTargetsIds = typeof input.shotId === 'string'
+        || (Array.isArray(input.updates) && input.updates.some((row) => (
+          !!row && typeof row === 'object' && !Array.isArray(row) && typeof (row as Record<string, unknown>).shotId === 'string'
+        )));
+      // atSec keeps its semantic meaning on the primary story lane. Stable ids can address video
+      // clips on any visual lane without pretending parallel tracks form one serial timeline.
+      const shots = explicitlyTargetsIds ? [...primaryShots, ...mediaEntries.map((entry) => entry.shot)] : primaryShots;
       const applied = applyShotFramingInput({ ...c, shots }, input, shots);
       if ('error' in applied) return { result: { ok: false, error: applied.error } };
-      const native = applyNativeNarrativePatches(p, applied.patches.map(({ shotId, patch }) => ({
+      const native = applyVideoClipSettingsPatches(p.document, applied.patches.map(({ shotId, patch }) => ({
         clipId: shotId,
         patch: { framing: patch },
       })));
-      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
+      if (!native.ok) return { result: { ok: false, error: native.error, data: native.data } };
       const count = applied.updates.length;
       return {
         result: {
@@ -624,8 +670,25 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           summary: count === 1 ? `Updated framing for shot ${applied.updates[0]!.shotId}` : `Updated framing for ${count} shots`,
           data: count === 1 ? applied.updates[0] : { updates: applied.updates },
         },
-        comp: native.comp,
+        comp: projectDocumentToComposition(native.document),
         document: native.document,
+      };
+    }
+    case 'set_media_transform':
+    case 'set_media_crop': {
+      const edit = tool === 'set_media_transform'
+        ? applyMediaTransformInput(p.document, input)
+        : applyMediaCropInput(p.document, input);
+      if (!edit.ok) return { result: { ok: false, error: edit.error, data: edit.data } };
+      const count = edit.updates.length;
+      return {
+        result: {
+          ok: true,
+          summary: `${tool === 'set_media_transform' ? 'Transformed' : 'Cropped'} ${count} media clip${count === 1 ? '' : 's'}`,
+          data: count === 1 ? edit.updates[0] : { updates: edit.updates },
+        },
+        comp: projectDocumentToComposition(edit.document),
+        document: edit.document,
       };
     }
     case 'apply_layout': {
@@ -652,21 +715,21 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
     }
     case 'set_shot_treatment': {
-      const shots = shotsOf(p);
+      const shots = [...shotsOf(p), ...mediaVideoClipEntries(p.document).map((entry) => entry.shot)];
       const s = shots.find((x) => x.id === input.shotId);
       if (!s) return { result: { ok: false, error: 'shot not found' } };
       const t = String(input.treatment);
       if (!TREATMENTS.has(t)) return { result: { ok: false, error: `invalid treatment: ${t}` } };
-      const native = applyNativeNarrativePatches(p, [{ clipId: s.id, patch: { framing: { treatment: t as VideoShot['treatment'] } } }]);
-      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
+      const native = applyVideoClipSettingsPatches(p.document, [{ clipId: s.id, patch: { framing: { treatment: t as VideoShot['treatment'] } } }]);
+      if (!native.ok) return { result: { ok: false, error: native.error, data: native.data } };
       return {
         result: { ok: true, summary: `Set shot framing to ${t}` },
-        comp: native.comp,
+        comp: projectDocumentToComposition(native.document),
         document: native.document,
       };
     }
     case 'set_video_filter': {
-      const shots = shotsOf(p);
+      const shots = [...shotsOf(p), ...mediaVideoClipEntries(p.document).map((entry) => entry.shot)];
       const s = shots.find((x) => x.id === input.shotId);
       if (!s) return { result: { ok: false, error: 'shot not found' } };
       const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
@@ -676,16 +739,16 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(num(input.saturate) != null ? { saturate: num(input.saturate) } : {}),
       };
       const css = shotFilterCss(f);
-      const native = applyNativeNarrativePatches(p, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
-      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
+      const native = applyVideoClipSettingsPatches(p.document, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
+      if (!native.ok) return { result: { ok: false, error: native.error, data: native.data } };
       return {
         result: { ok: true, summary: css === 'none' ? 'Reset color grading for this shot' : `Applied color grading: ${css}` },
-        comp: native.comp,
+        comp: projectDocumentToComposition(native.document),
         document: native.document,
       };
     }
     case 'set_shot_audio': {
-      const shots = shotsOf(p);
+      const shots = [...shotsOf(p), ...mediaVideoClipEntries(p.document).map((entry) => entry.shot)];
       if (!shots.length) return { result: { ok: false, error: 'no video track yet' } };
       const ids = input.all ? new Set(shots.map((s) => s.id)) : new Set((Array.isArray(input.shotIds) ? input.shotIds : []).map(String));
       if (!ids.size) return { result: { ok: false, error: 'pass shotIds or all:true' } };
@@ -698,15 +761,15 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
       };
       if (!Object.keys(patch).length) return { result: { ok: false, error: 'pass volumeDb / mute / fadeInSec / fadeOutSec' } };
-      const native = applyNativeNarrativePatches(p, hit.map((shot) => ({ clipId: shot.id, patch: { audio: patch } })));
-      if ('error' in native) return { result: { ok: false, error: native.error, data: native.data } };
+      const native = applyVideoClipSettingsPatches(p.document, hit.map((shot) => ({ clipId: shot.id, patch: { audio: patch } })));
+      if (!native.ok) return { result: { ok: false, error: native.error, data: native.data } };
       const bits = [
         ...('volumeDb' in patch ? [`volume ${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
         ...('mute' in patch ? [patch.mute ? 'muted' : 'unmuted'] : []),
       ];
       return {
-        result: { ok: true, summary: `Audio on ${hit.length} shot${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
-        comp: native.comp,
+        result: { ok: true, summary: `Audio on ${hit.length} video clip${hit.length > 1 ? 's' : ''}: ${bits.join(', ')}` },
+        comp: projectDocumentToComposition(native.document),
         document: native.document,
       };
     }
@@ -1021,18 +1084,26 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (Number.isFinite(scale)) patch.scale = scale;
       if (!preset && !Object.keys(patch).length) return { result: { ok: false, error: 'nothing to set: provide at least one of preset / yPct / scale' } };
       const sourceDocument = p.document;
-      if (preset) {
-        const narrativeAssetIds = new Set(primaryNarrativeClips(sourceDocument).map((clip) => clip.assetId));
-        const hasTranscript = Object.entries(sourceDocument.semantics.transcripts).some(([assetId, segments]) => narrativeAssetIds.has(assetId) && segments.length > 0);
-        if (!hasTranscript) return { result: { ok: false, error: 'no transcript in the cloud project, cannot lay captions — open the studio tab and run extract_asr first' } };
-      }
+      const source = input.source === 'track' && typeof input.trackId === 'string'
+        ? { mode: 'track' as const, trackId: input.trackId }
+        : input.source === 'clip' && typeof input.clipId === 'string'
+          ? { mode: 'clip' as const, clipId: input.clipId }
+          : input.source === 'auto' ? { mode: 'auto' as const } : undefined;
+      if ((input.source === 'track' && !source) || (input.source === 'clip' && !source)) return { result: { ok: false, error: 'trackId/clipId is required for the selected caption source' } };
       const edit = applyCaptionDocumentEdit({
         document: sourceDocument,
         patch: { ...(preset ? { on: true, preset, color: undefined, bg: undefined } : {}), ...patch },
+        ...(source ? { source } : {}),
         mainTranscript: null,
         clipTranscripts: {},
       });
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
+      if (preset) {
+        const captionTrack = edit.document.semantics.managedCaptionTrackId
+          ? edit.document.timeline.tracks.find((track) => track.id === edit.document.semantics.managedCaptionTrackId)
+          : undefined;
+        if (!captionTrack?.clips.length) return { result: { ok: false, error: 'no transcript for a placed caption source — register/transcribe the source first' } };
+      }
       const comp = projectDocumentToComposition(edit.document);
       return {
         result: { ok: true, summary: `${preset ? 'Set' : 'Adjusted'} captions: ${getCaptionPreset(resolveCaptionStyle(comp).preset).name}` },

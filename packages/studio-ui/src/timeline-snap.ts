@@ -26,7 +26,6 @@ export function timelineSnapPoints(
   audioClips: readonly AudioClip[],
 ): number[] {
   const points = new Set<number>([0, durationSec]);
-  for (let second = 0; second <= durationSec; second += 1) points.add(second);
   for (const span of scenes) {
     points.add(span.start);
     points.add(span.end);
@@ -59,16 +58,22 @@ export function snapTimelineSecond(
 ): { second: number; hit: number | null } {
   const tolerance = SNAP_PX / options.pps;
   const lockedPoint = options.lockedPoint;
-  if (lockedPoint != null && Math.abs(lockedPoint - second) < tolerance * 1.75) {
+  if (lockedPoint != null && Math.abs(lockedPoint - second) < tolerance * 1.5) {
     return { second: Math.round(lockedPoint * 100) / 100, hit: lockedPoint };
   }
   let best = second;
-  let bestDistance = tolerance;
+  let bestDistance = Infinity;
   let hit: number | null = null;
-  for (const point of [...points, ...(options.dynamicPoints ?? [])]) {
+  const targets = [
+    ...points.map((point) => ({ point, tolerance })),
+    // a professional NLE gives the playhead a wider acquisition range than ordinary clip edges.
+    ...(options.dynamicPoints ?? []).map((point) => ({ point, tolerance: tolerance * 1.5 })),
+  ];
+  for (const target of targets) {
+    const { point } = target;
     if (options.exclude?.some((excluded) => Math.abs(excluded - point) < 1e-3)) continue;
     const distance = Math.abs(point - second);
-    if (distance < bestDistance) {
+    if (distance <= target.tolerance && distance < bestDistance) {
       bestDistance = distance;
       best = point;
       hit = point;

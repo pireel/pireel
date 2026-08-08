@@ -2,10 +2,12 @@ import { captionBlocksFromAsr, type AsrSegment, type CueRef } from '../../build-
 import { displayCuesFromMappedSegs, mapTranscriptSegsToEdited } from '../../captions-relay';
 import { positiveDurationFrames, secondsToTimelineFrames, timelineFramesToSeconds } from '../time';
 import type {
+  AudioTimelineClip,
   CaptionSourceRef,
   CaptionTimelineClip,
   EditorDocumentV2,
   GraphicBlockPayload,
+  MediaTimelineClip,
   NarrativeTimelineClip,
   TimelineClip,
 } from '../types';
@@ -17,33 +19,70 @@ function stripBlockPlacement(block: ReturnType<typeof captionBlocksFromAsr>[numb
   return payload;
 }
 
-function primaryNarrativeClips(document: EditorDocumentV2): NarrativeTimelineClip[] {
-  const track = document.timeline.tracks.find((candidate) => candidate.id === document.semantics.primaryNarrativeTrackId);
-  return (track?.clips ?? [])
-    .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative' && clip.enabled)
+type SpeechTimelineClip = NarrativeTimelineClip | MediaTimelineClip | AudioTimelineClip;
+
+type CaptionSourceSelection = NonNullable<EditorDocumentV2['semantics']['managedCaptionSource']>;
+
+function isSpeechClip(clip: TimelineClip): clip is SpeechTimelineClip {
+  return clip.kind === 'narrative' || clip.kind === 'media' || clip.kind === 'audio';
+}
+
+function transcriptBearingClips(document: EditorDocumentV2, clips: readonly TimelineClip[]): SpeechTimelineClip[] {
+  return clips
+    .filter((clip): clip is SpeechTimelineClip => isSpeechClip(clip) && clip.enabled)
+    .filter((clip) => (document.semantics.transcripts[clip.assetId]?.length ?? 0) > 0)
     .sort((left, right) => left.startFrame - right.startFrame);
 }
 
+function autoSpeechClips(document: EditorDocumentV2): SpeechTimelineClip[] {
+  const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+  const visualSpeech = transcriptBearingClips(document, primary?.clips ?? []);
+  if (visualSpeech.length) return visualSpeech;
+
+  const narration = document.timeline.tracks.find((track) => track.type === 'audio' && track.role === 'narration');
+  const narrated = transcriptBearingClips(document, narration?.clips ?? []);
+  if (narrated.length) return narrated;
+
+  return document.timeline.tracks
+    .map((track) => transcriptBearingClips(document, track.clips))
+    .filter((clips) => clips.length)
+    .sort((left, right) => (
+      right.reduce((sum, clip) => sum + clip.durationFrames, 0)
+      - left.reduce((sum, clip) => sum + clip.durationFrames, 0)
+    ))[0] ?? [];
+}
+
+function selectedSpeechClips(document: EditorDocumentV2, selection: CaptionSourceSelection): SpeechTimelineClip[] {
+  if (selection.mode === 'auto') return autoSpeechClips(document);
+  if (selection.mode === 'track') {
+    const track = document.timeline.tracks.find((candidate) => candidate.id === selection.trackId);
+    return transcriptBearingClips(document, track?.clips ?? []);
+  }
+  const clip = document.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === selection.clipId);
+  return clip ? transcriptBearingClips(document, [clip]) : [];
+}
+
 /** Source seconds mapped through native clip placement, including explicit gaps and retiming. */
+function sourceRange(clip: SpeechTimelineClip, fps: number): { start: number; end: number } {
+  const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0
+    ? clip.properties.speed!
+    : 1;
+  return {
+    start: clip.sourceInSec,
+    end: clip.sourceOutSec ?? clip.sourceInSec + timelineFramesToSeconds(clip.durationFrames, fps) * speed,
+  };
+}
+
 function sourceSecToTimelineSec(
-  clips: readonly NarrativeTimelineClip[],
-  assetId: string,
+  clip: SpeechTimelineClip,
   sourceSec: number,
   fps: number,
 ): number {
-  let lastEndSec = 0;
-  for (const clip of clips) {
-    if (clip.assetId !== assetId) continue;
-    const startSec = timelineFramesToSeconds(clip.startFrame, fps);
-    const endSec = timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps);
-    if (sourceSec < clip.sourceInSec) return startSec;
-    if (sourceSec < clip.sourceOutSec) {
-      const ratio = (sourceSec - clip.sourceInSec) / (clip.sourceOutSec - clip.sourceInSec);
-      return startSec + ratio * (endSec - startSec);
-    }
-    lastEndSec = endSec;
-  }
-  return lastEndSec;
+  const startSec = timelineFramesToSeconds(clip.startFrame, fps);
+  const endSec = timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps);
+  const range = sourceRange(clip, fps);
+  const ratio = Math.max(0, Math.min(1, (sourceSec - range.start) / Math.max(0.001, range.end - range.start)));
+  return startSec + ratio * (endSec - startSec);
 }
 
 function priorSourceKeys(document: EditorDocumentV2, clips: readonly TimelineClip[]): Map<string, string> {
@@ -69,7 +108,10 @@ function uniqueClipId(preferred: string, used: Set<string>): string {
 }
 
 /** Rebuild the semantic managed-caption lane directly from V2 transcript and narrative truth. */
-export function relayManagedCaptionTrack(document: EditorDocumentV2): EditorCommandResult {
+export function relayManagedCaptionTrack(
+  document: EditorDocumentV2,
+  requestedSource?: CaptionSourceSelection,
+): EditorCommandResult {
   const issue = validateEditorDocumentV2(document).find((candidate) => candidate.severity === 'error');
   if (issue) return commandFailure(document, 'invalid-document', issue.message, { path: issue.path });
   const trackId = document.semantics.managedCaptionTrackId;
@@ -79,28 +121,40 @@ export function relayManagedCaptionTrack(document: EditorDocumentV2): EditorComm
   const track = document.timeline.tracks[trackIndex]!;
   if (track.locked) return commandFailure(document, 'track-locked', `Track is locked: ${trackId}`, { trackIds: [trackId] });
 
-  const narrative = primaryNarrativeClips(document);
-  const narrativeAssetIds = new Set(narrative.map((clip) => clip.assetId));
-  const transcriptEntries = Object.entries(document.semantics.transcripts)
-    .filter(([assetId, segments]) => narrativeAssetIds.has(assetId) && segments.length > 0);
+  const selection = requestedSource ?? document.semantics.managedCaptionSource ?? { mode: 'auto' };
+  const speechClips = selectedSpeechClips(document, selection);
   const captionTruthKnown = Object.values(document.semantics.transcripts).some((segments) => segments.length > 0);
-  if (!transcriptEntries.length && !(narrative.length === 0 && captionTruthKnown)) {
+  if (!speechClips.length && !captionTruthKnown && !requestedSource) {
     return { ok: true, document, receipt: emptyCommandReceipt('captions.relay') };
+  }
+  if (!speechClips.length && requestedSource) {
+    return commandFailure(document, 'invalid-command', 'The selected caption source has no placed transcript-bearing media.', {
+      path: requestedSource.mode === 'track' ? 'source.trackId' : requestedSource.mode === 'clip' ? 'source.clipId' : 'source',
+    });
   }
 
   const primaryAssetId = document.semantics.primaryNarrativeAssetId;
   const sourceKeys = priorSourceKeys(document, track.clips);
   const assetBySourceKey = new Map<string, string>();
-  const mapped = transcriptEntries.flatMap(([assetId, segments]) => {
+  const mapped = speechClips.flatMap((clip) => {
+    const assetId = clip.assetId;
+    const segments = document.semantics.transcripts[assetId] ?? [];
     const sourceKey = assetId === primaryAssetId
       ? null
       : sourceKeys.get(assetId) ?? document.assets[assetId]?.locator.remoteUrl ?? `blob:pireel-offline/${assetId}`;
     if (sourceKey) assetBySourceKey.set(sourceKey, assetId);
-    return mapTranscriptSegsToEdited(
-      segments as AsrSegment[],
-      (sourceSec) => sourceSecToTimelineSec(narrative, assetId, sourceSec, document.canvas.fps),
-      sourceKey,
-    );
+    const range = sourceRange(clip, document.canvas.fps);
+    return (segments as AsrSegment[]).flatMap((segment, segmentIndex) => {
+      const sourceWords = (segment.words ?? []).map((word, wordIndex) => ({ ...word, si: wordIndex }));
+      const words = sourceWords.filter((word) => word.end > range.start && word.start < range.end);
+      if (sourceWords.length && !words.length) return [];
+      if (!sourceWords.length && (segment.end <= range.start || segment.start >= range.end)) return [];
+      return mapTranscriptSegsToEdited(
+        [{ ...segment, ...(sourceWords.length ? { words } : {}) } as AsrSegment],
+        (sourceSec) => sourceSecToTimelineSec(clip, sourceSec, document.canvas.fps),
+        sourceKey,
+      ).map((mappedSegment) => ({ ...mappedSegment, ref: { ...mappedSegment.ref, seg: segmentIndex } }));
+    });
   }).sort((left, right) => left.start - right.start);
   const sourceSegment = (ref: CueRef): AsrSegment | undefined => {
     const assetId = ref.src ? assetBySourceKey.get(ref.src) : primaryAssetId;
@@ -160,6 +214,7 @@ export function relayManagedCaptionTrack(document: EditorDocumentV2): EditorComm
     timeline: { ...document.timeline, tracks },
     semantics: {
       ...document.semantics,
+      managedCaptionSource: selection,
       scenes: removedIds.size
         ? document.semantics.scenes.map((scene) => ({ ...scene, clipIds: scene.clipIds.filter((id) => !removedIds.has(id)) }))
         : document.semantics.scenes,

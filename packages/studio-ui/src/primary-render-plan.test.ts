@@ -16,7 +16,8 @@ describe('primary narrative render plan', () => {
       },
       {
         id: 'active', kind: 'narrative', assetId: 'main', startFrame: 120, durationFrames: 30,
-        sourceInSec: 2, sourceOutSec: 3, properties: { treatment: 'full' }, enabled: true,
+        sourceInSec: 2, sourceOutSec: 3, box: { x: 0.1, y: 0.2, w: 0.7, h: 0.7 },
+        properties: { treatment: 'full' }, enabled: true,
       },
     ];
 
@@ -26,9 +27,11 @@ describe('primary narrative render plan', () => {
     expect(primary).toMatchObject({ trackId: track.id, hidden: true, muted: true });
     expect(primary.placements).toEqual([
       { shotId: 'disabled', startSec: 1, endSec: 3, enabled: false },
-      { shotId: 'active', startSec: 4, endSec: 5, enabled: true },
+      { shotId: 'active', startSec: 4, endSec: 5, enabled: true, box: { x: 0.1, y: 0.2, w: 0.7, h: 0.7 } },
     ]);
-    expect(primary.activePlacements).toEqual([{ shotId: 'active', startSec: 4, endSec: 5 }]);
+    expect(primary.activePlacements).toEqual([{
+      shotId: 'active', startSec: 4, endSec: 5, box: { x: 0.1, y: 0.2, w: 0.7, h: 0.7 },
+    }]);
     expect(primary.activeEntries.map((entry) => entry.clipId)).toEqual(['active']);
   });
 });

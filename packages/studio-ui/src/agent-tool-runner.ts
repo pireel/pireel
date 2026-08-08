@@ -35,6 +35,9 @@ import {
   normalizeNarrationSplitPoints,
   narrativeTimelineRangesForAssetSourceRange,
   applyShotFramingInput,
+  applyVideoClipSettingsPatches,
+  applyMediaCropInput,
+  applyMediaTransformInput,
   audioTrimPatch,
   blockId,
   blockKind,
@@ -52,6 +55,7 @@ import {
   shotFilterCss,
   shotId,
   listDocumentAddressedWords,
+  mediaVideoClipEntries,
   patchNarrativeClips,
   removeOverlayDocumentClips,
   duplicateOverlayDocumentClip,
@@ -64,6 +68,8 @@ import {
   validateComposition,
   validateEditorDocumentV2,
   syncCaptionTranscripts,
+  AGENT_TIMELINE_TOOL_IDS,
+  runAgentTimelineTool,
   videoShotTimelineSpans,
   zoneOf,
 } from '@pireel/studio-engine/composition';
@@ -110,9 +116,10 @@ import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
 import { detectSpeechSilenceCuts, resolveSpeechSilenceOptions } from './speech-silence';
 import { withEditableBlockGeometry } from './editable-block-geometry';
+import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'inspect_media', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
 
@@ -241,7 +248,7 @@ export interface AgentToolCtx {
   trimAtPlayhead: (side: 'left' | 'right') => { ok: boolean; error?: string };
   deleteShot: (sid: string) => { ok: boolean; error?: string };
   videoDurationOf: (url: string) => Promise<number | null>;
-  insertClipCore: (url: string, clipDur: number, atWish: number, file?: File, srcDims?: { w: number; h: number } | null, srcSigOverride?: string | null, sceneId?: string) => string;
+  insertClipCore: (url: string, clipDur: number, atWish: number, file?: File, srcDims?: { w: number; h: number } | null, srcSigOverride?: string | null, options?: { placement?: 'nearest' | 'exact'; mode?: 'overwrite' | 'ripple'; sceneId?: string }) => string;
   // Captions
   setCaptionStyle: (patch: Partial<CaptionStyle>) => void;
   applyCaptionPreset: (preset: string, stylePatch?: Partial<CaptionStyle>) => Promise<void>;
@@ -358,6 +365,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       }
       if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
+        if (AGENT_TIMELINE_TOOL_IDS.has(toolId)) {
+          const outcome = runAgentTimelineTool(documentRef.current, toolId, input);
+          if (outcome.ok && outcome.document && outcome.document !== documentRef.current) setDocument(outcome.document);
+          return { ok: outcome.ok, ...(outcome.summary ? { summary: outcome.summary } : {}), ...(outcome.error ? { error: outcome.error } : {}), ...(outcome.data !== undefined ? { data: outcome.data } : {}) };
+        }
         switch (toolId) {
           case 'list_outputs': {
             const outputs = listProjectOutputs();
@@ -995,6 +1007,104 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               data: { scope: 'mine', assetId: `local:${entry.sig}`, label: entry.label, url },
             };
           }
+          case 'list_models': {
+            const kind = input.kind === 'image' || input.kind === 'video' ? `?kind=${input.kind}` : '';
+            const res = await fetch(`/api/models${kind}`, { ...(signal ? { signal } : {}) });
+            const body = (await res.json().catch(() => ({}))) as { models?: Array<{ id: string; name: string; kind: 'image' | 'video' }>; error?: string };
+            if (!res.ok || !Array.isArray(body.models)) return { ok: false, error: body.error || 'generation model list unavailable' };
+            const models = body.models.filter((model) => model.kind === 'image' || model.kind === 'video');
+            return { ok: true, summary: `${models.length} generation models available`, data: { models } };
+          }
+          case 'generate_image':
+          case 'generate_video': {
+            const generationKind = toolId === 'generate_image' ? 'image' : 'video';
+            const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+            if (!prompt) return { ok: false, error: 'prompt required' };
+            report(generationKind === 'image' ? 'Starting image generation…' : 'Starting video generation…');
+            try {
+              const params: Record<string, unknown> = {
+                prompt,
+                user_prompt: prompt,
+                ...(typeof input.modelId === 'string' && input.modelId ? { model_id: input.modelId } : {}),
+                ...(Array.isArray(input.referenceImages) ? { reference_images: input.referenceImages.filter((url): url is string => typeof url === 'string').slice(0, 9) } : {}),
+              };
+              if (generationKind === 'image') {
+                params.n = 1;
+                params.size = typeof input.size === 'string' ? input.size : '1440x2560';
+                if (typeof input.quality === 'string' && input.quality) params.quality = input.quality;
+              } else {
+                params.count = 1;
+                params.duration_sec = String(Math.max(4, Math.min(15, Math.round(Number(input.durationSec) || 10))));
+                params.aspect_ratio = input.aspectRatio === '16:9' || input.aspectRatio === '1:1' ? input.aspectRatio : '9:16';
+                params.resolution = input.resolution === '720p' || input.resolution === '1080p' ? input.resolution : '480p';
+                if (Array.isArray(input.referenceVideos)) params.reference_videos = input.referenceVideos.filter((url): url is string => typeof url === 'string').slice(0, 3);
+                if (Array.isArray(input.referenceAudios)) params.reference_audios = input.referenceAudios.filter((url): url is string => typeof url === 'string').slice(0, 3);
+              }
+              const started = await startGeneration(projectId, generationKind === 'image' ? 'image-gen' : 'video-gen', params);
+              if (!started.ok) {
+                if (started.kind === 'credits') return { ok: false, error: `insufficient_tokens: need ${started.need}, balance ${started.balance}` };
+                return { ok: false, error: started.message };
+              }
+              return {
+                ok: true,
+                summary: `${generationKind === 'image' ? 'Image' : 'Video'} generation started`,
+                data: {
+                  ids: started.ids,
+                  status: 'pending',
+                  kind: generationKind,
+                  projectId,
+                  next: 'The asynchronous task is already in Generate history. Do not poll repeatedly in this turn; call get_generation_jobs with these ids later, then register_media and add_clips after success.',
+                },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
+          case 'generate_music': {
+            const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+            if (!prompt) return { ok: false, error: 'prompt required' };
+            report('Generating background music…');
+            try {
+              const spaceId = await getStudioSpaceId(projectId);
+              const res = await fetch('/api/studio/music', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ prompt, duration_sec: Math.max(10, Math.min(300, Math.round(Number(input.durationSec) || 60))), space_id: spaceId }),
+                ...(signal ? { signal } : {}),
+              });
+              const body = (await res.json().catch(() => ({}))) as {
+                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; prompt: string; durationSec: number; model: string; bpm?: number };
+                error?: string; detail?: string;
+              };
+              if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'music generation failed' };
+              return {
+                ok: true, summary: 'Background music generated',
+                data: {
+                  asset: body.asset,
+                  next: 'To use it, call register_media with this id/url/durationSec and bpm when present, then add_clips with role=music. Set volume and fades separately; do not use set_bgm for newly generated Agent media.',
+                },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
+          case 'get_generation_jobs': {
+            const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === 'string' && !!id).slice(0, 30) : [];
+            if (ids.length) {
+              const jobs = (await Promise.all(ids.map((id) => pollCreation(id).catch(() => null)))).filter((job): job is NonNullable<typeof job> => !!job);
+              return { ok: true, summary: `${jobs.length} generation jobs`, data: { jobs } };
+            }
+            const [images, videos, audios] = await Promise.all([
+              listStudioGens(projectId, 'image', 30).catch(() => []),
+              listStudioGens(projectId, 'video', 30).catch(() => []),
+              listStudioGens(projectId, 'audio', 30).catch(() => []),
+            ]);
+            const jobs = [
+              ...images.map((job) => ({ ...job, kind: 'image' as const })),
+              ...videos.map((job) => ({ ...job, kind: 'video' as const })),
+              ...audios.map((job) => ({ ...job, kind: 'audio' as const })),
+            ].sort((a, b) => b.createdAt - a.createdAt).slice(0, 30);
+            return { ok: true, summary: `${jobs.length} recent generation jobs`, data: { jobs } };
+          }
           case 'list_voices': {
             const params = new URLSearchParams({ refresh: 'true', limit: String(Math.min(100, Math.max(1, Number(input.limit) || 20))) });
             if (input.language === 'zh' || input.language === 'en') params.set('language', input.language);
@@ -1049,7 +1159,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...(signal ? { signal } : {}),
               });
               const body = (await res.json().catch(() => ({}))) as {
-                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; charCount: number; estimatedDurationSec: number };
+                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; transcriptText: string; charCount: number; estimatedDurationSec: number };
                 error?: string;
                 detail?: string;
               };
@@ -1059,15 +1169,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ok: true,
                 summary: t('workbench.speechGenerated'),
                 data: {
-                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, ...(asset.label ? { label: asset.label } : {}) },
+                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, transcriptText: asset.transcriptText, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
                   model: asset.model,
                   voiceId: asset.voiceId,
                   voiceLabel: asset.voiceLabel,
                   charCount: asset.charCount,
                   estimatedDurationSec: asset.estimatedDurationSec,
-                  next: asset.estimatedDurationSec > 15
-                    ? 'This speech is longer than one lip_sync clip. Split the performance into deliberate <=15s sections before lip_sync.'
-                    : `For lip_sync, pass this asset url and durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.estimatedDurationSec)))}.`,
+                  next: `For timeline narration, call register_media with this asset id/url/transcriptText, then add_clips with role=narration. Never call set_bgm for speech.${asset.estimatedDurationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.estimatedDurationSec)))}.`}`,
                 },
               };
             } finally {
@@ -1200,7 +1308,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(from), to: r1(to) }), data: { shotIds: (committed.composition.shots ?? []).map((s) => s.id) } });
           }
           case 'set_captions': {
-            if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.uploadVideoBeforeSetting') };
             const preset = typeof input.preset === 'string' ? input.preset : undefined;
             if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: t('workbench.noSuchCaptionPreset', { preset }) };
             const yPct = Number(input.yPct);
@@ -1209,7 +1316,24 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (Number.isFinite(yPct)) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
             if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
-            if (preset) await applyCaptionPreset(preset, patch); // style + transcript relay publish as one V2 transaction
+            const source = input.source === 'track' && typeof input.trackId === 'string'
+              ? { mode: 'track' as const, trackId: input.trackId }
+              : input.source === 'clip' && typeof input.clipId === 'string'
+                ? { mode: 'clip' as const, clipId: input.clipId }
+                : input.source === 'auto' ? { mode: 'auto' as const } : undefined;
+            if ((input.source === 'track' && !source) || (input.source === 'clip' && !source)) return { ok: false, error: 'trackId/clipId is required for the selected caption source' };
+            const hasStoredTranscript = Object.values(documentRef.current.semantics.transcripts).some((segments) => segments.length);
+            if (source || hasStoredTranscript) {
+              const edit = applyCaptionDocumentEdit({
+                document: documentRef.current,
+                patch: { ...(preset ? { on: true, preset, color: undefined, bg: undefined } : {}), ...patch },
+                ...(source ? { source } : {}),
+                mainTranscript: asrRef.current,
+                clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+              });
+              if (!edit.ok) return { ok: false, error: edit.error.message, data: edit.error };
+              setDocument(edit.document);
+            } else if (preset) await applyCaptionPreset(preset, patch);
             else if (Object.keys(patch).length) setCaptionStyle(patch);
             if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.couldNotGenerateCaptions') };
             const cs = resolveCaptionStyle(compRef.current);
@@ -1630,20 +1754,40 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } };
           }
           case 'set_shot_framing': {
-            const shots = ensureShots(c);
+            const primaryShots = ensureShots(c);
+            const mediaEntries = mediaVideoClipEntries(documentRef.current);
+            const explicitlyTargetsIds = typeof input.shotId === 'string'
+              || (Array.isArray(input.updates) && input.updates.some((row) => (
+                !!row && typeof row === 'object' && !Array.isArray(row) && typeof (row as Record<string, unknown>).shotId === 'string'
+              )));
+            const shots = explicitlyTargetsIds ? [...primaryShots, ...mediaEntries.map((entry) => entry.shot)] : primaryShots;
             const applied = applyShotFramingInput({ ...c, shots }, input, shots);
             if ('error' in applied) return { ok: false, error: applied.error };
-            const command = patchNarrativeClips(documentRef.current, applied.patches.map(({ shotId, patch }) => ({
+            const command = applyVideoClipSettingsPatches(documentRef.current, applied.patches.map(({ shotId, patch }) => ({
               clipId: shotId,
               patch: { framing: patch },
             })));
-            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            if (!command.ok) return { ok: false, error: command.error, data: command.data };
             setDocument(command.document);
             const count = applied.updates.length;
             return {
               ok: true,
               summary: count === 1 ? `Updated framing for shot ${applied.updates[0]!.shotId}` : `Updated framing for ${count} shots`,
               data: count === 1 ? applied.updates[0] : { updates: applied.updates },
+            };
+          }
+          case 'set_media_transform':
+          case 'set_media_crop': {
+            const edit = toolId === 'set_media_transform'
+              ? applyMediaTransformInput(documentRef.current, input)
+              : applyMediaCropInput(documentRef.current, input);
+            if (!edit.ok) return { ok: false, error: edit.error, data: edit.data };
+            setDocument(edit.document);
+            const count = edit.updates.length;
+            return {
+              ok: true,
+              summary: `${toolId === 'set_media_transform' ? 'Transformed' : 'Cropped'} ${count} media clip${count === 1 ? '' : 's'}`,
+              data: count === 1 ? edit.updates[0] : { updates: edit.updates },
             };
           }
           case 'apply_layout': {
@@ -1664,12 +1808,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: `Applied ${layout} layout`, data: edit.layout };
           }
           case 'set_shot_treatment': {
-            const s = findShot(input.shotId);
+            const s = findShot(input.shotId)
+              ?? mediaVideoClipEntries(documentRef.current).find((entry) => entry.shot.id === input.shotId)?.shot;
             if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             const tr = String(input.treatment) as ShotTreatment;
             if (!SHOT_TREATMENTS.some((item) => item.id === tr)) return { ok: false, error: `invalid treatment: ${tr}` };
-            const command = patchNarrativeClips(documentRef.current, [{ clipId: s.id, patch: { framing: { treatment: tr } } }]);
-            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            const command = applyVideoClipSettingsPatches(documentRef.current, [{ clipId: s.id, patch: { framing: { treatment: tr } } }]);
+            if (!command.ok) return { ok: false, error: command.error, data: command.data };
             setDocument(command.document);
             const name = SHOT_TREATMENTS.find((x) => x.id === tr)?.name ?? tr;
             return { ok: true, summary: t('workbench.framingChangedName', { name: t(name) }) };
@@ -1739,7 +1884,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return withDelta({ ok: true, summary: t('workbench.deletedScene') });
           }
           case 'set_video_filter': {
-            const s = findShot(input.shotId);
+            const s = findShot(input.shotId)
+              ?? mediaVideoClipEntries(documentRef.current).find((entry) => entry.shot.id === input.shotId)?.shot;
             if (!s) return { ok: false, error: t('workbench.shotNotFound') };
             const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : undefined);
             const f: ShotFilter = {
@@ -1748,13 +1894,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(num(input.saturate) != null ? { saturate: num(input.saturate) } : {}),
             };
             const css = shotFilterCss(f);
-            const command = patchNarrativeClips(documentRef.current, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
-            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            const command = applyVideoClipSettingsPatches(documentRef.current, [{ clipId: s.id, patch: { filter: css === 'none' ? null : f } }]);
+            if (!command.ok) return { ok: false, error: command.error, data: command.data };
             setDocument(command.document);
             return { ok: true, summary: css === 'none' ? t('workbench.resetColorGradeShot') : t('workbench.filtersAppliedCss', { css }) };
           }
           case 'set_shot_audio': {
-            const shots = c.shots ?? [];
+            const shots = [...(c.shots ?? []), ...mediaVideoClipEntries(documentRef.current).map((entry) => entry.shot)];
             const ids = input.all ? new Set(shots.map((s) => s.id)) : new Set((Array.isArray(input.shotIds) ? input.shotIds : []).map(String));
             if (!ids.size) return { ok: false, error: t('workbench.passShotIdsOrAll') };
             const hit = shots.filter((s) => ids.has(s.id));
@@ -1766,11 +1912,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(typeof input.fadeOutSec === 'number' && Number.isFinite(input.fadeOutSec) ? { fadeOutSec: input.fadeOutSec } : {}),
             };
             if (!Object.keys(patch).length) return { ok: false, error: t('workbench.passVolumeOrMute') };
-            const command = patchNarrativeClips(documentRef.current, hit.map((shot) => ({
+            const command = applyVideoClipSettingsPatches(documentRef.current, hit.map((shot) => ({
               clipId: shot.id,
               patch: { audio: patch },
             })));
-            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            if (!command.ok) return { ok: false, error: command.error, data: command.data };
             setDocument(command.document);
             const bits = [
               ...('volumeDb' in patch ? [`${r1(Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, patch.volumeDb!)))}dB`] : []),
@@ -1903,7 +2049,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 return { ok: false, error: t('workbench.couldNotReadDurationCodec') };
               }
               void saveLocalVideo(f, fileSig(f)).catch(() => {});
-              const newShotId = insertClipCore(blobUrl, Math.round(dur * 100) / 100, at, f, null, null, explicitSceneId);
+              const newShotId = insertClipCore(blobUrl, Math.round(dur * 100) / 100, at, f, null, null, {
+                ...(explicitSceneId ? { sceneId: explicitSceneId } : {}),
+              });
               if (!newShotId) return { ok: false, error: t('workbench.failedFetchInsertClip') };
               const sceneId = documentRef.current.semantics.scenes.find((scene) => scene.clipIds.includes(newShotId))?.id;
               return withDelta({

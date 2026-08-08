@@ -10,11 +10,12 @@ import type {
   GraphicTimelineClip,
   NarrativeTimelineClip,
   NarrativeProperties,
+  MediaVideoProperties,
   TimelineClip,
   TimelineClipId,
   TrackId,
 } from '../types';
-import type { CaptionStyle, ShotFilter, ShotFramingPatch } from '../../composition-core';
+import type { AtomicMediaFraming, CaptionStyle, ShotFilter, ShotFramingPatch } from '../../composition-core';
 
 export interface ShotAudioPatch {
   volumeDb?: number;
@@ -57,7 +58,24 @@ export type TrackPatch = Partial<Pick<EditorTrack,
   'name' | 'muted' | 'hidden' | 'locked' | 'syncLocked' | 'stackOrder'
 >>;
 
-export type ClipPatch = Partial<Pick<TimelineClip, 'enabled'>>;
+export interface ClipPatch {
+  enabled?: boolean;
+  /** Visual media fill policy; valid only for media clips. */
+  fit?: 'contain' | 'cover';
+  /** Canvas-relative placement. x/y may be outside 0..1 and w/h may exceed 1. */
+  box?: { x: number; y: number; w: number; h: number };
+  /** Canonical layer-space transform/crop. null returns the clip to identity/legacy fallback. */
+  mediaFraming?: AtomicMediaFraming | null;
+  /** Full video-clip settings replacement. `null` clears settings back to neutral defaults. */
+  video?: MediaVideoProperties | null;
+  anchorX?: number;
+  anchorY?: number;
+  opacity?: number;
+  keyframes?: {
+    box?: Array<{ frame: number; x: number; y: number; w: number; h: number }>;
+    opacity?: Array<{ frame: number; value: number }>;
+  } | null;
+}
 
 export type CanvasPatch = Pick<EditorDocumentV2['canvas'], 'width' | 'height'>;
 
@@ -105,6 +123,10 @@ export type EditorCommand =
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
   | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
+  | { type: 'clip.move'; trackId: TrackId; clipId: TimelineClipId; startFrame: number; toTrackId?: TrackId; includeLinked?: boolean }
+  | { type: 'clip.swapAsset'; trackId: TrackId; clipId: TimelineClipId; assetId: string }
+  | { type: 'clips.link'; clipIds: TimelineClipId[]; groupId?: string }
+  | { type: 'clips.unlink'; clipIds: TimelineClipId[] }
   | { type: 'overlay.patch'; updates: OverlayClipPatchUpdate[] }
   | { type: 'overlay.insert'; trackId: TrackId; clip: GraphicTimelineClip; asset?: EditorMediaAsset }
   | { type: 'overlay.move'; clipId: TimelineClipId; toTrackId: TrackId }
@@ -112,7 +134,13 @@ export type EditorCommand =
   | { type: 'audio.insert'; trackId: TrackId; clip: AudioTimelineClip; asset?: EditorMediaAsset }
   | { type: 'audio.patch'; updates: AudioTimelineClipPatchUpdate[] }
   | { type: 'captions.style'; patch: CaptionStylePatch }
-  | { type: 'captions.relay' }
+  | {
+    type: 'captions.relay';
+    source?:
+      | { mode: 'auto' }
+      | { mode: 'track'; trackId: TrackId }
+      | { mode: 'clip'; clipId: TimelineClipId };
+  }
   | {
     type: 'narrative.insert';
     atFrame: number;
@@ -132,6 +160,8 @@ export type EditorCommand =
     clips: TimelineClipPlacement[];
     mode: 'overwrite' | 'ripple';
     includeLinked?: boolean;
+    /** Director scene that owns the inserted visual interval; inferred from overlap when omitted. */
+    sceneId?: string;
   }
   | {
     type: 'range.remove';

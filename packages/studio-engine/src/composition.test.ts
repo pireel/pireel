@@ -23,6 +23,8 @@ import {
   videoFrameTimelineBody,
   treatmentVacancyBox,
   shotTransformVars,
+  mediaFramingTransformVars,
+  resolveShotMediaFraming,
   parseClipInset,
   VOLUME_DB_MIN,
   dbToGain,
@@ -557,6 +559,16 @@ describe('视频分镜片段 shots', () => {
     expect(html).toContain('__parentClock'); // 段表/时钟归父层引擎,文档只收帧(hf:frame)
   });
 
+  it('assembleHtml:原生媒体拥有唯一画面底层，iframe 与 HTML root 保持透明', () => {
+    const c = emptyComposition();
+    c.video = { url: 'https://cdn.pireel.com/k.mp4', durationSec: 8 };
+    c.shots = shotsFromSentences([{ start: 0 }], 8);
+    const html = assembleHtml(c);
+    expect(html).toMatch(/html, body \{[^}]*background: transparent;/);
+    expect(html).toMatch(/#root \{[^}]*background: transparent;/);
+    expect(html).not.toContain('box-shadow:0 30px 90px');
+  });
+
   it('assembleHtml:成片时长=Σ片段(被剪区间不计入);data-duration', () => {
     const c = emptyComposition();
     c.video = { url: 'https://cdn.pireel.com/k.mp4', durationSec: 20 };
@@ -726,6 +738,36 @@ describe('取景 clipPath 可插值(所有取景同 token 数)', () => {
       const clip = shotTransformVars(tr).clipPath;
       expect(clip.match(/[\d.]+%/g), `${tr} → ${clip}`).toHaveLength(4);
     }
+  });
+});
+
+describe('原子媒体取景(transform + crop)', () => {
+  it('意图预设只负责物化原子值,渲染读取同一份值', () => {
+    const base: VideoShot = { id: 's', srcStart: 0, srcEnd: 2, treatment: 'full' };
+    const split = patchShotFraming(base, { treatment: 'split-l', size: 50, crop: 50 });
+    expect(split.mediaFraming).toEqual({
+      transform: { scale: 1, offsetX: -0.25, offsetY: 0 },
+      crop: { top: 0, right: 0.25, bottom: 0, left: 0.25 },
+      rounding: 0,
+    });
+    expect(mediaFramingTransformVars(resolveShotMediaFraming(split))).toEqual(shotTransformVars('split-l', 50, 50));
+  });
+
+  it('显式原子值优先于旧 treatment,旧项目仍可惰性解析', () => {
+    const custom: VideoShot = {
+      id: 'custom', srcStart: 0, srcEnd: 2, treatment: 'full',
+      mediaFraming: {
+        transform: { scale: 1.3, offsetX: 0.12, offsetY: -0.08 },
+        crop: { top: 0.1, right: 0.2, bottom: 0, left: 0.05 },
+        rounding: 18,
+      },
+    };
+    expect(videoFrameTimelineBody([custom])).toContain("scale: 1.3, xPercent: 12, yPercent: -8, borderRadius: 18, clipPath: 'inset(10% 20% 0% 5%)'");
+    expect(resolveShotMediaFraming({ treatment: 'corner-br' })).toEqual({
+      transform: { scale: 0.34, offsetX: 0.31, offsetY: 0.31 },
+      crop: { top: 0, right: 0, bottom: 0, left: 0 },
+      rounding: 54,
+    });
   });
 });
 

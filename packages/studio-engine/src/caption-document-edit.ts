@@ -21,6 +21,11 @@ export interface CaptionDocumentEditInput {
   /** Explicit user/agent action: discard the current cue boundaries and regenerate them from the
    *  current canvas/font metrics. Corrected caption copy is remapped onto the new ranges. */
   relayout?: boolean;
+  /** Select any speech-bearing clip/track; omitted preserves the current selection. */
+  source?:
+    | { mode: 'auto' }
+    | { mode: 'track'; trackId: string }
+    | { mode: 'clip'; clipId: string };
   mainTranscript: readonly AsrSegment[] | null;
   clipTranscripts: Readonly<Record<string, readonly AsrSegment[]>>;
 }
@@ -97,13 +102,13 @@ export function applyCaptionDocumentEdit(input: CaptionDocumentEditInput): Capti
   }
 
   if (input.relayout) document = clearManagedCaptionLayout(document);
-  const relaid = applyEditorCommand(document, { type: 'captions.relay' });
+  const relaid = applyEditorCommand(document, { type: 'captions.relay', ...(input.source ? { source: input.source } : {}) });
   if (!relaid.ok) return { ok: false, document: input.document, error: relaid.error };
   document = relaid.document;
   receipts.push(relaid.receipt);
   if (input.relayout) {
     document = remapCaptionCopyToManagedLayout(document);
-    const copyRelaid = applyEditorCommand(document, { type: 'captions.relay' });
+    const copyRelaid = applyEditorCommand(document, { type: 'captions.relay', ...(input.source ? { source: input.source } : {}) });
     if (!copyRelaid.ok) return { ok: false, document: input.document, error: copyRelaid.error };
     document = copyRelaid.document;
     receipts.push(copyRelaid.receipt);

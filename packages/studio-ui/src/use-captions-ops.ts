@@ -173,7 +173,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
    *  may just want to edit lines; picking a style later re-lays from this transcript). */
   const extractCaptionsNow = async () => {
     const source = inspectCaptionDocument(documentRef.current);
-    if (!source.hasVideoTrack) {
+    if (!source.hasSpeechTrack) {
       toast.error(t('common.uploadVideoFirst'));
       return;
     }
@@ -277,7 +277,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const applyCaptionPreset = async (preset: string, stylePatch: Partial<CaptionStyle> = {}) => {
     const has = isCaptionsOn(compRef.current);
     const source = inspectCaptionDocument(documentRef.current);
-    if (!source.hasVideoTrack) {
+    if (!source.hasSpeechTrack) {
       toast.error(t('workbench.uploadVideoBeforeApplying'));
       return;
     }

@@ -7,10 +7,13 @@ export const PREVIEW_W = 108; // hover element preview width
 
 export const ROW_H = 30; // overlay track (element/caption) row height: compact to save space (user's call)
 export const AUDIO_ROW_H = 44; // music lane: taller than an overlay row — the waveform and the fade knobs need the room
-export const SCENE_H = 92; // track 0 = scene rail: thumbnails + the footage's own audio strip under them
-export const SCENE_PAD_T = 12; // gap above scene card (like a mainstream editor): drag from gap = marquee, from card = reorder; bigger on top for easier hit
-export const SCENE_PAD_B = 8; // gap below scene card
-export const ROW_GAP = 6;
+export const SCENE_H = 72; // semantic primary rail: largest native-video lane
+export const VISUAL_SCENE_H = 56; // detached video is dense, while retaining the primary card's thumbnail + wave language
+export const SCENE_PAD_T = 8; // enough blank edge for marquee/track insertion without making the rail feel loose
+export const SCENE_PAD_B = 6;
+export const VISUAL_SCENE_PAD_T = 3;
+export const VISUAL_SCENE_PAD_B = 3;
+export const ROW_GAP = 2;
 export const RULER_H = 24;
 export const GUTTER = 58; // kind icon + the track's mute toggle
 export const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
@@ -20,7 +23,44 @@ export const MIN_PPS = 2; // min zoom: ~2px/s, shows minute scale (1 min ~= 120p
 export const MAX_PPS = 260;
 export const DEFAULT_PPS = 78;
 export const MIN_DUR = 0.3;
-export const SNAP_PX = 7;
+export const SNAP_PX = 8;
+
+export interface TimelinePlacementSpan {
+  id: string;
+  startSec: number;
+  endSec: number;
+}
+
+/** Half-open range collision used by the drag planner. Touching edges are allowed; a real overlap
+ * means the clip must be stacked on a new visual lane instead of trimming destination material. */
+export function timelinePlacementOverlaps(
+  spans: readonly TimelinePlacementSpan[],
+  startSec: number,
+  durationSec: number,
+  excludeId?: string,
+): boolean {
+  const endSec = startSec + durationSec;
+  return spans.some((span) => span.id !== excludeId && span.startSec < endSec - 1e-4 && span.endSec > startSec + 1e-4);
+}
+
+/** Primary auto-snap is a packing constraint, not a proximity magnet. The pointer chooses an insert
+ * position by clip centres; the returned start is the sum of every preceding duration, so the lane
+ * always begins at zero and cannot contain an inter-clip gap. */
+export function packedPrimaryPlacement(
+  spans: readonly TimelinePlacementSpan[],
+  movingId: string,
+  rawStartSec: number,
+  durationSec: number,
+): { index: number; startSec: number } {
+  const others = spans
+    .filter((span) => span.id !== movingId)
+    .sort((left, right) => left.startSec - right.startSec || left.id.localeCompare(right.id));
+  const movingCenter = rawStartSec + durationSec / 2;
+  const index = others.findIndex((span) => movingCenter < (span.startSec + span.endSec) / 2);
+  const resolvedIndex = index < 0 ? others.length : index;
+  const startSec = others.slice(0, resolvedIndex).reduce((sum, span) => sum + Math.max(0, span.endSec - span.startSec), 0);
+  return { index: resolvedIndex, startSec: Math.round(startSec * 1000) / 1000 };
+}
 
 /** One compact radius for every piece of content placed on a timeline lane. Keep the matching
  * edge-handle radii here too, so video, graphics, captions and audio cannot drift independently. */

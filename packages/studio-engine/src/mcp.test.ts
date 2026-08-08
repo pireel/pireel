@@ -25,6 +25,11 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     renameProject: vi.fn(async () => ({ ok: true, summary: 'renamed', data: { projectId: 'p1', title: 'X' } })),
     listAssets: vi.fn(async () => ({ ok: true, summary: '1 assets in the library', data: { assets: [{ id: 'u1', kind: 'image', url: 'https://cdn.example/u1.png' }], project: {} } })),
     searchAssets: vi.fn(async () => ({ ok: true, summary: '1 matching asset', data: { results: [{ assetId: 'u1', kind: 'image', scope: 'cloud' }] } })),
+    listModels: vi.fn(async () => ({ ok: true, summary: '2 generation models', data: { models: [] } })),
+    generateImage: vi.fn(async () => ({ ok: true, summary: 'image started', data: { id: 'ci1', status: 'pending' } })),
+    generateVideo: vi.fn(async () => ({ ok: true, summary: 'video started', data: { id: 'cv1', status: 'pending' } })),
+    generateMusic: vi.fn(async () => ({ ok: true, summary: 'music generated', data: { asset: { id: 'cm1', url: 'https://cdn.example/m.wav' } } })),
+    getGenerationJobs: vi.fn(async () => ({ ok: true, summary: '2 generation jobs', data: { jobs: [] } })),
     listVoices: vi.fn(async () => ({ ok: true, summary: '2 voices', data: { voices: [] } })),
     cloneVoice: vi.fn(async () => ({ ok: true, summary: 'voice created', data: { voice: { id: 'voice_1' } } })),
     deleteVoice: vi.fn(async () => ({ ok: true, summary: 'voice deleted' })),
@@ -92,7 +97,7 @@ describe('MCP 协议处理', () => {
     expect(d.readEditingGuide).toHaveBeenCalled();
     expect(d.readFrame).toHaveBeenCalledWith('f1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'generate_speech', 'get_icons', 'import_media', 'lip_sync', 'list_assets', 'list_frames', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);
@@ -119,6 +124,18 @@ describe('MCP 协议处理', () => {
     expect(d5.cloneVoice).toHaveBeenCalledWith({ audioAssetId: 'up_1', name: 'Mine', consentConfirmed: true });
     expect(d5.deleteVoice).toHaveBeenCalledWith({ voiceId: 'voice_1' });
     expect(d5.callBridge).not.toHaveBeenCalled();
+    const d6 = deps();
+    await handleMcpRequest({ id: 108, method: 'tools/call', params: { name: 'list_models', arguments: { kind: 'image' } } }, d6);
+    await handleMcpRequest({ id: 109, method: 'tools/call', params: { name: 'generate_image', arguments: { prompt: 'ocean' } } }, d6);
+    await handleMcpRequest({ id: 110, method: 'tools/call', params: { name: 'generate_video', arguments: { prompt: 'waves' } } }, d6);
+    await handleMcpRequest({ id: 111, method: 'tools/call', params: { name: 'generate_music', arguments: { prompt: 'calm piano' } } }, d6);
+    await handleMcpRequest({ id: 112, method: 'tools/call', params: { name: 'get_generation_jobs', arguments: { ids: ['ci1'] } } }, d6);
+    expect(d6.listModels).toHaveBeenCalledWith({ kind: 'image' });
+    expect(d6.generateImage).toHaveBeenCalledWith({ prompt: 'ocean' });
+    expect(d6.generateVideo).toHaveBeenCalledWith({ prompt: 'waves' });
+    expect(d6.generateMusic).toHaveBeenCalledWith({ prompt: 'calm piano' });
+    expect(d6.getGenerationJobs).toHaveBeenCalledWith({ ids: ['ci1'] });
+    expect(d6.callBridge).not.toHaveBeenCalled();
   });
   it('桥工具带 kind 对应超时过桥;未知工具 -32602', async () => {
     const d = deps();

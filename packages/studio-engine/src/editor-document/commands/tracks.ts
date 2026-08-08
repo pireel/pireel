@@ -12,7 +12,9 @@ const roleTrackTypes: Partial<Record<EditorTrackRole, EditorTrackType>> = {
   primaryNarrative: 'visual',
   broll: 'visual',
   graphics: 'graphics',
+  narration: 'audio',
   music: 'audio',
+  sfx: 'audio',
   managedCaptions: 'caption',
 };
 
@@ -140,6 +142,13 @@ export function removeEditorTrack(document: EditorDocumentV2, trackId: string): 
   };
   if (next.semantics.managedCaptionTrackId === trackId) {
     const { managedCaptionTrackId: _removed, ...semantics } = next.semantics;
+    next = { ...next, semantics };
+  }
+  if (next.semantics.managedCaptionSource?.mode === 'track' && next.semantics.managedCaptionSource.trackId === trackId) {
+    const { managedCaptionSource: _removed, ...semantics } = next.semantics;
+    next = { ...next, semantics };
+  } else if (next.semantics.managedCaptionSource?.mode === 'clip' && removedClipIds.has(next.semantics.managedCaptionSource.clipId)) {
+    const { managedCaptionSource: _removed, ...semantics } = next.semantics;
     next = { ...next, semantics };
   }
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');

@@ -1,5 +1,5 @@
 import type { AudioClip } from '../audio-tracks';
-import type { Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
+import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { DirectorPlanV1, NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
@@ -28,6 +28,13 @@ export interface EditorMediaAsset {
     width?: number;
     height?: number;
     hasAudio?: boolean;
+    /** Search/agent-facing metadata. Media bytes stay in locator; these fields remain cloud-safe. */
+    description?: string;
+    tags?: string[];
+    collection?: string;
+    /** Optional precomputed/declared musical grid metadata; media-byte analysis stays outside the document. */
+    bpm?: number;
+    beatOffsetSec?: number;
   };
   /** Cloud-safe library metadata. The file/directory handle remains device-local; this is enough
    * for another browser to render a restore card and ask for the original folder once. */
@@ -59,7 +66,7 @@ export interface EditorAppearance {
 }
 
 export type EditorTrackType = 'visual' | 'graphics' | 'audio' | 'caption';
-export type EditorTrackRole = 'primaryNarrative' | 'broll' | 'graphics' | 'music' | 'managedCaptions';
+export type EditorTrackRole = 'primaryNarrative' | 'broll' | 'graphics' | 'narration' | 'music' | 'sfx' | 'managedCaptions';
 
 export interface EditorTrack {
   id: TrackId;
@@ -90,15 +97,27 @@ export interface TimelineClipBase {
   linkGroupId?: string;
 }
 
-export type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd'>;
+export type NarrativeProperties = Omit<VideoShot, 'id' | 'src' | 'srcSig' | 'srcStart' | 'srcEnd' | 'mediaFraming'>;
 
 export interface NarrativeTimelineClip extends TimelineClipBase {
   kind: 'narrative';
   assetId: AssetId;
   sourceInSec: number;
   sourceOutSec: number;
+  /** Canvas-relative placement of the decoded video layer. May extend outside the canvas; omitted means full canvas. */
+  box?: { x: number; y: number; w: number; h: number };
+  /** Canonical layer transform/crop. Kept at clip level so primary and ordinary visual media share it. */
+  mediaFraming?: AtomicMediaFraming;
   properties: NarrativeProperties;
 }
+
+/** Shot-scoped controls that stay attached when a video clip leaves the semantic primary lane.
+ * `mediaFraming` remains the canonical layer geometry; these values preserve preset intent and
+ * the clip's own grade/audio settings across multi-track moves. */
+export type MediaVideoProperties = Pick<VideoShot, 'treatment'> & Partial<Pick<VideoShot,
+  'treatSize' | 'treatCrop' | 'preciseFraming' | 'filter'
+  | 'volumeDb' | 'audioMuted' | 'audioFadeInSec' | 'audioFadeOutSec'
+>>;
 
 export interface MediaTimelineClip extends TimelineClipBase {
   kind: 'media';
@@ -106,6 +125,20 @@ export interface MediaTimelineClip extends TimelineClipBase {
   sourceInSec: number;
   sourceOutSec: number;
   fit?: 'contain' | 'cover';
+  /** Canvas-relative region occupied by this visual. May extend outside the canvas; omitted means full canvas. */
+  box?: { x: number; y: number; w: number; h: number };
+  mediaFraming?: AtomicMediaFraming;
+  /** Present for video media. Images do not acquire shot/audio semantics. */
+  video?: MediaVideoProperties;
+  /** Source point retained by cover-cropping. */
+  anchorX?: number;
+  anchorY?: number;
+  opacity?: number;
+  /** Visual motion is clip-local and frame-addressed, so it survives fps-aware persistence/export. */
+  keyframes?: {
+    box?: Array<{ frame: number; x: number; y: number; w: number; h: number }>;
+    opacity?: Array<{ frame: number; value: number }>;
+  };
 }
 
 export type GraphicBlockPayload = Omit<Block, 'id' | 'startSec' | 'durationSec' | 'trackIndex'>;
@@ -163,6 +196,11 @@ export interface EditorSemanticState {
   /** The original talking-head source. Inserted/B-roll sources have their own asset ids. */
   primaryNarrativeAssetId?: AssetId;
   managedCaptionTrackId?: TrackId;
+  /** Persisted caption source selection. `auto` prefers visual speech, then narration audio. */
+  managedCaptionSource?:
+    | { mode: 'auto' }
+    | { mode: 'track'; trackId: TrackId }
+    | { mode: 'clip'; clipId: TimelineClipId };
   transcripts: Record<AssetId, TranscriptSegment[]>;
   scenes: SemanticScene[];
   /** Saved scene-level commitment produced by the editing expert for a complete edit. */

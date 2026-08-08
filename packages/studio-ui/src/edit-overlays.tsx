@@ -50,6 +50,9 @@ export function BoxEditOverlay({
   onEdgePointerDown,
   onScalePointerDown,
   onRotatePointerDown,
+  bodyMove = false,
+  outset,
+  toolbar,
 }: {
   box: { x: number; y: number; w: number; h: number };
   stageW: number;
@@ -62,16 +65,23 @@ export function BoxEditOverlay({
   labelRef?: React.Ref<HTMLSpanElement>;
   onMovePointerDown: (e: React.PointerEvent) => void;
   /** Edge handle: stretch only this axis's box size (opposite edge anchored), content reflows to fill — no crop, no locked ratio. */
-  onEdgePointerDown: (e: React.PointerEvent, side: 'l' | 'r' | 't' | 'b') => void;
+  onEdgePointerDown?: (e: React.PointerEvent, side: 'l' | 'r' | 't' | 'b') => void;
   /** Corner handle: proportional scale (window/content/font together, diagonal anchored). */
   onScalePointerDown: (e: React.PointerEvent, sgnX: 1 | -1, sgnY: 1 | -1) => void;
   /** Bottom rotate handle: rotate the whole thing around the center. */
-  onRotatePointerDown: (e: React.PointerEvent) => void;
+  onRotatePointerDown?: (e: React.PointerEvent) => void;
+  /** Native media uses the same shell but also drags from its visible body. */
+  bodyMove?: boolean;
+  /** Visual distance between the selected content and its border. Native media uses zero. */
+  outset?: number;
+  /** Context controls attached to the selected object. Mounted inside the live-moved shell so it
+   * follows direct-manipulation frames without requiring React state updates. */
+  toolbar?: React.ReactNode;
 }) {
   const edge = 'pointer-events-auto absolute';
   // White-fill outlined dots/bars: readable on both light and dark frames
   const knob = 'pointer-events-auto absolute rounded-full border-2 border-accent bg-white shadow';
-  const selectionRect = boxSelectionRect(box, stageW, stageH);
+  const selectionRect = boxSelectionRect(box, stageW, stageH, outset);
   return (
     <div
       ref={overlayRef}
@@ -83,9 +93,18 @@ export function BoxEditOverlay({
         transformOrigin: 'center center',
       }}
     >
-      <div className="absolute inset-0 rounded-md ring-2 ring-accent/80" />
+      <div className={`absolute inset-0 ring-2 ring-accent/80 ${outset === 0 ? '' : 'rounded-md'}`} />
+      {bodyMove && <div className="pointer-events-auto absolute inset-0 cursor-move" onPointerDown={onMovePointerDown} />}
+      {toolbar && (
+        <div
+          className="pointer-events-auto absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {toolbar}
+        </div>
+      )}
       {/* A blue line + rotate handle attached below center (drag to rotate around the center, live) */}
-      <div className="pointer-events-none absolute left-1/2 top-full flex -translate-x-1/2 flex-col items-center">
+      {onRotatePointerDown && <div className="pointer-events-none absolute left-1/2 top-full flex -translate-x-1/2 flex-col items-center">
         <div className="bg-accent w-px" style={{ height: 22 }} />
         <button
           type="button"
@@ -104,17 +123,19 @@ export function BoxEditOverlay({
         >
           {rotation ? `${Math.round(rotation)}°` : ''}
         </span>
-      </div>
+      </div>}
       {/* Four edges: drag to move (thin strips, hollow center for the iframe) */}
       <div className={`${edge} -top-1 left-0 right-0 h-2.5 cursor-move`} onPointerDown={onMovePointerDown} />
       <div className={`${edge} -bottom-1 left-0 right-0 h-2.5 cursor-move`} onPointerDown={onMovePointerDown} />
       <div className={`${edge} -left-1 bottom-0 top-0 w-2.5 cursor-move`} onPointerDown={onMovePointerDown} />
       <div className={`${edge} -right-1 bottom-0 top-0 w-2.5 cursor-move`} onPointerDown={onMovePointerDown} />
       {/* Mid-edge bar handles: stretch only this axis (opposite edge anchored, content reflows to fill; no crop, no locked ratio) */}
-      <div className={`${knob} top-1/2 -right-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.resizeWidth')} onPointerDown={(e) => onEdgePointerDown(e, 'r')} />
-      <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.resizeWidth')} onPointerDown={(e) => onEdgePointerDown(e, 'l')} />
-      <div className={`${knob} left-1/2 -bottom-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.resizeHeight')} onPointerDown={(e) => onEdgePointerDown(e, 'b')} />
-      <div className={`${knob} left-1/2 -top-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.resizeHeight')} onPointerDown={(e) => onEdgePointerDown(e, 't')} />
+      {onEdgePointerDown && <>
+        <div className={`${knob} top-1/2 -right-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.resizeWidth')} onPointerDown={(e) => onEdgePointerDown(e, 'r')} />
+        <div className={`${knob} top-1/2 -left-[5px] h-5 w-2 -translate-y-1/2 cursor-ew-resize`} title={t('workbench.resizeWidth')} onPointerDown={(e) => onEdgePointerDown(e, 'l')} />
+        <div className={`${knob} left-1/2 -bottom-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.resizeHeight')} onPointerDown={(e) => onEdgePointerDown(e, 'b')} />
+        <div className={`${knob} left-1/2 -top-[5px] h-2 w-5 -translate-x-1/2 cursor-ns-resize`} title={t('workbench.resizeHeight')} onPointerDown={(e) => onEdgePointerDown(e, 't')} />
+      </>}
       {/* Corner dots: proportional scale (window/content/font together, diagonal anchored) */}
       <div className={`${knob} -top-[7px] -left-[7px] h-3.5 w-3.5 cursor-nwse-resize`} title={t('workbench.scaleProportionally')} onPointerDown={(e) => onScalePointerDown(e, -1, -1)} />
       <div className={`${knob} -top-[7px] -right-[7px] h-3.5 w-3.5 cursor-nesw-resize`} title={t('workbench.scaleProportionally')} onPointerDown={(e) => onScalePointerDown(e, 1, -1)} />

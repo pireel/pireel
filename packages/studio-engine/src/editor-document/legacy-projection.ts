@@ -44,6 +44,7 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
         srcStart: clip.sourceInSec,
         srcEnd: clip.sourceOutSec,
         ...clip.properties,
+        ...(clip.mediaFraming ? { mediaFraming: clip.mediaFraming } : {}),
         ...(clip.assetId !== mainAssetId && src ? { src } : {}),
         ...(clip.assetId !== mainAssetId && asset.locator.localSig ? { srcSig: asset.locator.localSig } : {}),
       };

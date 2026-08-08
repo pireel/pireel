@@ -105,4 +105,20 @@ describe('EditorDocument V2 managed caption command', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'track-locked', trackIds: ['managed-captions'] } });
     expect(result.document).toBe(document);
   });
+
+  it('auto-selects a narration audio lane when the visual narrative is empty', () => {
+    const document = documentWithCaptions();
+    document.timeline.tracks[0]!.clips = [];
+    document.assets.voice = { id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.mp3' }, metadata: { durationSec: 6 } };
+    document.semantics.transcripts.voice = transcript;
+    document.timeline.tracks.push({
+      id: 'narration', type: 'audio', role: 'narration', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+      clips: [{ id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 30, durationFrames: 180, enabled: true, sourceInSec: 0, sourceOutSec: 6, properties: {}, anchor: { type: 'timeline' } }],
+    });
+    const result = applyEditorCommand(document, { type: 'captions.relay', source: { mode: 'auto' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.semantics.managedCaptionSource).toEqual({ mode: 'auto' });
+    expect(result.document.timeline.tracks.find((track) => track.id === 'managed-captions')!.clips[0]).toMatchObject({ startFrame: 30, sourceRef: { assetId: 'voice' } });
+  });
 });

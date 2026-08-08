@@ -27,6 +27,7 @@ export function primaryNarrativeRenderPlan(plan: EditorRenderPlan): PrimaryNarra
     startSec: entry.startSec,
     endSec: entry.endSec,
     enabled: entry.clip.enabled,
+    ...(entry.clip.box ? { box: entry.clip.box } : {}),
   }));
   const activeEntries = plan.narrative.filter((entry) => entry.clip.enabled);
   return {
@@ -38,6 +39,7 @@ export function primaryNarrativeRenderPlan(plan: EditorRenderPlan): PrimaryNarra
       shotId: entry.clipId,
       startSec: entry.startSec,
       endSec: entry.endSec,
+      ...(entry.clip.box ? { box: entry.clip.box } : {}),
     })),
     activeEntries,
   };

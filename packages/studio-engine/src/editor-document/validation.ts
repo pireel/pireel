@@ -77,6 +77,51 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
       if (!Number.isInteger(clip.durationFrames) || clip.durationFrames <= 0) push('error', 'invalid-clip-duration', `${clipPath}.durationFrames`, 'Clip duration must be a positive integral frame count.');
       if ('assetId' in clip && clip.assetId && !document.assets[clip.assetId]) push('error', 'dangling-asset', `${clipPath}.assetId`, `Missing asset: ${clip.assetId}`);
       if ((clip.kind === 'narrative' || clip.kind === 'media') && clip.sourceOutSec <= clip.sourceInSec) push('error', 'invalid-source-range', clipPath, 'Source out must be after source in.');
+      if (clip.kind === 'media' || clip.kind === 'narrative') {
+        const validUnit = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1;
+        const validBox = (box: { x: number; y: number; w: number; h: number }) => (
+          Number.isFinite(box.x) && Number.isFinite(box.y) && isFinitePositive(box.w) && isFinitePositive(box.h)
+        );
+        if (clip.box && !validBox(clip.box)) push('error', 'invalid-media-box', `${clipPath}.box`, 'Media box must be a finite canvas-relative rect with positive size.');
+        if (clip.mediaFraming) {
+          const framing = clip.mediaFraming;
+          const t = framing.transform;
+          const c = framing.crop;
+          const transformValid = !!t && [t.scale, t.offsetX, t.offsetY].every(Number.isFinite) && t.scale > 0;
+          const cropValid = !!c && [c.top, c.right, c.bottom, c.left].every((value) => Number.isFinite(value) && value >= 0 && value < 1)
+            && c.left + c.right < 1 && c.top + c.bottom < 1;
+          if (!transformValid || !cropValid || !Number.isFinite(framing.rounding) || framing.rounding < 0) {
+            push('error', 'invalid-media-framing', `${clipPath}.mediaFraming`, 'Media framing needs a positive scale, finite offsets, valid 0..1 crop insets and non-negative rounding.');
+          }
+        }
+        if (clip.kind === 'media' && clip.video) {
+          const video = clip.video;
+          const asset = document.assets[clip.assetId];
+          const treatments = new Set(['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b']);
+          const finiteOptional = (value: number | undefined) => value == null || Number.isFinite(value);
+          const validAudio = finiteOptional(video.volumeDb)
+            && (video.volumeDb == null || (video.volumeDb >= -60 && video.volumeDb <= 20))
+            && finiteOptional(video.audioFadeInSec) && (video.audioFadeInSec == null || (video.audioFadeInSec >= 0 && video.audioFadeInSec <= 10))
+            && finiteOptional(video.audioFadeOutSec) && (video.audioFadeOutSec == null || (video.audioFadeOutSec >= 0 && video.audioFadeOutSec <= 10));
+          if (asset?.kind !== 'video' || !treatments.has(video.treatment) || !validAudio) {
+            push('error', 'invalid-media-video-settings', `${clipPath}.video`, 'Video media settings require a video asset, valid framing preset, and bounded clip audio values.');
+          }
+        }
+        if (clip.kind === 'narrative') continue;
+        if (clip.anchorX != null && !validUnit(clip.anchorX)) push('error', 'invalid-media-anchor', `${clipPath}.anchorX`, 'Media anchorX must be within 0..1.');
+        if (clip.anchorY != null && !validUnit(clip.anchorY)) push('error', 'invalid-media-anchor', `${clipPath}.anchorY`, 'Media anchorY must be within 0..1.');
+        if (clip.opacity != null && !validUnit(clip.opacity)) push('error', 'invalid-media-opacity', `${clipPath}.opacity`, 'Media opacity must be within 0..1.');
+        for (const [keyframeIndex, row] of (clip.keyframes?.box ?? []).entries()) {
+          if (!Number.isInteger(row.frame) || row.frame < 0 || row.frame > clip.durationFrames || !validBox(row)) {
+            push('error', 'invalid-media-keyframe', `${clipPath}.keyframes.box[${keyframeIndex}]`, 'Box keyframe must be an in-range integral clip-local frame and finite canvas-relative rect.');
+          }
+        }
+        for (const [keyframeIndex, row] of (clip.keyframes?.opacity ?? []).entries()) {
+          if (!Number.isInteger(row.frame) || row.frame < 0 || row.frame > clip.durationFrames || !validUnit(row.value)) {
+            push('error', 'invalid-media-keyframe', `${clipPath}.keyframes.opacity[${keyframeIndex}]`, 'Opacity keyframe must be an in-range integral clip-local frame with value 0..1.');
+          }
+        }
+      }
     }
   }
 
@@ -93,6 +138,13 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
   if (document.semantics.managedCaptionTrackId) {
     const captions = document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId);
     if (!captions || captions.role !== 'managedCaptions' || captions.type !== 'caption') push('error', 'invalid-caption-track', 'semantics.managedCaptionTrackId', 'Managed caption track reference is invalid.');
+  }
+  const captionSource = document.semantics.managedCaptionSource;
+  if (captionSource?.mode === 'track' && !trackIds.has(captionSource.trackId)) {
+    push('error', 'invalid-caption-source', 'semantics.managedCaptionSource.trackId', `Caption source track does not exist: ${captionSource.trackId}`);
+  }
+  if (captionSource?.mode === 'clip' && !clipIds.has(captionSource.clipId)) {
+    push('error', 'invalid-caption-source', 'semantics.managedCaptionSource.clipId', `Caption source clip does not exist: ${captionSource.clipId}`);
   }
   for (const assetId of Object.keys(document.semantics.transcripts)) {
     if (!document.assets[assetId]) push('error', 'dangling-transcript-asset', `semantics.transcripts.${assetId}`, `Transcript references missing asset: ${assetId}`);

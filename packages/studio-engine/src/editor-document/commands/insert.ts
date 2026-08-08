@@ -1,7 +1,10 @@
 import type { EditorDocumentV2, EditorTrack, SemanticScene, TimelineClip } from '../types';
+import { atomicMediaFramingFromTreatment, IDENTITY_MEDIA_FRAMING } from '../../composition-core';
 import { validateEditorDocumentV2 } from '../validation';
 import { clipEndFrame, splitClipAtFrame } from './clip-geometry';
 import { removeEditorRange } from './range';
+import { directorPlanAfterRippleInsertion, withAdjustedDirectorPlan } from '../../director-plan-timing';
+import { assignClipToBestDirectorScene, assignClipToSemanticScene } from '../../semantic-scenes';
 import {
   commandFailure,
   emptyCommandReceipt,
@@ -15,12 +18,44 @@ export interface InsertEditorClipsOptions {
   clips: TimelineClipPlacement[];
   mode: 'overwrite' | 'ripple';
   includeLinked?: boolean;
+  sceneId?: string;
+}
+
+function assignInsertedClips(
+  original: EditorDocumentV2,
+  document: EditorDocumentV2,
+  clipIds: readonly string[],
+  sceneId?: string,
+): EditorDocumentV2 | EditorCommandResult {
+  let next = document;
+  for (const clipId of clipIds) {
+    const assigned = sceneId
+      ? assignClipToSemanticScene(next, clipId, sceneId)
+      : assignClipToBestDirectorScene(next, clipId);
+    if (!assigned.ok) return commandFailure(original, 'invalid-command', assigned.error, { path: 'sceneId' });
+    next = assigned.document;
+  }
+  return next;
 }
 
 function placedClips(placements: TimelineClipPlacement[], atFrame: number): TimelineClip[] {
   return placements.map((placement) => {
     const { offsetFrames, ...clip } = placement;
-    return { ...clip, startFrame: atFrame + offsetFrames } as TimelineClip;
+    const mediaFraming = clip.kind === 'narrative'
+      ? clip.mediaFraming ?? atomicMediaFramingFromTreatment(
+          clip.properties.treatment ?? 'full',
+          clip.properties.treatSize,
+          clip.properties.treatCrop,
+          clip.properties.preciseFraming,
+        )
+      : clip.kind === 'media'
+        ? clip.mediaFraming ?? IDENTITY_MEDIA_FRAMING
+        : undefined;
+    return {
+      ...clip,
+      ...(mediaFraming ? { mediaFraming } : {}),
+      startFrame: atFrame + offsetFrames,
+    } as TimelineClip;
   });
 }
 
@@ -121,7 +156,10 @@ export function insertEditorClips(document: EditorDocumentV2, options: InsertEdi
       ...target,
       clips: [...target.clips, ...incomingClips].sort((a, b) => a.startFrame - b.startFrame),
     };
-    const next: EditorDocumentV2 = { ...cleared.document, timeline: { ...cleared.document.timeline, tracks } };
+    let next: EditorDocumentV2 = { ...cleared.document, timeline: { ...cleared.document.timeline, tracks } };
+    const assigned = assignInsertedClips(document, next, incomingClips.map((clip) => clip.id), options.sceneId);
+    if ('ok' in assigned) return assigned;
+    next = assigned;
     const issue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
     if (issue) return commandFailure(document, 'invalid-command', issue.message, { path: issue.path });
     return {
@@ -174,11 +212,28 @@ export function insertEditorClips(document: EditorDocumentV2, options: InsertEdi
     clips.sort((a, b) => a.startFrame - b.startFrame);
     return { ...track, clips };
   });
-  const next: EditorDocumentV2 = {
+  let semantics: EditorDocumentV2['semantics'] = {
+    ...document.semantics,
+    scenes: expandScenesForSplits(document.semantics.scenes, splitPairs),
+  };
+  if (affectedTrackIds.has(document.semantics.primaryNarrativeTrackId) && document.semantics.directorPlan) {
+    const adjusted = directorPlanAfterRippleInsertion(
+      document.semantics.directorPlan,
+      options.atFrame,
+      spanFrames,
+      options.sceneId,
+    );
+    if (!adjusted.ok) return commandFailure(document, 'invalid-command', adjusted.error, { path: 'sceneId' });
+    semantics = withAdjustedDirectorPlan(semantics, adjusted.plan);
+  }
+  let next: EditorDocumentV2 = {
     ...document,
     timeline: { ...document.timeline, tracks },
-    semantics: { ...document.semantics, scenes: expandScenesForSplits(document.semantics.scenes, splitPairs) },
+    semantics,
   };
+  const assigned = assignInsertedClips(document, next, incomingClips.map((clip) => clip.id), options.sceneId);
+  if ('ok' in assigned) return assigned;
+  next = assigned;
   const issue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (issue) return commandFailure(document, 'invalid-command', issue.message, { path: issue.path });
 

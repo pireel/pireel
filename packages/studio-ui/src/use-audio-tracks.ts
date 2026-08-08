@@ -14,6 +14,7 @@ import {
   type AudioClip,
   type Composition,
   type EditorDocumentV2,
+  type SupplementalVisualMediaClip,
   addAudioDocumentClip,
   applyAudioDocumentEdits,
   audioClipGainAt,
@@ -32,6 +33,7 @@ import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { getStudioSpaceId } from './gen-api';
 import { t } from './i18n';
+import { supplementalVisualAudioSpecs } from './visual-render-plan';
 
 export interface AudioTracksDeps {
   projectId: string;
@@ -39,6 +41,8 @@ export interface AudioTracksDeps {
   compRef: MutableRefObject<Composition>;
   /** Native V2 playback projection. Editing and media recovery continue to use the full comp. */
   renderAudioTracks?: readonly AudioClip[];
+  /** Video clips outside the primary lane keep their source audio unless their visual track is muted. */
+  visualMediaClips?: readonly SupplementalVisualMediaClip[];
   timelineDurationSec?: number;
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
@@ -57,7 +61,7 @@ export interface AudioTracksDeps {
 
 export function useAudioTracks(deps: AudioTracksDeps) {
   const {
-    projectId, comp, compRef, renderAudioTracks, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
+    projectId, comp, compRef, renderAudioTracks, visualMediaClips, timelineDurationSec, documentRef, setDocument, videoFile, videoFileRef,
     videoSigRef, videoEngineRef, clipFilesRef, tRef, pickFile, backupMediaToCloud, pushUndoSnapshot,
   } = deps;
   const renderAudioTracksRef = useRef(renderAudioTracks);
@@ -258,7 +262,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   const engineSpecs = (): EngineAudioClip[] => {
     const c = compRef.current;
     const total = timelineDurationSec ?? totalDuration(c);
-    return (renderAudioTracksRef.current ?? c.audioTracks ?? [])
+    const laneSpecs = (renderAudioTracksRef.current ?? c.audioTracks ?? [])
       .filter(clipUsable)
       .map((clip) => ({
         id: clip.id,
@@ -267,6 +271,10 @@ export function useAudioTracks(deps: AudioTracksDeps) {
         gainAt: (tt: number) => (soloRef.current && soloRef.current !== clip.id ? 0 : audioClipGainAt(clip, tt, total)),
         srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
       }));
+    return [
+      ...laneSpecs,
+      ...supplementalVisualAudioSpecs(visualMediaClips ?? [], () => !!soloRef.current),
+    ];
   };
 
   // Engine sync: respec on any clip/timeline/bytes change (same-url respec swaps only closures — no reload).
@@ -274,7 +282,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     videoEngineRef.current?.setAudioClips(engineSpecs());
     videoEngineRef.current?.setMonitorMuteVideo(!!soloId); // solo silences the footage too, or it isn't solo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, timelineDurationSec, audioFileRev, soloId]);
+  }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, visualMediaClips, timelineDurationSec, audioFileRev, soloId]);
 
   // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
   useEffect(() => {

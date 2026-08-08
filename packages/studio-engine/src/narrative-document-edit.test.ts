@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument } from './project-document';
-import { addNarrativeDocumentClip, reorderNarrativeDocumentClips } from './narrative-document-edit';
+import { addNarrativeDocumentClip, moveNarrativeDocumentClip, moveNarrativeDocumentClipToVisualTrack, reorderNarrativeDocumentClips } from './narrative-document-edit';
 
 function emptyDocument() {
   return compositionToEditorDocument({ projectId: 'narrative-structure', composition: emptyComposition() }).document;
@@ -52,6 +52,58 @@ describe('native narrative structure edits', () => {
       { id: 'b', startFrame: 30, durationFrames: 90 },
       { id: 'a', startFrame: 150, durationFrames: 60 },
     ]);
+  });
+
+  it('moves a primary clip to exact time and overwrites only the primary destination', () => {
+    const first = addNarrativeDocumentClip({
+      document: emptyDocument(), mode: 'overwrite', atSec: 0,
+      shot: { id: 'first', src: 'https://cdn.test/first.mp4', srcStart: 0, srcEnd: 2, treatment: 'full' },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const second = addNarrativeDocumentClip({
+      document: first.document, mode: 'overwrite', atSec: 5,
+      shot: { id: 'second', src: 'https://cdn.test/second.mp4', srcStart: 0, srcEnd: 2, treatment: 'full' },
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    second.document.timeline.tracks.push({
+      id: 'graphics', type: 'graphics', role: 'graphics', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 2,
+      clips: [{ id: 'card', kind: 'graphic', startFrame: 135, durationFrames: 90, enabled: true, block: { templateId: 'custom', slots: {} }, anchor: { type: 'timeline' } }],
+    });
+
+    const result = moveNarrativeDocumentClip({ document: second.document, clipId: 'first', atSec: 4 });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips).toMatchObject([
+      { id: 'first', startFrame: 120, durationFrames: 60 },
+      { id: 'second', startFrame: 180, durationFrames: 30, sourceInSec: 1, sourceOutSec: 2 },
+    ]);
+    expect(result.document.timeline.tracks.find((track) => track.id === 'graphics')?.clips).toMatchObject([
+      { id: 'card', startFrame: 135, durationFrames: 90 },
+    ]);
+  });
+
+  it('promotes a primary clip into a native visual media track without changing its asset identity', () => {
+    const inserted = addNarrativeDocumentClip({
+      document: emptyDocument(), mode: 'overwrite', atSec: 0,
+      shot: { id: 'primary-clip', src: 'https://cdn.test/primary.mp4', srcStart: 1, srcEnd: 4, treatment: 'full' },
+    });
+    expect(inserted.ok).toBe(true);
+    if (!inserted.ok) return;
+    const result = moveNarrativeDocumentClipToVisualTrack({
+      document: inserted.document,
+      clipId: 'primary-clip',
+      atSec: 2,
+      newTrack: { id: 'visual-above', name: 'Visual media', stackOrder: 3 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips).toEqual([]);
+    expect(result.document.timeline.tracks.find((track) => track.id === 'visual-above')?.clips).toMatchObject([
+      { id: 'primary-clip', kind: 'media', assetId: inserted.assetId, startFrame: 60, durationFrames: 90, sourceInSec: 1, sourceOutSec: 4 },
+    ]);
+    expect(result.assetId).toBe(inserted.assetId);
   });
 
   it('rolls insertion back when a sync-locked sibling lane is locked', () => {

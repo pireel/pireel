@@ -143,6 +143,10 @@ export interface VideoShot extends Clip {
    *  remain normalized on the cover-fitted video layer. Keeping this separate from treatment preserves
    *  the intent-level layout vocabulary while giving agents an exact crop target. */
   preciseFraming?: ShotPreciseFraming;
+  /** Canonical layer-space framing consumed by preview, export and editor chrome. Intent-level
+   *  treatments compile into this value; legacy documents without it resolve lazily from the old
+   *  treatment fields. Offsets are fractions of the untransformed media layer. */
+  mediaFraming?: AtomicMediaFraming;
   /** Shot-level color grade (1 = neutral, only stores fields deviating from neutral; applies to the whole shot, swaps at the cut with no transition).
    *  Preview = #vidEl's CSS filter, export = ctx.filter, same shotFilterCss convention on both ends. */
   filter?: ShotFilter;
@@ -172,6 +176,31 @@ export interface ShotPreciseFraming {
    * source frame is drawn, before transitions/mattes, so a changed aspect ratio can recover pixels
    * outside the old centred cover crop. */
   coordinateSpace?: 'source-normalized';
+}
+
+export interface MediaLayerTransform {
+  /** Uniform scale around the media layer centre. */
+  scale: number;
+  /** Translation in fractions of the untransformed layer width/height. */
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface MediaCropInsets {
+  /** Normalized layer-local insets. Every side is 0..1 and opposing sides must leave content. */
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** Renderer-neutral atomic framing. Presets are recipes that create this value; they are not a
+ * second rendering model. Source-aware subject framing remains upstream in preciseFraming. */
+export interface AtomicMediaFraming {
+  transform: MediaLayerTransform;
+  crop: MediaCropInsets;
+  /** Canvas pixels in the composition coordinate system. */
+  rounding: number;
 }
 
 export interface ShotFramingPatch {
@@ -234,17 +263,19 @@ export interface VideoShotTimelinePlacement {
   shotId: string;
   startSec: number;
   endSec: number;
+  /** Canvas-relative placement of this shot's video layer. It may extend outside; omitted means full canvas. */
+  box?: NormBox;
 }
 
 function placedShotSpans(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]) {
-  if (placements === undefined) return spans(shots);
+  if (placements === undefined) return spans(shots).map((span) => ({ ...span, placement: undefined }));
   const byId = new Map(placements.map((placement) => [placement.shotId, placement]));
   return shots.flatMap((clip, index) => {
     const placement = byId.get(clip.id);
     // Supplying placements opts into the V2 document as authority. A composition shot missing
     // from that projection must not silently reappear through the legacy contiguous fallback.
     if (!placement) return [];
-    return [{ clip, index, editedStart: placement.startSec, editedEnd: placement.endSec }];
+    return [{ clip, index, editedStart: placement.startSec, editedEnd: placement.endSec, placement }];
   }).sort((left, right) => left.editedStart - right.editedStart || left.index - right.index);
 }
 
@@ -571,6 +602,7 @@ export function patchShotFraming<T extends VideoShot>(shot: T, patch: ShotFramin
       ...((patch.coordinateSpace ?? prev?.coordinateSpace) === 'source-normalized' ? { coordinateSpace: 'source-normalized' as const } : {}),
     };
   }
+  next.mediaFraming = atomicMediaFramingFromTreatment(treatment, next.treatSize, next.treatCrop, next.preciseFraming);
   return next as T;
 }
 
@@ -594,7 +626,7 @@ export interface ShotVars {
  *
  * corner/punch-in keep the scale-and-park model: those ARE a small window over the footage.
  */
-export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): ShotVars {
+function legacyShotTransformVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): ShotVars {
   const s = treatmentScale(tr, size);
   const r3 = (x: number) => Math.round(x * 1000) / 1000;
   // Source-normalized precision is already baked into the pixels drawn onto #vidEl. Applying the
@@ -651,6 +683,86 @@ export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: numbe
   }
 }
 
+export const IDENTITY_MEDIA_FRAMING: AtomicMediaFraming = {
+  transform: { scale: 1, offsetX: 0, offsetY: 0 },
+  crop: { top: 0, right: 0, bottom: 0, left: 0 },
+  rounding: 0,
+};
+
+const r4 = (value: number) => Math.round(value * 10000) / 10000;
+
+/** Normalize persisted/tool-supplied atomic framing at the one shared mutation boundary. */
+export function normalizeAtomicMediaFraming(
+  framing: Partial<AtomicMediaFraming> | undefined,
+  fallback: AtomicMediaFraming = IDENTITY_MEDIA_FRAMING,
+): AtomicMediaFraming {
+  const sourceTransform = framing?.transform ?? fallback.transform;
+  const sourceCrop = framing?.crop ?? fallback.crop;
+  const scale = clamp(Number.isFinite(sourceTransform.scale) ? sourceTransform.scale : fallback.transform.scale, 0.05, 20);
+  const offsetX = clamp(Number.isFinite(sourceTransform.offsetX) ? sourceTransform.offsetX : fallback.transform.offsetX, -20, 20);
+  const offsetY = clamp(Number.isFinite(sourceTransform.offsetY) ? sourceTransform.offsetY : fallback.transform.offsetY, -20, 20);
+  let top = clamp(Number.isFinite(sourceCrop.top) ? sourceCrop.top : fallback.crop.top, 0, 0.999);
+  let right = clamp(Number.isFinite(sourceCrop.right) ? sourceCrop.right : fallback.crop.right, 0, 0.999);
+  let bottom = clamp(Number.isFinite(sourceCrop.bottom) ? sourceCrop.bottom : fallback.crop.bottom, 0, 0.999);
+  let left = clamp(Number.isFinite(sourceCrop.left) ? sourceCrop.left : fallback.crop.left, 0, 0.999);
+  // Keep at least a tiny visible window even for malformed/stale external writes.
+  if (left + right >= 0.999) {
+    const factor = 0.998 / (left + right || 1);
+    left *= factor;
+    right *= factor;
+  }
+  if (top + bottom >= 0.999) {
+    const factor = 0.998 / (top + bottom || 1);
+    top *= factor;
+    bottom *= factor;
+  }
+  return {
+    transform: { scale: r4(scale), offsetX: r4(offsetX), offsetY: r4(offsetY) },
+    crop: { top: r4(top), right: r4(right), bottom: r4(bottom), left: r4(left) },
+    rounding: r4(clamp(Number.isFinite(framing?.rounding) ? framing!.rounding! : fallback.rounding, 0, 10000)),
+  };
+}
+
+export function atomicMediaFramingFromTreatment(
+  treatment: ShotTreatment,
+  size?: number,
+  crop?: number,
+  precise?: ShotPreciseFraming,
+): AtomicMediaFraming {
+  const vars = legacyShotTransformVars(treatment, size, crop, precise);
+  const inset = parseClipInset(vars.clipPath);
+  return normalizeAtomicMediaFraming({
+    transform: { scale: vars.scale, offsetX: vars.xPercent / 100, offsetY: vars.yPercent / 100 },
+    crop: { top: inset.t, right: inset.r, bottom: inset.b, left: inset.l },
+    rounding: vars.borderRadius,
+  });
+}
+
+/** New documents render the persisted atomic value. Legacy projects resolve to the exact old
+ * treatment geometry until the next framing edit materializes mediaFraming. */
+export function resolveShotMediaFraming(shot: Pick<VideoShot, 'treatment' | 'treatSize' | 'treatCrop' | 'preciseFraming' | 'mediaFraming'>): AtomicMediaFraming {
+  return shot.mediaFraming
+    ? normalizeAtomicMediaFraming(shot.mediaFraming)
+    : atomicMediaFramingFromTreatment(shot.treatment, shot.treatSize, shot.treatCrop, shot.preciseFraming);
+}
+
+export function mediaFramingTransformVars(framing: AtomicMediaFraming): ShotVars {
+  const normalized = normalizeAtomicMediaFraming(framing);
+  const { crop } = normalized;
+  return {
+    scale: normalized.transform.scale,
+    xPercent: r4(normalized.transform.offsetX * 100),
+    yPercent: r4(normalized.transform.offsetY * 100),
+    borderRadius: normalized.rounding,
+    clipPath: `inset(${r4(crop.top * 100)}% ${r4(crop.right * 100)}% ${r4(crop.bottom * 100)}% ${r4(crop.left * 100)}%)`,
+  };
+}
+
+/** Compatibility API for callers that still operate in treatment vocabulary. */
+export function shotTransformVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): ShotVars {
+  return mediaFramingTransformVars(atomicMediaFramingFromTreatment(tr, size, crop, precise));
+}
+
 /** Fractional insets of a computed clip-path (0..1 of the element's box). CSS collapses the
  *  four-value inset we set to shorthand in computed style — 'inset(0% 25%)' — so this expands
  *  1–4 values by the standard box rules. Non-inset / 'none' → all zero. Producer (shotTransformVars) and parser share this file so the two cannot drift. */
@@ -667,9 +779,14 @@ export function parseClipInset(clipPath: string | undefined): { t: number; r: nu
 }
 
 
-function shotVars(tr: ShotTreatment, size?: number, crop?: number, precise?: ShotPreciseFraming): string {
-  const v = shotTransformVars(tr, size, crop, precise);
+function mediaFramingVars(framing: AtomicMediaFraming): string {
+  const v = mediaFramingTransformVars(framing);
   return `{ scale: ${n(v.scale)}, xPercent: ${n(v.xPercent)}, yPercent: ${n(v.yPercent)}, borderRadius: ${n(v.borderRadius)}, clipPath: '${v.clipPath}' }`;
+}
+
+function shotPlacementVars(box?: NormBox): string {
+  const placed = box ?? { x: 0, y: 0, w: 1, h: 1 };
+  return `{ left: '${n(placed.x * 100)}%', top: '${n(placed.y * 100)}%', width: '${n(placed.w * 100)}%', height: '${n(placed.h * 100)}%' }`;
 }
 
 /**
@@ -714,14 +831,22 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
  * Automated callers should avoid flickering sub-second framing changes; explicit user cuts are executed as-is.
  * Registered to __timelines['vid'].
  */
-export function videoFrameKeyframes(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]): { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] {
+export function videoFrameKeyframes(shots: VideoShot[], placements?: readonly VideoShotTimelinePlacement[]): { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming; mediaFraming: AtomicMediaFraming; box?: NormBox }[] {
   const sp = placedShotSpans(shots, placements);
   if (sp.length === 0) return [];
 
   // canvas render mode: the video track is **one canvas**; all segments' framings (including other-source inserts) are applied to it uniformly
-  const keys: { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming }[] = [];
-  for (const { clip, editedStart } of sp) {
-    keys.push({ at: editedStart, tr: clip.treatment, size: (clip as VideoShot).treatSize, crop: (clip as VideoShot).treatCrop, precise: (clip as VideoShot).preciseFraming });
+  const keys: { at: number; tr: ShotTreatment; size?: number; crop?: number; precise?: ShotPreciseFraming; mediaFraming: AtomicMediaFraming; box?: NormBox }[] = [];
+  for (const { clip, editedStart, placement } of sp) {
+    keys.push({
+      at: editedStart,
+      tr: clip.treatment,
+      size: (clip as VideoShot).treatSize,
+      crop: (clip as VideoShot).treatCrop,
+      precise: (clip as VideoShot).preciseFraming,
+      mediaFraming: resolveShotMediaFraming(clip as VideoShot),
+      ...(placement?.box ? { box: placement.box } : {}),
+    });
   }
   const final: typeof keys = [];
   for (const k of keys) {
@@ -734,7 +859,20 @@ export function videoFrameKeyframes(shots: VideoShot[], placements?: readonly Vi
         prev.precise.anchorX === k.precise.anchorX &&
         prev.precise.anchorY === k.precise.anchorY &&
         prev.precise.coordinateSpace === k.precise.coordinateSpace);
-    if (!prev || prev.tr !== k.tr || (prev.size ?? -1) !== (k.size ?? -1) || (prev.crop ?? -1) !== (k.crop ?? -1) || !samePrecise) final.push(k);
+    const sameBox = (prev?.box?.x ?? 0) === (k.box?.x ?? 0)
+      && (prev?.box?.y ?? 0) === (k.box?.y ?? 0)
+      && (prev?.box?.w ?? 1) === (k.box?.w ?? 1)
+      && (prev?.box?.h ?? 1) === (k.box?.h ?? 1);
+    const sameAtomic = !!prev
+      && prev.mediaFraming.transform.scale === k.mediaFraming.transform.scale
+      && prev.mediaFraming.transform.offsetX === k.mediaFraming.transform.offsetX
+      && prev.mediaFraming.transform.offsetY === k.mediaFraming.transform.offsetY
+      && prev.mediaFraming.crop.top === k.mediaFraming.crop.top
+      && prev.mediaFraming.crop.right === k.mediaFraming.crop.right
+      && prev.mediaFraming.crop.bottom === k.mediaFraming.crop.bottom
+      && prev.mediaFraming.crop.left === k.mediaFraming.crop.left
+      && prev.mediaFraming.rounding === k.mediaFraming.rounding;
+    if (!prev || !sameAtomic || !samePrecise || !sameBox) final.push(k);
   }
   return final;
 }
@@ -746,11 +884,21 @@ export function videoFrameTimelineBody(shots: VideoShot[], placements?: readonly
   const final = videoFrameKeyframes(shots, placements);
   if (!final.length) return '';
 
-  const lines: string[] = [`tl.set('#vidEl', ${shotVars(final[0]!.tr, final[0]!.size, final[0]!.crop, final[0]!.precise)}, 0);`];
+  const lines: string[] = [
+    `tl.set('#vidEl', ${mediaFramingVars(final[0]!.mediaFraming)}, 0);`,
+    `tl.set('#vidEl', ${shotPlacementVars(final[0]!.box)}, 0);`,
+  ];
   for (let i = 1; i < final.length; i++) {
     const gap = (final[i + 1]?.at ?? total) - final[i]!.at;
     const dur = Math.max(0.2, Math.min(0.5, gap - 0.05));
-    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotVars(final[i]!.tr, final[i]!.size, final[i]!.crop, final[i]!.precise)}), ${n(final[i]!.at)});`);
+    lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${mediaFramingVars(final[i]!.mediaFraming)}), ${n(final[i]!.at)});`);
+    const previousBox = final[i - 1]!.box;
+    const nextBox = final[i]!.box;
+    const sameBox = (previousBox?.x ?? 0) === (nextBox?.x ?? 0)
+      && (previousBox?.y ?? 0) === (nextBox?.y ?? 0)
+      && (previousBox?.w ?? 1) === (nextBox?.w ?? 1)
+      && (previousBox?.h ?? 1) === (nextBox?.h ?? 1);
+    if (!sameBox) lines.push(`tl.to('#vidEl', Object.assign({ duration: ${n(dur)}, ease: 'power2.inOut' }, ${shotPlacementVars(nextBox)}), ${n(final[i]!.at)});`);
   }
   // Color-grade keyframes (deduped independently of framing): jump-cut semantics — swap at the cut (set), no transition tween.
   // No grading anywhere = no lines emitted; if any, neutral segments emit a 'none' reset, otherwise the prior shot's filter leaks into the next.
