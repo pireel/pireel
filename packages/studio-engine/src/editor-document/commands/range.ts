@@ -4,6 +4,7 @@ import { pruneEmptyNonPrimaryTracks } from '../prune-empty-tracks';
 import { clearRangeFromClip, clipOverlapsRange } from './clip-geometry';
 import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { directorPlanAfterRippleRemoval, withAdjustedDirectorPlan } from '../../director-plan-timing';
 
 export interface RemoveEditorRangeOptions {
   trackId: string;
@@ -118,10 +119,16 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
   tracks = detached.tracks;
   for (const id of detached.changedTrackIds) changedTrackIds.add(id);
 
-  const semantics = {
+  let semantics = {
     ...document.semantics,
     scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs),
   };
+  if (mode === 'ripple' && document.semantics.directorPlan) {
+    semantics = withAdjustedDirectorPlan(
+      semantics,
+      directorPlanAfterRippleRemoval(document.semantics.directorPlan, startFrame, endFrame),
+    );
+  }
   const pruned = pruneEmptyNonPrimaryTracks(
     { ...document, timeline: { ...document.timeline, tracks }, semantics },
     { preserveManagedCaptions: !options.pruneEmptyTracks },

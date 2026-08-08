@@ -18,6 +18,7 @@ import type { FrameCatalogItem } from './use-frame-catalog';
 import { elementIcon, makeElementPill } from './chat-format';
 import { t } from './i18n';
 import type { AttachedFrame, StudioElementRef } from './studio-chat';
+import type { StudioScenarioSkillOption } from './shell-context';
 
 export interface ComposerHandle {
   insertElementPill(el: StudioElementRef | null): void;
@@ -36,6 +37,7 @@ export function Composer({
   status,
   elements,
   skillId,
+  scenarioSkills,
   onPickSkill,
   frame,
   frames,
@@ -48,8 +50,10 @@ export function Composer({
   placeholder: string;
   status: ChatStatus;
   elements: StudioElementRef[];
-  /** Editorial scenario lens attached to this chat session. */
+  /** Rich Markdown Studio Skill attached to this chat session. */
   skillId: StudioScenarioSkillId;
+  /** Browser-safe host catalog; full Markdown never enters this component. */
+  scenarioSkills: readonly StudioScenarioSkillOption[];
   onPickSkill: (id: StudioScenarioSkillId) => void;
   /** Frame attached to the current session (theme button highlights; tapping the same item in the picker removes it). */
   frame: AttachedFrame | null;
@@ -336,6 +340,7 @@ export function Composer({
             <ChatSkillPicker
               editorRef={editorRef}
               skillId={skillId}
+              skills={scenarioSkills}
               disabled={isBusy}
               onChange={onPickSkill}
             />

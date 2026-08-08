@@ -16,20 +16,24 @@ export interface StoredThread {
   updatedAt: number;
   /** Frame attached to the session (theme button highlight comes back when restoring the session). */
   frame?: AttachedFrame | null;
-  /** Editorial scenario lens attached to this session; missing on legacy threads means automatic routing. */
+  /** Rich Markdown Studio Skill attached to this session; missing on legacy threads means automatic routing. */
   skillId?: StudioScenarioSkillId;
 }
 
-export function loadThreads(storageKey: string): StoredThread[] {
+export function loadThreads(storageKey: string, availableSkillIds: readonly string[] = []): StoredThread[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return [];
     const arr = JSON.parse(raw) as StoredThread[];
     if (!Array.isArray(arr)) return [];
+    const available = new Set(availableSkillIds);
     return arr.map((thread) => ({
       ...thread,
-      ...(isStudioScenarioSkillId(thread?.skillId) ? { skillId: thread.skillId } : { skillId: undefined }),
+      ...(isStudioScenarioSkillId(thread?.skillId)
+        && (thread.skillId === 'auto' || available.has(thread.skillId))
+        ? { skillId: thread.skillId }
+        : { skillId: undefined }),
     }));
   } catch {
     return [];

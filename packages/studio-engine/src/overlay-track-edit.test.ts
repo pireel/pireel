@@ -6,6 +6,9 @@ import {
   moveOverlayDocumentClip,
   reorderOverlayDocumentTracks,
 } from './overlay-track-edit';
+import { directorPlanFromSeconds } from './director-plan';
+import { applyDirectorPlanToDocument } from './director-plan-document';
+import { applyOverlayDocumentEdits } from './overlay-document-edit';
 
 const clip: GraphicTimelineClip = {
   id: 'card', kind: 'graphic', startFrame: 0, durationFrames: 30, enabled: true,
@@ -48,6 +51,30 @@ describe('overlay track transactions', () => {
     expect(second.document.timeline.tracks.filter((track) => track.type === 'graphics' && track.stackOrder === 5)).toHaveLength(1);
   });
 
+  it('binds a generated overlay to its explicit Director Plan scene', () => {
+    const base = documentWithGraphics();
+    const plan = directorPlanFromSeconds({
+      goal: 'Explain then prove.',
+      creativeThesis: 'Quiet setup, visible proof.',
+      scenes: [
+        { id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain the setup.' },
+        { id: 'proof', label: 'Proof', startSec: 2, durationSec: 3, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'data-explain', purpose: 'Show the result.' },
+      ],
+    }, 30).plan!;
+    const planned = applyDirectorPlanToDocument(base, plan);
+    if (!planned.ok) throw new Error(planned.error);
+    const inserted = insertOverlayDocumentClip({
+      document: planned.document,
+      sceneId: 'proof',
+      block: { id: 'proof-stat', templateId: 'custom', slots: {}, startSec: 2.2, durationSec: 1, trackIndex: 5 },
+    });
+    expect(inserted.ok).toBe(true);
+    if (!inserted.ok) return;
+    expect(inserted.sceneId).toBe('proof');
+    expect(inserted.document.semantics.scenes.find((scene) => scene.id === 'proof')?.clipIds).toContain('proof-stat');
+    expect(inserted.document.semantics.scenes.find((scene) => scene.id === 'setup')?.clipIds).not.toContain('proof-stat');
+  });
+
   it('creates a new lane, moves the clip and prunes every empty graphics lane', () => {
     const document = documentWithGraphics();
     const moved = moveOverlayDocumentClip({
@@ -61,6 +88,58 @@ describe('overlay track transactions', () => {
     expect(moved.document.timeline.tracks.find((track) => track.id === 'high')).toBeUndefined();
     expect(moved.document.timeline.tracks.find((track) => track.id === 'middle')).toMatchObject({ stackOrder: 5, clips: [{ id: 'card' }] });
     expect(moved.document.timeline.tracks.filter((track) => track.type === 'graphics').map((track) => track.id)).toEqual(['middle']);
+  });
+
+  it('reassigns duplicated and retimed graphics to the scene at their new placement', () => {
+    const base = documentWithGraphics();
+    const plan = directorPlanFromSeconds({
+      goal: 'Explain then prove.', creativeThesis: 'Setup then evidence.',
+      scenes: [
+        { id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' },
+        { id: 'proof', label: 'Proof', startSec: 2, durationSec: 3, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'data-explain', purpose: 'Prove.' },
+      ],
+    }, 30).plan!;
+    const planned = applyDirectorPlanToDocument(base, plan);
+    if (!planned.ok) throw new Error(planned.error);
+
+    const duplicated = duplicateOverlayDocumentClip({
+      document: planned.document,
+      clipId: 'card',
+      newClipId: 'proof-copy',
+      startSec: 2.5,
+      toTrackId: 'low',
+    });
+    expect(duplicated.ok).toBe(true);
+    if (!duplicated.ok) return;
+    expect(duplicated.document.semantics.scenes.find((scene) => scene.id === 'proof')?.clipIds).toContain('proof-copy');
+
+    const moved = applyOverlayDocumentEdits({
+      document: duplicated.document,
+      updates: [{ clipId: 'card', startSec: 2.2 }],
+    });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.document.semantics.scenes.find((scene) => scene.id === 'proof')?.clipIds).toEqual(expect.arrayContaining(['card', 'proof-copy']));
+    expect(moved.document.semantics.scenes.find((scene) => scene.id === 'setup')?.clipIds).not.toContain('card');
+  });
+
+  it('does not treat caption timing as Director Scene visual ownership', () => {
+    const base = documentWithGraphics();
+    base.timeline.tracks.push({
+      id: 'captions', type: 'caption', muted: false, hidden: false, locked: false,
+      syncLocked: true, stackOrder: 20,
+      clips: [{ id: 'caption', kind: 'caption', startFrame: 0, durationFrames: 30, enabled: true, managed: false, block: { templateId: 'caption', slots: {} }, anchor: { type: 'timeline' } }],
+    });
+    const plan = directorPlanFromSeconds({
+      goal: 'Explain.', creativeThesis: 'Keep it clear.',
+      scenes: [{ id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' }],
+    }, 30).plan!;
+    const planned = applyDirectorPlanToDocument(base, plan);
+    if (!planned.ok) throw new Error(planned.error);
+    const moved = applyOverlayDocumentEdits({ document: planned.document, updates: [{ clipId: 'caption', startSec: 0.5 }] });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.document.semantics.scenes[0]?.clipIds).not.toContain('caption');
   });
 
   it('rolls back a newly inserted lane when the following duplicate command fails', () => {

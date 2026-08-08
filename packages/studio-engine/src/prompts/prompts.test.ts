@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_TRANSCRIPT_MAX_CHARS,
-  AROLL_GUIDE,
   BLOCK_SYSTEM,
   CHAT_IDENTITY,
   SPOKEN_VISUAL_DIRECTION,
@@ -27,9 +26,12 @@ describe('静态提示词完整性', () => {
       expect(s).not.toMatch(/\{\{\w+\}\}/);
     });
   }
-  it('Skill 是编辑判断视角，工作流由通用工具组合', () => {
-    expect(CHAT_IDENTITY).toContain('selected Scenario Skill is an editorial lens');
-    expect(CHAT_IDENTITY).toContain('no scenario-specific plan/layout macro');
+  it('系统身份是剪辑专家，Skill 保持 Markdown 判断空间', () => {
+    expect(CHAT_IDENTITY).toContain("Studio's video editing expert");
+    expect(CHAT_IDENTITY).toContain('professional editorial judgment');
+    expect(CHAT_IDENTITY).toContain('selected Studio Skill is a rich Markdown expert playbook');
+    expect(CHAT_IDENTITY).toContain('NOT a structured configuration');
+    expect(CHAT_IDENTITY).toContain('There is no scenario-specific edit macro');
     expect(STUDIO_TOOLS.some((tool) => ['analyze_narration', 'lay_out', 'add_graphics'].includes(tool.id))).toBe(false);
   });
   it('口播全片编排覆盖语义锚点、密度、取景与用户优先级', () => {
@@ -67,6 +69,14 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
   it('buildChatSystem 同参数逐次字节相同(纯函数,无 request-time 动态内容)', () => {
     expect(buildChatSystem(null, '- f1 · F1 — x')).toBe(buildChatSystem(null, '- f1 · F1 — x'));
   });
+  it('完整首稿由剪辑专家自动选主题，小改动不强挂主题', () => {
+    const system = buildChatSystem(null, '- zen-white · Zen White\n- editorial-bold · Editorial Bold');
+    expect(system).toContain('choose the best-fitting frame');
+    expect(system).toContain('call attach_frame YOURSELF');
+    expect(system).toContain('safe default zen-white');
+    expect(system).toContain('NEVER attach a theme just for a small local edit');
+    expect(system).not.toContain('ask the user to pick (or to skip)');
+  });
   it('buildSituation 不带口播稿正文(稿子经 extract_asr 回执/read_script 一次性进信息流)', () => {
     const s = buildSituation({ composition: { durationSec: 10 }, playheadSec: 1, pipeline: { asr: true } });
     expect(s).not.toContain('Spoken script');
@@ -81,6 +91,34 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     expect(s).toContain('stable id output-stable');
     expect(s).toContain('All unqualified edits and @ element references target this active output');
   });
+  it('buildSituation 携带可跨轮继续执行的 Director Plan、精确 sceneId 与真实 Clip 归属', () => {
+    const s = buildSituation({
+      composition: { durationSec: 10 },
+      directorPlan: {
+        goal: '让观众相信结论',
+        creativeThesis: '先问题，后证据',
+        scenes: [{
+          id: 'proof',
+          label: '证据落地',
+          startSec: 4,
+          endSec: 8,
+          viewerTask: 'believe',
+          narrativeRole: 'prove',
+          sceneFamily: 'media-evidence',
+          purpose: '用原始证据支撑核心判断',
+          evidence: ['产品实拍'],
+          visualTreatment: '保留主体，证据占据视觉中心',
+          assetStrategy: '优先项目素材',
+          clipIds: ['shot-proof', 'block-proof'],
+        }],
+      },
+    });
+    expect(s).toContain('Director Plan: goal "让观众相信结论"');
+    expect(s).toContain('sceneId=proof');
+    expect(s).toContain('@shot-proof, @block-proof');
+    expect(s).toContain('purpose: 用原始证据支撑核心判断');
+    expect(s).toContain('pass the exact sceneId');
+  });
   it('read_script 工具在契约表里(插入片段的稿子靠它按需进上下文)', () => {
     expect(STUDIO_TOOLS.some((t) => t.id === 'read_script')).toBe(true);
   });
@@ -93,6 +131,16 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     for (const id of ['set_canvas', 'set_shot_framing', 'apply_layout']) {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
+  });
+  it('完整编辑先保存可校验导演方案，但它不是场景宏', () => {
+    const plan = STUDIO_TOOLS.find((tool) => tool.id === 'set_director_plan')!;
+    expect(plan.chatOnly).toBe(true);
+    expect(plan.description).toContain('NOT a macro');
+    const schema = plan.inputSchema as { required: string[]; properties: Record<string, unknown> };
+    expect(schema.required).toEqual(['goal', 'creativeThesis', 'scenes']);
+    expect(schema.properties).toHaveProperty('scenes');
+    expect(CHAT_IDENTITY).toContain('call set_director_plan before other timeline mutations');
+    expect(CHAT_IDENTITY).toContain('Every planned add_block and insert_clip call MUST pass the exact sceneId');
   });
   it('素材检索以显式 scope 为权限边界，本地图片有独立准备通道', () => {
     const search = STUDIO_TOOLS.find((tool) => tool.id === 'search_assets')!;
@@ -109,7 +157,13 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     const add = STUDIO_TOOLS.find((tool) => tool.id === 'add_block')!;
     const schema = add.inputSchema as { properties: Record<string, unknown> };
     expect(schema.properties).toHaveProperty('durationSec');
+    expect(schema.properties).toHaveProperty('sceneId');
     expect(add.description).toContain('complete spoken thought');
+    expect(add.description).toContain('binds the new clip back to the Semantic Scene');
+    const insert = STUDIO_TOOLS.find((tool) => tool.id === 'insert_clip')!;
+    const insertSchema = insert.inputSchema as { properties: Record<string, unknown> };
+    expect(insertSchema.properties).toHaveProperty('sceneId');
+    expect(insert.description).toContain("scene's evidence + assetStrategy");
   });
   it('语音与口型同步是可组合原子能力,不是数字人大工具', () => {
     const speech = STUDIO_TOOLS.find((tool) => tool.id === 'generate_speech')!;
@@ -164,12 +218,8 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
   });
   it('口播剪辑手册单独 skill:工具在表、映射到我们的剪辑面、按需进(不进 system)', () => {
     expect(STUDIO_TOOLS.some((t) => t.id === 'read_editing_guide')).toBe(true);
-    expect(AROLL_GUIDE).toContain('remove_silence');
-    expect(AROLL_GUIDE).toContain('minimumPauseSec 0.5');
-    expect(AROLL_GUIDE).toContain('speechPaddingSec 0.15 on EACH speech-facing edge');
     expect(STUDIO_TOOLS.find((t) => t.id === 'cut_narration')!.description).toContain('semantic passages');
     // 内容包按需读,绝不进静态 system(缓存前缀不被打穿)
-    expect(buildChatSystem(null)).not.toContain(AROLL_GUIDE.slice(0, 80));
   });
   it('set_captions 的 preset enum 从字幕预设表来(agent 只能选、不能自造)', () => {
     const preset = (STUDIO_TOOLS.find((t) => t.id === 'set_captions')!.inputSchema as { properties: { preset: { enum: string[] } } }).properties.preset;

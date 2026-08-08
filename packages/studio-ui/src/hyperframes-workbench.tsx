@@ -122,6 +122,7 @@ import { supplementalVisualMedia } from './visual-render-plan';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS, type TimelineTrackState } from './studio-timeline';
+import { timelineDirectorScenesFromDocument } from './director-scene-strip';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
 import { ElementSourceEditor, type SourceDraft } from './element-source-editor';
 import { useStableCallbacks } from './use-stable-callbacks';
@@ -152,7 +153,7 @@ import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { AssetsPanel, type GenType, type PanelDragAsset } from './assets-panel';
 import { addElementEntry } from './element-history';
-import { migrateOfficialComponentPayloads } from './official-component-migration';
+import { useStudioShell } from './shell-context';
 import { type ScriptCut, ScriptPanel } from './script-panel';
 import { CaptionsPanel } from './captions-panel';
 import { FramePanel } from './frame-panel';
@@ -208,6 +209,7 @@ type FloatKind = 'script' | 'person' | 'shot' | 'code' | 'anim' | 'transition' |
 
 
 export function HyperframesWorkbench({ projectId, agentView = false }: { projectId: string; agentView?: boolean }) {
+  const shell = useStudioShell();
   const locale = useLocale(); // note/reply language follows UI locale (on-screen text follows the narration script language)
   const localeRef = useRef(locale);
   localeRef.current = locale;
@@ -435,6 +437,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [playing, setPlaying] = useState(false);
   const [showCode, setShowCode] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  const directorTimelineScenes = useMemo(() => timelineDirectorScenesFromDocument(editorDocument), [editorDocument]);
   // Debug instruments (analysis/face/source) are admin-only: no entry rendered for normal users
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => {
@@ -4164,7 +4167,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     projectOutputs.hydrate(d.context?.outputs);
     setLocalAssetIndex(nativeProjectSharedLocalAssets(d.document, d.context));
     coverThumbRef.current = d.coverThumb ?? null;
-    const migrated = migrateOfficialComponentPayloads(d.document, d.comp);
+    const migrated = shell.migrateProjectPayload?.(d.document, d.comp) ?? { document: d.document, composition: d.comp };
     const restoredDocument = migrated.document;
     const restoredComposition = migrated.composition;
     // The source can remain in the media library while the explicit shots array is empty. Reconnect
@@ -4201,7 +4204,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     void recoverLocalClips(restoredComposition.shots ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrateNativeSession]);
+  }, [hydrateNativeSession, shell]);
   const autoRestoredRef = useRef(false);
   // The boot layer's data gate: released once auto-restore (cloud-first falling back to local) finishes —
   // video-byte reconnection (OPFS/cloud fetch) continues behind the gate, not counted as entry waiting
@@ -5962,6 +5965,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         <div data-cap-keep className="contents">
         <StudioTimeline
           comp={comp}
+          directorScenes={showDebug ? directorTimelineScenes : undefined}
           videoPlacements={videoPlacements}
           timelineDurationSec={duration}
           playing={playing}

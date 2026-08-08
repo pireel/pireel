@@ -352,6 +352,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.saveAsElement': 'Save as element',
   'workbench.saveAsElementKeep': 'Save as element — keep this look in Assets to reuse anytime',
   'workbench.savedAsElementAssets': 'Saved as an element (Assets · Elements)',
+  'workbench.savedDirectorPlan': 'Saved director plan · {n} scenes',
   'workbench.scaleProportionally': 'Scale proportionally',
   'workbench.sceneN': ' · Scene {n}',
   'workbench.scriptCut': 'Script cut',

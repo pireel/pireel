@@ -23,6 +23,7 @@ import { renderToolPart, renderToolPartGroup, toolStatus, type ToolPartLike } fr
 import { Composer, type ComposerHandle } from './chat-composer';
 import { assistantMessageHasRenderableOutput } from './chat-thread-store';
 import { t } from './i18n';
+import type { StudioScenarioSkillOption } from './shell-context';
 import type {
   AttachedFrame,
   ProgressHandle,
@@ -36,6 +37,7 @@ export function ChatThread({
   initialMessages,
   initialFrame,
   initialSkillId,
+  scenarioSkills,
   frames,
   onFrameApplied,
   runTool,
@@ -49,6 +51,7 @@ export function ChatThread({
   initialMessages: UIMessage[];
   initialFrame: AttachedFrame | null;
   initialSkillId: StudioScenarioSkillId;
+  scenarioSkills: readonly StudioScenarioSkillOption[];
   frames: FrameCatalogItem[];
   onFrameApplied?: (frame: AttachedFrame) => void;
   runTool: StudioChatProps['runTool'];
@@ -478,6 +481,7 @@ export function ChatThread({
           status={status}
           elements={elements}
           skillId={skillId}
+          scenarioSkills={scenarioSkills}
           onPickSkill={setSkillId}
           frame={frame}
           frames={frames}

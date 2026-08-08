@@ -57,7 +57,7 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
     case 'captions.relay':
       return relayManagedCaptionTrack(document);
     case 'narrative.insert':
-      return insertNarrativeClip(document, command.atFrame, command.clip, command.asset, command.mode);
+      return insertNarrativeClip(document, command.atFrame, command.clip, command.asset, command.mode, command.sceneId);
     case 'narrative.reorder':
       return reorderNarrativeClips(document, command.clipIds);
     case 'clips.remove':

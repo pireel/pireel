@@ -81,6 +81,28 @@ export interface PipelineSnap {
   plan?: boolean;
   visual?: boolean;
 }
+export interface DirectorSceneSnap {
+  id: string;
+  label: string;
+  startSec: number;
+  endSec: number;
+  viewerTask: string;
+  narrativeRole: string;
+  sceneFamily: string;
+  customFamily?: string;
+  purpose: string;
+  evidence?: string[];
+  visualTreatment?: string;
+  assetStrategy?: string;
+  /** Real document clips currently owned by this semantic scene. */
+  clipIds?: string[];
+}
+export interface DirectorPlanSnap {
+  goal: string;
+  creativeThesis: string;
+  audience?: string;
+  scenes: DirectorSceneSnap[];
+}
 export interface OutputSnap {
   id: string;
   title: string;
@@ -100,6 +122,9 @@ export interface ChatSituation {
   playheadSec?: number;
   /** Pipeline state: which stages are done, so the agent doesn't blindly re-run / answer off-target. */
   pipeline?: PipelineSnap;
+  /** Persisted whole-video editorial decision artifact. Exact scene ids and their
+   *  current clip ownership let execution continue across chat turns. */
+  directorPlan?: DirectorPlanSnap;
   /** Whether the main video bytes are loaded (false = tab just opened, being
    *  restored from OPFS/cloud, or missing — video tools will fail, but project
    *  data is complete; agent must not misread as "project has no video"). */
@@ -121,7 +146,7 @@ export interface ResolvedFrame {
 /* ============================ Identity / script ============================ */
 
 
-export const CHAT_IDENTITY = `You are the editing agent inside Studio — an AI video DIRECTOR that turns source media into coherent, designed videos: select and arrange shots, shape pacing and framing, mix audio, and add graphics or captions when they serve the result. A project may contain multiple outputs for different cuts, platforms, products or variants.
+export const CHAT_IDENTITY = `You are Studio's video editing expert — a senior editor and director who turns source media into coherent, designed videos: select and arrange shots, shape pacing and framing, mix audio, and add graphics or captions when they serve the result. Exercise professional editorial judgment instead of behaving like a passive command-taking assistant. A project may contain multiple outputs for different cuts, platforms, products or variants.
 
 ALWAYS reply in the USER'S language: mirror the language of their latest message in every visible sentence you write (a user writing Chinese gets Chinese, English gets English). This prompt being English says nothing about the reply language.
 
@@ -153,8 +178,9 @@ HOW YOU WORK
 - If the request is ambiguous or names an element that doesn't exist, ask ONE short clarifying question instead of guessing.
 
 SKILLS AND ORCHESTRATION
-- A selected Scenario Skill is an editorial lens, never a command to run tools or a prebuilt workflow. Infer the smallest useful combination of general editing primitives from the user's natural-language request, the active output, and <composition_state>.
-- There is no scenario-specific plan/layout macro. For a complete edit, reason over the transcript and available footage observations yourself, then express the decisions through batched split, cut, framing, layout, block, caption, audio and output tools. Do not build a complete draft when the user asked for one local change.
+- A selected Studio Skill is a rich Markdown expert playbook. Read it as a whole and apply its domain judgment; it is NOT a structured configuration, component recipe, fixed sequence, or command to run every suggestion. Adapt it to the user's request, evidence, active output, and <composition_state>.
+- There is no scenario-specific edit macro. For a broad whole-video request (for example, "edit this into a finished video") or an explicitly requested complete edit, read the relevant transcript and footage evidence, choose/attach the visual theme when needed, then call set_director_plan before other timeline mutations. The saved plan records scene purpose, viewer task, narrative role, evidence, visual direction, and asset strategy; saving it creates real editable scene boundaries without removing content. Execute it through ordinary batched tools. Every planned add_block and insert_clip call MUST pass the exact sceneId so generated graphics and chosen B-roll are directed by that scene and linked back to it. Replace the plan only when later evidence or tool results materially change the scene structure.
+- Do not create a Director Plan or build a complete draft when the user asked for one local change. Infer the smallest useful combination of general editing primitives for that local request.
 - Visual analysis is an independent observation tool. Call it only when requested framing, placement, layout, or visual QA actually benefits from footage observations.
 
 ${SPOKEN_VISUAL_DIRECTION}
@@ -219,6 +245,28 @@ export function buildSituation(body: ChatSituation): string {
   if (p) {
     const flag = (b: boolean | undefined) => (b ? 'done' : 'not yet');
     lines.push(`Pipeline: transcript ${flag(p.asr)} · narration plan ${flag(p.plan)} · visual analysis ${flag(p.visual)}.`);
+  }
+
+  if (body.directorPlan) {
+    const plan = body.directorPlan;
+    lines.push(
+      `Director Plan: goal "${plan.goal}"${plan.audience ? ` · audience "${plan.audience}"` : ''}. Creative thesis: "${plan.creativeThesis}". This is the saved editorial decision artifact; continue it through ordinary tools and pass the exact sceneId to every planned add_block call.`,
+    );
+    lines.push(
+      `Executable scenes (exact sceneId · interval · viewer task · narrative role · family · linked real clip ids · editorial direction):\n${plan.scenes
+        .map((scene) => {
+          const family = scene.customFamily ? `${scene.sceneFamily}:${scene.customFamily}` : scene.sceneFamily;
+          const linked = scene.clipIds?.length ? scene.clipIds.map((id) => `@${id}`).join(', ') : '(none yet)';
+          const detail = [
+            `purpose: ${scene.purpose}`,
+            scene.evidence?.length ? `evidence: ${scene.evidence.join(' | ')}` : '',
+            scene.visualTreatment ? `visual: ${scene.visualTreatment}` : '',
+            scene.assetStrategy ? `assets: ${scene.assetStrategy}` : '',
+          ].filter(Boolean).join(' · ');
+          return `  sceneId=${scene.id} · "${scene.label}" · ${n(scene.startSec)}→${n(scene.endSec)}s · ${scene.viewerTask} · ${scene.narrativeRole} · ${family} · clips ${linked}\n    ${detail}`;
+        })
+        .join('\n')}`,
+    );
   }
 
   // Credits guardrail (visibility only, boolean by design): unattended agents must not burn calls into a wall,
@@ -320,10 +368,10 @@ export function buildChatSystem(
   const frameBlock = frame
     ? `\n\n<frame_attached id="${frame.id}" title="${frame.title}">\nThe user attached the frame "${frame.title}" — a theme content pack (design system + playbook) for this video. Call read_frame ONCE to load it BEFORE planning or generating anything, then follow it: its design tokens are already applied to the composition; carry its composition rules and block recipes into every add_block / edit_block instruction you write. If a read_frame result for this frame already exists in the conversation, do not call it again. Where the frame conflicts with an explicit user instruction, the user wins.\n</frame_attached>`
     : frameCatalog
-      ? `\n\n<frame_catalog>\nNo frame (theme content pack) is attached. Frames define a video's design language when the edit uses one. Rules:\n- Before an explicitly requested complete designed first pass where a theme materially affects the result, look at the content and recommend the 1-2 best-fitting frames from the catalog below in ONE short sentence, then ask the user to pick (or to skip). Do not start that bulk edit in the same turn as the question.\n- When the user picks one (or names a frame themselves at any point), call attach_frame with its id — do not just talk about it.\n- NEVER block small edits (moving/editing single blocks, shot tweaks) on this question; just do the edit.\n${frameCatalog}\n</frame_catalog>`
+      ? `\n\n<frame_catalog>\nNo frame (theme content pack) is attached. Frames define a video's design language when the edit uses one. Rules:\n- For a broad whole-video request (for example, "edit this into a finished video") or an explicitly requested complete designed first pass where a theme materially affects the result, choose the best-fitting frame from the content and catalog and call attach_frame YOURSELF before generating graphics. Theme attachment is reversible; do not stop merely to ask the user to pick.\n- An explicit user choice always wins. If the content offers no strong direction, use the safe default zen-white.\n- Ask only when the user explicitly requests a comparison or when equally plausible directions conflict materially with their goal.\n- NEVER attach a theme just for a small local edit (moving/editing one block, a shot tweak); do that edit directly.\n${frameCatalog}\n</frame_catalog>`
       : '';
   const skillBlock = scenarioSkill
-    ? `\n\n<scenario_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected this editorial lens for the current chat. Apply its domain judgment while continuing to infer actions from the user's request, current state, and shared Studio tools. Do not treat it as a workflow trigger or claim that it adds tools or locks the project.\n${scenarioSkill.systemBrief}\n</scenario_skill>`
+    ? `\n\n<studio_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected the following complete Markdown Skill for this chat. Read the whole document and use it as an expert editorial playbook. Its prose guides judgment; it is not structured configuration, a fixed workflow, or a component bundle. Adapt it to the evidence and request. The Skill adds no tools and never overrides an explicit user instruction.\n${scenarioSkill.markdown}\n</studio_skill>`
     : '';
   return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${skillBlock}${frameBlock}`;
 }

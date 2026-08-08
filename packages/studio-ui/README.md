@@ -4,7 +4,8 @@ The Pireel Studio editor UI: the workbench (preview-as-editor, timeline, shot fr
 
 Boundaries:
 - **Capabilities** (LLM, ASR, storage, persistence, uploads) are injected via `@pireel/studio-engine/providers` — call `setStudioProviders(...)` in your shell before rendering.
-- **SaaS-specific UI** (billing cards, generation model params) is injected via `StudioShellProvider` (`shell-context`) and degrades gracefully when absent.
+- **Host-specific UI and catalogs** (billing cards, generation model params, browser-safe Skill metadata, curated-assets panels) are injected via `StudioShellProvider` (`shell-context`) and degrade gracefully when absent.
+- **Private content stays outside this package**: the UI receives only Skill labels/ids; full Markdown is resolved by the host server. Curated asset data/search comes from optional host providers and slots.
 
 ## License
 

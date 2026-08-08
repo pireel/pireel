@@ -25,6 +25,7 @@ export interface AddNarrativeDocumentClipInput {
   sourceHeight?: number;
   configureCanvas?: boolean;
   mode?: 'ripple' | 'overwrite';
+  sceneId?: string;
 }
 
 export interface InsertNarrativeAssetRangeInput {
@@ -129,6 +130,7 @@ export function addNarrativeDocumentClip(input: AddNarrativeDocumentClipInput): 
     clip,
     ...(asset ? { asset } : {}),
     ...(input.mode ? { mode: input.mode } : {}),
+    ...(input.sceneId ? { sceneId: input.sceneId } : {}),
   });
   if (!inserted.ok) return { ok: false, document: input.document, error: inserted.error };
   const captions = applyEditorCommand(inserted.document, { type: 'captions.relay' });

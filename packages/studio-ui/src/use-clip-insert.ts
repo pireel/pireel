@@ -142,7 +142,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
   };
   /** Insert core: an external clip lands at the nearest split point (an equal-standing clip: framing/matte/audio/captions
    *  same as the main source). Overlay blocks after the boundary shift right as a whole — the mirror of removeEditedInterval. file = local mode (blob url). */
-  const insertClipCore = (url: string, clipDur: number, atWish: number, file?: File, srcDims?: { w: number; h: number } | null, srcSigOverride?: string | null): string => {
+  const insertClipCore = (url: string, clipDur: number, atWish: number, file?: File, srcDims?: { w: number; h: number } | null, srcSigOverride?: string | null, sceneId?: string): string => {
     // First source into an empty project DECIDES the canvas ratio (per user) — later sources
     // contain-fit into it; the ratio picker can override afterwards.
     const documentBeforeInsert = documentRef.current;
@@ -160,6 +160,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       shot: nb,
       atSec: at,
       ...(dims ? { sourceWidth: dims.width, sourceHeight: dims.height } : {}),
+      ...(sceneId ? { sceneId } : {}),
     });
     if (!edit.ok || !edit.assetId) {
       toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : edit.error.message);

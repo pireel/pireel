@@ -119,6 +119,8 @@ export type EditorCommand =
     clip: Omit<NarrativeTimelineClip, 'startFrame'>;
     asset?: EditorMediaAsset;
     mode?: 'ripple' | 'overwrite';
+    /** Director scene that owns this inserted interval; inferred by placement when omitted. */
+    sceneId?: string;
   }
   | { type: 'narrative.reorder'; clipIds: TimelineClipId[] }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }

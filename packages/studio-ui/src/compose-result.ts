@@ -17,6 +17,14 @@ export interface ComposeMode {
   current?: KitChoice | null;
 }
 
+/**
+ * A planned scene needs bespoke visual reasoning even if frame attachment failed. The small,
+ * themeless local-edit path may still use the compact component kit as a deliberate fallback.
+ */
+export function newBlockComposeMode(input: { hasFrame: boolean; hasDirectorScene: boolean }): ComposeMode | undefined {
+  return input.hasFrame || input.hasDirectorScene ? undefined : { kit: true };
+}
+
 export interface ComposedBlock {
   innerHtml: string;
   timelineBody: string;

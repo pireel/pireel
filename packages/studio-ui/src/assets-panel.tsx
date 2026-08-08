@@ -1,14 +1,11 @@
 'use client';
 
 /**
- * Assets library shell — the 素材 slot of the rail's primary nav, split into three scopes:
+ * Assets library shell — the 素材 slot of the rail's primary nav:
  *  - My assets (the current project's LOCAL media, never uploaded)  → my-assets-panel
- *  - Official assets (kit components + stickers + BGM)              → official-assets-panel
  *  - Cloud assets (uploads + generated media + saved elements)      → cloud-assets-panel
- * The scope is a segmented switch. Every Studio session starts from the project's local media;
- * "My" stays mounted so imported blob URLs and scroll survive scope hops; "Official"/"Cloud"
- * mount on first visit (one manifest/library fetch) and then also stay. Card/tile/lightbox
- * primitives live in asset-card.
+ * A host may inject a curated-assets panel through StudioShell. The scope is a segmented switch.
+ * Every Studio session starts from the project's local media and visited panels stay mounted.
  */
 
 import { useState } from 'react';
@@ -17,9 +14,9 @@ import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import type { GenElementResult } from './element-history';
 import type { PanelDragAsset, PanelMediaAsset } from './asset-card';
 import { MyAssetsPanel } from './my-assets-panel';
-import { OfficialAssetsPanel } from './official-assets-panel';
 import { CloudAssetsPanel } from './cloud-assets-panel';
 import { t } from './i18n';
+import { useStudioShell } from './shell-context';
 
 export type { PanelDragAsset } from './asset-card';
 export type GenType = 'image' | 'video' | 'element' | 'audio';
@@ -85,6 +82,8 @@ export function AssetsPanel({
   /** Bumped when the generate popover closes → refetch gen history/elements. */
   genRefreshTick?: number;
 }) {
+  const shell = useStudioShell();
+  const CuratedAssetsPanel = shell.curatedAssets?.Panel;
   const [scope, setScope] = useState<Scope>('mine');
   const [officialMounted, setOfficialMounted] = useState(scope === 'official');
   const [cloudMounted, setCloudMounted] = useState(scope === 'cloud');
@@ -98,13 +97,11 @@ export function AssetsPanel({
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       <div className="px-2.5 pt-2">
         <div className="bg-panel border-line flex rounded-md border p-0.5">
-          {(
-            [
-              { v: 'mine', label: 'panels.myAssets' },
-              { v: 'official', label: 'panels.officialAssets' },
-              { v: 'cloud', label: 'panels.cloudAssets' },
-            ] as { v: Scope; label: string }[]
-          ).map((s) => (
+          {([
+            { v: 'mine' as const, label: t('panels.myAssets') },
+            ...(CuratedAssetsPanel ? [{ v: 'official' as const, label: shell.curatedAssets?.label ?? t('panels.officialAssets') }] : []),
+            { v: 'cloud' as const, label: t('panels.cloudAssets') },
+          ]).map((s) => (
             <button
               key={s.v}
               type="button"
@@ -113,7 +110,7 @@ export function AssetsPanel({
                 scope === s.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
               }`}
             >
-              {t(s.label)}
+              {s.label}
             </button>
           ))}
         </div>
@@ -137,11 +134,12 @@ export function AssetsPanel({
           onDragAsset={onDragAsset}
         />
       </div>
-      {officialMounted && (
+      {officialMounted && CuratedAssetsPanel && (
         <div className={scope === 'official' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-          <OfficialAssetsPanel
+          <CuratedAssetsPanel
             comp={comp}
             onInsert={onInsert}
+            onInsertClip={onInsertClip}
             onInsertKit={onInsertKit}
             onInsertElement={onInsertElement}
             onDragAsset={onDragAsset}
