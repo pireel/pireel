@@ -62,6 +62,18 @@ describe('EditorDocumentV2 render plan', () => {
     expect(cutTransitions(shots, [placements[0]!, { ...placements[1]!, startSec: 3, endSec: 5 }])).toMatchObject([{ cut: 3, shotId: 'b' }]);
   });
 
+  it('places the primary video box independently from source framing', () => {
+    const shots: VideoShot[] = [{ id: 'a', srcStart: 0, srcEnd: 2, treatment: 'punch-in' }];
+    const body = videoFrameTimelineBody(shots, [{
+      shotId: 'a', startSec: 0, endSec: 2, box: { x: 0.1, y: 0.2, w: 0.6, h: 0.6 },
+    }]);
+    expect(body.match(/tl\.set\('#vidEl'/g)).toHaveLength(2);
+    expect(body).toContain("left: '10%'");
+    expect(body).toContain("top: '20%'");
+    expect(body).toContain("width: '60%'");
+    expect(body).toContain('scale: 1.221');
+  });
+
   it('treats an explicit placement list as authoritative instead of reviving omitted shots', () => {
     const shots: VideoShot[] = [
       { id: 'stale', srcStart: 0, srcEnd: 2, treatment: 'full' },

@@ -65,8 +65,14 @@ export function removeEditorClips(
       scenes: updateScenesForClipChanges(document.semantics.scenes, removedIds),
     },
   };
+  if (next.semantics.managedCaptionSource?.mode === 'clip' && removedIds.has(next.semantics.managedCaptionSource.clipId)) {
+    next = { ...next, semantics: { ...next.semantics, managedCaptionSource: { mode: 'auto' } } };
+  }
   const pruned = pruneEmptyNonPrimaryTracks(next);
   next = pruned.document;
+  if (next.semantics.managedCaptionSource?.mode === 'track' && pruned.removedTrackIds.includes(next.semantics.managedCaptionSource.trackId)) {
+    next = { ...next, semantics: { ...next.semantics, managedCaptionSource: { mode: 'auto' } } };
+  }
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
   const receipt = emptyCommandReceipt('clips.remove');

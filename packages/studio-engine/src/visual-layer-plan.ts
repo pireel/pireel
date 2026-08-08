@@ -1,4 +1,4 @@
-import type { Block } from './composition-core';
+import type { AtomicMediaFraming, Block, ShotFilter } from './composition-core';
 
 export interface SupplementalVisualMediaClip {
   clipId: string;
@@ -12,6 +12,70 @@ export interface SupplementalVisualMediaClip {
   sourceOutSec: number;
   fit: 'contain' | 'cover';
   muted: boolean;
+  /** Per-clip video settings remain independent from the visual track's mute flag. */
+  volumeDb?: number;
+  audioMuted?: boolean;
+  audioFadeInSec?: number;
+  audioFadeOutSec?: number;
+  filter?: ShotFilter;
+  box?: { x: number; y: number; w: number; h: number };
+  mediaFraming?: AtomicMediaFraming;
+  anchorX?: number;
+  anchorY?: number;
+  opacity?: number;
+  keyframes?: {
+    box?: Array<{ atSec: number; x: number; y: number; w: number; h: number }>;
+    opacity?: Array<{ atSec: number; value: number }>;
+  };
+}
+
+export interface SupplementalVisualState {
+  box: { x: number; y: number; w: number; h: number };
+  opacity: number;
+  anchorX: number;
+  anchorY: number;
+}
+
+function interpolateRows<T extends { atSec: number }>(
+  rows: readonly T[],
+  localSec: number,
+  base: T,
+  mix: (left: T, right: T, progress: number) => T,
+): T {
+  const ordered = [base, ...rows].sort((left, right) => left.atSec - right.atSec);
+  if (localSec <= ordered[0]!.atSec) return ordered[0]!;
+  for (let index = 1; index < ordered.length; index++) {
+    const right = ordered[index]!;
+    if (localSec > right.atSec) continue;
+    const left = ordered[index - 1]!;
+    const span = Math.max(1e-9, right.atSec - left.atSec);
+    return mix(left, right, Math.max(0, Math.min(1, (localSec - left.atSec) / span)));
+  }
+  return ordered.at(-1)!;
+}
+
+/** Resolve one visual's static/keyframed state at final timeline time. Shared by preview HTML and canvas export tests. */
+export function supplementalVisualStateAt(visual: SupplementalVisualMediaClip, timelineSec: number): SupplementalVisualState {
+  const localSec = Math.max(0, timelineSec - visual.startSec);
+  const boxBase = { atSec: 0, ...(visual.box ?? { x: 0, y: 0, w: 1, h: 1 }) };
+  const box = interpolateRows(visual.keyframes?.box ?? [], localSec, boxBase, (left, right, progress) => ({
+    atSec: localSec,
+    x: left.x + (right.x - left.x) * progress,
+    y: left.y + (right.y - left.y) * progress,
+    w: left.w + (right.w - left.w) * progress,
+    h: left.h + (right.h - left.h) * progress,
+  }));
+  const opacityBase = { atSec: 0, value: visual.opacity ?? 1 };
+  const opacity = interpolateRows(visual.keyframes?.opacity ?? [], localSec, opacityBase, (left, right, progress) => ({
+    atSec: localSec,
+    value: left.value + (right.value - left.value) * progress,
+  })).value;
+  return {
+    box: { x: box.x, y: box.y, w: box.w, h: box.h },
+    opacity,
+    anchorX: visual.anchorX ?? 0.5,
+    anchorY: visual.anchorY ?? 0.5,
+  };
 }
 
 export type CompositionVisualLayer =

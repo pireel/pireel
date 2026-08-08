@@ -11,10 +11,13 @@ import {
   cutTransitions,
   escapeAttr,
   isSentenceCaption,
+  IDENTITY_MEDIA_FRAMING,
+  mediaFramingTransformVars,
   n,
   pct,
   renderBlock,
   resolveCaptionStyle,
+  shotFilterCss,
   videoTrackShots,
   videoFrameTimelineBody,
 } from './composition-core';
@@ -525,7 +528,7 @@ export function assembleHtml(
       : editedDuration(placedVideoShots);
     body.push(
       `<canvas id="vidEl" data-composition-id="vid" width="${n(comp.width)}" height="${n(comp.height)}" data-start="0" data-duration="${n(editedDur)}" data-track-index="0" ` +
-        `style="position:absolute;inset:0;width:100%;height:100%;transform-origin:center center;will-change:transform;box-shadow:0 30px 90px rgba(0,0,0,0.45);"></canvas>`,
+        `style="position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:center center;will-change:left,top,width,height,transform;"></canvas>`,
     );
     // Frame-receive shim + parent-clock marker (the runtime uses it to not self-drive the clock, see PREVIEW_RUNTIME); the cut-transition table is baked into the shim
     scripts.push(
@@ -549,19 +552,51 @@ export function assembleHtml(
   const renderVisual = (visual: SupplementalVisualMediaClip) => {
     const id = `hf-visual-${visual.clipId}`;
     const duration = Math.max(0, visual.endSec - visual.startSec);
-    const common = `id="${escapeAttr(id)}" data-composition-id="${escapeAttr(id)}" data-start="${n(visual.startSec)}" ` +
+    const common = `id="${escapeAttr(id)}" data-composition-id="${escapeAttr(id)}" data-hf-visual-clip="${escapeAttr(visual.clipId)}" data-start="${n(visual.startSec)}" ` +
       `data-duration="${n(duration)}" data-track-index="${n(visual.stackOrder)}" data-hf-visual-track="${escapeAttr(visual.trackId)}"`;
-    const mediaStyle = `position:absolute;inset:0;width:100%;height:100%;object-fit:${visual.fit};`;
+    const box = visual.box ?? { x: 0, y: 0, w: 1, h: 1 };
+    const framing = mediaFramingTransformVars(visual.mediaFraming ?? IDENTITY_MEDIA_FRAMING);
+    const mediaStyle = `position:absolute;left:${n(box.x * 100)}%;top:${n(box.y * 100)}%;width:${n(box.w * 100)}%;height:${n(box.h * 100)}%;` +
+      `object-fit:${visual.fit};object-position:${n((visual.anchorX ?? 0.5) * 100)}% ${n((visual.anchorY ?? 0.5) * 100)}%;opacity:${n(visual.opacity ?? 1)};` +
+      `transform:translate(${n(framing.xPercent)}%,${n(framing.yPercent)}%) scale(${n(framing.scale)});transform-origin:center center;` +
+      `clip-path:${framing.clipPath};border-radius:${n(framing.borderRadius)}px;filter:${shotFilterCss(visual.filter)};will-change:left,top,width,height,transform,clip-path,filter;`;
     if (visual.kind === 'image') {
       body.push(`<img class="comp hf-native-visual" ${common} src="${escapeAttr(visual.source)}" alt="" style="${mediaStyle}" />`);
-      return;
+    } else {
+      const rate = duration > 1e-9 ? Math.max(0, visual.sourceOutSec - visual.sourceInSec) / duration : 1;
+      body.push(
+        `<video class="hf-native-visual hf-native-video" ${common} data-hf-timeline-media="1" ` +
+        `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" data-source-rate="${n(rate)}" ` +
+        `src="${escapeAttr(visual.source)}" preload="auto" playsinline muted style="${mediaStyle}"></video>`,
+      );
     }
-    const rate = duration > 1e-9 ? Math.max(0, visual.sourceOutSec - visual.sourceInSec) / duration : 1;
-    body.push(
-      `<video class="hf-native-visual hf-native-video" ${common} data-hf-timeline-media="1" ` +
-      `data-source-in="${n(visual.sourceInSec)}" data-source-out="${n(visual.sourceOutSec)}" data-source-rate="${n(rate)}" ` +
-      `src="${escapeAttr(visual.source)}" preload="auto" playsinline ${visual.muted ? 'muted ' : ''}style="${mediaStyle}"></video>`,
-    );
+    const motion: string[] = [`var el=document.getElementById(${JSON.stringify(id)});`];
+    const boxRows = visual.keyframes?.box?.length ? [...visual.keyframes.box].sort((a, b) => a.atSec - b.atSec) : [];
+    if (boxRows.length) {
+      let previous = { atSec: 0, ...box };
+      motion.push(`tl.set(el,{left:${JSON.stringify(`${n(previous.x * 100)}%`)},top:${JSON.stringify(`${n(previous.y * 100)}%`)},width:${JSON.stringify(`${n(previous.w * 100)}%`)},height:${JSON.stringify(`${n(previous.h * 100)}%`)}},0);`);
+      for (const row of boxRows) {
+        const at = Math.max(0, Math.min(duration, row.atSec));
+        if (at <= previous.atSec + 1e-9) {
+          motion.push(`tl.set(el,{left:${JSON.stringify(`${n(row.x * 100)}%`)},top:${JSON.stringify(`${n(row.y * 100)}%`)},width:${JSON.stringify(`${n(row.w * 100)}%`)},height:${JSON.stringify(`${n(row.h * 100)}%`)}},${n(at)});`);
+        } else {
+          motion.push(`tl.to(el,{duration:${n(at - previous.atSec)},ease:'none',left:${JSON.stringify(`${n(row.x * 100)}%`)},top:${JSON.stringify(`${n(row.y * 100)}%`)},width:${JSON.stringify(`${n(row.w * 100)}%`)},height:${JSON.stringify(`${n(row.h * 100)}%`)}},${n(previous.atSec)});`);
+        }
+        previous = { ...row, atSec: at };
+      }
+    }
+    const opacityRows = visual.keyframes?.opacity?.length ? [...visual.keyframes.opacity].sort((a, b) => a.atSec - b.atSec) : [];
+    if (opacityRows.length) {
+      let previous = { atSec: 0, value: visual.opacity ?? 1 };
+      motion.push(`tl.set(el,{opacity:${n(previous.value)}},0);`);
+      for (const row of opacityRows) {
+        const at = Math.max(0, Math.min(duration, row.atSec));
+        if (at <= previous.atSec + 1e-9) motion.push(`tl.set(el,{opacity:${n(row.value)}},${n(at)});`);
+        else motion.push(`tl.to(el,{duration:${n(at - previous.atSec)},ease:'none',opacity:${n(row.value)}},${n(previous.atSec)});`);
+        previous = { ...row, atSec: at };
+      }
+    }
+    if (motion.length > 1) scripts.push(timelineScript(id, motion.join('')));
   };
 
   // One global bottom-to-top track plan, matching the browser-export compositor. Legacy captions
@@ -623,6 +658,9 @@ export function assembleHtml(
     for (const b of front) renderOne(b);
   }
 
+  // Native media owns its pixels. Keeping a theme-colored iframe/root behind a moved or resized
+  // video makes the HTML stage read as a second canvas, so media compositions stay transparent.
+  const documentBg = placedVideoShots.length || supplementalVisuals.length ? 'transparent' : bg;
   return `<!doctype html>
 <html lang="zh">
 <head>
@@ -632,8 +670,8 @@ export function assembleHtml(
 <link href="${STUDIO_FONTS_HREF}" rel="stylesheet" />
 <style>
   * { margin: 0; box-sizing: border-box; }
-  html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: ${bg}; }
-  #root { position: relative; width: ${W}px; height: ${H}px; background: ${bg}; overflow: hidden;
+  html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: ${documentBg}; }
+  #root { position: relative; width: ${W}px; height: ${H}px; background: ${documentBg}; overflow: hidden;
     ${themeVarsCss(theme, comp.palette)} font-family: var(--font-body); color: var(--fg); }
   .comp { position: absolute; }
   /* media-slot placeholder: not rendered by default (clean export), shown only in editor mode (body.hf-editor) */

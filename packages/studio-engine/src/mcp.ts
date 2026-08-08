@@ -86,6 +86,12 @@ export interface McpDeps {
   /** Natural-language metadata search across local-index/cloud/official library scopes.
    *  Server-direct so external agents do not need an open Studio tab. */
   searchAssets: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  /** Hosted generation catalog and tasks, server-direct so Studio need not be open. */
+  listModels: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  generateImage: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  generateVideo: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  generateMusic: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  getGenerationJobs: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   /** Hosted TTS, server-direct so Studio need not be open. */
   generateSpeech: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
   /** Voice inventory and cloning lifecycle, server-direct so Studio need not be open. */
@@ -99,7 +105,7 @@ export interface McpDeps {
 /* ============================ Tool surface ============================ */
 
 /** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
+export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
  *  get_state=state snapshot; apply_block=the validate-and-place surface for BYO generation output;
@@ -433,6 +439,11 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         if (name === 'rename_project') return toolResponse(raw.id, await deps.renameProject(args));
         if (name === 'list_assets') return toolResponse(raw.id, await deps.listAssets(args));
         if (name === 'search_assets') return toolResponse(raw.id, await deps.searchAssets(args));
+        if (name === 'list_models') return toolResponse(raw.id, await deps.listModels(args));
+        if (name === 'generate_image') return toolResponse(raw.id, await deps.generateImage(args));
+        if (name === 'generate_video') return toolResponse(raw.id, await deps.generateVideo(args));
+        if (name === 'generate_music') return toolResponse(raw.id, await deps.generateMusic(args));
+        if (name === 'get_generation_jobs') return toolResponse(raw.id, await deps.getGenerationJobs(args));
         if (name === 'list_voices') return toolResponse(raw.id, await deps.listVoices(args));
         if (name === 'clone_voice') return toolResponse(raw.id, await deps.cloneVoice(args));
         if (name === 'delete_voice') return toolResponse(raw.id, await deps.deleteVoice(args));

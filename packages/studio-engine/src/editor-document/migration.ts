@@ -156,7 +156,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
     const startFrame = secondsToTimelineFrames(cursorSec, fps);
     cursorSec += sourceDuration;
     const endFrame = secondsToTimelineFrames(cursorSec, fps);
-    const { id: oldId, src: _src, srcSig: _srcSig, srcStart, srcEnd, ...properties } = shot;
+    const { id: oldId, src: _src, srcSig: _srcSig, srcStart, srcEnd, mediaFraming, ...properties } = shot;
     narrativeClips.push({
       id: uniqueLegacyId(oldId, usedClipIds, `narrative_${index + 1}`),
       kind: 'narrative',
@@ -166,6 +166,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
       enabled: true,
       sourceInSec: srcStart,
       sourceOutSec: srcEnd,
+      ...(mediaFraming ? { mediaFraming } : {}),
       properties,
     });
   }

@@ -24,8 +24,34 @@ export function patchEditorClip(
     return commandFailure(document, 'clip-not-found', `Clip does not exist on track ${trackId}: ${clipId}`, { trackIds: [trackId] });
   }
   const current = track.clips[clipIndex]!;
-  const nextClip: TimelineClip = { ...current, ...patch };
-  if (current.enabled === nextClip.enabled) {
+  if ((patch.box != null || patch.mediaFraming !== undefined) && current.kind !== 'media' && current.kind !== 'narrative') {
+    return commandFailure(document, 'invalid-command', 'Canvas placement and framing are only valid for video and visual media clips.', { path: 'patch' });
+  }
+  if ((patch.fit != null || patch.anchorX != null || patch.anchorY != null || patch.opacity != null || patch.keyframes !== undefined || patch.video !== undefined) && current.kind !== 'media') {
+    return commandFailure(document, 'invalid-command', 'Visual fill, crop, opacity and keyframes are only valid for ordinary visual media clips.', { path: 'patch' });
+  }
+  const nextClip: TimelineClip = current.kind === 'media'
+    ? {
+        ...current,
+        ...(patch.enabled != null ? { enabled: patch.enabled } : {}),
+        ...(patch.fit ? { fit: patch.fit } : {}),
+        ...(patch.box ? { box: patch.box } : {}),
+        ...(patch.mediaFraming === null ? { mediaFraming: undefined } : patch.mediaFraming ? { mediaFraming: patch.mediaFraming } : {}),
+        ...(patch.video === null ? { video: undefined } : patch.video ? { video: patch.video } : {}),
+        ...(patch.anchorX != null ? { anchorX: patch.anchorX } : {}),
+        ...(patch.anchorY != null ? { anchorY: patch.anchorY } : {}),
+        ...(patch.opacity != null ? { opacity: patch.opacity } : {}),
+        ...(patch.keyframes === null ? { keyframes: undefined } : patch.keyframes !== undefined ? { keyframes: patch.keyframes } : {}),
+      }
+    : current.kind === 'narrative'
+      ? {
+          ...current,
+          ...(patch.enabled != null ? { enabled: patch.enabled } : {}),
+          ...(patch.box ? { box: patch.box } : {}),
+          ...(patch.mediaFraming === null ? { mediaFraming: undefined } : patch.mediaFraming ? { mediaFraming: patch.mediaFraming } : {}),
+        }
+      : { ...current, ...(patch.enabled != null ? { enabled: patch.enabled } : {}) };
+  if (JSON.stringify(current) === JSON.stringify(nextClip)) {
     return { ok: true, document, receipt: emptyCommandReceipt('clip.patch') };
   }
 

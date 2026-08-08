@@ -173,6 +173,46 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       properties: { filter: { brightness: 1.2 } },
     });
   });
+  it('V2 取景、滤镜和片段音频可按稳定 ID 操作任意视频轨', () => {
+    const p = v2proj();
+    p.document.assets.insert = {
+      id: 'insert', kind: 'video', locator: { remoteUrl: 'https://cdn.test/insert.mp4' }, metadata: { durationSec: 5 },
+    };
+    p.document.timeline.tracks.push({
+      id: 'visual-2', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 2,
+      clips: [{
+        id: 'insert-clip', kind: 'media', assetId: 'insert', startFrame: 60, durationFrames: 90,
+        enabled: true, sourceInSec: 0, sourceOutSec: 3,
+      }],
+    });
+
+    const framed = runServerTool('set_shot_framing', {
+      shotId: 'insert-clip', treatment: 'punch-in', size: 90,
+    }, p);
+    expect(framed.result.ok).toBe(true);
+    expect(framed.document?.timeline.tracks.find((track) => track.id === 'visual-2')?.clips[0]).toMatchObject({
+      id: 'insert-clip', kind: 'media', video: { treatment: 'punch-in', treatSize: 90 },
+    });
+
+    const filtered = runServerTool('set_video_filter', {
+      shotId: 'insert-clip', saturate: 0,
+    }, { ...p, comp: framed.comp!, document: framed.document! });
+    expect(filtered.result.ok).toBe(true);
+    expect(filtered.document?.timeline.tracks.find((track) => track.id === 'visual-2')?.clips[0]).toMatchObject({
+      video: { treatment: 'punch-in', filter: { saturate: 0 } },
+    });
+
+    const audio = runServerTool('set_shot_audio', {
+      shotIds: ['insert-clip'], volumeDb: -14, fadeInSec: 0.4, fadeOutSec: 0.8,
+    }, { ...p, comp: filtered.comp!, document: filtered.document! });
+    expect(audio.result.ok).toBe(true);
+    expect(audio.document?.timeline.tracks.find((track) => track.id === 'visual-2')?.clips[0]).toMatchObject({
+      video: { treatment: 'punch-in', filter: { saturate: 0 }, volumeDb: -14, audioFadeInSec: 0.4, audioFadeOutSec: 0.8 },
+    });
+    expect(SERVER_EXECUTABLE_TOOLS.has('set_shot_framing')).toBe(true);
+    expect(SERVER_EXECUTABLE_TOOLS.has('set_shot_audio')).toBe(true);
+  });
   it('V2 framing 触及锁定的关联版式轨时整笔拒绝', () => {
     const p = v2proj();
     const primary = p.document!.timeline.tracks.find((track) => track.id === p.document!.semantics.primaryNarrativeTrackId)!;
@@ -346,6 +386,26 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(layout.result.ok).toBe(true);
     expect(layout.comp!.shots![0]!.treatment).toBe('split-l');
     expect(layout.comp!.blocks[0]!.box).toBeTruthy();
+  });
+  it('原子媒体 transform/crop 可离线执行并自动进入 MCP 同源工具集', () => {
+    const p = proj();
+    const transformed = runServerTool('set_media_transform', {
+      items: [{ clipId: 's1', scale: 1.25, offsetX: 0.1, offsetY: -0.2 }],
+    }, p);
+    expect(transformed.result.ok).toBe(true);
+    expect(transformed.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 's1')).toMatchObject({
+      mediaFraming: { transform: { scale: 1.25, offsetX: 0.1, offsetY: -0.2 } },
+    });
+    const cropped = runServerTool('set_media_crop', {
+      items: [{ clipId: 's1', top: 0.1, right: 0.2, bottom: 0, left: 0.05 }],
+    }, { ...p, document: transformed.document!, comp: transformed.comp! });
+    expect(cropped.result.ok).toBe(true);
+    expect(cropped.comp!.shots![0]!.mediaFraming).toMatchObject({
+      transform: { scale: 1.25, offsetX: 0.1, offsetY: -0.2 },
+      crop: { top: 0.1, right: 0.2, bottom: 0, left: 0.05 },
+    });
+    expect(SERVER_EXECUTABLE_TOOLS.has('set_media_transform')).toBe(true);
+    expect(SERVER_EXECUTABLE_TOOLS.has('set_media_crop')).toBe(true);
   });
   it('P0 word addressing/delete:稳定 id 精确删词,stale id 整笔拒绝', () => {
     const p = v2proj({

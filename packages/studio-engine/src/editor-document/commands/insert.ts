@@ -1,4 +1,5 @@
 import type { EditorDocumentV2, EditorTrack, SemanticScene, TimelineClip } from '../types';
+import { atomicMediaFramingFromTreatment, IDENTITY_MEDIA_FRAMING } from '../../composition-core';
 import { validateEditorDocumentV2 } from '../validation';
 import { clipEndFrame, splitClipAtFrame } from './clip-geometry';
 import { removeEditorRange } from './range';
@@ -20,7 +21,21 @@ export interface InsertEditorClipsOptions {
 function placedClips(placements: TimelineClipPlacement[], atFrame: number): TimelineClip[] {
   return placements.map((placement) => {
     const { offsetFrames, ...clip } = placement;
-    return { ...clip, startFrame: atFrame + offsetFrames } as TimelineClip;
+    const mediaFraming = clip.kind === 'narrative'
+      ? clip.mediaFraming ?? atomicMediaFramingFromTreatment(
+          clip.properties.treatment ?? 'full',
+          clip.properties.treatSize,
+          clip.properties.treatCrop,
+          clip.properties.preciseFraming,
+        )
+      : clip.kind === 'media'
+        ? clip.mediaFraming ?? IDENTITY_MEDIA_FRAMING
+        : undefined;
+    return {
+      ...clip,
+      ...(mediaFraming ? { mediaFraming } : {}),
+      startFrame: atFrame + offsetFrames,
+    } as TimelineClip;
   });
 }
 

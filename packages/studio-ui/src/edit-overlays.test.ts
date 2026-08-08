@@ -14,6 +14,15 @@ describe('画布选框和官方组件布局', () => {
     expect(BOX_SELECTION_OUTSET_PX).toBe(6);
   });
 
+  it('原生媒体选框可以零间距贴合内容', () => {
+    expect(boxSelectionRect({ x: 0.2, y: 0.1, w: 0.5, h: 0.4 }, 1000, 500, 0)).toEqual({
+      left: 200,
+      top: 50,
+      width: 500,
+      height: 200,
+    });
+  });
+
   it('三个紧凑模板使用不会相互覆盖的确定性布局', () => {
     const element = (id: string) => artDirectedTemplateElement(
       ELEMENT_TEMPLATES.find((template) => template.id === id)!,

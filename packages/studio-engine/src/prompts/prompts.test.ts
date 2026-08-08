@@ -32,6 +32,11 @@ describe('静态提示词完整性', () => {
     expect(CHAT_IDENTITY).toContain('no scenario-specific plan/layout macro');
     expect(STUDIO_TOOLS.some((tool) => ['analyze_narration', 'lay_out', 'add_graphics'].includes(tool.id))).toBe(false);
   });
+  it('Chat 身份是剪辑专家，而不是被动助手或泛化导演', () => {
+    expect(CHAT_IDENTITY).toContain("Studio's video editing expert");
+    expect(CHAT_IDENTITY).toContain('professional editorial judgment');
+    expect(CHAT_IDENTITY).not.toContain('AI video DIRECTOR');
+  });
   it('口播全片编排覆盖语义锚点、密度、取景与用户优先级', () => {
     for (const phrase of ['proper name', 'list, steps or process', 'place', 'money', 'person', 'physical object', 'action', 'tone or emotion']) {
       expect(SPOKEN_VISUAL_DIRECTION).toContain(phrase);
@@ -90,9 +95,16 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     }
   });
   it('全局 P0 编辑原语在 Chat/MCP 同一契约表里', () => {
-    for (const id of ['set_canvas', 'set_shot_framing', 'apply_layout']) {
+    for (const id of ['set_canvas', 'set_shot_framing', 'set_media_transform', 'set_media_crop', 'apply_layout']) {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
+  });
+  it('取景预设与原子 transform/crop 分层，不暴露完整自动重构工具', () => {
+    const transform = STUDIO_TOOLS.find((tool) => tool.id === 'set_media_transform')!;
+    const crop = STUDIO_TOOLS.find((tool) => tool.id === 'set_media_crop')!;
+    expect(transform.description).toContain('atomic layer transform');
+    expect(crop.description).toContain('atomic crop primitive');
+    expect(CHAT_IDENTITY).toContain('Combine these atoms');
   });
   it('素材检索以显式 scope 为权限边界，本地图片有独立准备通道', () => {
     const search = STUDIO_TOOLS.find((tool) => tool.id === 'search_assets')!;

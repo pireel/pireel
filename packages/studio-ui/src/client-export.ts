@@ -58,6 +58,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import { decodeAudioFile } from './audio-decode';
 import { mixAudioTrack } from './export-audio-mix';
+import { supplementalVisualAudioMixSegments } from './visual-render-plan';
 import {
   activeVisualMedia,
   disposeVisualImageBitmaps,
@@ -921,13 +922,14 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       for (const [key, r] of rigs) if (r.audio && !key.startsWith('g_')) audioTracks.set(key, r.audio);
       const clips: { clip: AudioClip; buffer: AudioBuffer }[] = [];
       for (const a of opts.audio ?? []) clips.push({ clip: a.clip, buffer: await decodeAudioFile(a.file) });
-      const supplementalAudioSegs = visualVideos.map((visual) => ({
-        srcStart: visual.sourceInSec,
-        srcEnd: visual.sourceOutSec,
-        key: visualVideoKeys.get(visual.clipId)!,
-        timelineStart: visual.startSec,
-        timelineEnd: visual.endSec,
-        gain: visual.muted ? 0 : 1,
+      const supplementalAudioSegs = supplementalVisualAudioMixSegments(visualVideos).map((segment) => ({
+        srcStart: segment.sourceInSec,
+        srcEnd: segment.sourceOutSec,
+        key: visualVideoKeys.get(segment.clipId)!,
+        timelineStart: segment.timelineStart,
+        timelineEnd: segment.timelineEnd,
+        gain: segment.gain,
+        ...(segment.fadeAt ? { fadeAt: segment.fadeAt } : {}),
       }));
       await mixAudioTrack({
         segs: [

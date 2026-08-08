@@ -1,5 +1,9 @@
 import {
+  IDENTITY_MEDIA_FRAMING,
+  normalizeAtomicMediaFraming,
+  shotFilterCss,
   sourceDrawRect,
+  supplementalVisualStateAt,
   type ShotPreciseFraming,
   type SupplementalVisualMediaClip,
 } from '@pireel/studio-engine/composition';
@@ -50,9 +54,9 @@ export function activeVisualMedia(
   ));
 }
 
-function visualFraming(visual: SupplementalVisualMediaClip): ShotPreciseFraming | undefined {
+function visualFraming(visual: SupplementalVisualMediaClip, anchorX: number, anchorY: number): ShotPreciseFraming | undefined {
   return visual.fit === 'cover'
-    ? { scale: 1, anchorX: 0.5, anchorY: 0.5, coordinateSpace: 'source-normalized' }
+    ? { scale: 1, anchorX, anchorY, coordinateSpace: 'source-normalized' }
     : undefined;
 }
 
@@ -70,17 +74,48 @@ export function drawSupplementalVisualMedia(args: {
 }): void {
   const { ctx, visuals, timelineTime, imageBitmaps, videoSamples, targetWidth, targetHeight, scaleX, scaleY } = args;
   for (const visual of activeVisualMedia(visuals, timelineTime)) {
+    const state = supplementalVisualStateAt(visual, timelineTime);
+    if (state.opacity <= 0.0001) continue;
+    const targetX = state.box.x * targetWidth;
+    const targetY = state.box.y * targetHeight;
+    const boxWidth = state.box.w * targetWidth;
+    const boxHeight = state.box.h * targetHeight;
+    const framing = normalizeAtomicMediaFraming(visual.mediaFraming, IDENTITY_MEDIA_FRAMING);
+    ctx.save();
     ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+    ctx.globalAlpha *= state.opacity;
+    ctx.filter = shotFilterCss(visual.filter);
+    const transformed = framing.transform.scale !== 1
+      || framing.transform.offsetX !== 0
+      || framing.transform.offsetY !== 0;
+    if (transformed) {
+      const centreX = targetX + boxWidth / 2;
+      const centreY = targetY + boxHeight / 2;
+      ctx.translate(
+        centreX + framing.transform.offsetX * boxWidth,
+        centreY + framing.transform.offsetY * boxHeight,
+      );
+      ctx.scale(framing.transform.scale, framing.transform.scale);
+      ctx.translate(-centreX, -centreY);
+    }
+    ctx.beginPath();
+    const cropX = targetX + framing.crop.left * boxWidth;
+    const cropY = targetY + framing.crop.top * boxHeight;
+    const cropW = boxWidth * (1 - framing.crop.left - framing.crop.right);
+    const cropH = boxHeight * (1 - framing.crop.top - framing.crop.bottom);
+    if (framing.rounding > 0) ctx.roundRect(cropX, cropY, cropW, cropH, framing.rounding);
+    else ctx.rect(cropX, cropY, cropW, cropH);
+    ctx.clip();
     const image = imageBitmaps.get(visual.clipId);
     const video = videoSamples.get(visual.clipId);
     if (image) {
-      const rect = sourceDrawRect(image.width, image.height, targetWidth, targetHeight, visualFraming(visual));
-      ctx.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+      const rect = sourceDrawRect(image.width, image.height, boxWidth, boxHeight, visualFraming(visual, state.anchorX, state.anchorY));
+      ctx.drawImage(image, targetX + rect.x, targetY + rect.y, rect.width, rect.height);
     } else if (video) {
-      const rect = sourceDrawRect(video.sourceWidth, video.sourceHeight, targetWidth, targetHeight, visualFraming(visual));
-      video.sample.draw(ctx, rect.x, rect.y, rect.width, rect.height);
+      const rect = sourceDrawRect(video.sourceWidth, video.sourceHeight, boxWidth, boxHeight, visualFraming(visual, state.anchorX, state.anchorY));
+      video.sample.draw(ctx, targetX + rect.x, targetY + rect.y, rect.width, rect.height);
     }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.restore();
   }
 }
 

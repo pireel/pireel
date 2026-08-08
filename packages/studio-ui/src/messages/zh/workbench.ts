@@ -453,4 +453,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.zoomInTimelineLabel': '放大时间轴',
   'workbench.zoomOutTimeline': '时间轴缩小',
   'workbench.zoomOutTimelineLabel': '缩小时间轴',
+  'workbench.timelineAutoSnap': '主轨自动吸附',
+  'workbench.timelineAutoSnapOn': '主轨自动吸附已开启，片段会从头连续排列',
+  'workbench.timelineAutoSnapOff': '主轨自动吸附已关闭，可自由留白',
 };

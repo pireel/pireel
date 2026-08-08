@@ -37,4 +37,27 @@ describe('EditorDocument V2 clip patch command', () => {
     });
     expect(result).toMatchObject({ ok: false, document, error: { code: 'track-locked' } });
   });
+
+  it('persists canvas placement on a primary narrative video without changing source framing', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.main = { id: 'main', kind: 'video', locator: { localSig: 'main' }, metadata: { durationSec: 2 } };
+    const track = document.timeline.tracks[0]!;
+    track.clips = [{
+      id: 'talk', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 60,
+      sourceInSec: 0, sourceOutSec: 2,
+      properties: { treatment: 'punch-in', preciseFraming: { scale: 1.5, anchorX: 0.4, anchorY: 0.5 } },
+      enabled: true,
+    }];
+
+    const result = applyEditorCommand(document, {
+      type: 'clip.patch', trackId: track.id, clipId: 'talk',
+      patch: { box: { x: -0.1, y: 0.2, w: 1.2, h: 0.8 } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks[0]!.clips[0]).toMatchObject({
+      box: { x: -0.1, y: 0.2, w: 1.2, h: 0.8 },
+      properties: { treatment: 'punch-in', preciseFraming: { scale: 1.5, anchorX: 0.4, anchorY: 0.5 } },
+    });
+  });
 });

@@ -1,12 +1,16 @@
 import type {
+  AudioTimelineClip,
   CaptionTimelineClip,
   EditorDocumentV2,
+  MediaTimelineClip,
   NarrativeTimelineClip,
 } from '@pireel/studio-engine/composition';
 
 export interface CaptionDocumentState {
   hasVideoTrack: boolean;
   hasNarrativeTranscript: boolean;
+  hasSpeechTrack: boolean;
+  hasSpeechTranscript: boolean;
   captionCount: number;
   firstCaptionStartSec: number | null;
 }
@@ -23,10 +27,15 @@ export function inspectCaptionDocument(document: EditorDocumentV2): CaptionDocum
   const narrative = (primary?.clips ?? []).filter(
     (clip): clip is NarrativeTimelineClip => clip.kind === 'narrative' && clip.enabled,
   );
+  const otherSpeech = document.timeline.tracks.flatMap((track) => track.clips).filter(
+    (clip): clip is MediaTimelineClip | AudioTimelineClip => (clip.kind === 'media' || clip.kind === 'audio') && clip.enabled,
+  );
   const narrativeAssetIds = new Set(narrative.map((clip) => clip.assetId));
+  const speechAssetIds = new Set([...narrativeAssetIds, ...otherSpeech.map((clip) => clip.assetId)]);
   const hasNarrativeTranscript = [...narrativeAssetIds].some(
     (assetId) => (document.semantics.transcripts[assetId]?.length ?? 0) > 0,
   );
+  const hasSpeechTranscript = [...speechAssetIds].some((assetId) => (document.semantics.transcripts[assetId]?.length ?? 0) > 0);
 
   const managed = document.semantics.managedCaptionTrackId
     ? document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId)
@@ -42,6 +51,8 @@ export function inspectCaptionDocument(document: EditorDocumentV2): CaptionDocum
   return {
     hasVideoTrack: narrative.length > 0,
     hasNarrativeTranscript,
+    hasSpeechTrack: narrative.length + otherSpeech.length > 0,
+    hasSpeechTranscript,
     captionCount: captions.length,
     firstCaptionStartSec: firstCaption ? firstCaption.startFrame / document.canvas.fps : null,
   };

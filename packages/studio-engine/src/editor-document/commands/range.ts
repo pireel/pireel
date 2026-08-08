@@ -118,15 +118,21 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
   tracks = detached.tracks;
   for (const id of detached.changedTrackIds) changedTrackIds.add(id);
 
-  const semantics = {
+  let semantics: EditorDocumentV2['semantics'] = {
     ...document.semantics,
     scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs),
   };
+  if (semantics.managedCaptionSource?.mode === 'clip' && removedClipIds.has(semantics.managedCaptionSource.clipId)) {
+    semantics = { ...semantics, managedCaptionSource: { mode: 'auto' } };
+  }
   const pruned = pruneEmptyNonPrimaryTracks(
     { ...document, timeline: { ...document.timeline, tracks }, semantics },
     { preserveManagedCaptions: !options.pruneEmptyTracks },
   );
-  const next = pruned.document;
+  let next = pruned.document;
+  if (next.semantics.managedCaptionSource?.mode === 'track' && pruned.removedTrackIds.includes(next.semantics.managedCaptionSource.trackId)) {
+    next = { ...next, semantics: { ...next.semantics, managedCaptionSource: { mode: 'auto' } } };
+  }
   const outputIssue = validateEditorDocumentV2(next).find((issue) => issue.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
 

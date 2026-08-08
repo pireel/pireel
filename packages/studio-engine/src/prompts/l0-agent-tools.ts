@@ -49,6 +49,16 @@ export interface StudioToolDef {
 }
 
 const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+const AGENT_MEDIA_BOX_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    x: { type: 'number', description: 'Left edge in canvas units; may be below 0 or above 1 for off-canvas placement.' },
+    y: { type: 'number', description: 'Top edge in canvas units; may be below 0 or above 1 for off-canvas placement.' },
+    w: { type: 'number', description: 'Positive width in canvas units; may exceed 1.' },
+    h: { type: 'number', description: 'Positive height in canvas units; may exceed 1.' },
+  },
+  required: ['x', 'y', 'w', 'h'],
+} as const;
 const SHOT_FRAMING_PROPERTIES = {
   shotId: { type: 'string' },
   atSec: { type: 'number', description: 'Edited-timeline point inside the target shot; useful after split_shot when new ids are unknown.' },
@@ -60,6 +70,41 @@ const SHOT_FRAMING_PROPERTIES = {
   anchorY: { type: 'number', description: 'Subject y, normalized 0..1 in the declared coordinate space.' },
   coordinateSpace: { type: 'string', enum: ['source-normalized'], description: 'Use only for anchors measured on the original source frame.' },
   resetPrecision: { type: 'boolean', description: 'true removes exact scale/anchor override.' },
+} as const;
+
+const AGENT_CLIP_ITEM_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    id: { type: 'string', description: 'Optional new clip id; omit to allocate one.' },
+    assetId: { type: 'string', description: 'Exact registered asset id.' },
+    trackId: { type: 'string', description: 'Optional exact target track. Omit to reuse/create the semantic role lane.' },
+    role: { type: 'string', enum: ['broll', 'narration', 'music', 'sfx'], description: 'Semantic lane role. Audio defaults to narration; visual media defaults to broll.' },
+    startSec: { type: 'number', description: 'Edited-timeline start in seconds.' },
+    durationSec: { type: 'number', description: 'Timeline duration. Defaults to source duration (images default to 5s).' },
+    sourceInSec: { type: 'number' }, sourceOutSec: { type: 'number' },
+    fit: { type: 'string', enum: ['contain', 'cover'] },
+    box: AGENT_MEDIA_BOX_SCHEMA,
+    anchorX: { type: 'number', description: 'Cover-crop source anchor 0..1, left to right.' },
+    anchorY: { type: 'number', description: 'Cover-crop source anchor 0..1, top to bottom.' },
+    opacity: { type: 'number', description: 'Visual opacity 0..1.' },
+    enabled: { type: 'boolean' }, linkGroupId: { type: 'string' },
+    volumeDb: { type: 'number' }, fadeInSec: { type: 'number' }, fadeOutSec: { type: 'number' },
+    speed: { type: 'number' }, muted: { type: 'boolean' },
+  },
+  required: ['assetId'],
+} as const;
+
+const AGENT_CLIP_PROPERTY_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    clipId: { type: 'string' }, startSec: { type: 'number' }, enabled: { type: 'boolean' },
+    fit: { type: 'string', enum: ['contain', 'cover'] },
+    box: AGENT_MEDIA_BOX_SCHEMA,
+    anchorX: { type: 'number' }, anchorY: { type: 'number' }, opacity: { type: 'number' },
+    volumeDb: { type: 'number' }, fadeInSec: { type: 'number' }, fadeOutSec: { type: 'number' },
+    speed: { type: 'number' }, muted: { type: 'boolean' }, sourceInSec: { type: 'number' }, sourceOutSec: { type: 'number' },
+  },
+  required: ['clipId'],
 } as const;
 
 /** Helper: build an object schema. */
@@ -377,6 +422,191 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       ['atSecs'],
     ),
   },
+  /* ---------- neutral timeline atoms (one contract: live, offline and MCP) ---------- */
+  {
+    id: 'get_timeline', kind: 'badge', icon: '🧭', label: 'tools.get_timeline.label',
+    description:
+      'Read the canonical typed timeline: canvas, duration, assets, semantic roles, every track and every clip with both frame and second geometry. Use before generic editing when ids or lane roles are not already present in context. Works live, offline, and through MCP.',
+    inputSchema: obj({}, []),
+  },
+  {
+    id: 'register_media', kind: 'badge', icon: '📎', label: 'tools.register_media.label',
+    description:
+      'Register already-accessible media locators in the active project manifest without placing clips. Use exact ids/urls returned by list_assets, search_assets, generate_speech, or generation history. For TTS, include transcriptText verbatim so captions use the original script without another paid ASR call. This does not upload local bytes; MCP local-file import remains import_media.',
+    inputSchema: obj({
+      assets: {
+        type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+          id: { type: 'string' }, kind: { type: 'string', enum: ['video', 'image', 'audio'] }, url: { type: 'string' }, cloudKey: { type: 'string' }, localSig: { type: 'string' },
+          label: { type: 'string' }, durationSec: { type: 'number' }, estimatedDurationSec: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, hasAudio: { type: 'boolean' },
+          description: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } }, collection: { type: 'string' },
+          bpm: { type: 'number', description: 'Known/precomputed tempo for musical beat-grid operations.' }, beatOffsetSec: { type: 'number', description: 'Source-second position of beat zero.' },
+          transcriptText: { type: 'string', description: 'Exact known spoken script, especially generate_speech input.' },
+          transcript: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { start: { type: 'number' }, end: { type: 'number' }, text: { type: 'string' } }, required: ['start', 'end', 'text'] } },
+        }, required: ['id', 'kind'] },
+      },
+    }, ['assets']),
+  },
+  {
+    id: 'inspect_media', kind: 'badge', icon: '🔬', label: 'tools.inspect_media.label',
+    description: 'Inspect registered media metadata, transcript coverage, and every placed occurrence. Omit ids to inspect the whole active project manifest. This is read-only and never analyzes pixels or spends model credits.',
+    inputSchema: obj({ assetIds: { type: 'array', items: { type: 'string' } }, clipIds: { type: 'array', items: { type: 'string' } } }, []),
+  },
+  {
+    id: 'organize_media', kind: 'badge', icon: '🏷️', label: 'tools.organize_media.label',
+    description: 'Batch-update project media labels, descriptions, search tags, and collection metadata. It never changes bytes or timeline placement.',
+    inputSchema: obj({
+      items: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            assetId: { type: 'string' }, label: { type: 'string' }, description: { type: 'string' },
+            tags: { type: 'array', items: { type: 'string' } }, collection: { type: 'string' }, bpm: { type: 'number' }, beatOffsetSec: { type: 'number' },
+          },
+          required: ['assetId'],
+        },
+      },
+    }, ['items']),
+  },
+  {
+    id: 'swap_clip_media', kind: 'badge', icon: '🔄', label: 'tools.swap_clip_media.label',
+    description: 'Replace one clip\'s asset identity while preserving its timeline geometry, lane, links, anchors, and typed properties. The replacement kind must be compatible (audio↔audio, narrative↔video, visual media↔image/video).',
+    inputSchema: obj({ clipId: { type: 'string' }, assetId: { type: 'string' } }, ['clipId', 'assetId']),
+  },
+  {
+    id: 'add_texts', kind: 'badge', icon: 'T', label: 'tools.add_texts.label',
+    description: 'Add one or more ordinary title/subtitle text clips as native graphic blocks. This is the atomic text primitive; use richer generated components only when custom layout or animation is actually needed.',
+    inputSchema: obj({
+      items: { type: 'array', items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          id: { type: 'string' }, text: { type: 'string' }, sub: { type: 'string' }, startSec: { type: 'number' },
+          durationSec: { type: 'number' }, trackId: { type: 'string' }, trackIndex: { type: 'number' },
+        },
+        required: ['text', 'startSec'],
+      } },
+    }, ['items']),
+  },
+  {
+    id: 'update_text', kind: 'badge', icon: '✏️', label: 'tools.update_text.label',
+    description: 'Batch-update native title text clips by stable clip id: main text, subtitle, start, and duration. It does not rewrite arbitrary custom HTML components.',
+    inputSchema: obj({
+      items: { type: 'array', items: {
+        type: 'object', additionalProperties: false,
+        properties: { clipId: { type: 'string' }, text: { type: 'string' }, sub: { type: 'string' }, startSec: { type: 'number' }, durationSec: { type: 'number' } },
+        required: ['clipId'],
+      } },
+    }, ['items']),
+  },
+  {
+    id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
+    description: 'Place one or more registered assets with overwrite semantics. Each clip is typed from its asset; missing semantic lanes are created transactionally. Audio must declare narration/music/sfx when the default narration role is not intended.',
+    inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
+  },
+  {
+    id: 'insert_clips', kind: 'badge', icon: '↪️', label: 'tools.insert_clips.label',
+    description: 'Insert one or more registered assets and ripple later material on sync-locked/linked lanes. Use add_clips when replacement rather than timeline opening is intended.',
+    inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
+  },
+  {
+    id: 'move_clips', kind: 'badge', icon: '↔️', label: 'tools.move_clips.label',
+    description: 'Move exact clip identities to edited-timeline starts, optionally across compatible tracks. Linked partners move by the same delta unless includeLinked=false.',
+    inputSchema: obj({ items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { clipId: { type: 'string' }, startSec: { type: 'number' }, toTrackId: { type: 'string' } }, required: ['clipId', 'startSec'] } }, includeLinked: { type: 'boolean' } }, ['items']),
+  },
+  {
+    id: 'remove_clips', kind: 'badge', icon: '🗑️', label: 'tools.remove_clips.label',
+    description: 'Remove exact clip identities without shifting surviving material. Linked partners are included by default.',
+    inputSchema: obj({ clipIds: { type: 'array', items: { type: 'string' } }, includeLinked: { type: 'boolean' } }, ['clipIds']),
+  },
+  {
+    id: 'split_clips', kind: 'badge', icon: '✂️', label: 'tools.split_clips.label',
+    description: 'Split exact typed clips at edited-timeline seconds. Linked partners crossing the same moment split together by default.',
+    inputSchema: obj({ items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { clipId: { type: 'string' }, atSec: { type: 'number' } }, required: ['clipId', 'atSec'] } }, includeLinked: { type: 'boolean' } }, ['items']),
+  },
+  {
+    id: 'set_clip_properties', kind: 'badge', icon: '🎚️', label: 'tools.set_clip_properties.label',
+    description: 'Batch patch common typed clip properties. Supports enabled/start for all clips; canvas-relative box for primary and ordinary video/image clips (it may extend outside the canvas); fit, cover-crop anchor, and opacity for ordinary visual media; and trim/level/fades/speed/mute for audio. The box is the atomic canvas placement primitive; source framing/crop remains independent.',
+    inputSchema: obj({ items: { type: 'array', items: AGENT_CLIP_PROPERTY_SCHEMA } }, ['items']),
+  },
+  {
+    id: 'set_media_transform', kind: 'badge', icon: '↗', label: 'tools.set_media_transform.label',
+    description: 'Patch the atomic layer transform for one or many narrative/video/image clips. scale is uniform around the layer centre; offsetX/offsetY are fractions of the untransformed layer width/height. This does not change timeline timing, source crop, or clip.box placement. Presets such as split/corner compile into this same transform; use reset=true to restore only the transform atom.',
+    inputSchema: obj({
+      items: { type: 'array', minItems: 1, maxItems: 120, items: obj({
+        clipId: { type: 'string' },
+        scale: { type: 'number', description: 'Uniform layer scale, 0.05..20.' },
+        offsetX: { type: 'number', description: 'Horizontal offset in layer-width units.' },
+        offsetY: { type: 'number', description: 'Vertical offset in layer-height units.' },
+        reset: { type: 'boolean', description: 'Restore scale=1 and zero offsets while preserving crop.' },
+      }, ['clipId']) },
+    }, ['items']),
+  },
+  {
+    id: 'set_media_crop', kind: 'badge', icon: '⌗', label: 'tools.set_media_crop.label',
+    description: 'Patch normalized layer-local crop insets for one or many narrative/video/image clips. top/right/bottom/left are 0..<1 fractions; opposing sides must leave visible content. This is the atomic crop primitive used by split presets and is independent from clip.box placement. Use reset=true to clear only crop.',
+    inputSchema: obj({
+      items: { type: 'array', minItems: 1, maxItems: 120, items: obj({
+        clipId: { type: 'string' },
+        top: { type: 'number' }, right: { type: 'number' }, bottom: { type: 'number' }, left: { type: 'number' },
+        reset: { type: 'boolean', description: 'Clear all crop insets while preserving transform.' },
+      }, ['clipId']) },
+    }, ['items']),
+  },
+  {
+    id: 'set_keyframes', kind: 'badge', icon: '◆', label: 'tools.set_keyframes.label',
+    description: 'Replace or clear ONE visual media keyframe track. Keyframe times are clip-local seconds and interpolate linearly. box animates canvas-relative x/y/w/h and may extend outside the canvas; opacity animates 0..1. An empty keyframes array clears only that property. Use split_clips for semantic shot changes rather than pretending every edit needs animation.',
+    inputSchema: obj({
+      clipId: { type: 'string' },
+      property: { type: 'string', enum: ['box', 'opacity'] },
+      keyframes: { type: 'array', items: {
+        type: 'object', additionalProperties: false,
+        properties: { atSec: { type: 'number' }, x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' }, value: { type: 'number' } },
+        required: ['atSec'],
+      } },
+    }, ['clipId', 'property', 'keyframes']),
+  },
+  {
+    id: 'manage_tracks', kind: 'badge', icon: '☰', label: 'tools.manage_tracks.label',
+    description: 'Create, update, reorder, or remove one typed timeline track. Roles are semantic, not display names; primaryNarrative cannot be removed or recreated.',
+    inputSchema: obj({
+      action: { type: 'string', enum: ['create', 'update', 'move', 'remove'] }, trackId: { type: 'string' }, toIndex: { type: 'number' },
+      type: { type: 'string', enum: ['visual', 'graphics', 'audio', 'caption'] }, role: { type: 'string', enum: ['broll', 'graphics', 'narration', 'music', 'sfx', 'managedCaptions'] },
+      name: { type: 'string' }, muted: { type: 'boolean' }, hidden: { type: 'boolean' }, locked: { type: 'boolean' }, syncLocked: { type: 'boolean' }, stackOrder: { type: 'number' },
+    }, ['action']),
+  },
+  {
+    id: 'manage_clip_links', kind: 'badge', icon: '🔗', label: 'tools.manage_clip_links.label',
+    description: 'Link two or more clips into one editing group, or unlink selected clips. Later move/split/remove/ripple operations honor link groups by default.',
+    inputSchema: obj({ action: { type: 'string', enum: ['link', 'unlink'] }, clipIds: { type: 'array', items: { type: 'string' } }, groupId: { type: 'string' } }, ['action', 'clipIds']),
+  },
+  {
+    id: 'sync_clips', kind: 'badge', icon: '⇆', label: 'tools.sync_clips.label',
+    description: 'Align clips by explicit matching clip-local marker times, in one transaction. Use transcript/capture/analysis results to identify the same clap, word, or event in each source; this primitive performs exact timeline geometry and optional linking, not hidden audio correlation. If alignment would go before zero, the whole group shifts right together.',
+    inputSchema: obj({
+      referenceClipId: { type: 'string' },
+      referenceMarkerSec: { type: 'number', description: 'Clip-local marker time in the reference; default 0.' },
+      targets: { type: 'array', items: {
+        type: 'object', additionalProperties: false,
+        properties: { clipId: { type: 'string' }, markerSec: { type: 'number', description: 'Matching clip-local marker time.' } },
+        required: ['clipId', 'markerSec'],
+      } },
+      link: { type: 'boolean', description: 'Link the aligned group after moving; default true.' },
+    }, ['referenceClipId', 'targets']),
+  },
+  {
+    id: 'get_transcript', kind: 'badge', icon: '📝', label: 'tools.get_transcript.label',
+    description: 'Read transcript truth for any registered speech-bearing asset, clip, or track, including audio-only timelines. Omit selectors to prefer primary narration and otherwise return available transcripts. This never performs paid ASR; absent coverage is reported explicitly.',
+    inputSchema: obj({ assetId: { type: 'string' }, clipId: { type: 'string' }, trackId: { type: 'string' } }, []),
+  },
+  {
+    id: 'get_beat_grid', kind: 'badge', icon: '♩', label: 'tools.get_beat_grid.label',
+    description: 'Calculate a musical beat grid from known/precomputed BPM and offset, either in source seconds for an asset or mapped through a placed clip into timeline seconds/frames. This does NOT decode audio or pretend to detect tempo: provide bpm explicitly when metadata is absent. Use the returned exact times with move_clips, split_clips, or set_keyframes.',
+    inputSchema: obj({
+      assetId: { type: 'string' }, clipId: { type: 'string' }, bpm: { type: 'number' }, offsetSec: { type: 'number' },
+      startSec: { type: 'number' }, endSec: { type: 'number' }, subdivision: { type: 'number', enum: [1, 2, 4], description: '1=quarter-note beats, 2=eighths, 4=sixteenths.' },
+    }, []),
+  },
   {
     id: 'list_assets',
     kind: 'badge',
@@ -409,6 +639,73 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       },
       ['query', 'scope'],
     ),
+  },
+  /* ---------- hosted image/video generation primitives ---------- */
+  {
+    id: 'list_models',
+    kind: 'badge',
+    icon: '◈',
+    label: 'tools.list_models.label',
+    description:
+      'List enabled user-facing image/video generation models. Provider details stay server-private. Omit kind only when both catalogs are needed; callers may omit modelId from generation to use the current catalog default.',
+    inputSchema: obj({ kind: { type: 'string', enum: ['image', 'video'] } }, []),
+  },
+  {
+    id: 'generate_image',
+    kind: 'card',
+    busyText: 'tools.generate_image.busy',
+    icon: '🎨',
+    label: 'tools.generate_image.label',
+    description:
+      "Start ONE hosted image generation task (CHARGES the user's Pireel account). This is an atomic media operation: it returns an asynchronous creation id in the active project's generation history and does NOT insert the result into the edit. Use returned/supplied asset URLs as references; never invent locators. Do not poll repeatedly in the same turn.",
+    inputSchema: obj({
+      prompt: { type: 'string', description: 'Concrete visual prompt for the generated image.' },
+      modelId: { type: 'string', description: 'Optional stable id from list_models; omit for the catalog default.' },
+      size: { type: 'string', description: 'Output dimensions, e.g. 1440x2560, 2560x1440, or 2048x2048.' },
+      quality: { type: 'string', description: 'Optional model-specific quality tier.' },
+      referenceImages: { type: 'array', items: { type: 'string' }, description: 'Up to 9 exact image URLs returned by an asset/generation tool.' },
+    }, ['prompt']),
+  },
+  {
+    id: 'generate_video',
+    kind: 'card',
+    busyText: 'tools.generate_video.busy',
+    icon: '🎬',
+    label: 'tools.generate_video.label',
+    description:
+      "Start ONE hosted video generation task (CHARGES the user's Pireel account). This is an atomic media operation: it returns an asynchronous creation id in the active project's generation history and does NOT insert the result into the edit. Compose it with get_generation_jobs, register_media, and add_clips across turns; do not poll repeatedly in the same turn.",
+    inputSchema: obj({
+      prompt: { type: 'string', description: 'Concrete motion, camera, subject, and style prompt.' },
+      modelId: { type: 'string', description: 'Optional stable id from list_models; omit for the catalog default.' },
+      durationSec: { type: 'number', description: 'Requested duration, clamped to 4–15 seconds.' },
+      aspectRatio: { type: 'string', enum: ['9:16', '16:9', '1:1'] },
+      resolution: { type: 'string', enum: ['480p', '720p', '1080p'] },
+      referenceImages: { type: 'array', items: { type: 'string' }, description: 'Up to 9 exact image URLs.' },
+      referenceVideos: { type: 'array', items: { type: 'string' }, description: 'Up to 3 exact video URLs.' },
+      referenceAudios: { type: 'array', items: { type: 'string' }, description: 'Up to 3 exact audio URLs.' },
+    }, ['prompt']),
+  },
+  {
+    id: 'generate_music',
+    kind: 'card',
+    busyText: 'tools.generate_music.busy',
+    icon: '🎵',
+    label: 'tools.generate_music.label',
+    description:
+      "Generate ONE hosted instrumental background-music asset (CHARGES the user's Pireel account). This is a media primitive and does NOT place or mix it. To use it, register_media with the returned id/url, then add_clips with role=music and set_clip_properties for level/fades. Use generate_speech for narration; never mount speech as music.",
+    inputSchema: obj({
+      prompt: { type: 'string', description: 'Music mood, genre, energy, instrumentation, and intended scene.' },
+      durationSec: { type: 'number', description: 'Approximate duration, clamped to 10–300 seconds.' },
+    }, ['prompt']),
+  },
+  {
+    id: 'get_generation_jobs',
+    kind: 'badge',
+    icon: '⏳',
+    label: 'tools.get_generation_jobs.label',
+    description:
+      'Read image/video/music generation status from the active project. Prefer exact creation ids returned earlier; omit ids only when the user asks for recent generation history. Succeeded rows include reusable asset URLs for register_media.',
+    inputSchema: obj({ ids: { type: 'array', items: { type: 'string' }, description: 'Up to 30 exact creation ids.' } }, []),
   },
   {
     id: 'prepare_local_image',
@@ -471,7 +768,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.generate_speech.label',
     description:
-      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This is an atomic media operation: it returns an audio asset/url and does NOT add it to the timeline or create a digital-human workflow. Keep user-supplied wording verbatim unless they explicitly ask for rewriting. Omit voiceId to use the user's default; call list_voices first when they request a particular system/cloned voice. For a speaking portrait/video, call this first, then pass the returned url to lip_sync. Long speech is allowed, but one lip_sync clip accepts at most 15 seconds, so split longer performances deliberately.",
+      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This atomic operation returns an audio asset plus transcriptText and does NOT place it. To use it as timeline narration: register_media with the returned id/url/transcriptText, then add_clips with role=narration; NEVER use set_bgm for spoken narration. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
     inputSchema: obj(
       {
         text: { type: 'string', description: 'Exact text to speak (1–5000 characters).' },
@@ -573,12 +870,15 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '💬',
     label: 'tools.set_captions.label',
     description:
-      "Turn sentence captions ON and/or restyle/reposition them — the GLOBAL subtitle layer laid from the transcript (ONE setting styles the WHOLE video; NOT a per-block edit). `preset` = a style id from <caption_catalog> (enables captions if off; runs ASR first if needed). Default to a clean full-line `line` preset when no style is named. Turn captions OFF with remove_captions. The keyword-slam overlay is a block (add_block/edit_block), not captions.",
+      "Turn sentence captions ON and/or restyle/reposition the GLOBAL subtitle layer from transcript truth. Source defaults to auto: placed visual speech first, then narration audio, then the longest transcript-bearing media lane. To caption a specific audio/video source pass source=track with trackId or source=clip with clipId. TTS audio should be registered with its exact transcriptText before placement, avoiding another paid ASR call. ONE setting styles the whole managed layer; turn it off with remove_captions.",
     inputSchema: obj(
       {
         preset: { type: 'string', enum: CAPTION_PRESETS.map((p) => p.id), description: 'Caption style id from <caption_catalog>. Omit to only reposition/resize the current captions.' },
         yPct: { type: 'number', description: "Caption baseline's % from the top (smaller = higher). Omit to keep." },
         scale: { type: 'number', description: 'Size multiplier, 1 = preset default. Omit to keep.' },
+        source: { type: 'string', enum: ['auto', 'track', 'clip'], description: 'Caption source selector. Omit to preserve the current selection, or auto-select on first use.' },
+        trackId: { type: 'string', description: 'Required with source=track.' },
+        clipId: { type: 'string', description: 'Required with source=clip.' },
       },
       [],
     ),
@@ -671,7 +971,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_framing.label',
     description:
-      'Atomically update one or many shot framings. For 2+ shots, ALWAYS collect them into ONE updates[] call: it creates one undo step/card and rejects the whole batch if any row is invalid. Each row uses shotId or edited-timeline atSec. treatment/size/crop cover intent modes; scale (1..4) plus anchorX/anchorY provide exact full/punch framing. Pass coordinateSpace="source-normalized" only for anchors measured on the original source. Set the canvas first; split_shot first only where framing actually changes. resetPrecision returns to treatment defaults. Do not mix updates[] with top-level framing fields.',
+      'Apply one or many familiar video-clip framing recipes on any visual lane. Stable shotId values address primary or multi-track video clips; atSec resolves only the semantic primary story lane because parallel tracks do not form one serial timeline. The recipe is immediately materialized into the same atomic media transform/crop used by renderers; it is not a second visual layer. For 2+ clips, ALWAYS collect them into ONE updates[] call. treatment/size/crop cover intent presets; source-normalized scale plus anchorX/anchorY handles subject-aware full/punch framing. Use set_media_transform and set_media_crop when you need custom atoms rather than a preset. Set the canvas first; split_shot only where framing actually changes.',
     inputSchema: obj(
       {
         ...SHOT_FRAMING_PROPERTIES,
@@ -709,7 +1009,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_treatment.label',
     description:
-      'Set how a video shot is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split USE split-b — video in the bottom half, graphic in the top (the split band re-frames around the speaker, so their position in the frame does not matter); split-t only on explicit user request. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE shot — to frame only part of it, split_shot first.',
+      'Set how one video clip on any visual lane is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split USE split-b — video in the bottom half, graphic in the top (the split band re-frames around the speaker, so their position in the frame does not matter); split-t only on explicit user request. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE clip — split a primary shot first when only part should change.',
     inputSchema: obj(
       {
         shotId: { type: 'string' },
@@ -724,7 +1024,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.set_video_filter.label',
     description:
-      "Color-grade ONE shot's footage: brightness / contrast / saturate coefficients (1 = untouched). The values you pass REPLACE that shot's whole grade — omit a field to reset it, pass no fields to remove the grade. Whole shot, snaps at the cut — split_shot first to grade only part. Recipes: brighter → brightness 1.1–1.2; vivid → saturate 1.2–1.4; black & white → saturate 0; muted gray → saturate 0.7–0.85.",
+      "Color-grade ONE video clip on any visual lane: brightness / contrast / saturate coefficients (1 = untouched). The values you pass REPLACE that clip's whole grade — omit a field to reset it, pass no fields to remove the grade. Whole clip, snaps at its edges — split a primary shot first to grade only part. Recipes: brighter → brightness 1.1–1.2; vivid → saturate 1.2–1.4; black & white → saturate 0; muted gray → saturate 0.7–0.85.",
     inputSchema: obj(
       {
         shotId: { type: 'string' },
@@ -741,11 +1041,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔊',
     label: 'tools.set_shot_audio.label',
     description:
-      "Set shots' own audio: volumeDb sets the footage's level (0 = source level, -60 = silent, up to +20 to lift a quiet recording), mute true/false hard-silences while remembering the previous volume, fadeInSec/fadeOutSec fade that shot's audio at its own edges (0 = hard cut, ≤10s — use it for the piece's opening/ending, not on every shot). Whole shot, switches at the cut — split_shot first for a partial change. Batch with shotIds or all:true (e.g. quiet every B-roll insert to -18 while narration continues). Omit a field to leave it unchanged.",
+      "Set video clips' own source audio across all visual lanes: volumeDb sets the footage's level (0 = source level, -60 = silent, up to +20 to lift a quiet recording), mute true/false hard-silences while remembering the previous volume, fadeInSec/fadeOutSec fade that clip's audio at its own edges (0 = hard cut, ≤10s — use it for the piece's opening/ending, not on every clip). Whole clip, switches at its edges — split a primary shot first for a partial change. Batch with shotIds (the stable clip ids) or all:true, which means every video clip on every visual lane. Omit a field to leave it unchanged.",
     inputSchema: obj(
       {
         shotIds: { type: 'array', items: { type: 'string' }, description: 'Target shot ids (omit when using all).' },
-        all: { type: 'boolean', description: 'true = apply to every shot.' },
+        all: { type: 'boolean', description: 'true = apply to every video clip on every visual lane.' },
         volumeDb: { type: 'number', description: 'dB, clamped -60..+20; 0 resets to source level, -60 = silent.' },
         mute: { type: 'boolean', description: 'Hard-silence toggle (independent of volumeDb).' },
         fadeInSec: { type: 'number', description: "Fade this shot's audio in over N seconds (0 = none)." },

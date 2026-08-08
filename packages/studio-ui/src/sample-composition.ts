@@ -354,6 +354,35 @@ export const PREVIEW_RUNTIME = `
       // target: an external inserted clip's framing is applied to its own clip <video> (defaults to the main video)
       try { window.gsap && window.gsap.set(d.target || '#vidEl', d.vars); } catch (err) {}
     }
+    else if (d.type === 'hf:mediaBox' && d.id && d.box) {
+      // Direct canvas placement is independent from source framing: this only moves/resizes the
+      // native layer. The parent commits once on release; per-frame messages keep dragging smooth.
+      try {
+        var mb = d.box;
+        var mt = document.getElementById(String(d.id));
+        if (mt && [mb.x, mb.y, mb.w, mb.h].every(function (v) { return typeof v === 'number' && isFinite(v); })) {
+          var mv = { left: (mb.x * 100) + '%', top: (mb.y * 100) + '%', width: (mb.w * 100) + '%', height: (mb.h * 100) + '%' };
+          if (window.gsap) window.gsap.set(mt, mv);
+          else Object.assign(mt.style, mv);
+        }
+      } catch (err) {}
+    }
+    else if (d.type === 'hf:pickAt' && typeof d.x === 'number' && typeof d.y === 'number') {
+      // The parent-side media transform shell covers the selected layer so its body can be dragged.
+      // A click without movement comes back here for real DOM hit-testing, preserving selection of
+      // components and higher visual lanes under that transparent shell.
+      try {
+        var px = Math.max(0, Math.min(1, d.x)) * window.innerWidth;
+        var py = Math.max(0, Math.min(1, d.y)) * window.innerHeight;
+        var pe = document.elementFromPoint(px, py);
+        var pv = pe && pe.closest ? pe.closest('[data-hf-visual-clip]') : null;
+        if (pv) post({ type: 'selectVisual', clipId: pv.getAttribute('data-hf-visual-clip') });
+        else {
+          var pc = closestComp(pe);
+          post({ type: 'select', blockId: pc ? pc.getAttribute('data-composition-id') : null });
+        }
+      } catch (err) {}
+    }
     else if (d.type === 'hf:vidTimeline') {
       // in-place framing swap: kill the old vid timeline, install the new body, re-run at the current time. Framing changes no longer rebuild the whole doc
       // — a rebuild blanks the video canvas for one frame (flash), especially visible on rapid framing-card clicks. The body is compiled via new Function,
@@ -545,14 +574,14 @@ export const PREVIEW_RUNTIME = `
     }
     else if (d.type === 'hf:setVars' && typeof d.css === 'string') {
       // Instant theme/palette recolor: inline vars on #root override the baked stylesheet rule;
-      // the stage background follows (html/body/#root all carry it in the assembled doc).
+      // native media compositions keep the iframe/root transparent: the canvas owns the pixels.
       try {
         var svRoot = document.getElementById('root');
-        if (svRoot) svRoot.style.cssText = d.css + (d.bg ? 'background:' + d.bg + ';' : '');
-        if (d.bg) {
-          document.documentElement.style.background = d.bg;
-          document.body.style.background = d.bg;
-        }
+        var svHasMedia = !!document.getElementById('vidEl') || !!document.querySelector('.hf-native-visual');
+        var svBg = svHasMedia ? 'transparent' : (d.bg || 'transparent');
+        if (svRoot) svRoot.style.cssText = d.css + 'background:' + svBg + ';';
+        document.documentElement.style.background = svBg;
+        document.body.style.background = svBg;
       } catch (err) {}
     }
     else if (d.type === 'hf:blockHtml' && d.blockId) {
@@ -686,7 +715,7 @@ export const PREVIEW_RUNTIME = `
     while (el && el !== document.body) {
       if (el.getAttribute) {
         var id = el.getAttribute('data-composition-id');
-        if (id && id !== 'root' && id !== 'vid') return el;
+        if (id && id !== 'root' && id !== 'vid' && !el.hasAttribute('data-hf-visual-clip')) return el;
       }
       el = el.parentNode;
     }
@@ -698,6 +727,12 @@ export const PREVIEW_RUNTIME = `
   document.addEventListener('click', function (e) {
     if (performance.now() - dragEndAt < 350) return;
     if (e.target && e.target.getAttribute && e.target.getAttribute('contenteditable') === 'true') return; // don't grab selection while editing
+    var visual = e.target && e.target.closest ? e.target.closest('[data-hf-visual-clip]') : null;
+    if (visual) {
+      highlight(null);
+      post({ type: 'selectVisual', clipId: visual.getAttribute('data-hf-visual-clip') });
+      return;
+    }
     var comp = closestComp(e.target);
     if (comp) {
       highlight(comp);

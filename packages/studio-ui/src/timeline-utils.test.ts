@@ -1,0 +1,25 @@
+import { describe, expect, it } from 'vitest';
+import { packedPrimaryPlacement, timelinePlacementOverlaps } from './timeline-utils';
+
+describe('timeline placement rules', () => {
+  const spans = [
+    { id: 'a', startSec: 2, endSec: 5 },
+    { id: 'b', startSec: 8, endSec: 10 },
+  ];
+
+  it('treats touching edges as free space but detects a real same-lane overlap', () => {
+    expect(timelinePlacementOverlaps(spans, 5, 3)).toBe(false);
+    expect(timelinePlacementOverlaps(spans, 4.99, 3)).toBe(true);
+    expect(timelinePlacementOverlaps(spans, 2, 3, 'a')).toBe(false);
+  });
+
+  it('packs the primary lane from zero regardless of its previous head and middle gaps', () => {
+    expect(packedPrimaryPlacement(spans, 'moving', 0, 1)).toEqual({ index: 0, startSec: 0 });
+    expect(packedPrimaryPlacement(spans, 'moving', 5, 1)).toEqual({ index: 1, startSec: 3 });
+    expect(packedPrimaryPlacement(spans, 'moving', 20, 1)).toEqual({ index: 2, startSec: 5 });
+  });
+
+  it('excludes the moving primary clip before choosing its new packed position', () => {
+    expect(packedPrimaryPlacement(spans, 'a', 20, 3)).toEqual({ index: 1, startSec: 2 });
+  });
+});

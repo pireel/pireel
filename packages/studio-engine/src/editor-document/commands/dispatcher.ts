@@ -6,6 +6,9 @@ import { insertAudioClip } from './audio-insert';
 import { patchAudioClips } from './audio-patch';
 import { patchCaptionStyle } from './caption-style';
 import { patchEditorClip } from './clip-patch';
+import { moveEditorClip } from './clip-move';
+import { swapEditorClipAsset } from './clip-swap-asset';
+import { linkEditorClips, unlinkEditorClips } from './clip-links';
 import { insertEditorClips } from './insert';
 import { relayManagedCaptionTrack } from './managed-captions';
 import { patchNarrativeClips } from './narrative-patch';
@@ -40,6 +43,14 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return moveEditorTrack(document, command.trackId, command.toIndex);
     case 'clip.patch':
       return patchEditorClip(document, command.trackId, command.clipId, command.patch);
+    case 'clip.move':
+      return moveEditorClip(document, command);
+    case 'clip.swapAsset':
+      return swapEditorClipAsset(document, command.trackId, command.clipId, command.assetId);
+    case 'clips.link':
+      return linkEditorClips(document, command.clipIds, command.groupId);
+    case 'clips.unlink':
+      return unlinkEditorClips(document, command.clipIds);
     case 'overlay.patch':
       return patchOverlayClips(document, command.updates);
     case 'overlay.insert':
@@ -55,7 +66,7 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
     case 'captions.style':
       return patchCaptionStyle(document, command.patch);
     case 'captions.relay':
-      return relayManagedCaptionTrack(document);
+      return relayManagedCaptionTrack(document, command.source);
     case 'narrative.insert':
       return insertNarrativeClip(document, command.atFrame, command.clip, command.asset, command.mode);
     case 'narrative.reorder':

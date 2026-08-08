@@ -13,6 +13,14 @@ import { toast } from '@pireel/ui/toast';
 import { startPointerDrag } from './drag-shell';
 import { shiftBox } from './comp-diff';
 import { boxSelectionRect } from './edit-overlays';
+import { moveMediaCanvasBox, resizeMediaCanvasBox, scaleMediaCanvasBox, type MediaCanvasBox } from './media-box';
+
+export interface CanvasBoxDragTarget {
+  box: MediaCanvasBox;
+  onLive: (box: MediaCanvasBox) => void;
+  onCommit: (box: MediaCanvasBox) => void;
+  onPick?: (x: number, y: number) => void;
+}
 
 export interface BoxDragDeps {
   /** Canvas→stage uniform scale (comp px → stage px). */
@@ -47,11 +55,11 @@ export function useBoxDrag(deps: BoxDragDeps) {
   };
   /** Keep the one solid selection shell on the same live geometry as the iframe content.
    *  React still commits only on pointer-up; these four DOM writes avoid a second, stale baseline box. */
-  const previewSelectionRect = (box: { x: number; y: number; w: number; h: number }) => {
+  const previewSelectionRect = (box: { x: number; y: number; w: number; h: number }, outset?: number) => {
     const overlay = rotateOverlayRef.current;
     const stage = stageBoxRef.current?.getBoundingClientRect();
     if (!overlay || !stage) return;
-    const rect = boxSelectionRect(box, stage.width, stage.height);
+    const rect = boxSelectionRect(box, stage.width, stage.height, outset);
     overlay.style.left = `${rect.left}px`;
     overlay.style.top = `${rect.top}px`;
     overlay.style.width = `${rect.width}px`;
@@ -186,6 +194,99 @@ export function useBoxDrag(deps: BoxDragDeps) {
       },
     });
   };
+
+  /** The same stage shell used by components, adapted to any persisted canvas box. */
+  const canvasGripDrag = (e: React.PointerEvent, target: CanvasBoxDragTarget) => {
+    const sr = stageBoxRef.current?.getBoundingClientRect();
+    if (!sr) return;
+    const box0 = target.box;
+    const pick = { x: (e.clientX - sr.left) / sr.width, y: (e.clientY - sr.top) / sr.height };
+    let next = box0;
+    startPointerDrag(e, {
+      onStart: () => {
+        dragCursorRef.current = '';
+        setBodyDragging(true);
+      },
+      onFrame: (dx, dy) => {
+        next = moveMediaCanvasBox(box0, dx / sr.width, dy / sr.height, 8 / sr.width, 8 / sr.height);
+        const snapX = Math.abs(next.x + next.w / 2 - 0.5) < 1e-5;
+        const snapY = Math.abs(next.y + next.h / 2 - 0.5) < 1e-5;
+        setGuideVis(snapX, snapY);
+        previewSelectionRect(next, 0);
+        target.onLive(next);
+      },
+      onEnd: () => {
+        setBodyDragging(false);
+        setGuideVis(false, false);
+        setGhostRect(null);
+        if (next.x !== box0.x || next.y !== box0.y) target.onCommit(next);
+        else target.onPick?.(pick.x, pick.y);
+      },
+    });
+  };
+
+  /** Proportional corner resize for native media, using the shared pointer/shield/selection-shell path. */
+  const canvasScaleDrag = (e: React.PointerEvent, target: CanvasBoxDragTarget, sgnX: 1 | -1, sgnY: 1 | -1) => {
+    const sr = stageBoxRef.current?.getBoundingClientRect();
+    if (!sr) return;
+    const box0 = target.box;
+    let next = box0;
+    startPointerDrag(e, {
+      onStart: () => {
+        dragCursorRef.current = sgnX * sgnY > 0 ? 'nwse-resize' : 'nesw-resize';
+        setBodyDragging(true);
+      },
+      onFrame: (dx, dy) => {
+        next = scaleMediaCanvasBox(
+          box0,
+          dx / sr.width,
+          dy / sr.height,
+          sgnX,
+          sgnY,
+          Math.min(1, 48 / sr.width),
+          Math.min(1, 48 / sr.height),
+        );
+        previewSelectionRect(next, 0);
+        target.onLive(next);
+      },
+      onEnd: () => {
+        setBodyDragging(false);
+        setGhostRect(null);
+        if (next.w !== box0.w || next.h !== box0.h) target.onCommit(next);
+      },
+    });
+  };
+  /** Independent side resize for native media. The opposite edge remains anchored and the iframe
+   *  receives the same live box stream as move/corner scale, so no React render sits on the gesture path. */
+  const canvasEdgeDrag = (e: React.PointerEvent, target: CanvasBoxDragTarget, side: 'l' | 'r' | 't' | 'b') => {
+    const sr = stageBoxRef.current?.getBoundingClientRect();
+    if (!sr) return;
+    const box0 = target.box;
+    let next = box0;
+    startPointerDrag(e, {
+      onStart: () => {
+        dragCursorRef.current = side === 'l' || side === 'r' ? 'ew-resize' : 'ns-resize';
+        setBodyDragging(true);
+      },
+      onFrame: (dx, dy) => {
+        const horizontal = side === 'l' || side === 'r';
+        next = resizeMediaCanvasBox(
+          box0,
+          horizontal ? dx / sr.width : dy / sr.height,
+          side,
+          Math.min(1, 48 / sr.width),
+          Math.min(1, 48 / sr.height),
+        );
+        previewSelectionRect(next, 0);
+        target.onLive(next);
+      },
+      onEnd: () => {
+        setBodyDragging(false);
+        setGhostRect(null);
+        if (next.x !== box0.x || next.y !== box0.y || next.w !== box0.w || next.h !== box0.h) target.onCommit(next);
+      },
+    });
+  };
   /** Bottom rotate handle: rotate around the component center by the pointer angle, live via hf:rotate directly in the iframe (zero re-render), commits to Block.rotation on release.
    *  Shift = 15° snap. */
   const rotateDrag = (e: React.PointerEvent, block: Block) => {
@@ -220,5 +321,5 @@ export function useBoxDrag(deps: BoxDragDeps) {
       onEnd: () => setBlockRotation(block.id, deg),
     });
   };
-  return { edgeDrag, scaleDrag, gripDrag, rotateDrag };
+  return { edgeDrag, scaleDrag, gripDrag, rotateDrag, canvasGripDrag, canvasScaleDrag, canvasEdgeDrag };
 }

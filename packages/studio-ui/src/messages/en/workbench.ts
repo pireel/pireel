@@ -453,4 +453,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.zoomInTimelineLabel': 'Zoom in the timeline',
   'workbench.zoomOutTimeline': 'Zoom out timeline',
   'workbench.zoomOutTimelineLabel': 'Zoom out the timeline',
+  'workbench.timelineAutoSnap': 'Primary track auto snap',
+  'workbench.timelineAutoSnapOn': 'Primary auto snap is on. Clips stay packed continuously from the start.',
+  'workbench.timelineAutoSnapOff': 'Primary auto snap is off. Clips can leave free gaps.',
 };

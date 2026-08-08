@@ -15,4 +15,11 @@ describe('preview runtime', () => {
     expect(PREVIEW_RUNTIME).toContain("sel2.style.translate = ''");
     expect(PREVIEW_RUNTIME).toContain("post({ type: 'boxDragEnd'");
   });
+
+  it('keeps native media placement and selection on dedicated runtime channels', () => {
+    expect(PREVIEW_RUNTIME).toContain("d.type === 'hf:mediaBox'");
+    expect(PREVIEW_RUNTIME).toContain("d.type === 'hf:pickAt'");
+    expect(PREVIEW_RUNTIME).toContain("post({ type: 'selectVisual', clipId:");
+    expect(PREVIEW_RUNTIME).toContain("!el.hasAttribute('data-hf-visual-clip')");
+  });
 });

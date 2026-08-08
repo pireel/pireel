@@ -30,11 +30,12 @@ function narrativeShot(clip: NarrativeTimelineClip): VideoShot {
     srcStart: clip.sourceInSec,
     srcEnd: clip.sourceOutSec,
     ...clip.properties,
+    ...(clip.mediaFraming ? { mediaFraming: clip.mediaFraming } : {}),
   };
 }
 
 function narrativeProperties(shot: VideoShot): NarrativeTimelineClip['properties'] {
-  const { id: _id, srcStart: _sourceIn, srcEnd: _sourceOut, src: _src, srcSig: _srcSig, ...properties } = shot;
+  const { id: _id, srcStart: _sourceIn, srcEnd: _sourceOut, src: _src, srcSig: _srcSig, mediaFraming: _mediaFraming, ...properties } = shot;
   return properties;
 }
 
@@ -102,7 +103,11 @@ function patchedNarrativeClip(clip: NarrativeTimelineClip, patch: NarrativeClipP
       : withoutFilter as VideoShot;
   }
   if (patch.audio) shot = patchShotAudio(shot, patch.audio);
-  return { ...clip, properties: narrativeProperties(shot) };
+  return {
+    ...clip,
+    ...(shot.mediaFraming ? { mediaFraming: shot.mediaFraming } : { mediaFraming: undefined }),
+    properties: narrativeProperties(shot),
+  };
 }
 
 interface ResolvedUpdate {
