@@ -27,18 +27,45 @@ const snap = (value: number, targets: readonly number[], threshold: number) => {
 
 export const FULL_MEDIA_CANVAS_BOX: MediaCanvasBox = { x: 0, y: 0, w: 1, h: 1 };
 
-/** Source pixels visible inside a full-canvas placement before any user transform. */
+/** Keep selection chrome on the same preview generation as the visible iframe. Canvas-ratio
+ * changes update the live document before the double buffer swaps; promoting the live selection
+ * during that gap would draw new geometry over the old canvas. */
+export function resolveBufferedMediaSelection<T extends { clipId: string }>({
+  live,
+  displayed,
+  activeCanvas,
+  liveCanvas,
+}: {
+  live: T | null;
+  displayed: T | null;
+  activeCanvas: { width: number; height: number };
+  liveCanvas: { width: number; height: number };
+}): { selection: T | null; settled: boolean } {
+  const settled = activeCanvas.width === liveCanvas.width && activeCanvas.height === liveCanvas.height;
+  if (settled) return { selection: live, settled: true };
+  return {
+    selection: live && displayed?.clipId === live.clipId ? displayed : null,
+    settled: false,
+  };
+}
+
+/** Source pixels visible inside a media placement before any user transform. The placement's
+ * composition-pixel aspect matters: off-canvas boxes created by a canvas-ratio switch must keep
+ * fitting against their own layer, not silently re-fit against the new canvas. */
 export function fittedMediaContentBox(
   sourceWidth: number | undefined,
   sourceHeight: number | undefined,
   canvasWidth: number,
   canvasHeight: number,
   fit: 'contain' | 'cover',
+  placement: MediaCanvasBox = FULL_MEDIA_CANVAS_BOX,
 ): MediaCanvasBox {
   if (fit === 'cover' || !sourceWidth || !sourceHeight || sourceWidth <= 0 || sourceHeight <= 0) {
     return FULL_MEDIA_CANVAS_BOX;
   }
-  const relativeAspect = (sourceWidth / sourceHeight) / (canvasWidth / canvasHeight);
+  const targetWidth = Math.max(0.0001, placement.w * canvasWidth);
+  const targetHeight = Math.max(0.0001, placement.h * canvasHeight);
+  const relativeAspect = (sourceWidth / sourceHeight) / (targetWidth / targetHeight);
   if (relativeAspect >= 1) {
     const h = 1 / relativeAspect;
     return { x: 0, y: (1 - h) / 2, w: 1, h };

@@ -6,11 +6,40 @@ import {
   mediaContentBox,
   mediaPlacementBox,
   moveMediaCanvasBox,
+  resolveBufferedMediaSelection,
   resizeMediaCanvasBox,
   scaleMediaCanvasBox,
 } from './media-box';
 
 describe('media canvas box', () => {
+  it('keeps the displayed selection on the active preview generation until the canvas buffer swaps', () => {
+    const landscapeSelection = { clipId: 'shot-1', box: { x: 0, y: 0, w: 1, h: 1 } };
+    const portraitSelection = { clipId: 'shot-1', box: { x: 0, y: 0.3418, w: 1, h: 0.3164 } };
+
+    expect(resolveBufferedMediaSelection({
+      live: portraitSelection,
+      displayed: landscapeSelection,
+      activeCanvas: { width: 1920, height: 1080 },
+      liveCanvas: { width: 1080, height: 1920 },
+    })).toEqual({ selection: landscapeSelection, settled: false });
+
+    expect(resolveBufferedMediaSelection({
+      live: portraitSelection,
+      displayed: landscapeSelection,
+      activeCanvas: { width: 1080, height: 1920 },
+      liveCanvas: { width: 1080, height: 1920 },
+    })).toEqual({ selection: portraitSelection, settled: true });
+  });
+
+  it('does not show a stale selection for a different clip while the preview buffer is pending', () => {
+    expect(resolveBufferedMediaSelection({
+      live: { clipId: 'shot-2' },
+      displayed: { clipId: 'shot-1' },
+      activeCanvas: { width: 1920, height: 1080 },
+      liveCanvas: { width: 1080, height: 1920 },
+    })).toEqual({ selection: null, settled: false });
+  });
+
   it('wraps a landscape source instead of the portrait canvas and round-trips placement', () => {
     const fitted = fittedMediaContentBox(1920, 1080, 1080, 1920, 'contain');
     expect(fitted.x).toBe(0);
@@ -19,6 +48,20 @@ describe('media canvas box', () => {
     expect(fitted.h).toBeCloseTo(0.3164, 4);
     const content = mediaContentBox({ x: -0.1, y: 0.1, w: 1.2, h: 1.2 }, fitted);
     expect(mediaPlacementBox(content, fitted)).toEqual({ x: -0.1, y: 0.1, w: 1.2, h: 1.2 });
+  });
+
+  it('fits against the independent media layer after a canvas-ratio reflow', () => {
+    const placement = { x: 0.1, y: 0.4051, w: 0.6, h: 0.1898 };
+    const fitted = fittedMediaContentBox(1920, 1080, 1080, 1920, 'contain', placement);
+    expect(fitted.x).toBeCloseTo(0, 3);
+    expect(fitted.y).toBeCloseTo(0, 3);
+    expect(fitted.w).toBeCloseTo(1, 3);
+    expect(fitted.h).toBeCloseTo(1, 3);
+    const content = mediaContentBox(placement, fitted);
+    expect(content.x).toBeCloseTo(placement.x, 3);
+    expect(content.y).toBeCloseTo(placement.y, 3);
+    expect(content.w).toBeCloseTo(placement.w, 3);
+    expect(content.h).toBeCloseTo(placement.h, 3);
   });
 
   it('allows off-canvas movement without changing size', () => {

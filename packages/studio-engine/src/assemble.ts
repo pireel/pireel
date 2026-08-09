@@ -61,9 +61,19 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
   var mkStage = function () { var s = document.createElement('canvas'); s.width = W; s.height = H; return s; };
   var stageLive = mkStage(), stageGhost = mkStage();
   var sourceRect = (${SOURCE_DRAW_RECT_FUNCTION});
+  // #vidEl keeps a composition-sized backing store so the sandbox protocol stays stable, but its
+  // CSS box is the independent media layer. Pre-compensate for that box's X/Y scaling before draw;
+  // otherwise changing the canvas ratio non-uniformly stretches the already-rendered pixels.
+  var layerRect = function (sourceW, sourceH, framing) {
+    var cs = window.getComputedStyle(c);
+    var cw = parseFloat(cs.width) || W, ch = parseFloat(cs.height) || H;
+    var r = sourceRect(sourceW, sourceH, cw, ch, framing);
+    var sx = cw / W, sy = ch / H;
+    return { x: r.x / sx, y: r.y / sy, width: r.width / sx, height: r.height / sy };
+  };
   var cover = function (stage, bmp, framing, sourceW, sourceH) {
     var g = stage.getContext('2d');
-    var r = sourceRect(sourceW || bmp.width, sourceH || bmp.height, W, H, framing);
+    var r = layerRect(sourceW || bmp.width, sourceH || bmp.height, framing);
     g.clearRect(0, 0, W, H);
     g.drawImage(bmp, r.x, r.y, r.width, r.height);
     return stage;
@@ -76,7 +86,7 @@ export function videoFrameShim(transitions: { cut: number; effect: string; half:
     // videoWidth/videoHeight are the browser's DISPLAY dimensions. ImageBitmap.width/height can
     // still be the coded surface for phone footage carrying rotation metadata; using that 16:9
     // surface to place a 9:16 picture both letterboxes it and deforms the subject.
-    var r = sourceRect(sourceW || bmp.width, sourceH || bmp.height, W, H, framing);
+    var r = layerRect(sourceW || bmp.width, sourceH || bmp.height, framing);
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(bmp, r.x, r.y, r.width, r.height);
   };
@@ -202,6 +212,13 @@ const PERSON_CUT_SHIM = `(function(){
   var bgEl = document.getElementById('personBg');
   var W = c.width, H = c.height;
   var sourceRect = (${SOURCE_DRAW_RECT_FUNCTION});
+  var layerRect = function (sourceW, sourceH, framing) {
+    var cs = window.getComputedStyle(v);
+    var vw = parseFloat(cs.width) || W, vh = parseFloat(cs.height) || H;
+    var r = sourceRect(sourceW, sourceH, vw, vh, framing);
+    var sx = vw / W, sy = vh / H;
+    return { x: r.x / sx, y: r.y / sy, width: r.width / sx, height: r.height / sy };
+  };
   // person (video ∘ mask) and stroke silhouette each render offscreen; the main canvas composites in stroke→person order
   var P = document.createElement('canvas'); P.width = W; P.height = H;
   var pctx = P.getContext('2d');
@@ -344,9 +361,10 @@ const PERSON_CUT_SHIM = `(function(){
     // background-replace layer follows the mask: only lit on segments that have a mask (export / no parent / matting-off segments all hidden, fall back to original frame)
     if (bgEl) bgEl.style.display = mask ? 'block' : 'none';
     if (!mask) return;
-    // mask aspect ratio = source frame; the on-canvas frame is contain-fit, so align the mask with the same contain mapping
+    // Mask aspect ratio = source frame. Match the frame shim's layer-box pre-compensation so the
+    // extracted subject stays aligned after canvas-ratio changes and native media transforms.
     var vw = fi.w || W, vh = fi.h || H;
-    var rect = sourceRect(vw, vh, W, H, fi.framing || null), dw = rect.width, dh = rect.height, dx = rect.x, dy = rect.y;
+    var rect = layerRect(vw, vh, fi.framing || null), dw = rect.width, dh = rect.height, dx = rect.x, dy = rect.y;
     pctx.clearRect(0, 0, W, H);
     pctx.drawImage(v, 0, 0); // video frame taken straight from the #vidEl canvas (already source-composited)
     pctx.globalCompositeOperation = 'destination-in';
@@ -373,6 +391,11 @@ const PERSON_CUT_SHIM = `(function(){
     c.style.transform = v.style.transform || '';
     c.style.translate = v.style.translate || '';
     c.style.scale = v.style.scale || '';
+    c.style.inset = 'auto';
+    c.style.left = v.style.left || '0px';
+    c.style.top = v.style.top || '0px';
+    c.style.width = v.style.width || '100%';
+    c.style.height = v.style.height || '100%';
   }
   (function loop(){ try { feed(); draw(); } catch (e) {} requestAnimationFrame(loop); })();
 })();`;

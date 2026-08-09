@@ -229,21 +229,80 @@ async function rasterize(uri: string): Promise<HTMLImageElement> {
   return img;
 }
 
-function readTransform(win: Window, el: Element | null): { m: DOMMatrix; radius: number; inset: { t: number; r: number; b: number; l: number } } {
-  if (!el) return { m: new DOMMatrix(), radius: 0, inset: { t: 0, r: 0, b: 0, l: 0 } };
+/** Canonical ground for composition pixels not covered by video, graphics, or a theme surface. */
+export const EMPTY_VIDEO_GROUND = '#000000';
+
+function resetExportFrameGround(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = EMPTY_VIDEO_GROUND;
+  ctx.fillRect(0, 0, width, height);
+}
+
+/** Begin one encoded frame from a genuinely empty target.
+ *
+ * Media compositions intentionally rasterize a transparent document background. Drawing that
+ * transparent bitmap with source-over does not erase pixels from the previous encoded frame, so a
+ * native-media gap (or the transparent area around an HTML card) otherwise freezes old pixels.
+ */
+export function paintExportFrameBase(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  background: CanvasImageSource,
+  primaryVideo: CanvasImageSource,
+): void {
+  resetExportFrameGround(ctx, width, height);
+  ctx.drawImage(background, 0, 0);
+  ctx.drawImage(primaryVideo, 0, 0);
+}
+
+interface ExportMediaGeometry {
+  m: DOMMatrix;
+  radius: number;
+  inset: { t: number; r: number; b: number; l: number };
+  layout: { x: number; y: number; width: number; height: number };
+}
+
+function readTransform(win: Window, el: Element | null, fallbackWidth: number, fallbackHeight: number): ExportMediaGeometry {
+  if (!el) return {
+    m: new DOMMatrix(), radius: 0, inset: { t: 0, r: 0, b: 0, l: 0 },
+    layout: { x: 0, y: 0, width: fallbackWidth, height: fallbackHeight },
+  };
   const cs = win.getComputedStyle(el);
   const m = cs.transform && cs.transform !== 'none' ? new DOMMatrix(cs.transform) : new DOMMatrix();
+  const finite = (value: string, fallback: number) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
   // clip-path carries the crop for fill-the-half splits (transform is only the park position
   // there) — reading transform alone painted the full frame shifted, cropping nothing.
-  return { m, radius: parseFloat(cs.borderTopLeftRadius) || 0, inset: parseClipInset(cs.clipPath) };
+  return {
+    m,
+    radius: parseFloat(cs.borderTopLeftRadius) || 0,
+    inset: parseClipInset(cs.clipPath),
+    layout: {
+      x: finite(cs.left, 0),
+      y: finite(cs.top, 0),
+      width: Math.max(0.0001, finite(cs.width, fallbackWidth)),
+      height: Math.max(0.0001, finite(cs.height, fallbackHeight)),
+    },
+  };
 }
 
 /** The element-local rect that survives transform + clip — clip-path lives in the element's own
- *  coordinate system, so this rect is built in W×H space and clipped AFTER the matrix applies,
+ *  coordinate system, so this rect is built in the media layer's layout box and clipped AFTER the matrix applies,
  *  matching CSS order. Shared by the export loop and the still-frame capture. */
-function framedClipPath(W: number, H: number, vs: { radius: number; inset: { t: number; r: number; b: number; l: number } }): Path2D {
+function framedClipPath(vs: Pick<ExportMediaGeometry, 'radius' | 'inset' | 'layout'>): Path2D {
   const path = new Path2D();
-  path.roundRect(W * vs.inset.l, H * vs.inset.t, W * (1 - vs.inset.l - vs.inset.r), H * (1 - vs.inset.t - vs.inset.b), vs.radius);
+  const { x, y, width, height } = vs.layout;
+  path.roundRect(
+    x + width * vs.inset.l,
+    y + height * vs.inset.t,
+    width * (1 - vs.inset.l - vs.inset.r),
+    height * (1 - vs.inset.t - vs.inset.b),
+    vs.radius,
+  );
   return path;
 }
 
@@ -384,7 +443,7 @@ export async function captureCompositionFrame(opts: {
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
     overlay.win.__hfPreview!.seekTimelines(t);
     const el = overlay.doc.getElementById('vidEl');
-    const vs = readTransform(overlay.win, el);
+    const vs = readTransform(overlay.win, el, W, H);
     const bg = await rasterize(
       'data:image/svg+xml;charset=utf-8,' +
         encodeURIComponent(svgOpen(W, H, outW, outH, overlay.headCss) + `<div xmlns="http://www.w3.org/1999/xhtml" id="root"></div>` + SVG_CLOSE),
@@ -405,6 +464,7 @@ export async function captureCompositionFrame(opts: {
     canvas.width = outW;
     canvas.height = outH;
     const ctx = canvas.getContext('2d')!;
+    resetExportFrameGround(ctx, outW, outH);
     ctx.drawImage(bg, 0, 0);
     const sample = rig && !opts.primaryVisualHidden ? await sampleAt(rig, srcT) : null;
     if (sample && rig && !opts.primaryVisualHidden) {
@@ -412,12 +472,14 @@ export async function captureCompositionFrame(opts: {
       const Sy = outH / H;
       ctx.setTransform(Sx, 0, 0, Sy, 0, 0);
       ctx.save();
-      ctx.translate(W / 2, H / 2);
+      const centerX = vs.layout.x + vs.layout.width / 2;
+      const centerY = vs.layout.y + vs.layout.height / 2;
+      ctx.translate(centerX, centerY);
       ctx.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
-      ctx.translate(-W / 2, -H / 2);
-      ctx.clip(framedClipPath(W, H, vs));
-      const rect = sourceDrawRect(rig.sw, rig.sh, W, H, sourceFraming);
-      sample.draw(ctx, rect.x, rect.y, rect.width, rect.height);
+      ctx.translate(-centerX, -centerY);
+      ctx.clip(framedClipPath(vs));
+      const rect = sourceDrawRect(rig.sw, rig.sh, vs.layout.width, vs.layout.height, sourceFraming);
+      sample.draw(ctx, vs.layout.x + rect.x, vs.layout.y + rect.y, rect.width, rect.height);
       ctx.restore();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
@@ -740,7 +802,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       // tl.to('#vidEl')); looking up an element by clip_<id> is a leftover from the old "insert clip =
       // separate <video>" era — the element doesn't exist → identity matrix → export loses insert-clip framing
       const el = overlay.doc.getElementById('vidEl');
-      const vs = readTransform(overlay.win, el);
+      const vs = readTransform(overlay.win, el, W, H);
       const serials = serializeHtmlLayers();
       tm.prep += performance.now() - tPrep;
       const overlayP = Promise.all(serials.map((serial, index) => {
@@ -803,10 +865,12 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         tc.setTransform(Sx, 0, 0, Sy, 0, 0);
         tc.save();
         // transform-origin: center — the computed matrix excludes origin, so sandwich it manually as T(c)·M·T(-c)
-        tc.translate(W / 2, H / 2);
+        const centerX = vs.layout.x + vs.layout.width / 2;
+        const centerY = vs.layout.y + vs.layout.height / 2;
+        tc.translate(centerX, centerY);
         tc.transform(vs.m.a, vs.m.b, vs.m.c, vs.m.d, vs.m.e, vs.m.f);
-        tc.translate(-W / 2, -H / 2);
-        const path = framedClipPath(W, H, vs);
+        tc.translate(-centerX, -centerY);
+        const path = framedClipPath(vs);
         if (vs.m.a < 0.999) {
           // Shadow only shows when framing is scaled down: fill a shadowed base first, then clip and draw the frame
           tc.shadowColor = 'rgba(0,0,0,0.45)';
@@ -821,8 +885,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         tc.clip(path);
         // Per-shot grade: same source as the preview's #vidEl CSS filter (canvas filter, same syntax); restore resets it
         if (filterCss) tc.filter = filterCss;
-        const rect = sourceDrawRect(rg.sw, rg.sh, W, H, layerSeg.framing);
-        smp.draw(tc, rect.x, rect.y, rect.width, rect.height);
+        const rect = sourceDrawRect(rg.sw, rg.sh, vs.layout.width, vs.layout.height, layerSeg.framing);
+        smp.draw(tc, vs.layout.x + rect.x, vs.layout.y + rect.y, rect.width, rect.height);
         tc.restore();
         tc.setTransform(1, 0, 0, 1, 0, 0);
       };
@@ -861,10 +925,8 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
         videoLayers.set(layer.clipId, layer);
       }
 
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
       const d0 = performance.now();
-      ctx.drawImage(bg, 0, 0);
-      ctx.drawImage(vidC, 0, 0);
+      paintExportFrameBase(ctx, outW, outH, bg, vidC);
       let htmlLayerIndex = 0;
       for (const layer of visualLayers) {
         if (layer.kind === 'media') {

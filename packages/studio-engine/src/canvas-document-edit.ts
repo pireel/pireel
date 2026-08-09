@@ -31,8 +31,9 @@ export type CanvasDocumentEditResult =
 
 /**
  * Changes the canonical canvas and re-derives managed captions against its new line budget. The
- * transaction is published only after both commands succeed, so a locked caption lane cannot leave
- * the document with new dimensions and stale caption geometry.
+ * canvas command uniformly rebases native-media boxes around their relative centres and re-fits
+ * untouched media; framing stays attached to the clip. The transaction is published only after both
+ * commands succeed, so a locked caption lane cannot leave new dimensions with stale geometry.
  */
 export function applyCanvasDocumentEdit(input: CanvasDocumentEditInput): CanvasDocumentEditResult {
   const sourceDocument = syncCaptionTranscripts(input.document, input.mainTranscript, input.clipTranscripts);

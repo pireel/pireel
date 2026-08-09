@@ -35,6 +35,7 @@ describe('sourceDrawRect', () => {
       createElement: () => ({ width: 0, height: 0, getContext: (kind: string) => (kind === '2d' ? context : null) }),
     };
     const windowLike: Record<string, unknown> = {
+      getComputedStyle: () => ({ width: '1080px', height: '1920px' }),
       addEventListener: (type: string, listener: (event: { data: Record<string, unknown> }) => void) => {
         if (type === 'message') onMessage = listener;
       },
@@ -52,6 +53,37 @@ describe('sourceDrawRect', () => {
     });
 
     expect(draws.at(-1)).toEqual([codedLandscapeFrame, 0, 0, 1080, 1920]);
+  });
+
+  it('画布改成竖屏后按等比横屏图层预补偿，不把视频像素一起拉成竖屏', () => {
+    const draws: unknown[][] = [];
+    let onMessage: ((event: { data: Record<string, unknown> }) => void) | undefined;
+    const context = {
+      clearRect: () => {},
+      drawImage: (...args: unknown[]) => draws.push(args),
+    };
+    const mainCanvas = { width: 1080, height: 1920, getContext: () => context };
+    const documentLike = {
+      getElementById: (id: string) => (id === 'vidEl' ? mainCanvas : null),
+      createElement: () => ({ width: 0, height: 0, getContext: (kind: string) => (kind === '2d' ? context : null) }),
+    };
+    const windowLike: Record<string, unknown> = {
+      getComputedStyle: () => ({ width: '1080px', height: '607.5px' }),
+      addEventListener: (type: string, listener: (event: { data: Record<string, unknown> }) => void) => {
+        if (type === 'message') onMessage = listener;
+      },
+    };
+    new Function('window', 'document', videoFrameShim([]))(windowLike, documentLike);
+    const landscapeFrame = { width: 1920, height: 1080, close: () => {} };
+    onMessage?.({
+      data: {
+        type: 'hf:frame', frame: landscapeFrame, sourceWidth: 1920, sourceHeight: 1080, t: 0,
+      },
+    });
+
+    // The backing store is deliberately pre-warped; CSS maps 1080×1920 into the proportional
+    // 1080×607.5 media layer. Without this compensation the displayed video is stretched vertically.
+    expect(draws.at(-1)).toEqual([landscapeFrame, 0, 0, 1080, 1920]);
   });
 
   it('source-normalized 能取回横屏源两侧且不露边', () => {

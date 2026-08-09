@@ -174,8 +174,14 @@ export const StudioChat = memo(
     [],
   );
 
+  // Chat consumes the current canvas selection as an automatic @ reference. Focusing the composer
+  // or its picker must retain that selection, or the document outside-click handler removes its pill.
   return (
-    <div className="bg-panel flex h-full min-h-0 w-full min-w-0 flex-col">
+    <div
+      data-block-selection-keep
+      data-cap-keep
+      className="bg-panel flex h-full min-h-0 w-full min-w-0 flex-col"
+    >
       {/* Header: title + history + new chat */}
       <div className="border-line text-ink-3 relative flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
         <Sparkles size={13} className="text-accent" />

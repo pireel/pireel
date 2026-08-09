@@ -153,7 +153,7 @@ import {
 import { useGenerationLock } from './use-generation-lock';
 import { useMediaAnalysis } from './use-media-analysis';
 import { useStudioExport } from './use-export';
-import { DEFAULT_RENDER_OPTS, type ExportRenderOpts, captureCompositionFrame } from './client-export';
+import { DEFAULT_RENDER_OPTS, EMPTY_VIDEO_GROUND, type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { GenChatPanel, type GenElementResult } from './gen-chat-panel';
 import { KIT_INSERT_DURATION, kitSampleProps } from './kit-ui';
@@ -188,6 +188,7 @@ import {
   fittedMediaContentBox,
   framedMediaContentBox,
   framedMediaPlacementBox,
+  resolveBufferedMediaSelection,
   type MediaCanvasBox,
 } from './media-box';
 import { blockDisplayTitle } from './block-display-title';
@@ -672,12 +673,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Preview box scale: computed after `bufs` below (stage geometry follows the ACTIVE doc's canvas
   // dims, not the live comp — a ratio switch must change shape atomically WITH the buffer swap,
   // otherwise the old content flashes stretched into the new shape for the rebuild window).
+  const activeStageSizeRef = useRef({ width: 0, height: 0 });
   /** Floating toolbar positioning — single source of truth, shared by drag-follow (direct DOM writes) and React
    *  render; the two must produce identical numbers to avoid jumps. Pure follow, no clamping (edge-docking feel was
    *  rejected); avoiding truncation is structural: the toolbar mounts outside the stage's clipping layer. */
   const toolbarXY = useCallback((box?: { x: number; y: number; w: number; h: number } | null) => {
-    const W = compRef.current.width * fitRef.current;
-    const H = compRef.current.height * fitRef.current;
+    const { width: W, height: H } = activeStageSizeRef.current;
     return { left: box ? (box.x + box.w / 2) * W : W / 2, top: box ? box.y * H - 40 : 8 };
   }, []);
   // Debug overlay: geometry (face/safe-zone) of the frame segment at the playhead; normalized coords overlaid as % on the preview (= full-canvas scale)
@@ -761,6 +762,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   fitRef.current = fit;
   const boxW = Math.round(activeDims.w * fit);
   const boxH = Math.round(activeDims.h * fit);
+  activeStageSizeRef.current = { width: boxW, height: boxH };
   const previewAreaRef = useRef<HTMLDivElement | null>(null);
   const tRef = useRef(0);
   const selectedIdRef = useRef<string | null>(null);
@@ -1043,6 +1045,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (iB < 1) continue;
       const A = spans[iB - 1]!.clip;
       const B = spans[iB]!.clip;
+      const boxA = renderVideoPlacements.find((placement) => placement.shotId === A.id)?.box;
+      const boxB = renderVideoPlacements.find((placement) => placement.shotId === B.id)?.box;
+      const fullBox = (box: MediaCanvasBox | undefined) => !box
+        || (Math.abs(box.x) < 1e-6 && Math.abs(box.y) < 1e-6 && Math.abs(box.w - 1) < 1e-6 && Math.abs(box.h - 1) < 1e-6);
+      // The low-priority bake path still rasterizes a composition-sized source before the layer's
+      // CSS placement. For independent/off-canvas media boxes, keep the live dual-decoder path;
+      // otherwise the baked window would briefly resurrect the old canvas-stretch bug.
+      if (!fullBox(boxA) || !fullBox(boxB)) continue;
       const rateA = segmentSourceRate(A, spans[iB - 1]!.editedStart, spans[iB - 1]!.editedEnd);
       const rateB = segmentSourceRate(B, spans[iB]!.editedStart, spans[iB]!.editedEnd);
       const fileA = A.src ? clipFilesRef.current.get(A.src) : videoFile;
@@ -1233,6 +1243,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       || !previewDataEqual(previousRenderInputs.videoPlacements, renderVideoPlacements)
       || !previewDataEqual(previousRenderInputs.supplementalVisuals, supplementalVisuals);
     const sizeOnly = canvasSizeOnlyChange(lastBuiltCompRef.current, renderComposition);
+    // Ratio changes also rebase native media boxes. They are still one discrete action and must not
+    // fall back to the 300ms drag debounce merely because the projected placements changed too.
+    const canvasChanged = !!lastBuiltCompRef.current && (
+      lastBuiltCompRef.current.width !== renderComposition.width
+      || lastBuiltCompRef.current.height !== renderComposition.height
+    );
     const cutOnly = shotCountChange(lastBuiltCompRef.current, renderComposition);
     const capOnly = sameExceptCapStyle(lastBuiltCompRef.current, renderComposition);
     const framingOnly = shotFramingOnlyChange(lastBuiltCompRef.current, renderComposition);
@@ -1414,7 +1430,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         dims[back] = { w: comp.width, h: comp.height };
         return { docs, dims, active: s.active };
       });
-    }, fontsChanged || sizeOnly || cutOnly || capOnly || framingOnly || patchable ? 0 : 300);
+    }, fontsChanged || sizeOnly || canvasChanged || cutOnly || capOnly || framingOnly || patchable ? 0 : 300);
     return () => clearTimeout(id);
   }, [comp, renderComposition, fontsTick, renderVideoPlacements, supplementalVisuals]);
 
@@ -2773,18 +2789,23 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     && selectedShotIds.size <= 1
     && selectedBlockIds.size <= 1;
   const canvasPreviewSec = scrubPreviewSec ?? tSec;
-  const selectedCanvasMedia = (() => {
+  const liveSelectedCanvasMedia = (() => {
     if (selectedVisualClipId) {
       for (const track of renderPlan.tracks) {
         if (track.type !== 'visual' || track.id === renderPlan.primaryNarrativeTrackId || track.hidden) continue;
         const entry = track.clips.find((candidate) => candidate.clipId === selectedVisualClipId);
         if (!entry || entry.clip.kind !== 'media' || !entry.clip.enabled) continue;
+        const visualState = supplementalVisuals.find((visual) => visual.clipId === entry.clipId);
+        const placement = visualState
+          ? supplementalVisualStateAt(visualState, canvasPreviewSec).box
+          : entry.clip.box ?? FULL_MEDIA_CANVAS_BOX;
         const fitted = fittedMediaContentBox(
           entry.asset?.metadata.width,
           entry.asset?.metadata.height,
           comp.width,
           comp.height,
           entry.clip.fit ?? 'contain',
+          placement,
         );
         const atomicFraming = normalizeAtomicMediaFraming(entry.clip.mediaFraming, IDENTITY_MEDIA_FRAMING);
         const framing = {
@@ -2798,10 +2819,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             l: atomicFraming.crop.left,
           },
         };
-        const visualState = supplementalVisuals.find((visual) => visual.clipId === entry.clipId);
-        const placement = visualState
-          ? supplementalVisualStateAt(visualState, canvasPreviewSec).box
-          : entry.clip.box ?? FULL_MEDIA_CANVAS_BOX;
         return {
           kind: 'media' as const,
           assetKind: entry.asset?.kind,
@@ -2820,12 +2837,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (selectedShotId && selectedShotIds.size === 1 && !primaryNarrative.hidden) {
       const entry = renderPlan.narrative.find((candidate) => candidate.clipId === selectedShotId);
       if (entry?.clip.enabled) {
+        const placement = entry.clip.box ?? FULL_MEDIA_CANVAS_BOX;
         const fitted = fittedMediaContentBox(
           entry.asset?.metadata.width,
           entry.asset?.metadata.height,
           comp.width,
           comp.height,
           entry.clip.properties.preciseFraming?.coordinateSpace === 'source-normalized' ? 'cover' : 'contain',
+          placement,
         );
         const atomicFraming = entry.clip.mediaFraming
           ? normalizeAtomicMediaFraming(entry.clip.mediaFraming)
@@ -2853,7 +2872,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           clipId: entry.clipId,
           trackId: entry.trackId,
           elementId: 'vidEl',
-          box: framedMediaContentBox(entry.clip.box ?? FULL_MEDIA_CANVAS_BOX, fitted, framing),
+          box: framedMediaContentBox(placement, fitted, framing),
           fitted,
           placementFromContent: (box: MediaCanvasBox) => framedMediaPlacementBox(box, fitted, framing),
           startSec: entry.startSec,
@@ -2863,6 +2882,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     return null;
   })();
+  const displayedCanvasMediaRef = useRef(liveSelectedCanvasMedia);
+  const bufferedCanvasMedia = resolveBufferedMediaSelection({
+    live: liveSelectedCanvasMedia,
+    displayed: displayedCanvasMediaRef.current,
+    activeCanvas: { width: activeDims.w, height: activeDims.h },
+    liveCanvas: { width: comp.width, height: comp.height },
+  });
+  if (bufferedCanvasMedia.settled) displayedCanvasMediaRef.current = liveSelectedCanvasMedia;
+  const selectedCanvasMedia = bufferedCanvasMedia.selection;
+  const canvasGeometrySettled = bufferedCanvasMedia.settled;
 
   const patchTrackFlags = (trackId: string, patch: { muted?: boolean; hidden?: boolean }) => {
     const result = applyEditorCommand(editorDocumentRef.current, { type: 'track.patch', trackId, patch });
@@ -4042,10 +4071,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       ...projectOutputs.outputs.active,
       coverThumb: coverThumbRef.current,
       durationSec: totalDuration(comp) || comp.video?.durationSec || null,
+      canvasWidth: editorDocument.canvas.width,
+      canvasHeight: editorDocument.canvas.height,
     },
     ...projectOutputs.outputs.inactive.map((output) => ({
       ...output,
       durationSec: editorDocumentRenderPlan(output.document).durationSec || output.videoDurationSec,
+      canvasWidth: output.document.canvas.width,
+      canvasHeight: output.document.canvas.height,
     })),
   ].sort((a, b) => a.order - b.order || a.createdAt - b.createdAt);
   const switchOutput = (id: string) => {
@@ -4068,8 +4101,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (ok) await outputRuntime.deleteOutput(id);
     })();
   };
-  // ---- Expanded output list: selection + sequential batch export ----
-  const [outputsExpanded, setOutputsExpanded] = useState(false);
+  // ---- Output rail selection mode + sequential batch export ----
+  const [outputsBatchMode, setOutputsBatchMode] = useState(false);
   const [outputSelected, setOutputSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [outputBatch, setOutputBatch] = useState<OutputBatchState | null>(null);
   const outputBatchCancelRef = useRef(false);
@@ -4081,10 +4114,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   switchOutputFnRef.current = outputRuntime.switchOutput;
   const exportVideoFnRef = useRef(exportVideo);
   exportVideoFnRef.current = exportVideo;
-  const toggleOutputsExpanded = () => {
+  const toggleOutputsBatchMode = () => {
     if (outputBatch?.running) return;
-    const next = !outputsExpanded;
-    setOutputsExpanded(next);
+    const next = !outputsBatchMode;
+    setOutputsBatchMode(next);
     if (!next) {
       setOutputSelected(new Set());
       setOutputBatch(null);
@@ -4940,39 +4973,34 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         <div className="flex min-h-0 min-w-0 flex-1">
         {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
             No overflow-hidden: the floating toolbar must follow a component past the stage edge without being clipped (frame clipping is on the inner stage layer) */}
-        <div className="bg-panel-2 flex min-h-0 min-w-0 flex-1 flex-col p-3">
-          {/* Output tabs own a real header row (flow layout: it grows in place when the list is
-              expanded to two rows, and the preview area's fit observer reclaims the rest). z-40:
-              the expand toggle hangs below the pill into the canvas region. */}
-          <div className="relative z-40 mb-2 flex w-full shrink-0 justify-center pt-2">
-            <ProjectOutputSwitcher
-              outputs={outputTabs}
-              activeId={projectOutputs.outputs.active.id}
-              label={t('workbench.outputSwitcher')}
-              newLabel={t('workbench.newOutput')}
-              deleteLabel={t('workbench.deleteOutput')}
-              untitledLabel={t('workbench.untitledOutput')}
-              expandLabel={t('workbench.expandOutputs')}
-              collapseLabel={t('workbench.collapseOutputs')}
-              expanded={outputsExpanded}
-              switching={outputRuntime.switching}
-              selected={outputSelected}
-              batch={outputBatch}
-              exportPct={exportPct}
-              onSwitch={switchOutput}
-              onCreate={createOutput}
-              onDelete={requestDeleteOutput}
-              onToggleExpanded={toggleOutputsExpanded}
-              onToggleSelect={toggleOutputSelect}
-              onExportSelected={runBatchExport}
-              onCancelBatch={cancelBatchExport}
-            />
-          </div>
-          {/* Only the remaining canvas region participates in fit measurement; otherwise the new
-              header height would be counted as drawable space and push the stage below the fold. */}
-          <div ref={previewAreaRef} className="relative flex min-h-0 min-w-0 w-full flex-1 items-center justify-center">
-          {/* Canvas-ratio picker (bottom-right): the ratio is a project decision — seeded by the first
-              inserted source, switchable here; sources contain-fit so switching never crops content. */}
+        <div className="bg-panel-2 flex min-h-0 min-w-0 flex-1">
+          {/* The deliverables rail is a sibling of the measured canvas area: it consumes real width,
+              so the fit observer sizes the stage against the remaining space instead of overlaying it. */}
+          <ProjectOutputSwitcher
+            outputs={outputTabs}
+            activeId={projectOutputs.outputs.active.id}
+            label={t('workbench.outputSwitcher')}
+            newLabel={t('workbench.newOutput')}
+            deleteLabel={t('workbench.deleteOutput')}
+            untitledLabel={t('workbench.untitledOutput')}
+            batchMode={outputsBatchMode}
+            switching={outputRuntime.switching}
+            selected={outputSelected}
+            batch={outputBatch}
+            exportPct={exportPct}
+            onSwitch={switchOutput}
+            onCreate={createOutput}
+            onDelete={requestDeleteOutput}
+            onToggleBatchMode={toggleOutputsBatchMode}
+            onToggleSelect={toggleOutputSelect}
+            onExportSelected={runBatchExport}
+            onCancelBatch={cancelBatchExport}
+          />
+          <div className="flex min-h-0 min-w-0 flex-1 p-3">
+            <div ref={previewAreaRef} className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center">
+          {/* Canvas-ratio picker (bottom-right): the ratio is a project decision seeded by the first
+              inserted source. Default media re-fits inside the new canvas; manually transformed media
+              keeps its relative centre and is scaled uniformly, so source pixels never deform. */}
           <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
               {ratioOpen && (
                 <div className="border-line bg-panel absolute bottom-8 right-0 flex flex-col overflow-hidden rounded-md border shadow-lg">
@@ -5032,7 +5060,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               )}
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
                   so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
-              <div className="absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20">
+              <div
+                className="absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20"
+                style={{ background: EMPTY_VIDEO_GROUND }}
+              >
                 {/* Double-buffered iframes: load in the background then swap, eliminating the reload white flash.
                     Trust boundary: LLM-generated block HTML/scripts run in a sandbox (opaque origin), can't reach the main app's DOM/localStorage/cookies;
                     local blob videos aren't readable → onBufLoad hands the File in to build its own URL; the control protocol is all postMessage. */}
@@ -5092,6 +5123,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   </span>
                 </div>
               )}
+              {/* The live document already has its new ratio while the old iframe remains visible.
+                  Keep the old selection chrome, but don't let its old coordinate mapper edit the new document. */}
+              {!canvasGeometrySettled && <div aria-hidden className="absolute inset-0 z-40 cursor-wait" />}
               {/* Native video/image placement: the layer box is independent from source framing.
                   Timeline range/crop stay untouched; dragging commits one V2 clip.patch on release. */}
               {!playing && !scrubHideSel && selectedCanvasMedia
@@ -5147,7 +5181,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                     ),
                   }, side)}
                   toolbar={selectedCanvasMedia.assetKind === 'video' ? (
-                    <div className="border-line bg-panel flex items-center gap-0.5 rounded-lg border px-1.5 py-1 shadow-lg">
+                    <div className="border-line bg-panel flex items-center gap-1 rounded-lg border p-1 shadow-lg">
                       <button
                         type="button"
                         onClick={(event) => {
@@ -5157,14 +5191,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         }}
                         title={t('workbench.cameraFraming')}
                         aria-label={t('workbench.cameraFraming')}
-                        className={`inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] whitespace-nowrap ${
+                        className={`inline-flex size-7 items-center justify-center rounded ${
                           floatWin === 'shot' ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2 hover:text-ink'
                         }`}
                       >
-                        <Frame size={13} />
-                        {t('workbench.cameraFraming')}
+                        <Frame size={14} />
                       </button>
-                      <div className="bg-line mx-0.5 h-4 w-px" />
                       <button
                         type="button"
                         onClick={(event) => {
@@ -5173,12 +5205,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                         }}
                         title={t('panels.videoSound')}
                         aria-label={t('panels.videoSound')}
-                        className={`inline-flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] whitespace-nowrap ${
+                        className={`inline-flex size-7 items-center justify-center rounded ${
                           !floatWin && libTab === 'audio' ? 'bg-panel-2 text-ink' : 'text-ink-3 hover:bg-panel-2 hover:text-ink'
                         }`}
                       >
-                        <AudioLines size={13} />
-                        {t('panels.videoSound')}
+                        <AudioLines size={14} />
                       </button>
                     </div>
                   ) : undefined}
@@ -5804,6 +5835,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   </div>
                 </div>
               )}
+            </div>
           </div>
           </div>
         </div>
