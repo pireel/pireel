@@ -18,6 +18,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useLocale } from 'use-intl';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { SkillIcon } from '@pireel/ui/skill-icon';
+import { imageThumb } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { SupportedLocale as Locale } from '@pireel/studio-frames/locales';
@@ -128,11 +129,12 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
  *  details); frames without a cover (user uploads, etc.) fall back to an icon-row style. */
 function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: FrameCatalogItem; locale: Locale; onOpen: () => void }) {
   const block = useMemo(() => coverBlock(frame.id, locale), [frame.id, locale]);
+  const coverSrc = frame.coverKey ? imageThumb(frame.coverKey, 'list') : null;
   const previewComp = useMemo<Composition>(
     () => ({ ...comp, width: 1920, height: 1080, ...(frame.palette ? { palette: frame.palette } : {}) }),
     [comp, frame.palette],
   );
-  if (!block) {
+  if (!coverSrc && !block) {
     return (
       <button
         type="button"
@@ -156,7 +158,16 @@ function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: 
       onClick={onOpen}
       className="border-line hover:border-accent group w-full overflow-hidden rounded-lg border text-left transition"
     >
-      <InlineBlockPreview comp={previewComp} block={block} width={CARD_W} animate="hover" person={personOf(frame)} ground="stage" />
+      {coverSrc ? (
+        <img
+          src={coverSrc}
+          alt=""
+          loading="lazy"
+          className="block aspect-video w-full object-cover"
+        />
+      ) : (
+        <InlineBlockPreview comp={previewComp} block={block!} width={CARD_W} animate="hover" person={personOf(frame)} ground="stage" />
+      )}
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         <span className="text-ink-4 min-w-0 flex-1 truncate text-[10px]">{frame.summary}</span>
         <PaletteDots palette={frame.palette} />

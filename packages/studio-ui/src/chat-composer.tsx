@@ -8,6 +8,7 @@ import type { ChatStatus } from 'ai';
 import { useLocale } from 'use-intl';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { SkillIcon } from '@pireel/ui/skill-icon';
+import { imageThumb } from '@pireel/ui/image-url';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { StudioScenarioSkillId } from '@pireel/studio-engine/scenario-skills';
 import { framePack, type SupportedLocale as Locale } from '@pireel/studio-frames/locales';
@@ -433,6 +434,7 @@ function FrameOptionRow({
   setActive: () => void;
 }) {
   const block = useMemo(() => coverBlock(item.id, locale), [item.id, locale]);
+  const coverSrc = item.coverKey ? imageThumb(item.coverKey, 'list') : null;
   // Cover uses a uniform 16:9 canvas + the frame's own palette; chat can't reach the project comp, so theme is default
   const previewComp = useMemo<Composition>(
     () => ({ width: 1920, height: 1080, theme: 'general', video: null, blocks: [], ...(item.palette ? { palette: item.palette } : {}) }),
@@ -449,7 +451,9 @@ function FrameOptionRow({
       className={`flex w-full items-center gap-2.5 rounded-md p-1.5 text-left ${active ? 'bg-panel-2' : ''}`}
     >
       <span className={`border-line relative w-[112px] shrink-0 overflow-hidden rounded-md border ${selected ? 'ring-accent ring-2' : ''}`}>
-        {block ? (
+        {coverSrc ? (
+          <img src={coverSrc} alt="" loading="lazy" className="block aspect-video w-full object-cover" />
+        ) : block ? (
           <InlineBlockPreview comp={previewComp} block={block} width={112} animate="hover" ground="stage" />
         ) : (
           <span className="bg-panel-2 flex h-[63px] w-full items-center justify-center">

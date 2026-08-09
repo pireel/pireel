@@ -1,43 +1,38 @@
 import type { FrameLocalePack } from '../types';
 
 export const pack: FrameLocalePack = {
-  title: 'Blueprint',
-  summary:
-    'Engineering-drawing style — grid paper, stroked wireframes and dimension callouts, built for knowledge and opinion explainers.',
+  title: 'Concept Atlas',
+  summary: 'Warm study paper, real source material, cobalt routes and scarce coral revision turn objects, actions and evidence into a changing mental model rather than a stack of knowledge cards.',
   copy: {
-    // Title card
-    把观点讲成画面: 'MAKE THE POINT VISIBLE',
-    // Big number (dimension callout)
-    本月转化增长: 'MONTHLY CONVERSION LIFT',
-    // Chart / trend
-    季度增速: 'QUARTERLY GROWTH',
-    增长轨迹: 'GROWTH TRAJECTORY',
-    // List (spec table)
-    三个要点: 'THREE POINTS',
-    '先说结论,再给理由': 'CONCLUSION FIRST, THEN REASONS',
-    每个论点配一张图: 'ONE FIGURE PER ARGUMENT',
-    结尾回扣开场钩子: 'CLOSE ON THE OPENING HOOK',
-    // Number change (rolling readout)
-    连续日更实测: 'DAILY STREAK, MEASURED',
-    天: 'DAYS',
-    // Sections (drawing zone index)
-    开场: 'OPENING',
-    方法: 'METHOD',
-    实操: 'PRACTICE',
-    '先框架,后细节': 'FRAME, THEN DETAIL',
-    // Code (title-block code window)
-    '// 开场 3 秒,留人或劝退': '// first 3s: keep them or lose them',
-    看到最后有彩蛋: 'stay till the end',
-    完播率在这一行定生死: 'DECIDES RETENTION',
-    // Q&A
-    '为什么你的视频没人看完?': 'WHY DOES NO ONE FINISH YOUR VIDEO?',
-    '不是内容差,是结构乱': 'NOT CONTENT. STRUCTURE.',
-    // Quote
-    '结构,是给观众的礼貌': 'STRUCTURE IS COURTESY',
-    '口播 02\'14"': 'VO 02\'14"',
-    // Call to action
-    关注: 'FOLLOW',
-    // Cover (300px giant type: split across two lines, retro-drafting "blue print" spelling)
-    蓝图: 'BLUE PRINT',
+    '概念图谱': 'CONCEPT ATLAS',
+    '看见关系': 'SEE THE RELATION',
+    '为什么同一个动作': 'WHY CAN THE SAME ACTION',
+    '会得到不同结果？': 'CREATE A DIFFERENT RESULT?',
+    '先看见真实对象，再沿着关系寻找答案。': 'Begin with the real subject, then follow the relation toward an answer.',
+    '从这里开始': 'BEGIN HERE',
+    '输入发生在这里': 'INPUT BEGINS HERE',
+    '阻力改变动作': 'FRICTION CHANGES ACTION',
+    '结果从边缘出现': 'THE RESULT APPEARS AT THE EDGE',
+    '拆开，但不忘记整体': 'BREAK IT APART. KEEP THE WHOLE.',
+    '不是三个步骤': 'NOT THREE STEPS',
+    '是一条因果路线': 'ONE CAUSAL ROUTE',
+    '输入': 'INPUT',
+    '一个真实动作': 'ONE REAL ACTION',
+    '阻力': 'FRICTION',
+    '系统改变速度': 'THE SYSTEM CHANGES SPEED',
+    '结果': 'RESULT',
+    '反馈回到人': 'FEEDBACK RETURNS TO THE PERSON',
+    '从整体进入细节': 'MOVE FROM WHOLE TO DETAIL',
+    '再带着答案回来': 'THEN RETURN WITH THE ANSWER',
+    '原来的理解': 'ORIGINAL MODEL',
+    '速度决定结果': 'SPEED DETERMINES THE RESULT',
+    '证据改变路线': 'EVIDENCE CHANGES THE ROUTE',
+    '真正改变结果的': 'WHAT REALLY CHANGES THE RESULT',
+    '是交接方式': 'IS THE HANDOFF',
+    '来源片段 / 待用户确认': 'SOURCE CLIP / USER CONFIRMATION NEEDED',
+    '交接': 'HANDOFF',
+    '结果不是终点': 'THE RESULT IS NOT THE END',
+    '它会回到下一次输入': 'IT RETURNS TO THE NEXT INPUT',
+    '现在可以用一条路线重新看完整系统。': 'Now one route can reframe the whole system.',
   },
 };

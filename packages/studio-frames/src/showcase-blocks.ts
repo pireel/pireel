@@ -2,9 +2,15 @@
  * Factory for visual-language samples shown on a Frame's detail page, keyed by
  * (frameId, kind). Samples are not fixed production templates. Each Frame has its own layout dialect,
  * not one skeleton reskinned:
- *   Blueprint = engineering drawing: wireframes, dimension lines, grid, title block, stroke-only
- *   Cream     = sticker candy: tilted rounded stickers, pills, dot accents, layering
+ *   Concept Atlas = source-led inquiry: real subjects, routes, scale, correction, synthesis
+ *   Interface Current = real product surfaces, people, state transition, system depth, resolution
+ *   Social Cutout = people-first phone energy, real traces, reaction, chorus, human release
+ *   Retail Rush = product truth, verified offer hierarchy, density, proof, direct action
  *   Biennale  = constructivist poster: giant bleeding type, vertical text, reversed panels
+ *   Afterimage = optical time: source-derived traces, shutter slices, focus transfer, clean return
+ *   Available Light = photographic presence: real light, people, place, material, and room tone
+ *   Signal Manual = operational clarity: source fields, signal hierarchy, state, proof, release
+ *   Performance Native = phone-close people, product action, captions, proof hold, direct release
  *   Noir      = fashion editorial: centered, extreme whitespace, hairline gold frame, thin serif
  *   Journal   = newspaper front page: double-rule masthead, faux columns, drop caps, red-pen notes
  *   Neon      = HUD terminal: scan grid, corner brackets, status bar, mono readouts, cursor
@@ -17,6 +23,11 @@
 
 import { framePack, localizeBlock, type SupportedLocale } from './locales';
 import { type Block } from './dialects/shared';
+import * as afterimage from './dialects/afterimage';
+import * as availableLight from './dialects/available-light';
+import * as signalManual from './dialects/signal-manual';
+import * as editorialPulse from './dialects/editorial-pulse';
+import * as performanceNative from './dialects/performance-native';
 import * as kawaiiBubble from './dialects/kawaii-bubble';
 import * as megaSale from './dialects/mega-sale';
 import * as pixelArcade from './dialects/pixel-arcade';
@@ -46,6 +57,11 @@ import * as neonRunner from './dialects/neon-runner';
 /* ================================================================ */
 
 const DIALECTS: Record<string, Record<string, () => Block>> = {
+  'afterimage': afterimage.blocks,
+  'available-light': availableLight.blocks,
+  'signal-manual': signalManual.blocks,
+  'editorial-pulse': editorialPulse.blocks,
+  'performance-native': performanceNative.blocks,
   'knowledge-cards': knowledgeCards.blocks,
   'foodie-vlog': foodieVlog.blocks,
   'biennale-poster': biennalePoster.blocks,
@@ -86,6 +102,11 @@ export function showcaseBlock(frameId: string, kind: string, locale?: SupportedL
    ================================================================ */
 
 const COVERS: Record<string, () => Block> = {
+  'afterimage': afterimage.cover,
+  'available-light': availableLight.cover,
+  'signal-manual': signalManual.cover,
+  'editorial-pulse': editorialPulse.cover,
+  'performance-native': performanceNative.cover,
   'kawaii-bubble': kawaiiBubble.cover,
   'mega-sale': megaSale.cover,
   'pixel-arcade': pixelArcade.cover,

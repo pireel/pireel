@@ -4,7 +4,12 @@
  */
 
 
-import { KIND_LABELS_EN, KIND_LABELS_ZH, type FrameLocalePack, type SupportedLocale } from './types';
+import { KIND_LABELS_EN, KIND_LABELS_ZH, type FrameLocalePack } from './types';
+import { pack as afterimage } from './en/afterimage';
+import { pack as availableLight } from './en/available-light';
+import { pack as signalManual } from './en/signal-manual';
+import { pack as editorialPulse } from './en/editorial-pulse';
+import { pack as performanceNative } from './en/performance-native';
 import { pack as biennalePoster } from './en/biennale-poster';
 import { pack as boardroom } from './en/boardroom';
 import { pack as botanicPress } from './en/botanic-press';
@@ -36,6 +41,11 @@ export type { FrameLocalePack, SupportedLocale } from './types';
 export { localizeBlock } from './apply';
 
 const EN: Record<string, FrameLocalePack> = {
+  'afterimage': afterimage,
+  'available-light': availableLight,
+  'signal-manual': signalManual,
+  'editorial-pulse': editorialPulse,
+  'performance-native': performanceNative,
   'biennale-poster': biennalePoster,
   'boardroom': boardroom,
   'botanic-press': botanicPress,

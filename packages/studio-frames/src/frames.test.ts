@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { frameRegistry } from './vite';
+import { parseFrame } from './registry';
 
 describe('frame 注册表(frame.md 内容包)', () => {
   it('能加载全部 frame,必填字段齐全', () => {
@@ -29,6 +30,22 @@ describe('frame 注册表(frame.md 内容包)', () => {
     const first = frameRegistry.list()[0]!;
     expect(frameRegistry.get(first.id)?.id).toBe(first.id);
     expect(frameRegistry.get('__nope__')).toBeNull();
+  });
+
+  it('可由宿主通过元数据注入横版缩略图,不要求 OSS 内容包携带私有素材', () => {
+    const frame = parseFrame(`---
+id: private-frame
+title: Private Frame
+summary: Hosted metadata
+icon: ◼️
+coverKey: /studio/frame-covers/private-frame.jpg
+showcase: []
+version: 1.0.0
+---
+# Private frame
+
+This playbook remains hosted.`, 'private-frame/frame.md');
+    expect(frame.coverKey).toBe('/studio/frame-covers/private-frame.jpg');
   });
 
   it('body 是英文 playbook(注入 system prompt 的硬规则):首行不含中文', () => {

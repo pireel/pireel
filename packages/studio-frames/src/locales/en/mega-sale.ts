@@ -1,71 +1,34 @@
 import type { FrameLocalePack } from '../types';
 
 export const pack: FrameLocalePack = {
-  title: 'Mega Sale',
-  summary:
-    'Red-and-gold retail blowout — starburst stickers, giant price tags and a ticking countdown, built for hauls and flash-sale hype.',
+  title: 'Retail Rush',
+  summary: 'Real products, use actions, hard retail fields, verified offer hierarchy and tactile sound create high-density promotional pressure without fake discounts, scarcity or proof.',
   copy: {
-    // Cover
-    爆炸: 'Blowout',
-    'MEGA SALE · 全场狂欢': 'MEGA SALE · EVERYTHING MUST GO',
-    '5折': '50% OFF',
-    '限时开抢 — MEGA SALE — 限时开抢 — MEGA SALE':
-      'LIMITED TIME — MEGA SALE — LIMITED TIME — MEGA SALE',
-    // Title card
-    '今日爆款 — 全场直降 — 今日爆款 — 全场直降':
-      "TODAY'S HOT DEAL — STOREWIDE MARKDOWN — TODAY'S HOT DEAL — STOREWIDE MARKDOWN",
-    全场直降: 'EVERYTHING',
-    五折起: '50% OFF',
-    立减: 'SAVE BIG',
-    '数量有限 · 抢完即止 · FINAL CALL': 'LIMITED STOCK · WHILE SUPPLIES LAST · FINAL CALL',
-    // Big number
-    '日常价 ¥399': 'Regular price $39',
-    '¥': '$',
-    '199': '19',
-    '今晚 20:00 开抢 — TONIGHT ONLY — 今晚 20:00 开抢':
-      'DROPS TONIGHT AT 8PM — TONIGHT ONLY — DROPS TONIGHT AT 8PM',
-    // Number change
-    '价 格 崩 了': 'PRICE CRASH',
-    '原价 ¥1299': 'Was $129',
-    省400: 'SAVE $40',
-    '今夜恢复原价 · 仅此一批 · 手慢无': 'BACK TO FULL PRICE TONIGHT · ONE BATCH ONLY · GONE IS GONE',
-    // Call to action
-    '距 结 束 仅 剩': 'TIME REMAINING',
-    '马上抢购 ▶': 'SHOP NOW ▶',
-    仅限: 'TODAY',
-    今天: 'ONLY',
-    // Countdown
-    '距 开 抢 仅 剩': 'SALE STARTS IN',
-    时: 'HRS',
-    分: 'MIN',
-    秒: 'SEC',
-    秒杀: 'FLASH SALE',
-    '今晚 8 点开抢 — 8PM TONIGHT — 今晚 8 点开抢 — 8PM TONIGHT':
-      'LIVE AT 8PM — 8PM TONIGHT — LIVE AT 8PM — 8PM TONIGHT',
-    // Comparison
-    '别 再 花 冤 枉 钱': 'STOP OVERPAYING',
-    日常价: 'Regular price',
-    '¥399': '$39',
-    现价: 'NOW',
-    '¥199': '$19',
-    '同款同源 · 直降 200 · 仅此一批': 'SAME PRODUCT, SAME SOURCE · $200 OFF · WHILE SUPPLIES LAST',
-    // List
-    今日爆款清单: "TODAY'S TOP PICKS",
-    无线吸尘器: 'Cordless Vacuum',
-    '¥99': '$9',
-    速干吹风机: 'Fast-Dry Hair Dryer',
-    '¥159': '$15',
-    迷你破壁机: 'Mini Blender',
-    '前 100 名下单再减 10 元 · 抢完恢复原价': 'FIRST 100 ORDERS GET $10 OFF · PRICE RESETS AFTER',
-    // Steps
-    '三 步 抢 到 手': 'GRAB IT IN 3 STEPS',
-    领券: 'COUPON',
-    '先领 200 券': 'Grab your $20 off',
-    下单: 'ORDER',
-    整点拍下: 'Buy on the hour',
-    付款: 'PAYMENT',
-    立省一半: 'Save 50% instantly',
-    '零点截单 — 手慢无 — 零点截单 — 手慢无':
-      'ENDS AT MIDNIGHT — WHILE SUPPLIES LAST — ENDS AT MIDNIGHT — WHILE SUPPLIES LAST',
+    '零售脉冲': 'RETAIL RUSH',
+    '拿起它': 'PICK IT UP',
+    '就知道怎么用': 'KNOW HOW IT WORKS',
+    '真实包装、真实动作、真实材质先出现。': 'Real packaging, real action and real material appear first.',
+    '看清产品': 'SEE THE PRODUCT',
+    '真实套装': 'REAL BUNDLE',
+    '示例价格': 'EXAMPLE PRICE',
+    '发布前确认': 'CONFIRM BEFORE RELEASE',
+    '2 件套 / 适用版本待确认 / 不虚构原价': '2-ITEM BUNDLE / ELIGIBILITY TBD / NO FAKE REFERENCE PRICE',
+    '现在去看': 'SEE IT NOW',
+    '一按即开': 'OPEN IN ONE PRESS',
+    '真实动作片段': 'REAL ACTION FOOTAGE',
+    '折叠收好': 'FOLDS AWAY',
+    '真实体积变化': 'REAL SIZE CHANGE',
+    '放进日常': 'FITS REAL LIFE',
+    '真实使用场景': 'REAL USE CONTEXT',
+    '同一件事': 'ONE PRODUCT',
+    '三种选择': 'THREE REAL CHOICES',
+    '颜色、尺寸或版本必须来自真实产品。': 'Color, size and version must come from the real product.',
+    '先看结果': 'SEE THE RESULT FIRST',
+    '再听结论': 'THEN HEAR THE CLAIM',
+    '画面证明不了的，不用设计假装证明。': 'Design must never pretend the footage proves what it cannot.',
+    '用户确认后的真实证据': 'REAL EVIDENCE AFTER USER CONFIRMATION',
+    '确认条款': 'CONFIRM THE TERMS',
+    '再去行动': 'THEN TAKE ACTION',
+    '价格 / 日期 / 适用范围 / 发布前确认': 'PRICE / DATE / ELIGIBILITY / CONFIRM BEFORE RELEASE',
   },
 };

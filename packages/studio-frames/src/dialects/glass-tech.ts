@@ -1,352 +1,61 @@
-/**
- * Glass — frosted-glass tech dialect: dark base with two glow orbs lighting first,
- * glass panes floating over them offset. Main card off-axis + mini card in the corner,
- * top-edge highlight reads as a lit bevel; mono data glows ice-blue.
- */
-
+/** Interface Current v2: real product surfaces, state change, people, system depth, resolution. */
 import { type Block, mk } from './shared';
 
-/* Shared base for orbs + glass panes: orbs always sit at the bottom, glass floats on the light */
-const glassRoot = (id: string) => `
-#${id} .rt{position:absolute;inset:0;color:var(--fg);font-family:var(--font-head);overflow:hidden;}
-#${id} .orb{position:absolute;border-radius:999px;filter:blur(90px);opacity:0.5;}
-#${id} .o1{width:820px;height:820px;left:-180px;top:-240px;background:var(--accent);}
-#${id} .o2{width:720px;height:720px;right:-160px;bottom:-280px;background:var(--accent-2);}
-#${id} .gc{position:absolute;background:var(--panel);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:1px solid var(--line);border-top-color:var(--muted);border-radius:var(--radius);box-shadow:var(--shadow);}
-#${id} .chip{display:inline-flex;align-items:center;gap:18px;padding:16px 36px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-size:32px;color:var(--muted);letter-spacing:0.1em;}
-#${id} .chip i{width:14px;height:14px;border-radius:999px;background:var(--accent);box-shadow:var(--glow);}`;
+const root = (id: string) => `
+#${id} .ic{position:absolute;inset:0;overflow:hidden;background:var(--paper);color:var(--fg);font-family:var(--font-body);}
+#${id} .head{font-family:var(--font-head);font-weight:900;letter-spacing:-.045em;}
+#${id} .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;}
+#${id} .micro{font-family:var(--font-num);font-size:18px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;}
+#${id} .screen{position:absolute;background:#edf3f5;color:#172029;border:8px solid #29343d;box-shadow:var(--shadow);overflow:hidden;}
+#${id} .screen .nav{position:absolute;left:0;top:0;bottom:0;width:150px;background:#182129;}
+#${id} .screen .bar{position:absolute;left:190px;right:45px;height:18px;background:#bec9cd;border-radius:2px;}
+#${id} .screen .bar.hot{background:var(--accent);}
+#${id} .signal{position:absolute;height:10px;background:var(--accent);transform-origin:left center;box-shadow:var(--glow);}
+#${id} .signal::after{content:'';position:absolute;right:-2px;top:-8px;border-left:18px solid var(--accent);border-top:13px solid transparent;border-bottom:13px solid transparent;}
+#${id} .status{display:inline-flex;gap:12px;align-items:center;padding:13px 18px;border:2px solid var(--line);font-family:var(--font-num);font-size:18px;letter-spacing:.1em;}
+#${id} .status i{width:12px;height:12px;border-radius:50%;background:var(--accent);}
+#${id} [data-edit]{outline:none;}`;
 
-export const cover: () => Block = () =>
-  mk(
-    'cv_gl',
-    '封面',
-    (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="chip"><i></i>GLASS · FROSTED TECH</div>
-    <div class="h">玻璃</div>
-  </div>
-  <div class="gc mini"><b>BLUR 30</b><span>panes over light</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .main{left:250px;top:210px;width:1180px;padding:90px 110px;display:flex;flex-direction:column;gap:56px;}
-#${id} .h{font-size:300px;font-weight:900;line-height:1;letter-spacing:0.02em;}
-#${id} .mini{right:270px;bottom:190px;padding:52px 70px;display:flex;flex-direction:column;gap:18px;z-index:2;}
-#${id} .mini b{font-family:var(--font-num);font-size:64px;font-weight:700;color:var(--accent);text-shadow:var(--glow);}
-#${id} .mini span{font-size:30px;color:var(--muted);letter-spacing:0.22em;text-transform:uppercase;}
-</style>`,
-    (id) =>
-      `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-      `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.45,ease:'power2.out'},0.2);\n` +
-      `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.5);\n` +
-      `tl.from('#${id} .mini',{y:80,autoAlpha:0,duration:0.4,ease:'power2.out'},0.45);`,
-  );
+export const cover: () => Block = () => mk('cv_ic2', '封面', (id) => `
+<div class="ic cover"><div class="screen"><i class="nav"></i><i class="bar a"></i><i class="bar hot b"></i><div class="result"></div></div><div class="person"><i></i><b></b></div><i class="signal"></i><div class="title head" data-edit>界面流</div><div class="english num">INTERFACE CURRENT</div><div class="thesis micro">PERSON / PRODUCT / STATE / RESULT</div></div>
+<style>${root(id)}
+#${id} .cover .screen{right:80px;top:120px;width:950px;height:730px;transform:perspective(1200px) rotateY(-7deg);}#${id} .cover .bar.a{top:105px;width:430px;}#${id} .cover .bar.b{top:155px;width:610px;}#${id} .result{position:absolute;left:190px;right:55px;top:230px;bottom:55px;background:linear-gradient(135deg,#c6d4d7,#f8fbfb);border:4px solid #27323a;}#${id} .person{position:absolute;right:780px;bottom:-50px;width:360px;height:700px;}#${id} .person i{position:absolute;left:90px;top:0;width:180px;height:210px;border-radius:48%;background:#9a6b51;}#${id} .person b{position:absolute;left:10px;top:200px;width:340px;height:520px;border-radius:150px 150px 0 0;background:#485866;}#${id} .cover>.signal{left:770px;top:520px;width:400px;}#${id} .title{position:absolute;left:85px;top:240px;font-size:190px;line-height:.9;}#${id} .english{position:absolute;left:95px;top:520px;font-size:30px;font-weight:900;letter-spacing:.19em;}#${id} .thesis{position:absolute;left:95px;bottom:80px;color:var(--accent);}
+</style>`, (id) => `tl.from('#${id} .screen',{x:180,autoAlpha:0,duration:.36},0);tl.from('#${id} .person',{y:100,autoAlpha:0,duration:.3},.16);tl.from('#${id} .title,#${id} .english,#${id} .thesis',{x:-50,autoAlpha:0,duration:.24,stagger:.07},.28);tl.from('#${id} .signal',{scaleX:0,duration:.25},.48);`);
 
 export const blocks: Record<string, () => Block> = {
-  'title-card': () =>
-    mk(
-      'gl_ttl',
-      'title-card',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="chip"><i></i>新品实测 · HANDS-ON</div>
-    <div class="h">这块芯片,<br/>凭什么贵一倍</div>
-    <div class="s">三项极限测试,一次讲清</div>
-  </div>
-  <div class="gc mini"><b>3nm</b><span>128GB UNIFIED</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:170px;top:170px;width:1220px;padding:80px 100px;display:flex;flex-direction:column;gap:50px;}
-#${id} .h{font-size:128px;font-weight:900;line-height:1.16;letter-spacing:-0.01em;}
-#${id} .s{font-size:40px;color:var(--muted);}
-#${id} .mini{right:180px;bottom:170px;padding:48px 66px;display:flex;flex-direction:column;gap:16px;z-index:2;}
-#${id} .mini b{font-family:var(--font-num);font-size:96px;font-weight:700;color:var(--accent);text-shadow:var(--glow);line-height:1;}
-#${id} .mini span{font-size:30px;color:var(--muted);letter-spacing:0.2em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.45,ease:'power2.out'},0.18);\n` +
-        `tl.from('#${id} .h',{autoAlpha:0,y:24,duration:0.35},0.4);\n` +
-        `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.5);\n` +
-        `tl.from('#${id} .mini',{y:80,autoAlpha:0,duration:0.4,ease:'power2.out'},0.5);`,
-    ),
-  'big-number': () =>
-    mk(
-      'gl_num',
-      'big-number',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="v">89<i>%</i></div>
-    <div class="s">重度使用一整天,电量仍剩近九成</div>
-  </div>
-  <div class="gc mini"><div class="chip"><i></i>BENCHMARK · REAL WORLD</div></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:190px;top:250px;width:1240px;padding:90px 110px 100px;display:flex;flex-direction:column;gap:40px;}
-#${id} .v{font-family:var(--font-num);font-size:330px;font-weight:800;line-height:1;letter-spacing:-0.04em;color:var(--accent);text-shadow:var(--glow);}
-#${id} .v i{font-style:normal;font-size:160px;color:var(--fg);text-shadow:none;}
-#${id} .s{font-size:42px;color:var(--muted);}
-#${id} .mini{right:170px;top:180px;padding:36px 44px;z-index:2;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.45,ease:'power2.out'},0.18);\n` +
-        `tl.from('#${id} .v',{autoAlpha:0,y:30,duration:0.4,ease:'power2.out'},0.42);\n` +
-        `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.65);\n` +
-        `tl.from('#${id} .mini',{y:-60,autoAlpha:0,duration:0.4,ease:'power2.out'},0.5);`,
-    ),
-  'count-up': () =>
-    mk(
-      'gl_cnt',
-      'count-up',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="chip"><i></i>跑分实录 · ANTUTU V11</div>
-    <div class="v">128560</div>
-    <div class="s">跑完机身 41°C,没碰温度墙</div>
-  </div>
-  <div class="gc mini"><b>96420</b><span>上代旗舰跑分</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:190px;top:220px;width:1260px;padding:84px 100px 90px;display:flex;flex-direction:column;gap:44px;}
-#${id} .v{font-family:var(--font-num);font-size:270px;font-weight:800;line-height:1;letter-spacing:-0.03em;color:var(--accent);text-shadow:var(--glow);}
-#${id} .s{font-size:40px;color:var(--muted);}
-#${id} .mini{right:170px;bottom:170px;padding:44px 60px;display:flex;flex-direction:column;gap:14px;z-index:2;}
-#${id} .mini b{font-family:var(--font-num);font-size:76px;font-weight:700;color:var(--fg);opacity:0.9;line-height:1;}
-#${id} .mini span{font-size:30px;color:var(--muted);letter-spacing:0.14em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.4,ease:'power2.out'},0.1);\n` +
-        `tl.from('#${id} .v',{autoAlpha:0,duration:0.25},0.15);\n` +
-        `tl.from('#${id} .v',{innerText:96420,snap:{innerText:1},duration:0.8,ease:'power1.out'},0.15);\n` +
-        `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.5);\n` +
-        `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.7);\n` +
-        `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.6);`,
-    ),
-  'chart': () =>
-    mk(
-      'gl_bar',
-      'chart',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="hd"><div class="chip"><i></i>续航横评 · HOURS</div><span class="t">四机对比,差距在这</span></div>
-    <div class="plot">
-      <div class="col"><em>11.2</em><div class="b" style="height:220px"></div><span>机型 A</span></div>
-      <div class="col"><em>13.5</em><div class="b" style="height:280px"></div><span>机型 B</span></div>
-      <div class="col"><em>12.1</em><div class="b" style="height:240px"></div><span>机型 C</span></div>
-      <div class="col win"><em>19.8</em><div class="b" style="height:420px"></div><span>本机</span></div>
-    </div>
-  </div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:170px;right:170px;top:130px;bottom:130px;padding:70px 100px;display:flex;flex-direction:column;gap:40px;}
-#${id} .hd{display:flex;align-items:center;justify-content:space-between;}
-#${id} .t{font-size:56px;font-weight:800;}
-#${id} .plot{flex:1;display:flex;align-items:flex-end;gap:120px;border-bottom:1px solid var(--line);padding:0 60px;}
-#${id} .col{display:flex;flex-direction:column;align-items:center;gap:22px;}
-#${id} .col em{font-style:normal;font-family:var(--font-num);font-size:40px;color:var(--muted);}
-#${id} .col .b{width:170px;background:var(--panel);border:1px solid var(--line);border-top-color:var(--muted);border-radius:14px 14px 0 0;}
-#${id} .col span{font-size:34px;color:var(--muted);margin-bottom:-62px;padding-top:16px;}
-#${id} .col.win em{color:var(--accent);font-weight:700;font-size:48px;}
-#${id} .col.win .b{background:var(--accent);border-color:var(--accent);box-shadow:var(--glow);}
-#${id} .col.win span{color:var(--fg);font-weight:700;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.4,ease:'power2.out'},0.15);\n` +
-        `tl.from('#${id} .b',{scaleY:0,transformOrigin:'bottom',duration:0.4,stagger:0.09,ease:'power3.out'},0.4);\n` +
-        `tl.from('#${id} .col em',{autoAlpha:0,y:16,duration:0.25,stagger:0.07},0.6);\n` +
-        `tl.from('#${id} .col span',{autoAlpha:0,duration:0.25},0.8);`,
-    ),
-  'code': () =>
-    mk(
-      'gl_cde',
-      'code',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="bar"><i class="w"></i><i class="w"></i><i class="w"></i><em>bench.ts</em></div>
-    <div class="code">
-      <div class="row"><u>1</u><span><b class="kw">import</b> { bench } <b class="kw">from</b> <b class="st">"hyperlab"</b></span></div>
-      <div class="row"><u>2</u><span><b class="kw">const</b> run = <b class="kw">await</b> bench(<b class="st">"cine-r24"</b>)</span></div>
-      <div class="row"><u>3</u><span>run.load({ minutes: 30 })</span></div>
-      <div class="row rh"><i class="hl"></i><u>4</u><span><b class="kw">const</b> drop = run.throttle()</span></div>
-      <div class="row"><u>5</u><span><b class="kw">if</b> (drop &lt; 0.05) mark(<b class="st">"满血"</b>) <b class="cm">// 降频不到 5%,过</b></span></div>
-    </div>
-  </div>
-  <div class="gc mini"><b>BUILD PASSED</b><span>2.4s · 0 WARNINGS</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:170px;top:170px;width:1360px;padding:0;overflow:hidden;}
-#${id} .bar{display:flex;align-items:center;gap:20px;padding:34px 56px;border-bottom:1px solid var(--line);}
-#${id} .w{width:20px;height:20px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);}
-#${id} .bar em{font-style:normal;font-family:var(--font-num);font-size:30px;color:var(--muted);letter-spacing:0.08em;margin-left:16px;}
-#${id} .code{display:flex;flex-direction:column;gap:34px;padding:60px 70px 70px;font-family:var(--font-num);font-size:36px;line-height:1.2;}
-#${id} .row{position:relative;display:flex;gap:44px;align-items:baseline;}
-#${id} .row u{text-decoration:none;flex:none;width:44px;text-align:right;font-size:30px;color:var(--muted);opacity:0.7;}
-#${id} .kw{font-weight:700;color:var(--accent);}
-#${id} .st{font-weight:400;color:var(--accent-2);}
-#${id} .cm{font-weight:400;color:var(--muted);}
-#${id} .hl{position:absolute;left:-28px;right:-28px;top:-14px;bottom:-14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;}
-#${id} .rh u,#${id} .rh span{position:relative;}
-#${id} .mini{right:190px;bottom:130px;padding:44px 60px;display:flex;flex-direction:column;gap:14px;z-index:2;}
-#${id} .mini b{font-family:var(--font-num);font-size:46px;font-weight:700;color:var(--accent);text-shadow:var(--glow);line-height:1;}
-#${id} .mini span{font-size:30px;color:var(--muted);letter-spacing:0.18em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.4,ease:'power2.out'},0.12);\n` +
-        `tl.from('#${id} .w',{scale:0,duration:0.2,stagger:0.07,ease:'back.out(2)'},0.35);\n` +
-        `tl.from('#${id} .row',{autoAlpha:0,y:16,duration:0.28,stagger:0.08,ease:'power2.out'},0.4);\n` +
-        `tl.from('#${id} .hl',{scaleX:0,transformOrigin:'left center',duration:0.32,ease:'power2.out'},0.82);\n` +
-        `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.35,ease:'power2.out'},0.85);`,
-    ),
-  'quote': () =>
-    mk(
-      'gl_qte',
-      'quote',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="chip"><i></i>QUOTE · 实测有感</div>
-    <div class="t">性能不是跑分,<br/>是<b>全程不掉帧</b>的底气</div>
-  </div>
-  <div class="gc mini"><span>—— 主编 · 30 天深度体验</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:190px;top:230px;width:1330px;padding:84px 100px;display:flex;flex-direction:column;gap:52px;}
-#${id} .t{font-size:100px;font-weight:800;line-height:1.5;}
-#${id} .t b{color:var(--accent);font-weight:900;text-shadow:var(--glow);}
-#${id} .mini{right:210px;bottom:170px;padding:40px 60px;z-index:2;}
-#${id} .mini span{font-size:34px;color:var(--muted);letter-spacing:0.1em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.45,ease:'power2.out'},0.18);\n` +
-        `tl.from('#${id} .t',{autoAlpha:0,y:26,duration:0.35},0.4);\n` +
-        `tl.from('#${id} .t b',{autoAlpha:0,duration:0.3},0.6);\n` +
-        `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.55);\n` +
-        `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.55);`,
-    ),
-  'steps': () =>
-    mk(
-      'gl_stp',
-      'steps',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc st s1"><b class="n a">01</b><div class="tx"><span>开箱先跑基准</span><em>别信纸面参数,先测再说</em></div></div>
-  <div class="gc st s2"><b class="n">02</b><div class="tx"><span>满载烤机半小时</span><em>看降频曲线,不看峰值</em></div></div>
-  <div class="gc st s3"><b class="n">03</b><div class="tx"><span>回到真实工作流</span><em>剪一条 4K,数字才算数</em></div></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .st{padding:52px 70px;width:1180px;display:flex;align-items:center;gap:56px;}
-#${id} .st.s1{left:210px;top:190px;z-index:3;}
-#${id} .st.s2{left:320px;top:440px;z-index:2;}
-#${id} .st.s3{left:430px;top:690px;z-index:1;}
-#${id} .n{font-family:var(--font-num);font-size:56px;font-weight:700;color:var(--muted);background:var(--panel-2);border:1px solid var(--line);border-radius:18px;padding:22px 34px;}
-#${id} .n.a{color:var(--paper);background:var(--accent);border-color:var(--accent);box-shadow:var(--glow);}
-#${id} .tx{display:flex;flex-direction:column;gap:14px;}
-#${id} .tx span{font-size:54px;font-weight:800;}
-#${id} .tx em{font-style:normal;font-size:34px;color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .st',{y:60,autoAlpha:0,duration:0.4,stagger:0.13,ease:'power2.out'},0.16);\n` +
-        `tl.from('#${id} .n',{autoAlpha:0,y:20,duration:0.25,stagger:0.13},0.4);\n` +
-        `tl.from('#${id} .n.a',{scale:0.6,duration:0.25,ease:'back.out(2)'},0.7);\n` +
-        `tl.from('#${id} .tx em',{autoAlpha:0,duration:0.25},0.8);`,
-    ),
-  'chapters': () =>
-    mk(
-      'gl_chp',
-      'chapters',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="caps">
-    <div class="cap"><b>01</b><span>开箱</span></div>
-    <div class="cap on"><b>02</b><span>实测</span></div>
-    <div class="cap"><b>03</b><span>结论</span></div>
-  </div>
-  <div class="gc main">
-    <div class="h">实测</div>
-    <div class="s">满载半小时,看它掉不掉链子</div>
-  </div>
-  <div class="gc mini"><b>02/03</b><span>CHAPTER</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .caps{position:absolute;left:230px;top:240px;display:flex;gap:36px;z-index:3;}
-#${id} .cap{display:flex;align-items:center;gap:22px;padding:26px 54px;border-radius:999px;background:var(--panel-2);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);border:1px solid var(--line);border-top-color:var(--muted);font-size:40px;color:var(--muted);}
-#${id} .cap b{font-family:var(--font-num);font-weight:700;}
-#${id} .cap.on{background:var(--accent);border-color:var(--accent);color:var(--paper);box-shadow:var(--glow);font-weight:800;}
-#${id} .main{left:190px;top:300px;width:1280px;padding:130px 100px 90px;display:flex;flex-direction:column;gap:40px;}
-#${id} .h{font-size:200px;font-weight:900;line-height:1;}
-#${id} .s{font-size:40px;color:var(--muted);}
-#${id} .mini{right:200px;bottom:180px;padding:44px 62px;display:flex;flex-direction:column;gap:14px;z-index:2;}
-#${id} .mini b{font-family:var(--font-num);font-size:64px;font-weight:700;color:var(--accent);text-shadow:var(--glow);line-height:1;}
-#${id} .mini span{font-size:30px;color:var(--muted);letter-spacing:0.2em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.from('#${id} .cap',{y:40,autoAlpha:0,duration:0.35,stagger:0.12,ease:'power2.out'},0.15);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.45,ease:'power2.out'},0.25);\n` +
-        `tl.from('#${id} .cap.on',{scale:0.7,duration:0.3,ease:'back.out(2)'},0.62);\n` +
-        `tl.from('#${id} .h',{autoAlpha:0,y:24,duration:0.35},0.5);\n` +
-        `tl.from('#${id} .s',{autoAlpha:0,duration:0.3},0.75);\n` +
-        `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.7);`,
-    ),
-  'cta': () =>
-    mk(
-      'gl_cta',
-      'cta',
-      (id) => `
-<div class="rt">
-  <div class="orb o1"></div><div class="orb o2"></div>
-  <div class="gc main">
-    <div class="chip"><i></i>NEXT DROP · 每周四晚 8 点</div>
-    <div class="h">下期,拆它的散热</div>
-    <div class="pill">＋ 关注</div>
-  </div>
-  <div class="gc mini"><b>EP.13</b><span>THERMAL DEEP DIVE</span></div>
-</div>
-<style>${glassRoot(id)}
-#${id} .rt{background-color:var(--paper);}
-#${id} .main{left:210px;top:210px;width:1240px;padding:84px 100px;display:flex;flex-direction:column;align-items:flex-start;gap:52px;}
-#${id} .h{font-size:112px;font-weight:900;line-height:1.16;}
-#${id} .pill{background:var(--accent);color:var(--paper);border-radius:999px;box-shadow:var(--glow);font-size:64px;font-weight:900;padding:32px 110px;}
-#${id} .mini{right:200px;bottom:190px;padding:48px 66px;display:flex;flex-direction:column;gap:16px;z-index:2;}
-#${id} .mini b{font-family:var(--font-num);font-size:64px;font-weight:700;color:var(--accent);text-shadow:var(--glow);line-height:1;}
-#${id} .mini span{font-size:30px;color:var(--muted);letter-spacing:0.2em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .orb',{autoAlpha:0,scale:0.7,duration:0.5,stagger:0.1},0);\n` +
-        `tl.to('#${id} .o1',{x:60,y:40,duration:0.9,ease:'power1.out'},0.1);\n` +
-        `tl.to('#${id} .o2',{x:-50,y:-40,duration:0.9,ease:'power1.out'},0.1);\n` +
-        `tl.from('#${id} .main',{y:60,autoAlpha:0,duration:0.45,ease:'power2.out'},0.18);\n` +
-        `tl.from('#${id} .h',{autoAlpha:0,y:24,duration:0.3},0.4);\n` +
-        `tl.from('#${id} .pill',{scale:0.6,autoAlpha:0,duration:0.3,ease:'back.out(1.6)'},0.55);\n` +
-        `tl.from('#${id} .chip i',{scale:0,duration:0.25,ease:'back.out(2)'},0.6);\n` +
-        `tl.from('#${id} .mini',{y:70,autoAlpha:0,duration:0.4,ease:'power2.out'},0.6);`,
-    ),
+  'product-thesis': () => mk('ic_thesis', 'product-thesis', (id) => `
+<div class="ic thesis"><div class="human"><div class="person"><i></i><b></b></div></div><div class="copy"><span class="micro">PRODUCT THESIS / REAL FRICTION</span><h2 class="head" data-edit>工作没有离开人<br/><b>系统只是接住它</b></h2><p data-edit>从真实操作和真实结果开始，不从抽象科技开始。</p><span class="status"><i></i>READY FOR INPUT</span></div><i class="edge"></i></div>
+<style>${root(id)}
+#${id} .human{position:absolute;right:0;top:0;width:790px;height:1080px;background:linear-gradient(145deg,#bac5ca,#e8edef 60%,#6c7a82);}#${id} .person{position:absolute;left:190px;top:170px;width:430px;height:830px;}#${id} .person i{position:absolute;left:110px;width:210px;height:240px;border-radius:48%;background:#a9785e;}#${id} .person b{position:absolute;left:20px;top:225px;width:390px;height:600px;border-radius:180px 180px 0 0;background:#35454f;}#${id} .copy{position:absolute;left:80px;top:85px;width:1050px;}#${id} .copy h2{margin-top:140px;font-size:105px;line-height:.98;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:70px;width:730px;font-size:28px;line-height:1.55;color:var(--muted);}#${id} .copy .status{margin-top:70px;}#${id} .edge{position:absolute;left:1090px;top:0;width:14px;height:820px;background:var(--accent);}
+</style>`, (id) => `tl.from('#${id} .human',{x:170,duration:.34},0);tl.from('#${id} .edge',{scaleY:0,transformOrigin:'top',duration:.27},.14);tl.from('#${id} .copy>*',{x:-45,autoAlpha:0,duration:.24,stagger:.08},.25);`),
+
+  'live-interface': () => mk('ic_live', 'live-interface', (id) => `
+<div class="ic live"><div class="screen"><i class="nav"></i><div class="crumb num">PROJECT / REVIEW / CURRENT</div><i class="bar a"></i><i class="bar b hot"></i><div class="workspace"><div class="cursor"></div><div class="selection"></div></div></div><div class="note"><span class="micro">LIVE INTERFACE / INPUT → RESPONSE</span><h2 class="head" data-edit>让真实界面<br/><b>自己证明变化</b></h2><span class="status"><i></i>STATE CHANGED</span></div><i class="signal"></i></div>
+<style>${root(id)}
+#${id} .live .screen{left:70px;top:80px;width:1230px;height:920px;}#${id} .crumb{position:absolute;left:190px;top:45px;font-size:18px;}#${id} .live .bar.a{top:110px;width:610px;}#${id} .live .bar.b{top:155px;width:430px;}#${id} .workspace{position:absolute;left:190px;right:50px;top:220px;bottom:60px;background:#c8d4d7;}#${id} .selection{position:absolute;left:170px;top:150px;width:510px;height:310px;border:10px solid var(--accent);background:#eaf2f3;}#${id} .cursor{position:absolute;left:650px;top:430px;width:0;height:0;border-left:25px solid #101820;border-top:38px solid transparent;transform:rotate(-28deg);}#${id} .note{position:absolute;left:1370px;top:130px;width:460px;}#${id} .note h2{margin-top:135px;font-size:72px;line-height:1;}#${id} .note h2 b{color:var(--accent);}#${id} .note .status{margin-top:90px;color:var(--accent-2);}#${id} .live>.signal{left:1180px;top:700px;width:390px;}
+</style>`, (id) => `tl.from('#${id} .screen',{x:-130,autoAlpha:0,duration:.34},0);tl.from('#${id} .selection',{scale:.8,autoAlpha:0,duration:.28},.3);tl.from('#${id} .cursor',{x:120,y:90,duration:.38},.38);tl.from('#${id} .signal',{scaleX:0,duration:.25},.56);tl.from('#${id} .note>*',{x:45,autoAlpha:0,duration:.23,stagger:.07},.5);`),
+
+  'state-transition': () => mk('ic_state', 'state-transition', (id) => `
+<div class="ic state"><span class="micro">STATE TRANSITION / WHAT PERSISTED?</span><h2 class="head" data-edit>同一个位置<br/><b>只改变一个状态</b></h2><div class="states"><div class="before"><span class="num">BEFORE / PENDING</span><div class="panel"><i class="bar"></i><i class="bar"></i><i class="wait"></i></div></div><i class="signal"></i><div class="after"><span class="num">AFTER / VERIFIED</span><div class="panel"><i class="bar"></i><i class="bar hot"></i><b>✓</b></div></div></div></div>
+<style>${root(id)}
+#${id} .state>.micro{position:absolute;left:80px;top:65px;}#${id} .state>h2{position:absolute;left:80px;top:150px;font-size:88px;line-height:.98;}#${id} .state>h2 b{color:var(--accent);}#${id} .states{position:absolute;left:80px;right:80px;bottom:75px;height:560px;}#${id} .before,#${id} .after{position:absolute;top:0;width:720px;height:520px;}#${id} .before{left:0;}#${id} .after{right:0;}#${id} .states span{display:block;margin-bottom:22px;font-size:19px;letter-spacing:.12em;}#${id} .panel{position:relative;height:440px;background:#eaf0f2;color:#172029;border:6px solid #303a42;}#${id} .panel .bar{position:relative;display:block;margin:75px 70px 0;width:470px;height:22px;background:#aebdc2;}#${id} .panel .hot{background:var(--accent);}#${id} .wait{position:absolute;right:75px;bottom:70px;width:90px;height:90px;border:12px solid #aebdc2;border-right-color:var(--accent);border-radius:50%;}#${id} .panel b{position:absolute;right:70px;bottom:55px;width:115px;height:115px;border-radius:50%;background:var(--accent-2);display:grid;place-items:center;font-size:72px;color:#101810;}#${id} .states>.signal{left:760px;top:260px;width:230px;}
+</style>`, (id) => `tl.from('#${id} h2,#${id}>.micro',{x:-45,autoAlpha:0,duration:.24,stagger:.08},0);tl.from('#${id} .before',{x:-100,autoAlpha:0,duration:.3},.22);tl.from('#${id} .signal',{scaleX:0,duration:.28},.43);tl.from('#${id} .after',{x:100,autoAlpha:0,duration:.3},.58);tl.from('#${id} .after b',{scale:0,duration:.2},.78);`),
+
+  'human-machine': () => mk('ic_human', 'human-machine', (id) => `
+<div class="ic human-machine"><div class="room"><div class="person"><i></i><b></b></div><div class="device"></div></div><div class="response"><span class="micro">HUMAN / ATTENTION / FEEDBACK</span><h2 class="head" data-edit>人在看结果<br/><b>不是在装点界面</b></h2><div class="wave"></div><span class="status"><i></i>HANDOFF RECEIVED</span></div><i class="signal"></i></div>
+<style>${root(id)}
+#${id} .room{position:absolute;left:0;top:0;width:1050px;height:1080px;background:linear-gradient(135deg,#818e94,#dbe2e4 58%,#303b42);overflow:hidden;}#${id} .person{position:absolute;left:220px;top:170px;width:430px;height:820px;}#${id} .person i{position:absolute;left:110px;width:210px;height:240px;border-radius:48%;background:#a9785e;}#${id} .person b{position:absolute;left:20px;top:225px;width:390px;height:600px;border-radius:180px 180px 0 0;background:#334852;}#${id} .device{position:absolute;right:60px;top:350px;width:420px;height:280px;background:#111a20;border:18px solid #2c3840;transform:skewY(-5deg);}#${id} .response{position:absolute;left:1130px;top:115px;width:690px;}#${id} .response h2{margin-top:130px;font-size:85px;line-height:.98;}#${id} .response h2 b{color:var(--accent);}#${id} .wave{margin-top:90px;width:620px;height:150px;background:repeating-linear-gradient(90deg,var(--accent) 0 7px,transparent 7px 28px);clip-path:polygon(0 45%,5% 35%,10% 60%,15% 20%,20% 72%,25% 38%,30% 55%,35% 30%,40% 65%,45% 42%,50% 70%,55% 25%,60% 58%,65% 36%,70% 75%,75% 40%,80% 60%,85% 33%,90% 55%,95% 40%,100% 50%,100% 100%,0 100%);}#${id} .response .status{margin-top:70px;}#${id} .human-machine>.signal{left:930px;top:560px;width:300px;}
+</style>`, (id) => `tl.from('#${id} .room',{x:-160,duration:.35},0);tl.from('#${id} .signal',{scaleX:0,duration:.27},.28);tl.from('#${id} .response>*',{x:55,autoAlpha:0,duration:.24,stagger:.08},.38);tl.from('#${id} .wave',{scaleX:0,transformOrigin:'left',duration:.32},.58);`),
+
+  'system-depth': () => mk('ic_depth', 'system-depth', (id) => `
+<div class="ic depth"><span class="micro">SYSTEM DEPTH / ONLY WHEN IT EXPLAINS</span><div class="layers"><div class="l front"><b class="head" data-edit>界面</b><span>用户可见状态</span></div><div class="l middle"><b class="head" data-edit>任务</b><span>正在处理</span></div><div class="l back"><b class="head" data-edit>来源</b><span>已记录证据</span></div><i class="signal a"></i><i class="signal b"></i></div><div class="copy"><h2 class="head" data-edit>进入系统深处<br/><b>必须带回答案</b></h2><p>每一层都对应真实层级，不使用匿名科技背景。</p></div></div>
+<style>${root(id)}
+#${id} .depth>.micro{position:absolute;left:80px;top:65px;}#${id} .layers{position:absolute;left:80px;top:150px;width:1000px;height:800px;perspective:1200px;}#${id} .l{position:absolute;width:650px;height:420px;padding:55px;border:5px solid var(--accent);background:#18222c;box-shadow:var(--shadow);}#${id} .l.front{left:0;top:330px;z-index:3;}#${id} .l.middle{left:190px;top:175px;z-index:2;opacity:.88;}#${id} .l.back{left:380px;top:20px;z-index:1;opacity:.62;}#${id} .l b{font-size:75px;}#${id} .l span{display:block;margin-top:175px;font-size:24px;color:var(--muted);}#${id} .layers .signal{width:260px;z-index:4;}#${id} .layers .a{left:640px;top:545px;transform:rotate(-30deg);}#${id} .layers .b{left:810px;top:345px;transform:rotate(-30deg);}#${id} .copy{position:absolute;left:1220px;top:220px;width:610px;}#${id} .copy h2{font-size:79px;line-height:1;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:70px;font-size:27px;line-height:1.55;color:var(--muted);}
+</style>`, (id) => `tl.from('#${id} .l',{x:-100,y:80,autoAlpha:0,duration:.28,stagger:.14},0);tl.from('#${id} .signal',{scaleX:0,duration:.24,stagger:.16},.42);tl.from('#${id} .copy>*',{x:50,autoAlpha:0,duration:.24,stagger:.09},.48);`),
+
+  'resolved-flow': () => mk('ic_resolved', 'resolved-flow', (id) => `
+<div class="ic resolved"><div class="screen"><i class="nav"></i><i class="bar a"></i><i class="bar hot b"></i><div class="done">✓</div><span class="num">DELIVERED / 14:32</span></div><div class="copy"><span class="micro">RESOLVED FLOW / USEFUL OUTCOME</span><h2 class="head" data-edit>结果回到工作里<br/><b>系统安静下来</b></h2><p data-edit>结束在真实输出，不结束在无限加载。</p><span class="status ok"><i></i>VERIFIED RESULT</span></div><i class="lime"></i></div>
+<style>${root(id)}
+#${id} .resolved{background:var(--panel-2);color:#172029;}#${id} .resolved .screen{left:80px;top:100px;width:930px;height:820px;}#${id} .resolved .bar.a{top:110px;width:500px;}#${id} .resolved .bar.b{top:165px;width:620px;}#${id} .done{position:absolute;left:330px;top:285px;width:280px;height:280px;border-radius:50%;background:var(--accent-2);display:grid;place-items:center;font-size:190px;font-weight:900;}#${id} .resolved .screen>span{position:absolute;left:190px;bottom:55px;font-size:20px;}#${id} .resolved .copy{position:absolute;left:1120px;top:150px;width:690px;}#${id} .resolved .copy h2{margin-top:145px;font-size:86px;line-height:.98;}#${id} .resolved .copy h2 b{color:#087d69;}#${id} .resolved .copy p{margin-top:65px;font-size:28px;line-height:1.5;}#${id} .resolved .status{margin-top:70px;border-color:#172029;}#${id} .resolved .status i{background:#087d69;}#${id} .lime{position:absolute;right:0;bottom:0;width:660px;height:36px;background:var(--accent-2);}
+</style>`, (id) => `tl.from('#${id} .screen',{x:-130,autoAlpha:0,duration:.34},0);tl.from('#${id} .done',{scale:0,duration:.28,ease:'back.out(1.4)'},.28);tl.from('#${id} .copy>*',{x:55,autoAlpha:0,duration:.24,stagger:.08},.35);tl.from('#${id} .lime',{scaleX:0,transformOrigin:'right',duration:.27},.62);`),
 };

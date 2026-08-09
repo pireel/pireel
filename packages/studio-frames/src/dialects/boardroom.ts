@@ -1,423 +1,117 @@
-/**
- * Boardroom — business-consulting dialect: full-width top blue bar, section headers,
- * conclusion-first titles, KPI card sets, flat bar charts, SOURCE footnotes.
- * Layout logic: precise left-aligned grid, zero rotation, zero decoration.
- */
-
+/** Boardroom v2 preview dialect: people, exhibits, evidence lines, tension, ownership, release. */
 import { type Block, mk } from './shared';
 
-const bdRoot = (id: string) => `
-#${id} .bd{position:absolute;inset:0;color:var(--fg);font-family:var(--font-head);}
-#${id} .top{position:absolute;left:0;right:0;top:0;height:10px;background:var(--accent);}
-#${id} .hd{position:absolute;left:120px;right:120px;top:92px;display:flex;align-items:baseline;gap:34px;border-bottom:2px solid var(--line);padding-bottom:26px;}
-#${id} .hd .no{font-family:var(--font-num);font-size:34px;font-weight:700;color:var(--accent);}
-#${id} .hd .sec{font-size:38px;font-weight:700;border-left:2px solid var(--line);padding-left:34px;}
-#${id} .hd .sp{flex:1;}
-#${id} .hd .pg{font-family:var(--font-num);font-size:28px;color:var(--muted);letter-spacing:0.06em;}
-#${id} .ft{position:absolute;left:120px;right:120px;bottom:76px;border-top:1px solid var(--line);padding-top:22px;display:flex;justify-content:space-between;font-family:var(--font-num);font-size:28px;color:var(--muted);letter-spacing:0.06em;}`;
+const root = (id: string) => `
+#${id} .br{position:absolute;inset:0;overflow:hidden;background:var(--paper);color:var(--fg);font-family:var(--font-body);}
+#${id} .head{font-family:var(--font-head);font-weight:900;letter-spacing:-.045em;}
+#${id} .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;}
+#${id} .micro{font-family:var(--font-num);font-size:18px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;}
+#${id} .person{position:absolute;width:460px;height:790px;}
+#${id} .person .hair{position:absolute;left:103px;top:24px;width:255px;height:260px;border-radius:48% 48% 38% 38%;background:#252126;}
+#${id} .person .face{position:absolute;left:139px;top:92px;width:184px;height:220px;border-radius:48% 48% 43% 43%;background:#c78968;}
+#${id} .person .body{position:absolute;left:35px;top:292px;width:390px;height:520px;border-radius:180px 180px 0 0;background:#465665;}
+#${id} .person .eye{position:absolute;left:185px;top:176px;width:23px;height:9px;border-radius:50%;background:#241913;box-shadow:82px 0 0 #241913;}
+#${id} .person .mouth{position:absolute;left:220px;top:256px;width:48px;height:8px;border-radius:50%;background:#88443e;}
+#${id} .doc{position:absolute;background:#fff;border:2px solid var(--line);box-shadow:var(--shadow);}
+#${id} .doc .rule{position:absolute;left:46px;right:46px;height:4px;background:var(--fg);}
+#${id} .doc .thin{height:2px;background:var(--line);}
+#${id} .source{font-family:var(--font-num);font-size:17px;letter-spacing:.08em;color:var(--muted);}
+#${id} [data-edit]{outline:none;}`;
 
-export const cover: () => Block = () =>
-  mk(
-    'cv_bd',
-    '封面',
-    (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">00</span><span class="sec">FRAME</span><span class="sp"></span><span class="pg">P.00 / 12</span></div>
-  <div class="c">
-    <div class="h">简报</div>
-    <div class="s">BOARDROOM · 结论先行</div>
-  </div>
-  <div class="ft"><span>PIREEL ADVISORY</span><span>CONFIDENTIAL</span></div>
+export const cover: () => Block = () => mk('cv_br2', '封面', (id) => `
+<div class="br cover">
+  <div class="ink"></div><div class="room"><div class="table"></div><div class="person"><i class="hair"></i><i class="face"></i><i class="body"></i><i class="eye"></i><i class="mouth"></i></div><div class="doc"><i class="rule"></i><i class="rule thin"></i><i class="chart"></i></div></div>
+  <div class="line"></div><div class="title head" data-edit>决策室</div><div class="english num">BOARDROOM</div><div class="thesis micro">PERSON / EVIDENCE / DECISION / OWNER</div>
 </div>
-<style>${bdRoot(id)}
-#${id} .c{position:absolute;left:120px;top:330px;right:120px;display:flex;flex-direction:column;gap:48px;}
-#${id} .h{font-size:290px;font-weight:800;line-height:1;letter-spacing:0.02em;}
-#${id} .s{font-family:var(--font-num);font-size:36px;font-weight:700;letter-spacing:0.28em;color:var(--accent);}
-</style>`,
-    (id) =>
-      `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-      `tl.from('#${id} .hd',{autoAlpha:0,duration:0.24},0.14);\n` +
-      `tl.from('#${id} .h',{y:30,autoAlpha:0,duration:0.3,ease:'power2.out'},0.22);\n` +
-      `tl.from('#${id} .s,#${id} .ft',{autoAlpha:0,duration:0.26},0.5);`,
-  );
+<style>${root(id)}
+#${id} .cover{background:#f3f5f6;}#${id} .ink{position:absolute;left:0;top:0;width:805px;height:1080px;background:var(--panel-2);}#${id} .room{position:absolute;right:0;top:0;width:1220px;height:1080px;background:linear-gradient(145deg,#d7dde1,#f7f8f8 58%,#b8c0c5);overflow:hidden;}#${id} .table{position:absolute;left:-120px;right:-100px;bottom:-120px;height:420px;background:#7a6655;transform:skewY(-7deg);}#${id} .person{right:170px;top:150px;}#${id} .cover .doc{left:115px;top:215px;width:470px;height:620px;transform:rotate(-5deg);}#${id} .cover .doc .rule{top:76px;}#${id} .cover .doc .thin{top:132px;}#${id} .chart{position:absolute;left:55px;right:55px;bottom:85px;height:330px;background:linear-gradient(160deg,transparent 0 38%,var(--accent) 39% 44%,transparent 45% 56%,var(--accent) 57% 62%,transparent 63%);clip-path:polygon(0 80%,28% 58%,49% 67%,72% 32%,100% 6%,100% 100%,0 100%);opacity:.95;}
+#${id} .line{position:absolute;left:705px;top:0;width:18px;height:780px;background:var(--accent);}#${id} .title{position:absolute;left:92px;top:230px;color:#fff;font-size:185px;line-height:.95;}#${id} .english{position:absolute;left:102px;top:465px;color:#fff;font-size:32px;font-weight:900;letter-spacing:.2em;}#${id} .thesis{position:absolute;left:102px;bottom:90px;color:#fff;}
+</style>`, (id) =>
+  `tl.from('#${id} .ink',{x:-180,duration:.35,ease:'power3.out'},0);\n`+
+  `tl.from('#${id} .room',{x:220,duration:.38,ease:'power3.out'},.08);\n`+
+  `tl.from('#${id} .doc,#${id} .person',{y:90,autoAlpha:0,duration:.32,stagger:.1},.26);\n`+
+  `tl.from('#${id} .line',{scaleY:0,transformOrigin:'top',duration:.27},.38);\n`+
+  `tl.from('#${id} .title,#${id} .english,#${id} .thesis',{x:-45,autoAlpha:0,duration:.24,stagger:.06},.46);`);
 
 export const blocks: Record<string, () => Block> = {
-  'title-card': () =>
-    mk(
-      'bd_ttl',
-      'title-card',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">01</span><span class="sec">执行摘要</span><span class="sp"></span><span class="pg">P.01 / 12</span></div>
-  <div class="ttl">获客成本翻倍,<br/>复购把这笔账拉平了</div>
-  <div class="kpis">
-    <div class="kpi"><span>获客成本 CAC</span><b>¥86</b><i class="bad">▲ 102%</i></div>
-    <div class="kpi"><span>90 天复购率</span><b>41%</b><i class="good">▲ 9.4pt</i></div>
-    <div class="kpi"><span>回本周期</span><b>4.2<em>月</em></b><i class="good">▼ 1.1月</i></div>
-  </div>
-  <div class="ft"><span>SOURCE: 经营月报 2026-06</span><span>PIREEL ADVISORY</span></div>
+  'room-thesis': () => mk('br2_thesis', 'room-thesis', (id) => `
+<div class="br thesis">
+  <div class="room"><div class="window"></div><div class="table"></div><div class="person"><i class="hair"></i><i class="face"></i><i class="body"></i><i class="eye"></i><i class="mouth"></i></div></div>
+  <div class="field"><span class="micro">ROOM THESIS / CURRENT JUDGMENT</span><h2 class="head" data-edit>先说判断<br/><b>再让证据改变它</b></h2><p data-edit>人物、现场与问题先成立，不从一页执行摘要开始。</p></div><div class="edge"></div><div class="index num">01 / DECISION IN PROGRESS</div>
 </div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ttl{position:absolute;left:120px;right:120px;top:246px;font-size:84px;font-weight:700;line-height:1.32;letter-spacing:0.01em;}
-#${id} .kpis{position:absolute;left:120px;right:120px;top:566px;display:flex;gap:32px;}
-#${id} .kpi{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:44px 48px;display:flex;flex-direction:column;gap:20px;}
-#${id} .kpi span{font-size:29px;color:var(--muted);letter-spacing:0.08em;}
-#${id} .kpi b{font-family:var(--font-num);font-size:92px;font-weight:700;line-height:1;}
-#${id} .kpi b em{font-style:normal;font-size:44px;color:var(--muted);margin-left:8px;}
-#${id} .kpi i{font-style:normal;font-family:var(--font-num);font-size:32px;font-weight:700;}
-#${id} .kpi i.good{color:var(--accent);}
-#${id} .kpi i.bad{color:var(--accent-2);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd',{autoAlpha:0,duration:0.24},0.12);\n` +
-        `tl.from('#${id} .ttl',{y:30,autoAlpha:0,duration:0.3,ease:'power2.out'},0.2);\n` +
-        `tl.from('#${id} .kpi',{y:26,autoAlpha:0,duration:0.26,stagger:0.09,ease:'power2.out'},0.42);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.78);`,
-    ),
-  'chapters': () =>
-    mk(
-      'bd_agd',
-      'chapters',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">02</span><span class="sec">议程</span><span class="sp"></span><span class="pg">P.03 / 12</span></div>
-  <div class="bc"><span class="tag">AGENDA</span>
-    <div class="it"><span>01</span><b>复盘</b></div><i>/</i>
-    <div class="it cur"><span>02</span><b>目标</b></div><i>/</i>
-    <div class="it"><span>03</span><b>打法</b></div>
-  </div>
-  <div class="big">目标</div>
-  <div class="sub">明年增长从哪里来,靠什么守住</div>
-  <div class="ft"><span>SOURCE: 年度经营会 2026-07</span><span>PIREEL ADVISORY</span></div>
+<style>${root(id)}
+#${id} .thesis{background:var(--panel-2);color:#fff;}#${id} .thesis .room{position:absolute;right:0;top:0;width:880px;height:1080px;background:linear-gradient(140deg,#e9edef,#bec8ce);overflow:hidden;}#${id} .window{position:absolute;right:50px;top:70px;width:410px;height:500px;border:18px solid #9ba7ae;background:#eaf3f8;}#${id} .table{position:absolute;left:-80px;right:-80px;bottom:-90px;height:360px;background:#756456;transform:skewY(-7deg);}#${id} .thesis .person{left:165px;top:180px;}#${id} .field{position:absolute;left:95px;top:105px;width:860px;}#${id} .field h2{margin:125px 0 0;font-size:115px;line-height:.95;}#${id} .field h2 b{display:inline-block;margin-top:18px;color:#fff;border-bottom:14px solid var(--accent);padding-bottom:8px;}#${id} .field p{margin-top:78px;width:700px;font-size:27px;line-height:1.55;color:#ffffffb8;}#${id} .edge{position:absolute;left:1010px;top:0;width:16px;height:760px;background:var(--accent);}#${id} .index{position:absolute;left:96px;bottom:65px;font-size:19px;letter-spacing:.14em;}
+</style>`, (id) =>
+    `tl.from('#${id} .room',{x:220,duration:.36,ease:'power3.out'},0);\n`+
+    `tl.from('#${id} .edge',{scaleY:0,transformOrigin:'top',duration:.28},.16);\n`+
+    `tl.from('#${id} .field>* ,#${id} .index',{x:-45,autoAlpha:0,duration:.24,stagger:.07},.28);`),
+
+  'speaker-exhibit': () => mk('br2_speaker', 'speaker-exhibit', (id) => `
+<div class="br speaker">
+  <div class="human"><div class="person"><i class="hair"></i><i class="face"></i><i class="body"></i><i class="eye"></i><i class="mouth"></i></div><span class="micro">LIVE BRIEFING / SOURCE ATTACHED</span></div>
+  <div class="exhibit"><div class="doc"><i class="rule"></i><i class="rule thin"></i><div class="quote head" data-edit>“增长回来，<br/>但不是原来的增长。”</div><span class="source">SOURCE / OPERATING REVIEW / 2026-06</span></div><i class="connect"></i></div>
+  <div class="copy head" data-edit>让人物和证据<br/><b>共享权威</b></div>
 </div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .bc{position:absolute;left:120px;right:120px;top:280px;display:flex;align-items:baseline;gap:40px;}
-#${id} .bc .tag{font-family:var(--font-num);font-size:30px;font-weight:700;color:var(--muted);letter-spacing:0.2em;margin-right:16px;}
-#${id} .bc i{font-style:normal;font-family:var(--font-num);font-size:38px;color:var(--muted);opacity:0.5;}
-#${id} .it{display:flex;align-items:baseline;gap:18px;padding-bottom:16px;color:var(--muted);}
-#${id} .it span{font-family:var(--font-num);font-size:32px;font-weight:700;}
-#${id} .it b{font-size:44px;font-weight:600;}
-#${id} .it.cur{color:var(--fg);border-bottom:6px solid var(--accent);}
-#${id} .it.cur span{color:var(--accent);}
-#${id} .it.cur b{font-weight:700;}
-#${id} .big{position:absolute;left:120px;top:436px;font-size:280px;font-weight:800;line-height:1;letter-spacing:0.02em;}
-#${id} .sub{position:absolute;left:120px;top:790px;font-size:40px;color:var(--muted);letter-spacing:0.04em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd',{autoAlpha:0,duration:0.24},0.12);\n` +
-        `tl.from('#${id} .bc .tag',{autoAlpha:0,duration:0.22},0.2);\n` +
-        `tl.from('#${id} .it,#${id} .bc i',{x:-20,autoAlpha:0,duration:0.24,stagger:0.07,ease:'power2.out'},0.26);\n` +
-        `tl.from('#${id} .big',{y:30,autoAlpha:0,duration:0.3,ease:'power2.out'},0.56);\n` +
-        `tl.from('#${id} .sub',{autoAlpha:0,duration:0.24},0.76);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.88);`,
-    ),
-  'chart': () =>
-    mk(
-      'bd_bar',
-      'chart',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">03</span><span class="sec">季度营收</span><span class="sp"></span><span class="pg">P.07 / 12</span></div>
-  <div class="ttl2">Q4 冲到 3.6 亿,只有 Q3 掉过队</div>
-  <div class="plot">
-    <div class="gl"><i></i><i></i><i></i><i></i></div>
-    <div class="base"></div>
-    <div class="bars">
-      <div class="bg"><b>1.8亿</b><i style="height:200px"></i><span>Q1</span></div>
-      <div class="bg"><b>2.4亿</b><i style="height:267px"></i><span>Q2</span></div>
-      <div class="bg dim"><b>2.1亿 ▼</b><i style="height:233px"></i><span>Q3</span></div>
-      <div class="bg"><b>3.6亿</b><i style="height:400px"></i><span>Q4</span></div>
-    </div>
-  </div>
-  <div class="ft"><span>SOURCE: 财务系统 · 未经审计</span><span>单位: 人民币</span></div>
+<style>${root(id)}
+#${id} .speaker{background:#f3f5f6;}#${id} .human{position:absolute;left:0;top:0;width:760px;height:1080px;background:linear-gradient(145deg,#d1d8dc,#f4f6f7);overflow:hidden;}#${id} .human .person{left:145px;top:190px;}#${id} .human>span{position:absolute;left:68px;bottom:55px;}#${id} .exhibit{position:absolute;left:760px;right:0;top:0;height:1080px;background:var(--panel-2);}#${id} .speaker .doc{left:175px;top:135px;width:770px;height:720px;}#${id} .speaker .doc .rule{top:70px;}#${id} .speaker .doc .thin{top:125px;}#${id} .quote{position:absolute;left:50px;right:50px;top:195px;font-size:72px;line-height:1.08;}#${id} .source{position:absolute;left:50px;bottom:48px;}#${id} .connect{position:absolute;left:-105px;top:500px;width:250px;height:12px;background:var(--accent);}#${id} .speaker .copy{position:absolute;left:75px;top:80px;width:680px;font-size:62px;line-height:1;}#${id} .speaker .copy b{color:var(--accent);}
+</style>`, (id) =>
+    `tl.from('#${id} .human',{x:-150,duration:.34,ease:'power3.out'},0);\n`+
+    `tl.from('#${id} .exhibit',{x:180,duration:.34,ease:'power3.out'},.08);\n`+
+    `tl.from('#${id} .doc',{scale:.92,autoAlpha:0,duration:.3},.28);\n`+
+    `tl.from('#${id} .connect',{scaleX:0,transformOrigin:'right',duration:.23},.44);\n`+
+    `tl.from('#${id} .copy',{autoAlpha:0,y:20,duration:.24},.5);`),
+
+  'evidence-ledger': () => mk('br2_ledger', 'evidence-ledger', (id) => `
+<div class="br ledger">
+  <div class="question"><span class="micro">EVIDENCE LEDGER / ACTUAL VS PLAN</span><h2 class="head" data-edit>增长来自哪里？</h2><p data-edit>不是把数字摆大，而是让基线、变化和原因同时可见。</p></div>
+  <div class="plot"><div class="axis"></div><div class="bar a"><b class="num">64</b><i></i><span>计划</span></div><div class="bar b"><b class="num">81</b><i></i><span>实际</span></div><div class="event"><b>复购贡献</b><span class="num">+17</span></div><div class="source num">SOURCE / VERIFIED OPERATING DATA / PERIOD NEEDS CONFIRMATION</div></div>
+  <div class="decision head" data-edit>增长回来了，<br/><b>来源已经改变</b></div>
 </div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ttl2{position:absolute;left:120px;right:120px;top:238px;font-size:64px;font-weight:700;letter-spacing:0.01em;}
-#${id} .plot{position:absolute;left:120px;right:120px;top:396px;bottom:200px;}
-#${id} .gl{position:absolute;left:0;right:0;top:0;bottom:70px;display:flex;flex-direction:column;justify-content:space-between;}
-#${id} .gl i{height:1px;background:var(--line);}
-#${id} .base{position:absolute;left:0;right:0;bottom:70px;height:2px;background:var(--fg);}
-#${id} .bars{position:absolute;left:90px;right:90px;bottom:72px;display:flex;align-items:flex-end;justify-content:space-between;}
-#${id} .bg{position:relative;width:230px;display:flex;flex-direction:column;align-items:center;gap:18px;}
-#${id} .bg i{width:100%;background:var(--accent);display:block;}
-#${id} .bg.dim i{background:var(--panel-2);border:2px solid var(--line);}
-#${id} .bg b{font-family:var(--font-num);font-size:36px;font-weight:700;}
-#${id} .bg.dim b{color:var(--accent-2);}
-#${id} .bg span{position:absolute;bottom:-56px;font-family:var(--font-num);font-size:30px;color:var(--muted);letter-spacing:0.1em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd,#${id} .ttl2',{autoAlpha:0,duration:0.26},0.12);\n` +
-        `tl.from('#${id} .gl,#${id} .base',{autoAlpha:0,duration:0.24},0.24);\n` +
-        `tl.from('#${id} .bg i',{scaleY:0,transformOrigin:'bottom',duration:0.32,stagger:0.1,ease:'power2.out'},0.32);\n` +
-        `tl.from('#${id} .bg b,#${id} .bg span',{autoAlpha:0,duration:0.22},0.78);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.9);`,
-    ),
-  'list': () =>
-    mk(
-      'bd_lst',
-      'list',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">02</span><span class="sec">三项行动</span><span class="sp"></span><span class="pg">P.04 / 12</span></div>
-  <div class="ttl2">先止血,再提效,最后才谈扩张</div>
-  <div class="rows">
-    <div class="r"><span class="n">01</span><div class="t"><b>暂停回报不到 1 的投流计划</b><span>本周内 · 市场部</span></div><i class="st on">进行中</i></div>
-    <div class="r"><span class="n">02</span><div class="t"><b>会员券替代全站折扣</b><span>两周内 · 增长组</span></div><i class="st">待启动</i></div>
-    <div class="r"><span class="n">03</span><div class="t"><b>新城市仓配试点缓半年</b><span>Q4 复议 · 管理层</span></div><i class="st hold">已冻结</i></div>
-  </div>
-  <div class="ft"><span>SOURCE: 经营例会决议 2026-07</span><span>OWNERS CONFIRMED</span></div>
+<style>${root(id)}
+#${id} .ledger{background:#f3f5f6;}#${id} .question{position:absolute;left:85px;top:75px;width:690px;}#${id} .question h2{margin:90px 0 0;font-size:95px;}#${id} .question p{margin-top:55px;width:620px;font-size:27px;line-height:1.55;}#${id} .plot{position:absolute;left:820px;right:80px;top:80px;bottom:80px;background:#fff;border:3px solid var(--fg);}#${id} .axis{position:absolute;left:90px;right:70px;bottom:175px;height:5px;background:var(--fg);}#${id} .bar{position:absolute;bottom:178px;width:220px;}#${id} .bar.a{left:150px;}#${id} .bar.b{left:470px;}#${id} .bar i{display:block;width:100%;height:410px;background:#c8ced3;}#${id} .bar.b i{height:570px;background:var(--accent);}#${id} .bar b{position:absolute;left:0;bottom:100%;margin-bottom:18px;font-size:48px;}#${id} .bar span{position:absolute;left:0;top:100%;margin-top:24px;font-size:24px;font-weight:800;}#${id} .event{position:absolute;right:65px;top:185px;width:320px;border-top:10px solid var(--accent);padding-top:20px;}#${id} .event b{display:block;font-size:29px;}#${id} .event span{display:block;margin-top:16px;font-size:58px;color:var(--accent);}#${id} .plot .source{position:absolute;left:55px;bottom:40px;font-size:16px;color:var(--muted);}#${id} .ledger .decision{position:absolute;left:85px;bottom:90px;width:660px;font-size:68px;line-height:1.05;}#${id} .ledger .decision b{color:var(--accent);}
+</style>`, (id) =>
+    `tl.from('#${id} .question>* ,#${id} .decision',{x:-45,autoAlpha:0,duration:.24,stagger:.07},0);\n`+
+    `tl.from('#${id} .plot',{x:160,autoAlpha:0,duration:.33,ease:'power3.out'},.14);\n`+
+    `tl.from('#${id} .bar i',{scaleY:0,transformOrigin:'bottom',duration:.34,stagger:.12},.36);\n`+
+    `tl.from('#${id} .event',{scaleX:0,transformOrigin:'left',duration:.24},.62);`),
+
+  'decision-fork': () => mk('br2_fork', 'decision-fork', (id) => `
+<div class="br fork">
+  <div class="intro"><span class="micro">DECISION FORK / ONE MATERIAL CONSTRAINT</span><h2 class="head" data-edit>两个方向都合理<br/><b>直到风险出现</b></h2></div>
+  <div class="choice left"><span class="num">A / EXPAND</span><h3 class="head" data-edit>现在扩张</h3><p>更快获得规模</p><i class="path"></i></div><div class="choice right"><span class="num">B / STABILIZE</span><h3 class="head" data-edit>先稳住复购</h3><p>降低回本压力</p><i class="path"></i></div>
+  <div class="risk"><b class="head" data-edit>现金周期</b><span class="num">+47 DAYS</span><p>真实条件需用户确认</p></div><div class="resolved num">CONSTRAINT → DECISION</div>
 </div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ttl2{position:absolute;left:120px;right:120px;top:238px;font-size:64px;font-weight:700;letter-spacing:0.01em;}
-#${id} .rows{position:absolute;left:120px;right:120px;top:392px;display:flex;flex-direction:column;}
-#${id} .r{display:flex;align-items:center;gap:48px;padding:44px 8px;border-bottom:1px solid var(--line);}
-#${id} .r .n{font-family:var(--font-num);font-size:40px;font-weight:700;color:var(--accent);}
-#${id} .r .t{flex:1;display:flex;flex-direction:column;gap:14px;}
-#${id} .r .t b{font-size:52px;font-weight:600;}
-#${id} .r .t span{font-family:var(--font-num);font-size:29px;color:var(--muted);letter-spacing:0.06em;}
-#${id} .r .st{font-style:normal;font-family:var(--font-num);font-size:30px;font-weight:700;color:var(--muted);letter-spacing:0.1em;}
-#${id} .r .st.on{color:var(--accent);}
-#${id} .r .st.hold{color:var(--accent-2);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd,#${id} .ttl2',{autoAlpha:0,duration:0.26},0.12);\n` +
-        `tl.from('#${id} .r',{x:-24,autoAlpha:0,duration:0.26,stagger:0.11,ease:'power2.out'},0.3);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.78);`,
-    ),
-  'big-number': () =>
-    mk(
-      'bd_num',
-      'big-number',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">04</span><span class="sec">核心指标</span><span class="sp"></span><span class="pg">P.09 / 12</span></div>
-  <div class="lab">月度经常性收入 MRR</div>
-  <div class="giant">¥2,400<em>万</em></div>
-  <div class="row"><i class="chip">▲ 18.6%</i><span>环比上月 · 连续六个月正增长</span></div>
-  <div class="ft"><span>SOURCE: 订阅系统 2026-06</span><span>PIREEL ADVISORY</span></div>
+<style>${root(id)}
+#${id} .fork{background:var(--panel-2);color:#fff;}#${id} .intro{position:absolute;left:80px;top:70px;width:1100px;}#${id} .intro h2{margin-top:75px;font-size:85px;line-height:1;}#${id} .intro h2 b{color:#fff;border-bottom:12px solid var(--accent-2);}#${id} .choice{position:absolute;top:455px;width:690px;height:410px;padding:42px 50px;background:#fff;color:var(--fg);}#${id} .choice.left{left:80px;}#${id} .choice.right{left:850px;}#${id} .choice span{font-size:18px;font-weight:900;letter-spacing:.12em;color:var(--muted);}#${id} .choice h3{margin:62px 0 0;font-size:64px;}#${id} .choice p{font-size:27px;color:var(--muted);}#${id} .path{position:absolute;left:50px;right:50px;bottom:50px;height:10px;background:#b9c1c8;}#${id} .right .path{background:var(--accent);}#${id} .risk{position:absolute;right:70px;top:85px;width:380px;padding:30px 34px;background:var(--accent-2);color:#fff;}#${id} .risk b{display:block;font-size:45px;}#${id} .risk span{display:block;margin-top:18px;font-size:34px;font-weight:900;}#${id} .risk p{margin:18px 0 0;font-size:18px;}#${id} .resolved{position:absolute;right:80px;bottom:70px;font-size:19px;letter-spacing:.14em;}
+</style>`, (id) =>
+    `tl.from('#${id} .intro>*',{x:-45,autoAlpha:0,duration:.24,stagger:.08},0);\n`+
+    `tl.from('#${id} .choice',{y:100,autoAlpha:0,duration:.3,stagger:.12},.25);\n`+
+    `tl.from('#${id} .path',{scaleX:0,transformOrigin:'left',duration:.26,stagger:.1},.5);\n`+
+    `tl.from('#${id} .risk',{x:100,autoAlpha:0,duration:.26,ease:'power3.out'},.56);`),
+
+  'ownership-line': () => mk('br2_owner', 'ownership-line', (id) => `
+<div class="br owner">
+  <div class="person"><i class="hair"></i><i class="face"></i><i class="body"></i><i class="eye"></i><i class="mouth"></i></div><div class="blue"></div>
+  <div class="copy"><span class="micro">OWNERSHIP LINE / DECISION TO ACTION</span><h2 class="head" data-edit>决定不落到人<br/><b>就还不是决定</b></h2><div class="commit"><span>负责人</span><b data-edit>增长团队</b><span>复盘点</span><b data-edit>四周后</b></div></div>
+  <div class="line"></div><div class="source num">OWNER AND DATE REQUIRE USER CONFIRMATION</div>
 </div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .lab{position:absolute;left:120px;top:270px;font-size:36px;color:var(--muted);letter-spacing:0.08em;}
-#${id} .giant{position:absolute;left:120px;top:366px;font-family:var(--font-num);font-size:300px;font-weight:700;line-height:1;letter-spacing:-0.01em;}
-#${id} .giant em{font-style:normal;font-size:120px;color:var(--muted);margin-left:16px;}
-#${id} .row{position:absolute;left:120px;top:756px;display:flex;align-items:center;gap:40px;}
-#${id} .chip{font-style:normal;font-family:var(--font-num);font-size:40px;font-weight:700;background:var(--accent);color:var(--paper);border-radius:999px;padding:18px 44px;}
-#${id} .row span{font-size:32px;color:var(--muted);letter-spacing:0.06em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd',{autoAlpha:0,duration:0.24},0.12);\n` +
-        `tl.from('#${id} .lab',{autoAlpha:0,duration:0.24},0.2);\n` +
-        `tl.from('#${id} .giant',{y:30,autoAlpha:0,duration:0.32,ease:'power2.out'},0.26);\n` +
-        `tl.from('#${id} .row',{y:20,autoAlpha:0,duration:0.26,ease:'power2.out'},0.52);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.72);`,
-    ),
-  'count-up': () =>
-    mk(
-      'bd_cnt',
-      'count-up',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">06</span><span class="sec">年度盘点</span><span class="sp"></span><span class="pg">P.11 / 12</span></div>
-  <div class="lab">全国门店数 STORE COUNT</div>
-  <div class="giant"><b class="v">1268</b><em>家</em></div>
-  <div class="yoy"><i>▲ 12.8%</i><span>同比去年 · 净新开 144 家</span></div>
-  <div class="ft"><span>SOURCE: 门店运营台账 2026-06</span><span>PIREEL ADVISORY</span></div>
+<style>${root(id)}
+#${id} .owner{background:#f3f5f6;}#${id} .owner>.person{left:130px;top:175px;}#${id} .blue{position:absolute;left:0;bottom:0;width:720px;height:250px;background:var(--accent);}#${id} .owner .copy{position:absolute;left:760px;top:110px;width:1010px;}#${id} .owner .copy h2{margin:115px 0 0;font-size:105px;line-height:.98;}#${id} .owner .copy h2 b{color:var(--accent);}#${id} .commit{margin-top:78px;display:grid;grid-template-columns:190px 1fr;gap:18px 35px;border-top:5px solid var(--fg);padding-top:28px;}#${id} .commit span{font-size:22px;color:var(--muted);letter-spacing:.12em;}#${id} .commit b{font-size:36px;}#${id} .owner .line{position:absolute;left:640px;top:0;width:14px;height:850px;background:var(--accent);}#${id} .owner .source{position:absolute;right:95px;bottom:60px;font-size:17px;letter-spacing:.12em;color:var(--muted);}
+</style>`, (id) =>
+    `tl.from('#${id} .person,#${id} .blue',{x:-130,autoAlpha:0,duration:.34,stagger:.08,ease:'power3.out'},0);\n`+
+    `tl.from('#${id} .line',{scaleY:0,transformOrigin:'top',duration:.3},.18);\n`+
+    `tl.from('#${id} .copy>* ,#${id} .source',{x:45,autoAlpha:0,duration:.24,stagger:.07},.3);`),
+
+  'signed-close': () => mk('br2_close', 'signed-close', (id) => `
+<div class="br close">
+  <div class="ink"></div><div class="statement"><span class="micro">SIGNED CLOSE / LESS INFORMATION</span><h2 class="head" data-edit>先稳住复购<br/><b>再谈下一城</b></h2><p data-edit>结论、负责人和下一复盘点必须来自用户确认。</p><div class="sign"><i></i><span class="num">DECISION / OWNER / REVIEW</span></div></div>
+  <div class="room"><div class="table"></div><div class="person"><i class="hair"></i><i class="face"></i><i class="body"></i><i class="eye"></i><i class="mouth"></i></div></div>
 </div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .lab{position:absolute;left:120px;top:270px;font-size:36px;color:var(--muted);letter-spacing:0.08em;}
-#${id} .giant{position:absolute;left:120px;top:366px;display:flex;align-items:baseline;}
-#${id} .giant .v{font-family:var(--font-num);font-size:300px;font-weight:700;line-height:1;letter-spacing:-0.01em;}
-#${id} .giant em{font-style:normal;font-family:var(--font-num);font-size:120px;font-weight:700;color:var(--muted);margin-left:20px;}
-#${id} .yoy{position:absolute;left:120px;top:760px;display:flex;align-items:baseline;gap:44px;}
-#${id} .yoy i{font-style:normal;font-family:var(--font-num);font-size:64px;font-weight:700;color:var(--accent);}
-#${id} .yoy span{font-size:32px;color:var(--muted);letter-spacing:0.06em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd',{autoAlpha:0,duration:0.24},0.12);\n` +
-        `tl.from('#${id} .lab',{autoAlpha:0,duration:0.24},0.2);\n` +
-        `tl.from('#${id} .giant',{y:30,autoAlpha:0,duration:0.32,ease:'power2.out'},0.2);\n` +
-        `tl.from('#${id} .v',{innerText:1124,snap:{innerText:1},duration:0.8,ease:'power1.out'},0.15);\n` +
-        `tl.from('#${id} .yoy',{y:20,autoAlpha:0,duration:0.26,ease:'power2.out'},0.62);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.86);`,
-    ),
-  'compare': () =>
-    mk(
-      'bd_cmp',
-      'compare',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">05</span><span class="sec">方案对比</span><span class="sp"></span><span class="pg">P.10 / 12</span></div>
-  <div class="ttl2">同样的目标,方案 B 只花一半的钱</div>
-  <div class="tbl">
-    <div class="col">
-      <div class="ch">方案 A · 自建团队</div>
-      <div class="tr"><i class="ok">✓</i><span>节奏完全可控</span></div>
-      <div class="tr"><i class="nx">✕</i><span>成本 ¥120万 / 年</span></div>
-      <div class="tr"><i class="nx">✕</i><span>6 个月才能就位</span></div>
-    </div>
-    <div class="col">
-      <div class="ch rec">方案 B · 代运营<em>推荐</em></div>
-      <div class="tr"><i class="ok">✓</i><span>成本 ¥58万 / 年</span></div>
-      <div class="tr"><i class="ok">✓</i><span>两周内启动</span></div>
-      <div class="tr"><i class="nx">✕</i><span>知识沉淀在外部</span></div>
-    </div>
-  </div>
-  <div class="ft"><span>SOURCE: 供应商询价 2026-06</span><span>DECISION PENDING</span></div>
-</div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ttl2{position:absolute;left:120px;right:120px;top:238px;font-size:64px;font-weight:700;letter-spacing:0.01em;}
-#${id} .tbl{position:absolute;left:120px;right:120px;top:392px;display:flex;gap:40px;}
-#${id} .col{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;}
-#${id} .ch{padding:34px 48px;font-size:44px;font-weight:700;border-bottom:1px solid var(--line);}
-#${id} .ch.rec{background:var(--accent);color:var(--paper);}
-#${id} .ch em{font-style:normal;font-size:29px;font-weight:700;border:2px solid var(--paper);border-radius:999px;padding:6px 22px;margin-left:26px;vertical-align:middle;}
-#${id} .tr{display:flex;align-items:center;gap:34px;padding:30px 48px;border-bottom:1px solid var(--line);font-size:40px;}
-#${id} .tr:last-child{border-bottom:none;}
-#${id} .tr i{font-style:normal;font-family:var(--font-num);font-size:40px;font-weight:700;}
-#${id} .tr .ok{color:var(--accent);}
-#${id} .tr .nx{color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd,#${id} .ttl2',{autoAlpha:0,duration:0.26},0.12);\n` +
-        `tl.from('#${id} .col',{y:26,autoAlpha:0,duration:0.28,stagger:0.12,ease:'power2.out'},0.3);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.74);`,
-    ),
-  'trend': () =>
-    mk(
-      'bd_trd',
-      'trend',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">03</span><span class="sec">增长走势</span><span class="sp"></span><span class="pg">P.08 / 12</span></div>
-  <div class="ttl2">连续四个季度抬头,年底看到 4 亿</div>
-  <div class="plot">
-    <div class="gl"><i></i><i></i><i></i><i></i></div>
-    <div class="base"></div>
-    <svg class="crv" viewBox="0 0 1560 420" preserveAspectRatio="none">
-      <polyline class="ln" points="20,360 400,300 780,320 1160,150"/>
-      <polyline class="proj" points="1160,150 1520,60"/>
-      <g class="nd"><circle cx="20" cy="360" r="10"/><circle cx="400" cy="300" r="10"/><circle cx="780" cy="320" r="10"/><circle cx="1160" cy="150" r="14"/></g>
-    </svg>
-    <div class="xs"><span>Q1</span><span>Q2</span><span>Q3</span><span>Q4</span><span>Q1E</span></div>
-    <div class="co"><b>4.0亿</b><span>2027 Q1 预测</span></div>
-  </div>
-  <div class="ft"><span>SOURCE: 财务系统 · 线性外推</span><span>单位: 人民币</span></div>
-</div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ttl2{position:absolute;left:120px;right:120px;top:238px;font-size:64px;font-weight:700;letter-spacing:0.01em;}
-#${id} .plot{position:absolute;left:120px;right:120px;top:396px;bottom:200px;}
-#${id} .gl{position:absolute;left:0;right:0;top:0;bottom:70px;display:flex;flex-direction:column;justify-content:space-between;}
-#${id} .gl i{height:1px;background:var(--line);}
-#${id} .base{position:absolute;left:0;right:0;bottom:70px;height:2px;background:var(--fg);}
-#${id} .crv{position:absolute;left:0;right:0;top:0;bottom:74px;width:100%;height:calc(100% - 74px);}
-#${id} .ln{fill:none;stroke:var(--accent);stroke-width:6;stroke-dasharray:2000;stroke-dashoffset:2000;}
-#${id} .proj{fill:none;stroke:var(--muted);stroke-width:4;stroke-dasharray:24 20;}
-#${id} .nd circle{fill:var(--paper);stroke:var(--accent);stroke-width:5;}
-#${id} .xs{position:absolute;left:20px;right:20px;bottom:0;display:flex;justify-content:space-between;font-family:var(--font-num);font-size:30px;color:var(--muted);letter-spacing:0.1em;}
-#${id} .co{position:absolute;right:0;top:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:26px 38px;display:flex;flex-direction:column;gap:10px;}
-#${id} .co b{font-family:var(--font-num);font-size:44px;font-weight:700;color:var(--accent);}
-#${id} .co span{font-family:var(--font-num);font-size:28px;color:var(--muted);letter-spacing:0.06em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd,#${id} .ttl2',{autoAlpha:0,duration:0.26},0.12);\n` +
-        `tl.from('#${id} .gl,#${id} .base,#${id} .xs',{autoAlpha:0,duration:0.24},0.22);\n` +
-        `tl.to('#${id} .ln',{strokeDashoffset:0,duration:0.55,ease:'power2.inOut'},0.3);\n` +
-        `tl.from('#${id} .nd circle',{autoAlpha:0,duration:0.2,stagger:0.08},0.4);\n` +
-        `tl.from('#${id} .proj',{autoAlpha:0,duration:0.3},0.85);\n` +
-        `tl.from('#${id} .co',{autoAlpha:0,y:16,duration:0.26,ease:'power2.out'},0.9);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.94);`,
-    ),
-  'timeline': () =>
-    mk(
-      'bd_rmp',
-      'timeline',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">05</span><span class="sec">路线图</span><span class="sp"></span><span class="pg">P.06 / 12</span></div>
-  <div class="ttl2">上半年打地基,Q3 才踩油门</div>
-  <div class="map">
-    <div class="axis"></div>
-    <div class="nd done"><b>Q1</b><i></i><span>跑通供应链</span></div>
-    <div class="nd done"><b>Q2</b><i></i><span>上线会员体系</span></div>
-    <div class="nd cur"><b>Q3</b><i></i><span>全渠道投放</span><em>NOW</em></div>
-    <div class="nd"><b>Q4</b><i></i><span>出海首站</span></div>
-  </div>
-  <div class="ft"><span>SOURCE: 年度经营计划 2026</span><span>OWNERS CONFIRMED</span></div>
-</div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ttl2{position:absolute;left:120px;right:120px;top:238px;font-size:64px;font-weight:700;letter-spacing:0.01em;}
-#${id} .map{position:absolute;left:120px;right:120px;top:440px;height:400px;display:flex;justify-content:space-between;}
-#${id} .axis{position:absolute;left:0;right:0;top:130px;height:2px;background:var(--fg);}
-#${id} .nd{position:relative;width:330px;text-align:center;}
-#${id} .nd b{position:absolute;left:0;right:0;top:34px;font-family:var(--font-num);font-size:38px;font-weight:700;color:var(--muted);}
-#${id} .nd i{position:absolute;left:calc(50% - 13px);top:118px;width:26px;height:26px;border-radius:999px;background:var(--paper);border:5px solid var(--line);}
-#${id} .nd span{position:absolute;left:0;right:0;top:190px;font-size:32px;line-height:1.35;color:var(--muted);}
-#${id} .nd.done b{color:var(--fg);}
-#${id} .nd.done i{border-color:var(--accent);}
-#${id} .nd.cur b{color:var(--accent);}
-#${id} .nd.cur i{left:calc(50% - 20px);top:111px;width:40px;height:40px;background:var(--accent);border-color:var(--accent);}
-#${id} .nd.cur span{color:var(--fg);font-weight:700;font-size:36px;}
-#${id} .nd.cur em{position:absolute;left:0;right:0;top:302px;font-style:normal;font-family:var(--font-num);font-size:28px;font-weight:700;color:var(--accent);letter-spacing:0.2em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd,#${id} .ttl2',{autoAlpha:0,duration:0.26},0.12);\n` +
-        `tl.from('#${id} .axis',{scaleX:0,transformOrigin:'left center',duration:0.35,ease:'power2.inOut'},0.26);\n` +
-        `tl.from('#${id} .nd i',{scale:0,autoAlpha:0,duration:0.22,stagger:0.09,ease:'power2.out'},0.36);\n` +
-        `tl.from('#${id} .nd b',{autoAlpha:0,y:-14,duration:0.22,stagger:0.09},0.42);\n` +
-        `tl.from('#${id} .nd span',{autoAlpha:0,y:14,duration:0.24,stagger:0.07},0.6);\n` +
-        `tl.from('#${id} .nd.cur em',{autoAlpha:0,duration:0.22},0.9);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.22},0.94);`,
-    ),
-  'lower-third': () =>
-    mk(
-      'bd_spk',
-      'lower-third',
-      (id) => `
-<div class="bd"><div class="top"></div>
-  <div class="hd"><span class="no">01</span><span class="sec">发言人</span><span class="sp"></span><span class="pg">P.02 / 12</span></div>
-  <div class="ghost"><span>01</span>复盘</div>
-  <div class="lt">
-    <div class="tag">CFO</div>
-    <div class="who"><b>林亦舟</b><span>首席财务官 · 财务与经营分析部</span></div>
-    <div class="mt">发言 12 MIN</div>
-  </div>
-  <div class="ft"><span>SOURCE: 会议手册 2026-07</span><span>PIREEL ADVISORY</span></div>
-</div>
-<style>${bdRoot(id)}
-#${id} .bd{background-color:var(--paper);}
-#${id} .ghost{position:absolute;left:120px;top:300px;font-size:300px;font-weight:800;line-height:1;color:var(--panel-2);letter-spacing:0.02em;}
-#${id} .ghost span{font-family:var(--font-num);margin-right:40px;}
-#${id} .lt{position:absolute;left:120px;bottom:200px;display:flex;align-items:center;gap:44px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:36px 56px 36px 36px;}
-#${id} .tag{font-family:var(--font-num);font-size:34px;font-weight:700;background:var(--accent);color:var(--paper);border-radius:var(--radius);padding:22px 30px;letter-spacing:0.08em;}
-#${id} .who{display:flex;flex-direction:column;gap:12px;}
-#${id} .who b{font-size:56px;font-weight:700;}
-#${id} .who span{font-size:30px;color:var(--muted);letter-spacing:0.06em;}
-#${id} .mt{align-self:stretch;display:flex;align-items:center;margin-left:24px;border-left:1px solid var(--line);padding-left:44px;font-family:var(--font-num);font-size:28px;color:var(--muted);letter-spacing:0.1em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .top',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0);\n` +
-        `tl.from('#${id} .hd',{autoAlpha:0,duration:0.24},0.12);\n` +
-        `tl.from('#${id} .ghost',{autoAlpha:0,duration:0.3},0.2);\n` +
-        `tl.from('#${id} .lt',{x:-80,autoAlpha:0,duration:0.32,ease:'power2.out'},0.5);\n` +
-        `tl.from('#${id} .tag',{autoAlpha:0,scale:0.8,duration:0.22,ease:'power2.out'},0.78);\n` +
-        `tl.from('#${id} .ft',{autoAlpha:0,duration:0.24},0.9);`,
-    ),
+<style>${root(id)}
+#${id} .close{background:#f3f5f6;}#${id} .close .ink{position:absolute;left:0;top:0;width:1160px;height:1080px;background:var(--panel-2);}#${id} .statement{position:absolute;left:90px;top:95px;width:930px;color:#fff;}#${id} .statement h2{margin:130px 0 0;font-size:125px;line-height:.94;}#${id} .statement h2 b{color:#fff;border-bottom:14px solid var(--accent);}#${id} .statement p{margin-top:80px;width:760px;font-size:27px;line-height:1.5;color:#ffffffb6;}#${id} .sign{margin-top:90px;width:770px;}#${id} .sign i{display:block;width:100%;height:8px;background:var(--accent);}#${id} .sign span{display:block;margin-top:20px;font-size:18px;letter-spacing:.14em;}#${id} .close .room{position:absolute;right:0;top:0;width:760px;height:1080px;background:linear-gradient(145deg,#dce1e4,#f8f9f9);overflow:hidden;}#${id} .close .table{position:absolute;left:-100px;right:-80px;bottom:-100px;height:340px;background:#756456;transform:skewY(-8deg);}#${id} .close .person{left:120px;top:180px;}
+</style>`, (id) =>
+    `tl.from('#${id} .ink',{x:-180,duration:.35,ease:'power3.out'},0);\n`+
+    `tl.from('#${id} .room',{x:170,duration:.35,ease:'power3.out'},.08);\n`+
+    `tl.from('#${id} .statement>*',{x:-45,autoAlpha:0,duration:.24,stagger:.08},.3);\n`+
+    `tl.from('#${id} .sign i',{scaleX:0,transformOrigin:'left',duration:.26},.62);`),
 };

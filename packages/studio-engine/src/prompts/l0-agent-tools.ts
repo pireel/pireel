@@ -457,13 +457,14 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "LOOK at the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures every requested composed frame, compares them locally, and sends only visually distinct representatives to paid cloud vision. Returns the representative findings plus localComparison groups mapping skipped similar moments. Use it for final QA after a multi-shot aspect/framing change as well as after a batch of graphics lands. Sample every distinct framing and every moment where several overlays coexist (up to 18 candidates per call). Set forceCloudAll=true only when the user explicitly needs an independent reading of every requested moment. Fix reported issues with the relevant atomic tool. It also answers what a moment actually looks like; answer from returned scenes, never imagination. Skip it for single small edits.",
+      "LOOK at the rendered result with a scene-level visual QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples one representative moment per Director Scene, explicitly covering entrance, pressure, proof and exit, runs local structure checks, compares frames locally, and sends only visually distinct representatives to paid cloud vision. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing source evidence, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
     inputSchema: obj(
       {
-        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline candidate moments to review; local similarity filtering runs before paid cloud vision (max 18)." },
+        atSecs: { type: 'array', items: { type: 'number' }, description: 'Optional edited-timeline candidate moments for a local review. Omit for automatic Director Scene sampling (max 18).' },
+        sceneIds: { type: 'array', items: { type: 'string' }, description: 'Optional exact Semantic Scene ids. Use after repair to limit re-review to affected scenes; requires a saved Director Plan.' },
         forceCloudAll: { type: 'boolean', description: 'Bypass local similarity filtering only for explicit per-moment comparison/inspection.' },
       },
-      ['atSecs'],
+      [],
     ),
   },
   /* ---------- neutral timeline atoms (one contract: live, offline and MCP) ---------- */

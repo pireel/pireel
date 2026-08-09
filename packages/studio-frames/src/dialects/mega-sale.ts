@@ -1,264 +1,58 @@
-/**
- * Mega Sale dialect — bare red promo base; gold only for burst badges/diagonal banners/CTA,
- * gold-on-text always deep wine. Giant price tags in white with deep-wine stroke;
- * countdown on dark-red tiles; motion slams in (power4.in landing + one pulse).
- */
-
+/** Retail Rush v2: product truth, verified offer hierarchy, density, proof, direct action. */
 import { type Block, mk } from './shared';
 
-const msBurstClip =
-  'polygon(50% 0%,59% 15%,75% 7%,76% 25%,93% 25%,85% 41%,100% 50%,85% 59%,93% 75%,76% 76%,75% 93%,59% 85%,50% 100%,41% 85%,25% 93%,24% 76%,7% 75%,15% 59%,0% 50%,15% 41%,7% 25%,24% 24%,25% 7%,41% 15%)';
+const root = (id: string) => `
+#${id} .rr{position:absolute;inset:0;overflow:hidden;background:var(--paper);color:var(--fg);font-family:var(--font-body);}
+#${id} .head{font-family:var(--font-head);font-weight:950;letter-spacing:-.055em;}
+#${id} .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;}
+#${id} .micro{font-family:var(--font-num);font-size:18px;font-weight:900;letter-spacing:.13em;text-transform:uppercase;}
+#${id} .product{position:absolute;width:410px;height:690px;border:8px solid var(--fg);background:#ece5d5;box-shadow:var(--shadow);}
+#${id} .product::before{content:'';position:absolute;left:85px;right:85px;top:70px;height:100px;background:var(--fg);}
+#${id} .product::after{content:'';position:absolute;left:65px;right:65px;bottom:80px;height:260px;background:var(--accent);}
+#${id} .label{position:absolute;padding:14px 20px;background:var(--accent-2);border:5px solid var(--fg);box-shadow:6px 7px 0 var(--fg);font-size:23px;font-weight:950;}
+#${id} .rule{position:absolute;height:18px;background:var(--accent);transform-origin:left center;}
+#${id} [data-edit]{outline:none;}`;
 
-const msRoot = (id: string) => `
-#${id} .ms{position:absolute;inset:0;color:var(--fg);font-family:var(--font-head);overflow:hidden;}
-#${id} .burst{position:absolute;clip-path:${msBurstClip};background:var(--panel);color:var(--accent-2);display:flex;align-items:center;justify-content:center;text-align:center;font-weight:900;line-height:1.1;}
-#${id} .strip{position:absolute;left:-80px;right:-80px;background:var(--panel);color:var(--accent-2);font-weight:900;font-size:50px;letter-spacing:0.24em;padding:26px 0;text-align:center;white-space:nowrap;box-shadow:var(--shadow);}`;
-
-export const cover: () => Block = () =>
-  mk(
-    'cv_ms',
-    '封面',
-    (id) => `
-<div class="ms">
-  <div class="h">爆炸</div>
-  <div class="sub">MEGA SALE · 全场狂欢</div>
-  <div class="burst" style="width:460px;height:460px;right:170px;top:110px;transform:rotate(10deg);font-size:130px;">5折</div>
-  <div class="strip" style="bottom:180px;transform:rotate(-4deg);">限时开抢 — MEGA SALE — 限时开抢 — MEGA SALE</div>
-</div>
-<style>${msRoot(id)}
-#${id} .h{position:absolute;left:150px;top:250px;font-size:330px;font-weight:900;line-height:1;transform:rotate(-3deg);-webkit-text-stroke:8px var(--accent-2);}
-#${id} .sub{position:absolute;left:170px;top:670px;font-size:54px;font-weight:800;letter-spacing:0.24em;color:var(--muted);}
-</style>`,
-    (id) =>
-      `tl.from('#${id} .h',{scale:2.2,autoAlpha:0,duration:0.24,ease:'power4.in'},0);\n` +
-      `tl.from('#${id} .sub',{autoAlpha:0,x:-40,duration:0.24},0.26);\n` +
-      `tl.from('#${id} .burst',{scale:0,rotation:60,duration:0.3,ease:'back.out(2)'},0.3);\n` +
-      `tl.from('#${id} .strip',{x:-320,autoAlpha:0,duration:0.28,ease:'power3.out'},0.42);`,
-  );
+export const cover: () => Block = () => mk('cv_rr2', '封面', (id) => `
+<div class="rr cover"><div class="red"></div><div class="product"></div><div class="hand"></div><div class="title head" data-edit>零售脉冲</div><div class="english num">RETAIL RUSH</div><div class="label">PRODUCT FIRST</div><i class="rule"></i><div class="thesis micro">PRODUCT / BENEFIT / TERMS / ACTION</div></div>
+<style>${root(id)}
+#${id} .red{position:absolute;left:0;top:0;width:1050px;height:1080px;background:var(--accent);}#${id} .cover .product{right:250px;top:160px;transform:rotate(6deg) scale(1.15);}#${id} .hand{position:absolute;right:-60px;bottom:50px;width:800px;height:220px;background:#b78565;border:8px solid var(--fg);transform:rotate(-12deg);}#${id} .title{position:absolute;left:70px;top:210px;width:980px;color:#fff;font-size:180px;line-height:.88;}#${id} .english{position:absolute;left:80px;top:610px;color:#fff;font-size:31px;font-weight:900;letter-spacing:.2em;}#${id} .cover .label{left:900px;top:100px;}#${id} .cover .rule{left:70px;top:550px;width:820px;background:var(--accent-2);transform:rotate(-4deg);}#${id} .thesis{position:absolute;left:80px;bottom:70px;color:#fff;}
+</style>`, (id) => `tl.from('#${id} .red',{x:-180,duration:.34},0);tl.from('#${id} .product',{y:-120,rotation:0,autoAlpha:0,duration:.32},.16);tl.from('#${id} .hand',{x:180,autoAlpha:0,duration:.3},.27);tl.from('#${id} .title,#${id} .english,#${id} .thesis',{x:-50,autoAlpha:0,duration:.23,stagger:.06},.3);tl.from('#${id} .label',{scale:0,duration:.2},.56);`);
 
 export const blocks: Record<string, () => Block> = {
-  'title-card': () =>
-    mk(
-      'ms_ttl',
-      'title-card',
-      (id) => `
-<div class="ms">
-  <div class="strip" style="top:130px;transform:rotate(-4deg);">今日爆款 — 全场直降 — 今日爆款 — 全场直降</div>
-  <div class="h">全场直降<br/>五折起</div>
-  <div class="burst" style="width:430px;height:430px;right:160px;bottom:170px;transform:rotate(-8deg);font-size:100px;">立减</div>
-  <div class="fine">数量有限 · 抢完即止 · FINAL CALL</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .h{position:absolute;left:160px;top:340px;font-size:150px;font-weight:900;line-height:1.18;transform:rotate(-2deg);}
-#${id} .fine{position:absolute;left:160px;right:660px;bottom:110px;font-size:34px;font-weight:700;letter-spacing:0.3em;color:var(--muted);border-top:2px solid var(--line);padding-top:26px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .h',{scale:2.2,autoAlpha:0,duration:0.24,ease:'power4.in'},0);\n` +
-        `tl.from('#${id} .strip',{x:-320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.26);\n` +
-        `tl.from('#${id} .burst',{scale:0,rotation:-70,duration:0.3,ease:'back.out(2)'},0.38);\n` +
-        `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.6);`,
-    ),
-  'big-number': () =>
-    mk(
-      'ms_num',
-      'big-number',
-      (id) => `
-<div class="ms">
-  <div class="old">日常价 ¥399</div>
-  <div class="price"><i>¥</i>199</div>
-  <div class="burst" style="width:390px;height:390px;right:200px;top:120px;transform:rotate(12deg);font-size:96px;">-50%</div>
-  <div class="strip" style="bottom:130px;transform:rotate(-3deg);">今晚 20:00 开抢 — TONIGHT ONLY — 今晚 20:00 开抢</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .old{position:absolute;left:180px;top:190px;font-size:80px;font-weight:700;color:var(--muted);text-decoration:line-through;}
-#${id} .price{position:absolute;left:150px;top:270px;font-size:460px;font-weight:900;line-height:1.05;letter-spacing:-0.02em;-webkit-text-stroke:6px var(--accent-2);}
-#${id} .price i{font-style:normal;font-size:180px;color:var(--accent);-webkit-text-stroke:2px var(--accent-2);margin-right:16px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .old',{autoAlpha:0,y:-24,duration:0.2},0);\n` +
-        `tl.from('#${id} .price',{scale:2.4,autoAlpha:0,duration:0.22,ease:'power4.in'},0.12);\n` +
-        `tl.to('#${id} .price',{scale:1.06,duration:0.12,yoyo:true,repeat:1},0.42);\n` +
-        `tl.from('#${id} .burst',{scale:0,rotation:80,duration:0.28,ease:'back.out(2)'},0.6);\n` +
-        `tl.from('#${id} .strip',{x:320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.72);`,
-    ),
-  'count-up': () =>
-    mk(
-      'ms_prc',
-      'count-up',
-      (id) => `
-<div class="ms">
-  <div class="k">价 格 崩 了</div>
-  <div class="old"><span>原价 ¥1299</span><i class="cut"></i></div>
-  <div class="price"><i>¥</i><b class="v">899</b></div>
-  <div class="burst" style="width:380px;height:380px;right:200px;top:330px;transform:rotate(12deg);font-size:84px;">省400</div>
-  <div class="fine">今夜恢复原价 · 仅此一批 · 手慢无</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .k{position:absolute;left:0;right:0;top:150px;text-align:center;font-size:46px;font-weight:800;letter-spacing:0.4em;color:var(--muted);}
-#${id} .old{position:absolute;left:180px;top:300px;font-size:72px;font-weight:700;color:var(--muted);}
-#${id} .cut{position:absolute;left:-26px;right:-26px;top:50%;height:12px;background:var(--panel);transform:rotate(-5deg);box-shadow:var(--shadow);}
-#${id} .price{position:absolute;left:160px;top:390px;font-size:440px;font-weight:900;line-height:1.05;letter-spacing:-0.02em;-webkit-text-stroke:6px var(--accent-2);}
-#${id} .price i{font-style:normal;font-size:170px;color:var(--accent);-webkit-text-stroke:2px var(--accent-2);margin-right:16px;}
-#${id} .fine{position:absolute;left:180px;right:700px;bottom:110px;font-size:34px;font-weight:700;letter-spacing:0.3em;color:var(--muted);border-top:2px solid var(--line);padding-top:26px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .k',{autoAlpha:0,duration:0.2},0);\n` +
-        `tl.from('#${id} .old',{autoAlpha:0,y:-24,duration:0.2},0.04);\n` +
-        `tl.from('#${id} .price',{scale:2.4,autoAlpha:0,duration:0.22,ease:'power4.in'},0.08);\n` +
-        `tl.from('#${id} .v',{innerText:1299,snap:{innerText:1},duration:0.8,ease:'power1.out'},0.15);\n` +
-        `tl.from('#${id} .cut',{scaleX:0,transformOrigin:'left center',duration:0.22,ease:'power3.out'},0.36);\n` +
-        `tl.from('#${id} .burst',{scale:0,rotation:70,duration:0.28,ease:'back.out(2)'},0.66);\n` +
-        `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.9);\n` +
-        `tl.to('#${id} .price',{scale:1.06,duration:0.1,yoyo:true,repeat:1},0.96);`,
-    ),
-  'cta': () =>
-    mk(
-      'ms_cta',
-      'cta',
-      (id) => `
-<div class="ms">
-  <div class="k">距 结 束 仅 剩</div>
-  <div class="cd"><div class="t">00</div><i>:</i><div class="t">12</div><i>:</i><div class="t">45</div></div>
-  <div class="cta">马上抢购 ▶</div>
-  <div class="burst" style="width:340px;height:340px;right:140px;top:110px;transform:rotate(10deg);font-size:76px;">仅限<br/>今天</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .k{position:absolute;left:0;right:0;top:170px;text-align:center;font-size:46px;font-weight:800;letter-spacing:0.4em;color:var(--muted);}
-#${id} .cd{position:absolute;left:0;right:0;top:280px;display:flex;align-items:center;justify-content:center;gap:34px;}
-#${id} .t{background:var(--panel-2);border-radius:var(--radius);padding:26px 46px;font-family:var(--font-num);font-size:150px;font-weight:800;box-shadow:var(--shadow);}
-#${id} .cd i{font-style:normal;font-size:120px;font-weight:900;color:var(--accent);}
-#${id} .cta{position:absolute;left:50%;bottom:190px;transform:translateX(-50%) rotate(-2deg);background:var(--panel);color:var(--accent-2);font-size:104px;font-weight:900;letter-spacing:0.06em;padding:44px 120px;border-radius:var(--radius);box-shadow:var(--glow);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .k',{autoAlpha:0,duration:0.2},0);\n` +
-        `tl.from('#${id} .t',{y:-90,autoAlpha:0,duration:0.24,stagger:0.1,ease:'power3.out'},0.08);\n` +
-        `tl.from('#${id} .cd i',{autoAlpha:0,duration:0.18},0.4);\n` +
-        `tl.from('#${id} .cta',{scale:2,autoAlpha:0,duration:0.22,ease:'power4.in'},0.5);\n` +
-        `tl.to('#${id} .cta',{scale:1.05,duration:0.12,yoyo:true,repeat:1},0.8);\n` +
-        `tl.from('#${id} .burst',{scale:0,rotation:70,duration:0.26,ease:'back.out(2)'},0.7);`,
-    ),
-  'countdown': () =>
-    mk(
-      'ms_cdt',
-      'countdown',
-      (id) => `
-<div class="ms">
-  <div class="k">距 开 抢 仅 剩</div>
-  <div class="cd">
-    <div class="u"><div class="t">00</div><span>时</span></div>
-    <i>:</i>
-    <div class="u"><div class="t">59</div><span>分</span></div>
-    <i>:</i>
-    <div class="u"><div class="t sec">59</div><span>秒</span></div>
-  </div>
-  <div class="burst" style="width:300px;height:300px;right:150px;top:80px;transform:rotate(10deg);font-size:72px;">秒杀</div>
-  <div class="strip" style="bottom:150px;transform:rotate(-3deg);">今晚 8 点开抢 — 8PM TONIGHT — 今晚 8 点开抢 — 8PM TONIGHT</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .k{position:absolute;left:0;right:0;top:160px;text-align:center;font-size:46px;font-weight:800;letter-spacing:0.4em;color:var(--muted);}
-#${id} .cd{position:absolute;left:0;right:0;top:330px;display:flex;justify-content:center;gap:44px;}
-#${id} .u{display:flex;flex-direction:column;align-items:center;gap:26px;}
-#${id} .t{background:var(--panel-2);border-radius:var(--radius);padding:26px 50px;font-family:var(--font-num);font-size:180px;font-weight:800;line-height:1;box-shadow:var(--shadow);}
-#${id} .u span{font-size:38px;font-weight:800;letter-spacing:0.3em;color:var(--muted);}
-#${id} .cd i{font-style:normal;font-size:140px;font-weight:900;color:var(--accent);margin-top:46px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .k',{autoAlpha:0,duration:0.2},0);\n` +
-        `tl.from('#${id} .u',{y:-90,autoAlpha:0,duration:0.24,stagger:0.1,ease:'power3.out'},0.08);\n` +
-        `tl.from('#${id} .cd i',{autoAlpha:0,duration:0.18},0.44);\n` +
-        `tl.from('#${id} .sec',{innerText:53,snap:{innerText:1},duration:0.5,ease:'power1.out'},0.5);\n` +
-        `tl.from('#${id} .burst',{scale:0,rotation:70,duration:0.26,ease:'back.out(2)'},0.62);\n` +
-        `tl.from('#${id} .strip',{x:-320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.78);`,
-    ),
-  'compare': () =>
-    mk(
-      'ms_cmp',
-      'compare',
-      (id) => `
-<div class="ms">
-  <div class="k">别 再 花 冤 枉 钱</div>
-  <div class="slab"><span>日常价</span><b>¥399</b></div>
-  <div class="burst" style="width:620px;height:620px;right:180px;top:230px;transform:rotate(10deg);font-size:110px;">现价<br/>¥199</div>
-  <div class="fine">同款同源 · 直降 200 · 仅此一批</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .k{position:absolute;left:0;right:0;top:150px;text-align:center;font-size:46px;font-weight:800;letter-spacing:0.4em;color:var(--muted);}
-#${id} .slab{position:absolute;left:180px;top:400px;transform:rotate(-3deg);background:var(--panel-2);border-radius:var(--radius);box-shadow:var(--shadow);padding:56px 90px;display:flex;flex-direction:column;gap:20px;}
-#${id} .slab span{font-size:40px;font-weight:800;letter-spacing:0.2em;color:var(--muted);}
-#${id} .slab b{font-family:var(--font-num);font-size:150px;font-weight:800;color:var(--muted);text-decoration:line-through;}
-#${id} .fine{position:absolute;left:180px;right:860px;bottom:110px;font-size:34px;font-weight:700;letter-spacing:0.3em;color:var(--muted);border-top:2px solid var(--line);padding-top:26px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .k',{autoAlpha:0,duration:0.2},0);\n` +
-        `tl.from('#${id} .slab',{x:-320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.1);\n` +
-        `tl.from('#${id} .burst',{scale:0,rotation:70,duration:0.3,ease:'back.out(2)'},0.4);\n` +
-        `tl.to('#${id} .burst',{scale:1.06,duration:0.12,yoyo:true,repeat:1},0.76);\n` +
-        `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.9);`,
-    ),
-  'list': () =>
-    mk(
-      'ms_lst',
-      'list',
-      (id) => `
-<div class="ms">
-  <div class="h">今日爆款清单</div>
-  <div class="row r1"><b>1</b><span>无线吸尘器</span><em>¥199</em></div>
-  <div class="row r2"><b>2</b><span>速干吹风机</span><em>¥99</em></div>
-  <div class="row r3"><b>3</b><span>迷你破壁机</span><em>¥159</em></div>
-  <div class="fine">前 100 名下单再减 10 元 · 抢完恢复原价</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .h{position:absolute;left:160px;top:110px;font-size:110px;font-weight:900;transform:rotate(-2deg);}
-#${id} .row{position:absolute;left:160px;display:flex;align-items:center;gap:44px;background:var(--panel);color:var(--accent-2);border-radius:var(--radius);box-shadow:var(--shadow);padding:26px 64px;font-weight:900;}
-#${id} .row b{font-size:64px;}
-#${id} .row span{font-size:64px;flex:1;}
-#${id} .row em{font-style:normal;font-family:var(--font-num);font-size:76px;font-weight:800;}
-#${id} .r1{top:320px;right:520px;transform:rotate(-1.5deg);}
-#${id} .r2{top:500px;right:440px;transform:rotate(1deg);}
-#${id} .r3{top:680px;right:560px;transform:rotate(-1deg);}
-#${id} .fine{position:absolute;left:160px;right:660px;bottom:100px;font-size:34px;font-weight:700;letter-spacing:0.3em;color:var(--muted);border-top:2px solid var(--line);padding-top:26px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .h',{scale:2.2,autoAlpha:0,duration:0.24,ease:'power4.in'},0);\n` +
-        `tl.from('#${id} .r1',{x:-320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.28);\n` +
-        `tl.from('#${id} .r2',{x:320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.4);\n` +
-        `tl.from('#${id} .r3',{x:-320,autoAlpha:0,duration:0.24,ease:'power3.out'},0.52);\n` +
-        `tl.from('#${id} .fine',{autoAlpha:0,duration:0.24},0.8);`,
-    ),
-  'steps': () =>
-    mk(
-      'ms_stp',
-      'steps',
-      (id) => `
-<div class="ms">
-  <div class="k">三 步 抢 到 手</div>
-  <div class="tiles">
-    <div class="tile"><i>领券</i><b>1</b><span>先领 200 券</span></div>
-    <div class="tile"><i>下单</i><b>2</b><span>整点拍下</span></div>
-    <div class="tile"><i>付款</i><b>3</b><span>立省一半</span></div>
-  </div>
-  <div class="strip" style="bottom:130px;transform:rotate(-3deg);">零点截单 — 手慢无 — 零点截单 — 手慢无</div>
-</div>
-<style>${msRoot(id)}
-#${id} .ms{background-color:var(--paper);}
-#${id} .k{position:absolute;left:0;right:0;top:140px;text-align:center;font-size:46px;font-weight:800;letter-spacing:0.4em;color:var(--muted);}
-#${id} .tiles{position:absolute;left:170px;right:170px;top:290px;display:flex;gap:60px;}
-#${id} .tile{position:relative;flex:1;background:var(--panel-2);border-radius:var(--radius);box-shadow:var(--shadow);padding:80px 40px 60px;display:flex;flex-direction:column;align-items:center;gap:24px;}
-#${id} .tile b{font-family:var(--font-num);font-size:170px;font-weight:800;line-height:1;}
-#${id} .tile span{font-size:44px;font-weight:800;}
-#${id} .tile i{position:absolute;left:-24px;top:-26px;transform:rotate(-6deg);font-style:normal;background:var(--panel);color:var(--accent-2);font-size:38px;font-weight:900;letter-spacing:0.1em;padding:14px 34px;box-shadow:var(--shadow);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .k',{autoAlpha:0,duration:0.2},0);\n` +
-        `tl.from('#${id} .tile',{y:-90,autoAlpha:0,duration:0.24,stagger:0.1,ease:'power3.out'},0.08);\n` +
-        `tl.from('#${id} .tile i',{scale:0,rotation:-60,duration:0.26,stagger:0.1,ease:'back.out(2)'},0.44);\n` +
-        `tl.from('#${id} .strip',{x:-320,autoAlpha:0,duration:0.26,ease:'power3.out'},0.84);`,
-    ),
+  'product-hit': () => mk('rr_hit', 'product-hit', (id) => `
+<div class="rr hit"><div class="field"></div><div class="hand"></div><div class="product"></div><div class="copy"><span class="micro">PRODUCT HIT / IDENTITY IN ONE SECOND</span><h2 class="head" data-edit>拿起它<br/><b>就知道怎么用</b></h2><p data-edit>真实包装、真实动作、真实材质先出现。</p></div><div class="label">看清产品</div><i class="rule"></i></div>
+<style>${root(id)}
+#${id} .field{position:absolute;left:0;top:0;width:920px;height:1080px;background:var(--accent);}#${id} .hit .product{left:320px;top:170px;transform:rotate(-5deg) scale(1.08);}#${id} .hand{position:absolute;left:-140px;bottom:160px;width:800px;height:210px;background:#b98567;border:8px solid var(--fg);transform:rotate(15deg);}#${id} .copy{position:absolute;left:1030px;top:145px;width:780px;}#${id} .copy h2{margin-top:130px;font-size:99px;line-height:.94;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:70px;font-size:28px;line-height:1.55;}#${id} .hit .label{left:760px;top:130px;}#${id} .hit .rule{left:1030px;bottom:130px;width:670px;}
+</style>`, (id) => `tl.from('#${id} .field',{x:-160,duration:.34},0);tl.from('#${id} .product',{y:-110,rotation:0,autoAlpha:0,duration:.3},.16);tl.from('#${id} .hand',{x:-130,autoAlpha:0,duration:.28},.3);tl.from('#${id} .copy>*',{x:55,autoAlpha:0,duration:.23,stagger:.07},.34);tl.from('#${id} .label',{scale:0,duration:.2},.58);`),
+
+  'offer-lockup': () => mk('rr_offer', 'offer-lockup', (id) => `
+<div class="rr offer"><div class="black"></div><div class="product"></div><div class="info"><span class="micro">VERIFIED OFFER / TERMS MUST BE SUPPLIED</span><h2 class="head" data-edit>真实套装</h2><div class="price"><sup>¥</sup><b class="num" data-edit>199</b><span>示例价格<br/>发布前确认</span></div><div class="terms">2 件套 / 适用版本待确认 / 不虚构原价</div><div class="cta head" data-edit>现在去看</div></div><div class="label">ONE CLEAR ACTION</div></div>
+<style>${root(id)}
+#${id} .black{position:absolute;left:0;top:0;width:760px;height:1080px;background:var(--panel-2);}#${id} .offer .product{left:175px;top:190px;transform:rotate(4deg) scale(1.05);}#${id} .info{position:absolute;left:850px;top:85px;width:960px;}#${id} .info h2{margin-top:80px;font-size:90px;}#${id} .price{display:flex;align-items:flex-end;margin-top:60px;border-top:12px solid var(--accent);padding-top:35px;}#${id} .price sup{font-size:80px;font-weight:900;}#${id} .price b{font-size:330px;line-height:.8;letter-spacing:-.08em;}#${id} .price span{margin-left:40px;font-size:23px;line-height:1.4;}#${id} .terms{margin-top:60px;padding:22px 28px;border:4px solid var(--fg);font-size:24px;}#${id} .cta{display:inline-block;margin-top:50px;padding:25px 40px;background:var(--accent-2);font-size:58px;}#${id} .offer .label{left:600px;top:120px;}
+</style>`, (id) => `tl.from('#${id} .black',{x:-150,duration:.34},0);tl.from('#${id} .product',{y:100,rotation:0,autoAlpha:0,duration:.3},.15);tl.from('#${id} .info>*',{x:60,autoAlpha:0,duration:.24,stagger:.08},.28);tl.from('#${id} .price b',{innerText:0,snap:{innerText:1},duration:.65},.45);tl.from('#${id} .label',{scale:0,duration:.2},.62);`),
+
+  'benefit-stack': () => mk('rr_benefits', 'benefit-stack', (id) => `
+<div class="rr benefits"><span class="micro">BENEFIT RUN / ONE SOURCE BEAT EACH</span><div class="product"></div><div class="benefit one"><b class="num">01</b><h3 class="head" data-edit>一按即开</h3><span>真实动作片段</span></div><div class="benefit two"><b class="num">02</b><h3 class="head" data-edit>折叠收好</h3><span>真实体积变化</span></div><div class="benefit three"><b class="num">03</b><h3 class="head" data-edit>放进日常</h3><span>真实使用场景</span></div><i class="rule"></i></div>
+<style>${root(id)}
+#${id} .benefits>.micro{position:absolute;left:75px;top:55px;}#${id} .benefits .product{left:110px;top:210px;transform:rotate(-5deg);}#${id} .benefit{position:absolute;left:650px;right:70px;height:235px;padding:35px 45px;border-top:8px solid var(--fg);display:grid;grid-template-columns:100px 1fr 300px;align-items:center;}#${id} .benefit.one{top:130px;}#${id} .benefit.two{top:410px;background:var(--accent);color:#fff;}#${id} .benefit.three{top:690px;}#${id} .benefit b{font-size:34px;}#${id} .benefit h3{font-size:70px;}#${id} .benefit span{font-size:25px;}#${id} .benefits>.rule{left:500px;top:120px;width:18px;height:850px;background:var(--accent);}
+</style>`, (id) => `tl.from('#${id} .product',{x:-120,rotation:0,autoAlpha:0,duration:.3},0);tl.from('#${id} .rule',{scaleY:0,transformOrigin:'top',duration:.27},.18);tl.from('#${id} .benefit',{x:130,autoAlpha:0,duration:.26,stagger:.13},.28);`),
+
+  'variant-run': () => mk('rr_variants', 'variant-run', (id) => `
+<div class="rr variants"><div class="red"></div><div class="copy"><span class="micro">VARIANT RUN / REAL DIFFERENCES</span><h2 class="head" data-edit>同一件事<br/><b>三种选择</b></h2><p>颜色、尺寸或版本必须来自真实产品。</p></div><div class="lineup"><div class="v a"><i class="product"></i><b>01 / 红</b></div><div class="v b"><i class="product"></i><b>02 / 黑</b></div><div class="v c"><i class="product"></i><b>03 / 青</b></div></div><div class="label">SELECT THE REAL ONE</div></div>
+<style>${root(id)}
+#${id} .red{position:absolute;left:0;top:0;width:650px;height:1080px;background:var(--accent);}#${id} .copy{position:absolute;left:70px;top:100px;width:520px;color:#fff;}#${id} .copy h2{margin-top:120px;font-size:92px;line-height:.9;}#${id} .copy h2 b{color:var(--accent-2);}#${id} .copy p{margin-top:70px;font-size:26px;line-height:1.5;}#${id} .lineup{position:absolute;left:740px;right:60px;top:130px;bottom:90px;display:flex;gap:35px;align-items:flex-end;}#${id} .v{position:relative;flex:1;height:780px;border-bottom:10px solid var(--fg);}#${id} .v .product{left:50%;top:50px;transform:translateX(-50%) scale(.75);}#${id} .v.b .product::after{background:#181818;}#${id} .v.c .product::after{background:#2ca58d;}#${id} .v b{position:absolute;left:20px;bottom:25px;font-family:var(--font-num);font-size:24px;}#${id} .variants .label{right:70px;top:70px;}
+</style>`, (id) => `tl.from('#${id} .red',{x:-150,duration:.34},0);tl.from('#${id} .copy>*',{x:-45,autoAlpha:0,duration:.23,stagger:.07},.18);tl.from('#${id} .v',{y:130,autoAlpha:0,duration:.27,stagger:.12},.28);tl.from('#${id} .label',{scale:0,duration:.2},.62);`),
+
+  'proof-burst': () => mk('rr_proof', 'proof-burst', (id) => `
+<div class="rr proof"><div class="source"><div class="before"></div><div class="after"></div><span class="num">REAL SOURCE / RESULT HOLD</span></div><div class="copy"><span class="micro">PROOF / LOWER THE PRESSURE</span><h2 class="head" data-edit>先看结果<br/><b>再听结论</b></h2><p data-edit>画面证明不了的，不用设计假装证明。</p><div class="claim">用户确认后的真实证据</div></div><i class="rule"></i></div>
+<style>${root(id)}
+#${id} .proof{background:var(--panel-2);color:#fff;}#${id} .source{position:absolute;left:70px;top:70px;width:1050px;height:940px;background:#e8dfcf;color:var(--fg);display:flex;gap:20px;padding:70px;}#${id} .before,#${id} .after{flex:1;background:linear-gradient(145deg,#c2ae96,#f2d9bd 58%,#76655b);border:8px solid var(--fg);}#${id} .after{filter:contrast(1.08) saturate(1.1);}#${id} .source span{position:absolute;left:70px;bottom:25px;font-size:18px;}#${id} .copy{position:absolute;left:1220px;top:140px;width:620px;}#${id} .copy h2{margin-top:130px;font-size:90px;line-height:.92;}#${id} .copy h2 b{color:var(--accent-2);}#${id} .copy p{margin-top:65px;font-size:27px;line-height:1.55;color:#ffffffb2;}#${id} .claim{margin-top:75px;padding:28px;background:var(--paper);color:var(--fg);font-size:28px;font-weight:900;}#${id} .proof>.rule{left:1165px;top:0;width:16px;height:820px;background:var(--accent);}
+</style>`, (id) => `tl.from('#${id} .source',{x:-140,duration:.34},0);tl.from('#${id} .before,#${id} .after',{scale:.9,autoAlpha:0,duration:.27,stagger:.12},.2);tl.from('#${id} .rule',{scaleY:0,transformOrigin:'top',duration:.25},.35);tl.from('#${id} .copy>*',{x:55,autoAlpha:0,duration:.23,stagger:.08},.4);`),
+
+  'checkout-release': () => mk('rr_release', 'checkout-release', (id) => `
+<div class="rr release"><div class="red"></div><div class="product"></div><div class="copy"><span class="micro">CHECKOUT RELEASE / ESSENTIAL FACTS ONLY</span><h2 class="head" data-edit>看清产品<br/><b>确认条款</b><br/>再去行动</h2><div class="terms">价格 / 日期 / 适用范围 / 发布前确认</div><div class="cta head" data-edit>现在去看</div></div><div class="label">ONE PRODUCT / ONE ACTION</div></div>
+<style>${root(id)}
+#${id} .release{background:var(--accent);}#${id} .red{position:absolute;left:0;top:0;width:800px;height:1080px;background:var(--paper);}#${id} .release .product{left:190px;top:180px;transform:rotate(-4deg) scale(1.08);}#${id} .copy{position:absolute;left:900px;top:100px;width:850px;color:#fff;}#${id} .copy h2{margin-top:120px;font-size:102px;line-height:.88;}#${id} .copy h2 b{color:var(--accent-2);}#${id} .terms{margin-top:60px;padding:22px 28px;border:5px solid #fff;font-size:24px;}#${id} .cta{display:inline-block;margin-top:55px;padding:28px 42px;background:var(--accent-2);color:var(--fg);font-size:64px;}#${id} .release .label{left:690px;top:90px;}
+</style>`, (id) => `tl.from('#${id} .red',{x:-150,duration:.34},0);tl.from('#${id} .product',{y:120,rotation:0,autoAlpha:0,duration:.3},.18);tl.from('#${id} .copy>*',{x:60,autoAlpha:0,duration:.24,stagger:.08},.28);tl.from('#${id} .label',{scale:0,duration:.2},.58);`),
 };

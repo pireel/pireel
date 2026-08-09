@@ -279,9 +279,13 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
   it('成品画面复检先本地去重，并允许显式逐帧云端检查', () => {
     const review = STUDIO_TOOLS.find((tool) => tool.id === 'review_visuals')!;
     const schema = review.inputSchema as { properties: Record<string, unknown> };
-    expect(review.description).toContain('compares them locally');
+    expect(review.description).toContain('compares frames locally');
+    expect(review.description).toContain('entrance, pressure, proof and exit');
+    expect(review.description).toContain('repairScope');
+    expect(schema.properties).toHaveProperty('sceneIds');
     expect(schema.properties).toHaveProperty('forceCloudAll');
-    expect(CHAT_IDENTITY).toContain('locally collapses visually similar frames');
+    expect(CHAT_IDENTITY).toContain('samples Director Scene entrance, pressure, proof, exit');
+    expect(CHAT_IDENTITY).toContain('repair ONLY the listed Semantic Scenes');
   });
   it('口播剪辑手册单独 skill:工具在表、映射到我们的剪辑面、按需进(不进 system)', () => {
     expect(STUDIO_TOOLS.some((t) => t.id === 'read_editing_guide')).toBe(true);
