@@ -1,6 +1,6 @@
 /**
- * Factory for the real-preview blocks shown on a frame's detail page ("what this
- * theme produces"), keyed by (frameId, kind). Each frame is its own layout dialect,
+ * Factory for visual-language samples shown on a Frame's detail page, keyed by
+ * (frameId, kind). Samples are not fixed production templates. Each Frame has its own layout dialect,
  * not one skeleton reskinned:
  *   Blueprint = engineering drawing: wireframes, dimension lines, grid, title block, stroke-only
  *   Cream     = sticker candy: tilted rounded stickers, pills, dot accents, layering

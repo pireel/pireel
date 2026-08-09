@@ -126,7 +126,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.read_frame.label',
     description:
-      "Load the attached frame's playbook (theme content pack: design tokens, composition rules, per-block build recipes). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then follow the playbook. Its result persists in the conversation: if a read_frame result for this frame is already in the history, do NOT call it again. No input needed.",
+      "Load the attached Frame's rich visual-directing playbook (design tokens, footage relationship, composition grammar, density, typography, motion and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole and adapt it to each Scene's purpose and evidence. It is not a catalog of fixed output types or block recipes. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
   },
   {

@@ -10,7 +10,7 @@ export interface FrameCatalogItem {
   icon: string;
   /** Cover R2 raw key; null → fall back to emoji. */
   iconKey?: string | null;
-  /** Theme output-type preview words (preview card on the frame panel detail page). */
+  /** Open-vocabulary visual-language sample names shown on the Frame detail page. */
   showcase: string[];
   /** Theme design tokens (keys match theme vars); the preview card renders the theme's real tones from it. null → use the current project theme. */
   palette?: Record<string, string> | null;

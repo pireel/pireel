@@ -82,9 +82,18 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     const system = buildChatSystem(null, '- zen-white · Zen White\n- editorial-bold · Editorial Bold');
     expect(system).toContain('choose the best-fitting frame');
     expect(system).toContain('call attach_frame YOURSELF');
-    expect(system).toContain('safe default zen-white');
+    expect(system).toContain('zen-white is present in the catalog, it is the safe default');
+    expect(system).toContain('catalog previews are samples of that language, not templates');
     expect(system).toContain('NEVER attach a theme just for a small local edit');
     expect(system).not.toContain('ask the user to pick (or to skip)');
+  });
+  it('Frame 是富视觉导演手册，不是固定组件产物或场景路线', () => {
+    const system = buildChatSystem({ id: 'zen-white', title: '留白 Zen' });
+    expect(system).toContain('rich Markdown playbook');
+    expect(system).toContain('Frame is NOT a set of fixed output types, scene routes, quotas or block recipes');
+    expect(system).toContain("adapt its language to each Scene's purpose and evidence");
+    expect(STUDIO_TOOLS.find((tool) => tool.id === 'read_frame')?.description).toContain('not a catalog of fixed output types');
+    expect(mcpInstructions('test-version')).toContain('not a set of fixed output types or block recipes');
   });
   it('buildSituation 不带口播稿正文(稿子经 extract_asr 回执/read_script 一次性进信息流)', () => {
     const s = buildSituation({ composition: { durationSec: 10 }, playheadSec: 1, pipeline: { asr: true } });

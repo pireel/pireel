@@ -7,8 +7,9 @@
  * Unrelated to the /create line's skill system.
  * - List = one big **cover** card per row (theme name as the hero, hints at style without listing details,
  *   positioned like a PPT theme cover);
- * - Open = theme detail: summary + multi-type **real preview** cards this theme produces (showcase word →
- *   real block, rendered by BlockPreviewFrame via the same Hyperframes stack, following the project theme color; see showcase-blocks);
+ * - Open = theme detail: summary + **visual-language samples** (showcase word → real block,
+ *   rendered by BlockPreviewFrame via the same Hyperframes stack, following the project theme color; see showcase-blocks).
+ *   Samples demonstrate a dialect; they are not fixed output types or templates the agent must repeat;
  * - "Use" = attach the frame to the right chat (not copy the prompt text!); the request carries frameId and
  *   the server injects the playbook. The chat input's theme button opens the same catalog.
  */
@@ -165,9 +166,9 @@ function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: 
   );
 }
 
-/** Real preview card for a showcase word: builds a real block, rendered by BlockPreviewFrame (same
- *  preview/export stack, frozen on a stable frame). When the frame has a palette (design tokens), the
- *  preview comp adopts it — the card shows the theme's real color tone; unknown words fall back to a text card. */
+/** Visual-language sample for a showcase word: builds a real block, rendered by BlockPreviewFrame
+ * (same preview/export stack, frozen on a stable frame). It demonstrates the dialect rather than
+ * promising a fixed production template. Unknown words fall back to a text card. */
 function ShowcaseCard({ comp, frame, kind, locale }: { comp: Composition; frame: FrameCatalogItem; kind: string; locale: Locale }) {
   const block = useMemo(() => showcaseBlock(frame.id, kind, locale), [frame.id, kind, locale]);
   // Preview is always a 16:9 canvas + the frame's own design tokens (palette swaps font/radius/shadow too)

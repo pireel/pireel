@@ -15,7 +15,7 @@ export interface Frame {
   icon: string;
   /** Cover image R2 bare key (optional; used by the thumbnail wall if present). */
   iconKey?: string;
-  /** Preview kinds the theme produces (open vocabulary; frame detail page renders real preview cards). */
+  /** Open-vocabulary visual-language samples for the detail page; not fixed output types. */
   showcase: string[];
   /** Theme design tokens (keys match theme vars; use 8-digit hex for alpha, no commas). */
   palette?: Record<string, string>;
@@ -24,7 +24,7 @@ export interface Frame {
    *  stroke-color/stroke-opacity(0-1)/person-front(true)/feather(0-100). */
   personFx?: Record<string, string>;
   version: string;
-  /** Playbook body (English, injected into the studio chat system prompt). */
+  /** Rich Markdown visual-directing playbook. Treat as prose judgment, not structured recipes. */
   body: string;
 }
 
