@@ -32,6 +32,10 @@ describe('静态提示词完整性', () => {
     expect(CHAT_IDENTITY).toContain('selected Studio Skill is a rich Markdown expert playbook');
     expect(CHAT_IDENTITY).toContain('NOT a structured configuration');
     expect(CHAT_IDENTITY).toContain('There is no scenario-specific edit macro');
+    expect(CHAT_IDENTITY).toContain('Do not force it through as one uninterrupted execution');
+    expect(CHAT_IDENTITY).toContain('For a small set of named choices call ask_user and WAIT');
+    expect(CHAT_IDENTITY).toContain('For open-ended information, ask ONE concise natural-language question and stop');
+    expect(mcpInstructions('test-version')).toContain('Ask one concise question and wait when only the user can resolve that boundary');
     expect(STUDIO_TOOLS.some((tool) => ['analyze_narration', 'lay_out', 'add_graphics'].includes(tool.id))).toBe(false);
   });
   it('Chat 身份是剪辑专家，而不是被动助手或泛化导演', () => {
