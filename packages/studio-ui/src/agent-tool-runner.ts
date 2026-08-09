@@ -2109,16 +2109,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const sceneDirection = sceneContext ? `\n\n${formatDirectorSceneContext(sceneContext)}` : '';
               const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
-              // Planned scenes always get bespoke HTML reasoning. Only a small themeless local edit
-              // may use the compact kit fallback; a failed/missing frame must not flatten a full draft.
+              // New elements always get bespoke visual reasoning. No Frame means the neutral visual
+              // craft baseline, not a fallback to the fixed component-library cards.
               let parsed = await composeBlockChecked(
                 seed,
                 `Create a new overlay element for this content: ${String(input.instruction ?? '')}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
-                newBlockComposeMode({
-                  hasFrame: !!compRef.current.frameId,
-                  hasDirectorScene: !!sceneContext,
-                }),
+                newBlockComposeMode(),
               );
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than

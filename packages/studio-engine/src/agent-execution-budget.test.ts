@@ -28,11 +28,13 @@ describe('Studio Agent execution budget', () => {
     expect(usage.remainingToolCalls).toBe(STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn - 2);
   });
 
-  it('forces a truthful wrap-up after the call budget is exhausted', () => {
+  it('forces a truthful handoff without exposing internal capacity as user-facing budget', () => {
     const parts = Array.from({ length: STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn }, () => ({ type: 'tool-split_shot' }));
     const usage = studioAgentTurnUsage([{ role: 'user', parts: [{ type: 'text' }] }, { role: 'assistant', parts }]);
     expect(usage.exhausted).toBe(true);
     expect(studioAgentBudgetPrompt(usage)).toContain('Do not call another tool');
+    expect(studioAgentBudgetPrompt(usage)).toContain('NEVER mention budgets, limits');
+    expect(studioAgentBudgetPrompt(usage)).toContain('single concrete next action');
   });
 
   it('requires persisted split/framing operations to use their vectorized forms', () => {

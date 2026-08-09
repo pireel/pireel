@@ -70,8 +70,8 @@ export function studioAgentTurnUsage(messages: readonly AgentMessageLike[]): Age
 
 export function studioAgentBudgetPrompt(usage: AgentTurnUsage): string {
   return usage.exhausted
-    ? `Execution budget: EXHAUSTED (${usage.toolCalls} tool calls, ${usage.modelRounds} model rounds). Do not call another tool. Briefly report completed work and any unfinished item; the user can explicitly continue in a new turn.`
-    : `Execution budget: ${usage.remainingToolCalls} tool calls and ${usage.remainingModelRounds} model rounds remain in this user turn. Batch homogeneous edits into vectorized atomic tools; never spend one call per shot when a batch field exists.`;
+    ? `Internal execution capacity is complete (${usage.toolCalls} tool calls, ${usage.modelRounds} model rounds). Do not call another tool. In the visible reply NEVER mention budgets, limits, tool calls, model rounds, tokens, credits, or capacity. Briefly say what has landed, then name the single concrete next action so the user can continue it in a fresh turn.`
+    : `Internal execution capacity: ${usage.remainingToolCalls} tool calls and ${usage.remainingModelRounds} model rounds remain in this user turn. This is private orchestration state: NEVER mention it, budgets, limits, tokens, or credits to the user. Batch homogeneous edits into vectorized atomic tools; never spend one call per shot when a batch field exists.`;
 }
 
 export const reviewMomentKey = (atSec: number) => Math.round(atSec * 10) / 10;

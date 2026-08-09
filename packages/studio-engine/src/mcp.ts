@@ -53,6 +53,8 @@ export interface McpDeps {
    *  update on mismatch, not ordering; each release must announce a distinct string). The
    *  hosting route derives it from the shipped skill's VERSION file — the single source. */
   skillVersion: string;
+  /** Optional private foundational editing judgment injected by the host into initialize instructions. */
+  editingExpertise?: string;
   /** Execute over the bridge (routing layer = StudioBridge DO stub fetch /call). */
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
   /** Frame catalog (routing layer = frameRegistry.list()). */
@@ -177,7 +179,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. Component schemas are retrieved from the instruction/current moment at request time (maximum three), never dumped as the full registry. The contract follows the project: THEMELESS projects get a component contract (answer = one ```json fence: {component, props} / {"custom": true} for a bespoke build / null for no graphic); projects with a theme attached get the markup contract (note + ```html + ```js — the theme playbook rides in the system). Pass format:"html" to force markup (e.g. after answering {"custom": true}). YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Pass `blockId` + `instruction` to rewrite an existing block; omit `blockId` and pass `instruction` + optional `atSec` to create one. The default way to create/edit block content — charges no Pireel credits.',
+        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. Component schemas are retrieved from the instruction/current moment at request time (maximum three), never dumped as the full registry. New work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing kit block keeps the component contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit component-library choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Pass `blockId` + `instruction` to rewrite an existing block; omit `blockId` and pass `instruction` + optional `atSec` to create one. The default way to create/edit block content — charges no Pireel credits.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -185,7 +187,7 @@ export function buildMcpTools(): McpToolDef[] {
           blockId: { type: 'string', description: 'Existing block to rewrite. Omit for a new element.' },
           atSec: { type: 'number', description: 'New element only: timeline start seconds (defaults to playhead).' },
           instruction: { type: 'string', description: 'What to build or change.' },
-          format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract (default follows the project: themeless → kit, themed → html). Use "html" after answering {"custom": true}.' },
+          format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract. Default: existing kit block → kit; every new or custom block → html, with or without a Frame. Use kit only for an explicit component-library choice.' },
         },
         required: ['instruction'],
       },
@@ -404,7 +406,7 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         protocolVersion: typeof requested === 'string' ? requested : MCP_PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
         serverInfo: MCP_SERVER_INFO,
-        instructions: mcpInstructions(deps.skillVersion),
+        instructions: mcpInstructions(deps.skillVersion, deps.editingExpertise),
       });
     }
     case 'ping':

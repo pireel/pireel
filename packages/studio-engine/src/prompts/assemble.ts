@@ -48,10 +48,9 @@ After the note line, in THIS order:
 - one \`\`\`html block = the full INNER HTML,
 - then one \`\`\`js block = the full TIMELINE BODY.`;
 
-/** The component path's system prompt — the THEMELESS path by design. A themed project generates
- *  HTML instead: the theme is a prose description for the model (its character, palette, layout
- *  language), and the model builds themed markup from it plus the component norms — see
- *  buildHtmlSystem + withActiveTheme, which carry the frame playbook. Components stay unthemed. */
+/** The component path's system prompt. It is reserved for an explicit library-component choice or
+ *  editing an existing kit block; new generation uses the free-form path even without a Frame.
+ *  Components themselves stay unthemed. */
 export function buildKitSystem(opts?: ComponentSystemOptions): string {
   const preset = getPreset(opts?.presetId);
   return [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(componentIdsFor(opts)), preset.editorial, KIT_OUTPUT].join('\n\n');

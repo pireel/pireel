@@ -102,7 +102,7 @@ export function ChatThread({
     [],
   );
 
-  const { messages, sendMessage, status, stop, setMessages, addToolOutput, error, regenerate } = useChat({
+  const { messages, sendMessage, status, stop, setMessages, addToolOutput, error } = useChat({
     id: threadId,
     messages: initialMessages,
     transport,
@@ -253,6 +253,15 @@ export function ChatThread({
     [sendMessage, status],
   );
 
+  // A failed stream may already have committed tools. Re-generating the old assistant message
+  // erases its receipts while keeping the client-side call counter, so the apparent retry can
+  // duplicate edits or immediately hit the old turn's ceiling. Resume as a NEW user turn instead:
+  // that gives the server a fresh composition snapshot and resets both execution counters.
+  const continueFromCurrentState = useCallback(
+    () => run(t('chatGen.continueAfterInterruptionPrompt')),
+    [run],
+  );
+
   // Stop = abort the running tool (it stands down at its next safe boundary) + kill the stream.
   // Order matters: flag first so neither the SDK tail check nor our safety net restarts the turn.
   const handleStop = useCallback(() => {
@@ -391,6 +400,11 @@ export function ChatThread({
                 && isLast
                 && status === 'ready'
                 && !assistantMessageHasRenderableOutput(m);
+              const continuationRecommended =
+                m.role === 'assistant'
+                && isLast
+                && status === 'ready'
+                && (m.metadata as { continuationRecommended?: boolean } | undefined)?.continuationRecommended === true;
               return (
                 <Message key={m.id} from={m.role}>
                   <div className="flex items-start gap-2">
@@ -431,10 +445,21 @@ export function ChatThread({
                           <span className="min-w-0 flex-1 text-destructive">{t('chatGen.requestFailed')}</span>
                           <button
                             type="button"
-                            onClick={() => void regenerate()}
+                            onClick={continueFromCurrentState}
                             className="text-ink-2 hover:bg-line hover:text-ink shrink-0 rounded px-1.5 py-0.5 font-medium"
                           >
-                            {t('common.retry')}
+                            {t('chatGen.continueFromCurrentState')}
+                          </button>
+                        </div>
+                      )}
+                      {continuationRecommended && !emptyCompletedAssistant && (
+                        <div>
+                          <button
+                            type="button"
+                            onClick={continueFromCurrentState}
+                            className="border-line bg-panel-2 text-ink-2 hover:bg-line hover:text-ink rounded-md border px-2.5 py-1.5 text-[12px] font-medium"
+                          >
+                            {t('chatGen.continueFromCurrentState')}
                           </button>
                         </div>
                       )}
@@ -455,20 +480,23 @@ export function ChatThread({
               </div>
             </Message>
           )}
-          {/* Request/stream failed: show a visible error bar (otherwise it just silently stops); retry = regenerate reruns the last round */}
+          {/* Request/stream failed: committed tools are durable, so recovery is a fresh continuation
+              from live project state rather than regeneration of stale history. */}
           {error && (
             <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
               <X size={12} className="shrink-0 text-destructive" />
               <span className="min-w-0 flex-1 truncate text-destructive">
-                {error.message?.includes('insufficient_tokens') ? t('chatGen.notEnoughCreditsTop') : t('chatGen.somethingWentWrongMsg', { msg: error.message || t('chatGen.requestFailed') })}
+                {error.message?.includes('insufficient_tokens') ? t('chatGen.notEnoughCreditsTop') : t('chatGen.interruptedStatePreserved')}
               </span>
-              <button
-                type="button"
-                onClick={() => void regenerate()}
-                className="text-ink-2 hover:bg-line hover:text-ink shrink-0 rounded px-1.5 py-0.5 font-medium"
-              >
-                {t('common.retry')}
-              </button>
+              {!error.message?.includes('insufficient_tokens') && (
+                <button
+                  type="button"
+                  onClick={continueFromCurrentState}
+                  className="text-ink-2 hover:bg-line hover:text-ink shrink-0 rounded px-1.5 py-0.5 font-medium"
+                >
+                  {t('chatGen.continueFromCurrentState')}
+                </button>
+              )}
             </div>
           )}
         </ConversationContent>

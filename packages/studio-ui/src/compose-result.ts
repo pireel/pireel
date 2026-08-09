@@ -18,11 +18,12 @@ export interface ComposeMode {
 }
 
 /**
- * A planned scene needs bespoke visual reasoning even if frame attachment failed. The small,
- * themeless local-edit path may still use the compact component kit as a deliberate fallback.
+ * Every newly generated element gets bespoke visual reasoning. A missing Frame means neutral craft,
+ * not a fallback to one of the fixed library cards. Kit mode is reserved for editing an existing
+ * kit block or for explicit insertion from the component library.
  */
-export function newBlockComposeMode(input: { hasFrame: boolean; hasDirectorScene: boolean }): ComposeMode | undefined {
-  return input.hasFrame || input.hasDirectorScene ? undefined : { kit: true };
+export function newBlockComposeMode(): undefined {
+  return undefined;
 }
 
 export interface ComposedBlock {

@@ -2,14 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { assembleComposeBrief, assembleComposeTheme, interpretApplyRaw } from './briefs';
 
 describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', () => {
-  it('路由随项目:无主题 → 组件契约(json 三态),挂主题 → markup 契约(playbook 进 system)', () => {
+  it('新元素无 Frame 也走自由设计；已有 kit 块才保留组件 props 契约', () => {
     const block = { id: 'b1', kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: '新组件' };
-    const kit = assembleComposeBrief({ block, instruction: '做一张对比卡', theme: 'general' });
+    const fresh = assembleComposeBrief({ block, instruction: '做一张对比卡', theme: 'general' });
+    expect(fresh.format).toBe('html');
+    expect(fresh.system).toContain('ACTIVE THEME');
+    expect(fresh.prompt).toContain('```html');
+
+    const kit = assembleComposeBrief({
+      block,
+      instruction: '把数字改成 52%',
+      theme: 'general',
+      kitCurrent: { component: 'metric', props: { value: '47%' } },
+    });
     expect(kit.format).toBe('kit');
     expect(kit.system).toContain('COMPONENTS');
     expect(kit.system).toContain('{"custom": true}');
     expect(kit.system).not.toContain('ACTIVE THEME'); // 组件无主题:不给 token 表
-    expect(kit.prompt).toContain('做一张对比卡');
+    expect(kit.prompt).toContain('把数字改成 52%');
     const themed = assembleComposeBrief({ block, instruction: '做一张对比卡', theme: 'general', frame: { title: '双年展海报', body: 'FRAME BODY' } });
     expect(themed.format).toBe('html');
     expect(themed.system).toContain('FRAME BODY'); // 主题=散文描述,全量进 system
@@ -30,7 +40,9 @@ describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', ()
     expect(b.prompt).toContain('复购率');
   });
   it('frame 嫁接:审美层 frame 赢、工程契约不动的措辞进 theme(与 compose 路由同源单点)', () => {
-    const t = assembleComposeTheme('general', undefined, { title: '双年展海报', body: 'FRAME BODY' });
+    const t = assembleComposeTheme('general', undefined, { title: '双年展海报', body: 'FRAME BODY' }, 'PRIVATE QUALITY FLOOR');
+    expect(t.indexOf('PRIVATE QUALITY FLOOR')).toBeLessThan(t.indexOf('FRAME BODY'));
+    expect(t).toContain('not a hidden Frame');
     expect(t).toContain('FRAME DESIGN LANGUAGE');
     expect(t).toContain('THE FRAME WINS');
     expect(t).toContain('FRAME BODY');

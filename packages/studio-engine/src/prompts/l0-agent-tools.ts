@@ -126,7 +126,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.read_frame.label',
     description:
-      "Load the attached Frame's rich visual-directing playbook (design tokens, footage relationship, composition grammar, density, typography, motion and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole and adapt it to each Scene's purpose and evidence. It is not a catalog of fixed output types or block recipes. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
+      "Load the attached Frame's complete video design-system playbook (material and image treatment, footage relationship, composition, density, typography, temporal behavior, sequence contour, sound-image relationship, captions, ratio adaptation and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole and adapt its audiovisual world to each Scene's purpose and evidence. It is not a catalog of fixed output types, block recipes, or a foundational editing method with colors attached. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
   },
   {
@@ -136,7 +136,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🖼️',
     label: 'tools.attach_frame.label',
     description:
-      "Attach a frame (theme content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. For an explicitly requested complete designed first pass, choose and attach the best-fitting frame yourself before graphics; do not stop merely to ask the user to pick. An explicit user choice always wins. The catalog appears in <frame_catalog>; use its safe default when no direction is strong. Also usable to SWITCH frames.",
+      "Attach a Frame (visual-directing content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. Call only after the user explicitly chooses a Frame or explicitly delegates the choice. Skill and Frame are independent; never select or reject one from supposed Skill compatibility. Also usable to SWITCH Frames when the user requests it.",
     inputSchema: obj({ frame_id: { type: 'string', description: 'Frame id from the catalog, e.g. "biennale-poster"' } }, ['frame_id']),
   },
   {
@@ -145,14 +145,14 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.set_director_plan.label',
     description:
-      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and choosing a theme. Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Each scene is a non-overlapping narrative interval; purpose, evidence, free-form visualTreatment and assetStrategy explain why it exists. Times use the edited timeline in seconds.',
+      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Each scene is a non-overlapping narrative interval; purpose, evidence, free-form visualTreatment and assetStrategy explain why it exists. Times use the edited timeline in seconds.',
     chatOnly: true,
     inputSchema: obj(
       {
         goal: { type: 'string', description: 'Concrete viewer or business outcome for this output.' },
         creativeThesis: { type: 'string', description: 'One concise directing idea that governs pacing, evidence and visual contrast.' },
-        skillId: { type: 'string', description: 'Selected Studio Skill id when one is active.' },
-        frameId: { type: 'string', description: 'Attached frame id when a theme is active.' },
+        skillId: { type: 'string', description: 'Selected Studio Skill id when one is active; independent of frameId.' },
+        frameId: { type: 'string', description: 'User-selected Frame id when one is attached; independent of skillId.' },
         audience: { type: 'string', description: 'Intended viewer, when known.' },
         scenes: {
           type: 'array',

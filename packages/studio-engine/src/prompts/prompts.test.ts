@@ -31,6 +31,8 @@ describe('静态提示词完整性', () => {
     expect(CHAT_IDENTITY).toContain('professional editorial judgment');
     expect(CHAT_IDENTITY).toContain('selected Studio Skill is a rich Markdown expert playbook');
     expect(CHAT_IDENTITY).toContain('NOT a structured configuration');
+    expect(CHAT_IDENTITY).toContain('Skill and Frame are orthogonal session inputs');
+    expect(CHAT_IDENTITY).toContain('NEVER infer, choose, reject, or switch a Frame because a Skill is active');
     expect(CHAT_IDENTITY).toContain('There is no scenario-specific edit macro');
     expect(CHAT_IDENTITY).toContain('Do not force it through as one uninterrupted execution');
     expect(CHAT_IDENTITY).toContain('For a small set of named choices call ask_user and WAIT');
@@ -78,22 +80,50 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
   it('buildChatSystem 同参数逐次字节相同(纯函数,无 request-time 动态内容)', () => {
     expect(buildChatSystem(null, '- f1 · F1 — x')).toBe(buildChatSystem(null, '- f1 · F1 — x'));
   });
-  it('完整首稿由剪辑专家自动选主题，小改动不强挂主题', () => {
+  it('未选 Frame 时保持无主题，完整首稿也不触发隐式适配', () => {
     const system = buildChatSystem(null, '- zen-white · Zen White\n- editorial-bold · Editorial Bold');
-    expect(system).toContain('choose the best-fitting frame');
-    expect(system).toContain('call attach_frame YOURSELF');
-    expect(system).toContain('zen-white is present in the catalog, it is the safe default');
-    expect(system).toContain('catalog previews are samples of that language, not templates');
-    expect(system).toContain('NEVER attach a theme just for a small local edit');
-    expect(system).not.toContain('ask the user to pick (or to skip)');
+    expect(system).toContain('Remain themeless');
+    expect(system).toContain('a complete edit does not authorize automatic Frame selection');
+    expect(system).toContain('neutral visual-craft quality floor');
+    expect(system).toContain('not permission to emit generic fixed cards');
+    expect(system).toContain('user explicitly chooses one or explicitly delegates the choice');
+    expect(system).toContain('catalog previews are samples of a visual language');
+    expect(system).toContain('Never rank Frames by the active Skill');
+    expect(system).toContain('Do not use a hidden safe default');
+    expect(system).not.toContain('choose the best-fitting frame');
+    expect(system).not.toContain('zen-white is present in the catalog, it is the safe default');
+
+    const attach = STUDIO_TOOLS.find((tool) => tool.id === 'attach_frame')!;
+    expect(attach.description).toContain('only after the user explicitly chooses a Frame or explicitly delegates the choice');
+    expect(attach.description).toContain('Skill and Frame are independent');
   });
-  it('Frame 是富视觉导演手册，不是固定组件产物或场景路线', () => {
+  it('Frame 是完整视频设计系统，不是固定组件或加了颜色的基础能力', () => {
     const system = buildChatSystem({ id: 'zen-white', title: '留白 Zen' });
     expect(system).toContain('rich Markdown playbook');
-    expect(system).toContain('Frame is NOT a set of fixed output types, scene routes, quotas or block recipes');
-    expect(system).toContain("adapt its language to each Scene's purpose and evidence");
-    expect(STUDIO_TOOLS.find((tool) => tool.id === 'read_frame')?.description).toContain('not a catalog of fixed output types');
-    expect(mcpInstructions('test-version')).toContain('not a set of fixed output types or block recipes');
+    expect(system).toContain('Frame is NOT a set of fixed output types, scene routes, quotas, block recipes');
+    expect(system).toContain('a foundational editing method with colors attached');
+    expect(system).toContain("adapt its audiovisual world to each Scene's purpose and evidence");
+    expect(system).toContain('Skill and Frame are orthogonal');
+    expect(system).toContain('do not judge this Frame\'s compatibility from the active Skill');
+    expect(STUDIO_TOOLS.find((tool) => tool.id === 'read_frame')?.description).toContain('complete video design-system playbook');
+    expect(mcpInstructions('test-version')).toContain('a foundational editing method with colors attached');
+    expect(mcpInstructions('test-version')).toContain('Skill and Frame are orthogonal');
+  });
+  it('同时选择 Skill 与 Frame 时并列注入，不产生绑定关系', () => {
+    const system = buildChatSystem(
+      { id: 'afterimage', title: '余像 Afterimage' },
+      undefined,
+      {
+        id: 'product-demo',
+        title: 'Product Demo',
+        description: 'Demonstrate a product.',
+        markdown: '# Product Demo\n\nFollow verified product evidence.',
+      },
+    );
+    expect(system).toContain('<studio_skill id="product-demo"');
+    expect(system).toContain('<frame_attached id="afterimage"');
+    expect(system).toContain('independently selected');
+    expect(system).not.toContain('product-demo is compatible with afterimage');
   });
   it('buildSituation 不带口播稿正文(稿子经 extract_asr 回执/read_script 一次性进信息流)', () => {
     const s = buildSituation({ composition: { durationSec: 10 }, playheadSec: 1, pipeline: { asr: true } });
@@ -237,11 +267,12 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     expect(CHAT_IDENTITY).toContain('purpose:"framing"');
     expect(CHAT_IDENTITY).toContain('<execution_budget>');
   });
-  it('MCP 与内置 Agent 共享批处理规则，并由外部 host 追踪单任务预算', () => {
+  it('MCP 与内置 Agent 共享批处理规则，但不把内部容量说成用户预算或积分', () => {
     const instructions = mcpInstructions('test-version');
-    expect(instructions).toContain('EXECUTION BUDGET');
+    expect(instructions).toContain('INTERNAL EXECUTION CAPACITY');
     expect(instructions).toContain('24 Pireel tool calls');
     expect(instructions).toContain('12 plan/act cycles');
+    expect(instructions).toContain('NEVER expose a budget, limit, count, token, credit, or capacity');
     expect(instructions).toContain('ONE split_shot {atSecs:[...],purpose:"framing"}');
     expect(instructions).toContain('ONE set_shot_framing {updates:[...]}');
   });
