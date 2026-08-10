@@ -4879,7 +4879,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, [projectId]);
 
   return (
-    <div className="studio-scope relative flex h-full min-h-0 w-full gap-2">
+    <div className="studio-scope border-line bg-panel relative flex h-full min-h-0 w-full gap-0 overflow-hidden rounded-lg border shadow-sm">
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       {/* Agent file injection: a stable, always-mounted hidden input an external agent (e.g. Codex's
@@ -4897,11 +4897,11 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           if (f) void pickVideoFile(f);
         }}
       />
-      {/* Left: chat area (large rounded card). Hidden entirely when closed (kept mounted to preserve the chat session), reopened via the top-right "chat" on the preview */}
-      <div className={panelOpen ? 'flex min-h-0 shrink-0 gap-2' : 'hidden'}>
+      {/* Left: chat area. It shares one workbench frame with the editor, while staying mounted when hidden to preserve the chat session. */}
+      <div className={panelOpen ? 'flex min-h-0 shrink-0' : 'hidden'}>
         {/* Panel width adjustable (drag the right edge, 320–760); the stage shrinks accordingly (area observer auto-recomputes fit) */}
         <div
-          className="border-line bg-panel relative flex min-h-0 flex-col overflow-hidden rounded-lg border"
+          className="border-line bg-panel relative flex min-h-0 flex-col overflow-hidden border-r"
           style={{ width: panelW }}
         >
           <div
@@ -4957,7 +4957,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         </div>
 
       </div>
-      <div className="border-line bg-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border">
+      <div className="bg-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Video import goes through the preview upload / chat; the top bar no longer has buttons (the pipeline is fully tool-ized, chat-driven) */}
         <input
           ref={fileInputRef}

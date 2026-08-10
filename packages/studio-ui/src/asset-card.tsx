@@ -17,7 +17,7 @@ import { t } from './i18n';
 
 /** Compact card grid shared by asset and generation libraries.
  * The 88px floor lets the padded generation panel keep three compact columns at its default width. */
-export const RESPONSIVE_ASSET_CARD_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(min(88px,100%),1fr))] gap-2';
+export const RESPONSIVE_ASSET_CARD_GRID = 'grid grid-cols-[repeat(auto-fill,minmax(min(88px,100%),1fr))] gap-1.5';
 
 /** Static 16:9 canvas for previews that must not depend on the project comp (presets/kit). */
 export const STATIC_ELEMENT_PREVIEW_COMP: Composition = { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
@@ -291,7 +291,7 @@ export function AssetCard({
 }) {
   const audio = it.kind === 'audio';
   return (
-    <div className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border transition">
+    <div className="bg-panel-2/55 hover:bg-panel-2 group relative w-full overflow-hidden rounded-md transition-colors">
       <button
         type="button"
         title={audio ? it.label : t('panels.previewLabelDragOnto', { label: it.label })}

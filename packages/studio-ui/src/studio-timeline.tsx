@@ -1163,7 +1163,7 @@ function StudioTimelineImpl({
   })();
 
   return (
-    <div className="border-line bg-panel flex max-h-96 min-h-0 flex-col border-t">
+    <div className="bg-panel flex max-h-96 min-h-0 flex-col">
       {/* Scroll area (zoom controls moved to the transport toolbar above). When a panel asset is dragged in, the whole area becomes a drop zone:
           the drop x is converted to time via secAt (includes scroll/zoom), and workbench inserts an asset block at that time */}
       <div
