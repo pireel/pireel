@@ -130,6 +130,7 @@ import { supplementalVisualFileBindings, supplementalVisualMedia } from './visua
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS, type TimelineTrackState } from './studio-timeline';
+import { quantizeTimelineFrameSecond } from './timeline-utils';
 import { timelineDirectorScenesFromDocument } from './director-scene-strip';
 import type { TimelineInsertMode, TimelineMediaDropTarget } from './timeline-asset-drop';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
@@ -484,6 +485,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const rotateLabelRef = useRef<HTMLSpanElement | null>(null); // angle number next to the rotate handle: set textContent directly while dragging
   const [tSec, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [timelineFramePickActive, setTimelineFramePickActive] = useState(false);
+  const [timelineFramePickBusy, setTimelineFramePickBusy] = useState(false);
   const [showCode, setShowCode] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const directorTimelineScenes = useMemo(() => timelineDirectorScenesFromDocument(editorDocument), [editorDocument]);
@@ -774,6 +777,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   selectedShotIdRef.current = selectedShotId;
   const playingRef = useRef(false);
   playingRef.current = playing;
+  const timelineFramePickActiveRef = useRef(false);
+  timelineFramePickActiveRef.current = timelineFramePickActive;
   // Read/write the latest state while pipeline tools run async (setState is async; multi-step tool runs rely on refs for the latest)
   const videoFileRef = useRef<File | null>(null);
   videoFileRef.current = videoFile;
@@ -1727,7 +1732,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // codeOrigRef + setCodeBlockId(id) + setFloatWin('code'), and pin the playhead to a stable frame.
   /** Open the right-side chat area (right side is chat only; other panels dock in the asset rail). */
   const openChat = useCallback(() => setPanelOpen(true), []);
-  const closeChat = useCallback(() => setPanelOpen(false), []);
+  const closeChat = useCallback(() => {
+    setTimelineFramePickActive(false);
+    setPanelOpen(false);
+  }, []);
   /** Open a tool panel (docked in the full asset rail column). The anchor param is kept for signature compatibility
    *  across entries but no longer used for positioning after docking; clicking outside doesn't close it (a docked
    *  panel is a persistent region, not a popover) — toggling is on the trigger button itself. */
@@ -2242,6 +2250,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const el = document.activeElement as HTMLElement | null;
       const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
       if (e.key === 'Escape') {
+        if (timelineFramePickActiveRef.current) {
+          setTimelineFramePickActive(false);
+          return;
+        }
         if (typing) return;
         if (keysRef.current.floatWin === 'code') {
           keysRef.current.closeCode(); // source panel open: close it first (revert unapplied draft), keep selection
@@ -3990,6 +4002,52 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Live comp accessor for chat receipt previews: stable identity (StudioChat is memo'd), reads the ref —
   // the chat card re-renders off the tool-progress store, not off comp state.
   const getChatComp = useCallback(() => compRef.current, [compRef]);
+  const captureTimelineFrameAt = useCallback(async (atSec: number) => {
+    const document = editorDocumentRef.current;
+    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
+    const primary = primaryNarrativeRenderPlan(plan);
+    return captureCompositionFrame({
+      comp: compositionRenderView(compRef.current, plan),
+      videoPlacements: primary.activePlacements,
+      primaryVisualHidden: primary.hidden,
+      visualMediaClips: supplementalVisualMedia(plan),
+      timelineDurationSec: plan.durationSec,
+      videoFile: videoFileRef.current,
+      clipFiles: clipFilesRef.current,
+      atSec,
+      maxDim: 640,
+    });
+  }, [compRef, editorDocumentRef, resolveAssetUrl]);
+  const setTimelineFramePickMode = useCallback((active: boolean) => {
+    if (active && playingRef.current) setPlaying(false);
+    setTimelineFramePickActive(active);
+  }, []);
+  const pickTimelineFrame = useCallback(async (atSec: number) => {
+    const document = editorDocumentRef.current;
+    const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
+    const fps = Math.max(1, document.canvas.fps);
+    if (plan.durationSec <= 0) return;
+    const exactAt = quantizeTimelineFrameSecond(atSec, plan.durationSec, fps);
+    const frameId = `timeline-frame-${Date.now()}`;
+    setTimelineFramePickActive(false);
+    setTimelineFramePickBusy(true);
+    applyT(exactAt);
+    chatRef.current?.beginTimelineFrameCapture({ id: frameId, atSec: exactAt, fps });
+    try {
+      const frame = await captureTimelineFrameAt(exactAt);
+      chatRef.current?.resolveTimelineFrameCapture({
+        id: frameId,
+        atSec: exactAt,
+        fps,
+        ...frame,
+      });
+    } catch {
+      chatRef.current?.failTimelineFrameCapture(frameId);
+      toast.error(t('chatGen.timelineFrameCaptureFailed'));
+    } finally {
+      setTimelineFramePickBusy(false);
+    }
+  }, [applyT, captureTimelineFrameAt, editorDocumentRef, resolveAssetUrl]);
 
   /** Client-side execution of a tool call: mutate Composition state / call compose to generate a block.
    *  Not memoized — StudioChat holds the latest reference via ref, rebuilt each frame to guarantee reading the latest state/closures. */
@@ -4033,6 +4091,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   });
   const resetForOutputChange = useCallback(() => {
     setPlaying(false);
+    setTimelineFramePickActive(false);
     videoEngineRef.current?.pause();
     setSelectedId(null);
     setSelectedShotId(null);
@@ -4879,7 +4938,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, [projectId]);
 
   return (
-    <div className="studio-scope border-line bg-panel relative flex h-full min-h-0 w-full gap-0 overflow-hidden rounded-lg border shadow-sm">
+    <div className="studio-scope bg-panel relative flex h-full min-h-0 w-full gap-0 overflow-hidden">
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       {/* Agent file injection: a stable, always-mounted hidden input an external agent (e.g. Codex's
@@ -4947,6 +5006,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               runTool={chatCbs.runTool}
               getBody={getChatBody}
               getComp={getChatComp}
+              timelineFramePickActive={timelineFramePickActive}
+              timelineFramePickBusy={timelineFramePickBusy}
+              timelineFramePickAvailable={duration > 0 && hasTimelineContent(comp)}
+              onTimelineFramePickActiveChange={setTimelineFramePickMode}
               elements={chatElements}
               onFrameApplied={onFrameApplied}
               storageKey={chatKeyFor(projectId)}
@@ -5063,10 +5126,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               )}
               {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
                   so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
-              <div
-                className="absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20"
-                style={{ background: EMPTY_VIDEO_GROUND }}
-              >
+                <div
+                  className={`absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20 ${
+                    hasContent
+                      ? ''
+                      : 'bg-canvas bg-[radial-gradient(circle_at_center,var(--color-line)_0_1px,transparent_1.5px)] bg-[length:14px_14px]'
+                  }`}
+                  style={hasContent ? { background: EMPTY_VIDEO_GROUND } : undefined}
+                >
                 {/* Double-buffered iframes: load in the background then swap, eliminating the reload white flash.
                     Trust boundary: LLM-generated block HTML/scripts run in a sandbox (opaque origin), can't reach the main app's DOM/localStorage/cookies;
                     local blob videos aren't readable → onBufLoad hands the File in to build its own URL; the control protocol is all postMessage. */}
@@ -5100,6 +5167,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                       // state ("paused:false, ready:4, currentTime frozen") that doesn't wake even when brought to front (only rebuilding src saves it, see the watchdog).
                       // Pushed to the bottom = always rendering, just occluded by the same-size front iframe, so the decoder isn't suspended.
                       zIndex: bufs.active === i ? 2 : 1,
+                      visibility: hasContent ? 'visible' : 'hidden',
                     }}
                   />
                 ))}
@@ -6569,6 +6637,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           srcLive={srcLive}
           pps={pps}
           snapEnabled={timelineSnapEnabled}
+          framePickActive={timelineFramePickActive}
+          framePickFps={editorDocument.canvas.fps}
+          onPickFrame={pickTimelineFrame}
           assetDragging={!!dragAsset}
           assetDragKind={dragAsset?.type ?? null}
           selectedAudioId={selectedAudioId}

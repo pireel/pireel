@@ -569,6 +569,14 @@ describe('视频分镜片段 shots', () => {
     expect(html).not.toContain('box-shadow:0 30px 90px');
   });
 
+  it('assembleHtml:只有图形元素时仍使用视频画布的黑色底，不回退到主题纸色', () => {
+    const c = emptyComposition();
+    c.blocks = [titleBlock({ text: '图形元素', startSec: 0, durationSec: 2 })];
+    const html = assembleHtml(c);
+    expect(html).toMatch(/html, body \{[^}]*background: #000000;/);
+    expect(html).toMatch(/#root \{[^}]*background: #000000;/);
+  });
+
   it('assembleHtml:成片时长=Σ片段(被剪区间不计入);data-duration', () => {
     const c = emptyComposition();
     c.video = { url: 'https://cdn.pireel.com/k.mp4', durationSec: 20 };

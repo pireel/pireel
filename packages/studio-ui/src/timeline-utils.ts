@@ -31,6 +31,14 @@ export interface TimelinePlacementSpan {
   endSec: number;
 }
 
+/** Snap an inspector pick to the nearest real video frame and keep it inside the half-open timeline. */
+export function quantizeTimelineFrameSecond(rawSec: number, durationSec: number, rawFps: number): number {
+  const fps = Math.max(1, Number.isFinite(rawFps) ? rawFps : 30);
+  const duration = Math.max(0, Number.isFinite(durationSec) ? durationSec : 0);
+  const second = Math.max(0, Number.isFinite(rawSec) ? rawSec : 0);
+  return Math.min(Math.round(second * fps) / fps, Math.max(0, duration - 1 / fps));
+}
+
 /** Half-open range collision used by the drag planner. Touching edges are allowed; a real overlap
  * means the clip must be stacked on a new visual lane instead of trimming destination material. */
 export function timelinePlacementOverlaps(

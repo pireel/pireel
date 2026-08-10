@@ -531,8 +531,6 @@ export function assembleHtml(
 ): string {
   const { width: W, height: H } = comp;
   const theme = getTheme(comp.theme);
-  // Background: use paper if the derived/theme-pack palette provided it (a frame's dark-theme preview must actually go dark), otherwise the theme default
-  const bg = comp.palette?.paper ?? theme.background;
   const body: string[] = [];
   const scripts: string[] = [];
 
@@ -683,7 +681,10 @@ export function assembleHtml(
 
   // Native media owns its pixels. Keeping a theme-colored iframe/root behind a moved or resized
   // video makes the HTML stage read as a second canvas, so media compositions stay transparent.
-  const documentBg = placedVideoShots.length || supplementalVisuals.length ? 'transparent' : bg;
+  // The preview/export stage owns the canvas ground. Native media compositions stay transparent so
+  // the parent video canvas can show through; graphics-only compositions use the same black ground
+  // instead of unexpectedly exposing the attached theme's paper color as soon as an element appears.
+  const documentBg = placedVideoShots.length || supplementalVisuals.length ? 'transparent' : '#000000';
   return `<!doctype html>
 <html lang="zh">
 <head>

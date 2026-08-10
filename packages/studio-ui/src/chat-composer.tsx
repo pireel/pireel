@@ -16,10 +16,27 @@ import { InlineBlockPreview } from './block-preview-card';
 import { ChatSkillPicker } from './chat-skill-picker';
 import { coverBlock } from '@pireel/studio-frames/showcase-blocks';
 import type { FrameCatalogItem } from './use-frame-catalog';
-import { elementIcon, makeElementPill } from './chat-format';
+import {
+  appendChatPillRemoveIcon,
+  CHAT_PILL_CLASS,
+  CHAT_PILL_ICON_CLASS,
+  CHAT_PILL_LABEL_CLASS,
+  elementIcon,
+  makeElementPill,
+} from './chat-format';
 import { t } from './i18n';
-import type { AttachedFrame, StudioElementRef } from './studio-chat';
+import type {
+  AttachedFrame,
+  AttachedTimelineFrame,
+  PendingTimelineFrame,
+  StudioChatDraftPart,
+  StudioChatProps,
+  StudioElementRef,
+} from './studio-chat';
 import type { StudioScenarioSkillOption } from './shell-context';
+import { ChatTimelineFramePicker, formatTimelineFrameTime } from './chat-timeline-frame-picker';
+
+const noopTimelineFramePick = () => {};
 
 export interface ComposerHandle {
   insertElementPill(el: StudioElementRef | null): void;
@@ -31,6 +48,9 @@ export interface ComposerHandle {
   setText(text: string): void;
   /** Focus only (cursor to end), don't touch content (used by the component floating bar's "AI edit"). */
   focusInput(): void;
+  beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
+  resolveTimelineFrameCapture(frame: AttachedTimelineFrame): void;
+  failTimelineFrameCapture(id: string): void;
 }
 
 export function Composer({
@@ -44,6 +64,10 @@ export function Composer({
   frames,
   onPickFrame,
   onRemoveFrame,
+  timelineFramePickActive,
+  timelineFramePickBusy,
+  timelineFramePickAvailable,
+  onTimelineFramePickActiveChange,
   onSubmit,
   onStop,
   methodsRef,
@@ -62,7 +86,11 @@ export function Composer({
   frames: FrameCatalogItem[];
   onPickFrame: (frame: AttachedFrame) => void;
   onRemoveFrame: () => void;
-  onSubmit: (text: string) => void;
+  timelineFramePickActive: boolean;
+  timelineFramePickBusy: boolean;
+  timelineFramePickAvailable: boolean;
+  onTimelineFramePickActiveChange?: StudioChatProps['onTimelineFramePickActiveChange'];
+  onSubmit: (parts: StudioChatDraftPart[]) => void;
   onStop: () => void;
   methodsRef: React.MutableRefObject<ComposerHandle | null>;
 }) {
@@ -70,7 +98,10 @@ export function Composer({
   const editorRef = useRef<HTMLDivElement>(null);
   const refPopoverRef = useRef<TriggerPopoverHandle>(null);
   const framePopoverRef = useRef<TriggerPopoverHandle>(null);
+  const savedSelectionRef = useRef<Range | null>(null);
+  const timelineFramesRef = useRef<Map<string, AttachedTimelineFrame | null>>(new Map());
   const [empty, setEmpty] = useState(true);
+  const [timelineFrameCount, setTimelineFrameCount] = useState(0);
   const isBusy = status === 'streaming' || status === 'submitted';
 
   function recomputeEmpty() {
@@ -81,17 +112,39 @@ export function Composer({
     setEmpty(isEmpty);
   }
 
-  /** Serialize contenteditable → plain text (pills become @id tokens). */
-  function serialize(): string {
+  function rememberEditorSelection() {
+    const root = editorRef.current;
+    const selection = window.getSelection();
+    if (!root || !selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (root.contains(range.startContainer)) savedSelectionRef.current = range.cloneRange();
+  }
+
+  /** Serialize contenteditable in visual order: text/@ pills and every ready timeline-frame tag. */
+  function serializeToParts(): StudioChatDraftPart[] {
     const el = editorRef.current;
-    if (!el) return '';
+    if (!el) return [];
+    const out: StudioChatDraftPart[] = [];
     let buf = '';
+    const flushText = () => {
+      if (!buf) return;
+      out.push({ type: 'text', text: buf });
+      buf = '';
+    };
     const walk = (node: Node) => {
       if (node.nodeType === Node.TEXT_NODE) {
         buf += node.textContent ?? '';
         return;
       }
       if (!(node instanceof HTMLElement)) return;
+      if (node.dataset.timelineFrameId) {
+        const timelineFrame = timelineFramesRef.current.get(node.dataset.timelineFrameId);
+        if (timelineFrame) {
+          flushText();
+          out.push({ type: 'timeline-frame', frame: timelineFrame });
+        }
+        return;
+      }
       if (node.dataset.refId) {
         buf += `@${node.dataset.refId}`;
         return;
@@ -104,7 +157,25 @@ export function Composer({
       node.childNodes.forEach(walk);
     };
     el.childNodes.forEach(walk);
-    return buf;
+    flushText();
+    return out;
+  }
+
+  function hasLoadingTimelineFrame(): boolean {
+    return !!editorRef.current?.querySelector('[data-timeline-frame-state="loading"]');
+  }
+
+  function syncTimelineFrameCount() {
+    const root = editorRef.current;
+    if (!root) {
+      timelineFramesRef.current.clear();
+      setTimelineFrameCount(0);
+      return;
+    }
+    const pills = root.querySelectorAll<HTMLElement>('[data-timeline-frame-id]');
+    const liveIds = new Set(Array.from(pills, (pill) => pill.dataset.timelineFrameId).filter(Boolean));
+    for (const id of timelineFramesRef.current.keys()) if (!liveIds.has(id)) timelineFramesRef.current.delete(id);
+    setTimelineFrameCount(pills.length);
   }
 
   function clear() {
@@ -113,14 +184,34 @@ export function Composer({
       el.innerHTML = '';
       el.focus();
     }
+    timelineFramesRef.current.clear();
+    hideTimelineFrameHoverPreview();
+    savedSelectionRef.current = null;
+    setTimelineFrameCount(0);
     setEmpty(true);
   }
 
   function fireSubmit() {
     if (isBusy) return;
-    const text = serialize().trim();
-    if (!text) return;
-    onSubmit(text);
+    if (hasLoadingTimelineFrame()) {
+      return;
+    }
+    const parts = serializeToParts();
+    const firstText = parts.findIndex((part) => part.type === 'text');
+    let lastText = -1;
+    for (let index = parts.length - 1; index >= 0; index--) {
+      if (parts[index]!.type === 'text') {
+        lastText = index;
+        break;
+      }
+    }
+    const firstTextPart = firstText >= 0 ? parts[firstText] : undefined;
+    const lastTextPart = lastText >= 0 ? parts[lastText] : undefined;
+    if (firstTextPart?.type === 'text') firstTextPart.text = firstTextPart.text.trimStart();
+    if (lastTextPart?.type === 'text') lastTextPart.text = lastTextPart.text.trimEnd();
+    const final = parts.filter((part) => part.type !== 'text' || part.text.length > 0);
+    if (!final.length) return;
+    onSubmit(final);
     clear();
   }
 
@@ -157,26 +248,121 @@ export function Composer({
     }
   }
 
+  /** Remove a trigger and its live filter text (`/口播`) after a command-menu selection. */
+  function consumeTriggerQuery(trigger: string) {
+    const root = editorRef.current;
+    const sel = window.getSelection();
+    if (!root || !sel) return;
+
+    const removeFromNode = (node: Node, caretOffset: number): boolean => {
+      if (node.nodeType !== Node.TEXT_NODE || !root.contains(node)) return false;
+      const text = node.textContent ?? '';
+      const triggerIdx = text.slice(0, caretOffset).lastIndexOf(trigger);
+      if (triggerIdx < 0) return false;
+      const query = text.slice(triggerIdx + trigger.length, caretOffset);
+      if (/\s/.test(query)) return false;
+      node.textContent = text.slice(0, triggerIdx) + text.slice(caretOffset);
+      const next = document.createRange();
+      next.setStart(node, triggerIdx);
+      next.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(next);
+      return true;
+    };
+
+    if (sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (removeFromNode(range.startContainer, range.startOffset)) return;
+    }
+
+    // Some browsers normalize a contenteditable caret onto the root after a captured Enter.
+    // Fall back to the final live text node, which still contains the slash query that opened this menu.
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes: Node[] = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const node = nodes[i]!;
+      if (removeFromNode(node, node.textContent?.length ?? 0)) return;
+    }
+  }
+
   function insertPillAtCursor(span: HTMLElement) {
     const el = editorRef.current;
     if (!el) return;
-    el.focus();
     const sel = window.getSelection();
     const sp = document.createTextNode(' ');
-    if (sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).startContainer)) {
-      const range = sel.getRangeAt(0);
+    let range: Range | null = null;
+    const saved = savedSelectionRef.current;
+    if (saved && el.contains(saved.startContainer)) range = saved.cloneRange();
+    else if (sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).startContainer)) range = sel.getRangeAt(0).cloneRange();
+    el.focus({ preventScroll: true });
+    if (range) {
       range.deleteContents();
       range.insertNode(span);
       span.parentNode?.insertBefore(sp, span.nextSibling);
       const after = document.createRange();
       after.setStartAfter(sp);
       after.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(after);
+      sel?.removeAllRanges();
+      sel?.addRange(after);
+      savedSelectionRef.current = after.cloneRange();
     } else {
       el.appendChild(span);
       el.appendChild(sp);
+      const after = document.createRange();
+      after.setStartAfter(sp);
+      after.collapse(true);
+      sel?.removeAllRanges();
+      sel?.addRange(after);
+      savedSelectionRef.current = after.cloneRange();
     }
+  }
+
+  function focusAfterPill(span: HTMLElement) {
+    const root = editorRef.current;
+    if (!root || !span.isConnected) return;
+    root.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    const spacer = span.nextSibling;
+    if (spacer?.nodeType === Node.TEXT_NODE) range.setStart(spacer, spacer.textContent?.length ?? 0);
+    else range.setStartAfter(span);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedSelectionRef.current = range.cloneRange();
+  }
+
+  function removePillNode(pill: HTMLElement) {
+    const root = editorRef.current;
+    if (!root) return;
+    const next = pill.nextSibling;
+    if (next?.nodeType === Node.TEXT_NODE && next.textContent?.startsWith(' ')) {
+      next.textContent = next.textContent.slice(1);
+      if (!next.textContent) next.remove();
+    }
+    pill.remove();
+    recomputeEmpty();
+  }
+
+  function makeEditableElementPill(el: StudioElementRef, auto = false) {
+    const pill = makeElementPill(el, {
+      auto,
+      onRemove: () => removePillNode(pill),
+    });
+    return pill;
+  }
+
+  function removeTimelineFramePill(id: string) {
+    const root = editorRef.current;
+    if (!root) return;
+    const pill = findTimelineFramePill(root, id);
+    if (!pill) return;
+    removePillNode(pill);
+    timelineFramesRef.current.delete(id);
+    hideTimelineFrameHoverPreview(id);
+    syncTimelineFrameCount();
   }
 
   /** Theme picker selection → attach frame (button highlights, not in body text); tapping the currently attached item = remove. */
@@ -191,13 +377,13 @@ export function Composer({
   /** @ picker selection → insert pill. */
   function pickElement(el: StudioElementRef) {
     const root = editorRef.current;
-    if (root && root.querySelector(`[data-ref-id="${CSS.escape(el.id)}"]:not([data-auto])`)) {
+    if (root && findElementPill(root, el.id, false)) {
       consumeTriggerChar('@');
       recomputeEmpty();
       return;
     }
     consumeTriggerChar('@');
-    insertPillAtCursor(makeElementPill(el));
+    insertPillAtCursor(makeEditableElementPill(el));
     recomputeEmpty();
   }
 
@@ -215,8 +401,8 @@ export function Composer({
         });
         if (el) {
           // Already explicitly @-mentioned the same one → don't add again
-          if (!root.querySelector(`[data-ref-id="${CSS.escape(el.id)}"]`)) {
-            root.appendChild(makeElementPill(el, { auto: true }));
+          if (!findElementPill(root, el.id)) {
+            root.appendChild(makeEditableElementPill(el, true));
             root.appendChild(document.createTextNode(' '));
           }
         }
@@ -225,13 +411,16 @@ export function Composer({
       clearElementPills: () => {
         const root = editorRef.current;
         if (!root) return;
-        root.querySelectorAll('[data-ref-id]').forEach((node) => {
+        root.querySelectorAll('[data-ref-id], [data-timeline-frame-id]').forEach((node) => {
           const next = node.nextSibling;
           if (next?.nodeType === Node.TEXT_NODE && next.textContent?.startsWith(' ')) {
             next.textContent = next.textContent.slice(1);
           }
           node.remove();
         });
+        timelineFramesRef.current.clear();
+        hideTimelineFrameHoverPreview();
+        syncTimelineFrameCount();
         recomputeEmpty();
       },
       setText: (text: string) => {
@@ -279,7 +468,35 @@ export function Composer({
           sel.addRange(range);
         }
       },
+      beginTimelineFrameCapture: (pendingFrame) => {
+        const root = editorRef.current;
+        if (!root) return;
+        timelineFramesRef.current.set(pendingFrame.id, null);
+        const pill = makeTimelineFramePill(
+          pendingFrame,
+          () => timelineFramesRef.current.get(pendingFrame.id) ?? null,
+          () => removeTimelineFramePill(pendingFrame.id),
+        );
+        insertPillAtCursor(pill);
+        syncTimelineFrameCount();
+        recomputeEmpty();
+      },
+      resolveTimelineFrameCapture: (nextFrame) => {
+        const root = editorRef.current;
+        if (!root) return;
+        const pill = findTimelineFramePill(root, nextFrame.id);
+        if (!pill) return;
+        timelineFramesRef.current.set(nextFrame.id, nextFrame);
+        pill.dataset.timelineFrameState = 'ready';
+        rebuildTimelineFramePill(pill, nextFrame, () => removeTimelineFramePill(nextFrame.id));
+        focusAfterPill(pill);
+      },
+      failTimelineFrameCapture: (id) => {
+        removeTimelineFramePill(id);
+      },
     }),
+    // DOM-backed composer state deliberately lives in refs; keep the imperative surface stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -305,7 +522,15 @@ export function Composer({
             contentEditable
             suppressContentEditableWarning
             onKeyDown={handleKeyDown}
-            onInput={recomputeEmpty}
+            onInput={() => {
+              hideTimelineFrameHoverPreviewIfDetached(editorRef.current);
+              syncTimelineFrameCount();
+              recomputeEmpty();
+              rememberEditorSelection();
+            }}
+            onKeyUp={rememberEditorSelection}
+            onMouseUp={rememberEditorSelection}
+            onFocus={rememberEditorSelection}
             onPaste={(e) => {
               e.preventDefault();
               const raw = e.clipboardData.getData('text/plain') || e.clipboardData.getData('text');
@@ -338,12 +563,27 @@ export function Composer({
             >
               <Palette className="h-3.5 w-3.5" strokeWidth={2.2} />
             </button>
+            <ChatTimelineFramePicker
+              disabled={isBusy}
+              available={timelineFramePickAvailable}
+              active={timelineFramePickActive}
+              busy={timelineFramePickBusy}
+              count={timelineFrameCount}
+              onActiveChange={(active) => {
+                if (active) rememberEditorSelection();
+                (onTimelineFramePickActiveChange ?? noopTimelineFramePick)(active);
+              }}
+            />
             <ChatSkillPicker
               editorRef={editorRef}
               skillId={skillId}
               skills={scenarioSkills}
               disabled={isBusy}
               onChange={onPickSkill}
+              onTriggerPick={() => {
+                consumeTriggerQuery('/');
+                recomputeEmpty();
+              }}
             />
           </div>
           {isBusy ? (
@@ -358,8 +598,8 @@ export function Composer({
           ) : (
             <button
               type="button"
-              className="bg-ink inline-flex h-7 w-7 items-center justify-center rounded-md text-white hover:bg-black disabled:opacity-30"
-              disabled={empty}
+              className="bg-ink text-bg inline-flex h-7 w-7 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25"
+              disabled={empty || timelineFramePickBusy}
               onClick={fireSubmit}
               title={t('chatGen.sendEnter')}
             >
@@ -396,7 +636,7 @@ export function Composer({
         )}
       />
 
-      {/* Theme picker: button-only trigger (no trigger char, `/` reserved for future skills); tall row card = cover on left, description on right */}
+      {/* Theme picker: button-only trigger; `/` opens the Studio Skill picker. */}
       <TriggerPopover<FrameCatalogItem>
         ref={framePopoverRef}
         editorRef={editorRef}
@@ -414,6 +654,126 @@ export function Composer({
       />
     </>
   );
+}
+
+function makeTimelineFramePill(
+  pendingFrame: PendingTimelineFrame,
+  getFrame: () => AttachedTimelineFrame | null,
+  onRemove: () => void,
+): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.contentEditable = 'false';
+  span.dataset.timelineFrameId = pendingFrame.id;
+  span.dataset.timelineFrameState = 'loading';
+  rebuildTimelineFramePill(span, pendingFrame, onRemove);
+
+  let showTimer: number | null = null;
+  span.addEventListener('mouseenter', () => {
+    const frame = getFrame();
+    if (!frame) return;
+    if (showTimer != null) window.clearTimeout(showTimer);
+    showTimer = window.setTimeout(() => {
+      showTimelineFrameHoverPreview(frame, span.getBoundingClientRect());
+      showTimer = null;
+    }, 260);
+  });
+  span.addEventListener('mouseleave', () => {
+    if (showTimer != null) window.clearTimeout(showTimer);
+    showTimer = null;
+    hideTimelineFrameHoverPreview(pendingFrame.id);
+  });
+  return span;
+}
+
+/** Rebuild only the pill's children so its DOM identity and the user's caret position stay intact. */
+function rebuildTimelineFramePill(
+  span: HTMLElement,
+  frame: PendingTimelineFrame | AttachedTimelineFrame,
+  onRemove: () => void,
+) {
+  const ready = 'dataUrl' in frame;
+  span.className = `${CHAT_PILL_CLASS} sc-frame-pill ${ready ? '' : 'border-dashed opacity-75'}`;
+  span.innerHTML = '';
+
+  const thumb = document.createElement('span');
+  thumb.className = CHAT_PILL_ICON_CLASS;
+  if (ready) {
+    const image = document.createElement('img');
+    image.src = frame.dataUrl;
+    image.alt = '';
+    image.className = 'h-full w-full object-cover';
+    thumb.appendChild(image);
+  } else {
+    const spinner = document.createElement('span');
+    spinner.className = 'text-ink-3 h-2.5 w-2.5 animate-spin rounded-full border border-current border-r-transparent';
+    spinner.setAttribute('aria-hidden', 'true');
+    thumb.appendChild(spinner);
+  }
+  span.appendChild(thumb);
+
+  const label = document.createElement('span');
+  label.className = `${CHAT_PILL_LABEL_CLASS} font-mono tabular-nums`;
+  label.textContent = ready
+    ? t('chatGen.timelineFrameTag', { time: formatTimelineFrameTime(frame.atSec, frame.fps) })
+    : t('chatGen.timelineFrameCapturing');
+  span.appendChild(label);
+
+  appendChatPillRemoveIcon(span, t('chatGen.removeTimelineFrame'), onRemove);
+}
+
+let timelineFrameHoverEl: HTMLDivElement | null = null;
+let timelineFrameHoverId: string | null = null;
+
+function ensureTimelineFrameHoverPreview(): HTMLDivElement {
+  if (timelineFrameHoverEl) return timelineFrameHoverEl;
+  const preview = document.createElement('div');
+  preview.className = 'border-line bg-black fixed z-[1000] hidden overflow-hidden rounded-md border shadow-2xl';
+  preview.style.pointerEvents = 'none';
+  document.body.appendChild(preview);
+  timelineFrameHoverEl = preview;
+  return preview;
+}
+
+function showTimelineFrameHoverPreview(frame: AttachedTimelineFrame, anchor: DOMRect) {
+  const preview = ensureTimelineFrameHoverPreview();
+  preview.innerHTML = '';
+  const aspect = frame.width > 0 && frame.height > 0 ? frame.width / frame.height : 16 / 9;
+  const width = Math.round(Math.max(112, Math.min(240, aspect * 156)));
+  const height = Math.round(Math.min(240, width / aspect));
+  const image = document.createElement('img');
+  image.src = frame.dataUrl;
+  image.alt = '';
+  image.className = 'block h-full w-full object-contain';
+  preview.appendChild(image);
+  preview.style.width = `${width}px`;
+  preview.style.height = `${height}px`;
+  preview.style.left = `${Math.max(8, Math.min(anchor.left, window.innerWidth - width - 8))}px`;
+  preview.style.top = `${anchor.top >= height + 12 ? anchor.top - height - 8 : anchor.bottom + 8}px`;
+  preview.style.display = 'block';
+  timelineFrameHoverId = frame.id;
+}
+
+function hideTimelineFrameHoverPreview(id?: string) {
+  if (id && timelineFrameHoverId !== id) return;
+  if (timelineFrameHoverEl) timelineFrameHoverEl.style.display = 'none';
+  timelineFrameHoverId = null;
+}
+
+function hideTimelineFrameHoverPreviewIfDetached(editor: HTMLElement | null) {
+  if (!timelineFrameHoverId || !editor) return;
+  if (!findTimelineFramePill(editor, timelineFrameHoverId)) {
+    hideTimelineFrameHoverPreview();
+  }
+}
+
+function findTimelineFramePill(root: HTMLElement, id: string): HTMLElement | null {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-timeline-frame-id]'))
+    .find((pill) => pill.dataset.timelineFrameId === id) ?? null;
+}
+
+function findElementPill(root: HTMLElement, id: string, includeAuto = true): HTMLElement | null {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-ref-id]'))
+    .find((pill) => pill.dataset.refId === id && (includeAuto || !pill.dataset.auto)) ?? null;
 }
 
 /** Tall row card for the theme picker: left = real dialect-cover render (16:9, hover preview; falls back to icon if no cover),

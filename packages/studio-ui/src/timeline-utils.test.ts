@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { packedPrimaryPlacement, timelinePlacementOverlaps } from './timeline-utils';
+import { packedPrimaryPlacement, quantizeTimelineFrameSecond, timelinePlacementOverlaps } from './timeline-utils';
+
+describe('quantizeTimelineFrameSecond', () => {
+  it('picks the nearest exact frame and never returns the exclusive duration edge', () => {
+    expect(quantizeTimelineFrameSecond(1.021, 5, 30)).toBe(1 + 1 / 30);
+    expect(quantizeTimelineFrameSecond(5, 5, 30)).toBe(5 - 1 / 30);
+    expect(quantizeTimelineFrameSecond(-2, 5, 30)).toBe(0);
+  });
+
+  it('stays safe for empty or invalid timeline values', () => {
+    expect(quantizeTimelineFrameSecond(3, 0, 30)).toBe(0);
+    expect(quantizeTimelineFrameSecond(Number.NaN, 5, Number.NaN)).toBe(0);
+  });
+});
 
 describe('timeline placement rules', () => {
   const spans = [

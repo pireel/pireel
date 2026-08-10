@@ -59,11 +59,12 @@ import {
   VISUAL_SCENE_PAD_T,
   fmtTick,
   packedPrimaryPlacement,
+  quantizeTimelineFrameSecond,
   rulerStep,
   stripTiles,
   timelinePlacementOverlaps,
 } from './timeline-utils';
-import { ActiveSceneRing, HoverCursor, PlayheadCursor } from './timeline-overlays';
+import { ActiveSceneRing, FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
 import { AudioLane } from './timeline-audio-lane';
 import { draggedPlayheadSecond, snapTimelineSecond, timelineSnapPoints } from './timeline-snap';
 import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
@@ -134,6 +135,10 @@ interface StudioTimelineProps {
   onPps: React.Dispatch<React.SetStateAction<number>>;
   /** Global direct-manipulation magnet. Off means exact free placement with no edge/second snapping. */
   snapEnabled?: boolean;
+  /** Inspector-style Chat frame picking: hover previews the real timeline, click returns one exact frame. */
+  framePickActive?: boolean;
+  framePickFps?: number;
+  onPickFrame?: (atSec: number) => void;
   onSeek: (t: number) => void;
   /** Hover preview: seek the center player to this time (without moving the playhead); null = restore to the playhead. */
   onScrub: (t: number | null) => void;
@@ -285,6 +290,9 @@ function StudioTimelineImpl({
   pps,
   onPps,
   snapEnabled = true,
+  framePickActive = false,
+  framePickFps = 30,
+  onPickFrame,
   onSeek,
   onScrub,
   onSelect,
@@ -410,6 +418,7 @@ function StudioTimelineImpl({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false); // while dragging: let hover-seek yield (avoid double seek)
+  const framePickConsumedRef = useRef(false); // suppress the click synthesized after a capture-phase frame pick
   const hoverRaf = useRef(0); // hover rAF coalescing
   const hoverXRef = useRef(0); // latest hover screen x
   /** Detach the document-level hover escape guards (installed when hover-scrub arms). */
@@ -435,6 +444,10 @@ function StudioTimelineImpl({
   // A cursor "passing through" the timeline on its way from an element track to the stage, or a layout shift from the selection control bar appearing, shouldn't make the picture jump.
   const scrubEnterRef = useRef<{ x: number; y: number; ts: number } | null>(null);
   const scrubArmedRef = useRef(false);
+  useEffect(() => {
+    // Switching inspector mode in either direction must restore any transient preview and clear its guide.
+    endScrubRef.current();
+  }, [framePickActive]);
 
   const W = Math.max(320, dur * pps);
   const x = useCallback((s: number) => s * pps, [pps]);
@@ -505,6 +518,9 @@ function StudioTimelineImpl({
   // stable identities: the music lane is memoized, and a fresh closure per render would defeat that
   const rawSecAt = useCallback((clientX: number) => (clientX - (contentRef.current?.getBoundingClientRect().left ?? 0)) / pps, [pps]);
   const secAt = useCallback((clientX: number) => Math.max(0, Math.min(dur, rawSecAt(clientX))), [dur, rawSecAt]);
+  const frameSecAt = useCallback((clientX: number) => {
+    return quantizeTimelineFrameSecond(secAt(clientX), dur, framePickFps);
+  }, [dur, framePickFps, secAt]);
   /** Shared marquee engine (scene track / element track): anchor in content coordinates (base moves with scroll, x0/y0 stay fixed in content coords),
    *  end point recomputed each frame from base's **live** rect -> supports edge auto-scroll throughout; keeps scrolling via rAF even when the pointer sits still at the edge.
    *  baseRef = coordinate-base DOM; draggedRef = whether it became a drag; onDrag = draw rectangle; onCommit = hit test; onClick = pure click (no drag). */
@@ -1168,7 +1184,7 @@ function StudioTimelineImpl({
           the drop x is converted to time via secAt (includes scroll/zoom), and workbench inserts an asset block at that time */}
       <div
         ref={scrollRef}
-        className={`min-h-0 flex-1 overflow-auto ${dropActive ? 'ring-accent/60 ring-2 ring-inset' : ''}`}
+        className={`min-h-0 flex-1 overflow-auto ${dropActive ? 'ring-accent/60 ring-2 ring-inset' : framePickActive ? 'ring-accent/45 ring-1 ring-inset' : ''}`}
         onScroll={onScrollFollow}
         onDragOver={
           dropActive
@@ -1290,9 +1306,29 @@ function StudioTimelineImpl({
           {/* Right: ruler + tracks + playhead */}
           <div
             ref={contentRef}
-            className="relative select-none"
+            data-timeline-content
+            data-frame-pick-active={framePickActive ? '' : undefined}
+            className={`relative select-none ${framePickActive ? 'cursor-crosshair [&_*]:cursor-crosshair' : ''}`}
             style={{ width: W }}
+            onPointerDownCapture={(e) => {
+              if (!framePickActive || e.button !== 0) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const atSec = frameSecAt(e.clientX);
+              framePickConsumedRef.current = true;
+              setHoverT(atSec);
+              onSeek(atSec);
+              onScrub(null);
+              onPickFrame?.(atSec);
+            }}
+            onClickCapture={(e) => {
+              if (!framePickActive && !framePickConsumedRef.current) return;
+              framePickConsumedRef.current = false;
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             onClick={() => {
+              if (framePickActive) return;
               // Click empty space = clear all selection. Interactive parts (shots/chips/ticks/buttons) each stopPropagation,
               // so what bubbles here is the background. A marquee drag's tail isn't a click (browsers usually don't fire click, but add a safeguard).
               if (marqueeDraggedRef.current || blockMarqueeDraggedRef.current) {
@@ -1305,6 +1341,17 @@ function StudioTimelineImpl({
             onMouseMove={(e) => {
               if (draggingRef.current) return; // during drag onSeek handles it, don't also hover-seek
               hoverXRef.current = e.clientX;
+              if (framePickActive) {
+                scrubArmedRef.current = true;
+                if (!hoverRaf.current)
+                  hoverRaf.current = requestAnimationFrame(() => {
+                    hoverRaf.current = 0;
+                    const tt = frameSecAt(hoverXRef.current);
+                    setHoverT(tt);
+                    onScrub(tt);
+                  });
+                return;
+              }
               if (!scrubArmedRef.current) {
                 const a = scrubEnterRef.current;
                 if (!a) scrubEnterRef.current = { x: e.clientX, y: e.clientY, ts: performance.now() };
@@ -1350,6 +1397,15 @@ function StudioTimelineImpl({
               onClick={(e) => e.stopPropagation()} // dragging the ruler to seek doesn't clear selection
               onPointerDown={onRulerPointerDown}
             >
+              {framePickActive && (
+                <div
+                  data-frame-pick-hint
+                  className="bg-ink text-bg pointer-events-none sticky top-1 left-2 z-[49] inline-flex w-fit items-center gap-2 rounded-sm px-2 py-1 text-[10px] shadow-md"
+                >
+                  <span>{t('chatGen.pickFrameOnTimeline')}</span>
+                  <kbd className="border-bg/25 border-l pl-2 font-mono text-[9px] opacity-70">Esc</kbd>
+                </div>
+              )}
               {Array.from({ length: ticks }, (_, i) => {
                 const s = i * step;
                 return (
@@ -2037,8 +2093,10 @@ function StudioTimelineImpl({
 
             </div>
 
-            {/* Hover vertical line (spans ruler + tracks; center preview jumps to that frame in sync) */}
-            {hoverT != null && <HoverCursor second={hoverT} pps={pps} />}
+            {/* Hover vertical line (spans ruler + tracks; center preview jumps to that frame in sync). */}
+            {hoverT != null && (framePickActive
+              ? <FramePickCursor second={hoverT} pps={pps} />
+              : <HoverCursor second={hoverT} pps={pps} />)}
 
             {/* Playhead: spans ruler + tracks, bright line + top dot (subscribes to the playhead store, only this component moves each frame).
                 Not drawn on an empty project — a red line hanging on empty tracks looks broken */}

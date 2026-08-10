@@ -27,6 +27,7 @@ import type { StudioScenarioSkillOption } from './shell-context';
 import type {
   AttachedFrame,
   ProgressHandle,
+  StudioChatDraftPart,
   StudioChatHandle,
   StudioChatProps,
   StudioElementRef,
@@ -43,6 +44,10 @@ export function ChatThread({
   runTool,
   getBody,
   getComp,
+  timelineFramePickActive,
+  timelineFramePickBusy,
+  timelineFramePickAvailable,
+  onTimelineFramePickActiveChange,
   elements,
   onSnapshot,
   handleRef,
@@ -57,6 +62,10 @@ export function ChatThread({
   runTool: StudioChatProps['runTool'];
   getBody: StudioChatProps['getBody'];
   getComp?: StudioChatProps['getComp'];
+  timelineFramePickActive: boolean;
+  timelineFramePickBusy: boolean;
+  timelineFramePickAvailable: boolean;
+  onTimelineFramePickActiveChange?: StudioChatProps['onTimelineFramePickActiveChange'];
   elements: StudioElementRef[];
   onSnapshot: (messages: UIMessage[], frame: AttachedFrame | null, skillId: StudioScenarioSkillId) => void;
   handleRef: React.MutableRefObject<StudioChatHandle | null>;
@@ -242,13 +251,33 @@ export function ChatThread({
   }, [skillId]);
 
   const run = useCallback(
-    (text: string) => {
-      const t = text.trim();
-      if (!t || status === 'streaming' || status === 'submitted') return;
+    (draft: string | StudioChatDraftPart[]) => {
+      const draftParts: StudioChatDraftPart[] = typeof draft === 'string'
+        ? [{ type: 'text', text: draft.trim() }]
+        : draft;
+      const hasContent = draftParts.some((part) => part.type === 'timeline-frame' || part.text.trim().length > 0);
+      if (!hasContent || status === 'streaming' || status === 'submitted') return;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
       toolCallsUsedRef.current = 0;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
-      void sendMessage({ text: t, metadata: { situation: buildSituation(getBodyRef.current() as ChatSituation) } });
+      const timelineFrames = draftParts
+        .filter((part): part is Extract<StudioChatDraftPart, { type: 'timeline-frame' }> => part.type === 'timeline-frame')
+        .map(({ frame }) => ({ id: frame.id, atSec: frame.atSec, fps: frame.fps, width: frame.width, height: frame.height }));
+      const metadata = {
+        situation: buildSituation(getBodyRef.current() as ChatSituation),
+        ...(timelineFrames.length ? { timelineFrames } : {}),
+      };
+      void sendMessage({
+        metadata,
+        parts: draftParts.map((part) => part.type === 'text'
+          ? { type: 'text' as const, text: part.text }
+          : {
+              type: 'file' as const,
+              mediaType: 'image/jpeg',
+              filename: `pireel-frame-${part.frame.id}-${part.frame.atSec.toFixed(3)}s.jpg`,
+              url: part.frame.dataUrl,
+            }),
+      });
     },
     [sendMessage, status],
   );
@@ -322,8 +351,17 @@ export function ChatThread({
       attachFrame(s) {
         applyFrame(s);
       },
+      beginTimelineFrameCapture(s) {
+        composerRef.current?.beginTimelineFrameCapture(s);
+      },
+      resolveTimelineFrameCapture(s) {
+        composerRef.current?.resolveTimelineFrameCapture(s);
+      },
+      failTimelineFrameCapture(id) {
+        composerRef.current?.failTimelineFrameCapture(id);
+      },
     }),
-    [setMessages, run],
+    [applyFrame, setMessages, run],
   );
 
   const empty = messages.length === 0;
@@ -427,6 +465,24 @@ export function ChatThread({
                             </MessageContent>
                           );
                         }
+                        if (part.type === 'file') {
+                          const file = part as { mediaType?: string; url?: string };
+                          if (!file.mediaType?.startsWith('image/') || !file.url) return null;
+                          const fileIndex = parts.slice(0, idx + 1).filter((candidate) => candidate.type === 'file').length - 1;
+                          const timelineFrame = (m.metadata as { timelineFrames?: Array<{ atSec?: number }> } | undefined)?.timelineFrames?.[fileIndex];
+                          return (
+                            <MessageContent key={key} className="overflow-hidden p-0">
+                              <figure className="bg-canvas relative w-[180px] max-w-full overflow-hidden rounded-md">
+                                <img src={file.url} alt="" className="block max-h-[180px] w-full object-contain" />
+                                {typeof timelineFrame?.atSec === 'number' && (
+                                  <figcaption className="absolute bottom-1.5 left-1.5 rounded-sm bg-black/70 px-1.5 py-0.5 font-mono text-[9px] leading-none text-white backdrop-blur">
+                                    {timelineFrame.atSec.toFixed(2)}s
+                                  </figcaption>
+                                )}
+                              </figure>
+                            </MessageContent>
+                          );
+                        }
                         // Reasoning parts are NOT rendered (user decision: no thinking process in the
                         // chat, it reads as leaked internals). The thinking phase still shows activity
                         // via the ThinkingDots below — live reasoning counts as "thinking", not output.
@@ -513,6 +569,10 @@ export function ChatThread({
           onPickSkill={setSkillId}
           frame={frame}
           frames={frames}
+          timelineFramePickActive={timelineFramePickActive}
+          timelineFramePickBusy={timelineFramePickBusy}
+          timelineFramePickAvailable={timelineFramePickAvailable}
+          onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
           onPickFrame={applyFrame}
           onRemoveFrame={() => setFrame(null)}
           onSubmit={run}

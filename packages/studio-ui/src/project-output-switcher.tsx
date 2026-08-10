@@ -151,25 +151,23 @@ export function ProjectOutputSwitcher({
           title={accessibleTitle}
           disabled={busy}
           onClick={() => onSwitch(output.id)}
-          className={`relative flex w-full items-start gap-1.5 rounded-md px-2 py-1.5 text-left transition-[background-color,transform] active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-wait ${
+          className={`relative flex w-full items-start rounded-md px-2 py-1.5 text-left transition-[background-color,transform] active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-wait ${
             active ? 'bg-panel-2 text-ink' : 'text-ink-2 hover:bg-panel-2 hover:text-ink'
           }`}
         >
-          <span
-            data-output-index
-            aria-hidden
-            className={`w-4 shrink-0 pt-0.5 text-right font-mono text-[9.5px] leading-4 tabular-nums ${batchMode ? 'invisible' : ''} ${
-              active ? 'text-ink-2' : 'text-ink-4'
-            }`}
-          >
-            {String(index + 1).padStart(2, '0')}
-          </span>
           <span className="flex min-w-0 flex-1 flex-col items-center">
             <span
               data-output-thumb
               className="border-line group-hover:border-line-2 relative flex max-w-full items-center justify-center overflow-hidden rounded-sm border bg-black transition-colors"
               style={{ width: thumbGeometry.cardWidth, aspectRatio: thumbGeometry.cssAspectRatio }}
             >
+              <span
+                data-output-index
+                aria-hidden
+                className={`absolute left-1 top-1 z-10 rounded-sm bg-black/60 px-1 py-0.5 font-mono text-[9px] leading-none tabular-nums text-white/75 backdrop-blur-[2px] ${batchMode ? 'invisible' : ''}`}
+              >
+                {String(index + 1).padStart(2, '0')}
+              </span>
               {output.coverThumb ? (
                 <img src={output.coverThumb} alt="" className="h-full w-full object-cover" draggable={false} />
               ) : (
@@ -242,7 +240,7 @@ export function ProjectOutputSwitcher({
     <aside
       data-cap-keep
       aria-label={label}
-      className="border-line bg-panel relative flex h-full min-h-0 w-[clamp(148px,13vw,192px)] shrink-0 flex-col overflow-hidden border-r"
+      className="border-line bg-panel relative flex h-full min-h-0 w-[clamp(112px,10vw,156px)] shrink-0 flex-col overflow-hidden border-r"
     >
       <div className="flex w-full shrink-0 items-center justify-between px-3 pb-1.5 pt-3">
         <span className="text-ink-3 min-w-0 flex-1 truncate px-1 text-[11px] font-medium tracking-wide">

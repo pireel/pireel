@@ -35,6 +35,11 @@ export interface TriggerPopoverHandle {
   open: (anchorEl?: HTMLElement | null) => void;
 }
 
+export interface TriggerPopoverPickContext {
+  /** Trigger-character menus edit the composer token; manual button menus must leave it untouched. */
+  source: 'trigger' | 'manual';
+}
+
 export interface TriggerPopoverProps<T> {
   /** Trigger char: "@" / "/" / or another single char; omit = imperative open() only (button-invoked), editor not listened to */
   trigger?: string;
@@ -78,7 +83,7 @@ export interface TriggerPopoverProps<T> {
 
   /** Select callback; the caller applies the item to the editor (swallow trigger char + insert pill, etc.).
    *  The component closes the popover right after calling onPick — the caller doesn't need to close it. */
-  onPick: (item: T) => void;
+  onPick: (item: T, context: TriggerPopoverPickContext) => void;
 
   /** Key (itemKey) of the item that is currently "selected" in the caller's state (e.g. the attached theme).
    *  On open, the highlight starts on it and the list scrolls it into view (centered) instead of starting at the top. */
@@ -305,7 +310,7 @@ function TriggerPopoverImpl<T>(
       el.removeEventListener('compositionstart', onCompositionStart);
       el.removeEventListener('compositionend', onCompositionEnd);
     };
-  }, [enabled, editorRef, trigger, readCaretAnchor, readQuery, close, anchor, manualMode, tabs]);
+  }, [enabled, editorRef, trigger, readCaretAnchor, readQuery, close, anchor, manualMode, tabs, applyInitialActive]);
 
   // Imperative open: button click opens directly. Prefer the passed anchorEl as anchor, falling back to the editor position.
   // At render time the remaining viewport space decides whether the popover expands up or down (top edge too close to the top → down).
@@ -356,7 +361,7 @@ function TriggerPopoverImpl<T>(
       } else if (e.key === 'Enter' && filtered.length > 0) {
         const item = filtered[activeIdx];
         if (item) {
-          onPick(item);
+          onPick(item, { source: manualMode ? 'manual' : 'trigger' });
           close();
         }
       } else {
@@ -369,7 +374,7 @@ function TriggerPopoverImpl<T>(
     };
     document.addEventListener('keydown', handle, true);
     return () => document.removeEventListener('keydown', handle, true);
-  }, [anchor, filtered, activeIdx, onPick, close, tabs, activeTab]);
+  }, [anchor, filtered, activeIdx, onPick, close, tabs, activeTab, manualMode]);
 
   // click-outside close
   useEffect(() => {
@@ -505,7 +510,7 @@ function TriggerPopoverImpl<T>(
               {renderItem(item, {
                 active: i === activeIdx,
                 pick: () => {
-                  onPick(item);
+                  onPick(item, { source: manualMode ? 'manual' : 'trigger' });
                   close();
                 },
                 setActive: () => setActiveIdx(i),

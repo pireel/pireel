@@ -6,8 +6,9 @@ interface Props {
    * - `dark`: ink glyph, no background — for light surfaces.
    * - `light`: white glyph on ink background — for dark surfaces / favicons.
    * - `chromatic`: Pireel's lime / orange / ink mark — reserved for product identity moments.
+   * - `adaptive`: monochrome glyph using currentColor — for theme-aware product UI.
    */
-  variant?: 'dark' | 'light' | 'chromatic';
+  variant?: 'dark' | 'light' | 'chromatic' | 'adaptive';
   className?: string;
 }
 
@@ -139,7 +140,7 @@ export function BrandMark({
   // viewBox units — ~1.8/100 ≈ 1.8% chromatic offset, visible at every size.
   const shift = 1.8;
   const radius = 22;
-  const mainColor = variant === 'light' ? '#ffffff' : '#17181b';
+  const mainColor = variant === 'adaptive' ? 'currentColor' : variant === 'light' ? '#ffffff' : '#17181b';
   const leadingColor = '#c4f24c';
   const trailingColor = '#e85a2a';
 
@@ -154,12 +155,16 @@ export function BrandMark({
       {variant === 'light' && (
         <rect width="100" height="100" rx={radius} ry={radius} fill="#17181b" />
       )}
-      <g transform={`translate(${-shift} ${-shift})`}>
-        <PiGlyph stroke={leadingColor} />
-      </g>
-      <g transform={`translate(${shift} ${shift})`}>
-        <PiGlyph stroke={trailingColor} />
-      </g>
+      {variant !== 'adaptive' && (
+        <>
+          <g transform={`translate(${-shift} ${-shift})`}>
+            <PiGlyph stroke={leadingColor} />
+          </g>
+          <g transform={`translate(${shift} ${shift})`}>
+            <PiGlyph stroke={trailingColor} />
+          </g>
+        </>
+      )}
       <PiGlyph stroke={mainColor} />
     </svg>
   );

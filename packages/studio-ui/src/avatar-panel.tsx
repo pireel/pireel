@@ -2,6 +2,7 @@
 
 import { Check, Loader2, Mic2, Pause, Play, Plus, Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { RESPONSIVE_ASSET_CARD_GRID } from './asset-card';
 import { t } from './i18n';
 
 type VoiceAsset = {
@@ -340,7 +341,7 @@ export function AvatarPanel() {
         {loading ? (
           <div className="text-ink-4 flex items-center justify-center gap-2 py-10 text-[10.5px]"><Loader2 size={14} className="animate-spin" />{t('workbench.voiceLoading')}</div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,120px)] gap-2.5">
+          <div className={RESPONSIVE_ASSET_CARD_GRID}>
             {visibleVoices.map((voice) => (
               <div
                 key={voice.id}

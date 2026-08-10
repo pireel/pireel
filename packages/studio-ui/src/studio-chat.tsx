@@ -27,8 +27,9 @@ import {
   useRef,
   useState,
 } from 'react';
-import { X, Sparkles, MessageSquarePlus, History } from 'lucide-react';
+import { X, MessageSquarePlus, History } from 'lucide-react';
 import type { UIMessage } from 'ai';
+import { BrandMark } from '@pireel/ui/brand-mark';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import type { Composition } from '@pireel/studio-engine/composition';
 import {
@@ -68,6 +69,27 @@ export interface AttachedFrame {
   iconKey?: string | null;
 }
 
+/** A concrete composed timeline frame attached to the next user message. */
+export interface AttachedTimelineFrame {
+  id: string;
+  atSec: number;
+  fps: number;
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+export interface PendingTimelineFrame {
+  id: string;
+  atSec: number;
+  fps: number;
+}
+
+/** Ordered composer stream: frame references stay exactly where the user inserted them among text. */
+export type StudioChatDraftPart =
+  | { type: 'text'; text: string }
+  | { type: 'timeline-frame'; frame: AttachedTimelineFrame };
+
 export interface StudioChatHandle {
   startProgress(): ProgressHandle;
   /** Called by the workbench on selection change: pass an element → input shows a "currently selected" pill; pass null → remove it. */
@@ -82,6 +104,12 @@ export interface StudioChatHandle {
   focusInput(): void;
   /** Attach a frame to the current session (shared by frame panel "use" and the input's theme button): button highlights, injected with the request. */
   attachFrame(frame: AttachedFrame): void;
+  /** Insert a loading frame tag at the saved composer caret before capture starts. */
+  beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
+  /** Promote the matching loading tag in place without moving or replacing earlier frame tags. */
+  resolveTimelineFrameCapture(frame: AttachedTimelineFrame): void;
+  /** Remove a failed loading tag. */
+  failTimelineFrameCapture(id: string): void;
 }
 
 export interface StudioChatProps {
@@ -97,6 +125,11 @@ export interface StudioChatProps {
   /** Live composition accessor (stable identity, reads a ref): tool receipt cards preview blocks
    *  without linking chat re-renders to comp state. Optional — the preview strip hides without it. */
   getComp?: () => Composition;
+  /** Exact-frame picking happens on the real Studio timeline; Chat only owns its mode button and draft attachment. */
+  timelineFramePickActive?: boolean;
+  timelineFramePickBusy?: boolean;
+  timelineFramePickAvailable?: boolean;
+  onTimelineFramePickActiveChange?: (active: boolean) => void;
   /** Session persistence key (per project: studio:chat:v1:<projectId>, sessions belong to a project). */
   storageKey: string;
   /** Fired after threads are written to localStorage (the workbench uses it to sync sessions to the cloud too). */
@@ -112,7 +145,7 @@ export interface StudioChatProps {
  *  props have stable identity (guaranteed on the workbench side: runTool via useStableCallbacks, getBody useCallback([]),
  *  elements memoized by content key). */
 export const StudioChat = memo(
-  forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat({ runTool, getBody, elements, getComp, onFrameApplied, storageKey, onThreadsChange, onClose }, ref) {
+  forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat({ runTool, getBody, elements, getComp, timelineFramePickActive = false, timelineFramePickBusy = false, timelineFramePickAvailable = false, onTimelineFramePickActiveChange, onFrameApplied, storageKey, onThreadsChange, onClose }, ref) {
   const shell = useStudioShell();
   const scenarioSkills = shell.scenarioSkills ?? [];
   const defaultSkillId = scenarioSkills.some((skill) => skill.id === shell.defaultScenarioSkillId)
@@ -176,6 +209,9 @@ export const StudioChat = memo(
       insertText: (text) => innerRef.current?.insertText(text),
       focusInput: () => innerRef.current?.focusInput(),
       attachFrame: (frame) => innerRef.current?.attachFrame(frame),
+      beginTimelineFrameCapture: (frame) => innerRef.current?.beginTimelineFrameCapture(frame),
+      resolveTimelineFrameCapture: (frame) => innerRef.current?.resolveTimelineFrameCapture(frame),
+      failTimelineFrameCapture: (id) => innerRef.current?.failTimelineFrameCapture(id),
     }),
     [],
   );
@@ -189,8 +225,8 @@ export const StudioChat = memo(
       className="bg-panel flex h-full min-h-0 w-full min-w-0 flex-col"
     >
       {/* Header: title + history + new chat */}
-      <div className="border-line text-ink-3 relative flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
-        <Sparkles size={13} className="text-accent" />
+      <div className="border-line text-ink-3 relative flex h-10 shrink-0 items-center gap-1.5 border-b px-3 text-[12px]">
+        <BrandMark size={14} variant="adaptive" className="text-ink shrink-0" />
         <span className="truncate">{active?.title ?? t('chatGen.chat')}</span>
         <div className="ml-auto flex items-center gap-0.5">
           <button
@@ -258,6 +294,10 @@ export const StudioChat = memo(
         getBody={getBody}
         elements={elements}
         getComp={getComp}
+        timelineFramePickActive={timelineFramePickActive}
+        timelineFramePickBusy={timelineFramePickBusy}
+        timelineFramePickAvailable={timelineFramePickAvailable}
+        onTimelineFramePickActiveChange={onTimelineFramePickActiveChange}
         onSnapshot={onSnapshot}
         handleRef={innerRef}
       />

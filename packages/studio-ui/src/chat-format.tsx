@@ -25,35 +25,86 @@ export function PiAvatar({ thinking = false, size = 22 }: { thinking?: boolean; 
   const glyph = Math.round(size * 0.72);
   return (
     <span
-      className="bg-panel-2 relative flex shrink-0 items-center justify-center rounded-full"
+      className="bg-ink/8 text-ink ring-ink/10 relative flex shrink-0 items-center justify-center rounded-full ring-1 ring-inset"
       style={{ width: size, height: size }}
       aria-hidden
     >
       <BrandMark
         size={glyph}
-        variant="chromatic"
+        variant="adaptive"
         className={thinking ? 'animate-pulse' : undefined}
       />
     </span>
   );
 }
 
-const PILL_CLASS =
-  'sc-pill inline-flex items-center gap-1 align-middle rounded px-1.5 py-px mx-0.5 text-[12px] font-medium border border-accent/30 bg-accent/10 text-accent select-none cursor-default';
+export const CHAT_PILL_CLASS =
+  'sc-pill mx-0.5 inline-flex h-6 max-w-[180px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
+
+export const CHAT_PILL_ICON_CLASS =
+  'bg-accent/10 inline-flex h-4 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[2px] text-[11px] leading-none';
+
+export const CHAT_PILL_LABEL_CLASS = 'min-w-0 truncate text-[11px] leading-none';
+
+/** Shared trailing action for editable chat tags. Sent-message tags intentionally stay read-only. */
+export function appendChatPillRemoveIcon(
+  pill: HTMLElement,
+  label: string,
+  onRemove: () => void,
+) {
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.tabIndex = -1;
+  remove.contentEditable = 'false';
+  remove.className =
+    'ml-0.5 inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-current opacity-55 transition-opacity hover:bg-current/10 hover:opacity-100';
+  remove.setAttribute('aria-label', label);
+
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 16 16');
+  icon.setAttribute('width', '12');
+  icon.setAttribute('height', '12');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M4.5 4.5l7 7m0-7-7 7');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.5');
+  path.setAttribute('stroke-linecap', 'round');
+  icon.appendChild(path);
+  remove.appendChild(icon);
+
+  remove.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  remove.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onRemove();
+  });
+  pill.appendChild(remove);
+}
 
 /** Imperatively build an element pill (contenteditable=false). */
-export function makeElementPill(el: StudioElementRef, opts: { auto?: boolean } = {}): HTMLSpanElement {
+export function makeElementPill(
+  el: StudioElementRef,
+  opts: { auto?: boolean; onRemove?: () => void } = {},
+): HTMLSpanElement {
   const span = document.createElement('span');
   span.contentEditable = 'false';
   span.dataset.refId = el.id;
   if (opts.auto) span.dataset.auto = '1';
-  span.className = PILL_CLASS;
+  span.className = CHAT_PILL_CLASS;
   const icon = document.createElement('span');
+  icon.className = CHAT_PILL_ICON_CLASS;
   icon.textContent = elementIcon(el);
   span.appendChild(icon);
   const text = document.createElement('span');
+  text.className = CHAT_PILL_LABEL_CLASS;
   text.textContent = `@${el.label}`;
   span.appendChild(text);
+  if (opts.onRemove) appendChatPillRemoveIcon(span, t('chatGen.removeElementTag'), opts.onRemove);
   return span;
 }
 
@@ -71,8 +122,9 @@ export function renderTextWithElementPills(text: string, elements: StudioElement
     const el = map.get(m[1]!);
     if (el) {
       out.push(
-        <span key={`${m.index}-${m[1]}`} className={PILL_CLASS}>
-          <span>{elementIcon(el)}</span>@{el.label}
+        <span key={`${m.index}-${m[1]}`} className={CHAT_PILL_CLASS}>
+          <span className={CHAT_PILL_ICON_CLASS}>{elementIcon(el)}</span>
+          <span className={CHAT_PILL_LABEL_CLASS}>@{el.label}</span>
         </span>,
       );
     } else {

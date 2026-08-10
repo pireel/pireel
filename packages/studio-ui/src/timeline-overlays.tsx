@@ -20,6 +20,21 @@ export function HoverCursor({ second, pps }: { second: number; pps: number }) {
   );
 }
 
+/** Inspector-style guide shown while Chat is asking the user to pick an exact frame. */
+export function FramePickCursor({ second, pps }: { second: number; pps: number }) {
+  return (
+    <div
+      data-frame-pick-cursor
+      className="pointer-events-none absolute top-0 bottom-0 left-0 z-[48] w-px bg-accent shadow-[0_0_7px_color-mix(in_srgb,var(--color-accent)_55%,transparent)] will-change-transform"
+      style={{ transform: `translateX(${second * pps}px)` }}
+    >
+      <span className="bg-ink text-bg absolute top-1 left-1.5 rounded-sm px-1.5 py-0.5 font-mono text-[9px] leading-none whitespace-nowrap shadow-sm">
+        {second.toFixed(2)}s
+      </span>
+    </div>
+  );
+}
+
 /** Playhead cursor: subscribes to the playhead store — at 60fps during playback only this small
  *  component re-renders, not the whole timeline.
  *  Horizontal move must use transform: changing left triggers layout + layout-shift every frame,
