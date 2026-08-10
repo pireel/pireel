@@ -17,6 +17,15 @@ export interface ComposeMode {
   current?: KitChoice | null;
 }
 
+/**
+ * Every newly generated element gets bespoke visual reasoning. A missing Frame means neutral craft,
+ * not a fallback to one of the fixed library cards. Kit mode is reserved for editing an existing
+ * kit block or for explicit insertion from the component library.
+ */
+export function newBlockComposeMode(): undefined {
+  return undefined;
+}
+
 export interface ComposedBlock {
   innerHtml: string;
   timelineBody: string;

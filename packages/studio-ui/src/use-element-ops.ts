@@ -69,11 +69,9 @@ export function useElementOps(deps: ElementOpsDeps) {
     setPendingInsert, setGenRefreshTick, applyT, pushUndoSnapshot, ensureShots, mappedCaptionSegs,
     composeBlockChecked, insertKitBlock, openChat,
   } = deps;
-  /** Generate a standalone component (composeBlockChecked, not added to the video; only added via "insert" on a history card).
-   *  Same routing as add_block: themed → HTML in the theme's language; themeless → kit first, and
-   *  the model itself decides per the description — a component fits (props), nothing fits
-   *  ({"custom": true} falls through to HTML inside the checked composer), or a deliberate null,
-   *  which an explicit description never deserves → retry as HTML. */
+  /** Generate a standalone component (composeBlockChecked, not added to the video; only added via
+   *  "insert" on a history card). New work always uses bespoke markup; an existing kit result keeps
+   *  the props contract so editing never discards manual component choices. */
   const generateElementStandalone = async (prompt: string, base?: GenElementResult): Promise<GenElementResult> => {
     // Draft iteration: a "reference" already-generated component enters the seed as the existing implementation, the instruction = edit on top of it
     const seed = base
@@ -86,7 +84,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     const instruction = base
       ? `Edit this element's current implementation as requested (keep everything not mentioned as-is): ${prompt}`
       : `Create a new overlay element (title / big number / list / kinetic caption — pick per the content): ${prompt}`;
-    const kitOpts = compRef.current.frameId ? undefined : { kit: true, ...(base?.kit ? { current: base.kit } : {}) };
+    const kitOpts = base?.kit ? { kit: true, current: base.kit } : undefined;
     let parsed = await composeBlockChecked(seed, instruction, undefined, kitOpts);
     if (parsed.declined) parsed = await composeBlockChecked(seed, instruction); // explicit ask never maps to "nothing to show"
     if (parsed.kit) {

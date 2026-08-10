@@ -6,7 +6,7 @@
  * (element-history), merged into one reverse-chronological grid distinguished by origin.
  * Pending gens hold a placeholder at the top and turn into assets in place after 4s polling.
  *
- * Official/curated content (kit components, stickers, BGM) lives in OfficialAssetsPanel;
+ * Host-curated content is injected separately through StudioShell;
  * the current project's local, never-uploaded media lives in MyAssetsPanel.
  *
  * Generation has its own primary-nav panel in the workbench. Generated results still appear

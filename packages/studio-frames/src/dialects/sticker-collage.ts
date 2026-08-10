@@ -1,298 +1,59 @@
-/**
- * Sticker dialect — campus sticker collage (Apple Education Store reference): mostly a light-gray
- * paper base where everything looks "stuck on" — white die-cut stickers (soft shadow + slight tilt)
- * as the main container, colored stickers (cyan/pink + white rim) and small black label pills as
- * accents, highlighter blocks over keywords, a pink halftone starburst popping last. Black stays in
- * small doses (pills/index dots/one chalkboard sticker) and never dominates. Motion family = stickers
- * slapping on with back.out.
- * (Paired frame-level personFx: matte the subject and add the same white outline; cover/title-card
- * leave room on the right for a person.)
- */
-
+/** Social Cutout v2: people-first phone energy, real artifacts, reaction, chorus, release. */
 import { type Block, mk } from './shared';
 
-const stRoot = (id: string) => `
-#${id} .st{position:absolute;inset:0;background:var(--paper);color:var(--fg);font-family:var(--font-head);}
-#${id} .stk{position:absolute;background:var(--panel);border-radius:30px;box-shadow:var(--shadow);}
-#${id} .stc{position:absolute;background:var(--accent);border:10px solid var(--panel);border-radius:26px;box-shadow:var(--shadow);color:var(--fg);}
-#${id} .stp{position:absolute;background:var(--accent-2);border:10px solid var(--panel);border-radius:26px;box-shadow:var(--shadow);color:var(--panel);}
-#${id} .stb{position:absolute;background:var(--panel-2);border:10px solid var(--panel);border-radius:26px;box-shadow:var(--shadow);color:var(--panel);}
-#${id} .cap{position:absolute;display:inline-flex;align-items:center;background:var(--panel-2);color:var(--panel);font-size:30px;font-weight:700;letter-spacing:0.14em;padding:12px 30px;border-radius:999px;box-shadow:var(--shadow);white-space:nowrap;}
-#${id} .mk{background:var(--accent);color:var(--fg);padding:2px 18px;display:inline-block;}
-#${id} .burst{position:absolute;display:flex;align-items:center;justify-content:center;color:var(--panel);font-weight:900;filter:drop-shadow(0 10px 18px rgb(29 29 31/0.18));
-  clip-path:polygon(50% 0%,59% 35%,95% 6%,66% 41%,100% 50%,66% 59%,95% 94%,59% 65%,50% 100%,41% 65%,5% 94%,34% 59%,0% 50%,34% 41%,5% 6%,41% 35%);
-  background-color:var(--accent-2);background-image:radial-gradient(var(--panel) 18%,transparent 19%);background-size:12px 12px;}
-#${id} .dot{position:absolute;display:flex;align-items:center;justify-content:center;background:var(--panel-2);color:var(--panel);border:8px solid var(--panel);border-radius:999px;box-shadow:var(--shadow);font-weight:900;}
-#${id} .deco{position:absolute;border-radius:999px;box-shadow:var(--shadow);border:8px solid var(--panel);}
-#${id} .pair{position:absolute;font-size:52px;font-weight:800;white-space:nowrap;}
-#${id} .pair span{color:var(--muted);}`;
+const root = (id: string) => `
+#${id} .sc{position:absolute;inset:0;overflow:hidden;background:var(--paper);color:var(--fg);font-family:var(--font-body);}
+#${id} .head{font-family:var(--font-head);font-weight:950;letter-spacing:-.05em;}
+#${id} .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;}
+#${id} .micro{font-family:var(--font-num);font-size:18px;font-weight:900;letter-spacing:.13em;text-transform:uppercase;}
+#${id} .person{position:absolute;width:420px;height:780px;filter:drop-shadow(12px 14px 0 rgb(23 23 25 / .24));}
+#${id} .person .face{position:absolute;left:105px;top:10px;width:210px;height:235px;border-radius:48%;background:#9d6b50;border:10px solid var(--paper);}
+#${id} .person .body{position:absolute;left:18px;top:225px;width:385px;height:560px;border-radius:180px 180px 0 0;background:#405a76;border:10px solid var(--paper);}
+#${id} .photo{position:absolute;background:linear-gradient(145deg,#c9b9a6,#f2dcc6 58%,#765d55);border:14px solid var(--paper);box-shadow:var(--shadow);overflow:hidden;}
+#${id} .sticker{position:absolute;padding:15px 22px;background:var(--accent-2);border:5px solid var(--fg);box-shadow:6px 7px 0 var(--fg);font-size:24px;font-weight:950;transform:rotate(-4deg);}
+#${id} .marker{position:absolute;height:18px;background:var(--accent);transform-origin:left center;}
+#${id} [data-edit]{outline:none;}`;
 
-const MK_SWEEP = `{scaleX:0,transformOrigin:'left center',duration:0.25,ease:'power3.out'}`;
-const SLAP = `{scale:0.6,rotation:'-=8',autoAlpha:0,duration:0.3,ease:'back.out(1.7)'}`;
-const POP = `{scale:0,autoAlpha:0,duration:0.26,ease:'back.out(2)'}`;
-
-export const cover: () => Block = () =>
-  mk(
-    'cv_st',
-    '封面',
-    (id) => `
-<div class="st">
-  <div class="stk hero" style="transform:rotate(-2.5deg);">
-    <div class="h">贴纸</div>
-    <div class="sub">STICKER · 把重点贴出来</div>
-  </div>
-  <div class="cap" style="left:150px;top:130px;transform:rotate(-4deg);">白边裁切 DIE-CUT</div>
-  <div class="stc" style="left:920px;top:150px;padding:18px 40px;font-size:44px;font-weight:900;transform:rotate(5deg);">新学期</div>
-  <div class="burst" style="left:1030px;top:640px;width:200px;height:200px;font-size:52px;transform:rotate(-12deg);">NEW</div>
-  <div class="deco" style="left:80px;top:640px;width:84px;height:84px;background:var(--accent);transform:rotate(8deg);"></div>
-  <div class="dot" style="left:1180px;top:360px;width:92px;height:92px;font-size:44px;transform:rotate(6deg);">✂</div>
-  <div class="pair" style="left:150px;bottom:120px;"><b class="mk">好物。</b><span>贴出来才记得住。</span></div>
-</div>
-<style>${stRoot(id)}
-#${id} .hero{left:120px;top:250px;width:780px;height:520px;}
-#${id} .h{position:absolute;left:90px;top:70px;font-size:250px;font-weight:900;line-height:1;letter-spacing:0.04em;}
-#${id} .sub{position:absolute;left:96px;bottom:64px;font-size:34px;font-weight:700;letter-spacing:0.22em;color:var(--muted);}
-</style>`,
-    (id) =>
-      `tl.from('#${id} .hero',${SLAP},0);\n` +
-      `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0.18);\n` +
-      `tl.from('#${id} .stc',${SLAP.replace('0.3', '0.26')},0.3);\n` +
-      `tl.from('#${id} .dot',${POP},0.42);\n` +
-      `tl.from('#${id} .deco',${POP},0.5);\n` +
-      `tl.from('#${id} .pair',{autoAlpha:0,y:24,duration:0.24,ease:'power3.out'},0.56);\n` +
-      `tl.from('#${id} .mk',${MK_SWEEP},0.68);\n` +
-      `tl.from('#${id} .burst',${POP},0.84);`,
-  );
+export const cover: () => Block = () => mk('cv_sc2', '封面', (id) => `
+<div class="sc cover"><div class="red"></div><div class="photo a"></div><div class="photo b"></div><div class="person"><i class="face"></i><i class="body"></i></div><div class="title head" data-edit>社交拼场</div><div class="english num">SOCIAL CUTOUT</div><div class="sticker">PEOPLE WERE HERE</div><i class="marker"></i><div class="thesis micro">PEOPLE / TRACE / REACTION / CHORUS</div></div>
+<style>${root(id)}
+#${id} .red{position:absolute;left:0;top:0;width:850px;height:1080px;background:var(--accent);}#${id} .cover .photo.a{right:80px;top:90px;width:620px;height:430px;transform:rotate(5deg);}#${id} .cover .photo.b{right:480px;bottom:70px;width:540px;height:380px;transform:rotate(-7deg);}#${id} .cover .person{right:180px;bottom:-20px;}#${id} .title{position:absolute;left:75px;top:210px;width:880px;font-size:180px;line-height:.88;color:#fff;}#${id} .english{position:absolute;left:85px;top:610px;font-size:31px;font-weight:900;letter-spacing:.2em;color:#fff;}#${id} .cover .sticker{left:690px;top:120px;}#${id} .cover .marker{left:75px;top:550px;width:730px;transform:rotate(-5deg);background:var(--accent-2);}#${id} .thesis{position:absolute;left:85px;bottom:70px;color:#fff;}
+</style>`, (id) => `tl.from('#${id} .red',{x:-160,duration:.34},0);tl.from('#${id} .photo',{y:100,rotation:0,autoAlpha:0,duration:.28,stagger:.1},.16);tl.from('#${id} .person',{y:120,autoAlpha:0,duration:.3},.3);tl.from('#${id} .title,#${id} .english,#${id} .thesis',{x:-45,autoAlpha:0,duration:.23,stagger:.06},.32);tl.from('#${id} .sticker',{scale:0,rotation:8,duration:.22},.55);`);
 
 export const blocks: Record<string, () => Block> = {
-  'title-card': () =>
-    mk(
-      'st_ttl',
-      'title-card',
-      (id) => `
-<div class="st">
-  <div class="stk hero" style="transform:rotate(-2deg);">
-    <div class="h">三件开学好物</div>
-    <div class="sub">都是自费买的 · 无广</div>
-  </div>
-  <div class="cap" style="left:170px;top:150px;transform:rotate(-4deg);">开箱 UNBOX</div>
-  <div class="stp" style="left:1150px;top:200px;padding:16px 36px;font-size:40px;font-weight:900;transform:rotate(6deg);">第一期</div>
-  <div class="burst" style="left:1230px;top:660px;width:190px;height:190px;font-size:50px;transform:rotate(-10deg);">真香</div>
-  <div class="deco" style="left:96px;bottom:260px;width:72px;height:72px;background:var(--accent-2);transform:rotate(-6deg);"></div>
-  <div class="pair" style="left:170px;bottom:130px;"><b class="mk">第一件。</b><span>就把预算打醒。</span></div>
-</div>
-<style>${stRoot(id)}
-#${id} .hero{left:140px;top:270px;width:1000px;height:460px;}
-#${id} .h{position:absolute;left:80px;top:110px;font-size:130px;font-weight:900;line-height:1.15;}
-#${id} .sub{position:absolute;left:84px;bottom:60px;font-size:32px;font-weight:700;letter-spacing:0.2em;color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .hero',${SLAP},0);\n` +
-        `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0.18);\n` +
-        `tl.from('#${id} .stp',${SLAP.replace('0.3', '0.26')},0.3);\n` +
-        `tl.from('#${id} .pair',{autoAlpha:0,y:24,duration:0.24,ease:'power3.out'},0.46);\n` +
-        `tl.from('#${id} .mk',${MK_SWEEP},0.58);\n` +
-        `tl.from('#${id} .deco',${POP},0.7);\n` +
-        `tl.from('#${id} .burst',${POP},0.84);`,
-    ),
-  'big-number': () =>
-    mk(
-      'st_num',
-      'big-number',
-      (id) => `
-<div class="st">
-  <div class="stk big" style="transform:rotate(-2.5deg);">
-    <div class="v"><b class="n">4799</b><i>元</i></div>
-  </div>
-  <div class="stc" style="left:330px;top:170px;padding:16px 38px;font-size:38px;font-weight:900;transform:rotate(-5deg);">教育价 EDU</div>
-  <div class="burst" style="right:300px;top:180px;width:210px;height:210px;font-size:50px;transform:rotate(12deg);">省 500</div>
-  <div class="deco" style="right:250px;bottom:230px;width:80px;height:80px;background:var(--accent);transform:rotate(10deg);"></div>
-  <div class="pair" style="left:0;right:0;bottom:110px;text-align:center;"><b class="mk">比官网省 500。</b><span>白捡。</span></div>
-</div>
-<style>${stRoot(id)}
-#${id} .big{left:430px;right:430px;top:250px;height:520px;display:flex;align-items:center;justify-content:center;}
-#${id} .v{display:flex;align-items:baseline;gap:26px;}
-#${id} .n{font-size:340px;font-weight:900;letter-spacing:-0.02em;line-height:1;}
-#${id} .v i{font-style:normal;font-size:66px;font-weight:800;color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .big',${SLAP},0);\n` +
-        `tl.to({v:0},{v:4799,duration:0.7,ease:'power2.out',onUpdate:function(){document.querySelector('#${id} .n').textContent=String(Math.round(this.targets()[0].v))}},0.16);\n` +
-        `tl.from('#${id} .stc',${SLAP.replace('0.3', '0.26')},0.3);\n` +
-        `tl.from('#${id} .pair',{autoAlpha:0,y:24,duration:0.24,ease:'power3.out'},0.52);\n` +
-        `tl.from('#${id} .mk',${MK_SWEEP},0.64);\n` +
-        `tl.from('#${id} .deco',${POP},0.78);\n` +
-        `tl.from('#${id} .burst',${POP},0.9);`,
-    ),
-  'list': () =>
-    mk(
-      'st_lst',
-      'list',
-      (id) => `
-<div class="st">
-  <div class="cap" style="left:170px;top:100px;transform:rotate(-3deg);">开学清单 LIST</div>
-  <div class="deco" style="right:170px;top:110px;width:70px;height:70px;background:var(--accent-2);transform:rotate(8deg);"></div>
-  <div class="stk row r1"><span class="dot d" style="background:var(--panel-2);">1</span><b>降噪耳机</b><i class="mk">上课别戴。</i></div>
-  <div class="stk row r2"><span class="dot d" style="background:var(--accent);color:var(--fg);">2</span><b>便携支架</b></div>
-  <div class="stk row r3"><span class="dot d" style="background:var(--accent-2);">3</span><b>氮化镓充电头</b></div>
-</div>
-<style>${stRoot(id)}
-#${id} .row{left:220px;right:220px;height:176px;display:flex;align-items:center;gap:44px;padding:0 66px;font-size:62px;font-weight:800;}
-#${id} .row i{font-style:normal;font-size:36px;font-weight:800;margin-left:auto;}
-#${id} .row .d{position:static;width:86px;height:86px;font-size:44px;flex:none;}
-#${id} .r1{top:230px;transform:rotate(-1.6deg);}
-#${id} .r2{top:460px;transform:rotate(1.2deg);}
-#${id} .r3{top:690px;transform:rotate(-0.8deg);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0);\n` +
-        `tl.from('#${id} .r1',{x:-90,scale:0.85,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.14);\n` +
-        `tl.from('#${id} .r2',{x:90,scale:0.85,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.28);\n` +
-        `tl.from('#${id} .r3',{x:-90,scale:0.85,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.42);\n` +
-        `tl.from('#${id} .d',{scale:0,duration:0.22,stagger:0.12,ease:'back.out(2)'},0.32);\n` +
-        `tl.from('#${id} .mk',${MK_SWEEP},0.66);\n` +
-        `tl.from('#${id} .deco',${POP},0.8);`,
-    ),
-  'steps': () =>
-    mk(
-      'st_stp',
-      'steps',
-      (id) => `
-<div class="st">
-  <div class="cap" style="left:50%;top:110px;transform:translateX(-50%) rotate(-2deg);">领取路线 HOW-TO</div>
-  <div class="stk sq s1"><em>STEP 1</em><b>领教育优惠</b></div>
-  <svg class="ar a1" viewBox="0 0 120 60"><path d="M8,46 Q60,6 112,34"/></svg>
-  <div class="stc sq s2"><em>STEP 2</em><b>叠以旧换新</b></div>
-  <svg class="ar a2" viewBox="0 0 120 60"><path d="M8,20 Q60,54 112,28"/></svg>
-  <div class="stk sq s3"><em>STEP 3</em><b>分期免息</b><i class="mk um"></i></div>
-</div>
-<style>${stRoot(id)}
-#${id} .sq{top:50%;transform:translateY(-50%) rotate(-2deg);width:470px;height:420px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:34px;}
-#${id} .sq em{font-style:normal;font-size:30px;font-weight:700;letter-spacing:0.2em;color:var(--muted);}
-#${id} .stc.sq em{color:var(--fg);opacity:0.72;}
-#${id} .sq b{font-size:56px;font-weight:900;}
-#${id} .s1{left:110px;}
-#${id} .s2{left:725px;transform:translateY(-50%) rotate(2.2deg);}
-#${id} .s3{right:110px;transform:translateY(-50%) rotate(-1.4deg);}
-#${id} .um{position:absolute;left:88px;right:88px;bottom:60px;height:16px;padding:0;}
-#${id} .ar{position:absolute;top:40%;width:130px;height:66px;}
-#${id} .ar path{fill:none;stroke:var(--fg);stroke-width:7;stroke-linecap:round;stroke-dasharray:2 16;}
-#${id} .a1{left:592px;}
-#${id} .a2{right:592px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0);\n` +
-        `tl.from('#${id} .s1',${SLAP},0.12);\n` +
-        `tl.from('#${id} .a1 path',{strokeDashoffset:220,duration:0.3,ease:'power2.out'},0.32);\n` +
-        `tl.from('#${id} .s2',{scale:0.5,rotation:'-=10',autoAlpha:0,duration:0.32,ease:'back.out(1.7)'},0.46);\n` +
-        `tl.from('#${id} .a2 path',{strokeDashoffset:220,duration:0.3,ease:'power2.out'},0.66);\n` +
-        `tl.from('#${id} .s3',${SLAP},0.8);\n` +
-        `tl.from('#${id} .um',${MK_SWEEP},1.04);`,
-    ),
-  'compare': () =>
-    mk(
-      'st_cmp',
-      'compare',
-      (id) => `
-<div class="st">
-  <div class="stk side sl"><em>普通价</em><b>¥ 9999</b><span class="no">原价入手</span></div>
-  <div class="stc side sr"><em>教育价</em><b>¥ 9249</b><span class="yes"><i class="mk">直接省 750。</i></span></div>
-  <div class="burst" style="right:210px;top:150px;width:220px;height:220px;font-size:54px;transform:rotate(12deg);">省 750</div>
-  <div class="deco" style="left:160px;bottom:160px;width:76px;height:76px;background:var(--accent-2);transform:rotate(-8deg);"></div>
-</div>
-<style>${stRoot(id)}
-#${id} .side{top:50%;width:640px;height:540px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:42px;}
-#${id} .side em{font-style:normal;font-size:34px;font-weight:700;letter-spacing:0.16em;color:var(--muted);}
-#${id} .stc.side em{color:var(--fg);opacity:0.72;}
-#${id} .side b{font-size:110px;font-weight:900;letter-spacing:-0.01em;}
-#${id} .no{font-size:36px;color:var(--muted);text-decoration:line-through;}
-#${id} .yes{font-size:42px;font-weight:800;}
-#${id} .sl{left:180px;transform:translateY(-50%) rotate(-2.5deg);}
-#${id} .sr{right:180px;transform:translateY(-50%) rotate(2deg);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .sl',${SLAP},0);\n` +
-        `tl.from('#${id} .sr',{scale:0.5,rotation:'-=10',autoAlpha:0,duration:0.34,ease:'back.out(1.7)'},0.2);\n` +
-        `tl.from('#${id} .mk',${MK_SWEEP},0.6);\n` +
-        `tl.from('#${id} .deco',${POP},0.72);\n` +
-        `tl.from('#${id} .burst',${POP},0.86);`,
-    ),
-  'quote': () =>
-    mk(
-      'st_qte',
-      'quote',
-      (id) => `
-<div class="st">
-  <div class="cap" style="left:190px;top:130px;transform:rotate(-3deg);">学姐的忠告</div>
-  <div class="stb board" style="transform:rotate(-1.5deg);">
-    <div class="ln">预算有限,</div>
-    <div class="ln"><b class="mk">花在刀刃上。</b></div>
-  </div>
-  <div class="stc qm" style="transform:rotate(-8deg);">“</div>
-  <div class="burst" style="right:230px;bottom:170px;width:170px;height:170px;font-size:44px;transform:rotate(10deg);">记住</div>
-  <div class="deco" style="right:190px;top:180px;width:72px;height:72px;background:var(--accent);transform:rotate(6deg);"></div>
-</div>
-<style>${stRoot(id)}
-#${id} .board{left:270px;right:270px;top:300px;height:480px;display:flex;flex-direction:column;justify-content:center;gap:26px;padding:0 130px;}
-#${id} .ln{font-size:104px;font-weight:900;line-height:1.2;}
-#${id} .qm{left:190px;top:250px;width:150px;height:150px;display:flex;align-items:flex-end;justify-content:center;font-size:150px;font-weight:900;line-height:0.4;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .cap',${SLAP.replace('0.3', '0.26')},0);\n` +
-        `tl.from('#${id} .board',${SLAP},0.14);\n` +
-        `tl.from('#${id} .ln',{autoAlpha:0,y:30,duration:0.24,stagger:0.14,ease:'power3.out'},0.38);\n` +
-        `tl.from('#${id} .mk',${MK_SWEEP},0.66);\n` +
-        `tl.from('#${id} .qm',{scale:0,rotation:-30,autoAlpha:0,duration:0.3,ease:'back.out(1.8)'},0.8);\n` +
-        `tl.from('#${id} .deco',${POP},0.9);\n` +
-        `tl.from('#${id} .burst',${POP},1.0);`,
-    ),
-  'comments': () =>
-    mk(
-      'st_cmt',
-      'comments',
-      (id) => `
-<div class="st">
-  <div class="stk bub b1"><span class="hd cap" style="position:static;">@开学搭子</span><b>蹲一个链接!</b></div>
-  <div class="stk bub b2"><span class="hd cap" style="position:static;background:var(--accent);color:var(--fg);">@大一新生</span><b>学生认证怎么弄?</b></div>
-  <div class="stc bub b3"><span class="hd cap" style="position:static;">UP 回复</span><b>置顶评论区见。</b></div>
-  <div class="burst" style="right:430px;top:200px;width:150px;height:150px;font-size:44px;transform:rotate(14deg);">+1</div>
-</div>
-<style>${stRoot(id)}
-#${id} .bub{display:flex;flex-direction:column;gap:20px;padding:42px 58px;font-size:54px;font-weight:800;border-radius:36px;}
-#${id} .b1{left:190px;top:150px;transform:rotate(-2deg);border-bottom-left-radius:10px;}
-#${id} .b2{right:520px;top:390px;transform:rotate(1.5deg);border-bottom-right-radius:10px;}
-#${id} .b3{left:250px;top:660px;transform:rotate(-1deg);border-top-left-radius:10px;}
-#${id} .hd{font-size:24px;padding:8px 20px;align-self:flex-start;letter-spacing:0.1em;box-shadow:none;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .b1',{x:-90,scale:0.85,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0);\n` +
-        `tl.from('#${id} .b2',{x:90,scale:0.85,autoAlpha:0,duration:0.28,ease:'back.out(1.6)'},0.18);\n` +
-        `tl.from('#${id} .burst',${POP.replace('0.26', '0.24')},0.44);\n` +
-        `tl.from('#${id} .b3',{y:70,scale:0.85,autoAlpha:0,duration:0.3,ease:'back.out(1.6)'},0.56);`,
-    ),
-  'cta': () =>
-    mk(
-      'st_cta',
-      'cta',
-      (id) => `
-<div class="st">
-  <div class="stk pill" style="transform:translate(-50%,-50%) rotate(-2deg);"><b class="mk">关注</b><span>,不迷路。</span></div>
-  <div class="stc" style="left:58%;top:250px;padding:14px 34px;font-size:36px;font-weight:900;transform:rotate(4deg);">每周三更新</div>
-  <div class="burst" style="left:330px;bottom:210px;width:200px;height:200px;font-size:54px;transform:rotate(-12deg);">GO!</div>
-  <div class="deco" style="left:270px;top:220px;width:78px;height:78px;background:var(--accent-2);transform:rotate(-8deg);"></div>
-  <div class="dot" style="right:300px;bottom:280px;width:88px;height:88px;font-size:42px;transform:rotate(8deg);">✓</div>
-</div>
-<style>${stRoot(id)}
-#${id} .pill{left:50%;top:50%;border-radius:999px;padding:66px 116px;font-size:106px;font-weight:900;white-space:nowrap;}
-#${id} .pill span{color:var(--muted);}
-#${id} .pill .mk{padding:2px 26px;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .pill',{scale:0.5,rotation:'-=10',autoAlpha:0,duration:0.34,ease:'back.out(1.7)'},0);\n` +
-        `tl.from('#${id} .mk',${MK_SWEEP},0.3);\n` +
-        `tl.from('#${id} .stc',${SLAP.replace('0.3', '0.26')},0.46);\n` +
-        `tl.from('#${id} .deco',${POP},0.6);\n` +
-        `tl.from('#${id} .dot',${POP},0.7);\n` +
-        `tl.from('#${id} .burst',${POP},0.84);`,
-    ),
+  'crew-intro': () => mk('sc_crew', 'crew-intro', (id) => `
+<div class="sc crew"><div class="word head" data-edit>我们<br/>都在场</div><div class="p p1"><div class="person"><i class="face"></i><i class="body"></i></div><b>阿青 / 镜头外</b></div><div class="p p2"><div class="person"><i class="face"></i><i class="body"></i></div><b>小海 / 第一个笑</b></div><div class="p p3"><div class="person"><i class="face"></i><i class="body"></i></div><b>米粒 / 带来声音</b></div><div class="sticker">不是名单，是关系</div><span class="micro">CREW INTRO / DISTINCT PRESENCE</span></div>
+<style>${root(id)}
+#${id} .crew{background:var(--panel-2);color:#fff;}#${id} .word{position:absolute;left:70px;top:100px;font-size:150px;line-height:.82;color:var(--accent-2);transform:rotate(-4deg);}#${id} .p{position:absolute;width:470px;height:820px;}#${id} .p .person{left:20px;top:0;}#${id} .p b{position:absolute;left:25px;bottom:10px;padding:14px 20px;background:var(--paper);color:var(--fg);font-size:25px;transform:rotate(-3deg);}#${id} .p1{left:480px;top:170px;transform:rotate(-4deg);}#${id} .p2{left:930px;top:70px;transform:rotate(3deg);}#${id} .p2 .body{background:#a74139;}#${id} .p3{right:40px;top:210px;transform:rotate(-2deg);}#${id} .p3 .body{background:#3d725d;}#${id} .crew .sticker{left:80px;bottom:170px;color:var(--fg);}#${id} .crew>.micro{position:absolute;left:80px;bottom:70px;}
+</style>`, (id) => `tl.from('#${id} .p',{y:130,rotation:0,autoAlpha:0,duration:.28,stagger:.12},0);tl.from('#${id} .word',{x:-80,autoAlpha:0,duration:.28},.22);tl.from('#${id} .sticker',{scale:0,rotation:7,duration:.22},.55);`),
+
+  'cutout-reaction': () => mk('sc_reaction', 'cutout-reaction', (id) => `
+<div class="sc reaction"><div class="photo"></div><div class="person"><i class="face"></i><i class="body"></i></div><div class="quote head" data-edit>“等等，<br/>这真的有用。”</div><i class="marker"></i><div class="sticker">真实反应 / 00:07</div><span class="micro">CUTOUT REACTION / LET THE LOOK LAND</span></div>
+<style>${root(id)}
+#${id} .reaction .photo{left:-70px;top:-40px;width:1120px;height:1160px;border-width:0;}#${id} .reaction .person{left:560px;top:170px;transform:scale(1.15) rotate(4deg);}#${id} .quote{position:absolute;left:1030px;top:210px;width:790px;font-size:112px;line-height:.9;}#${id} .reaction .marker{left:1050px;top:650px;width:650px;transform:rotate(-7deg);}#${id} .reaction .sticker{right:110px;bottom:190px;}#${id} .reaction>.micro{position:absolute;right:90px;bottom:75px;}
+</style>`, (id) => `tl.from('#${id} .photo',{x:-150,duration:.34},0);tl.from('#${id} .person',{x:120,rotation:0,autoAlpha:0,duration:.3},.18);tl.from('#${id} .quote',{x:70,autoAlpha:0,duration:.27},.35);tl.from('#${id} .marker',{scaleX:0,duration:.23},.52);tl.from('#${id} .sticker',{scale:0,duration:.2},.63);`),
+
+  'receipt-stack': () => mk('sc_receipts', 'receipt-stack', (id) => `
+<div class="sc receipts"><div class="copy"><span class="micro">TRACE STACK / REAL ARTIFACTS</span><h2 class="head" data-edit>一晚留下的<br/><b>不是一张照片</b></h2><p>票根、消息、包装和现场声音共同证明发生过。</p></div><div class="art ticket"><b class="num">ENTRY / 21:30</b><i></i><span>地点待确认</span></div><div class="art message"><b>“我们已经到了”</b><span>真实消息需授权</span></div><div class="photo"></div><div class="sticker">SOURCE, NOT DECORATION</div></div>
+<style>${root(id)}
+#${id} .copy{position:absolute;left:70px;top:90px;width:790px;}#${id} .copy h2{margin-top:130px;font-size:99px;line-height:.93;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:65px;width:650px;font-size:27px;line-height:1.55;}#${id} .art{position:absolute;padding:45px;background:#fff;border:5px solid var(--fg);box-shadow:var(--shadow);}#${id} .ticket{left:930px;top:100px;width:760px;height:300px;transform:rotate(5deg);}#${id} .ticket b{font-size:33px;}#${id} .ticket i{display:block;margin-top:55px;border-top:8px dashed var(--fg);}#${id} .ticket span{display:block;margin-top:38px;font-size:24px;}#${id} .message{left:1080px;top:430px;width:650px;height:240px;transform:rotate(-5deg);background:var(--accent-2);}#${id} .message b{display:block;font-size:45px;}#${id} .message span{display:block;margin-top:45px;font-size:22px;}#${id} .receipts .photo{left:850px;bottom:30px;width:530px;height:380px;transform:rotate(8deg);}#${id} .receipts .sticker{left:640px;bottom:120px;}
+</style>`, (id) => `tl.from('#${id} .copy>*',{x:-45,autoAlpha:0,duration:.23,stagger:.07},0);tl.from('#${id} .art,#${id} .photo',{y:120,rotation:0,autoAlpha:0,duration:.27,stagger:.11},.2);tl.from('#${id} .sticker',{scale:0,rotation:6,duration:.2},.58);`),
+
+  'rhythm-wall': () => mk('sc_wall', 'rhythm-wall', (id) => `
+<div class="sc wall"><div class="photo one"></div><div class="photo two"></div><div class="photo three"></div><div class="person"><i class="face"></i><i class="body"></i></div><div class="slam head" data-edit>现在<br/>轮到我们</div><div class="sticker a">PLACE</div><div class="sticker b">VOICE</div><div class="sticker c">MOVE</div><i class="marker"></i></div>
+<style>${root(id)}
+#${id} .wall{background:var(--accent);}#${id} .wall .photo.one{left:40px;top:40px;width:540px;height:360px;transform:rotate(-5deg);}#${id} .wall .photo.two{left:520px;top:470px;width:580px;height:420px;transform:rotate(6deg);}#${id} .wall .photo.three{right:-50px;top:30px;width:650px;height:440px;transform:rotate(4deg);}#${id} .wall .person{right:260px;bottom:-90px;transform:scale(1.05) rotate(-5deg);}#${id} .slam{position:absolute;left:80px;top:410px;font-size:145px;line-height:.78;color:#fff;transform:rotate(-4deg);}#${id} .wall .sticker.a{left:130px;top:100px;}#${id} .wall .sticker.b{left:820px;top:120px;transform:rotate(7deg);}#${id} .wall .sticker.c{right:100px;top:470px;transform:rotate(-8deg);}#${id} .wall>.marker{left:60px;bottom:130px;width:860px;background:var(--accent-2);transform:rotate(5deg);}
+</style>`, (id) => `tl.from('#${id} .photo',{scale:.75,rotation:0,autoAlpha:0,duration:.25,stagger:.1},0);tl.from('#${id} .person',{y:150,autoAlpha:0,duration:.28},.2);tl.from('#${id} .slam',{x:-90,autoAlpha:0,duration:.25},.3);tl.from('#${id} .sticker',{scale:0,duration:.18,stagger:.08},.48);tl.from('#${id} .marker',{scaleX:0,duration:.2},.64);`),
+
+  'comment-pulse': () => mk('sc_comment', 'comment-pulse', (id) => `
+<div class="sc comment"><div class="night"></div><div class="photo"><div class="person"><i class="face"></i><i class="body"></i></div></div><div class="bubble"><span class="micro">REAL COMMENT / PERMISSION REQUIRED</span><h2 class="head" data-edit>“这不是给<br/>我们做的吧？”</h2></div><i class="reply"></i><div class="answer head" data-edit>那就现在<br/><b>重新回答</b></div><div class="sticker">另一种声音进入</div></div>
+<style>${root(id)}
+#${id} .comment{background:var(--panel-2);color:#fff;}#${id} .comment .photo{left:70px;top:70px;width:720px;height:940px;}#${id} .comment .photo .person{left:160px;top:180px;}#${id} .bubble{position:absolute;left:870px;top:100px;width:860px;padding:65px;background:var(--paper);color:var(--fg);transform:rotate(2deg);}#${id} .bubble h2{margin-top:80px;font-size:88px;line-height:.95;}#${id} .reply{position:absolute;left:940px;top:650px;width:760px;height:18px;background:var(--accent-2);transform:rotate(-5deg);}#${id} .answer{position:absolute;left:950px;top:735px;font-size:75px;line-height:.9;}#${id} .answer b{color:var(--accent-2);}#${id} .comment .sticker{right:80px;bottom:55px;color:var(--fg);}
+</style>`, (id) => `tl.from('#${id} .photo',{x:-130,duration:.34},0);tl.from('#${id} .bubble',{x:150,rotation:0,autoAlpha:0,duration:.3},.2);tl.from('#${id} .reply',{scaleX:0,duration:.23},.5);tl.from('#${id} .answer',{y:40,autoAlpha:0,duration:.24},.6);tl.from('#${id} .sticker',{scale:0,duration:.2},.72);`),
+
+  'group-release': () => mk('sc_release', 'group-release', (id) => `
+<div class="sc release"><div class="wide"><div class="person p1"><i class="face"></i><i class="body"></i></div><div class="person p2"><i class="face"></i><i class="body"></i></div><div class="person p3"><i class="face"></i><i class="body"></i></div></div><div class="copy"><span class="micro">GROUP RELEASE / LESS COLLAGE</span><h2 class="head" data-edit>最后记住的<br/><b>应该是人</b></h2><p data-edit>让现场声音和一个直接邀请完成结尾。</p><div class="sticker">一起去现场</div></div><i class="marker"></i></div>
+<style>${root(id)}
+#${id} .wide{position:absolute;left:0;top:0;width:1160px;height:1080px;background:linear-gradient(145deg,#857066,#d8b79e 60%,#4e5860);overflow:hidden;}#${id} .wide .person{top:260px;transform:scale(.95);}#${id} .wide .p1{left:30px;}#${id} .wide .p2{left:360px;}#${id} .wide .p2 .body{background:#9b403a;}#${id} .wide .p3{left:690px;}#${id} .wide .p3 .body{background:#426c55;}#${id} .copy{position:absolute;left:1250px;top:145px;width:580px;}#${id} .copy h2{margin-top:130px;font-size:85px;line-height:.94;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:65px;font-size:27px;line-height:1.5;}#${id} .copy .sticker{position:relative;display:inline-block;margin-top:75px;}#${id} .release>.marker{left:1120px;top:0;width:18px;height:830px;background:var(--accent);}
+</style>`, (id) => `tl.from('#${id} .wide',{x:-160,duration:.35},0);tl.from('#${id} .person',{y:100,autoAlpha:0,duration:.26,stagger:.1},.18);tl.from('#${id} .marker',{scaleY:0,transformOrigin:'top',duration:.26},.3);tl.from('#${id} .copy>*',{x:55,autoAlpha:0,duration:.24,stagger:.08},.38);`),
 };

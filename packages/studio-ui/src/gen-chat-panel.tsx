@@ -17,26 +17,16 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, Check, ChevronDown, Film, Loader2, Music2, Pause, Play, Plus, RefreshCw, Search, Sliders, SlidersHorizontal, X, ZoomIn } from 'lucide-react';
+import { ArrowUp, ChevronDown, Film, Loader2, Music2, Plus, RefreshCw, Sliders, X, ZoomIn } from 'lucide-react';
 import { useStudioShell } from './shell-context';
 import { useQuote } from '@pireel/ui/use-quote';
 import { imageThumb } from '@pireel/ui/image-url';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@pireel/ui/dropdown-menu';
-
 import { type Composition, type MediaRef } from '@pireel/studio-engine/composition';
 import { type GenAsset, listStudioGens, pollCreation, startGeneration } from './gen-api';
 import { BlockPreviewFrame } from './block-preview-card';
 import { type GenTemplate, localizedTemplatePrompt, TEMPLATES_BY_TYPE, zhCategory } from './gen-templates';
 import { ElementTemplateCard, ElementTemplatePreview } from './gen-templates/element-card';
-import { fmtDur, RESPONSIVE_ASSET_CARD_GRID, type PanelDragAsset, useAudioPreview } from './asset-card';
-import type { OfficialAssetsResponse, OfficialBgm, OfficialCategory } from './official-assets-types';
+import { RESPONSIVE_ASSET_CARD_GRID, type PanelDragAsset } from './asset-card';
 
 import { type ElementEntry, type GenElementResult, loadElementEntries as loadStoredElements, pushElementToCloud, saveElementEntries as saveStoredElements, syncElementEntries as syncStoredElements } from './element-history';
 import { studioLocale, t } from './i18n';
@@ -170,40 +160,6 @@ function ratioDims(size: string | undefined): { w: number; h: number } | undefin
   return m ? { w: Number(m[1]), h: Number(m[2]) } : undefined;
 }
 
-/** Official audio is a semantic generation seed: keep its mood/pacing metadata, never copy the
- * original melody. The current music model is text-to-audio, so this is the faithful Remix input
- * rather than pretending that the source file itself is accepted as an audio reference. */
-const AUDIO_META_ZH: Record<string, string> = {
-  adventurous: '冒险感', atmospheric: '氛围感', bright: '明亮', calm: '平静', chill: '松弛', compact: '紧凑',
-  confident: '自信', dark: '暗黑', dramatic: '戏剧性', emotional: '情绪化', epic: '史诗感', forward: '推进感',
-  funny: '幽默', futuristic: '未来感', global: '世界音乐感', happy: '愉快', horror: '惊悚', inspiring: '鼓舞',
-  loopable: '适合循环', melancholic: '忧郁', minimal: '极简', modern: '现代', mystery: '神秘', ominous: '不祥',
-  optimistic: '乐观', organic: '自然质感', playful: '俏皮', powerful: '有力量', quirky: '古怪有趣', rhythmic: '节奏鲜明',
-  romantic: '浪漫', soft: '柔和', suspense: '悬疑', urgent: '紧迫', warm: '温暖',
-  low: '低', 'low-medium': '中低', medium: '中等', 'medium-high': '中高', high: '高', variable: '有起伏', 'very-high': '很高',
-  'brand-recap': '品牌回顾', 'case-study': '案例解析', casual: '轻松内容', climax: '高潮段落', comedy: '喜剧内容',
-  conflict: '冲突场景', corporate: '企业内容', culture: '文化内容', digital: '数字科技', documentary: '纪录片',
-  education: '教育内容', explainer: '讲解视频', food: '美食内容', highlights: '高光集锦', intro: '片头',
-  investigation: '调查揭秘', kids: '儿童内容', lifestyle: '生活方式', 'light-transition': '轻转场', meditation: '冥想',
-  memory: '回忆叙事', opener: '开场', outdoor: '户外内容', outro: '片尾', podcast: '播客', 'product-demo': '产品演示',
-  reveal: '揭晓时刻', 'short-social': '社交短视频', 'slow-lifestyle': '慢生活', sports: '运动内容', storytelling: '故事叙述',
-  tech: '科技内容', 'tense-story': '紧张叙事', trailer: '预告片', transition: '转场', travel: '旅行', 'true-crime': '真实罪案',
-  tutorial: '教程', vlog: 'Vlog', voiceover: '旁白视频', wedding: '婚礼内容',
-};
-
-const zhAudioMeta = (value: string): string => AUDIO_META_ZH[value] ?? value;
-
-function officialAudioRemixPrompt(item: OfficialBgm): string {
-  if (studioLocale().toLowerCase().startsWith('zh')) {
-    const moods = item.moods.length ? item.moods.map(zhAudioMeta).join('、') : item.categoryLabel;
-    const uses = item.useCases.length ? item.useCases.slice(0, 4).map(zhAudioMeta).join('、') : '口播视频';
-    return `参考《${item.label}》的情绪、节奏与叙事适配度，创作一首全新的原创纯音乐。风格分类：${item.categoryLabel}；情绪：${moods}；能量：${zhAudioMeta(item.energy)}；适合：${uses}。保持相近的氛围和口播兼容性，但不要复制原曲的旋律或编曲。`;
-  }
-  const moods = item.moods.length ? item.moods.join(', ') : item.categoryLabelEn;
-  const uses = item.useCases.length ? item.useCases.slice(0, 4).join(', ') : 'talking-head video';
-  return `Create a fresh original instrumental track inspired by the mood and pacing of "${item.label}". ${item.categoryLabelEn}; ${moods} mood; ${item.energy} energy; suitable for ${uses}. Keep a similar atmosphere and narration fit, but do not copy the original melody or arrangement.`;
-}
-
 /**
  * The size sent to image-gen. gpt-image needs a concrete WxH (other models take aspect):
  *  - billing tier_param='image_tier'=`${quality}_${sizeTier}`, sizeTier derived from WxH (see pickGptImageSizeTier);
@@ -307,28 +263,11 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
     params: quoteParams,
   });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // Every generation type shares the same templates/mine interaction. Audio is intentionally
-  // sourced from the same official catalog as Assets → Official, so these are playable tracks
-  // with real covers rather than duplicate prompt-only presets.
+  // Every generation type shares the same templates/mine interaction. Audio templates are an
+  // optional host slot; the OSS editor does not ship a curated catalog.
   const templates = TEMPLATES_BY_TYPE[type] ?? [];
-  const [officialAudio, setOfficialAudio] = useState<OfficialAssetsResponse | null>(null);
-  useEffect(() => {
-    if (type !== 'audio') return;
-    let cancelled = false;
-    setOfficialAudio(null);
-    void fetch('/api/studio/official-assets')
-      .then((r) => (r.ok ? (r.json() as Promise<OfficialAssetsResponse>) : null))
-      .then((catalog) => {
-        if (!cancelled) setOfficialAudio(catalog ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) setOfficialAudio({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [type]);
-  const hasTemplateLibrary = type === 'audio' || templates.length > 0;
+  const AudioTemplateGallery = shell.curatedAssets?.AudioTemplateGallery;
+  const hasTemplateLibrary = type === 'audio' ? !!AudioTemplateGallery : templates.length > 0;
   const [tab, setTab] = useState<'mine' | 'templates'>('mine');
   // remember across sessions whether this panel ever had its own output → get the first frame right (had output → open "mine",
   // otherwise show templates), avoiding the flash of "show templates on empty entries, then switch back to mine once history arrives".
@@ -363,13 +302,10 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
   useEffect(() => {
     if (seedPrompt) applyTemplate(seedPrompt.prompt);
   }, [applyTemplate, seedPrompt]);
-  const remixOfficialAudio = useCallback(
-    (item: OfficialBgm) => {
-      if (item.durationSec) setAudioSec(Math.max(10, Math.min(300, Math.round(item.durationSec))));
-      applyTemplate(officialAudioRemixPrompt(item));
-    },
-    [applyTemplate],
-  );
+  const applyHostedAudioTemplate = useCallback((prompt: string, durationSec?: number) => {
+    if (durationSec) setAudioSec(Math.max(10, Math.min(300, Math.round(durationSec))));
+    applyTemplate(prompt);
+  }, [applyTemplate]);
 
   // On mount, load only this panel type's history for the current project.
   useEffect(() => {
@@ -564,11 +500,8 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
         className="min-h-0 flex-1 overflow-auto p-3"
       >
         {showTemplates ? (
-          type === 'audio' ? (
-            <OfficialAudioTemplateGallery
-              catalog={officialAudio}
-              onRemix={remixOfficialAudio}
-            />
+          type === 'audio' && AudioTemplateGallery ? (
+            <AudioTemplateGallery onUseTemplate={applyHostedAudioTemplate} />
           ) : (
             <TemplateGallery type={type} templates={templates} onUse={applyTemplate} />
           )
@@ -1039,139 +972,6 @@ function TemplatePreviewLightbox({
       >
         {t('chatGen.remix')}
       </button>
-    </div>
-  );
-}
-
-/** Audio templates are real official tracks: cover + inline preview + semantic Remix into the composer. */
-function OfficialAudioTemplateGallery({
-  catalog,
-  onRemix,
-}: {
-  catalog: OfficialAssetsResponse | null;
-  onRemix: (item: OfficialBgm) => void;
-}) {
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('all');
-  const { playingUrl, toggle } = useAudioPreview();
-  const english = !studioLocale().toLowerCase().startsWith('zh');
-  const rows = catalog?.bgm ?? [];
-  const categories = catalog?.bgmCategories ?? [];
-  const filterItemClass = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
-  const needle = query.trim().toLocaleLowerCase();
-  const visible = rows.filter((item) => {
-    if (category !== 'all' && item.category !== category) return false;
-    if (!needle) return true;
-    return [
-      item.label,
-      item.artist,
-      item.categoryLabel,
-      item.categoryLabelEn,
-      item.energy,
-      item.narrationFit,
-      ...item.moods,
-      ...item.useCases,
-    ].some((value) => value.toLocaleLowerCase().includes(needle));
-  });
-
-  if (catalog === null) {
-    return (
-      <div className="text-ink-4 flex items-center justify-center gap-2 py-12 text-[11px]">
-        <Loader2 size={13} className="animate-spin" /> {t('panels.loading')}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2.5">
-      <div className="bg-panel sticky -top-3 z-10 -mx-1 flex items-center gap-1.5 px-1 pb-1 pt-0.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              title={t('panels.filterOfficialAssets')}
-              aria-label={t('panels.filterOfficialAssets')}
-              className={`border-line hover:text-ink inline-flex size-7 shrink-0 items-center justify-center rounded-md border transition active:translate-y-px ${
-                category === 'all' ? 'text-ink-4' : 'bg-panel-2 text-ink'
-              }`}
-            >
-              <SlidersHorizontal size={12} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={5} className="max-h-[420px] min-w-[180px] overflow-auto">
-            <DropdownMenuRadioGroup value={category} onValueChange={setCategory}>
-              <DropdownMenuRadioItem value="all" className={filterItemClass}>
-                <span className="truncate">{t('panels.all')}</span>
-                {category === 'all' && <Check size={10} className="ml-auto shrink-0" />}
-              </DropdownMenuRadioItem>
-              {categories.length > 0 && <DropdownMenuSeparator />}
-              {categories.map((item: OfficialCategory) => (
-                <DropdownMenuRadioItem key={item.id} value={item.id} className={filterItemClass}>
-                  <span className="truncate">{english ? item.labelEn : item.label}</span>
-                  {category === item.id && <Check size={10} className="ml-auto shrink-0" />}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <label className="border-line bg-panel-2 flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2">
-          <Search size={12} className="text-ink-4 shrink-0" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('panels.searchOfficialAudio')}
-            aria-label={t('panels.searchOfficialAudio')}
-            className="text-ink placeholder:text-ink-4 h-7 min-w-0 flex-1 bg-transparent text-[11px] outline-none"
-          />
-        </label>
-      </div>
-
-      {visible.length === 0 ? (
-        <div className="text-ink-4 border-line rounded-md border border-dashed px-3 py-8 text-center text-[10.5px]">
-          {rows.length === 0 ? t('panels.officialPreparing') : t('panels.noMatchingAssetsTry')}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {visible.map((item: OfficialBgm) => {
-            const playing = playingUrl === item.url;
-            return (
-              <div key={item.id} className="border-line bg-panel hover:bg-panel-2 group relative flex items-center gap-2 rounded-lg border p-1.5 transition-colors">
-                <button
-                  type="button"
-                  onClick={() => toggle(item.url)}
-                  aria-label={playing ? t('panels.pauseAudio') : t('panels.playAudio')}
-                  title={item.label}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                >
-                  <span className="bg-panel-2 relative size-11 shrink-0 overflow-hidden rounded-md">
-                    <img src={imageThumb(item.coverKey, 'thumb')} alt="" loading="lazy" className="size-full object-cover" />
-                    <span className={`absolute inset-0 flex items-center justify-center text-white ${playing ? 'bg-accent/75' : 'bg-black/25'}`}>
-                      {playing ? <Pause size={14} /> : <Play size={14} />}
-                    </span>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="text-ink block truncate text-[11px] font-medium">{item.label}</span>
-                    <span className="text-ink-4 mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px]">
-                      <Music2 size={9} className="shrink-0" />
-                      <span className="truncate">{item.artist}</span>
-                      <span>·</span>
-                      <span className="shrink-0">{item.durationSec ? fmtDur(item.durationSec) : (english ? item.categoryLabelEn : item.categoryLabel)}</span>
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onRemix(item)}
-                  title={t('chatGen.remix')}
-                  className="bg-accent text-bg pointer-events-none absolute right-1.5 top-1/2 inline-flex h-7 -translate-y-1/2 items-center gap-1 rounded-md px-2 text-[10px] font-medium opacity-0 shadow-sm transition-[opacity,transform] duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
-                >
-                  <RefreshCw size={10} /> {t('chatGen.remix')}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }

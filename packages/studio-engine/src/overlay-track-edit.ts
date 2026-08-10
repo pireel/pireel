@@ -11,6 +11,7 @@ import {
 } from './editor-document';
 import type { Block } from './composition-core';
 import type { OverlayDocumentEditResult } from './overlay-document-edit';
+import { assignClipToBestDirectorScene, assignClipToSemanticScene } from './semantic-scenes';
 
 type OverlayDocumentEditFailure = Extract<OverlayDocumentEditResult, { ok: false }>;
 
@@ -36,18 +37,23 @@ export interface DuplicateOverlayDocumentClipInput extends OverlayTrackTarget {
   clipId: string;
   newClipId: string;
   startSec: number;
+  /** Explicit Director scene; otherwise inferred from the duplicate's new placement. */
+  sceneId?: string;
 }
 
 export interface InsertOverlayDocumentClipInput extends Partial<OverlayTrackTarget> {
   document: EditorDocumentV2;
   block: Block;
   asset?: EditorMediaAsset;
+  /** Explicit Director Plan scene; absent placements are inferred by maximum timeline overlap. */
+  sceneId?: string;
 }
 
 export type InsertOverlayDocumentClipResult = OverlayDocumentEditResult & {
   clipId?: string;
   trackId?: string;
   assetId?: string;
+  sceneId?: string;
 };
 
 function failure(
@@ -137,12 +143,17 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
     ...(input.asset ? { asset: input.asset } : {}),
   });
   if (!inserted.ok) return { ok: false, document: input.document, error: inserted.error };
+  const assigned = input.sceneId
+    ? assignClipToSemanticScene(inserted.document, id, input.sceneId)
+    : assignClipToBestDirectorScene(inserted.document, id);
+  if (!assigned.ok) return failure(input.document, 'invalid-command', assigned.error, { path: 'sceneId' });
   return {
     ok: true,
-    document: inserted.document,
+    document: assigned.document,
     receipts: [...target.receipts, inserted.receipt],
     clipId: id,
     trackId: target.trackId,
+    ...(assigned.sceneId ? { sceneId: assigned.sceneId } : {}),
     ...(input.asset ? { assetId: input.asset.id } : {}),
   };
 }
@@ -175,7 +186,11 @@ export function duplicateOverlayDocumentClip(input: DuplicateOverlayDocumentClip
     toTrackId: target.trackId,
   });
   if (!duplicated.ok) return { ok: false, document: input.document, error: duplicated.error };
-  return { ok: true, document: duplicated.document, receipts: [...target.receipts, duplicated.receipt] };
+  const assigned = input.sceneId
+    ? assignClipToSemanticScene(duplicated.document, input.newClipId, input.sceneId)
+    : assignClipToBestDirectorScene(duplicated.document, input.newClipId);
+  if (!assigned.ok) return failure(input.document, 'invalid-command', assigned.error, { path: 'sceneId' });
+  return { ok: true, document: assigned.document, receipts: [...target.receipts, duplicated.receipt] };
 }
 
 /** Reassign existing graphics stack values to a requested top-to-bottom lane order. */

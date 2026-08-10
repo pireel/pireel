@@ -32,6 +32,11 @@ Generation capabilities are injected via `StudioProviders`
 block generation, narration planning, transcription, cloud media vault,
 cross-device project sync, image/video generation — fails with a hint instead.
 
+The OSS shell also ships without Pireel's hosted expert-Skill catalog or official
+asset library. `StudioShellProvider` can inject browser-safe Skill metadata and a
+curated-assets panel; the matching full Skill Markdown and catalog services remain
+owned by the host.
+
 Two ways to light them up:
 
 1. **Inject your own providers** in [`src/providers.ts`](src/providers.ts) —

@@ -13,9 +13,11 @@ export interface Frame {
   summary: string;
   /** Emoji icon (fallback when a thumbnail has no cover + tag rendering). */
   icon: string;
-  /** Cover image R2 bare key (optional; used by the thumbnail wall if present). */
+  /** Square icon R2 bare key (optional; used by compact tags and rows). */
   iconKey?: string;
-  /** Preview kinds the theme produces (open vocabulary; frame detail page renders real preview cards). */
+  /** Landscape catalog cover (optional; R2 bare key or hosted site-relative URL). */
+  coverKey?: string;
+  /** Open-vocabulary visual-language samples for the detail page; not fixed output types. */
   showcase: string[];
   /** Theme design tokens (keys match theme vars; use 8-digit hex for alpha, no commas). */
   palette?: Record<string, string>;
@@ -24,7 +26,7 @@ export interface Frame {
    *  stroke-color/stroke-opacity(0-1)/person-front(true)/feather(0-100). */
   personFx?: Record<string, string>;
   version: string;
-  /** Playbook body (English, injected into the studio chat system prompt). */
+  /** Rich Markdown video design-system playbook. Treat as prose judgment, not structured recipes. */
   body: string;
 }
 
@@ -98,6 +100,7 @@ export function parseFrame(raw: string, ctx: string): Frame {
     summary: need('summary'),
     icon: need('icon'),
     ...(fm['iconKey'] ? { iconKey: fm['iconKey'] } : {}),
+    ...(fm['coverKey'] ? { coverKey: fm['coverKey'] } : {}),
     showcase: arr('showcase'),
     ...(map('palette') ? { palette: map('palette') } : {}),
     ...(map('personFx') ? { personFx: map('personFx') } : {}),

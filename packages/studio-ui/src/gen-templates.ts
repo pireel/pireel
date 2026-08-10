@@ -10,8 +10,8 @@
  *   mood prompts (no ready leaderboard for video sources). If there's a finished preview clip,
  *   fill video (bare R2 key, card loops a small video); otherwise fall back to a title placeholder card.
  * - Component templates: finished bundled overlay components with live previews.
- * - Audio templates come from the official-assets catalog at runtime, so cards play the
- *   licensed files and show their uploaded covers instead of acting as prompt presets.
+ * - Audio templates are an optional StudioShell slot. The OSS catalog stays empty; a host may
+ *   inject playable licensed tracks and its own semantic Remix behavior.
  *
  * Panel logic: nothing generated yet → show templates directly; once the user has their own
  * output → show two tabs ("Mine / Templates") at the top.
@@ -30,6 +30,8 @@ import { ELEMENT_TEMPLATES } from './gen-templates/element';
 export type { GenTemplate } from './gen-templates/types';
 export { localizedTemplatePrompt } from './gen-templates/types';
 export { ELEMENT_TEMPLATES, VIDEO_TEMPLATES };
+export { artDirectedTemplateElement, artDirectedTemplateIds } from './gen-templates/element-presets';
+export { ART_DIRECTED_PRESET_VERSION } from './gen-templates/element-presets/shared';
 
 export const TEMPLATE_CATEGORY_ZH: Record<string, string> = {
   'Poster Design': 'chatGen.poster',

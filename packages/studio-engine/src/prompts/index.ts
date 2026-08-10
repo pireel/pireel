@@ -34,6 +34,5 @@ export { THEME_GENERAL_BRIEF } from './theme-brief';
 export { withActiveTheme } from './active-theme';
 // Tool contracts (schema + English description; server attaches streamText / client executes via onToolCall)
 export * from './l0-agent-tools';
-export { AROLL_GUIDE } from './aroll-guide';
 // instructions + description override table for external agents (MCP)
 export { mcpInstructions, MCP_DESCRIPTION_OVERRIDES } from './mcp';

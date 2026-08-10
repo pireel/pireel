@@ -1,402 +1,58 @@
-/* ================================================================
-   Blueprint — engineering-drawing dialect: grid ground, wireframes, dimension marks, title block
-   ================================================================ */
-
+/** Concept Atlas v2: source-led inquiry, routes, scale, correction, synthesis. */
 import { type Block, mk } from './shared';
 
-const bpRoot = (id: string) => `
-#${id} .bp{position:absolute;inset:0;color:var(--fg);font-family:var(--font-head);
-  background-color:var(--paper);/* 页面底:纸色垫在网格纹之下 */
-  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-  background-size:96px 96px;}
-#${id} .frame{position:absolute;inset:56px;border:2px solid var(--line);}
-#${id} .dwg{position:absolute;right:80px;bottom:80px;border:2px solid var(--line);display:flex;font-family:var(--font-num);font-size:28px;color:var(--muted);}
-#${id} .dwg span{padding:16px 28px;border-left:2px solid var(--line);}
-#${id} .dwg span:first-child{border-left:none;color:var(--accent);}`;
+const root = (id: string) => `
+#${id} .ca{position:absolute;inset:0;overflow:hidden;background:var(--paper);color:var(--fg);font-family:var(--font-body);}
+#${id} .head{font-family:var(--font-head);font-weight:900;letter-spacing:-.045em;}
+#${id} .num{font-family:var(--font-num);font-variant-numeric:tabular-nums;}
+#${id} .micro{font-family:var(--font-num);font-size:18px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;}
+#${id} .photo{position:absolute;overflow:hidden;background:linear-gradient(145deg,#c7c0af,#eee8db 58%,#9ca398);}
+#${id} .object{position:absolute;background:#a98763;border:5px solid var(--fg);box-shadow:var(--shadow);}
+#${id} .route{position:absolute;height:12px;background:var(--accent);transform-origin:left center;}
+#${id} .route::after{content:'';position:absolute;right:-2px;top:-10px;border-left:22px solid var(--accent);border-top:16px solid transparent;border-bottom:16px solid transparent;}
+#${id} .label{position:absolute;padding:12px 18px;background:var(--paper);border:3px solid var(--fg);font-size:23px;font-weight:850;}
+#${id} [data-edit]{outline:none;}`;
+
+export const cover: () => Block = () => mk('cv_ca2', '封面', (id) => `
+<div class="ca cover"><div class="photo"><i class="object"></i><i class="route"></i><span class="label">看见关系</span></div><div class="title head" data-edit>概念图谱</div><div class="english num">CONCEPT ATLAS</div><div class="thesis micro">SOURCE / RELATION / REVISION / SYNTHESIS</div><i class="coral"></i></div>
+<style>${root(id)}
+#${id} .cover .photo{right:0;top:0;width:940px;height:1080px;}#${id} .cover .object{left:270px;top:270px;width:370px;height:460px;border-radius:48% 48% 14% 14%;}#${id} .cover .route{left:110px;top:530px;width:620px;transform:rotate(-12deg);}#${id} .cover .label{left:90px;top:390px;}#${id} .title{position:absolute;left:90px;top:260px;width:820px;font-size:178px;line-height:.9;}#${id} .english{position:absolute;left:98px;top:620px;font-size:31px;font-weight:900;letter-spacing:.2em;}#${id} .thesis{position:absolute;left:98px;bottom:85px;}#${id} .coral{position:absolute;left:780px;top:0;width:18px;height:760px;background:var(--accent-2);}
+</style>`, (id) => `tl.from('#${id} .photo',{x:180,duration:.36,ease:'power3.out'},0);tl.from('#${id} .title,#${id} .english,#${id} .thesis',{x:-50,autoAlpha:0,duration:.25,stagger:.07},.18);tl.from('#${id} .route',{scaleX:0,duration:.28},.4);tl.from('#${id} .coral',{scaleY:0,transformOrigin:'top',duration:.25},.48);`);
 
 export const blocks: Record<string, () => Block> = {
-  'title-card': () =>
-    mk(
-      'bp_ttl',
-      'title-card',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="body">
-    <div class="k">FIG.01 — OPENING</div>
-    <div class="h">把观点讲成画面</div>
-    <div class="dim"><i></i><b>1920</b><i></i></div>
-  </div>
-  <div class="dwg"><span>DWG-01</span><span>SCALE 1:1</span><span>REV A</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .body{position:absolute;left:150px;top:230px;right:150px;display:flex;flex-direction:column;gap:52px;}
-#${id} .k{font-family:var(--font-num);font-size:36px;letter-spacing:0.34em;color:var(--accent);}
-#${id} .h{font-size:158px;font-weight:900;letter-spacing:-0.02em;}
-#${id} .dim{display:flex;align-items:center;gap:20px;color:var(--muted);}
-#${id} .dim i{flex:1;height:0;border-top:2px dashed var(--line);position:relative;}
-#${id} .dim i::before,#${id} .dim i::after{content:'';position:absolute;top:-9px;width:2px;height:20px;background:var(--line);}
-#${id} .dim i::before{left:0}#${id} .dim i::after{right:0}
-#${id} .dim b{font-family:var(--font-num);font-size:34px;font-weight:500;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.3},0);\n` +
-        `tl.from('#${id} .k',{x:-30,autoAlpha:0,duration:0.25},0.1);\n` +
-        `tl.from('#${id} .h',{y:46,autoAlpha:0,duration:0.34,ease:'power3.out'},0.18);\n` +
-        `tl.from('#${id} .dim,#${id} .dwg',{autoAlpha:0,duration:0.3},0.42);`,
-    ),
-  'big-number': () =>
-    mk(
-      'bp_num',
-      'big-number',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="v">38<i>%</i></div>
-  <div class="lead"><span class="dot"></span><span class="ln"></span><span class="note">本月转化增长<br/>MEASURED · Q2</span></div>
-  <div class="dwg"><span>DATA</span><span>±0.5</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .v{position:absolute;left:150px;top:50%;transform:translateY(-54%);font-family:var(--font-num);font-size:560px;font-weight:700;line-height:1;letter-spacing:-0.05em;
-  color:transparent;-webkit-text-stroke:6px var(--accent);}
-#${id} .v i{font-style:normal;font-size:260px;-webkit-text-stroke:4px var(--fg);}
-#${id} .lead{position:absolute;right:150px;top:250px;display:flex;align-items:flex-start;gap:0;}
-#${id} .dot{width:16px;height:16px;border-radius:999px;background:var(--accent);margin-top:8px;}
-#${id} .ln{width:170px;height:2px;background:var(--line);margin-top:15px;}
-#${id} .note{padding-left:26px;font-size:40px;line-height:1.5;color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.3},0);\n` +
-        `tl.from('#${id} .v',{autoAlpha:0,x:-60,duration:0.4,ease:'power3.out'},0.1);\n` +
-        `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.3},0.4);\n` +
-        `tl.from('#${id} .note,#${id} .dot',{autoAlpha:0,duration:0.25},0.55);`,
-    ),
-  'count-up': () =>
-    mk(
-      'bp_cnt',
-      'count-up',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="k">FIG.04 — LIVE COUNT</div>
-  <div class="big"><b class="v">365</b><i class="u">天</i></div>
-  <div class="dim"><i></i><b>TOL ±0</b><i></i></div>
-  <div class="lead"><span class="dot"></span><span class="ln"></span><span class="note">连续日更实测<br/>NO GAPS · VERIFIED</span></div>
-  <div class="dwg"><span>CNT-04</span><span>TOL ±0</span><span>REV A</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .k{position:absolute;left:150px;top:150px;font-family:var(--font-num);font-size:36px;letter-spacing:0.34em;color:var(--accent);}
-#${id} .big{position:absolute;left:150px;top:50%;transform:translateY(-58%);display:flex;align-items:baseline;gap:36px;font-family:var(--font-num);}
-#${id} .v{font-size:520px;font-weight:700;line-height:1;letter-spacing:-0.04em;color:transparent;-webkit-text-stroke:6px var(--accent);}
-#${id} .u{font-style:normal;font-size:200px;font-weight:700;color:transparent;-webkit-text-stroke:4px var(--fg);}
-#${id} .dim{position:absolute;left:150px;right:150px;bottom:200px;display:flex;align-items:center;gap:20px;color:var(--muted);}
-#${id} .dim i{flex:1;height:0;border-top:2px dashed var(--line);position:relative;}
-#${id} .dim i::before,#${id} .dim i::after{content:'';position:absolute;top:-9px;width:2px;height:20px;background:var(--line);}
-#${id} .dim i::before{left:0}#${id} .dim i::after{right:0}
-#${id} .dim b{font-family:var(--font-num);font-size:32px;font-weight:500;letter-spacing:0.2em;}
-#${id} .lead{position:absolute;right:150px;top:250px;display:flex;align-items:flex-start;gap:0;}
-#${id} .dot{width:16px;height:16px;border-radius:999px;background:var(--accent);margin-top:8px;}
-#${id} .ln{width:170px;height:2px;background:var(--line);margin-top:15px;}
-#${id} .note{padding-left:26px;font-size:40px;line-height:1.5;color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame,#${id} .k',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .big',{x:-60,autoAlpha:0,duration:0.36,ease:'power3.out'},0.08);\n` +
-        `tl.from('#${id} .v',{innerText:0,snap:{innerText:1},duration:0.8,ease:'power1.out'},0.15);\n` +
-        `tl.from('#${id} .dim',{scaleX:0.6,autoAlpha:0,transformOrigin:'center',duration:0.3},0.4);\n` +
-        `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.26},0.5);\n` +
-        `tl.from('#${id} .dot,#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.25},0.6);`,
-    ),
-  'chart': () =>
-    mk(
-      'bp_bar',
-      'chart',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="h">季度增速 <span>FIG.03</span></div>
-  <div class="plot">
-    <div class="b" style="height:170px"></div><div class="b" style="height:300px"></div><div class="b" style="height:230px"></div><div class="b hot" style="height:470px"><em>×4.2</em></div>
-  </div>
-</div>
-<style>${bpRoot(id)}
-#${id} .h{position:absolute;left:150px;top:150px;font-size:78px;font-weight:800;display:flex;align-items:baseline;gap:36px;}
-#${id} .h span{font-family:var(--font-num);font-size:34px;letter-spacing:0.3em;color:var(--accent);}
-#${id} .plot{position:absolute;left:150px;right:150px;bottom:170px;display:flex;align-items:flex-end;gap:110px;border-bottom:3px solid var(--fg);padding:0 70px;}
-#${id} .b{position:relative;width:160px;border:3px solid var(--fg);border-bottom:none;}
-#${id} .b.hot{background:repeating-linear-gradient(45deg,var(--accent) 0 10px,transparent 10px 24px);border-color:var(--accent);}
-#${id} .b em{position:absolute;top:-72px;left:50%;transform:translateX(-50%);font-style:normal;font-family:var(--font-num);font-size:50px;font-weight:700;color:var(--accent);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame,#${id} .h',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .b',{scaleY:0,transformOrigin:'bottom',duration:0.38,stagger:0.1,ease:'power3.out'},0.15);\n` +
-        `tl.from('#${id} .b em',{autoAlpha:0,duration:0.22},0.7);`,
-    ),
-  'trend': () =>
-    mk(
-      'bp_trd',
-      'trend',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="h">增长轨迹 <span>PROJECTED</span></div>
-  <svg viewBox="0 0 1620 560" class="tr">
-    <polyline class="ln" points="30,470 420,390 810,420 1180,180"/>
-    <polyline class="proj" points="1180,180 1560,60"/>
-    <g class="nd"><circle cx="30" cy="470" r="10"/><circle cx="420" cy="390" r="10"/><circle cx="810" cy="420" r="10"/><circle cx="1180" cy="180" r="14"/></g>
-  </svg>
-</div>
-<style>${bpRoot(id)}
-#${id} .h{position:absolute;left:150px;top:150px;font-size:78px;font-weight:800;display:flex;align-items:baseline;gap:36px;}
-#${id} .h span{font-family:var(--font-num);font-size:34px;letter-spacing:0.3em;color:var(--muted);}
-#${id} .tr{position:absolute;left:150px;right:150px;bottom:130px;width:1620px;height:560px;}
-#${id} .ln{fill:none;stroke:var(--accent);stroke-width:8;stroke-dasharray:2200;stroke-dashoffset:2200;}
-#${id} .proj{fill:none;stroke:var(--muted);stroke-width:6;stroke-dasharray:26 22;}
-#${id} .nd circle{fill:var(--paper);stroke:var(--accent);stroke-width:6;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame,#${id} .h',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.to('#${id} .ln',{strokeDashoffset:0,duration:0.7,ease:'power2.inOut'},0.15);\n` +
-        `tl.from('#${id} .proj',{autoAlpha:0,duration:0.4},0.8);\n` +
-        `tl.from('#${id} .nd circle',{scale:0,transformOrigin:'center',duration:0.2,stagger:0.08},0.3);`,
-    ),
-  'list': () =>
-    mk(
-      'bp_lst',
-      'list',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="tbl">
-    <div class="cap">SPEC — 三个要点</div>
-    <div class="r"><span>01</span><b>先说结论,再给理由</b><i>PASS</i></div>
-    <div class="r"><span>02</span><b>每个论点配一张图</b><i>PASS</i></div>
-    <div class="r"><span>03</span><b>结尾回扣开场钩子</b><i>HOLD</i></div>
-  </div>
-</div>
-<style>${bpRoot(id)}
-#${id} .tbl{position:absolute;left:150px;right:150px;top:50%;transform:translateY(-50%);border:3px solid var(--fg);}
-#${id} .cap{padding:30px 44px;border-bottom:3px solid var(--fg);font-family:var(--font-num);font-size:38px;letter-spacing:0.24em;color:var(--accent);}
-#${id} .r{display:flex;align-items:center;gap:48px;padding:38px 44px;border-bottom:2px solid var(--line);font-size:56px;}
-#${id} .r:last-child{border-bottom:none;}
-#${id} .r span{font-family:var(--font-num);font-size:42px;color:var(--muted);}
-#${id} .r b{font-weight:600;flex:1;}
-#${id} .r i{font-style:normal;font-family:var(--font-num);font-size:32px;letter-spacing:0.2em;color:var(--accent);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .tbl',{y:40,autoAlpha:0,duration:0.3,ease:'power2.out'},0.1);\n` +
-        `tl.from('#${id} .r',{autoAlpha:0,duration:0.22,stagger:0.1},0.3);`,
-    ),
-  'chapters': () =>
-    mk(
-      'bp_sec',
-      'chapters',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="tabs">
-    <div class="tab"><span>SEC.01</span><b>开场</b></div>
-    <div class="tab on"><i class="fill"></i><span>SEC.02</span><b>方法</b></div>
-    <div class="tab"><span>SEC.03</span><b>实操</b></div>
-  </div>
-  <div class="cur">
-    <div class="ck">CURRENT SECTION</div>
-    <div class="h">先框架,后细节</div>
-    <div class="dim"><i></i><b>2 / 3</b><i></i></div>
-  </div>
-  <div class="dwg"><span>SEC-02</span><span>SHEET 2/3</span><span>REV A</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .tabs{position:absolute;left:150px;right:150px;top:150px;display:flex;gap:40px;}
-#${id} .tab{position:relative;flex:1;border:2px solid var(--line);padding:34px 44px;display:flex;align-items:baseline;gap:30px;overflow:hidden;}
-#${id} .tab span{position:relative;font-family:var(--font-num);font-size:32px;letter-spacing:0.2em;color:var(--muted);}
-#${id} .tab b{position:relative;font-size:46px;font-weight:700;color:var(--muted);}
-#${id} .tab.on{border:3px solid var(--accent);}
-#${id} .tab.on span{color:var(--accent);}
-#${id} .tab.on b{color:var(--fg);}
-#${id} .fill{position:absolute;inset:0;background:repeating-linear-gradient(45deg,var(--accent) 0 10px,transparent 10px 24px);opacity:0.25;}
-#${id} .cur{position:absolute;left:150px;right:150px;top:46%;display:flex;flex-direction:column;gap:56px;}
-#${id} .ck{font-family:var(--font-num);font-size:34px;letter-spacing:0.3em;color:var(--muted);}
-#${id} .h{font-size:150px;font-weight:900;letter-spacing:-0.02em;}
-#${id} .dim{display:flex;align-items:center;gap:20px;color:var(--muted);}
-#${id} .dim i{flex:1;height:0;border-top:2px dashed var(--line);position:relative;}
-#${id} .dim i::before,#${id} .dim i::after{content:'';position:absolute;top:-9px;width:2px;height:20px;background:var(--line);}
-#${id} .dim i::before{left:0}#${id} .dim i::after{right:0}
-#${id} .dim b{font-family:var(--font-num);font-size:32px;font-weight:500;letter-spacing:0.2em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .tab',{y:-30,autoAlpha:0,duration:0.26,stagger:0.08},0.08);\n` +
-        `tl.from('#${id} .fill',{scaleX:0,transformOrigin:'left center',duration:0.34,ease:'power2.out'},0.34);\n` +
-        `tl.from('#${id} .ck',{x:-30,autoAlpha:0,duration:0.24},0.4);\n` +
-        `tl.from('#${id} .h',{y:46,autoAlpha:0,duration:0.34,ease:'power3.out'},0.48);\n` +
-        `tl.from('#${id} .dim,#${id} .dwg',{autoAlpha:0,duration:0.28},0.72);`,
-    ),
-  'code': () =>
-    mk(
-      'bp_cod',
-      'code',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="win">
-    <div class="cap"><span>SRC — hook.js</span><span>UTF-8</span></div>
-    <div class="r"><span>01</span><em class="cm">// 开场 3 秒,留人或劝退</em></div>
-    <div class="r"><span>02</span><em><b>const</b> hook = boldClaim()</em></div>
-    <div class="r hl"><i class="hf"></i><span>03</span><em>video.<b>open</b>(hook, { maxSec: 3 })</em></div>
-    <div class="r"><span>04</span><em>caption.<b>set</b>('看到最后有彩蛋')</em></div>
-  </div>
-  <div class="lead"><span class="dot"></span><span class="lw"></span><span class="note">完播率在这一行定生死<br/>L03 · CRITICAL</span></div>
-  <div class="dwg"><span>SRC-03</span><span>REV B</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .win{position:absolute;left:150px;top:50%;transform:translateY(-52%);width:1000px;border:3px solid var(--fg);}
-#${id} .cap{display:flex;justify-content:space-between;padding:28px 40px;border-bottom:3px solid var(--fg);font-family:var(--font-num);font-size:34px;letter-spacing:0.2em;}
-#${id} .cap span:first-child{color:var(--accent);}
-#${id} .cap span:last-child{color:var(--muted);}
-#${id} .r{position:relative;display:flex;align-items:baseline;gap:34px;padding:30px 40px;border-bottom:2px solid var(--line);font-family:var(--font-num);font-size:42px;}
-#${id} .r:last-child{border-bottom:none;}
-#${id} .r span{position:relative;font-size:32px;color:var(--muted);}
-#${id} .r em{position:relative;font-style:normal;letter-spacing:0.02em;}
-#${id} .r em b{color:var(--accent);font-weight:700;}
-#${id} .cm{color:var(--muted);}
-#${id} .r.hl{outline:3px solid var(--accent);outline-offset:-3px;}
-#${id} .hf{position:absolute;inset:0;background:repeating-linear-gradient(45deg,var(--accent) 0 10px,transparent 10px 24px);opacity:0.18;}
-#${id} .lead{position:absolute;left:1210px;top:614px;display:flex;align-items:flex-start;}
-#${id} .dot{width:16px;height:16px;border-radius:999px;background:var(--accent);margin-top:8px;}
-#${id} .lw{width:120px;height:2px;background:var(--line);margin-top:15px;}
-#${id} .note{padding-left:26px;font-family:var(--font-num);font-size:30px;line-height:1.6;color:var(--muted);letter-spacing:0.08em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .win',{y:40,autoAlpha:0,duration:0.3,ease:'power2.out'},0.08);\n` +
-        `tl.from('#${id} .r',{autoAlpha:0,duration:0.2,stagger:0.08},0.24);\n` +
-        `tl.from('#${id} .hf',{scaleX:0,transformOrigin:'left center',duration:0.3,ease:'power2.out'},0.6);\n` +
-        `tl.from('#${id} .lw',{scaleX:0,transformOrigin:'left center',duration:0.26},0.72);\n` +
-        `tl.from('#${id} .dot,#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.25},0.85);`,
-    ),
-  'quote': () =>
-    mk(
-      'bp_qte',
-      'quote',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="body">
-    <div class="dim"><i></i><b>SPEC — QUOTE</b><i></i></div>
-    <div class="t">结构,是给观众的礼貌</div>
-    <div class="dim"><i></i><b>VERIFIED</b><i></i></div>
-    <div class="lead"><span class="dot"></span><span class="ln"></span><span class="note">SOURCE: 口播 02'14"</span></div>
-  </div>
-  <div class="dwg"><span>QTE-05</span><span>REV A</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .body{position:absolute;left:150px;right:150px;top:50%;transform:translateY(-54%);display:flex;flex-direction:column;gap:56px;}
-#${id} .dim{display:flex;align-items:center;gap:22px;color:var(--muted);}
-#${id} .dim i{flex:1;height:0;border-top:2px dashed var(--line);position:relative;}
-#${id} .dim i::before,#${id} .dim i::after{content:'';position:absolute;top:-9px;width:2px;height:20px;background:var(--line);}
-#${id} .dim i::before{left:0}#${id} .dim i::after{right:0}
-#${id} .dim b{font-family:var(--font-num);font-size:32px;font-weight:500;letter-spacing:0.3em;color:var(--accent);}
-#${id} .t{font-size:120px;font-weight:800;letter-spacing:-0.01em;text-align:center;}
-#${id} .lead{display:flex;align-items:flex-start;justify-content:flex-end;margin-top:6px;}
-#${id} .dot{width:16px;height:16px;border-radius:999px;background:var(--accent);margin-top:8px;}
-#${id} .ln{width:170px;height:2px;background:var(--line);margin-top:15px;}
-#${id} .note{padding-left:26px;font-family:var(--font-num);font-size:34px;line-height:1.5;color:var(--muted);letter-spacing:0.12em;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.3},0);\n` +
-        `tl.from('#${id} .dim',{scaleX:0.6,autoAlpha:0,transformOrigin:'center',duration:0.3},0.1);\n` +
-        `tl.from('#${id} .t',{y:40,autoAlpha:0,duration:0.34,ease:'power3.out'},0.22);\n` +
-        `tl.from('#${id} .ln',{scaleX:0,transformOrigin:'left center',duration:0.26},0.5);\n` +
-        `tl.from('#${id} .dot,#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.25},0.62);`,
-    ),
-  'qa': () =>
-    mk(
-      'bp_qa',
-      'qa',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="q"><span class="dot"></span><span class="lw"></span><span class="tag">FIG.Q1</span><span class="qt">为什么你的视频没人看完?</span></div>
-  <div class="ans">
-    <div class="cap">ANSWER — VERIFIED</div>
-    <div class="a">不是内容差,是结构乱</div>
-  </div>
-  <div class="dwg"><span>QA-01</span><span>FIG.Q1</span><span>REV A</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .q{position:absolute;left:150px;top:230px;display:flex;align-items:center;}
-#${id} .dot{width:16px;height:16px;border-radius:999px;background:var(--accent);flex:none;}
-#${id} .lw{width:140px;height:2px;background:var(--line);flex:none;}
-#${id} .tag{font-family:var(--font-num);font-size:34px;letter-spacing:0.24em;color:var(--accent);padding:0 34px 0 26px;flex:none;}
-#${id} .qt{font-size:56px;font-weight:600;}
-#${id} .ans{position:absolute;left:150px;right:150px;top:42%;border:3px solid var(--fg);}
-#${id} .cap{padding:28px 44px;border-bottom:3px solid var(--fg);font-family:var(--font-num);font-size:34px;letter-spacing:0.24em;color:var(--accent);}
-#${id} .a{padding:96px 60px;font-size:110px;font-weight:800;letter-spacing:-0.01em;text-align:center;}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .dot',{scale:0,duration:0.2},0.08);\n` +
-        `tl.from('#${id} .lw',{scaleX:0,transformOrigin:'left center',duration:0.26},0.12);\n` +
-        `tl.from('#${id} .tag,#${id} .qt',{x:-24,autoAlpha:0,duration:0.26},0.3);\n` +
-        `tl.from('#${id} .ans',{autoAlpha:0,duration:0.26},0.55);\n` +
-        `tl.from('#${id} .a',{y:40,autoAlpha:0,duration:0.32,ease:'power3.out'},0.68);\n` +
-        `tl.from('#${id} .dwg',{autoAlpha:0,duration:0.24},0.9);`,
-    ),
-  'cta': () =>
-    mk(
-      'bp_cta',
-      'cta',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="k">FIG.06 — CALL TO ACTION</div>
-  <div class="wrap">
-    <div class="btn"><i class="fill"></i><b>关注</b></div>
-    <i class="x xtl">+</i><i class="x xbr">+</i>
-    <div class="w"><i></i><b>W 640</b><i></i></div>
-    <div class="hd"><i></i><b>H 220</b><i></i></div>
-  </div>
-  <div class="note">PRESS TO FOLLOW · NEXT EPISODE</div>
-  <div class="dwg"><span>CTA-01</span><span>SCALE 1:1</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .k{position:absolute;left:150px;top:150px;font-family:var(--font-num);font-size:36px;letter-spacing:0.34em;color:var(--accent);}
-#${id} .wrap{position:absolute;left:50%;top:50%;transform:translate(-50%,-56%);width:640px;height:220px;}
-#${id} .btn{position:absolute;inset:0;border:3px solid var(--accent);display:flex;align-items:center;justify-content:center;overflow:hidden;}
-#${id} .fill{position:absolute;inset:0;background:repeating-linear-gradient(45deg,var(--accent) 0 10px,transparent 10px 24px);opacity:0.3;}
-#${id} .btn b{position:relative;font-size:84px;font-weight:800;letter-spacing:0.24em;padding-left:0.24em;}
-#${id} .x{position:absolute;font-style:normal;font-family:var(--font-num);font-size:52px;color:var(--accent);line-height:1;}
-#${id} .x.xtl{left:-72px;top:-66px;}
-#${id} .x.xbr{right:-72px;bottom:-66px;}
-#${id} .w{position:absolute;left:0;right:0;top:calc(100% + 44px);display:flex;align-items:center;gap:20px;color:var(--muted);}
-#${id} .w i{flex:1;height:0;border-top:2px dashed var(--line);position:relative;}
-#${id} .w i::before,#${id} .w i::after{content:'';position:absolute;top:-9px;width:2px;height:20px;background:var(--line);}
-#${id} .w i::before{left:0}#${id} .w i::after{right:0}
-#${id} .w b,#${id} .hd b{font-family:var(--font-num);font-size:30px;font-weight:500;letter-spacing:0.14em;}
-#${id} .hd{position:absolute;left:calc(100% + 44px);top:0;bottom:0;display:flex;flex-direction:column;align-items:center;gap:16px;color:var(--muted);}
-#${id} .hd i{width:0;flex:1;border-left:2px dashed var(--line);position:relative;}
-#${id} .hd i::before,#${id} .hd i::after{content:'';position:absolute;left:-9px;width:20px;height:2px;background:var(--line);}
-#${id} .hd i::before{top:0}#${id} .hd i::after{bottom:0}
-#${id} .note{position:absolute;left:50%;bottom:210px;transform:translateX(-50%);font-family:var(--font-num);font-size:34px;letter-spacing:0.26em;color:var(--muted);}
-</style>`,
-      (id) =>
-        `tl.from('#${id} .frame,#${id} .k',{autoAlpha:0,duration:0.28},0);\n` +
-        `tl.from('#${id} .btn',{autoAlpha:0,duration:0.26},0.12);\n` +
-        `tl.from('#${id} .fill',{scaleX:0,transformOrigin:'left center',duration:0.4,ease:'power2.out'},0.26);\n` +
-        `tl.from('#${id} .x',{scale:0,autoAlpha:0,duration:0.22,stagger:0.08},0.4);\n` +
-        `tl.from('#${id} .w,#${id} .hd',{autoAlpha:0,duration:0.26},0.52);\n` +
-        `tl.from('#${id} .note,#${id} .dwg',{autoAlpha:0,duration:0.26},0.66);`,
-    ),
-};
+  'question-field': () => mk('ca_question', 'question-field', (id) => `
+<div class="ca question"><div class="photo"><div class="person"><i></i><b></b></div></div><div class="copy"><span class="micro">QUESTION / BEGIN WITH THE SOURCE</span><h2 class="head" data-edit>为什么同一个动作<br/><b>会得到不同结果？</b></h2><p data-edit>先看见真实对象，再沿着关系寻找答案。</p></div><i class="route"></i><span class="label">从这里开始</span></div>
+<style>${root(id)}
+#${id} .question .photo{right:0;top:0;width:780px;height:1080px;}#${id} .person{position:absolute;left:160px;top:170px;width:430px;height:760px;}#${id} .person i{position:absolute;left:115px;top:0;width:210px;height:230px;border-radius:48%;background:#9e6c50;}#${id} .person b{position:absolute;left:20px;top:220px;width:390px;height:540px;border-radius:180px 180px 0 0;background:#405c53;}#${id} .copy{position:absolute;left:85px;top:90px;width:1010px;}#${id} .copy h2{margin-top:130px;font-size:104px;line-height:.98;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:70px;width:700px;font-size:29px;line-height:1.55;}#${id} .question>.route{left:890px;top:760px;width:470px;transform:rotate(-17deg);}#${id} .question>.label{left:810px;top:815px;}
+</style>`, (id) => `tl.from('#${id} .photo',{x:160,duration:.34},0);tl.from('#${id} .copy>*',{x:-40,autoAlpha:0,duration:.24,stagger:.08},.18);tl.from('#${id} .route',{scaleX:0,duration:.28},.45);tl.from('#${id} .label',{autoAlpha:0,duration:.2},.65);`),
 
-/** Cover — list thumbnail: the theme name is the hero (see showcase-blocks.ts). */
-export const cover: () => Block = () =>
-    mk(
-      'cv_bp',
-      '封面',
-      (id) => `
-<div class="bp"><div class="frame"></div>
-  <div class="c"><div class="k">FRAME · BLUEPRINT</div><div class="h">蓝图</div><div class="dim"><i></i><b>1920 × 1080</b><i></i></div></div>
-  <div class="dwg"><span>DWG-00</span><span>COVER</span></div>
-</div>
-<style>${bpRoot(id)}
-#${id} .c{position:absolute;left:150px;right:150px;top:50%;transform:translateY(-52%);display:flex;flex-direction:column;gap:56px;}
-#${id} .k{font-family:var(--font-num);font-size:40px;letter-spacing:0.4em;color:var(--accent);}
-#${id} .h{font-size:300px;font-weight:900;letter-spacing:0.06em;line-height:1;}
-#${id} .dim{display:flex;align-items:center;gap:22px;color:var(--muted);max-width:900px;}
-#${id} .dim i{flex:1;height:0;border-top:2px dashed var(--line);}
-#${id} .dim b{font-family:var(--font-num);font-size:36px;font-weight:500;}
-</style>`,
-      (id) => `tl.from('#${id} .c',{autoAlpha:0,y:40,duration:0.3},0);`,
-    );
+  'object-breakdown': () => mk('ca_object', 'object-breakdown', (id) => `
+<div class="ca object-scene"><span class="micro top">OBJECT / OBSERVE BEFORE LABELING</span><div class="specimen"><i class="object"></i><i class="part a"></i><i class="part b"></i><i class="part c"></i></div><div class="notes"><div><b class="num">01</b><span data-edit>输入发生在这里</span></div><div><b class="num">02</b><span data-edit>阻力改变动作</span></div><div><b class="num">03</b><span data-edit>结果从边缘出现</span></div></div><h2 class="head" data-edit>拆开，但不忘记整体</h2></div>
+<style>${root(id)}
+#${id} .top{position:absolute;left:80px;top:65px;}#${id} .specimen{position:absolute;left:95px;top:150px;width:920px;height:790px;background:#e6dfd2;border:4px solid var(--fg);}#${id} .specimen .object{left:235px;top:135px;width:460px;height:540px;border-radius:30px;transform:rotate(-4deg);}#${id} .part{position:absolute;width:38px;height:38px;border-radius:50%;background:var(--accent);border:6px solid var(--paper);}#${id} .part.a{left:300px;top:290px;}#${id} .part.b{left:600px;top:450px;}#${id} .part.c{left:430px;top:670px;background:var(--accent-2);}#${id} .notes{position:absolute;left:1080px;top:180px;width:710px;}#${id} .notes div{display:grid;grid-template-columns:90px 1fr;gap:20px;padding:36px 0;border-top:3px solid var(--fg);}#${id} .notes b{font-size:27px;color:var(--accent);}#${id} .notes span{font-size:42px;font-weight:800;}#${id} .object-scene h2{position:absolute;left:1080px;bottom:90px;width:700px;font-size:76px;line-height:1;}
+</style>`, (id) => `tl.from('#${id} .specimen',{scale:.94,autoAlpha:0,duration:.3},0);tl.from('#${id} .part',{scale:0,duration:.2,stagger:.12},.25);tl.from('#${id} .notes div',{x:60,autoAlpha:0,duration:.24,stagger:.1},.38);tl.from('#${id} h2',{autoAlpha:0,y:25,duration:.24},.68);`),
+
+  'causal-chain': () => mk('ca_chain', 'causal-chain', (id) => `
+<div class="ca chain"><span class="micro">CAUSE / ACTION / CONSEQUENCE</span><h2 class="head" data-edit>不是三个步骤<br/><b>是一条因果路线</b></h2><div class="nodes"><div class="n one"><i></i><b data-edit>输入</b><span>一个真实动作</span></div><i class="route r1"></i><div class="n two"><i></i><b data-edit>阻力</b><span>系统改变速度</span></div><i class="route r2"></i><div class="n three"><i></i><b data-edit>结果</b><span>反馈回到人</span></div></div></div>
+<style>${root(id)}
+#${id} .chain{background:var(--panel-2);color:#fff;}#${id} .chain>.micro{position:absolute;left:80px;top:65px;color:var(--accent);}#${id} .chain h2{position:absolute;left:80px;top:150px;font-size:91px;line-height:.96;}#${id} .chain h2 b{color:var(--accent);}#${id} .nodes{position:absolute;left:75px;right:75px;bottom:100px;height:470px;}#${id} .n{position:absolute;top:80px;width:390px;height:310px;padding:42px;background:var(--paper);color:var(--fg);}#${id} .n.one{left:0;}#${id} .n.two{left:610px;}#${id} .n.three{right:0;}#${id} .n i{display:block;width:72px;height:72px;border:8px solid var(--accent);border-radius:50%;}#${id} .n b{display:block;margin-top:40px;font-size:55px;}#${id} .n span{display:block;margin-top:18px;font-size:25px;color:var(--muted);}#${id} .nodes .route{top:220px;width:180px;}#${id} .r1{left:410px;}#${id} .r2{left:1020px;}
+</style>`, (id) => `tl.from('#${id} h2,#${id}>.micro',{x:-45,autoAlpha:0,duration:.25,stagger:.08},0);tl.from('#${id} .n',{y:70,autoAlpha:0,duration:.25,stagger:.18},.24);tl.from('#${id} .route',{scaleX:0,duration:.22,stagger:.18},.42);`),
+
+  'scale-shift': () => mk('ca_scale', 'scale-shift', (id) => `
+<div class="ca scale"><div class="whole"><i class="object"></i><span class="micro">SYSTEM</span></div><div class="detail"><i class="object"></i><b class="ring"></b><span class="micro">DETAIL</span></div><i class="route"></i><div class="copy"><span class="micro">SCALE / KEEP ORIENTATION</span><h2 class="head" data-edit>从整体进入细节<br/><b>再带着答案回来</b></h2></div></div>
+<style>${root(id)}
+#${id} .whole{position:absolute;left:70px;top:70px;width:750px;height:940px;background:#e1dbcf;border:4px solid var(--fg);overflow:hidden;}#${id} .whole .object{left:160px;top:210px;width:430px;height:560px;border-radius:38px;}#${id} .whole span,#${id} .detail span{position:absolute;left:30px;bottom:26px;}#${id} .detail{position:absolute;left:940px;top:170px;width:880px;height:650px;background:#d1cabd;overflow:hidden;border:14px solid var(--accent);}#${id} .detail .object{left:-220px;top:-120px;width:1050px;height:980px;border-radius:90px;}#${id} .ring{position:absolute;right:90px;top:155px;width:260px;height:260px;border:16px solid var(--accent-2);border-radius:50%;}#${id} .scale>.route{left:760px;top:500px;width:260px;}#${id} .copy{position:absolute;left:970px;bottom:70px;width:800px;}#${id} .copy h2{margin-top:35px;font-size:63px;line-height:1;}#${id} .copy h2 b{color:var(--accent);}
+</style>`, (id) => `tl.from('#${id} .whole',{x:-100,autoAlpha:0,duration:.3},0);tl.from('#${id} .route',{scaleX:0,duration:.25},.26);tl.from('#${id} .detail',{scale:.75,autoAlpha:0,duration:.34,ease:'power3.out'},.42);tl.from('#${id} .ring',{scale:0,duration:.22},.64);tl.from('#${id} .copy',{autoAlpha:0,y:25,duration:.23},.7);`),
+
+  'misconception-turn': () => mk('ca_turn', 'misconception-turn', (id) => `
+<div class="ca misconception"><span class="micro">REVISION / LET EVIDENCE INTERRUPT</span><div class="before"><span>原来的理解</span><h2 class="head" data-edit>速度决定结果</h2><i class="route"></i></div><i class="strike"></i><div class="after"><span>证据改变路线</span><h2 class="head" data-edit>真正改变结果的<br/><b>是交接方式</b></h2><i class="route"></i></div><div class="proof"><b class="num">03:42</b><span>来源片段 / 待用户确认</span></div></div>
+<style>${root(id)}
+#${id} .misconception>.micro{position:absolute;left:80px;top:65px;}#${id} .before{position:absolute;left:80px;top:190px;width:760px;height:650px;padding:55px;background:#e3ddd1;}#${id} .before span,#${id} .after>span{font-size:23px;font-weight:800;color:var(--muted);}#${id} .before h2{margin-top:150px;font-size:78px;}#${id} .before .route{left:70px;bottom:95px;width:520px;}#${id} .strike{position:absolute;left:95px;top:525px;width:760px;height:20px;background:var(--accent-2);transform:rotate(-8deg);}#${id} .after{position:absolute;right:75px;top:135px;width:890px;height:780px;padding:60px;background:var(--panel-2);color:#fff;}#${id} .after h2{margin-top:135px;font-size:80px;line-height:1;}#${id} .after h2 b{color:var(--accent);}#${id} .after .route{left:65px;bottom:105px;width:650px;}#${id} .proof{position:absolute;left:830px;bottom:55px;padding:22px 28px;background:var(--accent-2);color:#fff;}#${id} .proof b{font-size:30px;}#${id} .proof span{margin-left:18px;font-size:19px;}
+</style>`, (id) => `tl.from('#${id} .before',{x:-100,autoAlpha:0,duration:.3},0);tl.from('#${id} .before .route',{scaleX:0,duration:.25},.2);tl.from('#${id} .strike',{scaleX:0,transformOrigin:'left',duration:.25},.45);tl.from('#${id} .after',{x:120,autoAlpha:0,duration:.33},.55);tl.from('#${id} .after .route',{scaleX:0,duration:.25},.76);`),
+
+  'synthesis-map': () => mk('ca_synthesis', 'synthesis-map', (id) => `
+<div class="ca synthesis"><div class="map"><div class="source"><i class="object"></i></div><i class="route one"></i><i class="route two"></i><span class="label a">输入</span><span class="label b">交接</span><span class="label c">结果</span></div><div class="copy"><span class="micro">SYNTHESIS / FEWER MARKS</span><h2 class="head" data-edit>结果不是终点<br/><b>它会回到下一次输入</b></h2><p data-edit>现在可以用一条路线重新看完整系统。</p></div><i class="correction"></i></div>
+<style>${root(id)}
+#${id} .synthesis{background:var(--panel-2);color:#fff;}#${id} .map{position:absolute;left:70px;top:70px;width:820px;height:940px;background:var(--paper);color:var(--fg);}#${id} .source{position:absolute;left:190px;top:160px;width:440px;height:590px;background:#d7d0c3;}#${id} .source .object{left:80px;top:90px;width:280px;height:400px;border-radius:30px;}#${id} .map .route{width:320px;}#${id} .map .one{left:80px;top:120px;transform:rotate(22deg);}#${id} .map .two{left:420px;bottom:120px;transform:rotate(164deg);}#${id} .map .label.a{left:35px;top:70px;}#${id} .map .label.b{right:30px;top:280px;}#${id} .map .label.c{left:60px;bottom:80px;}#${id} .copy{position:absolute;left:1010px;top:150px;width:790px;}#${id} .copy h2{margin-top:145px;font-size:91px;line-height:.96;}#${id} .copy h2 b{color:var(--accent);}#${id} .copy p{margin-top:70px;width:660px;font-size:28px;line-height:1.55;color:#ffffffb0;}#${id} .correction{position:absolute;left:940px;top:0;width:16px;height:790px;background:var(--accent-2);}
+</style>`, (id) => `tl.from('#${id} .map',{x:-120,duration:.34},0);tl.from('#${id} .source',{scale:.9,autoAlpha:0,duration:.26},.2);tl.from('#${id} .route',{scaleX:0,duration:.28,stagger:.18},.38);tl.from('#${id} .label',{autoAlpha:0,duration:.2,stagger:.1},.55);tl.from('#${id} .copy>*',{x:45,autoAlpha:0,duration:.24,stagger:.08},.42);`),
+};

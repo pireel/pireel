@@ -40,6 +40,7 @@ import { mid } from './chat-format';
 import { ChatThread } from './chat-thread';
 import { type StoredThread, firstUserText, loadThreads, sanitizeRestored, saveThreads } from './chat-thread-store';
 import { t } from './i18n';
+import { useStudioShell } from './shell-context';
 
 /* ============================ Public types ============================ */
 
@@ -112,6 +113,11 @@ export interface StudioChatProps {
  *  elements memoized by content key). */
 export const StudioChat = memo(
   forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat({ runTool, getBody, elements, getComp, onFrameApplied, storageKey, onThreadsChange, onClose }, ref) {
+  const shell = useStudioShell();
+  const scenarioSkills = shell.scenarioSkills ?? [];
+  const defaultSkillId = scenarioSkills.some((skill) => skill.id === shell.defaultScenarioSkillId)
+    ? shell.defaultScenarioSkillId!
+    : STUDIO_AUTO_SKILL_ID;
   const [threads, setThreads] = useState<StoredThread[]>([]);
   const onThreadsChangeRef = useRef(onThreadsChange);
   onThreadsChangeRef.current = onThreadsChange;
@@ -123,7 +129,7 @@ export const StudioChat = memo(
   // Restore from localStorage after mount (SSR-safe: first frame empty, hydrate on the client). Key is per project,
   // sessions belong to a project; the workbench remounts per project, so storageKey won't change mid-life
   useEffect(() => {
-    const loaded = loadThreads(storageKey);
+    const loaded = loadThreads(storageKey, scenarioSkills.map((skill) => skill.id));
     if (loaded.length) {
       setThreads(loaded);
       setActiveId(loaded[0]!.id);
@@ -244,7 +250,8 @@ export const StudioChat = memo(
         threadId={activeId}
         initialMessages={restoredMessages}
         initialFrame={active?.frame ?? null}
-        initialSkillId={active?.skillId ?? STUDIO_AUTO_SKILL_ID}
+        initialSkillId={active?.skillId ?? defaultSkillId}
+        scenarioSkills={scenarioSkills}
         frames={frames}
         onFrameApplied={onFrameApplied}
         runTool={runTool}

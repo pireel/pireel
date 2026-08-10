@@ -16,7 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Eye, EyeOff, Film, Loader2, Music, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
   type BlockKind,
   type Composition,
@@ -67,6 +67,7 @@ import { ActiveSceneRing, HoverCursor, PlayheadCursor } from './timeline-overlay
 import { AudioLane } from './timeline-audio-lane';
 import { draggedPlayheadSecond, snapTimelineSecond, timelineSnapPoints } from './timeline-snap';
 import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
+import { DirectorSceneStrip, DIRECTOR_SCENE_STRIP_H, type TimelineDirectorScene } from './director-scene-strip';
 import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
 
 export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
@@ -107,6 +108,8 @@ const visualTrackId = (lane: TimelineLaneKey): string | null => typeof lane === 
 
 interface StudioTimelineProps {
   comp: Composition;
+  /** Admin/debug-only Director Plan intervals. Omit for the ordinary editing timeline. */
+  directorScenes?: readonly TimelineDirectorScene[];
   /** Canonical V2 placements. Omit only for legacy contiguous compositions. */
   videoPlacements?: readonly NarrativeTimelinePlacement[];
   /** Canonical document duration, including empty-primary graphics/audio regions. */
@@ -269,6 +272,7 @@ function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () 
 
 function StudioTimelineImpl({
   comp,
+  directorScenes,
   videoPlacements,
   timelineDurationSec,
   playing,
@@ -327,6 +331,7 @@ function StudioTimelineImpl({
   srcLive,
 }: StudioTimelineProps) {
   const dur = timelineDurationSec ?? totalDuration(comp);
+  const hasDirectorScenes = !!directorScenes?.length;
   const shots = useMemo(() => videoTrackShots(comp), [comp]);
   const placementEnabled = useMemo(
     () => new Map(videoPlacements?.map((placement) => [placement.shotId, placement.enabled] as const) ?? []),
@@ -1229,6 +1234,12 @@ function StudioTimelineImpl({
           <div className="bg-panel sticky left-0 z-50 shrink-0" style={{ width: GUTTER }}>
             {/* Corner: sticks with the ruler, and opaque so the track icons scroll UNDER it, not into it */}
             <div className="border-line bg-panel sticky top-0 z-10 border-b" style={{ height: RULER_H }} />
+            {hasDirectorScenes && (
+              <div className="border-line text-ink-4 flex items-center gap-1 border-b px-2 text-[9px]" style={{ height: DIRECTOR_SCENE_STRIP_H }} title={t('panels.directorPlan')}>
+                <Clapperboard size={12} className="text-accent shrink-0" />
+                <span className="truncate">{t('panels.directorPlan')}</span>
+              </div>
+            )}
             <div style={{ paddingTop: 0 }}>
               {displayTracks.map((track) => {
                 const k = trackKind(track);
@@ -1351,6 +1362,8 @@ function StudioTimelineImpl({
                 );
               })}
             </div>
+
+            {hasDirectorScenes && <DirectorSceneStrip scenes={directorScenes} pps={pps} onSeek={onSeek} />}
 
             {/* Track background area (hosts all rows) */}
             <div ref={tracksRef} className="relative" style={{ height: tracksHeight }}>

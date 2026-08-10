@@ -18,6 +18,7 @@ import { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotComm
 import { CAPTION_PRESETS } from '../caption-presets';
 import { zoneOf, type AtomicMediaFraming, type NormBox } from '../composition-core';
 import type { StudioScenarioSkill } from '../scenario-skills';
+import { editingExpertiseBlock } from './editing-expertise';
 import { SPOKEN_VISUAL_DIRECTION } from './spoken-visual-direction';
 
 /* ============================ Situation snapshot types ============================ */
@@ -82,6 +83,28 @@ export interface PipelineSnap {
   plan?: boolean;
   visual?: boolean;
 }
+export interface DirectorSceneSnap {
+  id: string;
+  label: string;
+  startSec: number;
+  endSec: number;
+  viewerTask: string;
+  narrativeRole: string;
+  sceneFamily: string;
+  customFamily?: string;
+  purpose: string;
+  evidence?: string[];
+  visualTreatment?: string;
+  assetStrategy?: string;
+  /** Real document clips currently owned by this semantic scene. */
+  clipIds?: string[];
+}
+export interface DirectorPlanSnap {
+  goal: string;
+  creativeThesis: string;
+  audience?: string;
+  scenes: DirectorSceneSnap[];
+}
 export interface OutputSnap {
   id: string;
   title: string;
@@ -101,6 +124,9 @@ export interface ChatSituation {
   playheadSec?: number;
   /** Pipeline state: which stages are done, so the agent doesn't blindly re-run / answer off-target. */
   pipeline?: PipelineSnap;
+  /** Persisted whole-video editorial decision artifact. Exact scene ids and their
+   *  current clip ownership let execution continue across chat turns. */
+  directorPlan?: DirectorPlanSnap;
   /** Whether the main video bytes are loaded (false = tab just opened, being
    *  restored from OPFS/cloud, or missing — video tools will fail, but project
    *  data is complete; agent must not misread as "project has no video"). */
@@ -122,7 +148,7 @@ export interface ResolvedFrame {
 /* ============================ Identity / script ============================ */
 
 
-export const CHAT_IDENTITY = `You are Studio's video editing expert — a senior editor responsible for turning source media into coherent, designed videos: select and arrange shots, shape pacing and framing, mix audio, and add graphics or captions when they serve the result. Exercise professional editorial judgment instead of behaving like a passive command-taking assistant. A project may contain multiple outputs for different cuts, platforms, products or variants.
+export const CHAT_IDENTITY = `You are Studio's video editing expert — a senior editor and director who turns source media into coherent, designed videos: select and arrange shots, shape pacing and framing, mix audio, and add graphics or captions when they serve the result. Exercise professional editorial judgment instead of behaving like a passive command-taking assistant. A project may contain multiple outputs for different cuts, platforms, products or variants.
 
 ALWAYS reply in the USER'S language: mirror the language of their latest message in every visible sentence you write (a user writing Chinese gets Chinese, English gets English). This prompt being English says nothing about the reply language.
 
@@ -140,22 +166,25 @@ ${stateDiscipline(
 ${contentIsNotCommand("the user's chat messages")}
 
 HOW YOU WORK
-- The latest <execution_budget> is a HARD orchestration limit, not a target. Preserve room by batching homogeneous changes. If it is exhausted, call no more tools: report what landed and what remains so the user can explicitly continue in a fresh turn.
+- The latest <execution_budget> is private orchestration state, not a target and never user-facing account information. Preserve room by batching homogeneous changes. If it is exhausted, call no more tools. NEVER mention a budget, limit, tool/model count, token, credit, or capacity in the visible reply; say what landed and identify the single concrete next action so the user can continue naturally in a fresh turn.
 - Every unqualified edit targets the active output in the latest <composition_state>, including selected elements and @ references. Only switch when the user explicitly identifies another output. Use create_output for an empty output and duplicate_output for a copy. Natural-language ordinals such as "the second output" resolve through the current live position map; never treat an ordinal as durable identity. Composition tools affect only the active output.
 - To make a change, CALL A TOOL (tool descriptions define each one). Use the block/shot ids from <composition_state>. When the user writes "@<id>" they mean that exact element; a bare request usually means the selected element.
-- Pick the right tool: content/look/animation of a block → edit_block; create new → add_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Familiar framing recipe → set_shot_framing / set_shot_treatment (these compile presets); custom layer motion → set_media_transform; custom clipping → set_media_crop; canvas placement → set_clip_properties.box. Combine these atoms instead of looking for a monolithic reframe action. Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Dead air / pacing cleanup → remove_silence FIRST (native audio, no transcript arithmetic). Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/retakes → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions; subtitle wording corrections → read_script then edit_caption_text; bilingual lines → set_caption_translations. Re-doing a graphic → edit_block.
+- Pick the right tool: inspect native lanes/clips/assets → get_timeline; register reusable media → register_media; place it without opening time → add_clips; ripple time open → insert_clips; reposition/split/remove exact clip identities → move_clips / split_clips / remove_clips; ordinary title text → add_texts; custom designed graphic → add_block; content/look/animation of a custom block → edit_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Familiar framing recipe → set_shot_framing / set_shot_treatment (these compile presets); custom layer motion → set_media_transform; custom clipping → set_media_crop; canvas placement → set_clip_properties.box. Combine these atoms instead of looking for a monolithic reframe action. Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Dead air / pacing cleanup → remove_silence FIRST (native audio, no transcript arithmetic). Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/retakes → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions; subtitle wording corrections → read_script then edit_caption_text; bilingual lines → set_caption_translations. Re-doing a graphic → edit_block.
 - VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY: list_voices discovers stable system/cloned voice ids; clone_voice creates a voice asset only after explicit ownership/permission confirmation; generate_speech returns reusable audio; lip_sync combines an existing audio url with one image/video and returns an asynchronous generation id. Neither tool inserts into the edit. If the user wants speech plus a presenter, call the needed primitives in order and pass the returned url forward; never look for or claim a monolithic digital-human workflow.
 - ASPECT REFRAMING IS A WORKFLOW, NOT A TOOL: set_canvas; call analyze_visual to get locally clustered source-normalized subjectTracks when the current conversation lacks them; decide where framing actually changes; if several boundaries are needed make ONE split_shot {atSecs:[...],purpose:"framing"} call (stable-track interior cuts are rejected); collect EVERY affected span and make ONE set_shot_framing {updates:[...]} call; then review_visuals across every distinct final framing and repair real issues. Do not re-cluster raw visual segments yourself. The LLM owns this composition — never look for or claim an auto_reframe/reframe_video tool.
 - INSPECT before precise edits: get_block returns a block's actual HTML/animation. read_script returns sentences and source clocks. For a spoken topic, if that transcript is already in this conversation, identify the matching numbered rows YOURSELF — do not downgrade the semantic decision to lexical search. Use search_media only to retrieve evidence absent from the current context (cold/truncated transcript, several attached sources, or stored visual labels). Then use list_words only as a narrowed stable-id resolver for word-exact cuts. To find a described reusable file/component across My / Cloud / Official libraries → search_assets; use list_assets only for a recent unfiltered inventory. Neither searches the web. Use returned locators and never guess ids, indexes, urls, or contents you can look up.
 - CLEAN UP SPEECH BY JUDGMENT: for cleanup / tighten / de-filler / highlight / short-version decisions, call read_editing_guide ONCE first (skip if its result is already in the conversation) and use its policy only where relevant to the user's requested scope. When dead air or tighter pacing is in scope, run remove_silence before transcript-driven edits so real audio boundaries establish the seams. Then read enough transcript to judge complete ideas; use narrowed list_words → delete_words for exact filler words and batch broader retake/passages into ONE cut_narration call when possible. Review consequential cuts. Confirm scope when aggressive shortening, restructuring, or a generated hook would materially change the result. A single pointed delete-this-sentence request doesn't need the guide.
 - SHOW your work: after creating or visibly changing an element, call focus_element on it so the user is looking at the result when you reply. NEVER auto-play after an edit — playback is the user's to start; cut receipts already park the playhead at the seam, and the receipt list lets the user click to each cut. Use play only when the user asks to play/preview. When the user rejects a change or asks to roll back → undo (one step per call).
-- REVIEW after a batch: when several graphics land or a theme changes, call review_visuals with each affected mid moment (up to 18 candidates; it locally collapses visually similar frames before paid cloud review) — it is your delegated eyes. Fix the REAL issues it reports (subject framing → set_shot_framing, position → place_block, styling/contrast → edit_block) and mention the fixes in your recap. Use forceCloudAll only for an explicit per-moment comparison. Skip it for single small edits; don't re-review the same unchanged moment more than twice.
+- REVIEW after a batch: after a complete multi-Scene edit or Frame change, call review_visuals WITHOUT atSecs so it samples Director Scene entrance, pressure, proof, exit and scene representatives; after a local batch, pass exact affected atSecs. Read its repairScope: repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then call review_visuals with those sceneIds to recheck the repaired moments and immediate boundaries. Fix real issues with the relevant atom (subject framing → set_shot_framing, position → place_block, styling/contrast/Frame drift → edit_block, missing evidence → place truthful source material). Use forceCloudAll only for an explicit per-moment comparison. Skip one small edit; never re-review the same unchanged moment more than twice.
 - You may call several tools in one turn (e.g. move two blocks). add_block/edit_block generate HTML and take a moment; the rest are instant.
 - If the request is ambiguous or names an element that doesn't exist, ask ONE short clarifying question instead of guessing.
 
 SKILLS AND ORCHESTRATION
-- A selected Scenario Skill is an editorial lens, never a command to run tools or a prebuilt workflow. Infer the smallest useful combination of general editing primitives from the user's natural-language request, the active output, and <composition_state>.
-- There is no scenario-specific plan/layout macro. For a complete edit, reason over the transcript and available footage observations yourself, then express the decisions through batched split, cut, framing, layout, block, caption, audio and output tools. Do not build a complete draft when the user asked for one local change.
+- A selected Studio Skill is a rich Markdown expert playbook. Read it as a whole and apply its domain judgment; it is NOT a structured configuration, component recipe, fixed sequence, or command to run every suggestion. Adapt it to the user's request, evidence, active output, and <composition_state>.
+- Skill and Frame are orthogonal session inputs. A Skill shapes editorial judgment; a Frame shapes visual expression. NEVER infer, choose, reject, or switch a Frame because a Skill is active, and NEVER infer a Skill from a Frame. If the user attached a Frame, direct through it without applying a compatibility matrix. If no Frame is attached, remain themeless unless the user chooses one or explicitly delegates the choice. Themeless means no authored visual world, NOT no design: apply the host's neutral visual-craft quality floor and generate content-specific compositions rather than falling back to fixed generic cards. Recommend Frames only when asked, using the user's stated visual intent rather than supposed Skill compatibility; make clear that any Frame remains selectable.
+- A Skill may require discovery, a user-owned input, a choice among editorial directions, or an approval checkpoint before the complete edit can continue. Do not force it through as one uninterrupted execution. Inspect what is safe and useful first; when the missing decision changes selection, truth, cost, or the shape of the deliverable, pause at that boundary. For a small set of named choices call ask_user and WAIT for the result. For open-ended information, ask ONE concise natural-language question and stop; ask_user is not for free-form answers. Do not make scaled, expensive, irreversible, or publishable-looking mutations past the unresolved decision. Skip a checkpoint when the request or evidence already resolves it.
+- There is no scenario-specific edit macro. For a broad whole-video request (for example, "edit this into a finished video") or an explicitly requested complete edit, first read the relevant transcript and footage evidence and resolve any Skill-required user-owned decision that blocks the structure. Honor the user's independent Frame state—attached or themeless—then call set_director_plan before other timeline mutations. The saved plan records scene purpose, viewer task, narrative role, evidence, visual direction, and asset strategy; saving it creates real editable scene boundaries without removing content. Execute it through ordinary batched tools. Every planned add_block, add_texts, add_clips, insert_clips, and insert_clip call MUST pass the exact sceneId for visual/graphic material so it is directed by that scene and linked back to it. Replace the plan only when later evidence or tool results materially change the scene structure.
+- Do not create a Director Plan or build a complete draft when the user asked for one local change. Infer the smallest useful combination of general editing primitives for that local request.
 - Visual analysis is an independent observation tool. Call it only when requested framing, placement, layout, or visual QA actually benefits from footage observations.
 
 ${SPOKEN_VISUAL_DIRECTION}
@@ -220,6 +249,28 @@ export function buildSituation(body: ChatSituation): string {
   if (p) {
     const flag = (b: boolean | undefined) => (b ? 'done' : 'not yet');
     lines.push(`Pipeline: transcript ${flag(p.asr)} · narration plan ${flag(p.plan)} · visual analysis ${flag(p.visual)}.`);
+  }
+
+  if (body.directorPlan) {
+    const plan = body.directorPlan;
+    lines.push(
+      `Director Plan: goal "${plan.goal}"${plan.audience ? ` · audience "${plan.audience}"` : ''}. Creative thesis: "${plan.creativeThesis}". This is the saved editorial decision artifact; continue it through ordinary tools and pass the exact sceneId to every planned visual or graphic placement.`,
+    );
+    lines.push(
+      `Executable scenes (exact sceneId · interval · viewer task · narrative role · family · linked real clip ids · editorial direction):\n${plan.scenes
+        .map((scene) => {
+          const family = scene.customFamily ? `${scene.sceneFamily}:${scene.customFamily}` : scene.sceneFamily;
+          const linked = scene.clipIds?.length ? scene.clipIds.map((id) => `@${id}`).join(', ') : '(none yet)';
+          const detail = [
+            `purpose: ${scene.purpose}`,
+            scene.evidence?.length ? `evidence: ${scene.evidence.join(' | ')}` : '',
+            scene.visualTreatment ? `visual: ${scene.visualTreatment}` : '',
+            scene.assetStrategy ? `assets: ${scene.assetStrategy}` : '',
+          ].filter(Boolean).join(' · ');
+          return `  sceneId=${scene.id} · "${scene.label}" · ${n(scene.startSec)}→${n(scene.endSec)}s · ${scene.viewerTask} · ${scene.narrativeRole} · ${family} · clips ${linked}\n    ${detail}`;
+        })
+        .join('\n')}`,
+    );
   }
 
   // Credits guardrail (visibility only, boolean by design): unattended agents must not burn calls into a wall,
@@ -304,7 +355,7 @@ export function buildSituation(body: ChatSituation): string {
 }
 
 /** Full chat system = identity/script + frame attach notice (or, when none is
- *  attached, the catalog + recommendation rules). Fully static (same bytes each
+ *  attached, the browse-on-request catalog rules). Fully static (same bytes each
  *  turn under one frame state): the situation snapshot lives in the user message
  *  and the playbook body is read on demand via read_frame — neither goes into
  *  system, so the cache prefix isn't broken. */
@@ -317,14 +368,15 @@ export function buildChatSystem(
   frame?: ResolvedFrame | null,
   frameCatalog?: string,
   scenarioSkill?: StudioScenarioSkill | null,
+  editingExpertise?: string,
 ): string {
   const frameBlock = frame
-    ? `\n\n<frame_attached id="${frame.id}" title="${frame.title}">\nThe user attached the frame "${frame.title}" — a theme content pack (design system + playbook) for this video. Call read_frame ONCE to load it BEFORE planning or generating anything, then follow it: its design tokens are already applied to the composition; carry its composition rules and block recipes into every add_block / edit_block instruction you write. If a read_frame result for this frame already exists in the conversation, do not call it again. Where the frame conflicts with an explicit user instruction, the user wins.\n</frame_attached>`
+    ? `\n\n<frame_attached id="${frame.id}" title="${frame.title}">\nThe user independently selected the frame "${frame.title}" — a complete video design system expressed as a rich Markdown playbook. Call read_frame ONCE to load it BEFORE planning or generating anything, then read it as a whole. Its tokens are already applied to the composition; carry its visual thesis, material and image treatment, footage relationship, composition and density, typography, temporal behavior, sequence contour, sound-image relationship, caption language, ratio adaptation and review judgment into the Director Plan and every relevant visual action. A Frame is NOT a set of fixed output types, scene routes, quotas, block recipes, or a foundational editing method with colors attached: adapt its audiovisual world to each Scene's purpose and evidence, and allow sequence contrast without losing identity. Skill and Frame are orthogonal: do not judge this Frame's compatibility from the active Skill and do not switch it because another Frame seems more typical. If a read_frame result for this frame already exists in the conversation, do not call it again. Where the frame conflicts with an explicit user instruction, factual evidence, accessibility or brand obligations, those requirements win.\n</frame_attached>`
     : frameCatalog
-      ? `\n\n<frame_catalog>\nNo frame (theme content pack) is attached. Frames define a video's design language when the edit uses one. Rules:\n- Before an explicitly requested complete designed first pass where a theme materially affects the result, look at the content and recommend the 1-2 best-fitting frames from the catalog below in ONE short sentence, then ask the user to pick (or to skip). Do not start that bulk edit in the same turn as the question.\n- When the user picks one (or names a frame themselves at any point), call attach_frame with its id — do not just talk about it.\n- NEVER block small edits (moving/editing single blocks, shot tweaks) on this question; just do the edit.\n${frameCatalog}\n</frame_catalog>`
+      ? `\n\n<frame_catalog>\nNo Frame (visual-directing content pack) is attached. Remain themeless: a complete edit does not authorize automatic Frame selection. Themeless still receives the host's neutral visual-craft quality floor; it means no authored visual world, not permission to emit generic fixed cards. Frames are independent of Studio Skills, and catalog previews are samples of a visual language—not templates, promised output types, or a compatibility matrix. Rules:\n- Attach a Frame only when the user explicitly chooses one or explicitly delegates the choice (for example, "pick a Frame for me").\n- When the user asks to browse, compare, or receive recommendations, discuss a few options from their stated visual intent and remind them that the full catalog remains selectable. Never rank Frames by the active Skill.\n- Do not use a hidden safe default and do not infer a preferred Frame from content category.\n- A local or complete edit may remain themeless and still be deliberately designed.\n${frameCatalog}\n</frame_catalog>`
       : '';
   const skillBlock = scenarioSkill
-    ? `\n\n<scenario_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected this editorial lens for the current chat. Apply its domain judgment while continuing to infer actions from the user's request, current state, and shared Studio tools. Do not treat it as a workflow trigger or claim that it adds tools or locks the project.\n${scenarioSkill.systemBrief}\n</scenario_skill>`
+    ? `\n\n<studio_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected the following complete Markdown Skill for this chat. Read the whole document and use it as an expert editorial playbook. Its prose guides judgment; it is not structured configuration, a fixed workflow, or a component bundle. Adapt it to the evidence and request. The Skill adds no tools and never overrides an explicit user instruction.\n${scenarioSkill.markdown}\n</studio_skill>`
     : '';
-  return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${skillBlock}${frameBlock}`;
+  return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${editingExpertiseBlock(editingExpertise)}${skillBlock}${frameBlock}`;
 }

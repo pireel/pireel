@@ -147,6 +147,8 @@ export type EditorCommand =
     clip: Omit<NarrativeTimelineClip, 'startFrame'>;
     asset?: EditorMediaAsset;
     mode?: 'ripple' | 'overwrite';
+    /** Director scene that owns this inserted interval; inferred by placement when omitted. */
+    sceneId?: string;
   }
   | { type: 'narrative.reorder'; clipIds: TimelineClipId[] }
   | { type: 'clips.remove'; trackId: TrackId; clipIds: TimelineClipId[]; includeLinked?: boolean }
@@ -158,6 +160,8 @@ export type EditorCommand =
     clips: TimelineClipPlacement[];
     mode: 'overwrite' | 'ripple';
     includeLinked?: boolean;
+    /** Director scene that owns the inserted visual interval; inferred from overlap when omitted. */
+    sceneId?: string;
   }
   | {
     type: 'range.remove';

@@ -76,12 +76,17 @@ describe('MCP 工具面', () => {
 
 describe('MCP 协议处理', () => {
   it('initialize:回显协议版本,instructions 带字幕目录与 get_state 纪律', async () => {
-    const r = await handleMcpRequest({ id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } }, deps());
+    const r = await handleMcpRequest(
+      { id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } },
+      deps({ editingExpertise: 'PRIVATE HOST EDITING JUDGMENT' }),
+    );
     const result = r!.result as { protocolVersion: string; instructions: string; serverInfo: { name: string } };
     expect(result.protocolVersion).toBe('2025-03-26');
     expect(result.serverInfo.name).toBe('pireel-studio');
     expect(result.instructions).toContain('<caption_catalog>');
     expect(result.instructions).toContain('get_state');
+    expect(result.instructions).toContain('<editing_expertise>');
+    expect(result.instructions).toContain('PRIVATE HOST EDITING JUDGMENT');
   });
   it('通知返回 null(路由回 202);未知方法回 -32601', async () => {
     expect(await handleMcpRequest({ method: 'notifications/initialized' }, deps())).toBeNull();

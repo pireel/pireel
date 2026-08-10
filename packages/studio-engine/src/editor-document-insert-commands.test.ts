@@ -9,6 +9,7 @@ import {
   type NarrativeTimelineClip,
   type TimelineClipPlacement,
 } from './editor-document';
+import type { DirectorPlanV1 } from './director-plan';
 
 function testDocument(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
@@ -76,6 +77,42 @@ function audioTrack(id: string, clip: AudioTimelineClip, patch: Partial<EditorTr
 }
 
 describe('EditorDocument V2 clip insertion commands', () => {
+  it('keeps Director intervals and scene membership aligned during a ripple insert', () => {
+    const document = testDocument();
+    document.timeline.tracks[0]!.clips = [narrative('talk', 0, 300, 0, 10)];
+    const plan: DirectorPlanV1 = {
+      version: 1,
+      goal: 'Explain, then prove.',
+      creativeThesis: 'Let evidence follow the claim.',
+      scenes: [
+        { id: 'claim', label: 'Claim', startFrame: 0, durationFrames: 120, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'State the claim.' },
+        { id: 'proof', label: 'Proof', startFrame: 120, durationFrames: 180, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show the evidence.' },
+      ],
+    };
+    document.semantics.directorPlan = plan;
+    document.semantics.scenes = [
+      { id: 'claim', clipIds: ['talk'] },
+      { id: 'proof', clipIds: ['talk'] },
+    ];
+
+    const result = applyEditorCommand(document, {
+      type: 'clips.insert',
+      trackId: document.semantics.primaryNarrativeTrackId,
+      atFrame: 60,
+      mode: 'ripple',
+      sceneId: 'claim',
+      clips: [placement(narrative('evidence', 0, 30, 12, 13))],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.semantics.directorPlan?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
+      ['claim', 0, 150],
+      ['proof', 150, 180],
+    ]);
+    expect(result.document.semantics.scenes.find((scene) => scene.id === 'claim')?.clipIds).toContain('evidence');
+    expect(validateEditorDocumentV2(result.document)).toEqual([]);
+  });
+
   it('ripple-inserts into an empty primary lane and opens the same gap on sync-locked tracks', () => {
     const document = testDocument();
     document.timeline.tracks.push(

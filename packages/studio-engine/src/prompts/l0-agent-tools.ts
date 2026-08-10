@@ -12,7 +12,7 @@
  * (Previous header follows — the operational contract for adding tools is unchanged.)
  */
 /**
- * Studio editing agent toolset — defined once, shared by server and client.
+ * Studio editing expert toolset — defined once, shared by server and client.
  *
  * Key design: these tools are NOT executed on the server. The server only uses their
  * JSON schema to attach tools to streamText (the model emits tool-calls from that);
@@ -27,6 +27,7 @@
 
 import { CAPTION_PRESETS } from '../caption-presets';
 import { PLACE_ANCHORS } from '../composition-core';
+import { NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '../director-plan';
 
 export type StudioToolKind = 'badge' | 'card';
 
@@ -79,6 +80,7 @@ const AGENT_CLIP_ITEM_SCHEMA = {
     assetId: { type: 'string', description: 'Exact registered asset id.' },
     trackId: { type: 'string', description: 'Optional exact target track. Omit to reuse/create the semantic role lane.' },
     role: { type: 'string', enum: ['broll', 'narration', 'music', 'sfx'], description: 'Semantic lane role. Audio defaults to narration; visual media defaults to broll.' },
+    sceneId: { type: 'string', description: 'Director scene that owns this visual clip. For a planned edit, pass the exact scene id; audio clips ignore it.' },
     startSec: { type: 'number', description: 'Edited-timeline start in seconds.' },
     durationSec: { type: 'number', description: 'Timeline duration. Defaults to source duration (images default to 5s).' },
     sourceInSec: { type: 'number' }, sourceOutSec: { type: 'number' },
@@ -124,7 +126,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.read_frame.label',
     description:
-      "Load the attached frame's playbook (theme content pack: design tokens, composition rules, per-block build recipes). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then follow the playbook. Its result persists in the conversation: if a read_frame result for this frame is already in the history, do NOT call it again. No input needed.",
+      "Load the attached Frame's complete video design-system playbook (material and image treatment, footage relationship, composition, density, typography, temporal behavior, sequence contour, sound-image relationship, captions, ratio adaptation and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole and adapt its audiovisual world to each Scene's purpose and evidence. It is not a catalog of fixed output types, block recipes, or a foundational editing method with colors attached. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
   },
   {
@@ -134,8 +136,49 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🖼️',
     label: 'tools.attach_frame.label',
     description:
-      "Attach a frame (theme content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. Call this when the user picks a frame from your recommendation, or names one explicitly. The catalog of ids appears in <frame_catalog> when none is attached. Also usable to SWITCH to a different frame.",
+      "Attach a Frame (visual-directing content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. Call only after the user explicitly chooses a Frame or explicitly delegates the choice. Skill and Frame are independent; never select or reject one from supposed Skill compatibility. Also usable to SWITCH Frames when the user requests it.",
     inputSchema: obj({ frame_id: { type: 'string', description: 'Frame id from the catalog, e.g. "biennale-poster"' } }, ['frame_id']),
+  },
+  {
+    id: 'set_director_plan',
+    kind: 'badge',
+    icon: '🎬',
+    label: 'tools.set_director_plan.label',
+    description:
+      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Each scene is a non-overlapping narrative interval; purpose, evidence, free-form visualTreatment and assetStrategy explain why it exists. Times use the edited timeline in seconds.',
+    chatOnly: true,
+    inputSchema: obj(
+      {
+        goal: { type: 'string', description: 'Concrete viewer or business outcome for this output.' },
+        creativeThesis: { type: 'string', description: 'One concise directing idea that governs pacing, evidence and visual contrast.' },
+        skillId: { type: 'string', description: 'Selected Studio Skill id when one is active; independent of frameId.' },
+        frameId: { type: 'string', description: 'User-selected Frame id when one is attached; independent of skillId.' },
+        audience: { type: 'string', description: 'Intended viewer, when known.' },
+        scenes: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 100,
+          items: obj(
+            {
+              id: { type: 'string', description: 'Short stable id unique inside this plan.' },
+              label: { type: 'string', description: 'Short human-readable scene name.' },
+              startSec: { type: 'number', description: 'Edited-timeline start in seconds.' },
+              durationSec: { type: 'number', description: 'Positive duration in seconds.' },
+              viewerTask: { type: 'string', enum: [...VIEWER_TASKS] },
+              narrativeRole: { type: 'string', enum: [...NARRATIVE_ROLES] },
+              sceneFamily: { type: 'string', enum: [...SCENE_FAMILIES], description: 'Shared vocabulary, not a component or layout selector. Use custom when the edit needs another family.' },
+              customFamily: { type: 'string', description: 'Free-form family name; required only when sceneFamily is custom.' },
+              purpose: { type: 'string', description: 'Why this scene exists and what should change for the viewer.' },
+              evidence: { type: 'array', items: { type: 'string' }, description: 'Transcript/footage/product/asset facts that support this scene.' },
+              visualTreatment: { type: 'string', description: 'Free-form direction within the theme; do not name a stock card unless it is genuinely right.' },
+              assetStrategy: { type: 'string', description: 'Which source/project/official/generated material should carry the scene, and why.' },
+            },
+            ['id', 'label', 'startSec', 'durationSec', 'viewerTask', 'narrativeRole', 'sceneFamily', 'purpose'],
+          ),
+        },
+      },
+      ['goal', 'creativeThesis', 'scenes'],
+    ),
   },
   /* ---------- speech-editing playbook (separate skill content pack; server-executed, client only renders the card, no runTool impl) ---------- */
   {
@@ -292,10 +335,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✨',
     label: 'tools.add_block.label',
     description:
-      'Add a NEW overlay element (a title card, big number/stat, bullet list, or an animated keyword caption). The actual HTML/animation is generated from your instruction. Use when the user wants something that is not on screen yet. Put a concrete, self-contained instruction in `instruction` (what it says + the look), written in the video\'s language (match the transcript unless the user says otherwise). Set `atSec` and `durationSec` to the complete spoken thought it supports; both otherwise default to the current playhead and 3 seconds.',
+      'Add a NEW overlay element. The visual form and animation are generated from meaning, not limited to stock cards. Use when the user wants something that is not on screen yet. When executing a saved Director Plan, pass its exact sceneId: runtime injects that scene\'s purpose, evidence, visual treatment, asset strategy and neighboring-scene contrast, generates bespoke themed HTML, and binds the new clip back to the Semantic Scene. For an unplanned small edit, put a concrete self-contained instruction (what it says + the look). Write on-screen content in the video\'s language. Set atSec and durationSec to the complete spoken thought it supports; both otherwise default to the current playhead and 3 seconds.',
     inputSchema: obj(
       {
         instruction: { type: 'string', description: 'Instruction describing the new element (content + style).' },
+        sceneId: { type: 'string', description: 'Exact scene id from the saved Director Plan. Required for planned full-draft graphics; omit for an unplanned local edit.' },
         atSec: { type: 'number', description: 'Timeline start in seconds. Omit to use the playhead.' },
         durationSec: { type: 'number', description: 'On-screen duration in seconds (>= 0.3). Omit only for an intentional 3-second element.' },
       },
@@ -393,8 +437,8 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '⧉',
     label: 'tools.duplicate_block.label',
     description:
-      'Duplicate an overlay block (same content/box/track, new id). `atSec` = where the copy starts; omit to place it right after the original. Use then edit_block to vary the copy.',
-    inputSchema: obj({ blockId: { type: 'string' }, atSec: { type: 'number' } }, ['blockId']),
+      'Duplicate an overlay block (same content/box/track, new id). `atSec` = where the copy starts; omit to place it right after the original. Its Semantic Scene is inferred from the new placement; when executing a Director Plan, pass the exact sceneId to resolve a shared boundary deliberately. Use then edit_block to vary the copy.',
+    inputSchema: obj({ blockId: { type: 'string' }, atSec: { type: 'number' }, sceneId: { type: 'string', description: 'Exact Director Plan scene id for a planned duplicate.' } }, ['blockId']),
   },
   {
     id: 'get_block',
@@ -413,13 +457,14 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "LOOK at the rendered result with a vision model (your delegated eyes — you cannot see frames yourself): captures every requested composed frame, compares them locally, and sends only visually distinct representatives to paid cloud vision. Returns the representative findings plus localComparison groups mapping skipped similar moments. Use it for final QA after a multi-shot aspect/framing change as well as after a batch of graphics lands. Sample every distinct framing and every moment where several overlays coexist (up to 18 candidates per call). Set forceCloudAll=true only when the user explicitly needs an independent reading of every requested moment. Fix reported issues with the relevant atomic tool. It also answers what a moment actually looks like; answer from returned scenes, never imagination. Skip it for single small edits.",
+      "LOOK at the rendered result with a scene-level visual QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples one representative moment per Director Scene, explicitly covering entrance, pressure, proof and exit, runs local structure checks, compares frames locally, and sends only visually distinct representatives to paid cloud vision. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing source evidence, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
     inputSchema: obj(
       {
-        atSecs: { type: 'array', items: { type: 'number' }, description: "Edited-timeline candidate moments to review; local similarity filtering runs before paid cloud vision (max 18)." },
+        atSecs: { type: 'array', items: { type: 'number' }, description: 'Optional edited-timeline candidate moments for a local review. Omit for automatic Director Scene sampling (max 18).' },
+        sceneIds: { type: 'array', items: { type: 'string' }, description: 'Optional exact Semantic Scene ids. Use after repair to limit re-review to affected scenes; requires a saved Director Plan.' },
         forceCloudAll: { type: 'boolean', description: 'Bypass local similarity filtering only for explicit per-moment comparison/inspection.' },
       },
-      ['atSecs'],
+      [],
     ),
   },
   /* ---------- neutral timeline atoms (one contract: live, offline and MCP) ---------- */
@@ -483,6 +528,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         properties: {
           id: { type: 'string' }, text: { type: 'string' }, sub: { type: 'string' }, startSec: { type: 'number' },
           durationSec: { type: 'number' }, trackId: { type: 'string' }, trackIndex: { type: 'number' },
+          sceneId: { type: 'string', description: 'Exact Director scene id for planned text.' },
         },
         required: ['text', 'startSec'],
       } },
@@ -501,12 +547,12 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
-    description: 'Place one or more registered assets with overwrite semantics. Each clip is typed from its asset; missing semantic lanes are created transactionally. Audio must declare narration/music/sfx when the default narration role is not intended.',
+    description: 'Place one or more registered assets with overwrite semantics. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
     id: 'insert_clips', kind: 'badge', icon: '↪️', label: 'tools.insert_clips.label',
-    description: 'Insert one or more registered assets and ripple later material on sync-locked/linked lanes. Use add_clips when replacement rather than timeline opening is intended.',
+    description: 'Insert one or more registered assets and ripple later material on sync-locked/linked lanes while keeping Director scene intervals aligned. Planned visual clips must pass their exact sceneId. Use add_clips when replacement rather than timeline opening is intended.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
@@ -1203,12 +1249,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.insert_clip.label',
     description:
-      "Insert a B-roll video segment into the main track. Bytes must already be on Pireel storage — pass `sig` (from the asset-import helper) OR `url` (asset library / generated video; external URLs are rejected — upload first). Inserts at `atSec` (snaps to the nearest shot boundary, shifts later overlays right). The segment is a full peer: framing, captions, its own audio and on-demand transcript. Needs the studio tab open.",
+      "Insert a B-roll video segment into the main track. Bytes must already be on Pireel storage — pass `sig` (from the asset-import helper) OR `url` (asset library / generated video; external URLs are rejected — upload first). For a saved Director Plan, choose the asset from that scene's evidence + assetStrategy and pass the exact sceneId; the scene expands around the inserted interval, later scenes shift right, and the new Clip is bound back to it. Inserts at `atSec` (snaps to the nearest shot boundary, shifts later overlays right). The segment is a full peer: framing, captions, its own audio and on-demand transcript. Needs the studio tab open.",
     inputSchema: obj(
       {
         sig: { type: 'string', description: 'Media fingerprint from the asset-import helper upload (preferred for local files).' },
         url: { type: 'string', description: "URL of a video already on the user's Pireel storage/CDN." },
         atSec: { type: 'number', description: 'Edited-timeline insertion point (defaults to the playhead; snaps to the nearest cut).' },
+        sceneId: { type: 'string', description: 'Exact scene id from the saved Director Plan. Required for planned B-roll; omit for an unplanned local insertion.' },
       },
       [],
     ),

@@ -1,15 +1,11 @@
 'use client';
 
-import { bgmSearchTags, officialStickerSearchTags, type AssetSearchDocument, type AssetSearchScope } from '@pireel/studio-engine/asset-search';
-import { kitComponents } from '@pireel/studio-engine/kit-templates';
+import { type AssetSearchDocument, type AssetSearchScope } from '@pireel/studio-engine/asset-search';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { imageThumb } from '@pireel/ui/image-url';
 import { loadElementEntries } from './element-history';
 import { listStudioGens } from './gen-api';
-import { ELEMENT_TEMPLATES, localizedTemplatePrompt } from './gen-templates';
-import { studioLocale, t } from './i18n';
-import type { OfficialAssetsResponse } from './official-assets-types';
 
 interface MaterialItem {
   id: string;
@@ -22,13 +18,12 @@ interface MaterialItem {
   created_at: number;
 }
 
-export { searchOfficialAssetDocuments } from './official-asset-search-client';
-
 const validDims = (w: number | null | undefined, h: number | null | undefined) =>
   w && h && w > 0 && h > 0 ? { w, h } : undefined;
 
 /** Gather all searchable library metadata available to an open Studio tab. Every request is
- * fail-soft so the local/kit portions still work in the zero-backend OSS shell. */
+ * fail-soft so local portions still work in the zero-backend OSS shell. Curated content is
+ * returned only by an injected host provider. */
 export async function collectAssetSearchDocuments(
   projectId: string,
   localAssets: readonly LocalAssetIndexEntry[],
@@ -43,7 +38,7 @@ export async function collectAssetSearchDocuments(
       .then((body: { items?: MaterialItem[] } | null) => body?.items ?? [])
       .catch(() => [] as MaterialItem[]);
 
-  const [images, videos, audio, genImages, genVideos, genAudio, syncedElements, official] = await Promise.all([
+  const [images, videos, audio, genImages, genVideos, genAudio, syncedElements, curated] = await Promise.all([
     includeCloud ? getUploads('image') : Promise.resolve([] as MaterialItem[]),
     includeCloud ? getUploads('video') : Promise.resolve([] as MaterialItem[]),
     includeCloud ? getUploads('audio') : Promise.resolve([] as MaterialItem[]),
@@ -51,9 +46,9 @@ export async function collectAssetSearchDocuments(
     includeCloud ? listStudioGens(projectId, 'video', 100).catch(() => []) : Promise.resolve([]),
     includeCloud ? listStudioGens(projectId, 'audio', 100).catch(() => []) : Promise.resolve([]),
     includeCloud ? (studioProviders().elements?.list(projectId).catch(() => null) ?? Promise.resolve(null)) : Promise.resolve(null),
-    includeOfficial ? fetch('/api/studio/official-assets')
-      .then((response): Promise<OfficialAssetsResponse> => (response.ok ? (response.json() as Promise<OfficialAssetsResponse>) : Promise.resolve({})))
-      .catch(() => ({} as OfficialAssetsResponse)) : Promise.resolve({} as OfficialAssetsResponse),
+    includeOfficial
+      ? (studioProviders().curatedAssets?.listSearchDocuments().catch(() => []) ?? Promise.resolve([]))
+      : Promise.resolve([] as AssetSearchDocument[]),
   ]);
 
   const docs: AssetSearchDocument[] = (includeMine ? localAssets : []).map((entry) => ({
@@ -121,77 +116,6 @@ export async function collectAssetSearchDocuments(
     });
   }
 
-  for (const sticker of official.stickers ?? []) {
-    docs.push({
-      assetId: `sticker:${sticker.id}`,
-      scope: 'official',
-      kind: 'image',
-      origin: 'sticker',
-      label: sticker.label || sticker.categoryLabel,
-      ...(validDims(sticker.width, sticker.height) ? { dimensions: validDims(sticker.width, sticker.height) } : {}),
-      fields: {
-        category: `${sticker.categoryLabel} ${sticker.categoryLabelEn}`,
-        tags: officialStickerSearchTags(sticker.label || sticker.categoryLabel, sticker.tags),
-        source: sticker.source,
-        license: sticker.license,
-      },
-      availability: 'ready',
-      locator: { url: imageThumb(sticker.key, 'original'), thumbUrl: imageThumb(sticker.key, 'strip') },
-    });
-  }
-  for (const bgm of official.bgm ?? []) {
-    docs.push({
-      assetId: `bgm:${bgm.id}`,
-      scope: 'official',
-      kind: 'audio',
-      origin: 'bgm',
-      label: bgm.label,
-      ...(bgm.durationSec ? { durationSec: bgm.durationSec } : {}),
-      fields: {
-        category: `${bgm.categoryLabel} ${bgm.categoryLabelEn}`,
-        tags: bgmSearchTags(bgm.narrationFit, bgm.moods, bgm.useCases),
-        artist: bgm.artist,
-        moods: bgm.moods,
-        useCases: bgm.useCases,
-        description: `energy:${bgm.energy} narration:${bgm.narrationFit}`,
-        source: bgm.source,
-        license: bgm.license,
-      },
-      availability: 'ready',
-      locator: { url: bgm.url, thumbUrl: imageThumb(bgm.coverKey, 'strip') },
-    });
-  }
-
-  if (includeOfficial) {
-    for (const [component, definition] of Object.entries(kitComponents)) {
-      docs.push({
-        assetId: `kit:${component}`,
-        scope: 'official',
-        kind: 'element',
-        origin: 'kit',
-        label: t(`engine.kit.${component}`),
-        fields: {
-          tags: ['kit', 'component', '组件', ...definition.searchTerms],
-          description: definition.summary,
-        },
-        availability: 'ready',
-        locator: { component },
-      });
-    }
-    const locale = studioLocale();
-    for (const template of ELEMENT_TEMPLATES) {
-      const prompt = localizedTemplatePrompt(template, locale);
-      docs.push({
-        assetId: `template:${template.id}`,
-        scope: 'official',
-        kind: 'element',
-        origin: 'template',
-        label: template.title ? t(template.title) : template.id,
-        fields: { category: template.category, prompt },
-        availability: 'ready',
-        locator: { templateId: template.id, prompt },
-      });
-    }
-  }
+  docs.push(...curated);
   return docs;
 }

@@ -2,6 +2,7 @@ import type { AudioClip } from '../audio-tracks';
 import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
+import type { DirectorPlanV1, NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -183,6 +184,11 @@ export interface SemanticScene {
   clipIds: TimelineClipId[];
   label?: string;
   intent?: string;
+  viewerTask?: ViewerTask;
+  narrativeRole?: NarrativeRole;
+  sceneFamily?: SceneFamily;
+  customFamily?: string;
+  purpose?: string;
 }
 
 export interface EditorSemanticState {
@@ -197,7 +203,9 @@ export interface EditorSemanticState {
     | { mode: 'clip'; clipId: TimelineClipId };
   transcripts: Record<AssetId, TranscriptSegment[]>;
   scenes: SemanticScene[];
-  /** Existing storyboard/agent plan, retained until scenes become its canonical representation. */
+  /** Saved scene-level commitment produced by the editing expert for a complete edit. */
+  directorPlan?: DirectorPlanV1;
+  /** Legacy arbitrary storyboard context. Retained for compatibility; new work uses directorPlan. */
   plan?: unknown;
 }
 

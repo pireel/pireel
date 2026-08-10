@@ -11,6 +11,7 @@ import {
   type OverlayClipPatchUpdate,
   type TimelineClip,
 } from './editor-document';
+import { assignClipToBestDirectorScene } from './semantic-scenes';
 
 export interface OverlayDocumentPatch {
   clipId: string;
@@ -69,9 +70,16 @@ export function applyOverlayDocumentEdits(input: OverlayDocumentPatchInput): Ove
   }
   const command = applyEditorCommand(input.document, { type: 'overlay.patch', updates });
   if (!command.ok) return { ok: false, document: input.document, error: command.error };
+  let document = command.document;
+  for (const update of input.updates) {
+    if (update.startSec == null && update.durationSec == null) continue;
+    const assigned = assignClipToBestDirectorScene(document, update.clipId);
+    if (!assigned.ok) return failure(input.document, 'invalid-command', assigned.error, { path: 'sceneId' });
+    document = assigned.document;
+  }
   return {
     ok: true,
-    document: command.document,
+    document,
     receipts: [command.receipt],
   };
 }

@@ -8,9 +8,11 @@ export interface FrameCatalogItem {
   title: string;
   summary: string;
   icon: string;
-  /** Cover R2 raw key; null → fall back to emoji. */
+  /** Square icon R2 raw key; null → fall back to emoji. */
   iconKey?: string | null;
-  /** Theme output-type preview words (preview card on the frame panel detail page). */
+  /** Landscape catalog cover; null → render the code-native dialect cover. */
+  coverKey?: string | null;
+  /** Open-vocabulary visual-language sample names shown on the Frame detail page. */
   showcase: string[];
   /** Theme design tokens (keys match theme vars); the preview card renders the theme's real tones from it. null → use the current project theme. */
   palette?: Record<string, string> | null;
@@ -22,7 +24,7 @@ export interface FrameCatalogItem {
 let cache: FrameCatalogItem[] | null = null;
 
 // localStorage mirror: the catalog is present on the first frame after refresh/new tab (boot theme wall isn't empty), then overwritten once the background fetch lands.
-const LS_KEY = 'studio:frame-catalog:v1';
+const LS_KEY = 'studio:frame-catalog:v3';
 function readStoredCatalog(): FrameCatalogItem[] | null {
   if (typeof window === 'undefined') return null;
   try {

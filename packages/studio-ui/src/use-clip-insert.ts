@@ -36,6 +36,7 @@ import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTar
 interface InsertClipCoreOptions {
   placement?: 'nearest' | 'exact';
   mode?: TimelineInsertMode;
+  sceneId?: string;
 }
 
 interface InsertLibraryClipOptions {
@@ -181,6 +182,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       atSec: at,
       ...(options.mode ? { mode: options.mode } : {}),
       ...(dims ? { sourceWidth: dims.width, sourceHeight: dims.height } : {}),
+      ...(options.sceneId ? { sceneId: options.sceneId } : {}),
     });
     if (!edit.ok || !edit.assetId) {
       toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : edit.error.message);

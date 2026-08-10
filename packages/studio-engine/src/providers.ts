@@ -14,6 +14,7 @@ import type { BlockEdit, ComposeContext, KitChoice } from './compose';
 import type { AsrSegment } from './build-blocks';
 import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
 import type { EditorDocumentV2 } from './editor-document';
+import type { AssetSearchDocument } from './asset-search';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
 export interface ComposeRequest {
@@ -76,6 +77,23 @@ export interface ElementStore {
   remove(projectId: string, id: string): Promise<void>;
 }
 
+export interface CuratedAssetSemanticResult {
+  query?: string;
+  mode: 'semantic' | 'metadata';
+  results: Array<{ assetId: string; kind?: string; score: number }>;
+}
+
+/** Optional host-owned catalog extension. OSS knows the search contract, never the catalog contents. */
+export interface CuratedAssetProvider {
+  listSearchDocuments(): Promise<AssetSearchDocument[]>;
+  semanticSearch(args: {
+    query: string;
+    kind: 'all' | 'image' | 'video' | 'audio' | 'element';
+    limit: number;
+    signal?: AbortSignal;
+  }): Promise<CuratedAssetSemanticResult | null>;
+}
+
 export interface StudioProviders {
   composer: BlockComposer;
   transcriber: Transcriber;
@@ -84,6 +102,8 @@ export interface StudioProviders {
   uploads: AssetUploader;
   /** Project component library sync (absent = pure-local localStorage library, e.g. the OSS shell). */
   elements?: ElementStore;
+  /** Hosted/curated asset metadata and ranking; absent in the zero-content OSS shell. */
+  curatedAssets?: CuratedAssetProvider;
   /** Endpoint for the built-in agent chat (a hosted-LLM feature; OSS shells may omit and rely on external agents via MCP). */
   chatEndpoint?: string;
   /** Cloud undo fallback: pop the newest entry off the project's server-side history ring and

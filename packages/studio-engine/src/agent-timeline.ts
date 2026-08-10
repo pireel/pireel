@@ -152,6 +152,7 @@ export function agentTimelineSnapshot(document: EditorDocumentV2) {
       managedCaptionSource: document.semantics.managedCaptionSource ?? { mode: 'auto' },
       transcriptAssetIds: Object.entries(document.semantics.transcripts).filter(([, segments]) => segments.length).map(([assetId]) => assetId),
       scenes: document.semantics.scenes,
+      directorPlan: document.semantics.directorPlan,
     },
   };
 }
@@ -366,6 +367,7 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
       clips: [placement],
       mode,
       includeLinked: input.includeLinked !== false,
+      ...(string(item.sceneId) ? { sceneId: string(item.sceneId) } : {}),
     });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
     next = inserted.document;
@@ -769,7 +771,12 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     });
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
-    const inserted = insertOverlayDocumentClip({ document: next, block, ...(string(item.trackId) ? { toTrackId: string(item.trackId) } : {}) });
+    const inserted = insertOverlayDocumentClip({
+      document: next,
+      block,
+      ...(string(item.trackId) ? { toTrackId: string(item.trackId) } : {}),
+      ...(string(item.sceneId) ? { sceneId: string(item.sceneId) } : {}),
+    });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
     next = inserted.document;
     receipts.push(...inserted.receipts);

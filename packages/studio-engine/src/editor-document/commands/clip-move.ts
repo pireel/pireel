@@ -1,6 +1,7 @@
 import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { assignClipToBestDirectorScene } from '../../semantic-scenes';
 
 export interface MoveEditorClipOptions {
   trackId: string;
@@ -56,7 +57,12 @@ export function moveEditorClip(document: EditorDocumentV2, options: MoveEditorCl
     }
     return touched.has(track.id) ? { ...track, clips: [...clips].sort((left, right) => left.startFrame - right.startFrame) } : track;
   });
-  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks } };
+  let next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks } };
+  for (const clipId of ids) {
+    const assigned = assignClipToBestDirectorScene(next, clipId);
+    if (!assigned.ok) return commandFailure(document, 'invalid-command', assigned.error, { path: 'sceneId' });
+    next = assigned.document;
+  }
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
   const receipt = emptyCommandReceipt('clip.move');

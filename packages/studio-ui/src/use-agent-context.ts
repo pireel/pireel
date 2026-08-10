@@ -93,6 +93,8 @@ export function useAgentContext(deps: AgentContextDeps) {
    *  so it enters the feed once via the extract_asr receipt / read_script, no need to resend each round (prompt-cache friendly). */
   const getChatBody = useCallback((): Record<string, unknown> => {
     const c = compRef.current;
+    const document = documentRef.current;
+    const directorPlan = document.semantics.directorPlan;
     let sel: { id: string; type: 'block' | 'shot'; label?: string; kind?: string } | null = null;
     if (selectedIdRef.current) {
       const b = c.blocks.find((x) => x.id === selectedIdRef.current);
@@ -159,7 +161,38 @@ export function useAgentContext(deps: AgentContextDeps) {
       selected: sel,
       playheadSec: tRef.current,
       // Pipeline state: so the agent doesn't blindly rerun, nor claim a transcript that doesn't exist
-      pipeline: { asr: !!asrRef.current?.length, visual: !!visualRef.current },
+      pipeline: {
+        asr: !!asrRef.current?.length,
+        plan: !!directorPlan || document.semantics.plan !== undefined,
+        visual: !!visualRef.current,
+      },
+      ...(directorPlan
+        ? {
+            directorPlan: {
+              goal: directorPlan.goal,
+              creativeThesis: directorPlan.creativeThesis,
+              ...(directorPlan.audience ? { audience: directorPlan.audience } : {}),
+              scenes: directorPlan.scenes.map((scene) => {
+                const semanticScene = document.semantics.scenes.find((candidate) => candidate.id === scene.id);
+                return {
+                  id: scene.id,
+                  label: scene.label,
+                  startSec: scene.startFrame / document.canvas.fps,
+                  endSec: (scene.startFrame + scene.durationFrames) / document.canvas.fps,
+                  viewerTask: scene.viewerTask,
+                  narrativeRole: scene.narrativeRole,
+                  sceneFamily: scene.sceneFamily,
+                  ...(scene.customFamily ? { customFamily: scene.customFamily } : {}),
+                  purpose: scene.purpose,
+                  ...(scene.evidence?.length ? { evidence: scene.evidence } : {}),
+                  ...(scene.visualTreatment ? { visualTreatment: scene.visualTreatment } : {}),
+                  ...(scene.assetStrategy ? { assetStrategy: scene.assetStrategy } : {}),
+                  ...(semanticScene?.clipIds.length ? { clipIds: semanticScene.clipIds } : {}),
+                };
+              }),
+            },
+          }
+        : {}),
       // Main-video byte-mount state: the project should have a video (has shots / has sig) but bytes aren't ready → tell the agent explicitly
       // (a handoff-just-opened tab is often in the OPFS miss → cloud fetch window; the data plane is complete)
       ...((videoSigRef.current || (c.shots ?? []).length) && !videoFileRef.current ? { videoBytesReady: false } : {}),

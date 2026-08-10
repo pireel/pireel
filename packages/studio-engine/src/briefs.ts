@@ -26,8 +26,17 @@ export interface FrameContent {
 
 /** compose's ACTIVE THEME text (single source shared by the compose route and BYO brief):
  *  theme tokens (+ palette override) + optional frame design-language graft (frame wins on aesthetics, engineering contract unchanged). */
-export function assembleComposeTheme(themeId?: string, palette?: Record<string, string>, frame?: FrameContent | null): string {
+export function assembleComposeTheme(
+  themeId?: string,
+  palette?: Record<string, string>,
+  frame?: FrameContent | null,
+  visualBaseline?: string,
+): string {
   let theme = themeForLlm(getTheme(themeId as ThemeId | undefined), palette);
+  const baseline = visualBaseline?.trim();
+  if (baseline) {
+    theme += `\n\n=== HOST VISUAL CRAFT BASELINE ===\nThis is a neutral quality floor, not a hidden Frame or visual identity. Apply its craft in a project without a Frame. When a Frame follows, keep the quality checks but let the Frame win every visible aesthetic decision.\n\n${baseline}`;
+  }
   if (frame) {
     theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this frame conflicts with the generic component styling, archetypes or default taste above, THE FRAME WINS. The engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
   }
@@ -42,11 +51,14 @@ export interface ComposeBriefInput {
   theme?: string;
   palette?: Record<string, string>;
   frame?: FrameContent | null;
+  /** Optional private host context that raises the quality floor without becoming a Frame. */
+  visualBaseline?: string;
   lang?: string;
   /** Domain preset constrains the searchable component vocabulary before query-time retrieval. */
   presetId?: string;
   /** Override the routing (an agent answered {"custom": true} and needs the markup contract for a
-   *  themeless project; or wants to fill props on a themed one). Default: frame ? html : kit. */
+   *  project; or wants to fill props on an existing kit block). Default: existing kit → kit,
+   *  otherwise html. New generation stays bespoke even without a Frame. */
   format?: 'kit' | 'html';
   /** The component a targeted kit block currently shows, so a BYO edit keeps unmentioned props. */
   kitCurrent?: KitChoice | null;
@@ -54,10 +66,11 @@ export interface ComposeBriefInput {
 
 /** Block-generation brief: the caller takes system+prompt, generates with its OWN model, and passes
  *  the raw output back to apply_block. Routing mirrors the in-app client: a themed project
- *  generates HTML (the theme is a prose description the model builds from); a themeless one fills
- *  a component's typed props. The returned `format` names which contract the text will follow. */
+ *  generates HTML (the optional Frame is a prose description the model builds from). Existing kit
+ *  blocks keep their typed-props contract; new generation stays bespoke even without a Frame. The
+ *  returned `format` names which contract the text will follow. */
 export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string; format: 'kit' | 'html'; candidateComponents: string[] } {
-  const format = input.format ?? (input.frame ? 'html' : 'kit');
+  const format = input.format ?? (input.kitCurrent ? 'kit' : 'html');
   const candidateComponents = retrieveComponentCandidates({
     instruction: input.instruction,
     block: input.block,
@@ -84,7 +97,7 @@ export function assembleComposeBrief(input: ComposeBriefInput): { system: string
     candidateComponents,
     system: withTheme(
       buildHtmlSystem({ componentIds: candidateComponents, ...(input.presetId ? { presetId: input.presetId } : {}) }),
-      assembleComposeTheme(input.theme, input.palette, input.frame),
+      assembleComposeTheme(input.theme, input.palette, input.frame, input.visualBaseline),
     ),
     prompt: buildBlockPrompt({
       block: input.block,

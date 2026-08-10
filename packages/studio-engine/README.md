@@ -12,6 +12,9 @@ The pure kernel of Pireel Studio. Everything here is framework-free and side-eff
 - `server-tools` — the offline executor: every data-level tool as a pure `(comp, context) → (comp', result)` function
 
 Consumers inject providers (LLM, ASR, storage, persistence). The engine owns contracts, not services.
+It also owns the parser and prompt seam for host-defined Markdown editing Skills, but ships no
+commercial Skill catalog or Skill body. Hosts resolve the selected id on the server and pass the
+resulting playbook into `buildChatSystem`.
 
 ## License
 

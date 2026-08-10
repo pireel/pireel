@@ -2,6 +2,7 @@ import type { EditorDocumentV2, EditorMediaAsset, NarrativeTimelineClip } from '
 import { validateEditorDocumentV2 } from '../validation';
 import { insertEditorClips } from './insert';
 import { commandFailure, type EditorCommandResult } from './types';
+import { directorPlanAfterRippleInsertion, withAdjustedDirectorPlan } from '../../director-plan-timing';
 
 function assetError(asset: EditorMediaAsset): string | null {
   if (!asset.id.trim()) return 'Narrative asset id is required.';
@@ -20,6 +21,7 @@ export function insertNarrativeClip(
   clip: Omit<NarrativeTimelineClip, 'startFrame'>,
   asset?: EditorMediaAsset,
   mode: 'ripple' | 'overwrite' = 'ripple',
+  sceneId?: string,
 ): EditorCommandResult {
   const issue = validateEditorDocumentV2(document).find((candidate) => candidate.severity === 'error');
   if (issue) return commandFailure(document, 'invalid-document', issue.message, { path: issue.path });
@@ -50,10 +52,28 @@ export function insertNarrativeClip(
     includeLinked: true,
   });
   if (!inserted.ok) return { ...inserted, document };
-  const semantics = {
+  let semantics = {
     ...inserted.document.semantics,
     ...(inserted.document.semantics.primaryNarrativeAssetId ? {} : { primaryNarrativeAssetId: clip.assetId }),
   };
+  if (mode === 'ripple' && document.semantics.directorPlan) {
+    const adjusted = directorPlanAfterRippleInsertion(
+      document.semantics.directorPlan,
+      atFrame,
+      clip.durationFrames,
+      sceneId,
+    );
+    if (!adjusted.ok) return commandFailure(document, 'invalid-command', adjusted.error, { path: 'sceneId' });
+    semantics = withAdjustedDirectorPlan(semantics, adjusted.plan);
+    if (adjusted.sceneId) {
+      semantics = {
+        ...semantics,
+        scenes: semantics.scenes.map((scene) => scene.id === adjusted.sceneId
+          ? { ...scene, clipIds: [...scene.clipIds.filter((id) => id !== clip.id), clip.id] }
+          : { ...scene, clipIds: scene.clipIds.filter((id) => id !== clip.id) }),
+      };
+    }
+  }
   delete semantics.plan;
   return {
     ok: true,

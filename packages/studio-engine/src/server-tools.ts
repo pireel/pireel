@@ -601,6 +601,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         clipId: b.id,
         newClipId,
         startSec: at,
+        ...(typeof input.sceneId === 'string' && input.sceneId.trim() ? { sceneId: input.sceneId.trim() } : {}),
         ...(target
           ? { toTrackId: target.id }
           : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),

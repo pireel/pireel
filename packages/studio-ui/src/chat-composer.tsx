@@ -8,6 +8,7 @@ import type { ChatStatus } from 'ai';
 import { useLocale } from 'use-intl';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { SkillIcon } from '@pireel/ui/skill-icon';
+import { imageThumb } from '@pireel/ui/image-url';
 import type { Composition } from '@pireel/studio-engine/composition';
 import type { StudioScenarioSkillId } from '@pireel/studio-engine/scenario-skills';
 import { framePack, type SupportedLocale as Locale } from '@pireel/studio-frames/locales';
@@ -18,6 +19,7 @@ import type { FrameCatalogItem } from './use-frame-catalog';
 import { elementIcon, makeElementPill } from './chat-format';
 import { t } from './i18n';
 import type { AttachedFrame, StudioElementRef } from './studio-chat';
+import type { StudioScenarioSkillOption } from './shell-context';
 
 export interface ComposerHandle {
   insertElementPill(el: StudioElementRef | null): void;
@@ -36,6 +38,7 @@ export function Composer({
   status,
   elements,
   skillId,
+  scenarioSkills,
   onPickSkill,
   frame,
   frames,
@@ -48,8 +51,10 @@ export function Composer({
   placeholder: string;
   status: ChatStatus;
   elements: StudioElementRef[];
-  /** Editorial scenario lens attached to this chat session. */
+  /** Rich Markdown Studio Skill attached to this chat session. */
   skillId: StudioScenarioSkillId;
+  /** Browser-safe host catalog; full Markdown never enters this component. */
+  scenarioSkills: readonly StudioScenarioSkillOption[];
   onPickSkill: (id: StudioScenarioSkillId) => void;
   /** Frame attached to the current session (theme button highlights; tapping the same item in the picker removes it). */
   frame: AttachedFrame | null;
@@ -336,6 +341,7 @@ export function Composer({
             <ChatSkillPicker
               editorRef={editorRef}
               skillId={skillId}
+              skills={scenarioSkills}
               disabled={isBusy}
               onChange={onPickSkill}
             />
@@ -428,6 +434,7 @@ function FrameOptionRow({
   setActive: () => void;
 }) {
   const block = useMemo(() => coverBlock(item.id, locale), [item.id, locale]);
+  const coverSrc = item.coverKey ? imageThumb(item.coverKey, 'list') : null;
   // Cover uses a uniform 16:9 canvas + the frame's own palette; chat can't reach the project comp, so theme is default
   const previewComp = useMemo<Composition>(
     () => ({ width: 1920, height: 1080, theme: 'general', video: null, blocks: [], ...(item.palette ? { palette: item.palette } : {}) }),
@@ -444,7 +451,9 @@ function FrameOptionRow({
       className={`flex w-full items-center gap-2.5 rounded-md p-1.5 text-left ${active ? 'bg-panel-2' : ''}`}
     >
       <span className={`border-line relative w-[112px] shrink-0 overflow-hidden rounded-md border ${selected ? 'ring-accent ring-2' : ''}`}>
-        {block ? (
+        {coverSrc ? (
+          <img src={coverSrc} alt="" loading="lazy" className="block aspect-video w-full object-cover" />
+        ) : block ? (
           <InlineBlockPreview comp={previewComp} block={block} width={112} animate="hover" ground="stage" />
         ) : (
           <span className="bg-panel-2 flex h-[63px] w-full items-center justify-center">

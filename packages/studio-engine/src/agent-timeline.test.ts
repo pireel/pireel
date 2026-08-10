@@ -4,6 +4,40 @@ import { emptyEditorDocumentV2 } from './editor-document';
 import { runAgentTimelineTool } from './agent-timeline';
 
 describe('shared agent timeline atoms', () => {
+  it('binds planned native visuals and reassigns them when they move across Director scenes', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document.semantics.directorPlan = {
+      version: 1,
+      goal: 'Move from claim to proof.',
+      creativeThesis: 'Evidence replaces assertion.',
+      scenes: [
+        { id: 'claim', label: 'Claim', startFrame: 0, durationFrames: 120, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'State the idea.' },
+        { id: 'proof', label: 'Proof', startFrame: 120, durationFrames: 180, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show evidence.' },
+      ],
+    };
+    document.semantics.scenes = [
+      { id: 'claim', clipIds: [] },
+      { id: 'proof', clipIds: [] },
+    ];
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [{ id: 'evidence', kind: 'image', url: 'https://cdn.example/evidence.png' }],
+    }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', {
+      clips: [{ id: 'evidence-clip', assetId: 'evidence', startSec: 1, durationSec: 2, sceneId: 'claim' }],
+    });
+    expect(placed.ok).toBe(true);
+    expect(placed.document!.semantics.scenes.find((scene) => scene.id === 'claim')?.clipIds).toContain('evidence-clip');
+    expect((placed.data as { clipIds: string[] }).clipIds).toEqual(['evidence-clip']);
+    expect((runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as { semantics: { directorPlan?: unknown } }).semantics.directorPlan).toBeDefined();
+
+    const moved = runAgentTimelineTool(placed.document!, 'move_clips', {
+      items: [{ clipId: 'evidence-clip', startSec: 5 }],
+    });
+    expect(moved.ok).toBe(true);
+    expect(moved.document!.semantics.scenes.find((scene) => scene.id === 'claim')?.clipIds).not.toContain('evidence-clip');
+    expect(moved.document!.semantics.scenes.find((scene) => scene.id === 'proof')?.clipIds).toContain('evidence-clip');
+  });
+
   it('registers exact TTS text, places narration audio, and relays audio-only captions', () => {
     const empty = emptyEditorDocumentV2({ fps: 30 });
     const registered = runAgentTimelineTool(empty, 'register_media', {
