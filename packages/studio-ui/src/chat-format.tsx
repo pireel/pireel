@@ -42,7 +42,7 @@ export const CHAT_PILL_CLASS =
   'sc-pill group/chat-pill relative mx-0.5 inline-flex h-6 max-w-[180px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
 
 export const CHAT_PILL_ICON_CLASS =
-  'bg-accent/10 inline-flex h-4 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[2px] text-[11px] leading-none';
+  'bg-accent/10 inline-flex h-4 w-5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-[11px] leading-none';
 
 export const CHAT_PILL_LABEL_CLASS = 'min-w-0 truncate text-[11px] leading-none';
 
