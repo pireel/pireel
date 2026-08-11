@@ -68,6 +68,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   renderAudioTracksRef.current = renderAudioTracks;
   /** Mounted bytes per clip sig (blob src dies on refresh; the File here is the live handle). */
   const audioFilesRef = useRef<Map<string, File>>(new Map());
+  /** Blob URLs remain valid for undo for the lifetime of this hook, then are all released. */
+  const audioObjectUrlsRef = useRef<Set<string>>(new Set());
+  const audioUrlsAliveRef = useRef(true);
   const [audioFileRev, setAudioFileRev] = useState(0);
   /** Peak envelope per VIDEO source ('main' / insert-clip url) for the scene rail's audio strip: the video
    *  track has its own sound, and the rail should show it. Measured lazily off the same extract+decode the
@@ -80,6 +83,25 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Main-narration loudness cache (extract+decode is seconds on long videos — measure once per source). */
   const narrDbRef = useRef<{ sig: string; db: number | null } | null>(null);
   const recoverTriedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const objectUrls = audioObjectUrlsRef.current;
+    const audioFiles = audioFilesRef.current;
+    audioUrlsAliveRef.current = true;
+    return () => {
+      audioUrlsAliveRef.current = false;
+      for (const url of objectUrls) URL.revokeObjectURL(url);
+      objectUrls.clear();
+      audioFiles.clear();
+    };
+  }, []);
+
+  const createAudioObjectUrl = (file: File): string | null => {
+    if (!audioUrlsAliveRef.current) return null;
+    const url = URL.createObjectURL(file);
+    audioObjectUrlsRef.current.add(url);
+    return url;
+  };
 
   const narrationDb = async (): Promise<number | null> => {
     const f = videoFileRef.current;
@@ -141,7 +163,8 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       return;
     }
     const sig = opts?.sig ?? fileSig(file);
-    const url = URL.createObjectURL(file);
+    const url = createAudioObjectUrl(file);
+    if (!url) return;
     audioFilesRef.current.set(sig, file);
     setAudioFileRev((v) => v + 1);
     if (peaks) setAudioPeaks((m) => new Map(m).set(sig, peaks!));
@@ -161,6 +184,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     };
     const edit = addAudioDocumentClip({ document: documentRef.current, clip });
     if (!edit.ok) {
+      URL.revokeObjectURL(url);
+      audioObjectUrlsRef.current.delete(url);
+      if (audioFilesRef.current.get(sig) === file) audioFilesRef.current.delete(sig);
       toast.error(edit.error.message);
       return;
     }
@@ -301,7 +327,8 @@ export function useAudioTracks(deps: AudioTracksDeps) {
         void decodeAudioFile(f)
           .then((buf) => setAudioPeaks((m) => new Map(m).set(sig, peaksOf(buf))))
           .catch(() => {});
-        const url = URL.createObjectURL(f);
+        const url = createAudioObjectUrl(f);
+        if (!url) return;
         const runtimeComposition = {
           ...compRef.current,
           audioTracks: (compRef.current.audioTracks ?? []).map((x) => (x.sig === sig ? { ...x, src: url } : x)),

@@ -40,6 +40,13 @@ export function useDenoise(deps: DenoiseDeps) {
   const blendedRef = useRef<{ sig: string; strength: number; file: File; url: string } | null>(null);
   const runIdRef = useRef(0);
 
+  useEffect(() => () => {
+    runIdRef.current += 1;
+    const blended = blendedRef.current;
+    if (blended) URL.revokeObjectURL(blended.url);
+    blendedRef.current = null;
+  }, []);
+
   const srcSig = (): string | null => {
     const f = videoFileRef.current;
     return f ? (videoSigRef.current ?? fileSig(f)) : null;
@@ -83,6 +90,8 @@ export function useDenoise(deps: DenoiseDeps) {
     } catch (e) {
       if (runId !== runIdRef.current) return;
       console.warn('[denoise] bake failed', e);
+      const previous = blendedRef.current;
+      if (previous) URL.revokeObjectURL(previous.url);
       blendedRef.current = null;
       setStatus('failed');
       toast.error(t('workbench.denoiseFailed'));

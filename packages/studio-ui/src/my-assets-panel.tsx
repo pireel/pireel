@@ -294,6 +294,9 @@ export function MyAssetsPanel({
   const linksRef = useRef<ReadonlyMap<string, string>>(new Map());
   /** sig → embedded cover art object URL (audio only) — derived whenever the File is in hand. */
   const [covers, setCovers] = useState<ReadonlyMap<string, string>>(new Map());
+  const coversRef = useRef<ReadonlyMap<string, string>>(new Map());
+  const objectUrlsAliveRef = useRef(true);
+  const coverGenerationRef = useRef(0);
   const [importing, setImporting] = useState(false);
   const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
@@ -318,6 +321,18 @@ export function MyAssetsPanel({
     return () => window.removeEventListener('hashchange', sync);
   }, []);
 
+  useEffect(() => {
+    objectUrlsAliveRef.current = true;
+    return () => {
+      objectUrlsAliveRef.current = false;
+      coverGenerationRef.current += 1;
+      for (const url of linksRef.current.values()) URL.revokeObjectURL(url);
+      for (const url of coversRef.current.values()) URL.revokeObjectURL(url);
+      linksRef.current = new Map();
+      coversRef.current = new Map();
+    };
+  }, []);
+
   /** THE registry writer: ref mirror → storage → state, in that order, outside any React updater
    *  (updaters must stay pure). Nobody else touches storage. */
   const regRef = useRef(reg);
@@ -336,6 +351,10 @@ export function MyAssetsPanel({
   };
 
   const link = (sig: string, url: string) => {
+    if (!objectUrlsAliveRef.current) {
+      URL.revokeObjectURL(url);
+      return;
+    }
     const previous = linksRef.current.get(sig);
     if (previous && previous !== url) URL.revokeObjectURL(previous);
     const next = new Map(linksRef.current).set(sig, url);
@@ -344,7 +363,19 @@ export function MyAssetsPanel({
   };
   const noteCover = (sig: string, f: File, k: LocalKind) => {
     if (k !== 'audio') return;
-    void audioCoverUrl(f).then((u) => u && setCovers((prev) => new Map(prev).set(sig, u)));
+    const generation = coverGenerationRef.current;
+    void audioCoverUrl(f).then((url) => {
+      if (!url) return;
+      if (!objectUrlsAliveRef.current || generation !== coverGenerationRef.current) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      const previous = coversRef.current.get(sig);
+      if (previous && previous !== url) URL.revokeObjectURL(previous);
+      const next = new Map(coversRef.current).set(sig, url);
+      coversRef.current = next;
+      setCovers(next);
+    });
   };
   const unlink = (sig: string) => {
     const url = linksRef.current.get(sig);
@@ -381,9 +412,13 @@ export function MyAssetsPanel({
       }
     }
     if (projectChanged) {
+      coverGenerationRef.current += 1;
       for (const url of linksRef.current.values()) URL.revokeObjectURL(url);
+      for (const url of coversRef.current.values()) URL.revokeObjectURL(url);
       linksRef.current = new Map();
+      coversRef.current = new Map();
       setLinks(linksRef.current);
+      setCovers(coversRef.current);
     }
     void (async () => {
       for (const e of pendingLocalAssetEntries(entries, new Set(linksRef.current.keys()))) {
@@ -735,14 +770,14 @@ export function MyAssetsPanel({
     void deleteLocalVideo(sig).catch(() => {});
     updateReg((r) => r.filter((x) => x.sig !== sig));
     unlink(sig);
-    setCovers((prev) => {
-      const u = prev.get(sig);
-      if (!u) return prev;
+    const u = coversRef.current.get(sig);
+    if (u) {
       URL.revokeObjectURL(u);
-      const next = new Map(prev);
+      const next = new Map(coversRef.current);
       next.delete(sig);
-      return next;
-    });
+      coversRef.current = next;
+      setCovers(next);
+    }
   };
 
   const evictRestoreEntry = (entry: RegEntry) => {

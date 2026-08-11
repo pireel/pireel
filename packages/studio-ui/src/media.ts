@@ -10,7 +10,7 @@
  */
 
 import { extractAudio } from '@pireel/studio-engine/video-edit/extract-audio';
-import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
+import { extractThumbnails, extractThumbnailsFromUrl } from '@pireel/studio-engine/video-edit/thumbnails';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { detectLang } from '@pireel/studio-engine/caption-fx';
@@ -121,6 +121,12 @@ export interface FilmstripFrame {
   url: string;
 }
 
+const filmstripTimestamps = (durationSec: number, count: number): number[] => {
+  const n = Math.max(2, Math.min(count, 600));
+  // Each cell takes its interval's midpoint, avoiding 0 and the trailing black frame.
+  return Array.from({ length: n }, (_, i) => Math.min(durationSec - 0.05, ((i + 0.5) / n) * durationSec));
+};
+
 /**
  * Sample evenly-spaced filmstrip frames to back the timeline video track (local decode, no upload).
  * count controls density; onFrame is an incremental callback so the filmstrip appears as it decodes.
@@ -133,9 +139,7 @@ export async function extractFilmstrip(
 ): Promise<FilmstripFrame[]> {
   const dur = durationSec > 0 ? durationSec : 0;
   if (dur <= 0) return [];
-  const n = Math.max(2, Math.min(count, 600));
-  // Each cell takes its interval's midpoint, avoiding 0 and the trailing black frame
-  const stamps = Array.from({ length: n }, (_, i) => Math.min(dur - 0.05, ((i + 0.5) / n) * dur));
+  const stamps = filmstripTimestamps(dur, count);
   const frames: FilmstripFrame[] = [];
   await extractThumbnails(file, stamps, {
     width: 96,
@@ -144,6 +148,29 @@ export async function extractFilmstrip(
       const f = { t: th.timestamp, url: th.url };
       frames.push(f);
       onFrame?.(f);
+    },
+  });
+  return frames.sort((a, b) => a.t - b.t);
+}
+
+/** Remote counterpart: MediaBunny's UrlSource requests only the container index and sample
+ * ranges needed for the visible strip instead of materializing the entire video as a Blob. */
+export async function extractFilmstripFromUrl(
+  url: string,
+  durationSec: number,
+  count = 14,
+  onFrame?: (f: FilmstripFrame) => void,
+): Promise<FilmstripFrame[]> {
+  const dur = durationSec > 0 ? durationSec : 0;
+  if (dur <= 0) return [];
+  const frames: FilmstripFrame[] = [];
+  await extractThumbnailsFromUrl(url, filmstripTimestamps(dur, count), {
+    width: 96,
+    quality: 0.6,
+    onThumb: (thumbnail) => {
+      const frame = { t: thumbnail.timestamp, url: thumbnail.url };
+      frames.push(frame);
+      onFrame?.(frame);
     },
   });
   return frames.sort((a, b) => a.t - b.t);

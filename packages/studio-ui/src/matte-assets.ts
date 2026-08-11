@@ -1,7 +1,7 @@
 /**
  * Single source of truth for the heavy person-matte asset URLs (ort wasm 27M + MODNet
- * 26M) — person-matte's actual load and studio-boot's prewarm must hit byte-identical
- * URLs, otherwise the prewarm just fetches a wasted copy.
+ * 26M). These assets are intentionally requested only by person-matte when the feature
+ * is used, so opening Studio does not eagerly download roughly 53 MB.
  *
  * ?v= is a cache stamp: assets are served `immutable` with a one-year cache, invalidated
  * only by URL change — same stamp always hits cache, an upgrade bumps the stamp and
@@ -21,7 +21,8 @@
  *
  * ORT_ASSET_REV is written by scripts/sync-ort.sh from onnxruntime-web/package.json,
  * don't hand-edit; at runtime person-matte prefers ort.env.versions.web (the real
- * version) — if the constant drifts it just wastes one prewarm, correctness is unaffected.
+ * version) — if the constant drifts the fallback URL may need another fetch, correctness
+ * is unaffected.
  */
 export const ORT_ASSET_REV = '1.27.0';
 

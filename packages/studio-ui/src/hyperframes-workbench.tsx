@@ -129,6 +129,7 @@ import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualFileBindings, supplementalVisualMedia } from './visual-render-plan';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { CloudProjectSaveQueue } from './cloud-project-save';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS, type TimelineTrackState } from './studio-timeline';
 import { quantizeTimelineFrameSecond } from './timeline-utils';
 import { timelineDirectorScenesFromDocument } from './director-scene-strip';
@@ -530,12 +531,15 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [displaced, setDisplaced] = useState(false);
   const displacedRef = useRef(false);
   const cloudSaveChainRef = useRef<Promise<void>>(Promise.resolve()); // serializes cloud PUTs (flush-on-evict must not race an in-flight save)
+  const cloudSaveQueueRef = useRef<CloudProjectSaveQueue<ProjectSavePayload> | null>(null);
+  const cloudSaveQueueProjectRef = useRef(projectId);
   const bridgeReclaimRef = useRef<() => void>(() => {});
   const reclaimWritership = () => {
     if (!displacedRef.current) return;
     displacedRef.current = false;
     setDisplaced(false);
     bridgeReclaimRef.current(); // evicts the other tab; conflicts with anything it wrote resolve via the 409 rebase-retry
+    void cloudSaveQueueRef.current?.flush(); // a failed pre-displacement save stays dirty until this tab can write again
     toast.info(t('workbench.reclaimedWritership'));
   };
   const [busyImport, setBusyImport] = useState(false);
@@ -1159,10 +1163,17 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const undoStackRef = useRef<EditorDocumentV2[]>([]); // canonical V2 snapshots; runtime media URLs live outside history
   const redoStackRef = useRef<EditorDocumentV2[]>([]); // undone states; any new edit (pushUndoSnapshot) discards the whole redo line
 
-  // Revoke blob URLs on unmount (original video + all filmstrip frames)
+  // Revoke every workbench-owned blob URL on unmount. Inserted sources stay alive while
+  // the project is open (including after deletion, because undo may restore them), but no
+  // project-local File URL should survive closing the workbench.
   useEffect(() => () => {
+    filmstripGenRef.current += 1; // late extraction callbacks revoke their own new frames
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     filmstripRef.current.forEach((f) => URL.revokeObjectURL(f.url));
+    for (const url of clipFilesRef.current.keys()) {
+      if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+    }
+    clipFilesRef.current.clear();
   }, []);
 
   // Preview control: a sandboxed iframe (opaque origin) can't reach contentWindow.__hfPreview, so everything goes through postMessage commands (sent to the current active buffer)
@@ -4399,6 +4410,34 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     };
   }
 
+  const cloudSaveOptions = {
+    getPayload: buildCloudPayload,
+    canWrite: () => !displacedRef.current && !schemaReloadingRef.current,
+    save: (payload: ProjectSavePayload) => {
+      // Keep metadata refresh and the one-shot displacement flush behind the same
+      // request chain as retries; no project PUT/GET observes a half-finished save.
+      const request = cloudSaveChainRef.current.then(() => studioProviders().projects.save(projectId, payload));
+      cloudSaveChainRef.current = request.then(() => undefined, () => undefined);
+      return request;
+    },
+    onConflict: () => {
+      if (conflictWarnedRef.current) return;
+      conflictWarnedRef.current = true;
+      toast.info(t('workbench.projectAlsoEditedElsewhere'));
+    },
+    onSchemaUpgrade: reloadForSchemaUpgrade,
+  };
+  if (!cloudSaveQueueRef.current || cloudSaveQueueProjectRef.current !== projectId) {
+    cloudSaveQueueRef.current?.dispose();
+    cloudSaveQueueRef.current = new CloudProjectSaveQueue(cloudSaveOptions);
+    cloudSaveQueueProjectRef.current = projectId;
+  } else {
+    cloudSaveQueueRef.current.configure(cloudSaveOptions);
+  }
+  const cloudSaveQueue = cloudSaveQueueRef.current;
+
+  useEffect(() => () => cloudSaveQueue.dispose(), [cloudSaveQueue]);
+
   // Selection change → close the background-color popover
   useEffect(() => {
     setBgOpen(false);
@@ -4889,30 +4928,14 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   useEffect(() => {
     // No content gate here: buildCloudPayload decides (full payload / chat-only / null) — chat syncs independently
     if (!projectId || displaced || schemaReloadingRef.current) return;
+    cloudSaveQueue.markDirty();
     const timer = window.setTimeout(() => {
       if (displacedRef.current || schemaReloadingRef.current) return; // demoted/upgraded while this timer was armed
-      const payload = buildCloudPayload();
-      if (!payload) return;
-      cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
-        const r = await studioProviders().projects.save(projectId, payload);
-        if (r === 'schema-upgraded') {
-          reloadForSchemaUpgrade();
-          return;
-        }
-        if (r !== 'conflict') return;
-        if (displacedRef.current) return; // read-only tabs drop conflicted batches instead of fighting
-        // The 409 already refreshed baseVersion to the store's latest: resend this batch immediately to truly enforce "last write wins".
-        // If we waited for the next edit to retry and the user wraps up now, this batch would be lost locally forever.
-        void studioProviders().projects.save(projectId, payload);
-        if (!conflictWarnedRef.current) {
-          conflictWarnedRef.current = true;
-          toast.info(t('workbench.projectAlsoEditedElsewhere'));
-        }
-      });
+      void cloudSaveQueue.flush();
     }, 1200);
     return () => window.clearTimeout(timer);
     // asrSentences/clipAsr are also deps: changes that touch only the transcript, not comp (like translations (sub)), must sync too
-  }, [comp, editorDocument, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced, projectOutputs.outputs]);
+  }, [comp, editorDocument, chatRev, videoFile, projectId, cloudMediaRev, localAssetIndexRev, asrSentences, clipAsr, displaced, projectOutputs.outputs, cloudSaveQueue]);
 
   // flush-on-hide: switching away / minimizing pushes the debounce tail immediately (a closed-soon
   // tab loses it otherwise — the "fast tab close loses the last edit" hole). Writers only; the diff
@@ -4921,21 +4944,33 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!projectId) return;
     const onHide = () => {
       if (document.visibilityState !== 'hidden' || displacedRef.current || schemaReloadingRef.current) return;
-      const payload = buildCloudPayload();
-      if (!payload) return;
-      cloudSaveChainRef.current = cloudSaveChainRef.current.then(async () => {
-        const r = await studioProviders().projects.save(projectId, payload).catch(() => 'skip' as const);
-        if (r === 'schema-upgraded') {
-          reloadForSchemaUpgrade();
-          return;
-        }
-        if (r === 'conflict' && !displacedRef.current) void studioProviders().projects.save(projectId, payload);
-      });
+      void cloudSaveQueue.flush();
     };
     document.addEventListener('visibilitychange', onHide);
     return () => document.removeEventListener('visibilitychange', onHide);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // Exponential retry covers transient failures while the tab remains open. These
+  // signals make recovery immediate after offline/background periods instead of
+  // waiting for the current backoff window or another edit.
+  useEffect(() => {
+    const retryPendingSave = () => {
+      if (displacedRef.current || schemaReloadingRef.current) return;
+      void cloudSaveQueue.flush();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') retryPendingSave();
+    };
+    window.addEventListener('online', retryPendingSave);
+    window.addEventListener('focus', retryPendingSave);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', retryPendingSave);
+      window.removeEventListener('focus', retryPendingSave);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [cloudSaveQueue]);
 
   return (
     <div className="studio-scope bg-panel relative flex h-full min-h-0 w-full gap-0 overflow-hidden">
