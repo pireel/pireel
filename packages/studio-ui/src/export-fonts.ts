@@ -93,12 +93,20 @@ export async function buildInlineFontCss(
   log: (m: string) => void = () => {},
 ): Promise<string> {
   const t0 = performance.now();
+  // DOM textContent keeps formatting newlines even when the composition has no visible text.
+  // Asking Google Fonts for text="\n" returns unusable dynamic-subset URLs in some UAs and makes
+  // a video-only frame wait on a set of doomed font requests. Whitespace has no glyph to embed.
+  const glyphText = usedText.replace(/\s+/gu, '');
+  if (!glyphText) {
+    log('font inlining skipped: no visible glyphs');
+    return '';
+  }
   // Exact subset: text= makes Google's server cut glyphs per character (a few hundred KB per CJK subset →
   // tens of KB total). The inline string is part of every changed frame's SVG data URI, so its size
   // multiplies directly into per-frame parse cost.
   // Include both cases (CSS text-transform can demand the other-case glyphs absent from textContent);
   // charset too large (URL limit) or request fails → fall back to the unicode-range hit method (old behavior).
-  const uniq = [...new Set([...(usedText + usedText.toUpperCase() + usedText.toLowerCase())])].join('');
+  const uniq = [...new Set([...(glyphText + glyphText.toUpperCase() + glyphText.toLowerCase())])].join('');
   let res: Response | null = null;
   if (uniq.length > 0 && uniq.length <= 600) {
     res = await fetchFont(`${FONT_CSS_URL}&text=${encodeURIComponent(uniq)}`);
@@ -115,18 +123,29 @@ export async function buildInlineFontCss(
   const faces = parseFontFaces(await res.text());
 
   const used = new Set<number>();
-  for (const ch of usedText) used.add(ch.codePointAt(0)!);
+  for (const ch of glyphText) used.add(ch.codePointAt(0)!);
   const hit = (f: FontFace) =>
     !f.ranges || f.ranges.some(([lo, hi]) => { for (const cp of used) if (cp >= lo && cp <= hi) return true; return false; });
 
   const kept = faces.filter(hit);
   log(`font subset: ${kept.length} of ${faces.length} @font-face rules kept`);
 
+  // Google commonly points several declared weights at the same exact-subset binary. Fetch each URL
+  // once, then reuse the immutable bytes while preserving the separate @font-face declarations.
+  const buffers = new Map<string, Promise<ArrayBuffer | null>>();
+  const loadFont = (url: string) => {
+    const known = buffers.get(url);
+    if (known) return known;
+    const pending = fetchFont(url)
+      .then((response) => response?.arrayBuffer() ?? null)
+      .catch(() => null);
+    buffers.set(url, pending);
+    return pending;
+  };
   const parts = await Promise.all(
     kept.map(async (f) => {
-      const r = await fetchFont(f.url);
-      if (!r) return ''; // one woff2 failing (blocked/flaky) shouldn't kill the whole capture/export
-      const buf = await r.arrayBuffer();
+      const buf = await loadFont(f.url);
+      if (!buf) return ''; // one woff2 failing (blocked/flaky) shouldn't kill the whole capture/export
       const range = f.ranges ? `unicode-range:${f.ranges.map(([a, b]) => (a === b ? `U+${a.toString(16)}` : `U+${a.toString(16)}-${b.toString(16)}`)).join(',')};` : '';
       return `@font-face{font-family:'${f.family}';font-style:${f.style};font-weight:${f.weight};src:url(data:font/woff2;base64,${toBase64(buf)}) format('woff2');${range}}`;
     }),
