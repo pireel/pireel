@@ -135,6 +135,7 @@ import { quantizeTimelineFrameSecond } from './timeline-utils';
 import { timelineDirectorScenesFromDocument } from './director-scene-strip';
 import type { TimelineInsertMode, TimelineMediaDropTarget } from './timeline-asset-drop';
 import { type AttachedFrame, StudioChat, type StudioChatHandle, type StudioElementRef } from './studio-chat';
+import { shouldCollapseChatForTimelineFramePick } from './chat-timeline-frame-picker';
 import { ElementSourceEditor, type SourceDraft } from './element-source-editor';
 import { useStableCallbacks } from './use-stable-callbacks';
 import {
@@ -488,6 +489,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const [playing, setPlaying] = useState(false);
   const [timelineFramePickActive, setTimelineFramePickActive] = useState(false);
   const [timelineFramePickBusy, setTimelineFramePickBusy] = useState(false);
+  const timelineFramePickAutoClosedChatRef = useRef(false);
   const [showCode, setShowCode] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const directorTimelineScenes = useMemo(() => timelineDirectorScenesFromDocument(editorDocument), [editorDocument]);
@@ -632,6 +634,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // only appears when chat is hidden. Agent view collapses by default: the main conversation lives in the external
   // agent (Codex), the built-in chat on the right just takes up space
   const [panelOpen, setPanelOpen] = useState(!agentView);
+  const restoreChatAfterTimelineFramePick = useCallback(() => {
+    setTimelineFramePickActive(false);
+    if (!timelineFramePickAutoClosedChatRef.current) return;
+    timelineFramePickAutoClosedChatRef.current = false;
+    setPanelOpen(true);
+  }, []);
   // Contextual tool panels (smart-cut/person/framing/code/anim/transition): **dock into the asset rail column, full area**
   // (per user: not a new tab, takes the whole column; if the rail is collapsed, expand it first, and collapse back
   // when a panel-triggered expansion closes). **Single instance** — opening another replaces the current one
@@ -1744,6 +1752,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   /** Open the right-side chat area (right side is chat only; other panels dock in the asset rail). */
   const openChat = useCallback(() => setPanelOpen(true), []);
   const closeChat = useCallback(() => {
+    timelineFramePickAutoClosedChatRef.current = false;
     setTimelineFramePickActive(false);
     setPanelOpen(false);
   }, []);
@@ -2262,7 +2271,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
       if (e.key === 'Escape') {
         if (timelineFramePickActiveRef.current) {
-          setTimelineFramePickActive(false);
+          restoreChatAfterTimelineFramePick();
           return;
         }
         if (typing) return;
@@ -2357,7 +2366,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [applyT, setPlaying]);
+  }, [applyT, restoreChatAfterTimelineFramePick, setPlaying]);
 
   // Agent range-play sentinel (play {toSec}): auto-pause when the playhead reaches it. Cleared on ANY pause —
   // a manual resume must not inherit an old stop point.
@@ -4030,9 +4039,16 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     });
   }, [compRef, editorDocumentRef, resolveAssetUrl]);
   const setTimelineFramePickMode = useCallback((active: boolean) => {
+    if (!active) {
+      restoreChatAfterTimelineFramePick();
+      return;
+    }
     if (active && playingRef.current) setPlaying(false);
-    setTimelineFramePickActive(active);
-  }, []);
+    const shouldCollapse = shouldCollapseChatForTimelineFramePick(window.innerWidth, panelW);
+    timelineFramePickAutoClosedChatRef.current = shouldCollapse;
+    if (shouldCollapse) setPanelOpen(false);
+    setTimelineFramePickActive(true);
+  }, [panelW, restoreChatAfterTimelineFramePick]);
   const pickTimelineFrame = useCallback(async (atSec: number) => {
     const document = editorDocumentRef.current;
     const plan = editorDocumentRenderPlan(document, { resolveAssetUrl });
@@ -4040,7 +4056,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (plan.durationSec <= 0) return;
     const exactAt = quantizeTimelineFrameSecond(atSec, plan.durationSec, fps);
     const frameId = `timeline-frame-${Date.now()}`;
-    setTimelineFramePickActive(false);
+    restoreChatAfterTimelineFramePick();
     setTimelineFramePickBusy(true);
     applyT(exactAt);
     chatRef.current?.beginTimelineFrameCapture({ id: frameId, atSec: exactAt, fps });
@@ -4058,7 +4074,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     } finally {
       setTimelineFramePickBusy(false);
     }
-  }, [applyT, captureTimelineFrameAt, editorDocumentRef, resolveAssetUrl]);
+  }, [applyT, captureTimelineFrameAt, editorDocumentRef, resolveAssetUrl, restoreChatAfterTimelineFramePick]);
 
   /** Client-side execution of a tool call: mutate Composition state / call compose to generate a block.
    *  Not memoized — StudioChat holds the latest reference via ref, rebuilt each frame to guarantee reading the latest state/closures. */
@@ -4102,7 +4118,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   });
   const resetForOutputChange = useCallback(() => {
     setPlaying(false);
-    setTimelineFramePickActive(false);
+    restoreChatAfterTimelineFramePick();
     videoEngineRef.current?.pause();
     setSelectedId(null);
     setSelectedShotId(null);
@@ -4116,7 +4132,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     tRef.current = 0;
     playhead.set(0);
     setT(0);
-  }, [setSelectedId, setSelectedShotId]);
+  }, [restoreChatAfterTimelineFramePick, setSelectedId, setSelectedShotId]);
   const outputRuntime = useProjectOutputRuntime({
     projectId,
     activeId: projectOutputs.outputs.active.id,
