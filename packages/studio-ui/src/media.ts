@@ -56,15 +56,16 @@ export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   const cached = getCachedAsr(sig);
   if (cached) return cached;
 
+  const durationSec = (await probeVideoFile(file).catch(() => null))?.durationSec;
   const audio = await extractAudio(file);
   const { url } = await studioProviders().uploads.upload(audio, { contentType: audio.type || 'audio/mp4', filename: 'studio-audio.m4a' });
   const r = await fetch('/api/auto-edit/asr', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ audio_url: url }),
+    body: JSON.stringify({ audio_url: url, duration_sec: durationSec }),
   });
   // Server failures must throw a clear error, not silently become an empty array — callers need to tell "ASR failed" apart from "the video truly has no speech"
-  // 402 = credits exhausted (creditsGate): say so instead of an opaque HTTP code
+  // 402 = credits exhausted: say so instead of an opaque HTTP code
   if (r.status === 402) throw new Error(t('chatGen.notEnoughCreditsTop'));
   if (!r.ok) throw new Error(t('common.transcriptionRequestFailedHttp', { status: r.status }));
   const j = (await r.json()) as {
