@@ -68,6 +68,10 @@ pnpm dev
   预览——全部在客户端完成。
 - **客户端导出**：基于 WebCodecs（Chromium）的所见即所得导出。
 - **主题**：完整目录由 `@pireel/studio-frames` 提供。
+- **开源剪辑基线**：内置完整的 `talking-head-edit` 口播剪辑 Skill，以及适合课程、评论和
+  知识讲解的 `knowledge-cards` / Concept Atlas 主题。
+- **面向生态的目录**：通过具名注册表分层合并 OSS、宿主和第三方 Skill / 主题；同 ID
+  默认报错，只有显式授权时才允许后层覆盖。
 - **本地上传**：由磁盘支持的开发路由（`/local-assets`）用于存储
   按内容寻址的文件，是托管上传 Provider 在本地的对应实现。
 

@@ -10,4 +10,9 @@ const FRAME_FILES = import.meta.glob('../content/*/frame.md', {
 }) as Record<string, string>;
 
 export const frameRegistry = createFrameRegistry(FRAME_FILES);
-export type { Frame, FrameRegistry } from './registry';
+export type {
+  Frame,
+  FrameRegistry,
+  FrameRegistryConflictPolicy,
+  FrameRegistryLayer,
+} from './registry';

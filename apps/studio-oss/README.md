@@ -19,6 +19,8 @@ pnpm --filter @pireel/studio-oss-shell dev
 - **Client export**: WYSIWYG export runs on WebCodecs in Chromium.
 - **Frame themes**: the full frame catalog is served from the content package
   (`@pireel/studio-frames`), client-side.
+- **Talking-head Skill baseline**: the Skill picker includes the public `talking-head-edit` playbook;
+  `knowledge-cards` / Concept Atlas is the included source-led Frame designed for explanatory speech.
 - **Local uploads**: panel image uploads go to a disk-backed route
   (`/local-assets`, see `local-assets-plugin.ts`) — content-addressed files in
   `.local-assets/`, referenced by stable same-origin relative URLs. The local
@@ -32,10 +34,11 @@ Generation capabilities are injected via `StudioProviders`
 block generation, narration planning, transcription, cloud media vault,
 cross-device project sync, image/video generation — fails with a hint instead.
 
-The OSS shell also ships without Pireel's hosted expert-Skill catalog or official
-asset library. `StudioShellProvider` can inject browser-safe Skill metadata and a
-curated-assets panel; the matching full Skill Markdown and catalog services remain
-owned by the host.
+The OSS shell does not ship Pireel's private expert-Skill catalog or official asset library. It does ship
+one complete public talking-head Skill and its picker metadata. A custom chat host should resolve the
+selected id through `ossStudioScenarioSkillRegistry` (or a merged registry) and inject the returned Markdown
+through `buildChatSystem`. `StudioShellProvider` remains the browser-safe injection point for additional
+Skill metadata and a curated-assets panel.
 
 Two ways to light them up:
 

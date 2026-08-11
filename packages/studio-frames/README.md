@@ -3,17 +3,35 @@
 Frame runtime contracts and OSS-compatible example content packs for Pireel Studio.
 
 - `content/<id>/frame.md` — optional public/example Frames: browser-safe metadata and tokens in frontmatter plus a rich Markdown visual-directing playbook.
-- `src/registry.ts` — pure parser/registry (`createFrameRegistry(files)`); feed it any path→raw map.
+- `src/registry.ts` — pure parser/registry (`createFrameRegistry(files)`) plus layered merging
+  (`mergeFrameRegistries(layers)`); feed it any path→raw map.
 - `src/vite.ts` — Vite entry that globs `content/` and exports a ready `frameRegistry`.
 - `src/dialects/` — per-theme layout dialects used for the live preview wall.
 - `src/locales/` — locale adaptation packs for dialect copy.
 
-Hosted products can keep polished Frame content private: import only the parser, build a host registry from private `frame.md` files, and inject that registry into the server routes. The Studio editor and agent tooling do not require concrete hosted playbooks to live in this package.
+The public catalog includes `knowledge-cards` / Concept Atlas as a source-led explanatory Frame suited to
+talking-head lessons and commentary. It keeps the real speaker or evidence as the anchor while routes,
+scale shifts, and sparse corrections make relationships visible.
+
+Hosted products can keep polished Frame content private: import the parser, build a host registry from
+private `frame.md` files, then merge the OSS and hosted layers. Third-party packs use the same contract.
+Duplicate ids fail by default; intentional replacement requires `onConflict: 'replace'` on that specific
+layer, with the later layer winning. The Studio editor and agent tooling do not require concrete hosted playbooks to live in this package.
+
+```ts
+const frames = mergeFrameRegistries([
+  { source: 'pireel-oss', registry: ossFrames },
+  { source: 'my-host', registry: privateFrames, onConflict: 'replace' },
+  { source: '@example/studio-frames', registry: communityFrames },
+]);
+```
+
+Only `my-host` can replace an earlier id here; the community layer can safely append new Frames.
 
 Hosts may preserve a public/example Frame id for saved-project compatibility while replacing its hosted
-title, playbook, cover and preview dialect with a deeper private world. In that case remove the public
-`content/<id>/frame.md`, inject the private playbook under the same id, and keep only generic preview and
-locale code in OSS. The hosted registry remains the source of truth for catalog discovery.
+title, playbook, cover and preview dialect with a deeper private world. Inject the private playbook under
+the same id in a later registry layer and opt into replacement. The merged host registry remains the source
+of truth for catalog discovery.
 
 Frame selection is user-controlled and orthogonal to Studio Skills. A Skill guides editorial judgment; a Frame guides visual expression. Hosts should not maintain a Skill–Frame compatibility table, infer one from the other, or require a Frame for a complete edit. When the user selects a Frame, apply its language across the chosen edit regardless of which Skill is active.
 

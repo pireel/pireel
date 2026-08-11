@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { frameRegistry } from './vite';
-import { parseFrame } from './registry';
+import { createFrameRegistry, mergeFrameRegistries, parseFrame } from './registry';
 
 describe('frame 注册表(frame.md 内容包)', () => {
   it('能加载全部 frame,必填字段齐全', () => {
@@ -17,6 +17,14 @@ describe('frame 注册表(frame.md 内容包)', () => {
     }
   });
 
+  it('内置一套适合口播解释的 Concept Atlas 主题', () => {
+    const frame = frameRegistry.get('knowledge-cards');
+    expect(frame?.title).toContain('Concept Atlas');
+    expect(frame?.showcase).toContain('causal-chain');
+    expect(frame?.body).toContain('speaker');
+    expect(frame?.body).toContain('evidence');
+  });
+
   it('种子主题带完整设计 token(palette 至少有 paper/panel/fg/accent)', () => {
     for (const f of frameRegistry.list()) {
       expect(f.palette, `${f.id} 应有 palette`).toBeTruthy();
@@ -30,6 +38,45 @@ describe('frame 注册表(frame.md 内容包)', () => {
     const first = frameRegistry.list()[0]!;
     expect(frameRegistry.get(first.id)?.id).toBe(first.id);
     expect(frameRegistry.get('__nope__')).toBeNull();
+  });
+
+  it('分层合并默认拒绝同 id,宿主显式 replace 时后层覆盖', () => {
+    const raw = (id: string, title: string) => `---
+id: ${id}
+title: ${title}
+summary: A complete visual system.
+icon: ◼️
+showcase: []
+version: 1.0.0
+---
+# ${title}
+
+This is a complete frame playbook with enough direction for a registry test.`;
+    const oss = createFrameRegistry({ 'talking-head/frame.md': raw('talking-head', 'OSS') });
+    const extension = createFrameRegistry({ 'third-party/frame.md': raw('third-party', 'Extension') });
+    const merged = mergeFrameRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'community.example', registry: extension },
+    ]);
+    expect(merged.list().map((frame) => frame.id)).toEqual(['talking-head', 'third-party']);
+
+    const hosted = createFrameRegistry({ 'talking-head/frame.md': raw('talking-head', 'Hosted') });
+    expect(() => mergeFrameRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'hosted', registry: hosted },
+    ])).toThrow('from oss and hosted');
+
+    const replaced = mergeFrameRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'hosted', registry: hosted, onConflict: 'replace' },
+      { source: 'community.example', registry: extension },
+    ]);
+    expect(replaced.list().map((frame) => frame.title)).toEqual(['Hosted', 'Extension']);
+    expect(() => mergeFrameRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'hosted', registry: hosted, onConflict: 'replace' },
+      { source: 'community.example', registry: oss },
+    ])).toThrow('from hosted and community.example');
   });
 
   it('可由宿主通过元数据注入横版缩略图,不要求 OSS 内容包携带私有素材', () => {

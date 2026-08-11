@@ -1,6 +1,6 @@
 export const STUDIO_AUTO_SKILL_ID = 'auto' as const;
 
-/** Host-defined Markdown Skill id. OSS deliberately owns no concrete catalog. */
+/** Open-vocabulary Markdown Skill id; membership is decided by the active merged registry. */
 export type StudioScenarioSkillDefinitionId = string;
 export type StudioScenarioSkillId = typeof STUDIO_AUTO_SKILL_ID | StudioScenarioSkillDefinitionId;
 
@@ -16,4 +16,19 @@ export interface StudioScenarioSkill {
   description: string;
   /** Complete SKILL.md body, including its H1. Never reduce this to structured options. */
   markdown: string;
+}
+
+/** Read-only runtime view assembled by the OSS baseline, a host, or extension packages. */
+export interface StudioScenarioSkillRegistry {
+  list(): readonly StudioScenarioSkill[];
+  get(id: string): StudioScenarioSkill | null;
+}
+
+export type StudioScenarioSkillConflictPolicy = 'error' | 'replace';
+
+/** A named registry layer. Replacement authority is granted per layer, never globally. */
+export interface StudioScenarioSkillRegistryLayer {
+  source: string;
+  registry: StudioScenarioSkillRegistry;
+  onConflict?: StudioScenarioSkillConflictPolicy;
 }

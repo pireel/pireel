@@ -35,6 +35,15 @@ export interface FrameRegistry {
   get(id: string): Frame | null;
 }
 
+export type FrameRegistryConflictPolicy = 'error' | 'replace';
+
+/** A named registry layer (OSS baseline, host, or third-party package). Replacement is per-layer. */
+export interface FrameRegistryLayer {
+  source: string;
+  registry: FrameRegistry;
+  onConflict?: FrameRegistryConflictPolicy;
+}
+
 export function parseFrame(raw: string, ctx: string): Frame {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw.trim());
   if (!m) throw new Error(`frame.md (${ctx}) is missing frontmatter`);
@@ -123,5 +132,43 @@ export function createFrameRegistry(files: Record<string, string>): FrameRegistr
     return out.sort((a, b) => a.id.localeCompare(b.id));
   };
   const all = (): Frame[] => (cache ??= loadAll());
-  return { list: () => all(), get: (id) => all().find((f) => f.id === id) ?? null };
+  return { list: () => [...all()], get: (id) => all().find((f) => f.id === id) ?? null };
+}
+
+/**
+ * Merge ordered Frame layers. Duplicate ids fail unless a host grants replacement to that layer;
+ * an authorized replacement preserves catalog position. This is the shared seam for private and ecosystem packs.
+ */
+export function mergeFrameRegistries(
+  layers: readonly FrameRegistryLayer[],
+): FrameRegistry {
+  const frames: Frame[] = [];
+  const indexById = new Map<string, number>();
+  const sourceById = new Map<string, string>();
+
+  for (const layer of layers) {
+    if (!layer.source.trim()) throw new Error('Frame registry layer needs a source name');
+    for (const frame of layer.registry.list()) {
+      const existingIndex = indexById.get(frame.id);
+      if (existingIndex !== undefined) {
+        if ((layer.onConflict ?? 'error') === 'error') {
+          throw new Error(
+            `Duplicate Frame id: ${frame.id} (from ${sourceById.get(frame.id)} and ${layer.source})`,
+          );
+        }
+        frames[existingIndex] = frame;
+        sourceById.set(frame.id, layer.source);
+        continue;
+      }
+      indexById.set(frame.id, frames.length);
+      sourceById.set(frame.id, layer.source);
+      frames.push(frame);
+    }
+  }
+
+  const byId = new Map(frames.map((frame) => [frame.id, frame]));
+  return {
+    list: () => [...frames],
+    get: (id) => byId.get(id) ?? null,
+  };
 }

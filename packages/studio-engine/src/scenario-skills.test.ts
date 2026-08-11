@@ -4,16 +4,64 @@ import {
   STUDIO_AUTO_SKILL_ID,
   createStudioScenarioSkillRegistry,
   isStudioScenarioSkillId,
+  mergeStudioScenarioSkillRegistries,
   parseStudioScenarioSkill,
 } from './scenario-skills';
+import {
+  OSS_STUDIO_DEFAULT_SKILL_ID,
+  ossStudioScenarioSkillCatalog,
+  ossStudioScenarioSkillRegistry,
+} from './scenario-skills/vite';
 
 describe('Studio scenario skill registry', () => {
   const raw = (name: string, title: string) => `---\nname: ${name}\ndescription: Host-owned expert guidance for a concrete editing situation.\n---\n# ${title}\n\n${'Rich prose that shapes judgment without becoming structured configuration. '.repeat(10)}`;
 
+  it('ships one complete OSS talking-head baseline with localized picker metadata', () => {
+    expect(OSS_STUDIO_DEFAULT_SKILL_ID).toBe('talking-head-edit');
+    expect(ossStudioScenarioSkillRegistry.list().map((skill) => skill.id)).toEqual(['talking-head-edit']);
+    expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('Protect the source of truth');
+    expect(ossStudioScenarioSkillCatalog('zh')[0]?.title).toBe('口播剪辑');
+    expect(ossStudioScenarioSkillCatalog('en')[0]?.title).toBe('Talking-head edit');
+  });
+
   it('loads arbitrary host-defined Markdown playbooks and rejects duplicates', () => {
     const skills = createStudioScenarioSkillRegistry([raw('interview-edit', 'Interview edit'), raw('course-edit', 'Course edit')]);
-    expect(skills.map((skill) => skill.id)).toEqual(['interview-edit', 'course-edit']);
+    expect(skills.list().map((skill) => skill.id)).toEqual(['interview-edit', 'course-edit']);
+    expect(skills.get('course-edit')?.title).toBe('Course edit');
+    expect(skills.get('missing')).toBeNull();
     expect(() => createStudioScenarioSkillRegistry([raw('interview-edit', 'One'), raw('interview-edit', 'Two')])).toThrow('Duplicate Studio Skill name');
+  });
+
+  it('validates file paths and merges extension layers without silent id hijacking', () => {
+    expect(() => createStudioScenarioSkillRegistry({
+      'wrong-directory/SKILL.md': raw('interview-edit', 'Interview edit'),
+    })).toThrow('does not match directory name');
+
+    const oss = createStudioScenarioSkillRegistry([raw('talking-head-edit', 'OSS talking head')]);
+    const thirdParty = createStudioScenarioSkillRegistry([raw('course-edit', 'Course edit')]);
+    const merged = mergeStudioScenarioSkillRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'community.example', registry: thirdParty },
+    ]);
+    expect(merged.list().map((skill) => skill.id)).toEqual(['talking-head-edit', 'course-edit']);
+
+    const hosted = createStudioScenarioSkillRegistry([raw('talking-head-edit', 'Hosted talking head')]);
+    expect(() => mergeStudioScenarioSkillRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'hosted', registry: hosted },
+    ])).toThrow('from oss and hosted');
+
+    const replaced = mergeStudioScenarioSkillRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'hosted', registry: hosted, onConflict: 'replace' },
+      { source: 'community.example', registry: thirdParty },
+    ]);
+    expect(replaced.list().map((skill) => skill.title)).toEqual(['Hosted talking head', 'Course edit']);
+    expect(() => mergeStudioScenarioSkillRegistries([
+      { source: 'oss', registry: oss },
+      { source: 'hosted', registry: hosted, onConflict: 'replace' },
+      { source: 'community.example', registry: oss },
+    ])).toThrow('from hosted and community.example');
   });
 
   it('uses frontmatter only for loading and rejects configuration fields', () => {

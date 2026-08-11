@@ -68,6 +68,10 @@ Dozens ship in `@pireel/studio-frames`; here are a few.
   preview — all client-side.
 - **Client export**: WYSIWYG export on WebCodecs (Chromium).
 - **Frame themes**: the full catalog is served from `@pireel/studio-frames`.
+- **Open editing baseline**: `talking-head-edit` provides a complete speech-led editing Skill, and
+  `knowledge-cards` / Concept Atlas provides a source-led Frame for lessons, commentary and explainers.
+- **Ecosystem-ready catalogs**: named registry layers merge OSS, host and third-party Skills/Frames;
+  duplicate ids are rejected unless replacement is explicitly enabled.
 - **Local uploads**: a disk-backed dev route (`/local-assets`) stores
   content-addressed files, the local counterpart of the hosted upload provider.
 

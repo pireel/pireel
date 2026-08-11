@@ -1,5 +1,7 @@
 import {
   type StudioScenarioSkill,
+  type StudioScenarioSkillRegistry,
+  type StudioScenarioSkillRegistryLayer,
 } from './types';
 
 const ALLOWED_FRONTMATTER_KEYS = new Set(['name', 'description']);
@@ -58,12 +60,71 @@ export function parseStudioScenarioSkill(raw: string): StudioScenarioSkill {
   };
 }
 
-export function createStudioScenarioSkillRegistry(rawSkills: readonly string[]): readonly StudioScenarioSkill[] {
-  const skills = rawSkills.map(parseStudioScenarioSkill);
+type StudioScenarioSkillFiles = Readonly<Record<string, string>> | readonly string[];
+
+function parseSkillFiles(files: StudioScenarioSkillFiles): StudioScenarioSkill[] {
+  if (Array.isArray(files)) return files.map(parseStudioScenarioSkill);
+
+  return Object.entries(files).map(([path, raw]) => {
+    const skill = parseStudioScenarioSkill(raw);
+    const directory = /([^/]+)\/SKILL\.md$/.exec(path)?.[1];
+    if (directory && directory !== skill.id) {
+      throw new Error(`Studio Skill ${path}: frontmatter name "${skill.id}" does not match directory name "${directory}"`);
+    }
+    return skill;
+  });
+}
+
+/** Build one registry from raw SKILL.md files. Content may come from Vite, disk, npm, or a database. */
+export function createStudioScenarioSkillRegistry(files: StudioScenarioSkillFiles): StudioScenarioSkillRegistry {
+  const skills = parseSkillFiles(files);
   const seen = new Set<string>();
   for (const skill of skills) {
     if (seen.has(skill.id)) throw new Error(`Duplicate Studio Skill name: ${skill.id}`);
     seen.add(skill.id);
   }
-  return skills;
+  const byId = new Map(skills.map((skill) => [skill.id, skill]));
+  return {
+    list: () => [...skills],
+    get: (id) => byId.get(id) ?? null,
+  };
+}
+
+/**
+ * Merge ordered Skill layers. Duplicates fail by default so installing an extension cannot silently
+ * replace another package. A host can grant `replace` to one layer; that layer wins while retaining
+ * the original catalog position (useful for a richer hosted implementation of an OSS baseline id).
+ */
+export function mergeStudioScenarioSkillRegistries(
+  layers: readonly StudioScenarioSkillRegistryLayer[],
+): StudioScenarioSkillRegistry {
+  const skills: StudioScenarioSkill[] = [];
+  const indexById = new Map<string, number>();
+  const sourceById = new Map<string, string>();
+
+  for (const layer of layers) {
+    if (!layer.source.trim()) throw new Error('Studio Skill registry layer needs a source name');
+    for (const skill of layer.registry.list()) {
+      const existingIndex = indexById.get(skill.id);
+      if (existingIndex !== undefined) {
+        if ((layer.onConflict ?? 'error') === 'error') {
+          throw new Error(
+            `Duplicate Studio Skill name: ${skill.id} (from ${sourceById.get(skill.id)} and ${layer.source})`,
+          );
+        }
+        skills[existingIndex] = skill;
+        sourceById.set(skill.id, layer.source);
+        continue;
+      }
+      indexById.set(skill.id, skills.length);
+      sourceById.set(skill.id, layer.source);
+      skills.push(skill);
+    }
+  }
+
+  const byId = new Map(skills.map((skill) => [skill.id, skill]));
+  return {
+    list: () => [...skills],
+    get: (id) => byId.get(id) ?? null,
+  };
 }
