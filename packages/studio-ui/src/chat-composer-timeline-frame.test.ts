@@ -67,14 +67,20 @@ describe('Composer timeline-frame tags', () => {
     expect(frameTag.classList).toContain('sc-pill');
     expect(elementTag.classList).toContain('h-6');
     expect(frameTag.classList).toContain('h-6');
-    expect(elementTag.querySelector('button[aria-label]')).not.toBeNull();
-    expect(frameTag.querySelector('button[aria-label]')).not.toBeNull();
+    expect(elementTag.classList).toContain('relative');
+    expect(frameTag.classList).toContain('relative');
+    const elementRemove = elementTag.querySelector<HTMLButtonElement>('button[aria-label]')!;
+    const frameRemove = frameTag.querySelector<HTMLButtonElement>('button[aria-label]')!;
+    expect(elementRemove.classList).toContain('absolute');
+    expect(frameRemove.classList).toContain('absolute');
+    expect(elementRemove.classList).toContain('opacity-0');
+    expect(frameRemove.classList).toContain('opacity-0');
 
-    act(() => elementTag.querySelector<HTMLButtonElement>('button[aria-label]')!.click());
+    act(() => elementRemove.click());
     expect(host.querySelector('[data-ref-id="title-a"]')).toBeNull();
     expect(host.querySelector('[data-timeline-frame-id="frame-a"]')).not.toBeNull();
 
-    act(() => frameTag.querySelector<HTMLButtonElement>('button[aria-label]')!.click());
+    act(() => frameRemove.click());
     expect(host.querySelector('[data-timeline-frame-id="frame-a"]')).toBeNull();
   });
 

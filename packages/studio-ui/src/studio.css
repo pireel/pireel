@@ -46,23 +46,7 @@
   border-radius: 4px;
 }
 
-/* 进场 boot 层(studio-boot.tsx):主题卡墙交叉滚动 + π 描边 loading。
- * 列栈 = 同一组卡渲 4 份,位移 -50%(两份)首尾同相 → 无缝循环;
- * down/up 交替即"第一列从上到下、第二列从下到上"。 */
-@keyframes sb-col-down {
-  from { transform: translateY(-50%); }
-  to { transform: translateY(0); }
-}
-@keyframes sb-col-up {
-  from { transform: translateY(0); }
-  to { transform: translateY(-50%); }
-}
-.sb-col {
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  will-change: transform;
-}
-/* π 三笔按书写顺序循环描边(pathLength 已归一到 100) */
+/* 进场 boot 层(studio-boot.tsx):π 三笔按书写顺序循环描边(pathLength 已归一到 100)。 */
 .sb-pi path {
   stroke-dasharray: 100;
   stroke-dashoffset: 100;
@@ -77,6 +61,5 @@
   100% { stroke-dashoffset: -100; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sb-col { animation: none; }
   .sb-pi path { animation: none; stroke-dashoffset: 0; }
 }

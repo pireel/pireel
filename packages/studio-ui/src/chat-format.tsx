@@ -39,7 +39,7 @@ export function PiAvatar({ thinking = false, size = 22 }: { thinking?: boolean; 
 }
 
 export const CHAT_PILL_CLASS =
-  'sc-pill mx-0.5 inline-flex h-6 max-w-[180px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
+  'sc-pill group/chat-pill relative mx-0.5 inline-flex h-6 max-w-[180px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
 
 export const CHAT_PILL_ICON_CLASS =
   'bg-accent/10 inline-flex h-4 w-5 shrink-0 items-center justify-center overflow-hidden rounded-[2px] text-[11px] leading-none';
@@ -54,10 +54,9 @@ export function appendChatPillRemoveIcon(
 ) {
   const remove = document.createElement('button');
   remove.type = 'button';
-  remove.tabIndex = -1;
   remove.contentEditable = 'false';
   remove.className =
-    'ml-0.5 inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-current opacity-55 transition-opacity hover:bg-current/10 hover:opacity-100';
+    'border-line bg-panel text-ink-3 absolute -right-1 -top-1 z-10 inline-flex size-4 scale-90 cursor-pointer items-center justify-center rounded-sm border opacity-0 shadow-sm transition-[background-color,color,opacity,transform] hover:bg-ink hover:text-bg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink group-hover/chat-pill:pointer-events-auto group-hover/chat-pill:scale-100 group-hover/chat-pill:opacity-100 group-focus-within/chat-pill:pointer-events-auto group-focus-within/chat-pill:scale-100 group-focus-within/chat-pill:opacity-100';
   remove.setAttribute('aria-label', label);
 
   const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
