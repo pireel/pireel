@@ -244,6 +244,138 @@ export async function saveLocalVideo(
   }
 }
 
+interface SaveLocalStreamOptions {
+  name: string;
+  type?: string;
+  expectedSize?: number | null;
+  pinned?: boolean;
+}
+
+async function consumeLocalStream(
+  stream: ReadableStream<Uint8Array<ArrayBuffer>>,
+  expectedSize: number | null,
+  write?: (chunk: Uint8Array<ArrayBuffer>) => Promise<void>,
+): Promise<number> {
+  const reader = stream.getReader();
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (expectedSize != null && received > expectedSize) {
+        throw new Error(
+          `local fetch size mismatch: expected ${expectedSize}, received more than ${expectedSize}`,
+        );
+      }
+      await write?.(value);
+    }
+    if (expectedSize != null && received !== expectedSize) {
+      throw new Error(`local fetch size mismatch: expected ${expectedSize}, received ${received}`);
+    }
+    return received;
+  } catch (error) {
+    try {
+      await reader.cancel(error);
+    } catch {
+      /* the source may already be closed */
+    }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/** Stream a loopback helper response straight into OPFS. This deliberately accepts a stream rather
+ * than a Blob/File so multi-GB local imports never need a second full-size browser memory buffer. */
+export async function saveLocalStream(
+  stream: ReadableStream<Uint8Array<ArrayBuffer>>,
+  sig: string,
+  options: SaveLocalStreamOptions,
+): Promise<File> {
+  const dir = await dirHandle();
+  if (!dir) throw new Error('local media storage is unavailable for streamed import');
+
+  void navigator.storage.persist?.().catch(() => {});
+  const key = sigKey(sig);
+  const expectedSize = options.expectedSize ?? null;
+  const sigParts = sig.split(':');
+  const sigMtime = Number(sigParts[sigParts.length - 1]);
+  const meta: StoredMeta = {
+    name: options.name || 'import',
+    type: options.type || 'application/octet-stream',
+    lastModified: Number.isSafeInteger(sigMtime) && sigMtime >= 0 ? sigMtime : Date.now(),
+    ...(options.pinned ? { pinned: true } : {}),
+  };
+
+  // The same helper request may be retried. Consume and validate it, but keep an already-complete
+  // OPFS entry untouched so a broken retry cannot destroy the good local copy.
+  if (expectedSize != null) {
+    let existing: File | null = null;
+    try {
+      existing = await (await dir.getFileHandle(key)).getFile();
+    } catch {
+      /* missing entry */
+    }
+    if (existing?.size === expectedSize) {
+      await consumeLocalStream(stream, expectedSize);
+      const existingMeta = await readStoredMeta(dir, key);
+      const retainedMeta: StoredMeta = {
+        ...meta,
+        ...(meta.pinned || existingMeta?.pinned ? { pinned: true } : {}),
+      };
+      await writeStoredMeta(dir, key, retainedMeta);
+      return alignFileToSig(
+        new File([existing], retainedMeta.name, {
+          type: retainedMeta.type,
+          lastModified: retainedMeta.lastModified,
+        }),
+        sig,
+      );
+    }
+  }
+
+  const fh = await dir.getFileHandle(key, { create: true });
+  const writable = await fh.createWritable();
+  let closed = false;
+  try {
+    await consumeLocalStream(stream, expectedSize, async (chunk) => {
+      await writable.write(chunk);
+    });
+    await writable.close();
+    closed = true;
+    await writeStoredMeta(dir, key, meta);
+    await prune(dir);
+    const stored = await fh.getFile();
+    return alignFileToSig(
+      new File([stored], meta.name, {
+        type: meta.type,
+        lastModified: meta.lastModified,
+      }),
+      sig,
+    );
+  } catch (error) {
+    if (!closed) {
+      try {
+        await writable.abort(error);
+      } catch {
+        /* writable may already be aborted by the browser */
+      }
+    }
+    try {
+      await dir.removeEntry(key);
+    } catch {
+      /* no committed partial file */
+    }
+    try {
+      await dir.removeEntry(`${key}.meta.json`);
+    } catch {
+      /* no metadata sidecar */
+    }
+    throw error;
+  }
+}
+
 export async function loadLocalVideo(sig: string): Promise<File | null> {
   const fromHandle = await loadFromHandle(sig);
   if (fromHandle) return fromHandle;

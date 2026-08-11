@@ -1,6 +1,6 @@
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { fileSig } from './media';
-import { alignFileToSig, saveLocalVideo } from './local-media';
+import { saveLocalStream, saveLocalVideo } from './local-media';
 
 export type LocalAssetKind = 'video' | 'image' | 'audio';
 export type LocalFolderSource = NonNullable<LocalAssetIndexEntry['folder']>;
@@ -83,9 +83,13 @@ const expectedSizeFromSig = (sig: string): number | null => {
 
 async function materialize(
   source: LocalImportSource,
-): Promise<{ file: File; sig: string }> {
+): Promise<{ file: File; sig: string; persisted: boolean }> {
   if (source.type === 'browser')
-    return { file: source.file, sig: fileSig(source.file) };
+    return {
+      file: source.file,
+      sig: fileSig(source.file),
+      persisted: false,
+    };
 
   const url = loopbackImportUrl(source.localUrl);
   if (!url)
@@ -97,20 +101,27 @@ async function materialize(
   });
   if (!response.ok)
     throw new Error(`local fetch failed: HTTP ${response.status}`);
-  const blob = await response.blob();
+  if (!response.body)
+    throw new Error('local fetch failed: response body is not streamable');
+
   const expectedSize = expectedSizeFromSig(source.sig);
-  if (expectedSize != null && blob.size !== expectedSize) {
-    throw new Error(
-      `local fetch size mismatch: expected ${expectedSize}, received ${blob.size}`,
-    );
+  const responseType = response.headers
+    .get('content-type')
+    ?.split(';', 1)[0]
+    ?.trim();
+  const type =
+    responseType || source.fallbackType || 'application/octet-stream';
+  if (!localAssetKindOf({ name: source.filename, type })) {
+    await response.body.cancel();
+    throw new Error(`unsupported local media: ${source.filename}`);
   }
-  const file = alignFileToSig(
-    new File([blob], source.filename || 'import', {
-      type: blob.type || source.fallbackType || 'application/octet-stream',
-    }),
-    source.sig,
-  );
-  return { file, sig: source.sig };
+  const file = await saveLocalStream(response.body, source.sig, {
+    name: source.filename || 'import',
+    type,
+    expectedSize,
+    pinned: Boolean(source.folder),
+  });
+  return { file, sig: source.sig, persisted: true };
 }
 
 /** Browser picker files and Skill loopback files converge here. Source permission/materialization is
@@ -118,17 +129,19 @@ async function materialize(
 export async function importLocalSource(
   source: LocalImportSource,
 ): Promise<ImportedLocalAsset> {
-  const { file, sig } = await materialize(source);
+  const { file, sig, persisted } = await materialize(source);
   const kind = localAssetKindOf(file);
   if (!kind) throw new Error(`unsupported local media: ${file.name}`);
   const handle = source.type === 'browser' ? source.handle : undefined;
   const folder = source.folder;
-  await saveLocalVideo(file, sig, handle, {
-    // Folder-input files have no reusable handle, so their OPFS copy is the source of truth.
-    pinned: Boolean(folder && !handle),
-    // A single-file handle also keeps a bounded OPFS fallback for embedded browser refreshes.
-    fallbackCopy: Boolean(handle && !folder),
-  });
+  if (!persisted) {
+    await saveLocalVideo(file, sig, handle, {
+      // Folder-input files have no reusable handle, so their OPFS copy is the source of truth.
+      pinned: Boolean(folder && !handle),
+      // A single-file handle also keeps a bounded OPFS fallback for embedded browser refreshes.
+      fallbackCopy: Boolean(handle && !folder),
+    });
+  }
   return {
     file,
     sig,
