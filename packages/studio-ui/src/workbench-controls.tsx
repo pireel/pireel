@@ -73,9 +73,9 @@ export function ExportOptRow<T extends string | number>({
   onPick: (v: T) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-start gap-2">
       <span className="text-ink-3 w-12 shrink-0 text-[12px]">{label}</span>
-      <div className="flex gap-1.5">
+      <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
         {options.map(([v, text]) => (
           <button
             key={String(v)}
