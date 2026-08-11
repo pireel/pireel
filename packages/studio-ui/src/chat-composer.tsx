@@ -537,7 +537,7 @@ export function Composer({
               const text = raw.replace(/^[\r\n]+|[\r\n]+$/g, '');
               if (text) document.execCommand('insertText', false, text);
             }}
-            className="max-h-[200px] min-h-[64px] overflow-y-auto whitespace-pre-wrap px-3 pb-1.5 pt-2.5 text-[13px] outline-none"
+            className="max-h-[220px] min-h-[80px] overflow-y-auto whitespace-pre-wrap px-3 pb-2 pt-2.5 text-[13px] outline-none"
           />
         </div>
         <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">

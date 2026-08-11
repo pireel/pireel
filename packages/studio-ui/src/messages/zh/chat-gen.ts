@@ -153,7 +153,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.starting': '启动中…',
   'chatGen.stop': '停止',
   'chatGen.stopped': '已停止',
-  'chatGen.timelineFrameTag': '画面 {time}',
+  'chatGen.timelineFrameTag': '{time}',
   'chatGen.timelineFrameCapturing': '正在截取…',
   'chatGen.timelineFrameCaptureFailed': '这一帧暂时无法读取',
   'chatGen.cancelTimelineFramePick': '退出画面取帧',

@@ -153,7 +153,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.starting': 'Starting…',
   'chatGen.stop': 'Stop',
   'chatGen.stopped': 'Stopped',
-  'chatGen.timelineFrameTag': 'Frame {time}',
+  'chatGen.timelineFrameTag': '{time}',
   'chatGen.timelineFrameCapturing': 'Capturing…',
   'chatGen.timelineFrameCaptureFailed': 'This frame could not be read',
   'chatGen.cancelTimelineFramePick': 'Exit frame picker',
