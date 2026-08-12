@@ -129,7 +129,7 @@ import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualFileBindings, supplementalVisualMedia } from './visual-render-plan';
 import { type BakeSpec, type BakedWindow, bakeTransitionWindow, decodeBake } from './transition-bake';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { CloudProjectSaveQueue } from './cloud-project-save';
+import { CloudProjectSaveQueue, DeferredEffectDisposer } from './cloud-project-save';
 import { StudioTimeline, DEFAULT_PPS, MIN_PPS, MAX_PPS, type TimelineTrackState } from './studio-timeline';
 import { quantizeTimelineFrameSecond } from './timeline-utils';
 import { timelineDirectorScenesFromDocument } from './director-scene-strip';
@@ -535,6 +535,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const cloudSaveChainRef = useRef<Promise<void>>(Promise.resolve()); // serializes cloud PUTs (flush-on-evict must not race an in-flight save)
   const cloudSaveQueueRef = useRef<CloudProjectSaveQueue<ProjectSavePayload> | null>(null);
   const cloudSaveQueueProjectRef = useRef(projectId);
+  const cloudSaveQueueDisposerRef = useRef<DeferredEffectDisposer | null>(null);
+  if (!cloudSaveQueueDisposerRef.current) cloudSaveQueueDisposerRef.current = new DeferredEffectDisposer();
   const bridgeReclaimRef = useRef<() => void>(() => {});
   const reclaimWritership = () => {
     if (!displacedRef.current) return;
@@ -4452,7 +4454,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }
   const cloudSaveQueue = cloudSaveQueueRef.current;
 
-  useEffect(() => () => cloudSaveQueue.dispose(), [cloudSaveQueue]);
+  useEffect(() => {
+    // React Strict Mode runs setup → cleanup → setup once in development without a render between
+    // those phases. Disposing synchronously in the first cleanup permanently killed the same queue
+    // that the second setup kept using, so local edits never reached the cloud during dev/QA.
+    // A later setup advances the lifecycle token before this microtask; a real unmount does not.
+    const lifecycle = cloudSaveQueueDisposerRef.current!.retain(cloudSaveQueue);
+    return () => {
+      cloudSaveQueueDisposerRef.current!.release(cloudSaveQueue, lifecycle, () => {
+        cloudSaveQueue.dispose();
+        if (cloudSaveQueueRef.current === cloudSaveQueue) cloudSaveQueueRef.current = null;
+      });
+    };
+  }, [cloudSaveQueue]);
 
   // Selection change → close the background-color popover
   useEffect(() => {
