@@ -25,6 +25,8 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     renameProject: vi.fn(async () => ({ ok: true, summary: 'renamed', data: { projectId: 'p1', title: 'X' } })),
     listAssets: vi.fn(async () => ({ ok: true, summary: '1 assets in the library', data: { assets: [{ id: 'u1', kind: 'image', url: 'https://cdn.example/u1.png' }], project: {} } })),
     searchAssets: vi.fn(async () => ({ ok: true, summary: '1 matching asset', data: { results: [{ assetId: 'u1', kind: 'image', scope: 'cloud' }] } })),
+    searchStock: vi.fn(async () => ({ ok: true, summary: '1 online result', data: { results: [{ assetId: 'px_1', provider: 'pexels' }] } })),
+    importStock: vi.fn(async () => ({ ok: true, summary: 'stock imported', data: { registration: { id: 'up_1', kind: 'image', url: 'https://cdn.example/stock.jpg' } } })),
     listModels: vi.fn(async () => ({ ok: true, summary: '2 generation models', data: { models: [] } })),
     generateImage: vi.fn(async () => ({ ok: true, summary: 'image started', data: { id: 'ci1', status: 'pending' } })),
     generateVideo: vi.fn(async () => ({ ok: true, summary: 'video started', data: { id: 'cv1', status: 'pending' } })),
@@ -44,7 +46,7 @@ describe('MCP 工具面', () => {
     const names = new Set(buildMcpTools().map((t) => t.name));
     // chatOnly 工具(review_visuals 这类外包眼睛)不出现在 MCP 面——外部 agent 有自己的眼睛(capture_frame)
     for (const d of STUDIO_TOOLS) expect(names.has(d.id)).toBe(!d.chatOnly);
-    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'get_icons']) {
+    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'get_icons', 'search_stock', 'import_stock']) {
       expect(names.has(extra)).toBe(true);
     }
   });
@@ -102,7 +104,7 @@ describe('MCP 协议处理', () => {
     expect(d.readEditingGuide).toHaveBeenCalled();
     expect(d.readFrame).toHaveBeenCalledWith('f1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);
@@ -116,6 +118,11 @@ describe('MCP 协议处理', () => {
     const d4 = deps();
     await handleMcpRequest({ id: 102, method: 'tools/call', params: { name: 'search_assets', arguments: { query: '口播配乐', kind: 'audio' } } }, d4);
     expect(d4.searchAssets).toHaveBeenCalledWith({ query: '口播配乐', kind: 'audio' });
+    await handleMcpRequest({ id: 1021, method: 'tools/call', params: { name: 'search_stock', arguments: { query: 'city night', kind: 'video' } } }, d4);
+    expect(d4.searchStock).toHaveBeenCalledWith({ query: 'city night', kind: 'video' });
+    const stockImport = { query: 'city night', kind: 'video', page: 1, limit: 12, assetId: 'px_1' };
+    await handleMcpRequest({ id: 1022, method: 'tools/call', params: { name: 'import_stock', arguments: stockImport } }, d4);
+    expect(d4.importStock).toHaveBeenCalledWith(stockImport);
     expect(d4.callBridge).not.toHaveBeenCalled();
     const d5 = deps();
     await handleMcpRequest({ id: 103, method: 'tools/call', params: { name: 'generate_speech', arguments: { text: '你好' } } }, d5);
