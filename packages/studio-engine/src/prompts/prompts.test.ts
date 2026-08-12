@@ -37,7 +37,16 @@ describe('静态提示词完整性', () => {
     expect(CHAT_IDENTITY).toContain('Do not force it through as one uninterrupted execution');
     expect(CHAT_IDENTITY).toContain('For a small set of named choices call ask_user and WAIT');
     expect(CHAT_IDENTITY).toContain('For open-ended information, ask ONE concise natural-language question and stop');
+    expect(CHAT_IDENTITY).toContain('Resolve only ONE blocking decision per wait');
+    expect(CHAT_IDENTITY).toContain('is NOT permission to make one output');
+    expect(CHAT_IDENTITY).toContain('uniform slices, filename-order assembly');
+    expect(CHAT_IDENTITY).toContain('does NOT implicitly authorize charge-bearing media generation');
+    expect(CHAT_IDENTITY).toContain('This is a hard pre-pilot checkpoint');
     expect(mcpInstructions('test-version')).toContain('Ask one concise question and wait when only the user can resolve that boundary');
+    expect(mcpInstructions('test-version')).toContain('requires an explicit output count, purpose and meaningful variation dimension');
+    expect(mcpInstructions('test-version')).toContain('Uniform slices or filename-order assembly');
+    expect(mcpInstructions('test-version')).toContain('does NOT implicitly authorize charge-bearing media generation');
+    expect(mcpInstructions('test-version')).toContain('hard pre-pilot checkpoint');
     expect(STUDIO_TOOLS.some((tool) => ['analyze_narration', 'lay_out', 'add_graphics'].includes(tool.id))).toBe(false);
   });
   it('Chat 身份是剪辑专家，而不是被动助手或泛化导演', () => {
@@ -80,13 +89,14 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
   it('buildChatSystem 同参数逐次字节相同(纯函数,无 request-time 动态内容)', () => {
     expect(buildChatSystem(null, '- f1 · F1 — x')).toBe(buildChatSystem(null, '- f1 · F1 — x'));
   });
-  it('未选 Frame 时保持无主题，完整首稿也不触发隐式适配', () => {
+  it('未选 Frame 时不隐式适配，完整创意任务会主动提供可跳过的选择', () => {
     const system = buildChatSystem(null, '- zen-white · Zen White\n- editorial-bold · Editorial Bold');
     expect(system).toContain('Remain themeless');
     expect(system).toContain('a complete edit does not authorize automatic Frame selection');
     expect(system).toContain('neutral visual-craft quality floor');
     expect(system).toContain('not permission to emit generic fixed cards');
     expect(system).toContain('user explicitly chooses one or explicitly delegates the choice');
+    expect(system).toContain('proactively offer one or two Frame candidates plus a themeless choice');
     expect(system).toContain('catalog previews are samples of a visual language');
     expect(system).toContain('Never rank Frames by the active Skill');
     expect(system).toContain('Do not use a hidden safe default');
