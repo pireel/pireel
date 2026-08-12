@@ -26,6 +26,7 @@ import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { kitElement } from '@pireel/studio-engine/kit-templates';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { addElementEntry } from './element-history';
 import type { GenElementResult } from './gen-chat-panel';
 import { fitElementDesignBox } from './element-insert-geometry';
@@ -320,11 +321,14 @@ export function useElementOps(deps: ElementOpsDeps) {
         const byIndex = new Map(out.items.map((x) => [x.index, x.text]));
         // Component = strong reference: HTML may grow/shrink repeated units. If the structural
         // response is invalid, patch text nodes only and keep the authored layout and animation.
+        const htmlHardIssues = typeof out.html === 'string'
+          ? lintBlock({ blockId: b.id, innerHtml: out.html, timelineBody: '' }).filter((issue) => HARD_LINT_CODES.has(issue.code))
+          : [];
         const okHtml =
           typeof out.html === 'string' &&
           out.html.includes('data-edit') &&
           out.html.includes(`#${b.id}`) &&
-          !/<script/i.test(out.html);
+          htmlHardIssues.length === 0;
         let nextHtml = out.html ?? '';
         if (!okHtml) {
           nodes.forEach((n, i) => {
@@ -336,7 +340,9 @@ export function useElementOps(deps: ElementOpsDeps) {
         // Only authored HTML owns an editable timeline body. Kit motion is derived from typed props.
         if (out.timeline) {
           try {
-            // eslint-disable-next-line @typescript-eslint/no-implied-eval
+            const timelineHardIssues = lintBlock({ blockId: b.id, innerHtml: nextHtml, timelineBody: out.timeline })
+              .filter((issue) => HARD_LINT_CODES.has(issue.code));
+            if (timelineHardIssues.length) throw new Error(timelineHardIssues[0]!.message);
             new Function('tl', out.timeline);
             nextTlb = out.timeline;
           } catch {
