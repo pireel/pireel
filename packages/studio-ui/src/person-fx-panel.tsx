@@ -15,7 +15,6 @@ import { imageThumb } from '@pireel/ui/image-url';
 import { toast } from '@pireel/ui/toast';
 import { Switch } from '@pireel/ui/switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@pireel/ui/tooltip';
-import { uploadImageFile } from './media';
 import { t } from './i18n';
 
 type StrokeStyle = 'none' | 'solid' | 'dashed';
@@ -63,6 +62,7 @@ const STROKE_CARDS: { style: StrokeStyle; name: string }[] = [
 export function PersonFxPanel({
   comp,
   onChange,
+  onPrepareLocalImage,
   matte,
   selectedShotMatte,
   onToggleShotMatte,
@@ -70,6 +70,7 @@ export function PersonFxPanel({
 }: {
   comp: Composition;
   onChange: (fx: PersonFx | undefined) => void;
+  onPrepareLocalImage: (file: File) => Promise<string>;
   matte: MatteState;
   /** Matte toggle state of the selected shot; null = no shot selected (toggle disabled). */
   selectedShotMatte: boolean | null;
@@ -105,7 +106,7 @@ export function PersonFxPanel({
     if (!f) return;
     setUploading(true);
     try {
-      const url = await uploadImageFile(f);
+      const url = await onPrepareLocalImage(f);
       commit({ ...fx, bg: { type: 'image', url } });
     } catch {
       toast.error(t('panels.imageUploadFailedTry'));

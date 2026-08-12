@@ -88,6 +88,7 @@ import {
   shotId,
   splitBlockedByTransition,
   totalDuration,
+  transcriptContextAt,
   validateComposition,
   validateEditorDocumentV2,
   videoShotTimelineSpans,
@@ -546,7 +547,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (isSentenceCaption(b)) return { result: { ok: false, error: 'sentence-caption layer — position it via set_captions yPct/scale' } };
       if (!b.box) return { result: { ok: false, error: 'this block has no screen box (full-canvas element) — cannot reposition' } };
       const next = applyBlockPlacement(b, input as Parameters<typeof applyBlockPlacement>[1]);
-      if (!next) return { result: { ok: false, error: 'no position (anchor / xPct+yPct / dxPct+dyPct) or scale given' } };
+      if (!next) return { result: { ok: false, error: 'no position (anchor / xPct+yPct / dxPct+dyPct) or size (scale / widthPct / heightPct) given' } };
       // Receipt hint, not a remap: when the block's window overlaps a corner/split span, say where
       // the video band is so the agent notices before parking a graphic on the speaker.
       const framing = placementFramingNotes(shotsOf(p), next.startSec, next.durationSec);
@@ -1244,6 +1245,9 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!raw.trim()) return { result: { ok: false, error: 'raw required (the raw text produced by compose_block_brief)' } };
       const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
       const target = bid ? findBlock(bid) : undefined;
+      const requestedLabel = typeof input.label === 'string' && input.label.trim()
+        ? input.label.trim().slice(0, 12)
+        : undefined;
       // Stabilize applyId (fixes a lint infinite loop found on-device): for a new
       // block with no bid, mint an id now and hand it back in the receipt on lint
       // failure; the retry carries blockId to reuse it → the new block's scoped-CSS
@@ -1258,7 +1262,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (shape.kind === 'kit') {
         const slots = { props: shape.props };
         if (target) {
-          const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: target.id, block: { templateId: `kit:${shape.component}`, slots } }] });
+          const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: target.id, block: { templateId: `kit:${shape.component}`, slots, ...(requestedLabel ? { label: requestedLabel } : {}) } }] });
           if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
           return {
             result: { ok: true, summary: `Updated "${bname(target)}"`, data: { blockId: target.id } },
@@ -1313,7 +1317,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (target) {
         const edit = applyOverlayDocumentEdits({
           document: p.document,
-          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } } }],
+          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
         });
         if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
         return {
@@ -1344,12 +1348,24 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'compose_context': {
       const mainTranscript = mainTranscriptOf(p);
       const clipTranscripts = projectedClipTranscripts(p);
-      const script = mainTranscript.map((s) => s.text).join('');
+      const placements = editorDocumentRenderPlan(p.document).narrative.map((entry) => ({
+        shotId: entry.clipId,
+        startSec: entry.startSec,
+        endSec: entry.endSec,
+      }));
+      const scriptAt = (atSec: number) => transcriptContextAt({
+        shots: c.shots ?? [],
+        placements,
+        mainTranscript,
+        clipTranscripts,
+        atSec,
+      });
       const base = { theme: c.theme, ...(c.palette ? { palette: c.palette } : {}), ...(c.frameId ? { frameId: c.frameId } : {}) };
       const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
       if (bid) {
         const b = findBlock(bid);
         if (!b) return { result: { ok: false, error: 'block not found' } };
+        const script = scriptAt(b.startSec);
         return {
           result: {
             ok: true,
@@ -1365,6 +1381,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         };
       }
       const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : 0;
+      const script = scriptAt(at);
       return {
         result: {
           ok: true,

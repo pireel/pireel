@@ -62,6 +62,7 @@ import {
   quantizeTimelineFrameSecond,
   rulerStep,
   stripTiles,
+  visibleStripTiles,
   timelinePlacementOverlaps,
 } from './timeline-utils';
 import { ActiveSceneRing, FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
@@ -398,8 +399,6 @@ function StudioTimelineImpl({
   const visualFilmH = VISUAL_VIDEO_CLIP_H - SCENE_WAVE_H;
   const visualThumbW = visualFilmH;
   const visualTileDur = visualThumbW / pps;
-  const filmTiles = useMemo(() => stripTiles(filmstrip ?? [], 0, videoDur, tileDur, pps), [filmstrip, videoDur, tileDur, pps]);
-
   const [guide, setGuide] = useState<number | null>(null); // snap alignment guide while dragging (sec)
   const [dropHint, setDropHint] = useState<{
     t: number;
@@ -417,6 +416,7 @@ function StudioTimelineImpl({
   const [hoverT, setHoverT] = useState<number | null>(null); // hover time (center preview jumps to this frame + draw hover vertical line)
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const [visibleRange, setVisibleRange] = useState({ startSec: 0, endSec: 30 });
   const draggingRef = useRef(false); // while dragging: let hover-seek yield (avoid double seek)
   const framePickConsumedRef = useRef(false); // suppress the click synthesized after a capture-phase frame pick
   const hoverRaf = useRef(0); // hover rAF coalescing
@@ -451,6 +451,38 @@ function StudioTimelineImpl({
 
   const W = Math.max(320, dur * pps);
   const x = useCallback((s: number) => s * pps, [pps]);
+  const updateVisibleRange = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const contentLeft = GUTTER + EDGE_PAD;
+    const viewportSec = Math.max(1, (el.clientWidth - GUTTER) / pps);
+    const rawStart = Math.max(0, (el.scrollLeft - contentLeft) / pps);
+    const rawEnd = Math.min(dur, (el.scrollLeft + el.clientWidth - contentLeft) / pps);
+    // Quantize to half-view buckets and keep a full viewport of overscan. This avoids re-rendering
+    // on every scroll pixel while still preparing thumbnails before they enter the viewport.
+    const bucket = Math.max(1, viewportSec / 2);
+    const startSec = Math.max(0, Math.floor(rawStart / bucket) * bucket - viewportSec);
+    const endSec = Math.min(dur, Math.ceil(rawEnd / bucket) * bucket + viewportSec);
+    setVisibleRange((current) => current.startSec === startSec && current.endSec === endSec ? current : { startSec, endSec });
+  }, [dur, pps]);
+  useEffect(() => {
+    updateVisibleRange();
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateVisibleRange);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateVisibleRange]);
+  const filmTiles = useMemo(() => visibleStripTiles(
+    filmstrip ?? [],
+    0,
+    videoDur,
+    tileDur,
+    pps,
+    0,
+    visibleRange.startSec,
+    visibleRange.endSec,
+  ), [filmstrip, pps, tileDur, videoDur, visibleRange]);
 
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
@@ -790,6 +822,7 @@ function StudioTimelineImpl({
   const onScrollFollow = () => {
     const el = scrollRef.current;
     if (!el) return;
+    updateVisibleRange();
     const moved = el.scrollLeft !== lastScrollLeftRef.current; // only count horizontal scroll (vertical track-switch doesn't count)
     lastScrollLeftRef.current = el.scrollLeft;
     if (performance.now() < progScrollUntilRef.current) return; // programmatic scroll, ignore
@@ -1529,7 +1562,8 @@ function StudioTimelineImpl({
                                 if (srcLive && !srcLive(shot.src)) return <MissingStrip />;
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
-                                return stripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
+                                if (end < visibleRange.startSec || start > visibleRange.endSec) return null;
+                                return visibleStripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps, start, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
                                   <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                                 ));
                               })()}
@@ -1540,7 +1574,7 @@ function StudioTimelineImpl({
                             </div>
                           ) : (
                             <>
-                              {stripTiles(filmstrip ?? [], shot.srcStart, shot.srcEnd, tileDur, pps).map((tl, ti) => (
+                              {end >= visibleRange.startSec && start <= visibleRange.endSec && visibleStripTiles(filmstrip ?? [], shot.srcStart, shot.srcEnd, tileDur, pps, start, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
                                 <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                               ))}
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
@@ -1739,17 +1773,20 @@ function StudioTimelineImpl({
                       );
                     }}
                   >
-                    {clip.kind === 'image' && clip.source && (
+                    {clip.kind === 'image' && clip.source && clip.endSec >= visibleRange.startSec && clip.startSec <= visibleRange.endSec && (
                       <img src={clip.source} alt="" draggable={false} className="pointer-events-none absolute inset-0 h-full w-full object-cover" />
                     )}
                     {clip.kind === 'video' && (
                       <div className="pointer-events-none absolute inset-0">
-                        {!liveSource ? <MissingStrip /> : visualStrip.length > 0 ? stripTiles(
+                        {!liveSource ? <MissingStrip /> : visualStrip.length > 0 ? visibleStripTiles(
                           visualStrip,
                           clip.sourceInSec,
                           clip.sourceOutSec,
                           visualTileDur,
                           pps,
+                          clip.startSec,
+                          visibleRange.startSec,
+                          visibleRange.endSec,
                         ).map((tile, index) => (
                           <img
                             key={index}

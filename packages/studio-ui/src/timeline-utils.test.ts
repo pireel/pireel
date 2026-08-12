@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { packedPrimaryPlacement, quantizeTimelineFrameSecond, timelinePlacementOverlaps } from './timeline-utils';
+import { packedPrimaryPlacement, quantizeTimelineFrameSecond, timelinePlacementOverlaps, visibleStripTiles } from './timeline-utils';
 
 describe('quantizeTimelineFrameSecond', () => {
   it('picks the nearest exact frame and never returns the exclusive duration edge', () => {
@@ -34,5 +34,15 @@ describe('timeline placement rules', () => {
 
   it('excludes the moving primary clip before choosing its new packed position', () => {
     expect(packedPrimaryPlacement(spans, 'a', 20, 3)).toEqual({ index: 1, startSec: 2 });
+  });
+});
+
+describe('visibleStripTiles', () => {
+  it('mounts only tiles intersecting the visible timeline window', () => {
+    const strip = Array.from({ length: 120 }, (_, index) => ({ t: index + 0.5, url: `frame-${index}` }));
+    const visible = visibleStripTiles(strip, 0, 120, 1, 50, 0, 40, 50);
+    expect(visible.length).toBeLessThan(15);
+    expect(visible[0]?.left).toBe(1_950);
+    expect(visible.at(-1)?.left).toBe(2_500);
   });
 });

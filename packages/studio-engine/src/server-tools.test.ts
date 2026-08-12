@@ -798,6 +798,32 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.result.ok).toBe(true);
     expect((r2.result.data as { block: { id: string } }).block.id).toBe('b1');
   });
+  it('compose_context 按 atSec 读取长视频当前位置，而不是固定取文稿开头', () => {
+    const transcript = Array.from({ length: 80 }, (_, index) => ({
+      start: index * 10,
+      end: index * 10 + 8,
+      text: index === 0 ? 'INTRO PREFIX' : index === 60 ? 'LATE MOMENT TARGET' : `line-${index}`,
+    }));
+    const base = proj();
+    const project = proj({
+      comp: {
+        ...base.comp,
+        shots: [{ id: 'long', srcStart: 0, srcEnd: 800, treatment: 'full' }],
+      },
+      videoDurationSec: 800,
+      transcript,
+    });
+    const result = runServerTool('compose_context', { atSec: 605 }, project);
+    const script = (result.result.data as { context: { script: string } }).context.script;
+    expect(script).toContain('LATE MOMENT TARGET');
+    expect(script).not.toContain('INTRO PREFIX');
+  });
+  it('apply_block 更新已有元素时同步应用明确提供的 label', () => {
+    const raw = '更新卡片\n```html\n<div><style>#b1 .title{color:red}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
+    const result = runServerTool('apply_block', { raw, blockId: 'b1', label: '新名称' }, proj());
+    expect(result.result.ok, JSON.stringify(result.result)).toBe(true);
+    expect(result.comp?.blocks.find((block) => block.id === 'b1')?.label).toBe('新名称');
+  });
   it('apply_block:新块 id 一轮收敛(未知 blockId 原样采用;lint 回执还稳定 id)', () => {
     // compose_context 给新元素铸的 id 不在 comp 里——apply 带这个"未知" id 必须原样采用,不许报找不到
     const rc = runServerTool('compose_context', {}, proj());

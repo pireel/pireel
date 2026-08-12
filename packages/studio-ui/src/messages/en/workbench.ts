@@ -293,7 +293,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.pauseSpace': 'Pause (Space)',
   'workbench.personTopSmartCutout': 'Person on top (smart cutout)',
   'workbench.placedNameZone': 'Placed "{name}" at {zone}',
-  'workbench.placeNoDirective': 'No position (anchor / xPct+yPct / dxPct+dyPct) or scale given',
+  'workbench.placeNoDirective': 'No position (anchor / xPct+yPct / dxPct+dyPct) or size (scale / widthPct / heightPct) given',
   'workbench.playbackAlreadyPaused': 'Playback was already paused',
   'workbench.playingFrom': 'Playing from {t}s',
   'workbench.playingRange': 'Playing {from}–{to}s, auto-pausing at the end',

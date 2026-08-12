@@ -46,6 +46,9 @@ import {
   assembleHtml,
   cutTransitions,
   parseClipInset,
+  localImageLocator,
+  localImageLocatorSigs,
+  parseLocalImageLocator,
   segmentFadeFn,
   shotFilterCss,
   shotGain,
@@ -79,6 +82,7 @@ import {
 } from './browser-visual-layer-plan';
 import { fingerprintReviewPixels, type ReviewFrameFingerprint } from './review-similarity';
 import { segmentSourceRate, segmentSourceTimeAt } from './video-segment-time';
+import { loadLocalVideo } from './local-media';
 
 /** Export options (chosen in the dialog): res=short-side pixels (width for portrait), fps, format=container/codec. */
 export interface ExportRenderOpts {
@@ -183,24 +187,46 @@ function applyPrimaryOverlayVisibility(overlay: Overlay, hidden: boolean | undef
   }
 }
 
-/** Inline every in-block <img> as a data URI (foreignObject rasterization forbids external loads; cross-origin goes through the /api/media/fetch proxy). */
+function blobDataUri(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** Inline every in-block <img> as a data URI (foreignObject rasterization forbids external loads).
+ * Device-local images are read from OPFS; public remote images go through the guarded media proxy. */
 async function inlineImages(root: HTMLElement): Promise<void> {
+  for (const sig of localImageLocatorSigs(root.innerHTML)) {
+    const file = await loadLocalVideo(sig);
+    if (!file) throw new Error(`Local image is unavailable on this device: ${sig}`);
+    const marker = localImageLocator(sig);
+    const dataUri = await blobDataUri(file);
+    for (const img of root.querySelectorAll('img[src]')) {
+      if (img.getAttribute('src') === marker) img.setAttribute('src', dataUri);
+    }
+    for (const element of root.querySelectorAll<HTMLElement>('[style]')) {
+      const style = element.getAttribute('style') ?? '';
+      if (style.includes(marker)) element.setAttribute('style', style.replaceAll(marker, dataUri));
+    }
+    for (const style of root.querySelectorAll('style')) {
+      if (style.textContent?.includes(marker)) style.textContent = style.textContent.replaceAll(marker, dataUri);
+    }
+  }
   const imgs = [...root.querySelectorAll('img')];
   await Promise.all(
     imgs.map(async (img) => {
       const src = img.getAttribute('src') ?? '';
       if (!src || src.startsWith('data:')) return;
+      if (parseLocalImageLocator(src)) throw new Error('Local image locator could not be resolved for export');
       try {
         const sameOrigin = src.startsWith('/') || src.startsWith(location.origin);
         const url = sameOrigin ? src : `/api/media/fetch?url=${encodeURIComponent(src)}`;
-        const blob = await (await fetch(url)).blob();
-        const dataUri = await new Promise<string>((res, rej) => {
-          const fr = new FileReader();
-          fr.onload = () => res(String(fr.result));
-          fr.onerror = () => rej(new Error('read failed'));
-          fr.readAsDataURL(blob);
-        });
-        img.setAttribute('src', dataUri);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`image fetch failed (${response.status})`);
+        img.setAttribute('src', await blobDataUri(await response.blob()));
       } catch {
         /* One image failing doesn't block export: it's just absent */
       }

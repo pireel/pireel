@@ -1080,6 +1080,9 @@ export interface PlaceBlockInput {
   dyPct?: number;
   /** Multiply the box size around its center (clamped 0.4–2). */
   scale?: number;
+  /** Set width/height independently as a percentage of the canvas. */
+  widthPct?: number;
+  heightPct?: number;
 }
 
 /** 3×3 zone label for a normalized box (by center) — the agent-facing vocabulary for "where is this on screen". */
@@ -1139,6 +1142,22 @@ export function applyBlockPlacement(block: Block, input: PlaceBlockInput): Block
     w = nw;
     h = nh;
     scaled = true;
+  }
+  if (typeof input.widthPct === 'number' && Number.isFinite(input.widthPct)) {
+    const nextWidth = Math.min(1, Math.max(0.04, input.widthPct / 100));
+    if (nextWidth !== w) {
+      x += (w - nextWidth) / 2;
+      w = nextWidth;
+      scaled = true;
+    }
+  }
+  if (typeof input.heightPct === 'number' && Number.isFinite(input.heightPct)) {
+    const nextHeight = Math.min(1, Math.max(0.03, input.heightPct / 100));
+    if (nextHeight !== h) {
+      y += (h - nextHeight) / 2;
+      h = nextHeight;
+      scaled = true;
+    }
   }
   let placed = false;
   if (input.anchor && (PLACE_ANCHORS as readonly string[]).includes(input.anchor)) {

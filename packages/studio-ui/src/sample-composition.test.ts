@@ -22,4 +22,12 @@ describe('preview runtime', () => {
     expect(PREVIEW_RUNTIME).toContain("post({ type: 'selectVisual', clipId:");
     expect(PREVIEW_RUNTIME).toContain("!el.hasAttribute('data-hf-visual-clip')");
   });
+
+  it('resolves device-local image locators inside image and CSS slots', () => {
+    expect(PREVIEW_RUNTIME).toContain("d.type === 'hf:imageFile'");
+    expect(PREVIEW_RUNTIME).toContain("'pireel-local-image:' + encodeURIComponent");
+    expect(PREVIEW_RUNTIME).toContain("document.querySelectorAll('img[src]')");
+    expect(PREVIEW_RUNTIME).toContain("document.querySelectorAll('[style]')");
+    expect(PREVIEW_RUNTIME).toContain("document.querySelectorAll('style')");
+  });
 });

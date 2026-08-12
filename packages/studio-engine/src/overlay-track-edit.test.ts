@@ -123,6 +123,32 @@ describe('overlay track transactions', () => {
     expect(moved.document.semantics.scenes.find((scene) => scene.id === 'setup')?.clipIds).not.toContain('card');
   });
 
+  it('rekeys custom HTML and animation selectors when duplicating a graphic', () => {
+    const document = documentWithGraphics();
+    const source = document.timeline.tracks.find((track) => track.id === 'low')!.clips[0]!;
+    if (source.kind !== 'graphic') throw new Error('fixture must be a graphic');
+    source.block.slots = {
+      innerHtml: '<style>#card .title{color:red}</style><div id="card"><b class="title">Hi</b></div>',
+      timelineBody: 'tl.to("#card .title", {opacity:1})',
+    };
+    const result = duplicateOverlayDocumentClip({
+      document,
+      clipId: 'card',
+      newClipId: 'card-copy',
+      startSec: 2,
+      toTrackId: 'low',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const copy = result.document.timeline.tracks.flatMap((track) => track.clips).find((item) => item.id === 'card-copy');
+    if (!copy || copy.kind !== 'graphic') throw new Error('duplicate must be a graphic');
+    expect(copy.block.slots).toMatchObject({
+      innerHtml: expect.stringContaining('#card-copy .title'),
+      timelineBody: expect.stringContaining('#card-copy .title'),
+    });
+    expect(JSON.stringify(copy.block.slots)).not.toContain('#card .title');
+  });
+
   it('does not treat caption timing as Director Scene visual ownership', () => {
     const base = documentWithGraphics();
     base.timeline.tracks.push({

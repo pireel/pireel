@@ -101,6 +101,43 @@ export function stripTiles(strip: FilmstripFrame[], srcStart: number, srcEnd: nu
   return tiles;
 }
 
+/** Keep filmstrip DOM proportional to the viewport, not the project duration. Cards remain mounted
+ * for editing geometry, but their image tiles are created only when their timeline span is visible
+ * (with the caller's overscan already included in visibleStart/visibleEnd). */
+export function visibleStripTiles(
+  strip: FilmstripFrame[],
+  srcStart: number,
+  srcEnd: number,
+  tileDur: number,
+  pps: number,
+  timelineStartSec: number,
+  visibleStartSec: number,
+  visibleEndSec: number,
+): { left: number; url: string }[] {
+  if (!strip.length || tileDur <= 0 || pps <= 0 || srcEnd <= srcStart || visibleEndSec < visibleStartSec) return [];
+  const sourceFirst = Math.floor(srcStart / tileDur);
+  const sourceLast = Math.ceil(srcEnd / tileDur) - 1;
+  const visibleFirst = Math.ceil((visibleStartSec - timelineStartSec + srcStart - tileDur) / tileDur);
+  const visibleLast = Math.floor((visibleEndSec - timelineStartSec + srcStart) / tileDur);
+  const first = Math.max(sourceFirst, visibleFirst);
+  const last = Math.min(sourceLast, visibleLast);
+  const tiles: { left: number; url: string }[] = [];
+  for (let k = first; k <= last; k++) {
+    const srcT = (k + 0.5) * tileDur;
+    let closest = strip[0]!;
+    let distance = Number.POSITIVE_INFINITY;
+    for (const frame of strip) {
+      const candidate = Math.abs(frame.t - srcT);
+      if (candidate < distance) {
+        closest = frame;
+        distance = candidate;
+      }
+    }
+    tiles.push({ left: (k * tileDur - srcStart) * pps, url: closest.url });
+  }
+  return tiles;
+}
+
 /** Timeline chip category background colors (base label/icon/dot live in shared kind-meta.ts). */
 export const KIND_CHIP: Record<BlockKind, { chip: string; chipSel: string }> = {
   caption: { chip: 'bg-rose-500/15 ring-rose-400/30 hover:bg-rose-500/25', chipSel: 'bg-rose-500/30 ring-2 ring-rose-400' },

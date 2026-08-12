@@ -8,6 +8,18 @@ function overlayClip(clip: TimelineClip): clip is OverlayClip {
   return clip.kind === 'graphic' || clip.kind === 'caption';
 }
 
+function duplicateSlots(clip: OverlayClip, newClipId: string): OverlayClip['block']['slots'] {
+  return Object.fromEntries(Object.entries(clip.block.slots).map(([key, value]) => [
+    key,
+    typeof value === 'string'
+      ? value
+          .replaceAll(`#${clip.id}`, `#${newClipId}`)
+          .replaceAll(`"${clip.id}"`, `"${newClipId}"`)
+          .replaceAll(`'${clip.id}'`, `'${newClipId}'`)
+      : value,
+  ]));
+}
+
 /** Duplicate an overlay onto a compatible target lane without changing the source clip. */
 export function duplicateOverlayClip(
   document: EditorDocumentV2,
@@ -46,7 +58,9 @@ export function duplicateOverlayClip(
     ...clip,
     id: newClipId,
     startFrame,
-    block: { ...clip.block, slots: { ...clip.block.slots } },
+    // Custom blocks scope their HTML/CSS/GSAP to the clip id. Keeping the old selector makes the
+    // duplicate look blank or control its source; re-key every string slot with the new identity.
+    block: { ...clip.block, slots: duplicateSlots(clip, newClipId) },
     anchor: { ...clip.anchor },
     ...(clip.kind === 'caption' && clip.sourceRef ? { sourceRef: { ...clip.sourceRef } } : {}),
   };

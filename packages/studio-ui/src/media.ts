@@ -182,12 +182,6 @@ export async function uploadVideoFile(file: File): Promise<string> {
   return url;
 }
 
-/** Upload a material-slot image, returning an https URL (the render service can fetch and localize it). */
-export async function uploadImageFile(file: File): Promise<string> {
-  const { url } = await studioProviders().uploads.upload(file, { contentType: file.type || 'image/png', filename: file.name || 'studio-image.png' });
-  return url;
-}
-
 /** Extract embedded cover art from an audio file (ID3 APIC / MP4 covr / FLAC PICTURE — MediaBunny
  *  reads them all) as an object URL, or null. Best-effort: any failure = no cover, never an error. */
 export async function audioCoverUrl(file: File): Promise<string | null> {

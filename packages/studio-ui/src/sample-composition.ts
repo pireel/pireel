@@ -659,6 +659,46 @@ export const PREVIEW_RUNTIME = `
         } catch (err) {}
       }
     }
+    else if (d.type === 'hf:imageFile' && d.file && d.sig) {
+      // Device-local custom-block image. Persisted markup carries only a stable sig; this opaque
+      // sandbox receives the File and creates its own object URL, exactly like local video clips.
+      var marker = 'pireel-local-image:' + encodeURIComponent(String(d.sig)).replace(/[!'()*]/g, function (char) {
+        return '%' + char.charCodeAt(0).toString(16).toUpperCase();
+      });
+      var localUrl = '';
+      try { localUrl = URL.createObjectURL(d.file); } catch (err1) { return; }
+      var used = false;
+      var imgs = document.querySelectorAll('img[src]');
+      for (var ii = 0; ii < imgs.length; ii++) {
+        var im = imgs[ii];
+        var raw = im.getAttribute('src') || '';
+        if (raw !== marker || im.__hfInjected) continue;
+        try {
+          im.src = localUrl;
+          im.__hfInjected = true;
+          im.addEventListener('load', triggerFit, { once: true });
+          used = true;
+        } catch (err3) {}
+      }
+      // Generated components sometimes use the selected image as a CSS background. Resolve the
+      // same locator in inline style attributes and scoped <style> text without persisting blob URLs.
+      var styled = document.querySelectorAll('[style]');
+      for (var si = 0; si < styled.length; si++) {
+        var styleText = styled[si].getAttribute('style') || '';
+        if (styleText.indexOf(marker) < 0) continue;
+        styled[si].setAttribute('style', styleText.split(marker).join(localUrl));
+        used = true;
+      }
+      var sheets = document.querySelectorAll('style');
+      for (var ti = 0; ti < sheets.length; ti++) {
+        var cssText = sheets[ti].textContent || '';
+        if (cssText.indexOf(marker) < 0) continue;
+        sheets[ti].textContent = cssText.split(marker).join(localUrl);
+        used = true;
+      }
+      if (used) triggerFit();
+      else try { URL.revokeObjectURL(localUrl); } catch (err4) {}
+    }
   });
   // Single boot point. __hfBootT is the moment the document wants to open on — single-block previews
   // declare it in <head> (see blockPreviewDoc) so the first painted frame is already correct; docs

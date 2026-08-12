@@ -55,6 +55,7 @@ import {
   shotFilterCss,
   shotId,
   listDocumentAddressedWords,
+  localImageLocator,
   mediaVideoClipEntries,
   patchNarrativeClips,
   removeOverlayDocumentClips,
@@ -65,6 +66,7 @@ import {
   documentWordRangesToTimeline,
   splitBlockedByTransition,
   totalDuration,
+  transcriptContextAt,
   validateComposition,
   validateEditorDocumentV2,
   syncCaptionTranscripts,
@@ -107,7 +109,7 @@ import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress } from './tool-progress';
-import { fileSig, uploadImageFile } from './media';
+import { fileSig } from './media';
 import { loadLocalFolderFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
@@ -519,13 +521,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   sig,
                   filename,
                   fallbackType: typeof row.mime === 'string' ? row.mime : 'application/octet-stream',
+                  width: typeof row.width === 'number' && Number.isFinite(row.width) ? row.width : undefined,
+                  height: typeof row.height === 'number' && Number.isFinite(row.height) ? row.height : undefined,
                   ...(folder ? { folder } : {}),
                 },
               ];
             });
             if (!sources.length) return { ok: false, error: 'local asset entries required' };
             const session = await runLocalImportSession(sources);
-            for (const asset of session.imported) registerLocalAsset(localAssetIndexEntry(asset));
+            const sourceBySig = new Map(sources.map((source) => [source.sig, source]));
+            for (const asset of session.imported) {
+              const source = sourceBySig.get(asset.sig);
+              registerLocalAsset(localAssetIndexEntry(asset, { width: source?.width, height: source?.height }));
+            }
             if (!session.imported.length) {
               return { ok: false, error: session.rejected[0]?.error ?? 'local asset import failed' };
             }
@@ -1048,11 +1056,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!file) {
               return { ok: false, error: 'local image access is unavailable — ask the user to click “restore access” on that exact local asset, then retry; do not use another image' };
             }
-            const url = await uploadImageFile(file);
+            // Folder handles can disappear across embedded-browser sessions. Pin this one explicitly
+            // selected image in OPFS so preview/capture/export can resolve the durable local locator.
+            if (folder?.file) await saveLocalVideo(folder.file, entry.sig, undefined, { pinned: true });
             return {
               ok: true,
               summary: t('workbench.preparedLocalImage', { name: entry.label }),
-              data: { scope: 'mine', assetId: `local:${entry.sig}`, label: entry.label, url },
+              data: {
+                scope: 'mine',
+                assetId: `local:${entry.sig}`,
+                label: entry.label,
+                url: localImageLocator(entry.sig),
+                urlKind: 'device-local',
+                privacy: 'The image bytes stay in this browser/device. The project stores only the local sig.',
+              },
             };
           }
           case 'list_models': {
@@ -2338,13 +2355,20 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
     };
     switch (tool) {
       case 'compose_context': {
-        const script = (asrRef.current ?? []).map((s) => s.text).join('');
+        const renderTimeline = canonicalRenderTimeline(c2, documentRef.current, ctx.resolveAssetUrl);
+        const scriptAt = (atSec: number) => transcriptContextAt({
+          shots: c2.shots ?? [],
+          placements: renderTimeline.placements,
+          mainTranscript: asrRef.current ?? [],
+          atSec,
+        });
         const base = { theme: c2.theme, ...(c2.palette ? { palette: c2.palette } : {}), ...(c2.frameId ? { frameId: c2.frameId } : {}) };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         if (bid) {
           const b = c2.blocks.find((x) => x.id === bid);
           if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
           if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
+          const script = scriptAt(b.startSec);
           return {
             ok: true,
             summary: t('workbench.fetchedBlockContext'),
@@ -2359,6 +2383,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           };
         }
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
+        const script = scriptAt(at);
         return {
           ok: true,
           summary: t('workbench.fetchedNewElementContext'),
@@ -2370,6 +2395,9 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (!raw.trim()) return { ok: false, error: t('workbench.rawRequired') };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         const target = bid ? c2.blocks.find((x) => x.id === bid) : undefined;
+        const requestedLabel = typeof input.label === 'string' && input.label.trim()
+          ? input.label.trim().slice(0, 12)
+          : undefined;
         if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
         const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
         // Stable applyId (same fix as the offline executor in server-tools): an unknown bid IS the
@@ -2384,11 +2412,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           pushUndoSnapshot();
           if (target) {
             const editable = withEditableBlockGeometry(
-              { ...target, templateId: `kit:${shape.component}`, slots: { props: shape.props } },
+              { ...target, templateId: `kit:${shape.component}`, slots: { props: shape.props }, ...(requestedLabel ? { label: requestedLabel } : {}) },
               c2.width,
               c2.height,
             );
-            const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box });
+            const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box, ...(requestedLabel ? { label: requestedLabel } : {}) });
             if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
             setSelectedShotId(null);
             setSelectedId(target.id);
@@ -2433,11 +2461,11 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         pushUndoSnapshot();
         if (target) {
           const editable = withEditableBlockGeometry(
-            { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody } },
+            { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody }, ...(requestedLabel ? { label: requestedLabel } : {}) },
             c2.width,
             c2.height,
           );
-          const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box });
+          const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box, ...(requestedLabel ? { label: requestedLabel } : {}) });
           if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
           setSelectedShotId(null);
           setSelectedId(target.id);

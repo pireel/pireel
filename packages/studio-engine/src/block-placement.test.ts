@@ -64,6 +64,15 @@ describe('applyBlockPlacement', () => {
     expect(r.box!.h).toBeCloseTo(0.2);
   });
 
+  it('widthPct/heightPct 可独立改变宽高并围绕中心调整', () => {
+    const r = applyBlockPlacement(
+      blk({ x: 0.2, y: 0.3, w: 0.4, h: 0.2 }, { x: 0.1, y: 0.2, w: 0.6, h: 0.4 }),
+      { widthPct: 60, heightPct: 10 },
+    )!;
+    expect(r.box).toEqual({ x: 0.1, y: 0.35, w: 0.6, h: 0.1 });
+    expect(r.contentBox).toBeUndefined();
+  });
+
   it('无有效指令 → null;无 box → null', () => {
     expect(applyBlockPlacement(blk({ x: 0.1, y: 0.1, w: 0.3, h: 0.2 }), {})).toBeNull();
     expect(applyBlockPlacement(blk({ x: 0.1, y: 0.1, w: 0.3, h: 0.2 }), { scale: 1 })).toBeNull();

@@ -294,7 +294,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.pauseSpace': '暂停(空格)',
   'workbench.personTopSmartCutout': '人物置顶(智能抠像)',
   'workbench.placedNameZone': '已把「{name}」放到画面 {zone}',
-  'workbench.placeNoDirective': '没给出位置(anchor / xPct+yPct / dxPct+dyPct)或 scale',
+  'workbench.placeNoDirective': '没给出位置(anchor / xPct+yPct / dxPct+dyPct)或尺寸(scale / widthPct / heightPct)',
   'workbench.playbackAlreadyPaused': '本来就没在播放',
   'workbench.playingFrom': '已从 {t}s 开始播放',
   'workbench.playingRange': '已开始播放 {from}–{to}s,到点自动暂停',

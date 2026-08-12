@@ -401,7 +401,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📐',
     label: 'tools.place_block.label',
     description:
-      "Reposition/resize an overlay block ON SCREEN (canvas space) — where it sits in the picture, not when it plays (timing is move_block/resize_block). Position: give ONE of `anchor` (snap into a canvas region, keeps size), `xPct`+`yPct` (absolute top-left, % of canvas), or `dxPct`/`dyPct` (relative nudge, % of canvas — e.g. move it down a bit = dyPct 8). Size: `scale` multiplies the current box around its center (0.4–2, e.g. 0.8 = shrink to 80%), combinable with any position input. The box is clamped fully on-canvas. Each block's current zone shows in the state snapshot. NOT for the sentence-caption layer (that's set_captions yPct/scale).",
+      "Reposition/resize an overlay block ON SCREEN (canvas space) — where it sits in the picture, not when it plays (timing is move_block/resize_block). Position: give ONE of `anchor` (snap into a canvas region, keeps size), `xPct`+`yPct` (absolute top-left, % of canvas), or `dxPct`/`dyPct` (relative nudge, % of canvas — e.g. move it down a bit = dyPct 8). Size: use `scale` for proportional resizing, or `widthPct`/`heightPct` to set either canvas-relative dimension independently. Size inputs resize around the current center and combine with position inputs. The box is clamped fully on-canvas. Each block's current zone shows in the state snapshot. NOT for the sentence-caption layer (that's set_captions yPct/scale).",
     inputSchema: obj(
       {
         blockId: { type: 'string' },
@@ -411,6 +411,8 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         dxPct: { type: 'number', description: 'Relative nudge right (+) / left (−), % of canvas width.' },
         dyPct: { type: 'number', description: 'Relative nudge down (+) / up (−), % of canvas height.' },
         scale: { type: 'number', description: 'Multiply current box size (0.4–2). 1 = keep size.' },
+        widthPct: { type: 'number', description: 'Set box width independently, % of canvas width (clamped 4–100).' },
+        heightPct: { type: 'number', description: 'Set box height independently, % of canvas height (clamped 3–100).' },
       },
       ['blockId'],
     ),
@@ -760,7 +762,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.prepare_local_image.label',
     chatOnly: true,
     description:
-      'Prepare ONE exact device-local image for durable use inside a generated component. Call only when the user explicitly asked to use that local image, and pass the exact sig returned by list_assets/search_assets. This uploads only that selected file to Pireel storage and returns its URL; it does NOT grant access to or search the cloud asset library. If local bytes need a user gesture, it fails with a restore-access instruction; never replace it with another image.',
+      'Prepare ONE exact device-local image for durable use inside a generated component. Call only when the user explicitly asked to use that local image, and pass the exact sig returned by list_assets/search_assets. Listing the sig does NOT grant access to its bytes. The bytes remain on this device in OPFS; the project stores only a device-local locator, never an R2 URL. If local bytes need a user gesture, it fails with a restore-access instruction; never upload or replace it with another image.',
     inputSchema: obj({ sig: { type: 'string', description: 'Exact local image sig returned by list_assets/search_assets.' } }, ['sig']),
   },
   /* ---------- reusable voice / portrait animation primitives ---------- */

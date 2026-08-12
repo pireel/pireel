@@ -79,6 +79,8 @@ import {
   pruneUnusedEditorAssets,
   projectDocumentToComposition,
   renderBlock,
+  localImageLocator,
+  localImageLocatorSigs,
   assembleBlockHtml,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
@@ -120,8 +122,9 @@ import { injectPreviewRuntime } from './sample-composition';
 import { playhead } from './playhead';
 import { type AsrSegment, desegmentCues, sanitizeTranscriptSegs } from '@pireel/studio-engine/build-blocks';
 import { type Box as GraphicBox, pickGraphicBox } from '@pireel/studio-engine/graphics-layout';
-import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadImageFile, uploadVideoFile } from './media';
-import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
+import { type FilmstripFrame, extractFilmstrip, fileSig, probeVideoFile, uploadVideoFile } from './media';
+import { alignFileToSig, loadLocalFolderFile, loadLocalVideo, saveLocalVideo } from './local-media';
+import { importLocalSource, localAssetIndexEntry } from './local-import-session';
 import { VideoTrackEngine } from './video-track-engine';
 import { segmentSourceRate } from './video-segment-time';
 import { compositionRenderView } from './composition-render-view';
@@ -941,6 +944,19 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     localAssetIndexMutationRevRef.current += 1;
     setLocalAssetIndex(entries);
   }, [setLocalAssetIndex]);
+
+  /** Resolve a persisted device-local image identity without ever minting a cloud URL. Folder
+   * handles are pinned into OPFS after the first explicit access so later capture/export is stable. */
+  const resolveLocalImageFile = useCallback(async (sig: string): Promise<File | null> => {
+    const direct = await loadLocalVideo(sig);
+    if (direct) return direct;
+    const entry = localAssetIndexRef.current.find((item) => item.sig === sig && item.kind === 'image');
+    if (!entry?.folder) return null;
+    const folder = await loadLocalFolderFile(entry.folder.id, entry.folder.path, sig);
+    if (!folder?.file) return null;
+    await saveLocalVideo(folder.file, sig, undefined, { pinned: true });
+    return folder.file;
+  }, []);
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs.
   livePersistenceMetadataRef.current = {
@@ -1187,13 +1203,28 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, []);
 
   // Preview control: a sandboxed iframe (opaque origin) can't reach contentWindow.__hfPreview, so everything goes through postMessage commands (sent to the current active buffer)
+  const postLocalImages = useCallback((win: Window | null | undefined, markup: string) => {
+    for (const sig of localImageLocatorSigs(markup)) {
+      void resolveLocalImageFile(sig).then((file) => {
+        if (!file) return;
+        try {
+          win?.postMessage({ type: 'hf:imageFile', sig, file }, '*');
+        } catch {
+          /* iframe may have swapped while OPFS resolved */
+        }
+      });
+    }
+  }, [resolveLocalImageFile]);
   const postPreview = useCallback((msg: Record<string, unknown>) => {
     try {
-      iframesRef.current[bufsRef.current.active]?.contentWindow?.postMessage(msg, '*');
+      const win = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      win?.postMessage(msg, '*');
+      const markup = typeof msg.html === 'string' ? msg.html : typeof msg.innerHtml === 'string' ? msg.innerHtml : '';
+      if (markup) postLocalImages(win, markup);
     } catch {
       /* iframe not ready */
     }
-  }, []);
+  }, [postLocalImages]);
   useEffect(() => {
     postPreview({ type: 'hf:primaryVisibility', hidden: primaryNarrative.hidden });
     if (primaryNarrative.hidden) postPreview({ type: 'hf:clearFrame', t: tRef.current });
@@ -1533,6 +1564,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     for (const binding of fileBindings) {
       post({ type: 'hf:clipFile', id: binding.id, file: binding.file });
     }
+    postLocalImages(
+      w,
+      // The full document also covers media-slot images and the person-background layer; scanning
+      // only custom-block innerHtml left those local locators unresolved after a buffer swap.
+      bufsRef.current.docs[idx],
+    );
     post({ type: 'hf:seek', t: tRef.current });
     post({ type: 'hf:primaryVisibility', hidden: primaryHiddenRef.current });
     post({ type: 'hf:selectBlock', blockId: selectedIdRef.current });
@@ -1543,7 +1580,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const fits: Record<string, number> = {};
     for (const b of compRef.current.blocks) if (b.fitScale && b.fitScale < 0.999) fits[b.id] = b.fitScale;
     if (Object.keys(fits).length) post({ type: 'hf:fit', fits });
-  }, [resolveAssetUrl, supplementalVisuals]);
+  }, [postLocalImages, resolveAssetUrl, supplementalVisuals]);
 
   /** A buffer finished loading: inject video/seek/restore selection; if it's the background buffer, start the ping handshake (swap only after pong). */
   const onBufLoad = useCallback(
@@ -2955,6 +2992,27 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       i.onchange = () => res(i.files?.[0] ?? null);
       i.click();
     });
+  /** Keep a user-picked image on this device and persist only its stable identity in the project.
+   * This is the browser-picker counterpart of the agent helper's register-local-assets path. */
+  const preparePickedLocalImage = async (file: File): Promise<string> => {
+    const asset = await importLocalSource({ type: 'browser', file });
+    if (asset.kind !== 'image') throw new Error('selected file is not an image');
+    let dims: { width?: number; height?: number } = {};
+    try {
+      const bitmap = await createImageBitmap(file);
+      dims = { width: bitmap.width, height: bitmap.height };
+      bitmap.close();
+    } catch {
+      /* Dimensions are optional; the renderer can still fit the image after decode. */
+    }
+    const entry = localAssetIndexEntry(asset, dims);
+    const previous = localAssetIndexRef.current.find((item) => item.sig === entry.sig);
+    changeLocalAssetIndex([
+      { ...entry, createdAt: previous?.createdAt ?? entry.createdAt },
+      ...localAssetIndexRef.current.filter((item) => item.sig !== entry.sig),
+    ]);
+    return localImageLocator(entry.sig);
+  };
   /** DOM surgery on the index-th <img> in a custom block's innerHtml (swap src / remove) — same DOMParser patch approach as setSlot's text edit, zero-LLM, instant. */
   const patchCustomImg = (blockId: string, index: number, fn: (img: Element) => 'remove' | void) =>
     (() => {
@@ -2972,13 +3030,13 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         return;
       }
     })();
-  /** Image toolbar "swap image": pick file → upload → only swap src, layout/animation unchanged (object-fit:cover from the generation contract keeps the layout intact). */
+  /** Image toolbar "swap image": pick file → OPFS → only swap src, layout/animation unchanged. */
   const replaceCustomImg = async (blockId: string, index: number) => {
     const f = await pickFile('image/*');
     if (!f) return;
     setMediaBusyPhase(blockId, 'upload');
     try {
-      const url = await uploadImageFile(f);
+      const url = await preparePickedLocalImage(f);
       patchCustomImg(blockId, index, (img) => {
         img.setAttribute('src', url);
         img.removeAttribute('srcset');
@@ -2998,7 +3056,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!f) return;
     setMediaBusyPhase(bid, 'upload');
     try {
-      const url = kind === 'image' ? await uploadImageFile(f) : await uploadVideoFile(f);
+      const url = kind === 'image' ? await preparePickedLocalImage(f) : await uploadVideoFile(f);
       setBlockMedia(bid, { type: kind, url });
       setMediaBusyPhase(bid, 'swap');
       seekBlockSettled(bid);
@@ -3241,7 +3299,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const kind = f.type.startsWith('video/') ? 'video' : 'image';
     setMediaBusyPhase(id, 'upload');
     try {
-      const url = kind === 'image' ? await uploadImageFile(f) : await uploadVideoFile(f);
+      const url = kind === 'image' ? await preparePickedLocalImage(f) : await uploadVideoFile(f);
       setBlockMedia(id, { type: kind, url });
       setMediaBusyPhase(id, 'swap');
       setSelectedId(id);
@@ -6274,6 +6332,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <PersonFxPanel
                   comp={comp}
                   onChange={setPersonFx}
+                  onPrepareLocalImage={preparePickedLocalImage}
                   matte={matteState}
                   selectedShotMatte={(() => {
                     const s = (comp.shots ?? []).find((x) => x.id === selectedShotId);
