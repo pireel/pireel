@@ -30,6 +30,7 @@ import { t } from './i18n';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument } from './caption-transcript-bridge';
+import { replaceCaptionTranslationsTransaction } from './caption-translation-transaction';
 
 /** Everything the caption ops borrow from the workbench (values are per-render, refs/handlers are stable-by-ref). */
 export interface CaptionsOpsDeps {
@@ -445,39 +446,25 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         return;
       }
       const out = await tr(groups.map((g, i) => ({ index: i, text: g.text })), target);
-      const byPos = new Map(out.map((o) => [o.index, o.text.trim()]));
-      // One translation per fragment. A sentence in one piece → seg.sub; a sentence split into
-      // several groups (an insert landed mid-sentence) → one range sub per group, so each side
-      // keeps its own translation. The renderer distributes either across that group's cues.
-      const perSeg = new Map<string, number>();
-      groups.forEach((g) => {
-        const k = `${g.ref.src ?? ''}|${g.ref.seg}`;
-        perSeg.set(k, (perSeg.get(k) ?? 0) + 1);
+      // Stage clear + all-source replacement + caption relay first, then publish refs/state exactly
+      // once. A missing row, stale source, or locked caption lane leaves the old bilingual layer
+      // untouched instead of clearing it and writing only the batches that happened to succeed.
+      const transaction = replaceCaptionTranslationsTransaction({
+        document: documentRef.current,
+        composition: compRef.current,
+        groups,
+        rows: out,
+        target,
+        mainTranscript: asrRef.current,
+        clipTranscripts: clipAsrRef.current,
       });
-      const bySrc = new Map<string | null, { index: number; w0?: number; w1?: number; text: string }[]>();
-      groups.forEach((g, i) => {
-        const textOut = byPos.get(i);
-        if (!textOut) return;
-        const r = g.ref;
-        const arr = bySrc.get(r.src) ?? [];
-        arr.push((perSeg.get(`${r.src ?? ''}|${r.seg}`) ?? 1) > 1 ? { index: r.seg, w0: r.w0, w1: r.w1, text: textOut } : { index: r.seg, text: textOut });
-        bySrc.set(r.src, arr);
-      });
-      if (![...bySrc.values()].some((a) => a.length)) throw new Error(t('workbench.translationFailedTryAgain'));
-      // A full re-translate REPLACES the bilingual layer: clear first so per-cue/fragment keys from
-      // earlier runs (or an earlier cut state) can't shadow the fresh sentence subs.
-      await runTool('set_caption_translations', { clear: true });
-      for (const [src, items] of bySrc) {
-        if (!items.length) continue;
-        if (src) {
-          const shot = (compRef.current.shots ?? []).find((sh) => sh.src === src);
-          if (shot) await runTool('set_caption_translations', { shotId: shot.id, items, lang: target });
-        } else {
-          await runTool('set_caption_translations', { items, lang: target });
-        }
-      }
-      // Remember the target language: panel chip selected state + new inserted clips auto-translated to the same language
-      setCaptionStyle({ sub: { ...(compRef.current.captionStyle?.sub ?? {}), lang: target } });
+      if (!transaction.ok) throw new Error(transaction.error || t('workbench.translationFailedTryAgain'));
+      pushUndoSnapshot();
+      asrRef.current = transaction.mainTranscript;
+      clipAsrRef.current = transaction.clipTranscripts;
+      setAsrSentences(transaction.mainTranscript);
+      setClipAsr(transaction.clipTranscripts);
+      setDocument(transaction.document);
       toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
