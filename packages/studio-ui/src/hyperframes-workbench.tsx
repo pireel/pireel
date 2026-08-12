@@ -5064,10 +5064,9 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     <div className="studio-scope bg-panel relative flex h-full min-h-0 w-full gap-0 overflow-hidden">
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
-      {/* Agent file injection: a stable, always-mounted hidden input an external agent (e.g. Codex's
-          in-app browser) targets with tab.playwright.setInputFiles('[data-pireel-video-input]', path).
-          The browser reads the local file directly — no localhost server, no port. It flows through the
-          normal pickVideoFile path (OPFS local library, NOT uploaded to the cloud). */}
+      {/* Agent file injection: the stable input and empty-canvas trigger below let an external agent
+          use the browser file-chooser bridge. The browser reads the local file directly — no cloud
+          upload — and the normal pickVideoFile path persists it in the OPFS local library. */}
       <input
         type="file"
         accept="video/*"
@@ -5234,6 +5233,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               {!hasContent && (
                 <button
                   type="button"
+                  data-pireel-video-trigger
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {

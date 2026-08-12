@@ -5,8 +5,9 @@
  *
  * Shape: `imp1.{b64url(userId)}.{expEpochSec}.{b64url(hmacSha256(secret, userId.exp))}`
  * Stateless (HMAC self-verifies, nothing persisted), secret=BETTER_AUTH_SECRET.
- * Accepted by a single endpoint, /api/studio/media (four actions:
- * put/put-audio/asr/register — exactly what the helper needs).
+ * Accepted by a single endpoint, /api/studio/media, whose route allowlists only the
+ * helper's narrow local-relay and audio actions. Local visual bytes never receive a
+ * cloud-upload capability.
  */
 
 const VERSION = 'imp1';

@@ -2064,9 +2064,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: trimming ? t('workbench.bgmTrimmed') : t('workbench.bgmAdjusted') };
           }
           case 'insert_clip': {
-            // Agent inserts B-roll: the bytes must already be in our storage (a helper-uploaded sig / a CDN url of a library / generated video) —
-            // the canvas engine needs CORS-clean frames, so always fetch the bytes into a File and go through the full local-insert path
-            // (blob src + srcSig + OPFS + cloud backup), fully isomorphic to a manual "+" insert
+            // Agent inserts B-roll: local helper sigs resolve from device OPFS first; cloud-backed
+            // library/generated media fall back to vault/CDN. Either way the canvas engine receives
+            // a File and follows the same local-insert path as the manual "+" action.
             const sigIn = typeof input.sig === 'string' ? input.sig.trim() : '';
             const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
             if (!sigIn && !urlIn) return { ok: false, error: t('workbench.needUrlOrSig') };
@@ -2093,7 +2093,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               };
               let f: File | null = null;
               if (sigIn) {
-                f = await studioProviders().vault.fetch(sigIn);
+                f = await loadLocalVideo(sigIn);
+                if (!f) f = await studioProviders().vault.fetch(sigIn);
                 if (!f) {
                   // presign direct fetch failed (CORS/unconfigured) → fall back to the public CDN via the same-origin proxy
                   const r = await fetch('/api/studio/media', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'get', sig: sigIn }) });

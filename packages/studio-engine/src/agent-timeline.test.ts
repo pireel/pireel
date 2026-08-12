@@ -59,6 +59,29 @@ describe('shared agent timeline atoms', () => {
     expect(captions.document.timeline.tracks.find((track) => track.role === 'managedCaptions')!.clips.length).toBeGreaterThan(0);
   });
 
+  it('keeps an overwrite destination track alive when a later clip fully replaces its contents', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'local:first', kind: 'video', localSig: 'first.mp4:100:1' },
+        { id: 'local:second', kind: 'video', localSig: 'second.mp4:200:2' },
+      ],
+    }).document!;
+
+    const placed = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'first-clip', role: 'broll', assetId: 'local:first', startSec: 8.7 },
+        { id: 'second-clip', role: 'broll', assetId: 'local:second', startSec: 8.7 },
+      ],
+    });
+
+    expect(placed.ok).toBe(true);
+    const broll = placed.document!.timeline.tracks.find((track) => track.role === 'broll');
+    expect(broll).toBeDefined();
+    expect(broll!.clips).toHaveLength(1);
+    expect(broll!.clips[0]).toMatchObject({ id: 'second-clip', assetId: 'local:second' });
+  });
+
   it('links and moves typed clips through one shared command path', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {

@@ -132,10 +132,16 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
   if (semantics.managedCaptionSource?.mode === 'clip' && removedClipIds.has(semantics.managedCaptionSource.clipId)) {
     semantics = { ...semantics, managedCaptionSource: { mode: 'auto' } };
   }
-  const pruned = pruneEmptyNonPrimaryTracks(
-    { ...document, timeline: { ...document.timeline, tracks }, semantics },
-    { preserveManagedCaptions: !options.pruneEmptyTracks },
-  );
+  const editedDocument = { ...document, timeline: { ...document.timeline, tracks }, semantics };
+  // Overwrite insertion clears the destination interval and then immediately places replacement
+  // clips back on the same lane. Keep that lane alive across the two halves of the transaction;
+  // otherwise a fully-covered non-primary track is pruned here and the insertion has no target.
+  const pruned = options.pruneEmptyTracks === false
+    ? { document: editedDocument, removedTrackIds: [] }
+    : pruneEmptyNonPrimaryTracks(
+        editedDocument,
+        { preserveManagedCaptions: options.pruneEmptyTracks !== true },
+      );
   let next = pruned.document;
   if (next.semantics.managedCaptionSource?.mode === 'track' && pruned.removedTrackIds.includes(next.semantics.managedCaptionSource.trackId)) {
     next = { ...next, semantics: { ...next.semantics, managedCaptionSource: { mode: 'auto' } } };

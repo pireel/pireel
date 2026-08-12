@@ -147,6 +147,9 @@ export function insertEditorClips(document: EditorDocumentV2, options: InsertEdi
       endFrame: options.atFrame + spanFrames,
       mode: 'lift',
       includeLinked: options.includeLinked,
+      // The cleared lane is the destination for the replacement clips below. A range that fully
+      // covers its current contents must not prune the lane between these atomic steps.
+      pruneEmptyTracks: false,
     });
     if (!cleared.ok) return cleared;
     const targetIndex = cleared.document.timeline.tracks.findIndex((track) => track.id === options.trackId);

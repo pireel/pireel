@@ -549,7 +549,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
-    description: 'Place one or more registered assets with overwrite semantics. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended.',
+    description: 'Place one or more registered assets with overwrite semantics. Each item replaces its own destination interval; items on the same lane and time replace earlier items rather than forming a sequence. Use insert_clips to open time, or insert_clip with a local sig for device-local video in the main narrative sequence. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
@@ -1251,10 +1251,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.insert_clip.label',
     description:
-      "Insert a B-roll video segment into the main track. Bytes must already be on Pireel storage — pass `sig` (from the asset-import helper) OR `url` (asset library / generated video; external URLs are rejected — upload first). For a saved Director Plan, choose the asset from that scene's evidence + assetStrategy and pass the exact sceneId; the scene expands around the inserted interval, later scenes shift right, and the new Clip is bound back to it. Inserts at `atSec` (snaps to the nearest shot boundary, shifts later overlays right). The segment is a full peer: framing, captions, its own audio and on-demand transcript. Needs the studio tab open.",
+      "Insert a B-roll video segment into the main track. For a LOCAL file, run the asset-import helper with --broll and pass its `sig`; the bytes stay in this device's Studio OPFS and are resolved locally. For cloud-library/generated media, pass its Pireel CDN `url`; arbitrary external URLs are rejected. For a saved Director Plan, choose the asset from that scene's evidence + assetStrategy and pass the exact sceneId; the scene expands around the inserted interval, later scenes shift right, and the new Clip is bound back to it. Inserts at `atSec` (snaps to the nearest shot boundary, shifts later overlays right). The segment is a full peer: framing, captions, its own audio and on-demand transcript. Needs the studio tab open.",
     inputSchema: obj(
       {
-        sig: { type: 'string', description: 'Media fingerprint from the asset-import helper upload (preferred for local files).' },
+        sig: { type: 'string', description: 'Device-local media fingerprint returned by the asset-import helper --broll flow.' },
         url: { type: 'string', description: "URL of a video already on the user's Pireel storage/CDN." },
         atSec: { type: 'number', description: 'Edited-timeline insertion point (defaults to the playhead; snaps to the nearest cut).' },
         sceneId: { type: 'string', description: 'Exact scene id from the saved Director Plan. Required for planned B-roll; omit for an unplanned local insertion.' },
