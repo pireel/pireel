@@ -101,6 +101,7 @@ export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; 
   parts.push(`Current INNER HTML:\n\`\`\`html\n${args.block.innerHtml}\n\`\`\``);
   parts.push(`Current TIMELINE BODY:\n\`\`\`js\n${args.block.timelineBody}\n\`\`\``);
   parts.push(`Instruction: ${args.instruction}`);
+  parts.push(`MANDATORY FINAL CSS AUDIT for this exact response: inspect EVERY selector in the <style>, including selectors after commas and selectors inside @container. Every one must start with #${args.block.id}. Rewrite any shorthand such as ".kicker", ".pf .logo", or ".rule" to "#${args.block.id} .kicker", "#${args.block.id} .pf .logo", and "#${args.block.id} .rule" before answering. One unscoped selector makes the component invalid.`);
   const noteLang = args.lang ? `the user's UI language "${args.lang}"` : 'the same language as the instruction above';
   parts.push(`First reply with ONE short note in ${noteLang} describing the change, THEN the updated INNER HTML (\`\`\`html), THEN the updated TIMELINE BODY (\`\`\`js).`);
   return parts.join('\n\n');
