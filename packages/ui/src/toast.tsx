@@ -73,7 +73,7 @@ export function Toaster() {
   const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   if (items.length === 0) return null;
   return (
-    <div className="toast-stack" role="region" aria-label={messages.notifications}>
+    <div className="toast-stack" role="region" aria-label={messages.notifications} aria-live="polite">
       {items.map((t) => (
         <div key={t.id} className={`toast toast-${t.level}`} role="alert">
           {t.title && <div className="toast-title">{t.title}</div>}

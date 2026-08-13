@@ -114,7 +114,7 @@ function Picker({ defaultRes, defaultFps, defaultFormat, ready }: { defaultRes: 
             type="button"
             disabled={!ready}
             onClick={() => resolveInteraction({ resolution: res, fps, format })}
-            className="bg-ink rounded-md px-3 py-1 text-[12px] text-white hover:bg-black disabled:opacity-30"
+            className="bg-ink text-bg rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
           >
             {t('workbench.exportStart')}
           </button>

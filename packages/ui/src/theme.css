@@ -106,7 +106,7 @@
   --color-ink: #f0f1f4;
   --color-ink-2: #c8cbd2;
   --color-ink-3: #8f939d;
-  --color-ink-4: #63676f;
+  --color-ink-4: #888c96;
   --color-line: rgba(235, 238, 245, 0.08);
   --color-line-2: rgba(235, 238, 245, 0.14);
   --color-switch-on: #3f4be8;
@@ -135,7 +135,7 @@
   --color-muted-foreground: #8f939d;
   --color-border: #2b2e35;
   --color-input: #2b2e35;
-  --color-ring: #63676f;
+  --color-ring: #888c96;
 }
 
 /* shiki 双主题:亮色走默认 color,暗色读 codeToHtml 写进内联样式的 --shiki-dark */
@@ -193,11 +193,11 @@
   max-width: 360px;
   padding: 10px 32px 10px 14px;
   border-radius: 12px;
-  background: #fff;
-  border: 1px solid #ececE8;
-  box-shadow: 0 12px 32px rgba(20, 22, 30, 0.12), 0 1px 3px rgba(20, 22, 30, 0.05);
+  background: var(--color-panel);
+  border: 1px solid var(--color-line-2);
+  box-shadow: var(--shadow-lg);
   font-size: 13px;
-  color: #17181b;
+  color: var(--color-ink);
   pointer-events: auto;
   animation: toast-in 0.18s ease-out;
 }
@@ -217,7 +217,7 @@
 .toast-msg {
   font-size: 13px;
   line-height: 1.45;
-  color: #3a3c42;
+  color: var(--color-ink-2);
 }
 .toast-close {
   position: absolute;
@@ -231,11 +231,15 @@
   border: none;
   font-size: 16px;
   line-height: 1;
-  color: #9a9da6;
+  color: var(--color-ink-4);
   cursor: pointer;
   border-radius: 4px;
 }
-.toast-close:hover { color: #17181b; background: #f3f3f0; }
+.toast-close:hover { color: var(--color-ink); background: var(--color-panel-2); }
+.toast-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-ring) 55%, transparent);
+  outline-offset: 1px;
+}
 
 /* ============ π 品牌动效 keyframes（token 见 @theme --animate-pi-*） ============ */
 @keyframes pi-orbit {

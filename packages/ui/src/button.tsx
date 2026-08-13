@@ -10,7 +10,7 @@ const buttonVariants = cva(
       variant: {
         // brand
         default: 'border border-line-2 bg-panel text-ink shadow-sm hover:border-line-2 hover:bg-panel-2',
-        primary: 'border border-ink bg-ink text-white shadow-sm hover:opacity-90',
+        primary: 'border border-ink bg-ink text-bg shadow-sm hover:opacity-90',
         accent: 'border border-accent bg-accent text-white shadow-sm hover:brightness-95',
         lime: 'border border-lime bg-lime text-[#1F2A00] hover:brightness-95',
         ghost: 'bg-transparent hover:bg-panel-2 text-ink',

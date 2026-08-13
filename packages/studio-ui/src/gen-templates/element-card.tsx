@@ -75,7 +75,7 @@ export function ElementTemplateCard({
           type="button"
           aria-label={`${label} · ${t('chatGen.remix')}`}
           onClick={() => onUse(prompt)}
-          className="text-ink absolute bottom-1.5 right-1.5 rounded-md bg-white/90 px-2 py-1 text-[10.5px] font-medium opacity-0 shadow-sm transition hover:bg-white group-hover:opacity-100 group-focus-within:opacity-100"
+          className="absolute bottom-1.5 right-1.5 rounded-md bg-white/90 px-2 py-1 text-[10.5px] font-medium text-[#20201e] opacity-0 shadow-sm transition hover:bg-white group-hover:opacity-100 group-focus-within:opacity-100"
         >
           {t('chatGen.remix')}
         </button>
@@ -93,7 +93,7 @@ export function ElementTemplateCard({
     >
       <TemplateVisual item={item} />
       <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100 group-focus-within:bg-black/35 group-focus-within:opacity-100">
-        <span className="text-ink rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium">
+        <span className="rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-[#20201e]">
           {label} · {t('chatGen.remix')}
         </span>
       </span>

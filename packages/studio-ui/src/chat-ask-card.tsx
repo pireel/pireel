@@ -106,7 +106,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
             type="button"
             disabled={!picked.size}
             onClick={() => submit([...picked])}
-            className="bg-ink rounded-md px-3 py-1 text-[12px] text-white hover:bg-black disabled:opacity-30"
+            className="bg-ink text-bg rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
           >
             {t('workbench.askConfirm')}
           </button>

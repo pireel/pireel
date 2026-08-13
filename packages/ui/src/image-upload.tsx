@@ -77,8 +77,9 @@ export function ImageUpload({
               <button
                 type="button"
                 onClick={() => onChange('')}
-                className="border-line-2 text-ink-3 hover:border-rose hover:text-rose grid h-6 w-6 shrink-0 place-items-center rounded-md border bg-white"
+                className="border-line-2 bg-panel text-ink-3 hover:border-rose hover:text-rose grid h-6 w-6 shrink-0 place-items-center rounded-md border"
                 title={ui.remove}
+                aria-label={ui.remove}
               >
                 <IconClose size={12} />
               </button>
@@ -296,7 +297,8 @@ function RemovableThumb({
         type="button"
         onClick={onRemove}
         title={ui.remove}
-        className="absolute -right-1.5 -top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-white text-ink-3 shadow-[var(--shadow-sm)] opacity-0 transition-opacity hover:text-rose group-hover:opacity-100"
+        aria-label={ui.remove}
+        className="bg-panel text-ink-3 absolute -right-1.5 -top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full shadow-[var(--shadow-sm)] opacity-0 transition-opacity hover:text-rose group-hover:opacity-100"
       >
         <IconClose size={11} />
       </button>
@@ -328,7 +330,8 @@ function PendingThumb({
           type="button"
           onClick={onDismiss}
           title={ui.close}
-          className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white text-ink-3 shadow-[var(--shadow-sm)] hover:text-rose"
+          aria-label={ui.close}
+          className="bg-panel text-ink-3 absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full shadow-[var(--shadow-sm)] hover:text-rose"
         >
           <IconClose size={11} />
         </button>
