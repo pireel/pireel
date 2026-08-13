@@ -7,6 +7,7 @@
  */
 
 import type { MutableRefObject } from 'react';
+import { editorErrorMessage } from './editor-error';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import {
   type AudioClip,
@@ -634,7 +635,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!Number.isFinite(value)) return { ok: false, error: 'invalid startSec' };
             const startSec = Math.max(0, Math.round(value * 100) / 100);
             const edit = commitOverlayEdits([{ clipId: b.id, startSec }]);
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             return { ok: true, summary: t('workbench.movedNameSecS', { name: bname(b), sec: r1(startSec) }) };
           }
           case 'resize_block': {
@@ -646,7 +647,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const startSec = Math.max(0, Math.round(s * 100) / 100);
             const durationSec = Math.max(0.3, Math.round(d * 100) / 100);
             const edit = commitOverlayEdits([{ clipId: b.id, startSec, durationSec }]);
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(startSec), to: r1(startSec + durationSec) }) };
           }
           case 'place_block': {
@@ -660,7 +661,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               clipId: b.id,
               block: { box: next.box, contentBox: next.contentBox },
             }]);
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             // Receipt hint (agent-facing, same convention as review_visuals' data.hint): overlapping
             // corner/split spans → say where the video band is before the agent parks a graphic on it.
             const framing = placementFramingNotes(ensureShots(c), next.startSec, next.durationSec);
@@ -670,7 +671,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const b = findBlock(input.blockId);
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             const edit = commitOverlayRemoval([b.id]);
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             postPreview({ type: 'hf:remove', id: b.id });
             if (selectedIdRef.current === b.id) setSelectedId(null);
             return { ok: true, summary: t('workbench.deletedName', { name: bname(b) }) };
@@ -681,7 +682,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const hit = c.blocks.filter((b) => ids.has(b.id));
             if (!hit.length) return { ok: false, error: t('workbench.elementsNotFound') };
             const edit = commitOverlayRemoval(hit.map((block) => block.id));
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             hit.forEach((b) => postPreview({ type: 'hf:remove', id: b.id }));
             if (selectedIdRef.current && ids.has(selectedIdRef.current)) setSelectedId(null);
             return { ok: true, summary: t('workbench.deletedNElements', { n: hit.length }) };
@@ -708,7 +709,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ? { toTrackId: target.id }
                 : { newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder } }),
             });
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             setDocument(edit.document);
             setSelectedShotId(null);
             setSelectedId(newClipId);
@@ -1367,7 +1368,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const to = Number(input.toSec);
             if (!Number.isFinite(from) || !Number.isFinite(to) || to - from < 0.1) return { ok: false, error: t('workbench.invalidRange') };
             const committed = commitNarrationRanges([{ fromSec: from, toSec: to }]);
-            if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
+            if (!committed.ok) return { ok: false, error: editorErrorMessage(committed.error), data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
             applyT(from);
             return withDelta({ ok: true, summary: t('workbench.deletedFootageFromS', { from: r1(from), to: r1(to) }), data: { shotIds: (committed.composition.shots ?? []).map((s) => s.id) } });
@@ -1396,7 +1397,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 mainTranscript: asrRef.current,
                 clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
               });
-              if (!edit.ok) return { ok: false, error: edit.error.message, data: edit.error };
+              if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: edit.error };
               setDocument(edit.document);
             } else if (preset) await applyCaptionPreset(preset, patch);
             else if (Object.keys(patch).length) setCaptionStyle(patch);
@@ -1446,7 +1447,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               mainTranscript: src ? asrRef.current : next,
               clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
             });
-            if (!captionEdit.ok) return { ok: false, error: captionEdit.error.message, data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
+            if (!captionEdit.ok) return { ok: false, error: editorErrorMessage(captionEdit.error), data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
             if (src) {
               clipAsrRef.current = nextClipAsr;
               setClipAsr(nextClipAsr);
@@ -1510,7 +1511,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               mainTranscript: asrRef.current,
               clipTranscripts: clipAsrRef.current,
             });
-            if (!captionEdit.ok) return { ok: false, error: captionEdit.error.message, data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
+            if (!captionEdit.ok) return { ok: false, error: editorErrorMessage(captionEdit.error), data: { code: captionEdit.error.code, trackIds: captionEdit.error.trackIds } };
             setDocument(captionEdit.document);
             if (compRef.current.blocks.some(isSentenceCaption)) return { ok: true, summary };
             return { ok: true, summary: summary + t('workbench.captionsOffTheyShow') };
@@ -1536,7 +1537,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return { at: range.fromSec, len: range.toSec - range.fromSec, ...(range.text ? { text: range.text } : {}) };
             });
             const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
-            if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
+            if (!committed.ok) return { ok: false, error: editorErrorMessage(committed.error), data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
             if (Number.isFinite(firstCut)) applyT(firstCut);
             return { ok: true, summary: `Deleted ${ids.length} transcript word${ids.length === 1 ? '' : 's'}`, data: { wordIds: ids, cuts: finalizeCutSeams(seams) } };
@@ -1570,7 +1571,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const seams: CutSeamEntry[] = edited.map((range) => ({ at: range.from, len: range.to - range.from }));
             const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
             if (!committed.ok) {
-              return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
+              return { ok: false, error: editorErrorMessage(committed.error), data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             }
             setSelectedShotId(null);
             applyT(Math.min(...edited.map((range) => range.from)));
@@ -1621,7 +1622,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(range.text ? { text: range.text } : {}),
             }));
             const committed = commitNarrationRanges(seams.map((seam) => ({ fromSec: seam.at, toSec: seam.at + seam.len })));
-            if (!committed.ok) return { ok: false, error: committed.error.message, data: { code: committed.error.code, trackIds: committed.error.trackIds } };
+            if (!committed.ok) return { ok: false, error: editorErrorMessage(committed.error), data: { code: committed.error.code, trackIds: committed.error.trackIds } };
             setSelectedShotId(null);
             applyT(Math.min(...edited.map((range) => range.from)));
             // The receipt speaks ACTUAL seconds (post-margin, what really left the timeline) — the agent's own
@@ -1813,7 +1814,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               clipTranscripts: clipAsrRef.current,
             });
             if (!edit.ok) {
-              return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+              return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             }
             setDocument(edit.document);
             return { ok: true, summary: `Set canvas to ${size.width}×${size.height}`, data: { canvas: size } };
@@ -1867,7 +1868,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
               },
             });
-            if (!edit.ok) return { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
             setDocument(edit.document);
             if (edit.layout.shotId) setSelectedShotId(edit.layout.shotId);
             return { ok: true, summary: `Applied ${layout} layout`, data: edit.layout };
@@ -1924,7 +1925,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const transitionPoint = splitPoints.find((atSec) => splitBlockedByTransition(shots, atSec, nativePlacements));
             if (transitionPoint != null) return { ok: false, error: `cannot split at ${transitionPoint}s because it is inside a transition region` };
             const command = applyNarrationSplitCommands(documentRef.current, splitPoints);
-            if (!command.ok) return { ok: false, error: command.error.message, data: { code: command.error.code, trackIds: command.error.trackIds } };
+            if (!command.ok) return { ok: false, error: editorErrorMessage(command.error), data: { code: command.error.code, trackIds: command.error.trackIds } };
             setDocument(command.document);
             applyT(splitPoints[splitPoints.length - 1]!);
             return withDelta({
@@ -2202,7 +2203,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 label: String(input.instruction ?? t('workbench.newElement')).slice(0, 12),
               }, c.width, c.height);
               const inserted = commitOverlayInsert(nb, sceneContext?.scene.id);
-              if (!inserted.ok) return { ok: false, error: inserted.error.message, data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
+              if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
               setSelectedShotId(null);
               setSelectedId(seed.id);
               applyT(Math.max(0, at + 0.01)); // on completion, take the user straight to the result
@@ -2235,7 +2236,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 clipId: b.id,
                 block: { templateId: editable.templateId, slots: editable.slots, box: editable.box },
               }]);
-              if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
+              if (!updated.ok) return { ok: false, error: editorErrorMessage(updated.error), data: { code: updated.error.code, trackIds: updated.error.trackIds } };
               return { ok: true, summary: parsed.note || t('workbench.elementUpdated') };
             } finally {
               markGenerating([b.id], false);
@@ -2246,7 +2247,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: false, error: t('workbench.unknownOperationTool', { tool: toolId }) };
         }
       } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        console.warn(`[studio-tool] ${toolId} failed`, e);
+        return { ok: false, error: t('editorError.operationFailed') };
       }
 }
 
@@ -2271,8 +2273,9 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   try {
     pending = execute();
   } catch (error) {
+    console.warn('[studio-tool] synchronous operation failed', error);
     restore();
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: t('editorError.operationFailed') };
   }
   const afterSyncJson = JSON.stringify(ctx.compRef.current);
   const afterSyncDocument = ctx.documentRef.current;
@@ -2299,8 +2302,9 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   try {
     result = await pending;
   } catch (error) {
+    console.warn('[studio-tool] asynchronous operation failed', error);
     rollbackFailure();
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: t('editorError.operationFailed') };
   }
   if (!result.ok) {
     // Synchronous mutation branches (including every P0 primitive) can be rolled back exactly. A
@@ -2418,7 +2422,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
               c2.height,
             );
             const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box, ...(requestedLabel ? { label: requestedLabel } : {}) });
-            if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
+            if (!updated.ok) return { ok: false, error: editorErrorMessage(updated.error), data: { code: updated.error.code, trackIds: updated.error.trackIds } };
             setSelectedShotId(null);
             setSelectedId(target.id);
             applyT(Math.max(0, target.startSec + 0.01));
@@ -2436,7 +2440,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
           }, c2.width, c2.height);
           const inserted = insertBlock(kb);
-          if (!inserted.ok) return { ok: false, error: inserted.error.message, data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
+          if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
           setSelectedShotId(null);
           setSelectedId(kb.id);
           applyT(Math.max(0, kAt + 0.01));
@@ -2467,7 +2471,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             c2.height,
           );
           const updated = patchBlock(target.id, { templateId: editable.templateId, slots: editable.slots, box: editable.box, ...(requestedLabel ? { label: requestedLabel } : {}) });
-          if (!updated.ok) return { ok: false, error: updated.error.message, data: { code: updated.error.code, trackIds: updated.error.trackIds } };
+          if (!updated.ok) return { ok: false, error: editorErrorMessage(updated.error), data: { code: updated.error.code, trackIds: updated.error.trackIds } };
           setSelectedShotId(null);
           setSelectedId(target.id);
           applyT(Math.max(0, target.startSec + 0.01));
@@ -2485,7 +2489,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
         }, c2.width, c2.height);
         const inserted = insertBlock(nb);
-        if (!inserted.ok) return { ok: false, error: inserted.error.message, data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
+        if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
         setSelectedShotId(null);
         setSelectedId(nb.id);
         applyT(Math.max(0, at + 0.01));

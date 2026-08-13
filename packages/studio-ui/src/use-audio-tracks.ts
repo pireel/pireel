@@ -33,6 +33,7 @@ import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { getStudioSpaceId } from './gen-api';
 import { t } from './i18n';
+import { editorErrorMessage } from './editor-error';
 import { supplementalVisualAudioSpecs } from './visual-render-plan';
 
 export interface AudioTracksDeps {
@@ -187,7 +188,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       URL.revokeObjectURL(url);
       audioObjectUrlsRef.current.delete(url);
       if (audioFilesRef.current.get(sig) === file) audioFilesRef.current.delete(sig);
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -244,7 +245,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
 
   const removeClips = (ids: readonly string[]): { ok: boolean; error?: string } => {
     const edit = removeAudioDocumentClips(documentRef.current, ids);
-    if (!edit.ok) return { ok: false, error: edit.error.message };
+    if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
     pushUndoSnapshot();
     setDocument(edit.document);
     return { ok: true };
@@ -258,7 +259,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     beforeCommit?: () => void,
   ): { ok: boolean; error?: string } => {
     const edit = applyAudioDocumentEdits({ document: documentRef.current, updates: [{ clipId: id, patch }] });
-    if (!edit.ok) return { ok: false, error: edit.error.message };
+    if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
     beforeCommit?.();
     setDocument(edit.document);
     return { ok: true };
@@ -266,7 +267,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
 
   const splitClip = (id: string, atSec: number, beforeCommit?: () => void): { ok: boolean; error?: string; newClipId?: string } => {
     const edit = splitAudioDocumentClip(documentRef.current, id, atSec);
-    if (!edit.ok) return { ok: false, error: edit.error.message };
+    if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
     beforeCommit?.();
     setDocument(edit.document);
     return { ok: true, newClipId: edit.newClipId };

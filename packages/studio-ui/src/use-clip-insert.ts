@@ -30,6 +30,7 @@ import { type FilmstripFrame, extractFilmstrip, extractFilmstripFromUrl, fileSig
 import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
 import { normalizeDims } from './workbench-utils';
 import { t } from './i18n';
+import { editorErrorMessage } from './editor-error';
 import { registerNarrativeSourceRuntime, type PrimaryNarrativeSourceRuntime } from './clip-source-runtime';
 import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
 
@@ -200,7 +201,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     });
     if (!edit.ok || !edit.assetId) {
       if (newlyOwnedObjectUrl) URL.revokeObjectURL(url);
-      toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : edit.error.message);
+      toast.error(edit.ok ? t('workbench.failedFetchInsertClip') : editorErrorMessage(edit.error));
       return '';
     }
     if (file && sg) {
@@ -407,7 +408,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
         },
       });
       if (!insertedTrack.ok) {
-        toast.error(insertedTrack.error.message);
+        toast.error(editorErrorMessage(insertedTrack.error));
         return '';
       }
       document = insertedTrack.document;
@@ -434,7 +435,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       includeLinked: true,
     });
     if (!inserted.ok) {
-      toast.error(inserted.error.message);
+      toast.error(editorErrorMessage(inserted.error));
       return '';
     }
     clipFilesRef.current.set(input.url, input.file);

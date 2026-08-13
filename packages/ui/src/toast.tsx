@@ -12,6 +12,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { useUiI18n } from './i18n';
 
 type Level = 'info' | 'success' | 'error' | 'warn';
 
@@ -68,10 +69,11 @@ function subscribe(cb: () => void) {
 }
 
 export function Toaster() {
+  const messages = useUiI18n();
   const items = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   if (items.length === 0) return null;
   return (
-    <div className="toast-stack" role="region" aria-label="通知">
+    <div className="toast-stack" role="region" aria-label={messages.notifications}>
       {items.map((t) => (
         <div key={t.id} className={`toast toast-${t.level}`} role="alert">
           {t.title && <div className="toast-title">{t.title}</div>}
@@ -80,7 +82,7 @@ export function Toaster() {
             type="button"
             className="toast-close"
             onClick={() => dismiss(t.id)}
-            aria-label="关闭"
+            aria-label={messages.dismiss}
           >
             ×
           </button>

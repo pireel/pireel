@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { IconClose, IconPlus } from './icons';
+import { useUiI18n } from './i18n';
 
 /* ======================================================================
  * Single-image upload: empty state is a dashed card, click to upload; once uploaded it shows as a
@@ -11,7 +12,7 @@ export function ImageUpload({
   value,
   onChange,
   accept = 'image/*',
-  label = '上传图片',
+  label,
   afterUpload,
 }: {
   value: string;
@@ -24,6 +25,8 @@ export function ImageUpload({
    *  Fire-and-forget — errors don't affect the main upload flow. */
   afterUpload?: (file: File, url: string) => void | Promise<void>;
 }) {
+  const ui = useUiI18n();
+  const resolvedLabel = label ?? ui.uploadImage;
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -47,7 +50,8 @@ export function ImageUpload({
         }
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      console.warn('[image-upload] upload failed', e);
+      setErr(ui.uploadFailed);
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -60,7 +64,7 @@ export function ImageUpload({
         <div className="border-line bg-panel flex items-stretch gap-3 rounded-md border p-2">
           <Thumb src={value} onOpen={() => setLightbox(true)} />
           <div className="flex min-w-0 flex-1 items-start justify-between gap-2 py-0.5">
-            <div className="text-ink text-[12.5px] font-semibold">已上传</div>
+            <div className="text-ink text-[12.5px] font-semibold">{ui.uploaded}</div>
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
@@ -68,13 +72,13 @@ export function ImageUpload({
                 disabled={uploading}
                 className="border-line-2 bg-panel-2 text-ink-2 hover:bg-panel inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-medium disabled:opacity-50"
               >
-                {uploading ? `替换中 ${progress}%` : '替换'}
+                {uploading ? ui.replacingProgress(progress) : ui.replace}
               </button>
               <button
                 type="button"
                 onClick={() => onChange('')}
                 className="border-line-2 text-ink-3 hover:border-rose hover:text-rose grid h-6 w-6 shrink-0 place-items-center rounded-md border bg-white"
-                title="移除"
+                title={ui.remove}
               >
                 <IconClose size={12} />
               </button>
@@ -88,7 +92,7 @@ export function ImageUpload({
             onChange={onPick}
           />
         </div>
-        {err && <div className="text-rose mt-1 text-[11.5px]">上传失败：{err}</div>}
+        {err && <div className="text-rose mt-1 text-[11.5px]">{err}</div>}
         {lightbox && <Lightbox src={value} onClose={() => setLightbox(false)} />}
       </>
     );
@@ -104,16 +108,16 @@ export function ImageUpload({
         className="border-line-2 hover:border-accent hover:bg-accent/[0.04] text-ink-3 hover:text-accent flex h-[88px] items-center justify-center gap-2 rounded-md border-[1.5px] border-dashed bg-transparent px-4 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
       >
         {uploading ? (
-          <span className="font-mono text-[12px]">上传中 {progress}%</span>
+          <span className="font-mono text-[12px]">{ui.uploadingProgress(progress)}</span>
         ) : (
           <>
             <IconPlus size={14} />
-            <span className="text-[12.5px] font-medium">{label}</span>
+            <span className="text-[12.5px] font-medium">{resolvedLabel}</span>
           </>
         )}
       </button>
       {uploading && <ProgressBar pct={progress} />}
-      {err && <div className="text-rose text-[11.5px]">上传失败：{err}</div>}
+      {err && <div className="text-rose text-[11.5px]">{err}</div>}
       <input
         ref={fileRef}
         type="file"
@@ -134,7 +138,7 @@ export function ImageUploadList({
   onChange,
   accept = 'image/*',
   maxItems,
-  label = '添加图片',
+  label,
 }: {
   values: string[];
   onChange: (urls: string[]) => void;
@@ -143,6 +147,8 @@ export function ImageUploadList({
   /** Text on the "+" card */
   label?: string;
 }) {
+  const ui = useUiI18n();
+  const resolvedLabel = label ?? ui.addImage;
   const fileRef = useRef<HTMLInputElement>(null);
   /** In-flight upload placeholders: one per file, removed from the list as each completes. */
   const [pending, setPending] = useState<{ id: string; name: string; progress: number; err?: string }[]>([]);
@@ -179,8 +185,8 @@ export function ImageUploadList({
         setPending((prev) => prev.filter((p) => p.id !== slot.id));
         onChange([...valuesRef.current, url]);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setPending((prev) => prev.map((p) => (p.id === slot.id ? { ...p, err: msg } : p)));
+        console.warn('[image-upload] list upload failed', e);
+        setPending((prev) => prev.map((p) => (p.id === slot.id ? { ...p, err: ui.uploadFailed } : p)));
       }
     }
   }
@@ -210,10 +216,10 @@ export function ImageUploadList({
             type="button"
             onClick={() => fileRef.current?.click()}
             className="border-line-2 hover:border-accent hover:bg-accent/[0.04] text-ink-3 hover:text-accent flex h-[88px] w-[88px] shrink-0 flex-col items-center justify-center gap-1 rounded-md border-[1.5px] border-dashed bg-transparent transition-colors"
-            title={label}
+            title={resolvedLabel}
           >
             <IconPlus size={16} />
-            <span className="text-[11px] font-medium">{label}</span>
+            <span className="text-[11px] font-medium">{resolvedLabel}</span>
           </button>
         )}
       </div>
@@ -238,13 +244,14 @@ export function ImageUploadList({
 /* ---------------- Building blocks: thumbnail, removable thumbnail, upload placeholder ---------------- */
 
 function Thumb({ src, onOpen }: { src: string; onOpen: () => void }) {
+  const ui = useUiI18n();
   const isVideo = /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(src);
   return (
     <button
       type="button"
       onClick={onOpen}
       className="group border-line bg-panel-2 relative h-[88px] w-[88px] shrink-0 overflow-hidden rounded-md border"
-      title={isVideo ? '查看视频' : '查看大图'}
+      title={isVideo ? ui.viewVideo : ui.viewImage}
     >
       {isVideo ? (
         <>
@@ -255,7 +262,7 @@ function Thumb({ src, onOpen }: { src: string; onOpen: () => void }) {
             className="h-full w-full object-cover"
           />
           <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/60 px-1 py-0.5 text-[9px] font-bold text-white">
-            ▶ 视频
+            ▶ {ui.video}
           </span>
         </>
       ) : (
@@ -281,13 +288,14 @@ function RemovableThumb({
   onOpen: () => void;
   onRemove: () => void;
 }) {
+  const ui = useUiI18n();
   return (
     <div className="group relative h-[88px] w-[88px] shrink-0">
       <Thumb src={src} onOpen={onOpen} />
       <button
         type="button"
         onClick={onRemove}
-        title="移除"
+        title={ui.remove}
         className="absolute -right-1.5 -top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-white text-ink-3 shadow-[var(--shadow-sm)] opacity-0 transition-opacity hover:text-rose group-hover:opacity-100"
       >
         <IconClose size={11} />
@@ -307,18 +315,19 @@ function PendingThumb({
   err?: string;
   onDismiss: () => void;
 }) {
+  const ui = useUiI18n();
   if (err) {
     return (
       <div
         className="border-rose/40 bg-rose/[0.06] relative flex h-[88px] w-[88px] shrink-0 flex-col items-center justify-center rounded-md border px-2 text-center"
         title={err}
       >
-        <div className="text-rose text-[11px] font-semibold">失败</div>
+        <div className="text-rose text-[11px] font-semibold">{ui.failed}</div>
         <div className="text-ink-3 font-mono mt-0.5 line-clamp-1 text-[10px]">{name}</div>
         <button
           type="button"
           onClick={onDismiss}
-          title="关闭"
+          title={ui.close}
           className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-white text-ink-3 shadow-[var(--shadow-sm)] hover:text-rose"
         >
           <IconClose size={11} />
@@ -348,6 +357,7 @@ function ProgressBar({ pct }: { pct: number }) {
 /* ---------------- Lightbox & small SVG bits ---------------- */
 
 function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  const ui = useUiI18n();
   const isVideo = /\.(mp4|mov|webm|avi|mkv)(\?|$)/i.test(src);
 
   useEffect(() => {
@@ -372,7 +382,7 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
         type="button"
         onClick={onClose}
         className="absolute right-5 top-5 grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
-        title="关闭 (Esc)"
+        title={ui.closeEsc}
       >
         <IconClose size={16} />
       </button>

@@ -14,6 +14,7 @@ import { startPointerDrag } from './drag-shell';
 import { shiftBox } from './comp-diff';
 import { boxSelectionRect } from './edit-overlays';
 import { moveMediaCanvasBox, resizeMediaCanvasBox, scaleMediaCanvasBox, type MediaCanvasBox } from './media-box';
+import { editorErrorMessage } from './editor-error';
 
 export interface CanvasBoxDragTarget {
   box: MediaCanvasBox;
@@ -48,7 +49,7 @@ export function useBoxDrag(deps: BoxDragDeps) {
   const patchBlock = (clipId: string, block: Partial<Omit<Block, 'id' | 'startSec' | 'durationSec' | 'trackIndex'>>) => {
     const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId, block }] });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     setDocument(edit.document);

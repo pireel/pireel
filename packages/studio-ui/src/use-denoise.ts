@@ -19,6 +19,7 @@ import { decodeVideoAudio, toMono } from './audio-decode';
 import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { t } from './i18n';
+import { editorErrorMessage } from './editor-error';
 
 export interface DenoiseDeps {
   comp: Composition;
@@ -137,7 +138,7 @@ export function useDenoise(deps: DenoiseDeps) {
       patch: { audioDenoise: s == null ? undefined : { strength: Math.round(Math.max(0.05, Math.min(1, s)) * 100) / 100 } },
     });
     if (!command.ok) {
-      toast.error(command.error.message);
+      toast.error(editorErrorMessage(command.error));
       return;
     }
     pushUndoSnapshot();

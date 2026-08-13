@@ -34,6 +34,7 @@ import type { StudioChatHandle } from './studio-chat';
 import { t } from './i18n';
 import { componentContentSyncTarget } from './component-content-sync';
 import { fitEditableBoxIntoSafeArea, normalizeElementForInsert } from './editable-block-geometry';
+import { editorErrorMessage } from './editor-error';
 
 export interface ElementOpsDeps {
   projectId: string;
@@ -154,7 +155,7 @@ export function useElementOps(deps: ElementOpsDeps) {
         }],
       });
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       pushUndoSnapshot();
@@ -185,7 +186,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     };
     const inserted = insertOverlayDocumentClip({ document: documentRef.current, block: nb });
     if (!inserted.ok) {
-      toast.error(inserted.error.message);
+      toast.error(editorErrorMessage(inserted.error));
       return;
     }
     pushUndoSnapshot();
@@ -210,7 +211,7 @@ export function useElementOps(deps: ElementOpsDeps) {
       ...(existing ? { toTrackId: existing.id } : { newTrack: { id: trackId, stackOrder, name: `Graphics ${stackOrder}` } }),
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -221,7 +222,7 @@ export function useElementOps(deps: ElementOpsDeps) {
     const behindNow = b.personLayer ? b.personLayer === 'behind' : !!compRef.current.personFx?.personFront;
     const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId: b.id, block: { personLayer: behindNow ? 'front' : 'behind' } }] });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -360,12 +361,13 @@ export function useElementOps(deps: ElementOpsDeps) {
           block: { slots: nextSlots },
         }],
       });
-      if (!edit.ok) throw new Error(edit.error.message);
+      if (!edit.ok) throw new Error(editorErrorMessage(edit.error));
       pushUndoSnapshot();
       setDocument(edit.document);
       toast.success(nextTlb ? t('workbench.syncedContentTimingBlock') : t('workbench.syncedContentAlignedNarration'));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('workbench.syncFailedTryAgain'));
+      console.warn('[elements] sync failed', e);
+      toast.error(t('workbench.syncFailedTryAgain'));
     } finally {
       setSyncBusyId(null);
     }

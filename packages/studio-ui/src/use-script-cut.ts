@@ -24,6 +24,7 @@ import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { ScriptCut } from './script-panel';
 import { t } from './i18n';
+import { editorErrorMessage } from './editor-error';
 
 export interface ScriptCutDeps {
   projectId: string;
@@ -75,7 +76,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
           clipTranscripts: clipAsrRef.current,
         });
         if (!edit.ok) {
-          toast.error(edit.error.message);
+          toast.error(editorErrorMessage(edit.error));
           return;
         }
         document = edit.document;
@@ -147,7 +148,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
           properties: { treatment: 'full' },
         });
         if (!edit.ok) {
-          toast.error(edit.error.message);
+          toast.error(editorErrorMessage(edit.error));
           return;
         }
         document = edit.document;
@@ -194,7 +195,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
       clipTranscripts: clipAsrRef.current,
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     setDocument(edit.document);

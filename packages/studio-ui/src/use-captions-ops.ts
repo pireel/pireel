@@ -27,6 +27,7 @@ import { joinWords, wordsFromText } from '@pireel/studio-engine/caption-fx';
 import { displayCues, mappedCaptionSegs as relayMappedCaptionSegs, relayCaptionLayer as relayCaptionLayerPure } from '@pireel/studio-engine/captions-relay';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { t } from './i18n';
+import { editorErrorMessage } from './editor-error';
 import type { CaptionLineRow } from './captions-panel';
 import { inspectCaptionDocument } from './caption-document-state';
 import { captionTranscriptsByAsset, captionTranscriptsFromDocument } from './caption-transcript-bridge';
@@ -80,7 +81,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     // the resolver so future default changes reach projects that never explicitly set those fields.
     const edit = captionEdit(patch);
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     setDocument(edit.document);
@@ -126,7 +127,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         await runTool('set_caption_translations', { items: [item], lang });
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
+      console.warn('[captions] line translation failed', e);
+      toast.error(t('workbench.translationFailedTryAgain'));
     } finally {
       setCaptionLineBusyKey((k) => (k === key ? null : k));
     }
@@ -157,7 +159,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -310,7 +312,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       // transcript in the same V2 transaction so locked lanes cannot publish half a style change.
       let edit = captionEdit({ on: true, preset, color: undefined, bg: undefined, ...stylePatch });
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       let output = inspectCaptionDocument(edit.document);
@@ -322,7 +324,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         segs = await refreshAsr();
         edit = captionEdit({ on: true, preset, color: undefined, bg: undefined, ...stylePatch });
         if (!edit.ok) {
-          toast.error(edit.error.message);
+          toast.error(editorErrorMessage(edit.error));
           return;
         }
         output = inspectCaptionDocument(edit.document);
@@ -362,7 +364,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     const ids = compRef.current.blocks.filter(isSentenceCaption).map((b) => b.id);
     const edit = captionEdit({ on: false });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -386,8 +388,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       clipTranscripts: {},
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
-      return { ok: false, error: edit.error.message };
+      toast.error(editorErrorMessage(edit.error));
+      return { ok: false, error: editorErrorMessage(edit.error) };
     }
     const transcripts = captionTranscriptsFromDocument(edit.document, compRef.current, clipAsrRef.current);
     pushUndoSnapshot();
@@ -467,7 +469,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       setDocument(transaction.document);
       toast.success(t('workbench.generatedLangTranslations', { lang: target }) + (isCaptionsOn(compRef.current) ? '' : t('workbench.enableCaptionsShowThem')));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('workbench.translationFailedTryAgain'));
+      console.warn('[captions] translation failed', e);
+      toast.error(t('workbench.translationFailedTryAgain'));
     } finally {
       setCapTransBusy(false);
     }

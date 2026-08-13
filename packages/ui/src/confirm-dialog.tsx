@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { Button } from './button';
+import { useUiI18n } from './i18n';
 
 interface Props {
   open: boolean;
@@ -25,12 +26,13 @@ export function ConfirmDialog({
   open,
   title,
   description,
-  confirmLabel = '确认',
-  cancelLabel = '取消',
+  confirmLabel,
+  cancelLabel,
   tone = 'default',
   onCancel,
   onConfirm,
 }: Props) {
+  const messages = useUiI18n();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -63,7 +65,7 @@ export function ConfirmDialog({
         )}
         <div className="mt-5 flex justify-end gap-2">
           <Button size="sm" onClick={onCancel}>
-            {cancelLabel}
+            {cancelLabel ?? messages.cancel}
           </Button>
           <Button
             size="sm"
@@ -72,7 +74,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             autoFocus
           >
-            {confirmLabel}
+            {confirmLabel ?? messages.confirm}
           </Button>
         </div>
       </div>

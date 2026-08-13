@@ -7,6 +7,7 @@ import {
 import { applyCaptionDocumentEdit, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import type { MappedSeg } from '@pireel/studio-engine/captions-relay';
 import { captionTranscriptsByAsset } from './caption-transcript-bridge';
+import { editorErrorMessage } from './editor-error';
 
 export interface CaptionTranslationRow {
   index: number;
@@ -104,6 +105,6 @@ export function replaceCaptionTranslationsTransaction(input: {
     mainTranscript: staged.mainTranscript,
     clipTranscripts: captionTranscriptsByAsset(input.document, input.composition, staged.clipTranscripts),
   });
-  if (!edit.ok) return { ok: false, error: edit.error.message };
+  if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error) };
   return { ...staged, document: edit.document };
 }

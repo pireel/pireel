@@ -27,6 +27,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useUiI18n } from './i18n';
 
 /** Imperative API — opens directly when a Composer bottom-bar button is clicked (not via a trigger char).
  *  When anchorEl is passed the popover anchors to that element (usually the trigger button itself);
@@ -110,6 +111,7 @@ function TriggerPopoverImpl<T>(
   props: TriggerPopoverProps<T>,
   ref: React.Ref<TriggerPopoverHandle>,
 ) {
+  const messages = useUiI18n();
   const {
     trigger,
     editorRef,
@@ -488,7 +490,7 @@ function TriggerPopoverImpl<T>(
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索…"
+            placeholder={messages.searchPlaceholder}
             className="w-full rounded-md border border-line bg-panel-2 px-2 py-1 text-[12px] outline-none focus:border-ink"
           />
         </div>
@@ -496,12 +498,12 @@ function TriggerPopoverImpl<T>(
       <div data-trigger-list className="overflow-y-auto p-2 max-h-[60vh]">
         {isOriginalEmpty ? (
           emptyOriginal ?? (
-            <div className="px-2 py-3 text-[12px] text-ink-3 text-center">无可选项</div>
+            <div className="px-2 py-3 text-[12px] text-ink-3 text-center">{messages.emptyOptions}</div>
           )
         ) : isMatchedEmpty ? (
           emptyMatched?.(query) ?? (
             <div className="px-2 py-3 text-[12px] text-ink-3 text-center">
-              没有匹配「{query}」
+              {messages.noMatches(query)}
             </div>
           )
         ) : (

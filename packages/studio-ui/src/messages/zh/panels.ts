@@ -186,7 +186,7 @@ export const PANELS_ZH: Record<string, string> = {
   'panels.importFromLocalService': '从本地服务导入',
   'panels.localServiceInvalid': '本地导入地址无效',
   'panels.localServiceImported': '已导入 {n} 个本地素材',
-  'panels.localServiceFailed': '本地导入失败：{error}',
+  'panels.localServiceFailed': '本地导入失败，请检查本地服务后重试。',
   'panels.moreImportOptions': '更多导入方式',
   'panels.noLocalAssets': '还没有本地素材',
   'panels.folderNoMedia': '文件夹里没有可导入的媒体文件',

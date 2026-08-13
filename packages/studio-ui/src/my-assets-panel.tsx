@@ -629,7 +629,8 @@ export function MyAssetsPanel({
       history.replaceState(null, '', `${location.pathname}${location.search}`);
       setServiceManifestUrl(null);
     } catch (error) {
-      toast.error(t('panels.localServiceFailed', { error: error instanceof Error ? error.message : String(error) }));
+      console.warn('[studio-assets] local import failed', error);
+      toast.error(t('panels.localServiceFailed'));
     } finally {
       setImporting(false);
     }

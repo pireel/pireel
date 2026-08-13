@@ -9,6 +9,7 @@ import {
   IconAttach,
   IconClose,
 } from './icons';
+import { useUiI18n } from './i18n';
 
 const FILE_REF_RE = /!\[([^\]]*)\]\(([^)]+)\)/g;
 
@@ -58,6 +59,7 @@ export function UrlOrUploadInput({
   controlClass: string;
   multiline?: boolean;
 }) {
+  const ui = useUiI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
@@ -107,7 +109,8 @@ export function UrlOrUploadInput({
       const newFiles = [...files, { name: file.name, url, raw: ref }];
       onChange(buildValue(text, newFiles));
     } catch (err) {
-      setUploadErr(err instanceof Error ? err.message : String(err));
+      console.warn('[url-or-upload] upload failed', err);
+      setUploadErr(ui.uploadFailed);
     } finally {
       setUploading(false);
       setUploadFileName(null);
@@ -129,7 +132,7 @@ export function UrlOrUploadInput({
               <button
                 type="button"
                 onClick={() => removeFile(i)}
-                aria-label="移除"
+                aria-label={ui.remove}
                 className="text-ink-4 hover:text-rose ml-0.5 inline-flex items-center"
               >
                 <IconClose size={10} />
@@ -144,7 +147,7 @@ export function UrlOrUploadInput({
           <textarea
             value={text}
             onChange={(e) => updateText(e.target.value)}
-            placeholder={placeholder ?? '输入文本、粘贴链接、或上传文件'}
+            placeholder={placeholder ?? ui.inputOrUploadPlaceholder}
             className={`flex-1 ${controlClass}`}
             disabled={uploading}
           />
@@ -152,7 +155,7 @@ export function UrlOrUploadInput({
           <input
             value={text}
             onChange={(e) => updateText(e.target.value)}
-            placeholder={placeholder ?? '粘贴链接或输入文本'}
+            placeholder={placeholder ?? ui.urlOrTextPlaceholder}
             className={`flex-1 ${controlClass}`}
             disabled={uploading}
           />
@@ -163,7 +166,7 @@ export function UrlOrUploadInput({
           disabled={uploading}
           className="border-line-2 bg-panel hover:bg-panel-2 text-ink flex items-center gap-1.5 rounded-md border px-3 text-[12.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {uploading ? `${progress}%` : '上传文件'}
+          {uploading ? `${progress}%` : ui.uploadFile}
         </button>
         <input
           ref={fileRef}
@@ -181,7 +184,7 @@ export function UrlOrUploadInput({
           <span className="text-ink-4 text-[11px]">{uploadFileName}</span>
         </div>
       )}
-      {uploadErr && <span className="text-rose text-[11.5px]">上传失败：{uploadErr}</span>}
+      {uploadErr && <span className="text-rose text-[11.5px]">{uploadErr}</span>}
     </div>
   );
 }

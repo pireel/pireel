@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@piree
 
 import { toast } from '@pireel/ui/toast';
 import { studioLocale, t } from './i18n';
+import { editorErrorMessage } from './editor-error';
 import { framePack } from '@pireel/studio-frames/locales';
 import {
   type Block,
@@ -256,7 +257,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (!updates.length) return false;
     const edit = applyOverlayDocumentEdits({ document: editorDocumentRef.current, updates });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return false;
     }
     setEditorDocument(edit.document);
@@ -687,7 +688,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       clipTranscripts: clipAsrRef.current,
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -1920,7 +1921,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const parsed = await composeBlockChecked(seed, instruction, (acc) => onNote(noteOf(acc)));
       return { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody };
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t('workbench.aiEditFailed'));
+      console.warn('[studio] AI edit failed', e);
+      toast.error(t('workbench.aiEditFailed'));
       return null;
     } finally {
       markGenerating([b.id], false);
@@ -2535,7 +2537,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           configureCanvas: !preserveEmptyTrackEdit,
           mode: 'overwrite',
         });
-        if (!edit.ok || !edit.assetId) throw new Error(edit.ok ? 'Narrative source was not registered.' : edit.error.message);
+        if (!edit.ok || !edit.assetId) throw new Error(edit.ok ? 'Narrative source was not registered.' : editorErrorMessage(edit.error));
         rememberAssetUrl(edit.assetId, url);
         setEditorDocument(edit.document);
       }
@@ -2677,7 +2679,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (genLockToast(id)) return;
     const edit = removeOverlayDocumentClips({ document: editorDocumentRef.current, clipIds: [id] });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     postPreview({ type: 'hf:remove', id });
@@ -2695,7 +2697,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const commitNarrativePatches = (updates: NarrativeClipPatchUpdate[]): boolean => {
     const result = patchNarrativeClips(editorDocumentRef.current, updates);
     if (!result.ok) {
-      toast.error(result.error.message);
+      toast.error(editorErrorMessage(result.error));
       return false;
     }
     setEditorDocument(result.document);
@@ -2826,7 +2828,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       patch: { enabled },
     });
     if (!result.ok) {
-      toast.error(result.error.message);
+      toast.error(editorErrorMessage(result.error));
       return;
     }
     pushUndoSnapshot();
@@ -2841,7 +2843,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       patch: { box },
     });
     if (!result.ok) {
-      toast.error(result.error.message);
+      toast.error(editorErrorMessage(result.error));
       return;
     }
     if (result.document === current) return;
@@ -2970,7 +2972,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const patchTrackFlags = (trackId: string, patch: { muted?: boolean; hidden?: boolean }) => {
     const result = applyEditorCommand(editorDocumentRef.current, { type: 'track.patch', trackId, patch });
     if (!result.ok) {
-      toast.error(result.error.message);
+      toast.error(editorErrorMessage(result.error));
       return;
     }
     pushUndoSnapshot();
@@ -3161,7 +3163,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const b: Block = { ...base, slots: { media } };
     const inserted = insertOverlayDocumentClip({ document: editorDocumentRef.current, block: b });
     if (!inserted.ok) {
-      toast.error(inserted.error.message);
+      toast.error(editorErrorMessage(inserted.error));
       return;
     }
     pushUndoSnapshot();
@@ -3282,7 +3284,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const nb: Block = { ...base, slots: { media: dropMedia } };
     const inserted = insertOverlayDocumentClip({ document: editorDocumentRef.current, block: nb });
     if (!inserted.ok) {
-      toast.error(inserted.error.message);
+      toast.error(editorErrorMessage(inserted.error));
       return;
     }
     pushUndoSnapshot();
@@ -3341,7 +3343,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const b = { ...base, trackIndex: freeTrack(compRef.current.blocks, base.startSec, base.durationSec, base.trackIndex) };
     const inserted = insertOverlayDocumentClip({ document: editorDocumentRef.current, block: b });
     if (!inserted.ok) {
-      toast.error(inserted.error.message);
+      toast.error(editorErrorMessage(inserted.error));
       return;
     }
     pushUndoSnapshot();
@@ -3404,7 +3406,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     });
     if (appearance.ok) setEditorDocument(appearance.document);
     else {
-      toast.error(appearance.error.message);
+      toast.error(editorErrorMessage(appearance.error));
       return;
     }
     // The theme declared a person recommendation (sticker theme: cut out the subject and add a sticker outline) → land it into comp.personFx too,
@@ -3436,7 +3438,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       updates: [{ clipId: id, startSec: Math.max(0, Math.round(startSec * 100) / 100) }],
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     setEditorDocument(edit.document);
@@ -3452,7 +3454,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }],
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     setEditorDocument(edit.document);
@@ -3553,7 +3555,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     const split = applyNarrationSplitCommands(editorDocumentRef.current, [tRef.current]);
     if (!split.ok) {
-      toast.error(split.error.message);
+      toast.error(editorErrorMessage(split.error));
       return;
     }
     pushUndoSnapshot();
@@ -3588,8 +3590,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     const edit = prepareNarrationRangeEdit([range]);
     if (!edit.ok) {
-      toast.error(edit.error.message);
-      return { ok: false, error: edit.error.message };
+      toast.error(editorErrorMessage(edit.error));
+      return { ok: false, error: editorErrorMessage(edit.error) };
     }
     pushUndoSnapshot();
     setEditorDocument(edit.document);
@@ -3609,8 +3611,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (clips.length > 1) {
       const edit = prepareNarrationRangeEdit([range]);
       if (!edit.ok) {
-        toast.error(edit.error.message);
-        return { ok: false, error: edit.error.message };
+        toast.error(editorErrorMessage(edit.error));
+        return { ok: false, error: editorErrorMessage(edit.error) };
       }
       pushUndoSnapshot();
       setEditorDocument(edit.document);
@@ -3618,8 +3620,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       // Emptying the primary lane intentionally preserves every independent sibling lane.
       const edit = prepareNarrationClipRemoval([sid]);
       if (!edit.ok) {
-        toast.error(edit.error.message);
-        return { ok: false, error: edit.error.message };
+        toast.error(editorErrorMessage(edit.error));
+        return { ok: false, error: editorErrorMessage(edit.error) };
       }
       pushUndoSnapshot();
       setEditorDocument(edit.document);
@@ -3641,7 +3643,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     if (targets.length === clips.length) {
       const edit = prepareNarrationClipRemoval(targets.map((target) => target.clip.id));
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       pushUndoSnapshot();
@@ -3655,7 +3657,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const firstStart = Math.min(...removedRanges.map((range) => range.fromSec));
     const edit = prepareNarrationRangeEdit(removedRanges);
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -3700,7 +3702,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           ranges: spans.map((span) => ({ fromSec: span.editedStart, toSec: span.editedEnd })),
         });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -3771,7 +3773,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     const kill = new Set(targets.map((b) => b.id));
     const edit = removeOverlayDocumentClips({ document: editorDocumentRef.current, clipIds: [...kill] });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -3793,12 +3795,12 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       includeLinked: true,
     });
     if (!removed.ok) {
-      toast.error(removed.error.message);
+      toast.error(editorErrorMessage(removed.error));
       return;
     }
     const captions = applyEditorCommand(removed.document, { type: 'captions.relay' });
     if (!captions.ok) {
-      toast.error(captions.error.message);
+      toast.error(editorErrorMessage(captions.error));
       return;
     }
     pushUndoSnapshot();
@@ -3918,7 +3920,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     });
     const command = applyEditorCommand(editorDocumentRef.current, { type: 'appearance.patch', patch: { personFx: fx } });
     if (command.ok) setEditorDocument(command.document);
-    else toast.error(command.error.message);
+    else toast.error(editorErrorMessage(command.error));
   };
   setPersonFxRef.current = setPersonFx;
   /** Whether this range's (a source's) mask is mostly complete (≥80% of sample points have frames) — avoids re-running when the toggle is flipped again. */
@@ -4142,7 +4144,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // refs/setters/handlers; rebuilding it every render is intentional (tool bodies read the latest state via refs).
   // Caption ops (style / line edits / preset re-lay / bilingual) — see use-captions-ops.ts. runTool goes through a
   // ref because the dispatcher ctx below needs the hook's outputs first (the tools only run from async handlers).
-  const runToolRef = useRef<(toolId: string, input: Record<string, unknown>) => Promise<StudioToolResult>>(() => Promise.resolve({ ok: false, error: 'not ready' }));
+  const runToolRef = useRef<(toolId: string, input: Record<string, unknown>) => Promise<StudioToolResult>>(() => Promise.resolve({ ok: false, error: t('editorError.operationFailed') }));
   const { setCaptionStyle, mappedCaptionSegs, relayCaptionLayer, captionLineRows, captionsPanelProps, applyCaptionPreset, relayoutCaptions, removeCaptionLayer } = useCaptionsOps({
     comp, tSec, asrSentences, clipAsr, setClipAsr, setAsrSentences, setSelectedIdRaw, setSelectedBlockIds,
     setPlaying, compRef, clipAsrRef, asrRef, videoFileRef, playingRef, tRef,
@@ -4600,7 +4602,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         primaryOrder: clips.map((clip) => clip.id),
       });
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       pushUndoSnapshot();
@@ -4649,7 +4651,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           : target,
     });
     if (!edit.ok) {
-      toast.error(edit.error.message);
+      toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
@@ -4723,7 +4725,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       }
       const edit = moveOverlayDocumentClip({ document: editorDocumentRef.current, clipId: id, toTrackId: target.id });
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       pushUndoSnapshot();
@@ -4749,7 +4751,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         newTrack: { id: `track_graphics_${blockId('lane')}`, name: 'Graphics', stackOrder },
       });
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       pushUndoSnapshot();
@@ -4814,7 +4816,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       const ids = topToBottom.map((stackOrder) => graphics.find((track) => track.stackOrder === stackOrder)?.id).filter((id): id is string => !!id);
       const edit = reorderOverlayDocumentTracks(editorDocumentRef.current, ids);
       if (!edit.ok) {
-        toast.error(edit.error.message);
+        toast.error(editorErrorMessage(edit.error));
         return;
       }
       pushUndoSnapshot();

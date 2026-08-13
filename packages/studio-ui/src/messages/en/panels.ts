@@ -186,7 +186,7 @@ export const PANELS_EN: Record<string, string> = {
   'panels.importFromLocalService': 'Import from local service',
   'panels.localServiceInvalid': 'The local import address is invalid',
   'panels.localServiceImported': 'Imported {n} local assets',
-  'panels.localServiceFailed': 'Local import failed: {error}',
+  'panels.localServiceFailed': 'Local import failed. Check the local service and try again.',
   'panels.moreImportOptions': 'More import options',
   'panels.noLocalAssets': 'No local assets yet',
   'panels.folderNoMedia': 'No importable media in that folder',
