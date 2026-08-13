@@ -143,6 +143,32 @@ describe('shared agent timeline atoms', () => {
     });
   });
 
+  it('retimes video picture and source audio together while keeping source ranges fixed', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.main = { id: 'main', kind: 'video', locator: { remoteUrl: 'https://cdn.example/main.mp4' }, metadata: { durationSec: 6, hasAudio: true } };
+    document.semantics.primaryNarrativeAssetId = 'main';
+    document.timeline.tracks[0]!.clips = [
+      {
+        id: 'shot-1', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 120,
+        sourceInSec: 0, sourceOutSec: 4, properties: { treatment: 'full' }, enabled: true,
+      },
+      {
+        id: 'shot-2', kind: 'narrative', assetId: 'main', startFrame: 120, durationFrames: 60,
+        sourceInSec: 4, sourceOutSec: 6, properties: { treatment: 'full' }, enabled: true,
+      },
+    ];
+
+    const retimed = runAgentTimelineTool(document, 'set_video_speed', { shotIds: ['shot-1'], speed: 2 });
+
+    expect(retimed.ok).toBe(true);
+    expect(retimed.document!.timeline.tracks[0]!.clips).toMatchObject([
+      { id: 'shot-1', startFrame: 0, durationFrames: 60, sourceInSec: 0, sourceOutSec: 4 },
+      { id: 'shot-2', startFrame: 60, durationFrames: 60, sourceInSec: 4, sourceOutSec: 6 },
+    ]);
+    expect(retimed.data).toEqual({ clipIds: ['shot-1'], speed: 2 });
+    expect(runAgentTimelineTool(document, 'set_video_speed', { all: true, speed: 4.1 }).ok).toBe(false);
+  });
+
   it('removes a cross-track linked batch only once', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [

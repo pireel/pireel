@@ -34,6 +34,7 @@ export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'move_clips',
   'remove_clips',
   'split_clips',
+  'set_video_speed',
   'set_clip_properties',
   'set_keyframes',
   'manage_tracks',
@@ -447,6 +448,58 @@ function splitClips(document: EditorDocumentV2, input: Input): AgentTimelineOutc
   return mutation(next, `Split ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts, { createdClipIds: created });
 }
 
+function setVideoSpeed(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
+  const speed = Number(input.speed);
+  if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) return fail('speed must be within 0.25..4');
+  const requestedIds = Array.isArray(input.shotIds)
+    ? input.shotIds.map(string).filter((id): id is string => !!id)
+    : [];
+  if (!input.all && !requestedIds.length) return fail('shotIds or all:true is required');
+
+  const videoLocations = document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+    if ((clip.kind !== 'narrative' && clip.kind !== 'media') || document.assets[clip.assetId]?.kind !== 'video') return [];
+    return [{ trackId: track.id, clip }];
+  }));
+  const ids = input.all ? videoLocations.map(({ clip }) => clip.id) : [...new Set(requestedIds)];
+  const targets = ids.map((clipId) => {
+    const found = videoLocations.find(({ clip }) => clip.id === clipId);
+    return found ? { ...found, originalStartFrame: found.clip.startFrame } : null;
+  });
+  const missing = ids.filter((_clipId, index) => !targets[index]);
+  if (missing.length) return fail(`video clip not found: ${missing.join(', ')}`);
+  if (!targets.length) return fail('no video clips found');
+
+  let next = document;
+  const receipts: EditorCommandReceipt[] = [];
+  for (const target of targets.filter((item): item is NonNullable<typeof item> => !!item)
+    .sort((left, right) => left.originalStartFrame - right.originalStartFrame || left.clip.id.localeCompare(right.clip.id))) {
+    const found = locatedClip(next, target.clip.id);
+    if (!found || (found.clip.kind !== 'narrative' && found.clip.kind !== 'media')) return fail(`video clip not found: ${target.clip.id}`);
+    const sourceDurationSec = found.clip.sourceOutSec - found.clip.sourceInSec;
+    const retimed = applyEditorCommand(next, {
+      type: 'clip.retime',
+      trackId: found.track.id,
+      clipId: found.clip.id,
+      durationFrames: positiveDurationFrames(sourceDurationSec / speed, next.canvas.fps),
+      ripple: typeof input.ripple === 'boolean' ? input.ripple : found.clip.kind === 'narrative',
+    });
+    if (!retimed.ok) return fail(retimed.error.message, retimed.error);
+    next = retimed.document;
+    receipts.push(retimed.receipt);
+  }
+
+  if (next.semantics.managedCaptionTrackId) {
+    const relayed = applyEditorCommand(next, { type: 'captions.relay' });
+    if (!relayed.ok) return fail(relayed.error.message, relayed.error);
+    next = relayed.document;
+    receipts.push(relayed.receipt);
+  }
+  return mutation(next, `Set ${targets.length} video clip${targets.length === 1 ? '' : 's'} to ${speed}x`, receipts, {
+    clipIds: targets.map((target) => target!.clip.id),
+    speed,
+  });
+}
+
 function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
@@ -822,6 +875,7 @@ export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, i
     case 'move_clips': return moveClips(document, input);
     case 'remove_clips': return removeClips(document, input);
     case 'split_clips': return splitClips(document, input);
+    case 'set_video_speed': return setVideoSpeed(document, input);
     case 'set_clip_properties': return setClipProperties(document, input);
     case 'set_keyframes': return setKeyframes(document, input);
     case 'manage_tracks': return manageTracks(document, input);

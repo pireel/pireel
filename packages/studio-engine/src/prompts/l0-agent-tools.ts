@@ -1103,6 +1103,23 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
   {
+    id: 'set_video_speed',
+    kind: 'badge',
+    icon: '⏩',
+    label: 'tools.set_video_speed.label',
+    description:
+      "Set constant playback speed for video clips on any visual lane. The source range stays fixed while timeline duration, picture, and the clip's own audio retime together. Batch with shotIds or all:true. speed accepts 0.25..4. ripple defaults to true for primary narrative clips and false for B-roll/overlay video; set it explicitly to override. This is constant speed only; speed ramps are not supported.",
+    inputSchema: obj(
+      {
+        shotIds: { type: 'array', items: { type: 'string' }, description: 'Target video clip ids (omit when using all).' },
+        all: { type: 'boolean', description: 'true = apply to every video clip on every visual lane.' },
+        speed: { type: 'number', description: 'Constant playback speed, 0.25..4.' },
+        ripple: { type: 'boolean', description: 'Shift later sync-locked clips with the changed out-point. Defaults to true for primary narrative and false for B-roll/overlay video.' },
+      },
+      ['speed'],
+    ),
+  },
+  {
     id: 'denoise_audio',
     kind: 'badge',
     icon: '🎙️',

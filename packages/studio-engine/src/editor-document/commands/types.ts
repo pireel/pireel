@@ -123,6 +123,7 @@ export type EditorCommand =
   | { type: 'track.patch'; trackId: TrackId; patch: TrackPatch }
   | { type: 'track.move'; trackId: TrackId; toIndex: number }
   | { type: 'clip.patch'; trackId: TrackId; clipId: TimelineClipId; patch: ClipPatch }
+  | { type: 'clip.retime'; trackId: TrackId; clipId: TimelineClipId; durationFrames: number; ripple?: boolean }
   | { type: 'clip.move'; trackId: TrackId; clipId: TimelineClipId; startFrame: number; toTrackId?: TrackId; includeLinked?: boolean }
   | { type: 'clip.swapAsset'; trackId: TrackId; clipId: TimelineClipId; assetId: string }
   | { type: 'clips.link'; clipIds: TimelineClipId[]; groupId?: string }

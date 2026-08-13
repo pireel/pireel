@@ -5,6 +5,7 @@ export * from './audio-patch';
 export * from './caption-style';
 export * from './clip-geometry';
 export * from './clip-patch';
+export * from './clip-retime';
 export * from './clip-move';
 export * from './clip-swap-asset';
 export * from './clip-links';

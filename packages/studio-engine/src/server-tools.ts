@@ -175,6 +175,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'apply_layout',
   'set_video_filter',
   'set_shot_audio',
+  'set_video_speed',
   'set_bgm',
   'split_shot',
   'trim_shot',

@@ -6,6 +6,7 @@ import { insertAudioClip } from './audio-insert';
 import { patchAudioClips } from './audio-patch';
 import { patchCaptionStyle } from './caption-style';
 import { patchEditorClip } from './clip-patch';
+import { retimeEditorClip } from './clip-retime';
 import { moveEditorClip } from './clip-move';
 import { swapEditorClipAsset } from './clip-swap-asset';
 import { linkEditorClips, unlinkEditorClips } from './clip-links';
@@ -43,6 +44,8 @@ export function applyEditorCommand(document: EditorDocumentV2, command: EditorCo
       return moveEditorTrack(document, command.trackId, command.toIndex);
     case 'clip.patch':
       return patchEditorClip(document, command.trackId, command.clipId, command.patch);
+    case 'clip.retime':
+      return retimeEditorClip(document, command);
     case 'clip.move':
       return moveEditorClip(document, command);
     case 'clip.swapAsset':
