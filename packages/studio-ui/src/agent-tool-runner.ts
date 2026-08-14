@@ -431,6 +431,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if ((compRef.current.shots ?? []).some((s) => s.src)) await ensureClipTranscripts();
               // The full text enters the feed with the receipt (injected once, cached after): the situation snapshot doesn't carry the script
               return { ok: true, summary: t('workbench.transcribedNLines', { n: segs.length }), data: { transcript: transcriptForAgent() } };
+            } catch (error) {
+              // ASR errors are already sanitized/localized at the media boundary. Preserve that
+              // actionable reason instead of collapsing every failure to "operation failed";
+              // the selected Skill also tells the agent not to hammer the same call this turn.
+              return {
+                ok: false,
+                error: error instanceof Error && error.message.trim()
+                  ? error.message
+                  : t('workbench.transcriptExtractionFailedTry'),
+              };
             } finally {
               clearToolProgress(toolId);
             }

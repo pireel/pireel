@@ -1650,18 +1650,33 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // are only 96px wide, upscaling from them is blurry at any size (user feedback). A 960-wide jpeg is sharp enough for
   // retina cards (~440 CSS px).
   const coverThumbRef = useRef<string | null>(null);
+  // Cover clearing must wait for hydration: the first render is intentionally empty even when a
+  // saved project has video. Once ready, an empty primary track is authoritative user state.
+  const [bootDataReady, setBootDataReady] = useState(false);
+  const hasPrimaryVideo = primaryNarrativeClips(editorDocument).length > 0;
+  const currentCoverThumb = () =>
+    primaryNarrativeClips(editorDocumentRef.current).length > 0 ? coverThumbRef.current : null;
   const activateOutputDocumentRef = useRef<(document: EditorDocumentV2, composition: Composition) => void>(() => {});
   const getActiveOutputState = useCallback(
     () => ({
       document: persistableDocument(false),
       videoSig: videoSigRef.current ?? (videoFileRef.current ? fileSig(videoFileRef.current) : null),
       videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
-      coverThumb: coverThumbRef.current,
+      coverThumb: currentCoverThumb(),
     }),
     [persistableDocument],
   );
   const projectOutputs = useProjectOutputs(getActiveOutputState);
   useEffect(() => {
+    // A cover describes the current deliverable, not the reusable source kept in the media
+    // library. Removing the final timeline video must therefore clear the cover even though
+    // videoFile intentionally remains available for inserting again later.
+    if (!hasPrimaryVideo) {
+      if (!bootDataReady) return;
+      coverThumbRef.current = null;
+      saveCoverThumb(projectId, null);
+      return;
+    }
     if (!videoFile) return;
     let alive = true;
     const url = URL.createObjectURL(videoFile);
@@ -1703,7 +1718,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     return () => {
       alive = false;
     };
-  }, [videoFile, projectId]);
+  }, [videoFile, projectId, hasPrimaryVideo, bootDataReady]);
   // Autosave runs regardless (pure side effect: debounced draft write); the toolbar no longer shows a "project/saved" time
   // videoSigRef first: in the missing-media state (no File on this device) the draft's sig anchor
   // must survive autosave — writing null would wipe the cloud row's reconnect anchor.
@@ -4220,7 +4235,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const outputTabs = [
     {
       ...projectOutputs.outputs.active,
-      coverThumb: coverThumbRef.current,
+      coverThumb: hasPrimaryVideo ? coverThumbRef.current : null,
       durationSec: totalDuration(comp) || comp.video?.durationSec || null,
       canvasWidth: editorDocument.canvas.width,
       canvasHeight: editorDocument.canvas.height,
@@ -4469,7 +4484,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             },
             videoSig: videoSigRef.current,
             videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
-            coverThumb: coverThumbRef.current,
+            coverThumb: currentCoverThumb(),
           }
         : null;
     }
@@ -4484,7 +4499,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       },
       videoSig: videoSigRef.current ?? (videoFileRef.current ? fileSig(videoFileRef.current) : null),
       videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
-      coverThumb: coverThumbRef.current,
+      coverThumb: currentCoverThumb(),
     };
   }
 
@@ -4888,7 +4903,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   const autoRestoredRef = useRef(false);
   // The boot layer's data gate: released once auto-restore (cloud-first falling back to local) finishes —
   // video-byte reconnection (OPFS/cloud fetch) continues behind the gate, not counted as entry waiting
-  const [bootDataReady, setBootDataReady] = useState(false);
   // The canvas may fall back locally after 1.2s, but publishing a cached asset index must wait for
   // the cloud request itself to settle or a slow response can resurrect cross-browser deletions.
   const [localAssetIndexSyncReady, setLocalAssetIndexSyncReady] = useState(false);

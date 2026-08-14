@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   type Composition,
   type EditorDocumentV2,
   compositionToEditorDocument,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
+import { buildChatSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
+import { classifyAsrResponse } from './media';
 
 async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<{ ok: boolean; summary?: string; error?: string }>) {
   // agent-tool-runner also owns browser export tools; this unit only needs the transaction helper.
@@ -39,6 +42,30 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  it('distinguishes ASR provider failure from genuine no-speech and exposes a useful tool error once', async () => {
+    expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr poll HTTP 503: busy' })).toBe('failed');
+    expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr returned no text' })).toBe('empty');
+
+    const h = harness();
+    Object.assign(h.ctx, {
+      videoFileRef: { current: new File(['video'], 'talking-head.mp4', { type: 'video/mp4' }) },
+      stepAsr: async () => { throw new Error('提取口播稿失败,稍后再试'); },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'extract_asr', {});
+    expect(result).toMatchObject({ ok: false, error: '提取口播稿失败,稍后再试' });
+
+    const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
+    const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
+    expect(execute.indexOf('`remove_silence`')).toBeLessThan(execute.indexOf('`extract_asr`'));
+    expect(execute).toContain('do not retry it in the same user request');
+    expect(buildChatSystem(null)).toContain('the sole timeline mutation allowed before planning');
+    expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
+  });
+
   it('failed synchronous mutation rolls back state and both history lines', async () => {
     const h = harness();
     const redo = h.redoStackRef.current[0];

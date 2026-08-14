@@ -24,6 +24,15 @@ export interface ProbedFile {
   hasAudio: boolean;
 }
 
+/** The ASR routes deliberately return HTTP 200 for both genuine no-speech and provider
+ * failures so a batch import can continue. The browser must still distinguish them: only
+ * an explicit provider "no text/speech" result is an empty transcript; every other
+ * asr_ok:false response is a failed service call. */
+export function classifyAsrResponse(value: { asr_ok?: boolean; detail?: string }): 'ok' | 'empty' | 'failed' {
+  if (value.asr_ok !== false) return 'ok';
+  return /returned no (?:text|transcript)|no speech/i.test(value.detail ?? '') ? 'empty' : 'failed';
+}
+
 /** File fingerprint: same file (name/size/mtime) → same key, so ASR/uploads can hit the cache. */
 export function fileSig(file: File): string {
   return `${file.name}:${file.size}:${file.lastModified}`;
@@ -69,9 +78,14 @@ export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   if (r.status === 402) throw new Error(t('chatGen.notEnoughCreditsTop'));
   if (!r.ok) throw new Error(t('common.transcriptionRequestFailedHttp', { status: r.status }));
   const j = (await r.json()) as {
+    asr_ok?: boolean;
+    detail?: string;
     lang?: string | null;
     segments?: Array<{ start: number; end: number; text: string; lang?: string; speaker?: string; words?: Array<{ start: number; end: number; text: string }> }>;
   };
+  const asrState = classifyAsrResponse(j);
+  if (asrState === 'failed') throw new Error(t('workbench.transcriptExtractionFailedTry'));
+  if (asrState === 'empty') return [];
   // ASR times are in the "audio track's own zero" frame (audio extraction subtracts the audio track's first
   // packet), while playback is in "earliest sample across all tracks". Files whose two tracks' first packets
   // are out of sync need this delta added back, or captions/cut points shift wholesale.

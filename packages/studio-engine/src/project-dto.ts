@@ -359,7 +359,7 @@ export function sanitizeSavePayload(body: unknown): {
   contextHash?: string;
   videoSig: string | null;
   videoDurationSec: number | null;
-  coverThumb: string | null;
+  coverThumb: string | null | undefined;
   baseVersion: number | null;
   documentSchemaVersion: 2 | null;
 } | null {
@@ -394,7 +394,9 @@ export function sanitizeSavePayload(body: unknown): {
     ...(typeof b.contextHash === 'string' ? { contextHash: b.contextHash.slice(0, 64) } : {}),
     videoSig,
     videoDurationSec,
-    coverThumb: typeof b.coverThumb === 'string' ? b.coverThumb.slice(0, 500_000) : null,
+    coverThumb: b.coverThumb === null
+      ? null
+      : (typeof b.coverThumb === 'string' ? b.coverThumb.slice(0, 500_000) : undefined),
     baseVersion: typeof b.baseVersion === 'number' ? b.baseVersion : null,
     documentSchemaVersion: b.documentSchemaVersion === 2 ? 2 : null,
   };
@@ -479,9 +481,10 @@ export function mergeSaveIntoRow(
     document,
     chat,
     context,
-    // null doesn't overwrite non-empty: the saving tab may not have hydrated yet (its "absent" ≠ "user deleted")
+    // Missing media metadata doesn't overwrite non-empty: the saving tab may not have hydrated yet.
+    // coverThumb is tri-state, though: absent keeps the cover while explicit null clears it.
     videoSig: p.videoSig ?? existing.videoSig,
     videoDurationSec: p.videoDurationSec != null ? String(p.videoDurationSec) : exDur == null ? null : String(exDur),
-    coverThumb: p.coverThumb ?? existing.coverThumb,
+    coverThumb: p.coverThumb === undefined ? existing.coverThumb : p.coverThumb,
   };
 }

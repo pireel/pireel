@@ -186,11 +186,16 @@ describe('save request boundary', () => {
     expect(mergeSaveIntoRow(existing(base), legacy)).toBeNull();
   });
 
-  it('preserves row metadata on null and serializes a supplied duration', () => {
+  it('clears an explicitly null cover while preserving unavailable media metadata', () => {
     const merged = mergeSaveIntoRow(existing(), sanitizeSavePayload({ videoSig: null, coverThumb: null, videoDurationSec: 42 })!)!;
     expect(merged.videoSig).toBe('sig-old');
-    expect(merged.coverThumb).toBe('thumb-old');
+    expect(merged.coverThumb).toBeNull();
     expect(merged.videoDurationSec).toBe('42');
+  });
+
+  it('keeps the existing cover when the cover section is absent', () => {
+    const merged = mergeSaveIntoRow(existing(), sanitizeSavePayload({ videoSig: null, videoDurationSec: null })!)!;
+    expect(merged.coverThumb).toBe('thumb-old');
   });
 });
 

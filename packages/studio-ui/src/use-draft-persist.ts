@@ -157,13 +157,17 @@ export function createProject(comp: Composition, title = t('common.untitledProje
   return id;
 }
 
-/** Patch the cover into an existing draft when the first-frame thumbnail is ready: thumbnail generation
- *  lags the debounced save, and with no further edits there's no next autosave, so without this patch the cover stays missing. */
-export function saveCoverThumb(id: string, thumb: string) {
+/** Patch or clear the cover in an existing draft. Thumbnail generation lags the debounced save,
+ *  while clearing must happen as soon as the final timeline video disappears. */
+export function saveCoverThumb(id: string, thumb: string | null) {
   const d = rawDraft(id);
   if (!d) return;
   try {
-    writeDraft({ ...d, coverThumb: thumb });
+    if (thumb) writeDraft({ ...d, coverThumb: thumb });
+    else {
+      const { coverThumb: _coverThumb, ...withoutCover } = d;
+      writeDraft(withoutCover);
+    }
   } catch {
     /* ignore */
   }
@@ -400,7 +404,7 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
 
 /** Debounced autosave: don't write an empty canvas (just-opened, don't clobber an existing draft); strip the blob
  *  video down to sig/duration; preserve title as-is (renaming happens in the project list); read the first-frame
- *  thumbnail from a ref (keep the last one until ready, so it doesn't flicker away). Returns lastSavedAt for the workbench badge. */
+ *  thumbnail from a ref (including an intentional null after deletion). Returns lastSavedAt for the workbench badge. */
 export function useDraftAutosave(
   comp: Composition,
   videoSig: string | null,
@@ -425,7 +429,10 @@ export function useDraftAutosave(
     timer.current = window.setTimeout(() => {
       try {
         const prev = rawDraft(projectId);
-        const cover = coverThumbRef?.current ?? prev?.coverThumb;
+        // Passing a ref means the caller is authoritative: null is an intentional clear after
+        // the last timeline video was removed. Only callers without a cover ref inherit the
+        // previous draft value.
+        const cover = coverThumbRef ? coverThumbRef.current : prev?.coverThumb;
         const videoDurationSec = primaryNarrativeAsset(document)?.metadata.durationSec ?? prev?.videoDurationSec ?? null;
         const draft: StudioDraft = {
           id: projectId,
