@@ -61,6 +61,11 @@ describe('Director Plan V1', () => {
       'overlapping-scenes',
       'missing-custom-family',
     ]));
+    expect(parsed.issues.find((issue) => issue.code === 'overlapping-scenes')).toEqual({
+      code: 'overlapping-scenes',
+      path: 'scenes[1].startSec',
+      message: 'Scene starts at 3s before the previous planned interval ends at 4s. Set startSec to 4 or later, or shorten an earlier scene.',
+    });
   });
 
   it('does not silently repair a negative scene duration', () => {

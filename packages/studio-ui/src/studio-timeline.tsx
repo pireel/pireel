@@ -65,7 +65,7 @@ import {
   visibleStripTiles,
   timelinePlacementOverlaps,
 } from './timeline-utils';
-import { ActiveSceneRing, FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
+import { FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
 import { AudioLane } from './timeline-audio-lane';
 import { draggedPlayheadSecond, snapTimelineSecond, timelineSnapPoints } from './timeline-snap';
 import { WAVE_FLOOR_DB, fadeBodyPath, waveBars } from './timeline-wave';
@@ -1507,8 +1507,6 @@ function StudioTimelineImpl({
                   )}
                   {/* Scene cards (shot clips, semi-transparent so the filmstrip shows through): index + current-scene highlight.
                       Framing controls belong to the selected video border on the canvas, not the thumbnail. */}
-                  {/* Highlight ring for the scene under the playhead: subscribes to the playhead separately, so playback no longer re-renders the whole table */}
-                  <ActiveSceneRing sceneSpans={sceneSpans} pps={pps} selectedShotIds={selectedShotIds} />
                   {marquee && (
                     <div
                       className="pointer-events-none absolute top-3 bottom-2 z-40 rounded-sm border border-sky-400 bg-sky-400/15"

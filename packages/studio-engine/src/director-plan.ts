@@ -163,6 +163,31 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
     ...(input.audience !== undefined ? { audience: input.audience as string } : {}),
     scenes,
   };
-  const issues = validateDirectorPlanV1(plan);
+  const issues = validateDirectorPlanV1(plan).map((issue) => {
+    const match = /^scenes\[(\d+)\]\.(startFrame|durationFrames)$/.exec(issue.path);
+    if (!match) return issue;
+    const index = Number(match[1]);
+    if (issue.code === 'overlapping-scenes' && index > 0) {
+      const previousEndFrame = scenes
+        .slice(0, index)
+        .reduce((end, scene) => (
+          Number.isInteger(scene.startFrame) && Number.isInteger(scene.durationFrames) && scene.durationFrames > 0
+            ? Math.max(end, scene.startFrame + scene.durationFrames)
+            : end
+        ), 0);
+      const startSec = Number((rawScenes[index] as Record<string, unknown> | undefined)?.startSec);
+      const previousEndSec = previousEndFrame / fps;
+      const showSeconds = (seconds: number) => Number(seconds.toFixed(3)).toString();
+      return {
+        ...issue,
+        path: `scenes[${index}].startSec`,
+        message: `Scene starts at ${showSeconds(startSec)}s before the previous planned interval ends at ${showSeconds(previousEndSec)}s. Set startSec to ${showSeconds(previousEndSec)} or later, or shorten an earlier scene.`,
+      };
+    }
+    return {
+      ...issue,
+      path: `scenes[${index}].${match[2] === 'startFrame' ? 'startSec' : 'durationSec'}`,
+    };
+  });
   return issues.length ? { issues } : { plan, issues: [] };
 }

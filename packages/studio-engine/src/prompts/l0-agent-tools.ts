@@ -145,7 +145,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.set_director_plan.label',
     description:
-      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Each scene is a non-overlapping narrative interval; purpose, evidence, free-form visualTreatment and assetStrategy explain why it exists. Times use the edited timeline in seconds.',
+      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Scenes must be chronological and non-overlapping: for every scene after the first, startSec must be greater than or equal to the previous scene\'s startSec + durationSec. Purpose, evidence, free-form visualTreatment and assetStrategy explain why each scene exists. Times use the edited timeline in seconds.',
     chatOnly: true,
     inputSchema: obj(
       {
@@ -158,12 +158,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           type: 'array',
           minItems: 1,
           maxItems: 100,
+          description: 'Chronological, non-overlapping scene intervals. Each next startSec must be at or after the previous scene end.',
           items: obj(
             {
               id: { type: 'string', description: 'Short stable id unique inside this plan.' },
               label: { type: 'string', description: 'Short human-readable scene name.' },
-              startSec: { type: 'number', description: 'Edited-timeline start in seconds.' },
-              durationSec: { type: 'number', description: 'Positive duration in seconds.' },
+              startSec: { type: 'number', description: 'Edited-timeline start in seconds. After the first scene, this must be >= previous startSec + previous durationSec.' },
+              durationSec: { type: 'number', description: 'Positive duration in seconds; the interval must end no later than the next scene starts.' },
               viewerTask: { type: 'string', enum: [...VIEWER_TASKS] },
               narrativeRole: { type: 'string', enum: [...NARRATIVE_ROLES] },
               sceneFamily: { type: 'string', enum: [...SCENE_FAMILIES], description: 'Shared vocabulary, not a component or layout selector. Use custom when the edit needs another family.' },
