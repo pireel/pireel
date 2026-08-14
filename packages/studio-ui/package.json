@@ -40,7 +40,9 @@
     "./workbench-controls": "./src/workbench-controls.tsx",
     "./*": "./src/*.ts"
   },
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/i18n.ts"
+  ],
   "dependencies": {
     "@pireel/studio-engine": "workspace:*",
     "@pireel/studio-frames": "workspace:*",

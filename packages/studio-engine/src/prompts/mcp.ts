@@ -73,7 +73,7 @@ LANGUAGE (Pireel is international)
 - ${ON_SCREEN_LANGUAGE}
 
 SKILL FRESHNESS
-- This server's current pireel skill baseline is ${skillVersion}. Your installed version is the VERSION file next to the pireel skill's SKILL.md (older installs carry it in SKILL.md's "Skill version" footer instead). Versions are opaque release tags — don't order them: if yours DIFFERS from this baseline, UPDATE IT YOURSELF before continuing: run \`npx skills update pireel\` (fallback: \`npx skills add pireel/pireel-agent\`) — your host's command-approval flow is the user's consent, don't bounce this to them as a question — then RE-READ the updated skill files (they may cover the very flow you're about to run). If they still differ after one update attempt, or the command is unavailable or denied, mention the update once and continue with what you have. If they match, say nothing.${CAPTION_CATALOG_BLOCK}`;
+- This server's current Pireel workflow baseline is ${skillVersion}. The installed workflow baseline is the VERSION file next to the Pireel skill's SKILL.md (older installs carry it in SKILL.md's "Skill version" footer instead). This is NOT the Plugin SemVer. Versions are opaque release tags — don't order them. If they differ, follow the installed skill's distribution-specific update section: Plugin bundles update through their Plugin manager; standalone Skills update through their Skill installer. Never assume or prescribe \`npx skills\` from this MCP instruction. After one update attempt, or when no installed skill/version can be inspected, mention the mismatch once and continue. If they match, say nothing.${CAPTION_CATALOG_BLOCK}`;
 
 const CREDITS_WARNING = '[Runs on Pireel\'s own LLM and CHARGES the account\'s credits — prefer the BYO flow';
 

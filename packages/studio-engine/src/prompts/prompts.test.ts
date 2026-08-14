@@ -47,6 +47,9 @@ describe('静态提示词完整性', () => {
     expect(mcpInstructions('test-version')).toContain('Uniform slices or filename-order assembly');
     expect(mcpInstructions('test-version')).toContain('does NOT implicitly authorize charge-bearing media generation');
     expect(mcpInstructions('test-version')).toContain('hard pre-pilot checkpoint');
+    expect(mcpInstructions('test-version')).toContain('distribution-specific update section');
+    expect(mcpInstructions('test-version')).toContain('Plugin SemVer');
+    expect(mcpInstructions('test-version')).not.toContain('npx skills update pireel');
     expect(STUDIO_TOOLS.some((tool) => ['analyze_narration', 'lay_out', 'add_graphics'].includes(tool.id))).toBe(false);
   });
   it('Chat 身份是剪辑专家，而不是被动助手或泛化导演', () => {
