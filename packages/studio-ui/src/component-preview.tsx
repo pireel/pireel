@@ -80,12 +80,16 @@ export function LibraryComponentPreview({
   height,
   animate = false,
   replayKey,
+  playOnReady = false,
+  onReady,
 }: {
   model: ComponentPreviewModel;
   width: number;
   height?: number;
   animate?: boolean | 'hover' | 'manual';
   replayKey?: number;
+  playOnReady?: boolean;
+  onReady?: () => void;
 }) {
   return (
     <BlockPreviewFrame
@@ -95,6 +99,8 @@ export function LibraryComponentPreview({
       height={height}
       animate={animate}
       replayKey={replayKey}
+      playOnReady={playOnReady}
+      onReady={onReady}
       ground="checker"
       fit="canvas"
     />

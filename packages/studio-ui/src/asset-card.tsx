@@ -209,8 +209,8 @@ export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: 
   );
 }
 
-/** Element card live preview shared by Assets and Generation. Every component is rendered through
- * the same design-canvas preview contract, so thumbnails cannot drift by component type. */
+/** Element card preview shared by Assets and Generation. Curated components use their generated
+ * R2 poster; user/generated elements without a poster keep the sandboxed live-preview fallback. */
 export function ElementTile({ item, width, height }: { item: LibraryItem; width?: number; height?: number }) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [measuredWidth, setMeasuredWidth] = useState(width ?? 120);
@@ -229,8 +229,16 @@ export function ElementTile({ item, width, height }: { item: LibraryItem; width?
   const tileHeight = height ?? Math.round((tileWidth * 9) / 16);
   const model = useMemo(() => componentPreviewModel(item), [item]);
   return (
-    <div ref={shellRef} className="w-full overflow-hidden">
-      {model ? (
+    <div ref={shellRef} className="bg-panel-2 w-full overflow-hidden">
+      {item.thumbSrc ? (
+        <img
+          src={imageThumb(item.thumbSrc, 'strip')}
+          alt={item.label}
+          loading="lazy"
+          className="w-full object-contain"
+          style={{ height: tileHeight }}
+        />
+      ) : model ? (
         <LibraryComponentPreview model={model} width={tileWidth} height={tileHeight} />
       ) : (
         <div className="bg-panel-2" style={{ width: tileWidth, height: tileHeight }} />
@@ -248,6 +256,9 @@ export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: b
         {playing ? <Pause size={13} /> : <Play size={13} />}
       </div>
     );
+  }
+  if (it.kind === 'element' && it.thumbSrc) {
+    return <img src={imageThumb(it.thumbSrc, 'thumb')} alt={it.label} className="size-9 shrink-0 rounded object-cover" loading="lazy" />;
   }
   if (it.kind === 'element') {
     return (
@@ -354,13 +365,15 @@ export function AssetLightbox({
     () => (item.kind === 'element' ? componentPreviewModel(item, comp) : null),
     [comp, item],
   );
-  // Elements get a local iframe live preview, available immediately (no network load), so skip the ready placeholder
-  const [ready, setReady] = useState(item.kind === 'element');
+  const [ready, setReady] = useState(false);
   // Size the placeholder box to the asset's true aspect ratio (element = canvas ratio; unknown dims default to 16:9)
   const ar = componentModel ? componentModel.comp.width / componentModel.comp.height : (arOf(item) ?? 16 / 9);
   const componentWidth = componentModel
     ? Math.max(240, Math.min(window.innerWidth - 96, Math.round(window.innerHeight * 0.78 * ar)))
     : 0;
+  useEffect(() => {
+    setReady(false);
+  }, [item.id]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -384,14 +397,33 @@ export function AssetLightbox({
           // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
           style={{ aspectRatio: ar, width: `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
         >
-          {!ready && (
+          {!ready && !item.thumbSrc && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
               <Loader2 size={26} className="animate-spin" />
               <span className="text-[12px]">{t('panels.loading')}</span>
             </div>
           )}
           {componentModel ? (
-            <LibraryComponentPreview model={componentModel} width={componentWidth} animate="manual" replayKey={replayKey} />
+            <>
+              {item.thumbSrc && (
+                <img
+                  src={imageThumb(item.thumbSrc, 'preview')}
+                  alt={item.label}
+                  fetchPriority="high"
+                  className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-150 ${ready ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+                />
+              )}
+              <div className={`transition-opacity duration-150 ${ready ? 'opacity-100' : 'opacity-0'}`}>
+                <LibraryComponentPreview
+                  model={componentModel}
+                  width={componentWidth}
+                  animate="manual"
+                  replayKey={replayKey}
+                  playOnReady
+                  onReady={() => setReady(true)}
+                />
+              </div>
+            </>
           ) : item.kind === 'video' ? (
             <video
               src={item.insertUrl}

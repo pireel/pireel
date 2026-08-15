@@ -115,6 +115,7 @@ function kitLibraryItem(item: AssetSearchCardItem): LibraryItem | null {
     id: item.assetId,
     kind: 'element',
     origin: 'preset',
+    thumbSrc: item.locator?.thumbUrl ?? null,
     label: item.label,
     prompt: item.label,
     createdAt: 0,
@@ -132,6 +133,7 @@ function kitLibraryItem(item: AssetSearchCardItem): LibraryItem | null {
 }
 
 function ElementPreview({ item }: { item: AssetSearchCardItem }) {
+  if (item.locator?.thumbUrl) return <ImagePreview item={item} />;
   const templateId = item.locator?.templateId;
   if (templateId && ELEMENT_TEMPLATES.some((template) => template.id === templateId)) {
     return <ElementTemplatePreview id={templateId} />;

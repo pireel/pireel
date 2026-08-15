@@ -31,6 +31,8 @@ export function BlockPreviewFrame({
   height,
   animate = false,
   replayKey,
+  playOnReady = false,
+  onReady,
   ground = 'checker',
   fit = 'inset',
   focus,
@@ -57,6 +59,10 @@ export function BlockPreviewFrame({
   /** Bump to replay the entrance once (used with animate='manual'): the preview plays from the
    *  start and settles back on the stable frame. Editing props re-renders WITHOUT replaying. */
   replayKey?: number;
+  /** Notify the caller when the iframe and its render dependencies are ready. */
+  onReady?: () => void;
+  /** Play the entrance once after the iframe is ready; used by lightboxes that open from a poster. */
+  playOnReady?: boolean;
   /** Overlay layer (timestamp stamp / hover buttons / generating cover), mounted in the same relative container */
   children?: ReactNode;
 }) {
@@ -165,6 +171,10 @@ export function BlockPreviewFrame({
         sandbox="allow-scripts"
         tabIndex={-1}
         loading="lazy"
+        onLoad={() => {
+          onReady?.();
+          if (playOnReady) setLoop(true, true);
+        }}
         className="pointer-events-none"
         style={{ position: 'absolute', left: padX, top: padY, width: comp.width, height: comp.height, border: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}
       />
