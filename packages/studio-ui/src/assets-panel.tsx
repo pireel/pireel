@@ -94,9 +94,9 @@ export function AssetsPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="px-2.5 pt-2">
-        <div className="bg-panel border-line flex rounded-md border p-0.5">
+    <div className="bg-canvas flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <div className="bg-panel flex h-8 shrink-0 items-center px-2.5">
+        <div className="flex w-full rounded-md p-0.5">
           {([
             { v: 'mine' as const, label: t('panels.myAssets') },
             ...(CuratedAssetsPanel ? [{ v: 'official' as const, label: shell.curatedAssets?.label ?? t('panels.officialAssets') }] : []),
@@ -106,7 +106,7 @@ export function AssetsPanel({
               key={s.v}
               type="button"
               onClick={() => pick(s.v)}
-              className={`flex-1 rounded px-2 py-1 text-[11.5px] transition ${
+              className={`h-6 flex-1 rounded px-2 text-[11.5px] transition ${
                 scope === s.v ? 'bg-panel-2 text-ink font-medium' : 'text-ink-4 hover:text-ink-2'
               }`}
             >

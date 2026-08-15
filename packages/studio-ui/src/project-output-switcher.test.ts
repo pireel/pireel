@@ -14,24 +14,16 @@ const outputs: ProjectOutputTab[] = [
   { id: 'custom', title: 'Custom', coverThumb: null, durationSec: 5, canvasWidth: 1000, canvasHeight: 667 },
 ];
 
-const renderSwitcher = (batchMode = false) => renderToStaticMarkup(createElement(ProjectOutputSwitcher, {
+const renderSwitcher = () => renderToStaticMarkup(createElement(ProjectOutputSwitcher, {
   outputs,
   activeId: 'portrait',
   label: 'Outputs',
   newLabel: 'New',
   deleteLabel: 'Delete',
   untitledLabel: 'Untitled',
-  batchMode,
-  selected: new Set<string>(),
-  batch: null,
-  exportPct: 0,
   onSwitch: () => undefined,
   onCreate: () => undefined,
   onDelete: () => undefined,
-  onToggleBatchMode: () => undefined,
-  onToggleSelect: () => undefined,
-  onExportSelected: () => undefined,
-  onCancelBatch: () => undefined,
 }));
 
 describe('projectOutputThumbGeometry', () => {
@@ -75,18 +67,19 @@ describe('projectOutputThumbGeometry', () => {
     expect(markup).not.toContain('aspect-video');
   });
 
-  it('places the add action in a board-style header above the vertical navigation', () => {
+  it('places the add action after the output cards without a list header', () => {
     const markup = renderSwitcher();
     const asideOpen = markup.slice(0, markup.indexOf('>') + 1);
-    expect(asideOpen).toContain('bg-panel');
-    expect(asideOpen).toContain('border-line');
-    expect(asideOpen).toContain('border-r');
+    expect(asideOpen).toContain('bg-canvas');
+    expect(asideOpen).not.toContain('border-');
     expect(asideOpen).not.toContain('rounded-');
     expect(asideOpen).not.toContain('shadow-lg');
     expect(asideOpen).not.toContain('backdrop-blur-md');
     expect(markup).toContain('data-output-list="true"');
     expect(markup).toContain('aria-orientation="vertical"');
-    expect(markup.indexOf('aria-label="New"')).toBeLessThan(markup.indexOf('role="tab"'));
+    expect(markup).toContain('data-output-create-card="true"');
+    expect(markup.indexOf('data-output-create-card="true"')).toBeGreaterThan(markup.lastIndexOf('role="tab"'));
+    expect(markup).not.toContain('aria-pressed');
     expect(markup).not.toContain('aria-expanded');
   });
 
@@ -114,8 +107,8 @@ describe('projectOutputThumbGeometry', () => {
     expect(markup).not.toContain('data-output-meta');
   });
 
-  it('shows output checkboxes only while batch selection mode is active', () => {
+  it('does not expose batch-selection controls', () => {
     expect(renderSwitcher()).not.toContain('role="checkbox"');
-    expect(renderSwitcher(true)).toContain('role="checkbox"');
+    expect(renderSwitcher()).not.toContain('aria-checked');
   });
 });

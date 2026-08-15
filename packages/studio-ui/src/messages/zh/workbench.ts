@@ -424,7 +424,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   'workbench.outputSwitched': '已切换成片',
   'workbench.outputSwitcher': '项目成片',
   'workbench.outputTitleRequired': '请提供成片名称',
-  'workbench.newOutput': '新建空白成片',
+  'workbench.newOutput': '新建',
   'workbench.expandOutputs': '展开成片列表',
   'workbench.collapseOutputs': '收起成片列表',
   'workbench.batchExport': '批量导出',

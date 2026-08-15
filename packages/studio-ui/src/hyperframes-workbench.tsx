@@ -212,7 +212,7 @@ import { useScriptCut } from './use-script-cut';
 import { useLiveProjectDocument } from './use-live-project-document';
 import type { LiveProjectPersistenceMetadata } from './live-project-document';
 import { nativeProjectSessionMetadata, nativeProjectSharedLocalAssets } from './native-project-session';
-import { ProjectOutputSwitcher, type OutputBatchState } from './project-output-switcher';
+import { ProjectOutputSwitcher } from './project-output-switcher';
 import { useProjectOutputs } from './use-project-outputs';
 import { useProjectOutputRuntime } from './use-project-output-runtime';
 import { videoPickSuccessNotices, type VideoPickOptions } from './video-pick-feedback';
@@ -1003,7 +1003,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   // Export dialog: options persist (remembers last choice within this session), only runs on confirm
   const [exportOpen, setExportOpen] = useState(false);
   const [exportOpts, setExportOpts] = useState<ExportRenderOpts>(DEFAULT_RENDER_OPTS);
-  const [batchExportPending, setBatchExportPending] = useState(false);
 
   // Engine source sync: swap source whenever the main video File changes (the resident element only swaps src, the decode session doesn't churn with doc rebuilds)
   useEffect(() => {
@@ -4283,83 +4282,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       if (ok) await outputRuntime.deleteOutput(id);
     })();
   };
-  // ---- Output rail selection mode + sequential batch export ----
-  const [outputsBatchMode, setOutputsBatchMode] = useState(false);
-  const [outputSelected, setOutputSelected] = useState<ReadonlySet<string>>(() => new Set());
-  const [outputBatch, setOutputBatch] = useState<OutputBatchState | null>(null);
-  const outputBatchCancelRef = useRef(false);
-  // The batch loop spans many renders (each switch/export re-renders); refs keep it reading the
-  // CURRENT callbacks/state instead of the closures captured when the loop started.
-  const activeOutputIdRef = useRef(projectOutputs.outputs.active.id);
-  activeOutputIdRef.current = projectOutputs.outputs.active.id;
-  const switchOutputFnRef = useRef(outputRuntime.switchOutput);
-  switchOutputFnRef.current = outputRuntime.switchOutput;
-  const exportVideoFnRef = useRef(exportVideo);
-  exportVideoFnRef.current = exportVideo;
-  const toggleOutputsBatchMode = () => {
-    if (outputBatch?.running) return;
-    const next = !outputsBatchMode;
-    setOutputsBatchMode(next);
-    if (!next) {
-      setOutputSelected(new Set());
-      setOutputBatch(null);
-    }
-  };
-  const toggleOutputSelect = (id: string) => {
-    setOutputSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const runBatchExport = () => {
-    if (outputBatch?.running || exporting) return;
-    if (!batchExportTargets().length) return;
-    // Same config step as the normal export flow: the dialog's start button runs startBatchExport.
-    setBatchExportPending(true);
-    setExportOpen(true);
-  };
-  // Batch target = selected outputs, or every output when nothing is selected; empty versions
-  // (no video / no duration) are skipped automatically.
-  const batchExportTargets = () => {
-    const selectedIds = outputTabs.map((o) => o.id).filter((id) => outputSelected.has(id));
-    const base = selectedIds.length ? selectedIds : outputTabs.map((o) => o.id);
-    return outputTabs.filter((o) => base.includes(o.id) && o.durationSec).map((o) => o.id);
-  };
-  const startBatchExport = (opts: ExportRenderOpts) => {
-    const ids = batchExportTargets();
-    if (!ids.length || outputBatch?.running) return;
-    setExportOpen(false);
-    setBatchExportPending(false);
-    outputBatchCancelRef.current = false;
-    setPlaying(false);
-    setOutputBatch({ running: true, total: ids.length, done: 0, currentId: null, doneIds: [], failedIds: [] });
-    void (async () => {
-      const doneIds: string[] = [];
-      const failedIds: string[] = [];
-      for (const id of ids) {
-        if (outputBatchCancelRef.current) break;
-        setOutputBatch((s) => (s ? { ...s, currentId: id } : s));
-        let ok = id === activeOutputIdRef.current || (await switchOutputFnRef.current(id));
-        if (outputBatchCancelRef.current) break;
-        if (ok) {
-          const r = await exportVideoFnRef.current(opts);
-          if (outputBatchCancelRef.current && !r.ok) break; // canceled mid-render: don't count it as failed
-          ok = !!r.ok;
-        }
-        (ok ? doneIds : failedIds).push(id);
-        setOutputBatch((s) =>
-          s ? { ...s, done: doneIds.length + failedIds.length, currentId: null, doneIds: [...doneIds], failedIds: [...failedIds] } : s,
-        );
-      }
-      setOutputBatch((s) => (s ? { ...s, running: false, currentId: null } : s));
-    })();
-  };
-  const cancelBatchExport = () => {
-    outputBatchCancelRef.current = true;
-    cancelExport();
-  };
   // Element generation / block element ops (gen panel, floating toolbar) — see use-element-ops.ts.
   const { generateElementStandalone, insertGeneratedElement, bumpBlockLayer, togglePersonLayer, saveBlockAsElement, syncBlockContent, syncBusyId, mentionAsset } = useElementOps({
     projectId, playing, compRef, tRef, asrRef, elementTargetRef, chatRef,
@@ -5093,7 +5015,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
   }, [cloudSaveQueue]);
 
   return (
-    <div className="studio-scope bg-panel relative flex h-full min-h-0 w-full gap-0 overflow-hidden">
+    <div className="studio-scope bg-bg relative flex h-full min-h-0 w-full gap-1.5 overflow-hidden p-1.5">
       {/* Entry boot layer: heavy-resource warmup + project-data double gate, covers the whole workbench (incl. the chat bar), self-unmounts when done */}
       <StudioBootOverlay dataReady={bootDataReady} />
       {/* Agent file injection: the stable input and empty-canvas trigger below let an external agent
@@ -5114,7 +5036,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       <div className={panelOpen ? 'flex min-h-0 shrink-0' : 'hidden'}>
         {/* Panel width adjustable (drag the right edge, 320–760); the stage shrinks accordingly (area observer auto-recomputes fit) */}
         <div
-          className="border-line bg-panel relative flex min-h-0 flex-col overflow-hidden border-r"
+          className="bg-canvas relative flex min-h-0 flex-col overflow-hidden rounded-sm"
           style={{ width: panelW }}
         >
           <div
@@ -5174,7 +5096,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         </div>
 
       </div>
-      <div className="bg-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Video import goes through the preview upload / chat; the top bar no longer has buttons (the pipeline is fully tool-ized, chat-driven) */}
         <input
           ref={fileInputRef}
@@ -5190,10 +5112,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
         {/* Top half: preview | asset library (above the timeline). The asset library has a fixed column width, the stage adapts to remaining space (area observer recomputes fit).
             The preview must be min-w-0: flex's min-width:auto would lock it to the stage content width, and it gets squeezed and clipped when the rail collapses then expands */}
-        <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="mb-1.5 flex min-h-0 min-w-0 flex-1 gap-1.5">
         {/* Preview (= the editing surface: single-click selects a block, double-click edits text in place). No video → upload area.
-            No overflow-hidden: the floating toolbar must follow a component past the stage edge without being clipped (frame clipping is on the inner stage layer) */}
-        <div className="bg-panel-2 flex min-h-0 min-w-0 flex-1">
+            The panel clips its own children so nested surfaces cannot bleed through the outer rounded corners. */}
+        <div className="bg-canvas flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-sm">
           {/* The deliverables rail is a sibling of the measured canvas area: it consumes real width,
               so the fit observer sizes the stage against the remaining space instead of overlaying it. */}
           <ProjectOutputSwitcher
@@ -5203,18 +5125,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             newLabel={t('workbench.newOutput')}
             deleteLabel={t('workbench.deleteOutput')}
             untitledLabel={t('workbench.untitledOutput')}
-            batchMode={outputsBatchMode}
             switching={outputRuntime.switching}
-            selected={outputSelected}
-            batch={outputBatch}
-            exportPct={exportPct}
             onSwitch={switchOutput}
             onCreate={createOutput}
             onDelete={requestDeleteOutput}
-            onToggleBatchMode={toggleOutputsBatchMode}
-            onToggleSelect={toggleOutputSelect}
-            onExportSelected={runBatchExport}
-            onCancelBatch={cancelBatchExport}
           />
           <div className="flex min-h-0 min-w-0 flex-1 p-3">
             <div ref={previewAreaRef} className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center">
@@ -5279,8 +5193,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                   <div className="text-[12px] font-medium">{busyImport ? t('workbench.reading') : t('workbench.startWithAnyMedia')}</div>
                 </button>
               )}
-              {/* Frame clipping layer: rounded corners / overflow clipping apply only to the iframe frame — floating overlays like the toolbar mount outside this layer,
-                  so following a component off-bounds isn't clipped (per user: the toolbar purely follows, never clipped; component overflow is cut here) */}
+              {/* Frame clipping layer: component overflow is cut here; the panel-level radius is owned by the preview surface above. */}
                 <div
                   className={`absolute inset-0 overflow-hidden shadow-xl ring-1 ring-black/20 ${
                     hasContent
@@ -6074,8 +5987,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             a panel title header appears, the asset list is hidden but keeps state; the nav strip stays visible and
             clicking any nav item closes the panel and returns to that tab. */}
         <div
-          className="border-line relative flex shrink-0 flex-col border-l"
-          style={{ width: libCollapsed ? RAIL_NAV_W : railW + RAIL_NAV_W }}
+          className="relative flex shrink-0 flex-col"
+          style={{ width: libCollapsed ? RAIL_NAV_W : railW + RAIL_NAV_W + 6 }}
         >
           {/* Drag the left edge to resize (260–786 = up to six 120px card columns flush, persisted) */}
           {!libCollapsed && (
@@ -6113,10 +6026,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
               className="hover:bg-accent/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors"
             />
           )}
-          <div className="flex min-h-0 flex-1">
-          <div className={`${libCollapsed ? 'hidden' : 'flex'} min-h-0 min-w-0 flex-1 flex-col`}>
+          <div className="flex min-h-0 flex-1 gap-1.5">
+          <div className={`${libCollapsed ? 'hidden' : 'flex'} bg-canvas min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-sm`}>
           {floatWin ? (
-            <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
+            <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
               <span className="text-ink truncate px-1 text-[12px] font-medium">
                 {floatWin === 'script'
                   ? t('workbench.smartScriptCut')
@@ -6237,7 +6150,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           )}
           {!floatWin && libTab === 'gen' && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="border-line flex items-center gap-1 border-b px-2 py-1.5">
+              <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
                 {(
                   [
                     { v: 'image', label: 'panels.image' },
@@ -6400,8 +6313,18 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
           )}
           </div>
           {/* Primary nav strip: always visible, including while the content column is collapsed.
-              Clicking a tab closes any docked tool panel; collapse/expand stays at the strip's bottom. */}
-          <div className={`border-line flex shrink-0 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2 ${libCollapsed ? '' : 'border-l'}`} style={{ width: RAIL_NAV_W }}>
+              Clicking a tab closes any docked tool panel; collapse/expand aligns with the content header. */}
+          <div className="bg-canvas flex shrink-0 flex-col overflow-hidden rounded-sm" style={{ width: RAIL_NAV_W }}>
+            <button
+              type="button"
+              onClick={() => setLibCollapsedManual(!libCollapsed)}
+              title={t(libCollapsed ? 'workbench.expandAssetsBar' : 'workbench.collapseAssetsBar')}
+              aria-label={t(libCollapsed ? 'workbench.expandAssetsBar' : 'workbench.collapseAssetsBar')}
+              className="bg-panel text-ink-4 hover:text-ink flex h-8 w-full shrink-0 items-center justify-center transition-colors"
+            >
+              {libCollapsed ? <ChevronsLeft size={14} /> : <ChevronsRight size={14} />}
+            </button>
+            <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto px-1 py-2">
             {(
               [
                 { v: 'assets', icon: LayoutGrid, label: 'workbench.assets' },
@@ -6431,16 +6354,6 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <span className="max-w-full truncate px-0.5 text-[9px] leading-none">{t(n.label)}</span>
               </button>
             ))}
-            <div className="mt-auto flex w-full flex-col items-center gap-0.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setLibCollapsedManual(!libCollapsed)}
-                title={t(libCollapsed ? 'workbench.expandAssetsBar' : 'workbench.collapseAssetsBar')}
-                aria-label={t(libCollapsed ? 'workbench.expandAssetsBar' : 'workbench.collapseAssetsBar')}
-                className="text-ink-4 hover:text-ink flex w-full items-center justify-center rounded-md py-1.5"
-              >
-                {libCollapsed ? <ChevronsLeft size={14} /> : <ChevronsRight size={14} />}
-              </button>
             </div>
           </div>
           </div>
@@ -6449,7 +6362,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
         {/* Transport bar. On narrow windows (≤1280) button text must not wrap: when space is short the whole bar scrolls horizontally, don't let "safe zone" stack into three lines */}
         <TooltipProvider delayDuration={200}>
-        <div className="border-line flex items-center gap-3 overflow-x-auto border-t py-2 pl-4 whitespace-nowrap [&>button]:shrink-0">
+        <div className="bg-panel flex items-center gap-3 overflow-x-auto rounded-t-sm py-2 pl-4 whitespace-nowrap [&>button]:shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -6667,7 +6580,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => { setBatchExportPending(false); setExportOpen(true); }}
+                onClick={() => setExportOpen(true)}
                 disabled={exporting || publishing || !hasContent}
                 className="border-line text-ink-2 hover:text-ink inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] disabled:opacity-50"
               >
@@ -6677,10 +6590,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             </TooltipTrigger>
             <TooltipContent>{t('tools.export_video.label')}</TooltipContent>
           </Tooltip>
-          <Dialog open={exportOpen} onOpenChange={(v) => { if (!v && exporting) return; setExportOpen(v); if (!v) setBatchExportPending(false); }}>
+          <Dialog open={exportOpen} onOpenChange={(v) => { if (!v && exporting) return; setExportOpen(v); }}>
             <DialogContent className="max-w-[320px]" showCloseButton={!exporting}>
               <DialogHeader>
-                <DialogTitle>{batchExportPending ? `${t('workbench.batchExport')} · ${batchExportTargets().length}` : t('tools.export_video.label')}</DialogTitle>
+                <DialogTitle>{t('tools.export_video.label')}</DialogTitle>
               </DialogHeader>
               {exporting ? (
                 // Export dialog stays open: progress lives here, only "cancel export" can close it (overlay/Esc are blocked)
@@ -6738,12 +6651,8 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
                 <button
                   type="button"
                   onClick={() => {
-                    if (batchExportPending) {
-                      void startBatchExport(exportOpts);
-                    } else {
-                      // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
-                      void exportVideo(exportOpts).finally(() => setExportOpen(false));
-                    }
+                    // Keep the dialog to show progress, close only when compositing ends (done/failed/cancelled)
+                    void exportVideo(exportOpts).finally(() => setExportOpen(false));
                   }}
                   className="bg-ink text-bg inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-[13px] font-medium hover:opacity-90"
                 >
@@ -6775,7 +6684,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
 
         {/* Caption style popover: reuses CaptionsPanel wholesale; clicking a style applies globally, click outside / Esc dismisses */}
         {/* Multi-track timeline */}
-        <div data-cap-keep className="contents">
+        <div data-cap-keep className="shrink-0 overflow-hidden rounded-b-sm">
         <StudioTimeline
           comp={comp}
           directorScenes={showDebug ? directorTimelineScenes : undefined}

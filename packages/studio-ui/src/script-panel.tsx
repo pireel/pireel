@@ -265,7 +265,7 @@ export function ScriptPanel({
 
   if (!items.length) {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="bg-canvas flex h-full min-h-0 w-full flex-col">
         <PanelHeader hint={t('panels.deleteWordDeleteFootage')} />
         <div className="text-ink-4 flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-[11.5px]">
           <ScrollText size={22} />
@@ -285,10 +285,10 @@ export function ScriptPanel({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col" ref={rootRef}>
+    <div className="bg-canvas relative flex h-full min-h-0 w-full flex-col" ref={rootRef}>
       <PanelHeader hint={hasTrueWords ? t('panels.clickWordHint') : t('panels.clickWordHintEstimated')} />
       {/* Batch actions */}
-      <div className="border-line flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-1.5 px-3 py-1.5">
         <button
           type="button"
           disabled={!silences.length}
@@ -527,5 +527,5 @@ function GapToken({ gap, onClick }: { gap: { range: SrcRange; alive: boolean; ra
 
 /** The title belongs to the floating-window header; only a one-line hint remains here. */
 function PanelHeader({ hint }: { hint: string }) {
-  return <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{hint}</div>;
+  return <div className="bg-panel text-ink-4 flex h-8 shrink-0 items-center px-3 text-[10.5px]">{hint}</div>;
 }

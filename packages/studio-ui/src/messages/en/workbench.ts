@@ -424,7 +424,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   'workbench.outputSwitched': 'Switched output',
   'workbench.outputSwitcher': 'Project outputs',
   'workbench.outputTitleRequired': 'Output title is required',
-  'workbench.newOutput': 'Create blank output',
+  'workbench.newOutput': 'New',
   'workbench.expandOutputs': 'Expand output list',
   'workbench.collapseOutputs': 'Collapse output list',
   'workbench.batchExport': 'Batch export',

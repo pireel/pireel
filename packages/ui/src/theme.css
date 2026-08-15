@@ -99,10 +99,10 @@
  * 此块必须在未分层样式里(Tailwind 的 @theme 落在 @layer theme,未分层规则天然胜出)。 */
 .dark {
   color-scheme: dark;
-  --color-bg: #101114;
-  --color-canvas: #0b0c0e;
-  --color-panel: #1a1c20;
-  --color-panel-2: #23252b;
+  --color-bg: #141414;
+  --color-canvas: #262626;
+  --color-panel: #303030;
+  --color-panel-2: #3b3b3b;
   --color-ink: #f0f1f4;
   --color-ink-2: #c8cbd2;
   --color-ink-3: #8f939d;
@@ -122,16 +122,16 @@
   --shadow-lg: 0 20px 60px -20px rgba(0, 0, 0, 0.75);
   /* shadcn / ai-elements 兼容 token */
   --color-foreground: #f0f1f4;
-  --color-background: #101114;
-  --color-card: #1a1c20;
+  --color-background: #141414;
+  --color-card: #303030;
   --color-card-foreground: #f0f1f4;
-  --color-popover: #1a1c20;
+  --color-popover: #303030;
   --color-popover-foreground: #f0f1f4;
   --color-primary: #f0f1f4;
   --color-primary-foreground: #17181b;
-  --color-secondary: #23252b;
+  --color-secondary: #3b3b3b;
   --color-secondary-foreground: #f0f1f4;
-  --color-muted: #23252b;
+  --color-muted: #3b3b3b;
   --color-muted-foreground: #8f939d;
   --color-border: #2b2e35;
   --color-input: #2b2e35;

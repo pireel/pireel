@@ -255,9 +255,9 @@ export function AvatarPanel() {
   };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="px-2.5 pt-2">
-        <div className="bg-panel border-line flex rounded-md border p-0.5">
+    <div className="bg-canvas flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <div className="bg-panel flex h-8 shrink-0 items-center px-2.5">
+        <div className="flex w-full rounded-md p-0.5">
           {(['all', 'zh', 'en'] as const).map((filter) => (
             <button
               key={filter}
@@ -273,9 +273,9 @@ export function AvatarPanel() {
         </div>
       </div>
 
-      <div className="border-line border-b px-2.5 py-1.5">
+      <div className="flex h-9 shrink-0 items-center px-2.5">
         <div className="flex items-center gap-1.5">
-          <label className="border-line bg-panel-2 focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
+          <label className="border-line focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
             <Search size={11} className="text-ink-4 pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2" />
             <input
               type="search"
@@ -300,16 +300,16 @@ export function AvatarPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {formOpen && (
-          <section className="border-line bg-panel mb-2.5 rounded-md border p-2.5">
+          <section className="bg-panel-2 mb-2.5 rounded-md p-2.5">
             <div className="mb-2.5 flex items-center gap-2">
-              <span className="bg-panel-2 text-ink-3 flex size-7 items-center justify-center rounded"><Mic2 size={13} /></span>
+              <span className="bg-panel text-ink-3 flex size-7 items-center justify-center rounded"><Mic2 size={13} /></span>
               <div>
                 <div className="text-ink text-[11.5px] font-semibold">{t('workbench.voiceCreateTitle')}</div>
                 <div className="text-ink-4 text-[9.5px]">{t('workbench.voiceSampleHint')}</div>
               </div>
             </div>
-            <label className="border-line bg-panel-2 hover:border-accent flex min-h-14 cursor-pointer items-center gap-2.5 rounded-md border border-dashed px-2.5 py-2 transition-colors">
-              <span className="bg-panel text-ink-4 flex size-8 items-center justify-center rounded"><Plus size={14} /></span>
+            <label className="border-line bg-panel hover:border-accent flex min-h-14 cursor-pointer items-center gap-2.5 rounded-md border border-dashed px-2.5 py-2 transition-colors">
+              <span className="bg-panel-2 text-ink-4 flex size-8 items-center justify-center rounded"><Plus size={14} /></span>
               <span className="min-w-0">
                 <span className="text-ink block truncate text-[10.5px] font-medium">{file?.name || t('workbench.voiceChooseSample')}</span>
                 <span className="text-ink-4 block text-[9.5px]">{duration != null ? `${duration.toFixed(1)}s · ${t('workbench.voiceSampleReady')}` : 'MP3 · M4A · WAV'}</span>
@@ -345,7 +345,7 @@ export function AvatarPanel() {
             {visibleVoices.map((voice) => (
               <div
                 key={voice.id}
-                className={`group relative w-full overflow-hidden rounded-md border transition ${voice.selected ? 'border-accent ring-accent/20 ring-1' : 'border-line hover:border-accent'}`}
+                className={`bg-panel-2/55 hover:bg-panel-2 group relative w-full overflow-hidden rounded-md transition-colors ${voice.selected ? 'ring-accent ring-1' : ''}`}
               >
                 <button
                   type="button"

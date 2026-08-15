@@ -85,8 +85,8 @@ export function MusicPanel({
   );
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
-      <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.musicBedHint')}</div>
+    <div className="bg-canvas flex h-full min-h-0 w-full flex-col">
+      <div className="bg-panel text-ink-4 flex h-8 shrink-0 items-center px-3 text-[10.5px]">{t('panels.musicBedHint')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
         {/* No audio clip selected → the selected shots' own sound. Selection is exclusive, so exactly one
             of these two sections is live at a time, and neither addresses anything the user didn't pick. */}

@@ -29,7 +29,6 @@ import {
 } from 'react';
 import { X, MessageSquarePlus, History } from 'lucide-react';
 import type { UIMessage } from 'ai';
-import { BrandMark } from '@pireel/ui/brand-mark';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import type { Composition } from '@pireel/studio-engine/composition';
 import {
@@ -222,11 +221,10 @@ export const StudioChat = memo(
     <div
       data-block-selection-keep
       data-cap-keep
-      className="bg-panel flex h-full min-h-0 w-full min-w-0 flex-col"
+      className="bg-canvas flex h-full min-h-0 w-full min-w-0 flex-col"
     >
       {/* Header: title + history + new chat */}
-      <div className="border-line text-ink-3 relative flex h-10 shrink-0 items-center gap-1.5 border-b px-3 text-[12px]">
-        <BrandMark size={14} variant="adaptive" className="text-ink shrink-0" />
+      <div className="bg-panel text-ink-3 relative flex h-8 shrink-0 items-center gap-1.5 px-3 text-[12px]">
         <span className="truncate">{active?.title ?? t('chatGen.chat')}</span>
         <div className="ml-auto flex items-center gap-0.5">
           <button
@@ -259,7 +257,7 @@ export const StudioChat = memo(
           )}
         </div>
         {histOpen && (
-          <div className="border-line bg-panel absolute right-2 top-9 z-20 max-h-[50vh] w-[260px] overflow-y-auto rounded-md border shadow-md">
+          <div className="border-line bg-panel absolute right-2 top-full z-20 mt-1 max-h-[50vh] w-[260px] overflow-y-auto rounded-md border shadow-md">
             {threads.length === 0 ? (
               <div className="text-ink-4 px-3 py-3 text-center text-[12px]">{t('chatGen.noPastConversationsYet')}</div>
             ) : (

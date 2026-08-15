@@ -202,7 +202,7 @@ export function CaptionsPanel({
     onEditLine?.(row, next, 'commit');
   };
   return (
-    <div className="relative flex h-full min-h-0 w-full flex-col">
+    <div className="bg-canvas relative flex h-full min-h-0 w-full flex-col">
       {generating && (
         <div className="bg-bg/70 absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 backdrop-blur-[2px]">
           <Loader2 size={18} className="text-accent animate-spin" />
@@ -210,7 +210,7 @@ export function CaptionsPanel({
         </div>
       )}
       {/* Style rows laid flat at the top (no section header) — the line list below is the panel body */}
-      <div className="border-line flex shrink-0 flex-col border-b">
+      <div className="bg-panel flex shrink-0 flex-col">
         <div className="px-2.5 pb-2 pt-2.5">
             {/* Compact per-line style rows (preset picker + size + text color + backdrop as on-demand popovers)
                 — the 18 preset cards no longer live inline, the line list below gets the panel back. */}

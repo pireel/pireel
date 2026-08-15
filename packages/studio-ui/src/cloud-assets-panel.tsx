@@ -385,8 +385,8 @@ export function CloudAssetsPanel({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="border-line border-b px-2.5 py-1.5">
-        <div className="flex items-center gap-1.5">
+      <div className="flex h-9 shrink-0 items-center px-2.5">
+        <div className="flex w-full items-center gap-1.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -412,7 +412,7 @@ export function CloudAssetsPanel({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <label className="border-line bg-panel-2 focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
+          <label className="border-line focus-within:border-accent relative min-w-0 flex-1 rounded-md border transition">
             <Search size={11} className="text-ink-4 pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2" />
             <input
               type="search"

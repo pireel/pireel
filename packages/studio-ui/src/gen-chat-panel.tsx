@@ -469,11 +469,11 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
   const meta = TYPE_META[type];
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div className="bg-canvas flex h-full min-h-0 w-full flex-col">
       {/* shimmer placeholder animation (same as fc-shimmer; studio doesn't import free-create.css, defined locally) */}
       <style>{'@keyframes hfgen-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}@media (prefers-reduced-motion: reduce){[style*="hfgen-shimmer"]{animation:none !important}}'}</style>
       {showTabs && (
-        <div className="border-line text-ink flex items-center gap-1.5 border-b px-3 py-2 text-[12px]">
+        <div className="text-ink flex h-9 shrink-0 items-center gap-1.5 px-3 text-[12px]">
           <div className="flex items-center gap-1">
             {(['mine', 'templates'] as const).map((tb) => (
               <button
