@@ -100,6 +100,7 @@ export function LibraryComponentPreview({
       animate={animate}
       replayKey={replayKey}
       playOnReady={playOnReady}
+      showLoading
       onReady={onReady}
       ground="checker"
       fit="canvas"

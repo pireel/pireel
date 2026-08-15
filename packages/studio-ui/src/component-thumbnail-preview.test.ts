@@ -55,14 +55,16 @@ describe('component thumbnail previews', () => {
       trackIndex: 2,
     };
     const onReady = vi.fn();
-    const host = mount(createElement(BlockPreviewFrame, { comp, block, width: 320, animate: 'manual', playOnReady: true, onReady }));
+    const host = mount(createElement(BlockPreviewFrame, { comp, block, width: 320, animate: 'manual', playOnReady: true, showLoading: true, onReady }));
     const iframe = host.querySelector('iframe')!;
     const postMessage = vi.spyOn(iframe.contentWindow!, 'postMessage');
     postMessage.mockClear();
+    expect(host.querySelector('[data-preview-loading]')).not.toBeNull();
 
     act(() => iframe.dispatchEvent(new Event('load')));
 
     expect(onReady).toHaveBeenCalledOnce();
     expect(postMessage).toHaveBeenCalledWith({ type: 'hf-loop', on: true, once: true }, '*');
+    expect(host.querySelector('[data-preview-loading]')).toBeNull();
   });
 });

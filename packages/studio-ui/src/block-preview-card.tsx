@@ -32,6 +32,7 @@ export function BlockPreviewFrame({
   animate = false,
   replayKey,
   playOnReady = false,
+  showLoading = false,
   onReady,
   ground = 'checker',
   fit = 'inset',
@@ -63,6 +64,8 @@ export function BlockPreviewFrame({
   onReady?: () => void;
   /** Play the entrance once after the iframe is ready; used by lightboxes that open from a poster. */
   playOnReady?: boolean;
+  /** Show a lightweight loading cover until the current iframe document fires load. */
+  showLoading?: boolean;
   /** Overlay layer (timestamp stamp / hover buttons / generating cover), mounted in the same relative container */
   children?: ReactNode;
 }) {
@@ -98,6 +101,8 @@ export function BlockPreviewFrame({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [block.id, docKey, focusContent],
   );
+  const [loadedDocKey, setLoadedDocKey] = useState<string | null>(null);
+  const iframeReady = loadedDocKey === docKey;
   const [measuredFocus, setMeasuredFocus] = useState<PreviewContentBounds | null>(null);
   useEffect(() => setMeasuredFocus(null), [docKey]);
   useEffect(() => {
@@ -172,12 +177,18 @@ export function BlockPreviewFrame({
         tabIndex={-1}
         loading="lazy"
         onLoad={() => {
+          setLoadedDocKey(docKey);
           onReady?.();
           if (playOnReady) setLoop(true, true);
         }}
         className="pointer-events-none"
         style={{ position: 'absolute', left: padX, top: padY, width: comp.width, height: comp.height, border: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}
       />
+      {showLoading && !iframeReady && (
+        <div data-preview-loading className="bg-panel-2/85 absolute inset-0 z-10 flex items-center justify-center">
+          <span className="border-ink-4 border-t-ink size-4 animate-spin rounded-full border-2" />
+        </div>
+      )}
       {children}
     </div>
   );

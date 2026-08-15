@@ -397,10 +397,12 @@ export function AssetLightbox({
           // width = min(viewport margin, 78vh×ratio) → height stays ≤78vh, placeholder matches final size
           style={{ aspectRatio: ar, width: `min(calc(100vw - 6rem), calc(78vh * ${ar}))` }}
         >
-          {!ready && !item.thumbSrc && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/85">
-              <Loader2 size={26} className="animate-spin" />
-              <span className="text-[12px]">{t('panels.loading')}</span>
+          {!ready && (
+            <div className={`absolute inset-0 z-20 flex items-center justify-center ${item.thumbSrc ? 'bg-black/10' : ''}`}>
+              <div className="flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-white/90 shadow-lg backdrop-blur-sm">
+                <Loader2 size={16} className="animate-spin" />
+                <span className="text-[11px]">{t('panels.loading')}</span>
+              </div>
             </div>
           )}
           {componentModel ? (
