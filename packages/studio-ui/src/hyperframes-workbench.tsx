@@ -2321,6 +2321,27 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     redo: () => {},
     floatWin: null,
   });
+  // Audible media must begin inside the click/keydown activation itself. Deferring the first
+  // video.play() to the React effect loses browser user activation on stricter autoplay policies.
+  const beginPlayback = useCallback(() => {
+    if (tRef.current >= duration - 0.02) {
+      tRef.current = 0;
+      playhead.set(0);
+      setT(0);
+    }
+    postPreview({ type: 'hf:play', t: tRef.current });
+    videoEngineRef.current?.play(tRef.current);
+  }, [duration, postPreview]);
+  const togglePlaybackFromUserGesture = useCallback(() => {
+    if (playingRef.current) {
+      videoEngineRef.current?.pause();
+      postPreview({ type: 'hf:pause' });
+      setPlaying(false);
+      return;
+    }
+    beginPlayback();
+    setPlaying(true);
+  }, [beginPlayback, postPreview]);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null;
@@ -2358,7 +2379,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
         const c = compRef.current;
         if (!hasTimelineContent(c)) return;
         e.preventDefault();
-        setPlaying((p) => !p);
+        togglePlaybackFromUserGesture();
         return;
       }
       if (e.key.startsWith('Arrow')) {
@@ -2422,7 +2443,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [applyT, restoreChatAfterTimelineFramePick, setPlaying]);
+  }, [applyT, restoreChatAfterTimelineFramePick, togglePlaybackFromUserGesture]);
 
   // Agent range-play sentinel (play {toSec}): auto-pause when the playhead reaches it. Cleared on ANY pause —
   // a manual resume must not inherit an old stop point.
@@ -2452,15 +2473,10 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
       setT(tRef.current); // stopped: sync the coarse-grained t (for low-frequency consumers like debug overlay/liveGeom)
       return;
     }
-    // Pressing play at the end → start over (no looping, but replay is allowed)
-    if (tRef.current >= duration - 0.02) {
-      tRef.current = 0;
-      playhead.set(0);
-      setT(0);
-    }
-    postPreview({ type: 'hf:play', t: tRef.current });
-    videoEngineRef.current?.play(tRef.current);
-  }, [playing, duration, postPreview]);
+    // Button/Space starts the resident decoder synchronously inside the user gesture. Agent-driven
+    // playback has no such direct entry and starts here. Never restart an already-playing decoder.
+    if (!videoEngineRef.current?.isPlaying) beginPlayback();
+  }, [playing, beginPlayback, postPreview]);
 
   /* ---------- Pick a local video (no upload, blob preview) + ASR ---------- */
   function activatePrimarySourceRuntime(source: { file: File; url: string; sig: string; durationSec: number }) {
@@ -6438,7 +6454,7 @@ export function HyperframesWorkbench({ projectId, agentView = false }: { project
             <TooltipTrigger asChild>
               <button
                 type="button"
-                onClick={() => setPlaying((p) => !p)}
+                onClick={togglePlaybackFromUserGesture}
                 disabled={!hasContent}
                 className="bg-ink text-bg inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
                 aria-label={playing ? t('tools.pause.label') : t('tools.play.label')}

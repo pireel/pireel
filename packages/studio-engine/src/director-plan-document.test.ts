@@ -41,16 +41,28 @@ const planInput = {
       viewerTask: 'orient', narrativeRole: 'hook', sceneFamily: 'speaker-emphasis',
       purpose: 'Make the repeated manual work recognizable.',
       evidence: ['The opening sentence names the manual work.'],
+      treatmentId: 'speaker-distillation',
+      visualAnchor: 'The speaker and their repeated gesture.',
       visualTreatment: 'Keep the speaker present with one restrained emphasis.',
+      motionPlan: 'One thought-led punch-in, then a clean return.',
+      soundPlan: 'Keep voice continuous and the room present.',
       assetStrategy: 'Use source footage.',
+      brollDecision: 'none',
+      brollRationale: 'The face and cadence are the strongest carrier.',
     },
     {
       id: 'proof', label: 'Visible proof', startSec: 4, durationSec: 6,
       viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'demo-focus',
       purpose: 'Show the product completing that same work.',
       evidence: ['The screen recording shows input and final result.'],
+      treatmentId: 'evidence-plane',
+      visualAnchor: 'The real product state change.',
       visualTreatment: 'Follow the active UI region without losing orientation.',
+      motionPlan: 'Reveal input, follow the change, and hold the result.',
+      soundPlan: 'Keep narration primary with one restrained source response.',
       assetStrategy: 'Use the supplied screen recording.',
+      brollDecision: 'source',
+      brollRationale: 'Visible product evidence is required for belief.',
     },
   ],
 };
@@ -85,7 +97,10 @@ describe('Director Plan document execution', () => {
     expect(brief).toContain('Creative thesis: Human problem first, product evidence second.');
     expect(brief).toContain('Viewer task: believe');
     expect(brief).toContain('The screen recording shows input and final result');
-    expect(brief).toContain('never a component recipe');
+    expect(brief).toContain('Signature treatment: evidence-plane');
+    expect(brief).toContain('Visual anchor: The real product state change.');
+    expect(brief).toContain('B-roll decision: source');
+    expect(brief).toContain('one composed scene');
     expect(brief).not.toContain('kit:');
   });
 

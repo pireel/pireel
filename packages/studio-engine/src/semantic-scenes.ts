@@ -75,7 +75,7 @@ export function resolveDirectorSceneContext(
   };
 }
 
-/** Prompt context is prose on purpose: the scene family guides judgment but never selects a component. */
+/** Prompt context is prose on purpose: the treatment contract directs one scene without selecting a stock component. */
 export function formatDirectorSceneContext(context: DirectorSceneContext): string {
   const { plan, scene, previous, next } = context;
   return `DIRECTOR SCENE CONTEXT — editorial direction, never a component recipe:
@@ -85,8 +85,8 @@ export function formatDirectorSceneContext(context: DirectorSceneContext): strin
 - Viewer task: ${scene.viewerTask}; narrative role: ${scene.narrativeRole}
 - Scene family: ${scene.sceneFamily}${scene.customFamily ? ` (${scene.customFamily})` : ''}
 - Purpose: ${scene.purpose}
-${scene.evidence?.length ? `- Evidence: ${scene.evidence.join(' | ')}\n` : ''}${scene.visualTreatment ? `- Visual treatment: ${scene.visualTreatment}\n` : ''}${scene.assetStrategy ? `- Asset strategy: ${scene.assetStrategy}\n` : ''}- Neighbor contrast: ${previous ? `previous ${previous.id} is ${previous.sceneFamily}` : 'opening scene'}; ${next ? `next ${next.id} is ${next.sceneFamily}` : 'closing scene'}.
-Choose the visual form from this scene's meaning and evidence. Do not default to a stock card, and do not repeat a neighboring scene's composition without an editorial reason.`;
+${scene.evidence?.length ? `- Evidence: ${scene.evidence.join(' | ')}\n` : ''}${scene.treatmentId ? `- Signature treatment: ${scene.treatmentId}\n` : ''}${scene.visualAnchor ? `- Visual anchor: ${scene.visualAnchor}\n` : ''}${scene.visualTreatment ? `- Composition and visual treatment: ${scene.visualTreatment}\n` : ''}${scene.motionPlan ? `- Motion plan: ${scene.motionPlan}\n` : ''}${scene.soundPlan ? `- Sound plan: ${scene.soundPlan}\n` : ''}${scene.assetStrategy ? `- Asset strategy: ${scene.assetStrategy}\n` : ''}${scene.brollDecision ? `- B-roll decision: ${scene.brollDecision}${scene.brollRationale ? ` — ${scene.brollRationale}` : ''}\n` : ''}${scene.visualMetaphor ? `- Visual proposition: ${scene.visualMetaphor}\n` : ''}- Neighbor contrast: ${previous ? `previous ${previous.id} is ${previous.sceneFamily}` : 'opening scene'}; ${next ? `next ${next.id} is ${next.sceneFamily}` : 'closing scene'}.
+Execute this treatment as one composed scene: preserve the visual anchor, make graphics subordinate to the source unless designed-fullscreen is explicitly justified, and synchronize entrance/change/exit to the motion and sound plans. Do not default to a stock card or reinterpret a functional noun as a literal UI box. Do not repeat a neighboring scene's composition without an editorial reason.`;
 }
 
 export type SemanticSceneAssignmentResult =

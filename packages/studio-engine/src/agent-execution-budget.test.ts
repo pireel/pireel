@@ -24,8 +24,19 @@ describe('Studio Agent execution budget', () => {
         ],
       },
     ]);
-    expect(usage).toMatchObject({ toolCalls: 2, modelRounds: 2, exhausted: false });
+    expect(usage).toMatchObject({ toolCalls: 2, exhausted: false });
     expect(usage.remainingToolCalls).toBe(STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn - 2);
+  });
+
+  it('does not stop a useful job merely because it needed many model continuations', () => {
+    const parts = Array.from({ length: 40 }, () => ({ type: 'step-start' }));
+    const usage = studioAgentTurnUsage([{ role: 'user', parts: [{ type: 'text' }] }, { role: 'assistant', parts }]);
+    expect(usage).toEqual({
+      toolCalls: 0,
+      remainingToolCalls: STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn,
+      exhausted: false,
+    });
+    expect(studioAgentBudgetPrompt(usage)).toContain('There is no model-round ceiling');
   });
 
   it('forces a truthful handoff without exposing internal capacity as user-facing budget', () => {

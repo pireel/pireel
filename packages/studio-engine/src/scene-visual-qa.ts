@@ -87,8 +87,15 @@ function sceneContext(scene: DirectorScenePlan, phase: SceneVisualReviewPhase, f
     `sceneFamily: ${scene.sceneFamily}${scene.customFamily ? ` (${scene.customFamily})` : ''}`,
     `purpose: ${scene.purpose}`,
     `evidence: ${evidence.length ? evidence.join(' | ') : '(none supplied)'}`,
+    `treatmentId: ${scene.treatmentId ?? '(not specified)'}`,
+    `visualAnchor: ${scene.visualAnchor ?? '(not specified)'}`,
     `visualTreatment: ${scene.visualTreatment ?? '(not specified)'}`,
+    `motionPlan: ${scene.motionPlan ?? '(not specified)'}`,
+    `soundPlan: ${scene.soundPlan ?? '(not specified)'}`,
     `assetStrategy: ${scene.assetStrategy ?? '(not specified)'}`,
+    `brollDecision: ${scene.brollDecision ?? '(not specified)'}`,
+    `brollRationale: ${scene.brollRationale ?? '(not specified)'}`,
+    `visualMetaphor: ${scene.visualMetaphor ?? '(not specified)'}`,
     `frameId: ${frameId ?? '(themeless)'}`,
   ].join('; ');
 }

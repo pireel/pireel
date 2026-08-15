@@ -22,6 +22,14 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(HARD_LINT_CODES.has('unscoped-selector')).toBe(true);
   });
 
+  it('空壳组件不能以成功状态写入时间线', () => {
+    for (const html of ['', '<div></div>', '<div class="wrap"></div><style>#b7 .wrap{position:absolute;inset:0}</style>']) {
+      const issues = ok(html);
+      expect(issues.map((issue) => issue.code)).toContain('empty-content');
+    }
+    expect(HARD_LINT_CODES.has('empty-content')).toBe(true);
+  });
+
   it('@keyframes 里的百分比选择器不误报', () => {
     const issues = ok(`<div data-edit="t">文字四个字</div><style>@keyframes spin{0%{opacity:0}100%{opacity:1}} #b7 .x{color:blue}</style>`);
     expect(issues.filter((i) => i.code === 'unscoped-selector')).toEqual([]);

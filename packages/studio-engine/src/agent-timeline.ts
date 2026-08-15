@@ -185,9 +185,16 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
       ...(string(item.url) ? { remoteUrl: string(item.url)! } : current?.locator.remoteUrl ? { remoteUrl: current.locator.remoteUrl } : {}),
     };
     if (!locator.localSig && !locator.cloudKey && !locator.remoteUrl) return fail(`asset needs url, cloudKey, or localSig: ${requestedId}`);
+    const declaredDurationSec = sec(item.durationSec, -1);
+    const estimatedDurationSec = sec(item.estimatedDurationSec, -1);
+    const initialDurationSec = declaredDurationSec > 0
+      ? declaredDurationSec
+      : estimatedDurationSec > 0
+        ? estimatedDurationSec
+        : undefined;
     const metadata: EditorMediaAsset['metadata'] = {
       ...current?.metadata,
-      ...(sec(item.durationSec, -1) > 0 ? { durationSec: sec(item.durationSec) } : {}),
+      ...(initialDurationSec ? { durationSec: initialDurationSec } : {}),
       ...(sec(item.width, -1) > 0 ? { width: Math.round(sec(item.width)) } : {}),
       ...(sec(item.height, -1) > 0 ? { height: Math.round(sec(item.height)) } : {}),
       ...(typeof item.hasAudio === 'boolean' ? { hasAudio: item.hasAudio } : {}),
@@ -203,7 +210,7 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
       const value = segment as Partial<TranscriptSegment>;
       return Number.isFinite(value.start) && Number.isFinite(value.end) && typeof value.text === 'string' && value.end! > value.start!;
     }) : [];
-    const generated = exactText ? transcriptFromExactText(exactText, metadata.durationSec ?? sec(item.estimatedDurationSec, 1)) : supplied;
+    const generated = exactText ? transcriptFromExactText(exactText, metadata.durationSec ?? 1) : supplied;
     if (generated.length) transcripts = { ...transcripts, [requestedId]: generated };
     imported.push(requestedId);
   }

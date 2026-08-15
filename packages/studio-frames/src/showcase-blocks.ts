@@ -47,6 +47,7 @@ import * as botanicPress from './dialects/botanic-press';
 import * as flipBoard from './dialects/flip-board';
 import * as circuitBoard from './dialects/circuit-board';
 import * as stickerCollage from './dialects/sticker-collage';
+import * as editorialCollage from './dialects/editorial-collage';
 import * as knowledgeCards from './dialects/knowledge-cards';
 import * as foodieVlog from './dialects/foodie-vlog';
 import * as biennalePoster from './dialects/biennale-poster';
@@ -87,6 +88,7 @@ const DIALECTS: Record<string, Record<string, () => Block>> = {
   'flip-board': flipBoard.blocks,
   'circuit-board': circuitBoard.blocks,
   'sticker-collage': stickerCollage.blocks,
+  'editorial-collage': editorialCollage.blocks,
 };
 
 /** (frameId, showcase kind) → the real sample block in that theme's dialect; null if not
@@ -126,6 +128,7 @@ const COVERS: Record<string, () => Block> = {
   'flip-board': flipBoard.cover,
   'circuit-board': circuitBoard.cover,
   'sticker-collage': stickerCollage.cover,
+  'editorial-collage': editorialCollage.cover,
   'knowledge-cards': knowledgeCards.cover,
   'foodie-vlog': foodieVlog.cover,
   'biennale-poster': biennalePoster.cover,

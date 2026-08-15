@@ -27,7 +27,7 @@
 
 import { CAPTION_PRESETS } from '../caption-presets';
 import { PLACE_ANCHORS } from '../composition-core';
-import { NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '../director-plan';
+import { BROLL_DECISIONS, NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '../director-plan';
 
 export type StudioToolKind = 'badge' | 'card';
 
@@ -126,7 +126,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.read_frame.label',
     description:
-      "Load the attached Frame's complete video design-system playbook (material and image treatment, footage relationship, composition, density, typography, temporal behavior, sequence contour, sound-image relationship, captions, ratio adaptation and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole and adapt its audiovisual world to each Scene's purpose and evidence. It is not a catalog of fixed output types, block recipes, or a foundational editing method with colors attached. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
+      "Load the attached Frame's complete video design-system playbook (signature/native treatments, material and image treatment, footage relationship, composition, density, typography, temporal behavior, sequence contour, sound-image relationship, captions, ratio adaptation and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole. Use its named situations as composition grammars in the Director Plan, not as prebuilt components, and adapt its audiovisual world to each Scene's purpose, evidence and observed footage. It is not a catalog of fixed output types, block recipes, or a foundational editing method with colors attached. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
     inputSchema: obj({}, []),
   },
   {
@@ -145,7 +145,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.set_director_plan.label',
     description:
-      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Scenes must be chronological and non-overlapping: for every scene after the first, startSec must be greater than or equal to the previous scene\'s startSec + durationSec. Purpose, evidence, free-form visualTreatment and assetStrategy explain why each scene exists. Times use the edited timeline in seconds.',
+      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Scenes must be chronological and non-overlapping: for every scene after the first, startSec must be greater than or equal to the previous scene\'s startSec + durationSec. Every scene commits to one named treatment, concrete visual anchor, source-aware composition, motion/sound behavior, asset strategy, and an explicit B-roll decision. Times use the edited timeline in seconds.',
     chatOnly: true,
     inputSchema: obj(
       {
@@ -171,10 +171,17 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
               customFamily: { type: 'string', description: 'Free-form family name; required only when sceneFamily is custom.' },
               purpose: { type: 'string', description: 'Why this scene exists and what should change for the viewer.' },
               evidence: { type: 'array', items: { type: 'string' }, description: 'Transcript/footage/product/asset facts that support this scene.' },
-              visualTreatment: { type: 'string', description: 'Free-form direction within the theme; do not name a stock card unless it is genuinely right.' },
+              treatmentId: { type: 'string', description: 'Concise kebab-case name for the chosen Frame-native treatment or, when themeless, a content-specific treatment. Name the composition idea, never a generic component such as top-label or CTA-card.' },
+              visualAnchor: { type: 'string', description: 'Concrete subject, action, evidence, or relationship that must dominate and remain unobscured.' },
+              visualTreatment: { type: 'string', description: 'Executable source-aware composition: framing/crop, graphic-to-footage relationship, hierarchy, placement/safe zones, density and exit state. Functional nouns are not literal boxes.' },
+              motionPlan: { type: 'string', description: 'How the scene enters, develops with exact speech/action beats, holds, and exits; use the Frame motion grammar.' },
+              soundPlan: { type: 'string', description: 'How voice, source sound, music, silence and any sparse graphic cue support this scene.' },
               assetStrategy: { type: 'string', description: 'Which source/project/official/generated material should carry the scene, and why.' },
+              brollDecision: { type: 'string', enum: [...BROLL_DECISIONS], description: 'none keeps A-roll/source continuity; source uses supplied footage; search retrieves truthful external material; generate proposes new media only when generation is separately authorized.' },
+              brollRationale: { type: 'string', description: 'Why this moment earns or rejects a picture change. Prefer cognitive anchors—evidence, process, relation, state change, or a sharp metaphor—not decoration or coverage quotas.' },
+              visualMetaphor: { type: 'string', description: 'Optional one-sentence visual proposition for metaphorical B-roll: one idea, one physical action/relation, normally 3–6 meaningful objects.' },
             },
-            ['id', 'label', 'startSec', 'durationSec', 'viewerTask', 'narrativeRole', 'sceneFamily', 'purpose'],
+            ['id', 'label', 'startSec', 'durationSec', 'viewerTask', 'narrativeRole', 'sceneFamily', 'purpose', 'treatmentId', 'visualAnchor', 'visualTreatment', 'motionPlan', 'soundPlan', 'assetStrategy', 'brollDecision', 'brollRationale'],
           ),
         },
       },
@@ -286,8 +293,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📝',
     label: 'tools.extract_asr.label',
     description:
-      'Transcribe spoken audio into timed sentences for transcript-aware editing. Covers the main video AND every inserted source segment (each transcript section uses its own source clock). It does NOT add captions or cut shots. Run to (re)fetch the transcript. No input. Cheap to re-run (cached per file).',
-    inputSchema: obj({}, []),
+      'Transcribe actual spoken audio into measured timed sentences/words. With no input it analyzes the main video and inserted video sources. For audio-only narration, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth, not necessarily timing truth: reuse it directly for meaning and ordinary copy; call this only when the task needs real word timing, pauses, performed wording, karaoke/caption sync, beat-aware scenes, or another audio-derived fact. It does NOT add captions or cut clips. Cached per file.',
+    inputSchema: obj({
+      assetId: { type: 'string', description: 'Optional exact registered audio asset id to analyze.' },
+      clipId: { type: 'string', description: 'Optional exact placed audio clip id; resolves its asset automatically.' },
+    }, []),
   },
   {
     id: 'read_script',
@@ -296,7 +306,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Read the spoken transcript into your context: ordinary short/medium projects arrive in full; genuinely long transcripts are explicitly marked truncated and can be supplemented with search_media. It contains the main narration in SOURCE-video seconds (never shifted by cutting) PLUS each inserted clip's own transcript (its own clock). Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks plus dead-air notes for ALL of it — inter-sentence gaps (\"+Xs gap after\"), mid-sentence stalls (\"Xs pause inside at a–bs\", with the exact source range) and the recording's pre/post-roll (\"dead air at the head/tail\") — each flipping to CUT once tightened — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read dead air from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main narration requires extract_asr first.",
+      "Read the spoken transcript into your context: ordinary short/medium projects arrive in full; genuinely long transcripts are explicitly marked truncated and can be supplemented with search_media. It contains the main narration in SOURCE-video seconds (never shifted by cutting), each inserted clip's transcript (its own clock), and registered audio-only narration from either its exact supplied script or targeted ASR. Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks plus dead-air notes for ALL of it — inter-sentence gaps (\"+Xs gap after\"), mid-sentence stalls (\"Xs pause inside at a–bs\", with the exact source range) and the recording's pre/post-roll (\"dead air at the head/tail\") — each flipping to CUT once tightened — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read dead air from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main video narration requires extract_asr first; registered TTS/user scripts do not unless measured audio timing is needed.",
     inputSchema: obj({}, []),
   },
   {
@@ -480,7 +490,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'register_media', kind: 'badge', icon: '📎', label: 'tools.register_media.label',
     description:
-      'Register already-accessible media locators in the active project manifest without placing clips. Use exact ids/urls returned by list_assets, search_assets, generate_speech, or generation history. For TTS, include transcriptText verbatim so captions use the original script without another paid ASR call. This does not upload local bytes; MCP local-file import remains import_media.',
+      'Register already-accessible media locators in the active project manifest without placing clips. Use exact ids/urls returned by list_assets, search_assets, generate_speech, or generation history. For TTS, pass the returned asset fields unchanged, including transcriptText and durationSec, so semantic work and ordinary captions can start immediately; extract_asr remains available when the task genuinely needs measured audio timing. This does not upload local bytes; MCP local-file import remains import_media.',
     inputSchema: obj({
       assets: {
         type: 'array', items: { type: 'object', additionalProperties: false, properties: {
@@ -817,7 +827,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.generate_speech.label',
     description:
-      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This atomic operation returns an audio asset plus transcriptText and does NOT place it. To use it as timeline narration: register_media with the returned id/url/transcriptText, then add_clips with role=narration; NEVER use set_bgm for spoken narration. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
+      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; use targeted extract_asr only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
     inputSchema: obj(
       {
         text: { type: 'string', description: 'Exact text to speak (1–5000 characters).' },

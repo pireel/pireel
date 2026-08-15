@@ -1,14 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   type Composition,
   type EditorDocumentV2,
   compositionToEditorDocument,
   projectDocumentToComposition,
+  runAgentTimelineTool,
 } from '@pireel/studio-engine/composition';
 import { buildChatSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
 import { classifyAsrResponse } from './media';
+
+const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
+vi.mock('@pireel/studio-engine/providers', () => ({
+  studioProviders: () => ({ transcriber: { transcribe: providerMocks.transcribe } }),
+}));
 
 async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<{ ok: boolean; summary?: string; error?: string }>) {
   // agent-tool-runner also owns browser export tools; this unit only needs the transaction helper.
@@ -42,6 +48,11 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  afterEach(() => {
+    providerMocks.transcribe.mockReset();
+    vi.unstubAllGlobals();
+  });
+
   it('distinguishes ASR provider failure from genuine no-speech and exposes a useful tool error once', async () => {
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr poll HTTP 503: busy' })).toBe('failed');
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr returned no text' })).toBe('empty');
@@ -64,6 +75,41 @@ describe('Agent composition transaction boundary', () => {
     expect(execute).toContain('do not retry it in the same user request');
     expect(buildChatSystem(null)).toContain('the sole timeline mutation allowed before planning');
     expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
+  });
+
+  it('transcribes a targeted registered audio asset without requiring a main video', async () => {
+    const h = harness();
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: 'tts-audio', kind: 'audio', url: 'https://cdn.example/tts.mp3', durationSec: 12, transcriptText: '原始文稿' }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startSec: 0 }],
+    });
+    h.ctx.setDocument(placed.document!);
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] }]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['audio'], { type: 'audio/mpeg' }), {
+      status: 200,
+      headers: { 'content-type': 'audio/mpeg' },
+    })));
+    Object.assign(h.ctx, {
+      resolveAssetUrl: (asset: { locator: { remoteUrl?: string } }) => asset.locator.remoteUrl,
+      videoFileRef: { current: null },
+      asrRef: { current: null },
+      clipAsrRef: { current: {} },
+      ensureClipTranscripts: async () => {},
+      transcriptForAgent: () => 'AUDIO NARRATION: actual timing',
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'extract_asr', { clipId: 'narration-clip' });
+
+    expect(result).toMatchObject({ ok: true, data: { assetId: 'tts-audio', transcript: 'AUDIO NARRATION: actual timing' } });
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }));
+    expect(h.documentRef.current.semantics.transcripts['tts-audio']).toEqual([
+      { start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] },
+    ]);
   });
 
   it('failed synchronous mutation rolls back state and both history lines', async () => {

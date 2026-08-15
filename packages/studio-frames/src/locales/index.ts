@@ -35,6 +35,7 @@ import { pack as zenWhite } from './en/zen-white';
 import { pack as flipBoard } from './en/flip-board';
 import { pack as circuitBoard } from './en/circuit-board';
 import { pack as stickerCollage } from './en/sticker-collage';
+import { pack as editorialCollage } from './en/editorial-collage';
 
 export { KIND_LABELS_EN, KIND_LABELS_ZH } from './types';
 export type { FrameLocalePack, SupportedLocale } from './types';
@@ -71,6 +72,7 @@ const EN: Record<string, FrameLocalePack> = {
   'flip-board': flipBoard,
   'circuit-board': circuitBoard,
   'sticker-collage': stickerCollage,
+  'editorial-collage': editorialCollage,
 };
 
 /** Get the adapted pack for a frame in a language. zh/not-found → undefined (use canonical Chinese);

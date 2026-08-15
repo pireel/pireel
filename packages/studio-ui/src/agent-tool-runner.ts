@@ -292,7 +292,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       {
         const deAt = (v: unknown): unknown =>
           typeof v === 'string' && v.startsWith('@') ? v.slice(1) : Array.isArray(v) ? v.map((x) => (typeof x === 'string' && x.startsWith('@') ? x.slice(1) : x)) : v;
-        const idKeys = ['blockId', 'blockIds', 'id', 'ids', 'shotId', 'shotIds', 'output_id'] as const;
+        const idKeys = ['assetId', 'blockId', 'blockIds', 'clipId', 'id', 'ids', 'shotId', 'shotIds', 'output_id'] as const;
         if (idKeys.some((k) => k in input)) {
           input = { ...input };
           for (const k of idKeys) if (k in input) input[k] = deAt(input[k]);
@@ -422,8 +422,47 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.outputDeleted') };
           }
           case 'extract_asr': {
-            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
             try {
+              const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
+              const requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
+              const requestedClip = requestedClipId
+                ? documentRef.current.timeline.tracks
+                    .flatMap((track) => track.clips)
+                    .find((clip) => clip.id === requestedClipId)
+                : undefined;
+              const clipAssetId = requestedClip && 'assetId' in requestedClip ? requestedClip.assetId : undefined;
+              const targetAssetId = requestedAssetId || clipAssetId;
+              if (requestedClipId && !clipAssetId) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId}` };
+              if (targetAssetId) {
+                const asset = documentRef.current.assets[targetAssetId];
+                if (!asset) return { ok: false, error: `asset not found: ${targetAssetId}` };
+                if (asset.kind !== 'audio') return { ok: false, error: `targeted extract_asr currently requires an audio asset: ${targetAssetId}` };
+                report(t('tools.extract_asr.busy'));
+                let file = asset.locator.localSig ? await loadLocalVideo(asset.locator.localSig) : null;
+                if (!file) {
+                  const source = resolveAssetUrl(asset);
+                  if (!source) return { ok: false, error: `audio bytes unavailable: ${targetAssetId}` };
+                  const requestUrl = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/')
+                    ? source
+                    : `/api/media/fetch?url=${encodeURIComponent(source)}`;
+                  const response = await race(fetch(requestUrl, { ...(signal ? { signal } : {}) }));
+                  if (!response.ok) return { ok: false, error: `audio fetch failed: HTTP ${response.status}` };
+                  const contentType = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
+                  file = new File([await response.blob()], `${asset.label || targetAssetId}.mp3`, { type: contentType, lastModified: 0 });
+                }
+                const segs = await race(studioProviders().transcriber.transcribe(file));
+                const current = documentRef.current;
+                setDocument({
+                  ...current,
+                  semantics: {
+                    ...current.semantics,
+                    transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
+                  },
+                });
+                if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
+                return { ok: true, summary: t('workbench.transcribedNLines', { n: segs.length }), data: { assetId: targetAssetId, transcript: transcriptForAgent() } };
+              }
+              if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
               const segs = await race(stepAsr(report));
               if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
               // Transcribe inserted clips too so the agent sees every source, including when the
@@ -446,7 +485,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'read_script': {
-            if (!asrRef.current?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
+            const hasStoredTranscript = Object.values(documentRef.current.semantics.transcripts).some((segments) => segments.length > 0);
+            if (!asrRef.current?.length && !hasStoredTranscript) return { ok: false, error: t('workbench.noTranscriptYetRun') };
             await ensureClipTranscripts(); // transcribe missing insert sources on demand (the failure blacklist avoids re-burning ASR)
             return { ok: true, summary: t('workbench.readTranscript'), data: { transcript: transcriptForAgent() } };
           }
@@ -1235,7 +1275,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...(signal ? { signal } : {}),
               });
               const body = (await res.json().catch(() => ({}))) as {
-                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; transcriptText: string; charCount: number; estimatedDurationSec: number };
+                asset?: { id: string; kind: 'audio'; key: string; url: string; mime: string; label?: string | null; model: string; voiceId: string; voiceLabel: string; transcriptText: string; charCount: number; durationSec: number; estimatedDurationSec: number };
                 error?: string;
                 detail?: string;
               };
@@ -1245,13 +1285,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ok: true,
                 summary: t('workbench.speechGenerated'),
                 data: {
-                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, transcriptText: asset.transcriptText, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
+                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, transcriptText: asset.transcriptText, durationSec: asset.durationSec, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
                   model: asset.model,
                   voiceId: asset.voiceId,
                   voiceLabel: asset.voiceLabel,
                   charCount: asset.charCount,
                   estimatedDurationSec: asset.estimatedDurationSec,
-                  next: `For timeline narration, call register_media with this asset id/url/transcriptText, then add_clips with role=narration. Never call set_bgm for speech.${asset.estimatedDurationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.estimatedDurationSec)))}.`}`,
+                  next: `For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration. Never call set_bgm for speech.${asset.estimatedDurationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.estimatedDurationSec)))}.`}`,
                 },
               };
             } finally {

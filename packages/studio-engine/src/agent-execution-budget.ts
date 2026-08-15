@@ -8,7 +8,6 @@
 
 export const STUDIO_AGENT_EXECUTION_LIMITS = {
   toolCallsPerTurn: 24,
-  modelRoundsPerTurn: 12,
   proposalOperations: 32,
   proposalSplitCalls: 1,
   splitPointsPerCall: 24,
@@ -29,9 +28,7 @@ export interface AgentMessageLike {
 
 export interface AgentTurnUsage {
   toolCalls: number;
-  modelRounds: number;
   remainingToolCalls: number;
-  remainingModelRounds: number;
   exhausted: boolean;
 }
 
@@ -50,28 +47,23 @@ export function studioAgentTurnUsage(messages: readonly AgentMessageLike[]): Age
     }
   }
   let toolCalls = 0;
-  let modelRounds = 0;
   for (const message of messages.slice(lastUser + 1)) {
     if (message.role !== 'assistant' || !Array.isArray(message.parts)) continue;
     const parts = message.parts.filter((part): part is AgentMessagePartLike => !!part && typeof part === 'object');
     toolCalls += parts.filter(isToolPart).length;
-    if (parts.length) modelRounds += Math.max(1, parts.filter((part) => part.type === 'step-start').length);
   }
   const remainingToolCalls = Math.max(0, STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn - toolCalls);
-  const remainingModelRounds = Math.max(0, STUDIO_AGENT_EXECUTION_LIMITS.modelRoundsPerTurn - modelRounds);
   return {
     toolCalls,
-    modelRounds,
     remainingToolCalls,
-    remainingModelRounds,
-    exhausted: remainingToolCalls === 0 || remainingModelRounds === 0,
+    exhausted: remainingToolCalls === 0,
   };
 }
 
 export function studioAgentBudgetPrompt(usage: AgentTurnUsage): string {
   return usage.exhausted
-    ? `Internal execution capacity is complete (${usage.toolCalls} tool calls, ${usage.modelRounds} model rounds). Do not call another tool. In the visible reply NEVER mention budgets, limits, tool calls, model rounds, tokens, credits, or capacity. Briefly say what has landed, then name the single concrete next action so the user can continue it in a fresh turn.`
-    : `Internal execution capacity: ${usage.remainingToolCalls} tool calls and ${usage.remainingModelRounds} model rounds remain in this user turn. This is private orchestration state: NEVER mention it, budgets, limits, tokens, or credits to the user. Batch homogeneous edits into vectorized atomic tools; never spend one call per shot when a batch field exists.`;
+    ? `Internal execution capacity is complete (${usage.toolCalls} tool calls). Do not call another tool. In the visible reply NEVER mention budgets, limits, tool calls, tokens, credits, or capacity. Briefly say what has landed, then name the single concrete next action so the user can continue it in a fresh turn.`
+    : `Internal execution capacity: ${usage.remainingToolCalls} tool calls remain in this user turn. This is private orchestration state: NEVER mention it, budgets, limits, tokens, or credits to the user. There is no model-round ceiling: continue the requested job while useful tool capacity remains. Batch homogeneous edits into vectorized atomic tools; never spend one call per shot when a batch field exists.`;
 }
 
 export const reviewMomentKey = (atSec: number) => Math.round(atSec * 10) / 10;

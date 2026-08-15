@@ -23,6 +23,9 @@ export const SCENE_FAMILIES = [
 ] as const;
 export type SceneFamily = typeof SCENE_FAMILIES[number];
 
+export const BROLL_DECISIONS = ['none', 'source', 'search', 'generate'] as const;
+export type BrollDecision = typeof BROLL_DECISIONS[number];
+
 export interface DirectorScenePlan {
   id: string;
   label: string;
@@ -37,10 +40,24 @@ export interface DirectorScenePlan {
   purpose: string;
   /** Supplied transcript, footage, product, or asset evidence supporting the treatment. */
   evidence?: string[];
+  /** Stable, human-readable name for the Frame-native treatment chosen for this scene. */
+  treatmentId?: string;
+  /** The concrete subject, action, evidence, or relation that must remain visually dominant. */
+  visualAnchor?: string;
   /** Free-form direction inside the chosen theme; intentionally not a component enum. */
   visualTreatment?: string;
+  /** How the scene enters, develops with speech/action, holds, and exits. */
+  motionPlan?: string;
+  /** How voice, source sound, music, silence, and graphic cues relate in this scene. */
+  soundPlan?: string;
   /** What source/project/official/generated material should carry the scene, and why. */
   assetStrategy?: string;
+  /** Explicit editorial decision about whether this scene should interrupt A-roll with B-roll. */
+  brollDecision?: BrollDecision;
+  /** Why B-roll helps here, or why the source picture should remain uninterrupted. */
+  brollRationale?: string;
+  /** One sharp, content-specific visual proposition when metaphorical B-roll is justified. */
+  visualMetaphor?: string;
 }
 
 /**
@@ -111,8 +128,15 @@ export function validateDirectorPlanV1(value: unknown): DirectorPlanIssue[] {
     if (scene.evidence !== undefined && (!Array.isArray(scene.evidence) || scene.evidence.some((item) => !nonEmpty(item)))) {
       push('invalid-scene-evidence', `${path}.evidence`, 'Evidence must be an array of non-empty strings.');
     }
+    if (scene.treatmentId !== undefined && !nonEmpty(scene.treatmentId)) push('invalid-treatment-id', `${path}.treatmentId`, 'Treatment id must be non-empty when supplied.');
+    if (scene.visualAnchor !== undefined && !nonEmpty(scene.visualAnchor)) push('invalid-visual-anchor', `${path}.visualAnchor`, 'Visual anchor must be non-empty when supplied.');
     if (scene.visualTreatment !== undefined && !nonEmpty(scene.visualTreatment)) push('invalid-visual-treatment', `${path}.visualTreatment`, 'Visual treatment must be non-empty when supplied.');
+    if (scene.motionPlan !== undefined && !nonEmpty(scene.motionPlan)) push('invalid-motion-plan', `${path}.motionPlan`, 'Motion plan must be non-empty when supplied.');
+    if (scene.soundPlan !== undefined && !nonEmpty(scene.soundPlan)) push('invalid-sound-plan', `${path}.soundPlan`, 'Sound plan must be non-empty when supplied.');
     if (scene.assetStrategy !== undefined && !nonEmpty(scene.assetStrategy)) push('invalid-asset-strategy', `${path}.assetStrategy`, 'Asset strategy must be non-empty when supplied.');
+    if (scene.brollDecision !== undefined && !inList(scene.brollDecision, BROLL_DECISIONS)) push('invalid-broll-decision', `${path}.brollDecision`, 'B-roll decision is not recognized.');
+    if (scene.brollRationale !== undefined && !nonEmpty(scene.brollRationale)) push('invalid-broll-rationale', `${path}.brollRationale`, 'B-roll rationale must be non-empty when supplied.');
+    if (scene.visualMetaphor !== undefined && !nonEmpty(scene.visualMetaphor)) push('invalid-visual-metaphor', `${path}.visualMetaphor`, 'Visual metaphor must be non-empty when supplied.');
 
     if (Number.isInteger(scene.startFrame) && Number.isInteger(scene.durationFrames) && Number(scene.durationFrames) > 0) {
       const start = Number(scene.startFrame);
@@ -150,8 +174,15 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
       ...(scene.customFamily !== undefined ? { customFamily: scene.customFamily as string } : {}),
       purpose: scene.purpose as string,
       ...(scene.evidence !== undefined ? { evidence: scene.evidence as string[] } : {}),
+      ...(scene.treatmentId !== undefined ? { treatmentId: scene.treatmentId as string } : {}),
+      ...(scene.visualAnchor !== undefined ? { visualAnchor: scene.visualAnchor as string } : {}),
       ...(scene.visualTreatment !== undefined ? { visualTreatment: scene.visualTreatment as string } : {}),
+      ...(scene.motionPlan !== undefined ? { motionPlan: scene.motionPlan as string } : {}),
+      ...(scene.soundPlan !== undefined ? { soundPlan: scene.soundPlan as string } : {}),
       ...(scene.assetStrategy !== undefined ? { assetStrategy: scene.assetStrategy as string } : {}),
+      ...(scene.brollDecision !== undefined ? { brollDecision: scene.brollDecision as BrollDecision } : {}),
+      ...(scene.brollRationale !== undefined ? { brollRationale: scene.brollRationale as string } : {}),
+      ...(scene.visualMetaphor !== undefined ? { visualMetaphor: scene.visualMetaphor as string } : {}),
     } satisfies DirectorScenePlan;
   });
   const plan: DirectorPlanV1 = {

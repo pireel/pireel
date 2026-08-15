@@ -41,6 +41,8 @@ describe('静态提示词完整性', () => {
     expect(CHAT_IDENTITY).toContain('is NOT permission to make one output');
     expect(CHAT_IDENTITY).toContain('uniform slices, filename-order assembly');
     expect(CHAT_IDENTITY).toContain('does NOT implicitly authorize charge-bearing media generation');
+    expect(CHAT_IDENTITY).toContain('BRIEF DESIGNED GRAPHICS BY MEANING, NOT BY A GENERIC UI SHAPE');
+    expect(CHAT_IDENTITY).toContain('Do not pre-solve it as a "top label", "bottom card", "CTA box"');
     expect(CHAT_IDENTITY).toContain('This is a hard pre-pilot checkpoint');
     expect(mcpInstructions('test-version')).toContain('Ask one concise question and wait when only the user can resolve that boundary');
     expect(mcpInstructions('test-version')).toContain('requires an explicit output count, purpose and meaningful variation dimension');
@@ -168,8 +170,14 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
           sceneFamily: 'media-evidence',
           purpose: '用原始证据支撑核心判断',
           evidence: ['产品实拍'],
+          treatmentId: 'evidence-plane',
+          visualAnchor: '真实产品结果',
           visualTreatment: '保留主体，证据占据视觉中心',
+          motionPlan: '证据进入后保持',
+          soundPlan: '保留口播与产品声',
           assetStrategy: '优先项目素材',
+          brollDecision: 'source',
+          brollRationale: '结论需要实拍证明',
           clipIds: ['shot-proof', 'block-proof'],
         }],
       },
@@ -178,10 +186,18 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     expect(s).toContain('sceneId=proof');
     expect(s).toContain('@shot-proof, @block-proof');
     expect(s).toContain('purpose: 用原始证据支撑核心判断');
+    expect(s).toContain('treatment: evidence-plane');
+    expect(s).toContain('B-roll: source — 结论需要实拍证明');
     expect(s).toContain('pass the exact sceneId');
   });
   it('read_script 工具在契约表里(插入片段的稿子靠它按需进上下文)', () => {
     expect(STUDIO_TOOLS.some((t) => t.id === 'read_script')).toBe(true);
+    const asr = STUDIO_TOOLS.find((tool) => tool.id === 'extract_asr')!;
+    const schema = asr.inputSchema as { properties: Record<string, unknown> };
+    expect(schema.properties).toHaveProperty('assetId');
+    expect(schema.properties).toHaveProperty('clipId');
+    expect(asr.description).toContain('semantic text truth');
+    expect(CHAT_IDENTITY).toContain('SEMANTIC truth, not automatically TIMING truth');
   });
   it('字幕/口播稿剪辑工具在契约表里', () => {
     for (const id of ['set_captions', 'remove_captions', 'edit_caption_text', 'remove_silence', 'cut_narration', 'list_words', 'delete_words']) {
@@ -200,8 +216,16 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     const schema = plan.inputSchema as { required: string[]; properties: Record<string, unknown> };
     expect(schema.required).toEqual(['goal', 'creativeThesis', 'scenes']);
     expect(schema.properties).toHaveProperty('scenes');
+    const sceneSchema = (schema.properties.scenes as { items: { required: string[]; properties: Record<string, unknown> } }).items;
+    expect(sceneSchema.required).toEqual(expect.arrayContaining(['treatmentId', 'visualAnchor', 'visualTreatment', 'motionPlan', 'soundPlan', 'assetStrategy', 'brollDecision', 'brollRationale']));
+    expect(sceneSchema.properties).toHaveProperty('visualMetaphor');
     expect(CHAT_IDENTITY).toContain('call set_director_plan before other timeline mutations');
     expect(CHAT_IDENTITY).toContain('Every planned add_block, add_texts, add_clips, insert_clips, and insert_clip call MUST pass the exact sceneId');
+    expect(CHAT_IDENTITY).toContain('call analyze_visual BEFORE set_director_plan whenever a Frame is attached');
+    expect(CHAT_IDENTITY).toContain('MUST NOT be implemented as add_block calls alone');
+    expect(CHAT_IDENTITY).toContain('immediately place/size it from the actual footage observations with place_block');
+    expect(CHAT_IDENTITY).toContain('Treat B-roll selection as DIRECTOR judgment');
+    expect(CHAT_IDENTITY).toContain('A complete edit is NOT complete if review_visuals fails');
   });
   it('取景预设与原子 transform/crop 分层，不暴露完整自动重构工具', () => {
     const transform = STUDIO_TOOLS.find((tool) => tool.id === 'set_media_transform')!;
@@ -284,7 +308,7 @@ describe('chat 缓存架构:system 静态、局势在消息里', () => {
     const instructions = mcpInstructions('test-version');
     expect(instructions).toContain('INTERNAL EXECUTION CAPACITY');
     expect(instructions).toContain('24 Pireel tool calls');
-    expect(instructions).toContain('12 plan/act cycles');
+    expect(instructions).toContain('There is no plan/act or model-round ceiling');
     expect(instructions).toContain('NEVER expose a budget, limit, count, token, credit, or capacity');
     expect(instructions).toContain('ONE split_shot {atSecs:[...],purpose:"framing"}');
     expect(instructions).toContain('ONE set_shot_framing {updates:[...]}');
@@ -330,6 +354,9 @@ describe('主题装配', () => {
     const s = withActiveTheme('SYS', 'THEME_TOKENS');
     expect(s.startsWith('SYS\n\n')).toBe(true);
     expect(s).toContain('ACTIVE THEME (preset design system)');
+    expect(s).toContain('THEME DISTINCTIVENESS IS STRUCTURAL, NOT A RECOLOR');
+    expect(s).toContain('at least TWO non-token signatures');
+    expect(s).toContain('A polished generic rectangle wearing the theme colors is a failure');
     expect(s).toContain('THEME_TOKENS');
   });
 });

@@ -61,6 +61,23 @@ export interface EngineAudioClip {
   srcTimeAt: (t: number) => number | null;
 }
 
+/** WebAudio requires CORS-clean media even when a plain <audio> element can play the same URL.
+ * Generated speech/music lives on our CDN, whose bytes are already exposed through the authenticated
+ * same-origin media proxy for browser-side processing. Route cross-origin preview audio through that
+ * proxy before attaching a MediaElementAudioSourceNode; local blob/data and same-origin URLs stay direct. */
+export function previewAudioSource(url: string): string {
+  if (typeof window === 'undefined') return url;
+  try {
+    const target = new URL(url, window.location.href);
+    if ((target.protocol === 'http:' || target.protocol === 'https:') && target.origin !== window.location.origin) {
+      return `/api/media/fetch?url=${encodeURIComponent(target.toString())}`;
+    }
+  } catch {
+    // Keep malformed/opaque values unchanged; the media element will surface the real load failure.
+  }
+  return url;
+}
+
 export interface FrameInfo {
   t: number;
   elKey: string;
@@ -275,6 +292,11 @@ export class VideoTrackEngine {
     return this.total;
   }
 
+  /** Lets the React shell avoid replaying the media element after a direct user-gesture start. */
+  get isPlaying(): boolean {
+    return this.playing;
+  }
+
   /**
    * Sets the authoritative timeline end. Video is one possible clock source, not the document
    * duration: graphics/audio-only edits and content after the final video frame still need time.
@@ -328,17 +350,19 @@ export class VideoTrackEngine {
     }
     for (const spec of specs) {
       const cur = this.audioClips.get(spec.id);
+      const source = previewAudioSource(spec.url);
       if (!cur) {
         const a = document.createElement('audio');
         a.preload = 'auto';
-        a.src = spec.url;
-        a.dataset.hfSrcTag = spec.url;
+        a.crossOrigin = 'anonymous';
+        a.src = source;
+        a.dataset.hfSrcTag = source;
         this.ensureHost().appendChild(a);
         this.audioClips.set(spec.id, { el: a, spec });
       } else {
-        if (cur.el.dataset.hfSrcTag !== spec.url) {
-          cur.el.src = spec.url;
-          cur.el.dataset.hfSrcTag = spec.url;
+        if (cur.el.dataset.hfSrcTag !== source) {
+          cur.el.src = source;
+          cur.el.dataset.hfSrcTag = source;
           cur.el.load();
         }
         cur.spec = spec;
@@ -361,14 +385,16 @@ export class VideoTrackEngine {
       return;
     }
     if (cur?.url === url) return;
+    const source = previewAudioSource(url);
     if (cur) {
-      cur.el.src = url;
+      cur.el.src = source;
       cur.el.load();
       cur.url = url;
     } else {
       const a = document.createElement('audio');
       a.preload = 'auto';
-      a.src = url;
+      a.crossOrigin = 'anonymous';
+      a.src = source;
       this.ensureHost().appendChild(a);
       this.dubs.set(key, { el: a, url });
     }

@@ -59,6 +59,23 @@ describe('shared agent timeline atoms', () => {
     expect(captions.document.timeline.tracks.find((track) => track.role === 'managedCaptions')!.clips.length).toBeGreaterThan(0);
   });
 
+  it('uses a generated speech estimate as the initial asset and clip duration', () => {
+    const empty = emptyEditorDocumentV2({ fps: 30 });
+    const registered = runAgentTimelineTool(empty, 'register_media', {
+      assets: [{
+        id: 'tts-estimated', kind: 'audio', url: 'https://cdn.example/tts.mp3',
+        estimatedDurationSec: 46.1, transcriptText: '这是已经确定的配音文稿。',
+      }],
+    });
+    expect(registered.document!.assets['tts-estimated']!.metadata.durationSec).toBe(46.1);
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ assetId: 'tts-estimated', role: 'narration', startSec: 0 }],
+    });
+    const narration = placed.document!.timeline.tracks.find((track) => track.role === 'narration')!;
+    expect(narration.clips[0]!.durationFrames).toBe(1_383);
+    expect(narration.clips[0]).toMatchObject({ sourceInSec: 0, sourceOutSec: 46.1 });
+  });
+
   it('keeps an overwrite destination track alive when a later clip fully replaces its contents', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {

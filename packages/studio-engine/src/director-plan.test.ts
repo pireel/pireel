@@ -19,8 +19,14 @@ const input = {
       sceneFamily: 'speaker-emphasis',
       purpose: 'State the concrete problem without losing the speaker.',
       evidence: ['Transcript sentence 0 names the repeated manual task.'],
+      treatmentId: 'speaker-distillation',
+      visualAnchor: 'The speaker\'s face and the repeated hand motion.',
       visualTreatment: 'Restrained punch-in with one short phrase, not a stock quote card.',
+      motionPlan: 'Punch in on the named friction, hold through the sentence, then return cleanly.',
+      soundPlan: 'Keep voice and room tone continuous; no graphic cue.',
       assetStrategy: 'Use source speaker footage; no B-roll is needed yet.',
+      brollDecision: 'none',
+      brollRationale: 'The speaker\'s cadence and gesture already carry the friction.',
     },
     {
       id: 'proof',
@@ -32,8 +38,14 @@ const input = {
       sceneFamily: 'demo-focus',
       purpose: 'Show the product completing the task the hook promised.',
       evidence: ['Screen recording shows input, processing, and the result.'],
+      treatmentId: 'evidence-plane',
+      visualAnchor: 'The product input and final result in the supplied recording.',
       visualTreatment: 'Follow the active UI region while retaining enough surrounding context.',
+      motionPlan: 'Track input, processing, then hold the result on the spoken proof beat.',
+      soundPlan: 'Voice remains primary; retain one truthful interface response if audible.',
       assetStrategy: 'Use the supplied screen recording as evidence.',
+      brollDecision: 'source',
+      brollRationale: 'The mechanism must be seen to support the claim.',
     },
   ],
 };
@@ -43,6 +55,7 @@ describe('Director Plan V1', () => {
     const parsed = directorPlanFromSeconds(input, 30);
     expect(parsed.issues).toEqual([]);
     expect(parsed.plan?.scenes.map((scene) => [scene.startFrame, scene.durationFrames])).toEqual([[0, 120], [120, 240]]);
+    expect(parsed.plan?.scenes[1]).toMatchObject({ treatmentId: 'evidence-plane', brollDecision: 'source' });
     expect(isDirectorPlanV1(parsed.plan)).toBe(true);
   });
 
@@ -75,6 +88,18 @@ describe('Director Plan V1', () => {
     }, 30);
     expect(parsed.plan).toBeUndefined();
     expect(parsed.issues.map((issue) => issue.code)).toContain('invalid-scene-duration');
+  });
+
+  it('rejects invalid optional treatment-contract values', () => {
+    const parsed = directorPlanFromSeconds({
+      ...input,
+      scenes: [{ ...input.scenes[0], treatmentId: '', brollDecision: 'always' }],
+    }, 30);
+    expect(parsed.plan).toBeUndefined();
+    expect(parsed.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'invalid-treatment-id',
+      'invalid-broll-decision',
+    ]));
   });
 
   it('participates in persisted editor-document validation while legacy plan remains compatible', () => {

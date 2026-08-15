@@ -162,7 +162,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       playheadSec: tRef.current,
       // Pipeline state: so the agent doesn't blindly rerun, nor claim a transcript that doesn't exist
       pipeline: {
-        asr: !!asrRef.current?.length,
+        asr: !!asrRef.current?.length || Object.values(document.semantics.transcripts).some((segments) => segments.length > 0),
         plan: !!directorPlan || document.semantics.plan !== undefined,
         visual: !!visualRef.current,
       },
@@ -185,8 +185,15 @@ export function useAgentContext(deps: AgentContextDeps) {
                   ...(scene.customFamily ? { customFamily: scene.customFamily } : {}),
                   purpose: scene.purpose,
                   ...(scene.evidence?.length ? { evidence: scene.evidence } : {}),
+                  ...(scene.treatmentId ? { treatmentId: scene.treatmentId } : {}),
+                  ...(scene.visualAnchor ? { visualAnchor: scene.visualAnchor } : {}),
                   ...(scene.visualTreatment ? { visualTreatment: scene.visualTreatment } : {}),
+                  ...(scene.motionPlan ? { motionPlan: scene.motionPlan } : {}),
+                  ...(scene.soundPlan ? { soundPlan: scene.soundPlan } : {}),
                   ...(scene.assetStrategy ? { assetStrategy: scene.assetStrategy } : {}),
+                  ...(scene.brollDecision ? { brollDecision: scene.brollDecision } : {}),
+                  ...(scene.brollRationale ? { brollRationale: scene.brollRationale } : {}),
+                  ...(scene.visualMetaphor ? { visualMetaphor: scene.visualMetaphor } : {}),
                   ...(semanticScene?.clipIds.length ? { clipIds: semanticScene.clipIds } : {}),
                 };
               }),
@@ -221,9 +228,11 @@ export function useAgentContext(deps: AgentContextDeps) {
     );
     const mainRow = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${copy(s)}${marks.rows[i]!.gapNote}`;
     const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
-    parts.push(
-      `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,
-    );
+    if (main.length || primaryNarrativeAsset(documentRef.current)) {
+      parts.push(
+        `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,
+      );
+    }
     const bySrc = new Map<string, string[]>();
     for (const s of compRef.current.shots ?? []) {
       if (!s.src) continue;
@@ -233,6 +242,26 @@ export function useAgentContext(deps: AgentContextDeps) {
       const segs = clipAsrRef.current[src];
       const head = `INSERTED CLIP for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its OWN source seconds; does not map to the narration clock)`;
       if (!segs) parts.push(`${head}: (no transcript — transcription unavailable for this clip)`);
+      else if (!segs.length) parts.push(`${head}: (no speech detected)`);
+      else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
+    }
+    // Generated/imported narration may be an audio-only lane. Its exact script is stored on the
+    // canonical asset at registration time; a later targeted ASR replaces those estimated rows
+    // with measured audio timing. Expose either form through the same read_script surface.
+    const document = documentRef.current;
+    const audioByAsset = new Map<string, string[]>();
+    for (const track of document.timeline.tracks) {
+      if (track.type !== 'audio') continue;
+      for (const clip of track.clips) {
+        if (clip.kind !== 'audio') continue;
+        audioByAsset.set(clip.assetId, [...(audioByAsset.get(clip.assetId) ?? []), clip.id]);
+      }
+    }
+    for (const [assetId, clipIds] of audioByAsset) {
+      const asset = document.assets[assetId];
+      const segs = document.semantics.transcripts[assetId];
+      const head = `AUDIO NARRATION ${asset?.label ? `"${asset.label}" ` : ''}for clip(s) ${clipIds.map((id) => `@${id}`).join(', ')} (asset source seconds)`;
+      if (!segs) parts.push(`${head}: (no transcript — call extract_asr with assetId only when actual audio timing is needed)`);
       else if (!segs.length) parts.push(`${head}: (no speech detected)`);
       else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
     }

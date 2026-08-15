@@ -9,16 +9,25 @@
  */
 
 export interface BlockLintIssue {
-  code: 'unscoped-selector' | 'viewport-units' | 'script-tag' | 'nondeterministic' | 'no-data-edit';
+  code: 'empty-content' | 'unscoped-selector' | 'viewport-units' | 'script-tag' | 'nondeterministic' | 'no-data-edit';
   message: string;
 }
 
 /** Hard errors rejected even after a fix round (bad CSS/script harms the whole document). */
-export const HARD_LINT_CODES: ReadonlySet<string> = new Set(['unscoped-selector', 'script-tag', 'nondeterministic']);
+export const HARD_LINT_CODES: ReadonlySet<string> = new Set(['empty-content', 'unscoped-selector', 'script-tag', 'nondeterministic']);
 
 export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string }): BlockLintIssue[] {
   const { blockId, innerHtml, timelineBody } = args;
   const issues: BlockLintIssue[] = [];
+
+  const contentMarkup = innerHtml
+    .replace(/<!--([\s\S]*?)-->/g, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '');
+  const visibleText = contentMarkup.replace(/<[^>]+>/g, '').replace(/&nbsp;|\s+/gi, '');
+  const hasVisualContent = /<(?:svg|img|picture|video|canvas|path|circle|ellipse|rect|line|polyline|polygon)\b/i.test(contentMarkup);
+  if (!visibleText && !hasVisualContent) {
+    issues.push({ code: 'empty-content', message: 'generated block has no visible text or visual structure' });
+  }
 
   if (/<script\b/i.test(innerHtml)) {
     issues.push({ code: 'script-tag', message: 'innerHtml must not contain <script> — animation belongs in the timeline body' });
@@ -56,10 +65,7 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
   }
 
   // visible text with no data-edit handle → double-click in-place editing breaks
-  const textish = innerHtml
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, '');
+  const textish = visibleText;
   if (textish.length >= 8 && !/data-edit=/.test(innerHtml)) {
     issues.push({ code: 'no-data-edit', message: 'visible text must carry data-edit="<unique-key>" handles for in-place editing' });
   }

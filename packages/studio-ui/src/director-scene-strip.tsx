@@ -12,8 +12,15 @@ export interface TimelineDirectorScene {
   startSec: number;
   endSec: number;
   purpose: string;
+  treatmentId?: string;
+  visualAnchor?: string;
   visualTreatment?: string;
+  motionPlan?: string;
+  soundPlan?: string;
   assetStrategy?: string;
+  brollDecision?: string;
+  brollRationale?: string;
+  visualMetaphor?: string;
   clipCount: number;
 }
 
@@ -32,8 +39,15 @@ export function timelineDirectorScenesFromDocument(document: EditorDocumentV2): 
     startSec: scene.startFrame / document.canvas.fps,
     endSec: (scene.startFrame + scene.durationFrames) / document.canvas.fps,
     purpose: scene.purpose,
+    ...(scene.treatmentId ? { treatmentId: scene.treatmentId } : {}),
+    ...(scene.visualAnchor ? { visualAnchor: scene.visualAnchor } : {}),
     ...(scene.visualTreatment ? { visualTreatment: scene.visualTreatment } : {}),
+    ...(scene.motionPlan ? { motionPlan: scene.motionPlan } : {}),
+    ...(scene.soundPlan ? { soundPlan: scene.soundPlan } : {}),
     ...(scene.assetStrategy ? { assetStrategy: scene.assetStrategy } : {}),
+    ...(scene.brollDecision ? { brollDecision: scene.brollDecision } : {}),
+    ...(scene.brollRationale ? { brollRationale: scene.brollRationale } : {}),
+    ...(scene.visualMetaphor ? { visualMetaphor: scene.visualMetaphor } : {}),
     clipCount: semanticScenes.get(scene.id)?.clipIds.length ?? 0,
   }));
 }
@@ -73,8 +87,14 @@ export function DirectorSceneStrip({
   if (!selected) return null;
   const detail = [
     `${t('panels.directorScenePurpose')}: ${selected.purpose}`,
+    selected.treatmentId ? `Treatment: ${selected.treatmentId}` : '',
+    selected.visualAnchor ? `Anchor: ${selected.visualAnchor}` : '',
     selected.visualTreatment ? `${t('panels.directorSceneVisual')}: ${selected.visualTreatment}` : '',
+    selected.motionPlan ? `Motion: ${selected.motionPlan}` : '',
+    selected.soundPlan ? `Sound: ${selected.soundPlan}` : '',
     selected.assetStrategy ? `${t('panels.directorSceneAssets')}: ${selected.assetStrategy}` : '',
+    selected.brollDecision ? `B-roll: ${selected.brollDecision}${selected.brollRationale ? ` — ${selected.brollRationale}` : ''}` : '',
+    selected.visualMetaphor ? `Visual proposition: ${selected.visualMetaphor}` : '',
     t('panels.directorSceneLinkedClips', { n: selected.clipCount }),
   ].filter(Boolean).join(' · ');
 
@@ -95,7 +115,7 @@ export function DirectorSceneStrip({
       <div className="absolute inset-x-0 bottom-0 h-6">
         {geometry.map((scene, index) => {
           const active = scene.id === selected.id;
-          const title = `${scene.label} · ${scene.startSec.toFixed(1)}–${scene.endSec.toFixed(1)}s\n${scene.purpose}\n${scene.visualTreatment ?? ''}\n${scene.assetStrategy ?? ''}`.trim();
+          const title = `${scene.label} · ${scene.startSec.toFixed(1)}–${scene.endSec.toFixed(1)}s\n${scene.purpose}\n${scene.treatmentId ?? ''}\n${scene.visualAnchor ?? ''}\n${scene.visualTreatment ?? ''}\n${scene.motionPlan ?? ''}\n${scene.soundPlan ?? ''}\n${scene.assetStrategy ?? ''}\n${scene.brollDecision ?? ''} ${scene.brollRationale ?? ''}\n${scene.visualMetaphor ?? ''}`.trim();
           return (
             <button
               key={scene.id}

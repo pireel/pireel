@@ -1,5 +1,7 @@
+/** @vitest-environment jsdom */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { VideoTrackEngine } from './video-track-engine';
+import { previewAudioSource, VideoTrackEngine } from './video-track-engine';
 
 describe('VideoTrackEngine timeline-only clock', () => {
   let now = 0;
@@ -7,6 +9,7 @@ describe('VideoTrackEngine timeline-only clock', () => {
   let rafs = new Map<number, FrameRequestCallback>();
 
   beforeEach(() => {
+    document.body.innerHTML = '';
     now = 0;
     nextRafId = 1;
     rafs = new Map();
@@ -63,6 +66,44 @@ describe('VideoTrackEngine timeline-only clock', () => {
     expect(ticks[0]).toBeCloseTo(0.7);
     engine.pause();
     expect(rafs.size).toBe(0);
+  });
+
+  it('starts the active source unmuted and exposes the synchronous playing state', () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    const engine = new VideoTrackEngine();
+    engine.setSource('main', 'blob:audible-source');
+    engine.setSegments([{ key: 'main', elKey: 'main', srcStart: 0, srcEnd: 1 }]);
+
+    engine.play(0);
+
+    const video = document.querySelector('video');
+    expect(engine.isPlaying).toBe(true);
+    expect(play).toHaveBeenCalledOnce();
+    expect(video?.muted).toBe(false);
+    engine.dispose();
+    expect(engine.isPlaying).toBe(false);
+  });
+
+  it('routes cross-origin lane audio through the authenticated same-origin media proxy', () => {
+    expect(previewAudioSource('blob:local-audio')).toBe('blob:local-audio');
+    expect(previewAudioSource('/audio/local.mp3')).toBe('/audio/local.mp3');
+    expect(previewAudioSource('https://cdn.example/generated.mp3')).toBe(
+      '/api/media/fetch?url=https%3A%2F%2Fcdn.example%2Fgenerated.mp3',
+    );
+
+    const engine = new VideoTrackEngine();
+    engine.setAudioClips([{
+      id: 'speech',
+      url: 'https://cdn.example/generated.mp3',
+      speed: 1,
+      gainAt: () => 1,
+      srcTimeAt: () => 0,
+    }]);
+    const audio = document.querySelector('audio');
+    expect(audio?.getAttribute('src')).toContain('/api/media/fetch?url=');
+    expect(audio?.crossOrigin).toBe('anonymous');
+    engine.dispose();
   });
 
   it('keeps an explicit leading video gap instead of compacting or skipping it', () => {
