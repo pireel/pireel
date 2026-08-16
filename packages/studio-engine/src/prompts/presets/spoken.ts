@@ -2,12 +2,12 @@
  * L2 preset "spoken" — graphics planning for speech-led video.
  * Other scenario skills orchestrate the shared editor tools and may add their own presets.
  *
- * A preset owns two things: the editorial judgment for its domain (L3.1) and which components its
+ * A preset owns two things: the editorial judgment for its domain (L3.1) and which Motion Graphic Components its
  * vocabulary contains (L4). Everything above it (the base contract, the props grammar) and the
  * theme voice below it are preset-independent.
  *
  * L3.1 is shared by both generation paths on purpose. Whether the model writes markup or picks a
- * component, "put the spoken figure on screen verbatim" and "say nothing when there is nothing to
+ * Motion Graphic Component, "put the spoken figure on screen verbatim" and "say nothing when there is nothing to
  * say" are the same rules; two copies would drift the moment one is tuned.
  */
 
@@ -58,7 +58,7 @@ export interface Preset {
   title: string;
   /** L3.1 — the domain's editorial judgment. */
   editorial: string;
-  /** L4 — the component ids this preset's vocabulary contains. */
+  /** L4 — the internal ids for Motion Graphic Components this preset's vocabulary contains. */
   components: string[];
 }
 
@@ -66,7 +66,7 @@ export const SPOKEN_PRESET: Preset = {
   id: 'spoken',
   title: 'Talking-head',
   editorial: SPOKEN_EDITORIAL,
-  // The default preset searches the full registry. Adding a component therefore grows only the
+  // The default preset searches the full Component registry. Adding a Motion Graphic Component therefore grows only the
   // retrieval index; it does not require a second hand-maintained list or enlarge every prompt.
   components: Object.keys(components),
 };

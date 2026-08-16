@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyComposition } from '@pireel/studio-engine/composition';
+import { editorDocumentRenderPlan, emptyComposition, localImageLocator } from '@pireel/studio-engine/composition';
 import {
   applyCommandToLiveProject,
   applyDocumentToLiveProject,
@@ -30,6 +30,27 @@ describe('canonical live project document', () => {
     applyDocumentToLiveProject(session, snapshot);
     expect(session.state.composition.video?.url).toBe('blob:runtime-main');
     expect(JSON.stringify(snapshot)).not.toContain('blob:runtime-main');
+  });
+
+  it('keeps a prepared device-local image renderable when the document stores only localSig', () => {
+    const session = createLiveProjectDocumentSession('project-1', emptyComposition());
+    const sig = 'platform-data.jpg:2048:7';
+    const document = structuredClone(session.state.document);
+    document.assets.platformData = { id: 'platformData', kind: 'image', locator: { localSig: sig }, metadata: {} };
+    document.timeline.tracks.push({
+      id: 'data-track', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 2, clips: [
+        { id: 'data-clip', kind: 'media', assetId: 'platformData', startFrame: 60, durationFrames: 120, enabled: true, sourceInSec: 0, sourceOutSec: 4 },
+      ],
+    });
+    applyDocumentToLiveProject(session, document);
+
+    const source = localImageLocator(sig);
+    expect(resolveLiveAssetUrl(session, session.state.document.assets.platformData!)).toBe(source);
+    const plan = editorDocumentRenderPlan(session.state.document, {
+      resolveAssetUrl: (asset) => resolveLiveAssetUrl(session, asset),
+    });
+    expect(plan.tracks.find((track) => track.id === 'data-track')?.clips[0]?.resolvedSource).toBe(source);
   });
 
   it('restores a graphics-only V2 snapshot without requiring a main video', () => {

@@ -4,16 +4,39 @@ import {
   type Composition,
   type EditorDocumentV2,
   compositionToEditorDocument,
+  emptyEditorDocumentV2,
   projectDocumentToComposition,
   runAgentTimelineTool,
 } from '@pireel/studio-engine/composition';
-import { buildChatSystem } from '@pireel/studio-engine/prompts';
+import { buildChatSystem, buildHtmlSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
 import { classifyAsrResponse } from './media';
+import { localAssetMentionId } from './chat-local-asset-mention';
 
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
+const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
+const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn() }));
+const localMediaMocks = vi.hoisted(() => ({
+  loadLocalVideo: vi.fn(),
+  loadLocalFolderFile: vi.fn(),
+  saveLocalVideo: vi.fn(),
+}));
 vi.mock('@pireel/studio-engine/providers', () => ({
   studioProviders: () => ({ transcriber: { transcribe: providerMocks.transcribe } }),
+}));
+vi.mock('./media', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./media')>()),
+  probeVideoFile: mediaMocks.probeVideoFile,
+}));
+vi.mock('./visual', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./visual')>()),
+  analyzeVisual: visualMocks.analyzeVisual,
+}));
+vi.mock('./local-media', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./local-media')>()),
+  loadLocalVideo: localMediaMocks.loadLocalVideo,
+  loadLocalFolderFile: localMediaMocks.loadLocalFolderFile,
+  saveLocalVideo: localMediaMocks.saveLocalVideo,
 }));
 
 async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<{ ok: boolean; summary?: string; error?: string }>) {
@@ -50,6 +73,11 @@ function harness() {
 describe('Agent composition transaction boundary', () => {
   afterEach(() => {
     providerMocks.transcribe.mockReset();
+    mediaMocks.probeVideoFile.mockReset();
+    visualMocks.analyzeVisual.mockReset();
+    localMediaMocks.loadLocalVideo.mockReset();
+    localMediaMocks.loadLocalFolderFile.mockReset();
+    localMediaMocks.saveLocalVideo.mockReset();
     vi.unstubAllGlobals();
   });
 
@@ -77,15 +105,176 @@ describe('Agent composition transaction boundary', () => {
     expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
   });
 
+  it('keeps speech edits visually directed without an implicit Smart Select frame', () => {
+    const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
+    expect(skill).not.toContain('Smart Select');
+    expect(skill).not.toContain('attach `editorial-pulse`');
+    expect(skill).toContain('picture-change contract');
+    expect(skill).toContain('roughly every 5–10 seconds');
+    expect(skill).toContain('never loop or stretch one short clip as wallpaper');
+    expect(skill).toContain('local image sig → `inspect_images`');
+
+    const componentSystem = buildHtmlSystem({ componentIds: [] });
+    expect(componentSystem).toContain('participating in a video scene');
+    expect(componentSystem).toContain('A decisive typographic beat MAY be type-only');
+    expect(componentSystem).toContain('not a dashboard widget');
+  });
+
+  it('pins every explicitly prepared local image even when its native handle is currently readable', async () => {
+    const h = harness();
+    const sig = 'platform-data.jpg:12:7';
+    const image = new File(['image-bytes'], 'platform-data.jpg', { type: 'image/jpeg', lastModified: 7 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(image);
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '平台数据', kind: 'image', createdAt: 1 }] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+      t: (key: string) => key,
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'prepare_local_image', { sig });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(localMediaMocks.loadLocalFolderFile).not.toHaveBeenCalled();
+    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig, undefined, { pinned: true });
+  });
+
+  it('inspects local image pixels before timeline placement without uploading them to the media library', async () => {
+    const h = harness();
+    const sig = 'conversion-chart.png:18:9';
+    const image = new File(['image-pixels'], 'conversion-chart.png', { type: 'image/png', lastModified: 9 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(image);
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1600, height: 900, close: vi.fn() }));
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({ drawImage: vi.fn() }),
+        toBlob: (callback: (blob: Blob | null) => void) => callback(new Blob(['compressed-pixels'], { type: 'image/jpeg' })),
+      }),
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      frames: [{ atSec: 0, scene: 'A line chart shows conversion rising from 12% to 31%, with the final value emphasized in blue.', issues: [] }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '转化率数据', kind: 'image', createdAt: 1 }] },
+      resolveAssetUrl: () => null,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const mentionId = localAssetMentionId(sig);
+    const result = await runStudioTool(h.ctx, 'inspect_images', { refs: [mentionId] });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        images: [{ ref: sig, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/studio/review');
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit)?.body))).toMatchObject({ mode: 'assets' });
+    expect(localMediaMocks.saveLocalVideo).not.toHaveBeenCalled();
+  });
+
+  it('stops image inspection while local pixels are still being prepared', async () => {
+    const h = harness();
+    const sig = 'slow-reference.png:18:9';
+    const image = new File(['image-pixels'], 'slow-reference.png', { type: 'image/png', lastModified: 9 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(image);
+    vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise(() => {})));
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '慢速图片', kind: 'image', createdAt: 1 }] },
+      resolveAssetUrl: () => null,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const controller = new AbortController();
+    const pending = runStudioTool(h.ctx, 'inspect_images', { refs: [localAssetMentionId(sig)] }, { signal: controller.signal, surface: 'chat' });
+
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ ok: false, error: '已停止' });
+  });
+
+  it('transcribes an unplaced local video when a model mirrors its @ reference token into assetId', async () => {
+    const h = harness();
+    const sig = 'viral-reference.mp4:240:12';
+    const video = new File(['video-with-speech'], 'viral-reference.mp4', { type: 'video/mp4', lastModified: 12 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 30, width: 1080, height: 1920, hasAudio: true });
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 2.4, text: '先用结果抓住观众' }]);
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '爆款参考视频', kind: 'video', createdAt: 1 }] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const assetIdsBefore = Object.keys(h.documentRef.current.assets);
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'extract_asr', { assetId: localAssetMentionId(sig) });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        localSig: sig,
+        label: '爆款参考视频',
+        kind: 'video',
+        durationSec: 30,
+        transcript: expect.stringContaining('先用结果抓住观众'),
+      },
+    });
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(video);
+    expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
+  });
+
+  it('analyzes an unplaced local video by sig before Director planning', async () => {
+    const h = harness();
+    const sig = 'product-demo.mp4:120:4';
+    const video = new File(['video-bytes'], 'product-demo.mp4', { type: 'video/mp4', lastModified: 4 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
+    visualMocks.analyzeVisual.mockResolvedValue({
+      cuts: [6],
+      segments: [{ start: 0, end: 18, label: { content: 'broll', person: 'none', safe: 'top', hasText: false, desc: 'Hands demonstrate the product.' } }],
+    });
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '产品演示', kind: 'video', createdAt: 1 }] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const assetIdsBefore = Object.keys(h.documentRef.current.assets);
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'analyze_visual', { localSig: sig });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        localSig: sig,
+        label: '产品演示',
+        durationSec: 18,
+        sceneCutsSec: [6],
+        segments: [{ description: 'Hands demonstrate the product.' }],
+      },
+    });
+    expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
+    expect(Object.values(h.documentRef.current.assets).some((asset) => asset.locator.localSig === sig)).toBe(false);
+  });
+
   it('transcribes a targeted registered audio asset without requiring a main video', async () => {
     const h = harness();
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
-      assets: [{ id: 'tts-audio', kind: 'audio', url: 'https://cdn.example/tts.mp3', durationSec: 12, transcriptText: '原始文稿' }],
+      assets: [{ id: 'tts-audio', kind: 'audio', url: 'https://cdn.example/tts.mp3', transcriptText: '原始文稿' }],
     });
-    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
-      clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startSec: 0 }],
-    });
-    h.ctx.setDocument(placed.document!);
+    h.ctx.setDocument(registered.document!);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 12.4, width: 0, height: 0, hasAudio: true });
     providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] }]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['audio'], { type: 'audio/mpeg' }), {
       status: 200,
@@ -103,13 +292,124 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'extract_asr', { clipId: 'narration-clip' });
+    const result = await runStudioTool(h.ctx, 'extract_asr', { assetId: 'tts-audio' });
 
-    expect(result).toMatchObject({ ok: true, data: { assetId: 'tts-audio', transcript: 'AUDIO NARRATION: actual timing' } });
+    expect(result).toMatchObject({ ok: true, data: { assetId: 'tts-audio', durationSec: 12.4, transcript: 'AUDIO NARRATION: actual timing' } });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }));
+    expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true });
     expect(h.documentRef.current.semantics.transcripts['tts-audio']).toEqual([
       { start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] },
     ]);
+    const placed = runAgentTimelineTool(h.documentRef.current, 'add_clips', {
+      clips: [{ id: 'narration-clip', assetId: 'tts-audio', role: 'narration', startSec: 0 }],
+    });
+    expect(placed.document!.timeline.tracks.find((track) => track.role === 'narration')?.clips[0]).toMatchObject({
+      id: 'narration-clip',
+      durationFrames: 372,
+      sourceOutSec: 12.4,
+    });
+  });
+
+  it('analyzes the only B-roll video in an audio-led project without a mounted main video', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [
+        { id: 'demo-video', kind: 'video', url: 'https://cdn.example/demo.mp4' },
+        // Re-registering the same underlying local/cloud source must not turn one video into an
+        // ambiguous visual-analysis choice.
+        { id: 'demo-video-alias', kind: 'video', url: 'https://cdn.example/demo.mp4' },
+      ],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'demo-clip', assetId: 'demo-video', role: 'broll', startSec: 0 }],
+    });
+    h.ctx.setDocument(placed.document!);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 30, width: 1280, height: 720, hasAudio: true });
+    visualMocks.analyzeVisual.mockResolvedValue({
+      cuts: [8.5],
+      segments: [{
+        start: 0,
+        end: 30,
+        label: { content: 'broll', person: 'center', safe: 'right', hasText: false, desc: 'AI demonstration video' },
+      }],
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['video'], { type: 'video/mp4' }), {
+      status: 200,
+      headers: { 'content-type': 'video/mp4' },
+    })));
+    Object.assign(h.ctx, {
+      resolveAssetUrl: (asset: { locator: { remoteUrl?: string } }) => asset.locator.remoteUrl,
+      videoFileRef: { current: null },
+      clipFilesRef: { current: new Map<string, File>() },
+      currentVideo: () => null,
+      stepVisual: async () => { throw new Error('mounted-primary path must not run'); },
+      visualRef: { current: null },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'analyze_visual', {});
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        assetId: 'demo-video',
+        sceneCutsSec: [8.5],
+        segments: [{ content: 'broll', description: 'AI demonstration video' }],
+      },
+    });
+    expect(visualMocks.analyzeVisual).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/mp4' }), 30, expect.any(Function));
+    expect(h.documentRef.current.assets['demo-video']?.metadata).toMatchObject({ durationSec: 30, width: 1280, height: 720, hasAudio: true });
+  });
+
+  it('keeps simultaneous visual evidence on separate lanes and lays media clips out directly', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [
+        { id: 'proof-xhs', kind: 'image', url: 'https://cdn.example/xhs.jpg' },
+        { id: 'proof-x', kind: 'image', url: 'https://cdn.example/x.jpg' },
+        { id: 'proof-video-account', kind: 'image', url: 'https://cdn.example/video-account.jpg' },
+      ],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [
+        { id: 'clip-xhs', assetId: 'proof-xhs', startSec: 2, durationSec: 4 },
+        { id: 'clip-x', assetId: 'proof-x', startSec: 2, durationSec: 4 },
+        { id: 'clip-video-account', assetId: 'proof-video-account', startSec: 2, durationSec: 4 },
+      ],
+    });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    h.ctx.setDocument(placed.document!);
+    const visualTracks = h.documentRef.current.timeline.tracks.filter((track) => track.role === 'broll');
+    expect(visualTracks).toHaveLength(3);
+    expect(visualTracks.flatMap((track) => track.clips.map((clip) => clip.id)).sort()).toEqual([
+      'clip-video-account', 'clip-x', 'clip-xhs',
+    ]);
+
+    Object.assign(h.ctx, {
+      ensureShots: (c: Composition) => c.shots ?? [],
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      setSelectedShotId: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'apply_layout', {
+      layout: 'split-left-right',
+      blockIds: ['clip-xhs', 'clip-x', 'clip-video-account'],
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    const clips = h.documentRef.current.timeline.tracks
+      .flatMap((track) => track.clips)
+      .filter((clip) => ['clip-xhs', 'clip-x', 'clip-video-account'].includes(clip.id));
+    expect(clips.every((clip) => clip.kind === 'media' && clip.box)).toBe(true);
+    const xs = clips.map((clip) => clip.kind === 'media' ? clip.box!.x : -1).sort((a, b) => a - b);
+    expect(xs[0]).toBeLessThan(xs[1]!);
+    expect(xs[1]).toBeLessThan(xs[2]!);
   });
 
   it('failed synchronous mutation rolls back state and both history lines', async () => {
@@ -244,6 +544,36 @@ describe('Agent composition transaction boundary', () => {
       templateId: 'custom',
       box: { x: 0.14, y: 0.3, w: 0.72, h: 0.4 },
     });
+  });
+
+  it('stops a pending add_block without letting its late result mutate the timeline', async () => {
+    const h = harness();
+    let release!: (value: { innerHtml: string; timelineBody: string; note: string }) => void;
+    const generated = new Promise<{ innerHtml: string; timelineBody: string; note: string }>((resolve) => {
+      release = resolve;
+    });
+    Object.assign(h.ctx, {
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      setSelectedId: () => {},
+      setSelectedShotId: () => {},
+      applyT: () => {},
+      tRef: { current: 0 },
+      composeBlockChecked: () => generated,
+      noteOf: () => '',
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const controller = new AbortController();
+    const pending = runStudioTool(h.ctx, 'add_block', { instruction: 'show 42' }, { signal: controller.signal, surface: 'chat' });
+
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    release({ innerHtml: '<div>late</div>', timelineBody: '', note: 'late' });
+    await Promise.resolve();
+
+    expect(h.compRef.current.blocks).toHaveLength(0);
+    expect(h.undoStackRef.current).toHaveLength(0);
   });
 
   it('async failure preserves a later manual edit and removes only the tool ghost snapshot', async () => {

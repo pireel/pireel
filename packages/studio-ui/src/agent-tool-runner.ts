@@ -29,6 +29,7 @@ import {
   applyCanvasDocumentEdit,
   applyCaptionDocumentEdit,
   applyCompositionLayout,
+  applyEditorCommand,
   applyLayoutDocumentEdit,
   applyNarrationDocumentEdit,
   applyOverlayDocumentEdits,
@@ -94,7 +95,7 @@ import {
   reviewMomentKey,
   selectReviewMoments,
 } from '@pireel/studio-engine/agent-execution-budget';
-import type { StudioToolResult } from '@pireel/studio-engine/prompts';
+import { type StudioToolResult, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import { rejectStableFramingSplits, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
 import { directorPlanFromSeconds } from '@pireel/studio-engine/director-plan';
 import { applyDirectorPlanToDocument } from '@pireel/studio-engine/director-plan-document';
@@ -110,10 +111,11 @@ import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress } from './tool-progress';
-import { fileSig } from './media';
+import { fileSig, probeVideoFile } from './media';
 import { loadLocalFolderFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
-import { type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
+import { normalizeStudioToolInputReferences } from './studio-tool-input-references';
+import { analyzeVisual, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
@@ -129,8 +131,45 @@ import { withEditableBlockGeometry } from './editable-block-geometry';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'inspect_media', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
+
+const IMAGE_INSPECTION_MAX_DIM = 1280;
+const IMAGE_INSPECTION_MAX_BASE64_CHARS = 2 * 1024 * 1024;
+
+async function imageBlobForInspection(blob: Blob): Promise<{ base64: string; mime: string }> {
+  let inspectionBlob = blob;
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(blob);
+    const scale = Math.min(1, IMAGE_INSPECTION_MAX_DIM / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('image canvas unavailable');
+    context.drawImage(bitmap, 0, 0, width, height);
+    inspectionBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((value) => value ? resolve(value) : reject(new Error('image compression failed')), 'image/jpeg', 0.82);
+    });
+  } catch {
+    // Small browser-readable files can still be sent without recompression. The size guard below
+    // prevents a full-resolution source from accidentally entering the vision request.
+    inspectionBlob = blob;
+  } finally {
+    bitmap?.close();
+  }
+  const bytes = new Uint8Array(await inspectionBlob.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  const base64 = btoa(binary);
+  if (base64.length > IMAGE_INSPECTION_MAX_BASE64_CHARS) throw new Error('image is too large to inspect');
+  return { base64, mime: inspectionBlob.type || blob.type || 'image/jpeg' };
+}
 const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
 
 function reviewMomentAttempts(compRef: object, compositionHash: string): Map<number, number> {
@@ -286,18 +325,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     trimAtPlayhead, deleteShot, videoDurationOf, insertClipCore, setCaptionStyle, applyCaptionPreset,
     relayoutCaptions, removeCaptionLayer, agentExportRef, exportPctRef, exportVideo, frameCatalogRef, chatRef,
   } = ctx;
-      // Models mirror the chat's @id pill syntax into tool args ("blockIds":["@media55_…"]) — the id
-      // lookup then misses and the first call of a batch reliably fails. Strip a leading @ from every
-      // id-shaped field up front (fresh copy, the message part keeps what the model actually sent).
-      {
-        const deAt = (v: unknown): unknown =>
-          typeof v === 'string' && v.startsWith('@') ? v.slice(1) : Array.isArray(v) ? v.map((x) => (typeof x === 'string' && x.startsWith('@') ? x.slice(1) : x)) : v;
-        const idKeys = ['assetId', 'blockId', 'blockIds', 'clipId', 'id', 'ids', 'shotId', 'shotIds', 'output_id'] as const;
-        if (idKeys.some((k) => k in input)) {
-          input = { ...input };
-          for (const k of idKeys) if (k in input) input[k] = deAt(input[k]);
-        }
-      }
+      // Chat pills are references, not storage ids. Normalize every top-level/nested tool argument
+      // once here so individual tools never grow their own @ token / localSig compatibility rules.
+      input = normalizeStudioToolInputReferences(toolId, input, ctx.localAssetIndexRef?.current ?? []);
       const c = compRef.current;
       const r1 = (x: unknown) => Math.round(Number(x) * 10) / 10;
       const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
@@ -307,8 +337,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         ...(typeof input.position === 'number' ? { position: input.position } : {}),
       });
       const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
-      // Pipeline tools: push friendly progress to this tool's card (matched by toolId), cleared on finish
-      const report = (text: string, frac?: number, extra?: { blockIds?: string[] }) => setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}), ...(extra ?? {}) });
       // Cooperative stop (chat stop button): long tools honor the signal at SAFE boundaries only —
       // atomic mutations always land whole. Shared dedup'd pipelines (ASR / visual analysis) are
       // never cancelled: race() just stops WAITING for them, they keep running in the background
@@ -322,6 +350,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       const surface = opts?.surface ?? 'bridge';
       const stopped = () => !!signal?.aborted;
       const abortErr = () => new DOMException(t('workbench.stoppedByUser'), 'AbortError');
+      // Pipeline tools push friendly progress to their card. A provider may keep producing
+      // harmless late deltas after our abort race has stopped waiting; never let those deltas
+      // resurrect a completed/aborted progress state.
+      const report = (text: string, frac?: number, extra?: { blockIds?: string[] }) => {
+        if (stopped()) return;
+        setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}), ...(extra ?? {}) });
+      };
       const race = <T,>(p: Promise<T>): Promise<T> =>
         signal
           ? signal.aborted
@@ -423,8 +458,52 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'extract_asr': {
             try {
+              const requestedLocalSigInput = typeof input.localSig === 'string'
+                ? input.localSig.trim().replace(/^local:/, '')
+                : '';
               const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
               const requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
+              const requestedLocalSig = requestedLocalSigInput;
+              if (requestedLocalSig) {
+                const entry = ctx.localAssetIndexRef.current.find(
+                  (item) => item.sig === requestedLocalSig && ((item.kind ?? 'video') === 'video' || item.kind === 'audio'),
+                );
+                if (!entry) return { ok: false, error: `local audio/video not found: ${requestedLocalSig}` };
+                const localKind = entry.kind ?? 'video';
+                const direct = await loadLocalVideo(entry.sig);
+                const folder = !direct && entry.folder
+                  ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig)
+                  : null;
+                const file = direct ?? folder?.file ?? null;
+                if (!file) {
+                  return { ok: false, error: 'local media access is unavailable — ask the user to restore access, then retry' };
+                }
+                report(t('tools.extract_asr.busy'));
+                const probe = await probeVideoFile(file).catch(() => null);
+                const segs = await race(studioProviders().transcriber.transcribe(file));
+                if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
+                const rd = (value: number) => Math.round(value * 10) / 10;
+                const transcript = wrapAgentTranscript([
+                  `DEVICE-LOCAL ${localKind.toUpperCase()} TRANSCRIPT ${JSON.stringify(entry.label)} (source-file seconds):`,
+                  ...segs.map((segment, index) => {
+                    const copy = segment.captionText && segment.captionText !== segment.text
+                      ? `${segment.captionText} 〈ASR: ${segment.text}〉`
+                      : segment.text;
+                    return `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${copy}`;
+                  }),
+                ].join('\n'));
+                return {
+                  ok: true,
+                  summary: t('workbench.transcribedNLines', { n: segs.length }),
+                  data: {
+                    localSig: entry.sig,
+                    label: entry.label,
+                    kind: localKind,
+                    ...(probe?.durationSec ? { durationSec: Math.round(probe.durationSec * 100) / 100 } : {}),
+                    transcript,
+                  },
+                };
+              }
               const requestedClip = requestedClipId
                 ? documentRef.current.timeline.tracks
                     .flatMap((track) => track.clips)
@@ -450,17 +529,43 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   const contentType = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
                   file = new File([await response.blob()], `${asset.label || targetAssetId}.mp3`, { type: contentType, lastModified: 0 });
                 }
+                const probe = await probeVideoFile(file).catch(() => null);
                 const segs = await race(studioProviders().transcriber.transcribe(file));
                 const current = documentRef.current;
                 setDocument({
                   ...current,
+                  ...(probe?.durationSec
+                    ? {
+                        assets: {
+                          ...current.assets,
+                          [targetAssetId]: {
+                            ...current.assets[targetAssetId]!,
+                            metadata: {
+                              ...current.assets[targetAssetId]!.metadata,
+                              durationSec: probe.durationSec,
+                              ...(probe.width > 0 ? { width: probe.width } : {}),
+                              ...(probe.height > 0 ? { height: probe.height } : {}),
+                              hasAudio: probe.hasAudio,
+                            },
+                          },
+                        },
+                      }
+                    : {}),
                   semantics: {
                     ...current.semantics,
                     transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
                   },
                 });
                 if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
-                return { ok: true, summary: t('workbench.transcribedNLines', { n: segs.length }), data: { assetId: targetAssetId, transcript: transcriptForAgent() } };
+                return {
+                  ok: true,
+                  summary: t('workbench.transcribedNLines', { n: segs.length }),
+                  data: {
+                    assetId: targetAssetId,
+                    ...(probe?.durationSec ? { durationSec: Math.round(probe.durationSec * 100) / 100 } : {}),
+                    transcript: transcriptForAgent(),
+                  },
+                };
               }
               if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
               const segs = await race(stepAsr(report));
@@ -598,14 +703,131 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             };
           }
           case 'analyze_visual': {
-            if (!videoFileRef.current) return { ok: false, error: t('common.uploadVideoFirst') };
+            const requestedLocalSig = typeof input.localSig === 'string' ? input.localSig.trim().replace(/^local:/, '') : '';
+            if (requestedLocalSig) {
+              const entry = ctx.localAssetIndexRef.current.find((item) => item.kind === 'video' && item.sig === requestedLocalSig);
+              if (!entry) return { ok: false, error: `local video not found: ${requestedLocalSig}` };
+              const direct = await loadLocalVideo(entry.sig);
+              const folder = !direct && entry.folder
+                ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig)
+                : null;
+              const file = direct ?? folder?.file ?? null;
+              if (!file) return { ok: false, error: 'local video access is unavailable — ask the user to restore access, then retry' };
+              try {
+                const probe = await probeVideoFile(file).catch(() => null);
+                const durationSec = probe?.durationSec;
+                if (!durationSec) return { ok: false, error: `video duration unavailable: ${requestedLocalSig}` };
+                const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
+                const vis = await race(analyzeVisual(file, durationSec, (done, count) => {
+                  const fraction = count > 0 ? done / count : 0;
+                  report(t('common.analyzingVisualsPctSec', {
+                    pct: Math.round(fraction * 85),
+                    sec: Math.max(1, Math.ceil((1 - fraction) * total * 0.13 + 2)),
+                  }), fraction * 0.85);
+                }).catch(() => null));
+                return vis
+                  ? {
+                      ok: true,
+                      summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
+                      data: { localSig: requestedLocalSig, label: entry.label, durationSec, ...visualTimelineForAgent(vis) },
+                    }
+                  : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
+              } finally {
+                clearToolProgress(toolId);
+              }
+            }
+            const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
+            const requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
+            const requestedClip = requestedClipId
+              ? documentRef.current.timeline.tracks
+                  .flatMap((track) => track.clips)
+                  .find((clip) => clip.id === requestedClipId)
+              : undefined;
+            const clipAssetId = requestedClip && 'assetId' in requestedClip ? requestedClip.assetId : undefined;
+            if (requestedClipId && !clipAssetId) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId}` };
+            const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const videoAssets = Object.values(documentRef.current.assets)
+              .filter((asset): asset is EditorMediaAsset => asset.kind === 'video');
+            const uniqueVideoSources = new Map<string, EditorMediaAsset>();
+            for (const asset of videoAssets) {
+              const sourceKey = asset.locator.localSig
+                ? `local:${asset.locator.localSig}`
+                : asset.locator.cloudKey
+                  ? `cloud:${asset.locator.cloudKey}`
+                  : asset.locator.remoteUrl
+                    ? `remote:${asset.locator.remoteUrl}`
+                    : `asset:${asset.id}`;
+              if (!uniqueVideoSources.has(sourceKey)) uniqueVideoSources.set(sourceKey, asset);
+            }
+            const uniqueVideoAssets = [...uniqueVideoSources.values()];
+            const videoAssetIds = uniqueVideoAssets.map((asset) => asset.id);
+            const targetAssetId = requestedAssetId
+              || clipAssetId
+              || (primaryAssetId && documentRef.current.assets[primaryAssetId]?.kind === 'video' ? primaryAssetId : '')
+              || (uniqueVideoAssets.length === 1 ? uniqueVideoAssets[0]!.id : '');
+            if (!targetAssetId) {
+              return videoAssetIds.length > 1
+                ? { ok: false, error: `analyze_visual needs assetId or clipId; video assets: ${videoAssetIds.join(', ')}` }
+                : { ok: false, error: t('common.uploadVideoFirst') };
+            }
+            const targetAsset = documentRef.current.assets[targetAssetId];
+            if (!targetAsset) return { ok: false, error: `asset not found: ${targetAssetId}` };
+            if (targetAsset.kind !== 'video') return { ok: false, error: `analyze_visual requires a video asset: ${targetAssetId}` };
             try {
-              const vis = await race(stepVisual(report));
+              const useMountedPrimary = targetAssetId === primaryAssetId && !!videoFileRef.current && !!currentVideo();
+              let vis: VisualTimeline | null;
+              if (useMountedPrimary) {
+                vis = await race(stepVisual(report));
+              } else {
+                const source = resolveAssetUrl(targetAsset);
+                let file = source ? clipFilesRef.current.get(source) ?? null : null;
+                if (!file && targetAsset.locator.localSig) file = await loadLocalVideo(targetAsset.locator.localSig);
+                if (!file && source) {
+                  const requestUrl = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/')
+                    ? source
+                    : `/api/media/fetch?url=${encodeURIComponent(source)}`;
+                  const response = await race(fetch(requestUrl, { ...(signal ? { signal } : {}) }));
+                  if (!response.ok) return { ok: false, error: `video fetch failed: HTTP ${response.status}` };
+                  const contentType = response.headers.get('content-type')?.split(';')[0] || 'video/mp4';
+                  file = new File([await response.blob()], `${targetAsset.label || targetAssetId}.mp4`, { type: contentType, lastModified: 0 });
+                }
+                if (!file) return { ok: false, error: `video bytes unavailable: ${targetAssetId}` };
+                const probe = await probeVideoFile(file).catch(() => null);
+                const durationSec = probe?.durationSec || targetAsset.metadata.durationSec;
+                if (!durationSec) return { ok: false, error: `video duration unavailable: ${targetAssetId}` };
+                const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
+                vis = await race(analyzeVisual(file, durationSec, (done, count) => {
+                  const fraction = count > 0 ? done / count : 0;
+                  report(t('common.analyzingVisualsPctSec', {
+                    pct: Math.round(fraction * 85),
+                    sec: Math.max(1, Math.ceil((1 - fraction) * total * 0.13 + 2)),
+                  }), fraction * 0.85);
+                }).catch(() => null));
+                if (probe?.durationSec && targetAsset.metadata.durationSec !== probe.durationSec) {
+                  const current = documentRef.current;
+                  setDocument({
+                    ...current,
+                    assets: {
+                      ...current.assets,
+                      [targetAssetId]: {
+                        ...current.assets[targetAssetId]!,
+                        metadata: {
+                          ...current.assets[targetAssetId]!.metadata,
+                          durationSec: probe.durationSec,
+                          ...(probe.width > 0 ? { width: probe.width } : {}),
+                          ...(probe.height > 0 ? { height: probe.height } : {}),
+                          hasAudio: probe.hasAudio,
+                        },
+                      },
+                    },
+                  });
+                }
+              }
               return vis
                 ? {
                     ok: true,
                     summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
-                    data: visualTimelineForAgent(vis),
+                    data: { assetId: targetAssetId, ...visualTimelineForAgent(vis) },
                   }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
             } finally {
@@ -1021,7 +1243,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 assets,
                 project,
                 usageHint: scope === 'mine'
-                  ? 'A local sig is not an image URL. For an exact image the user asked to use, call prepare_local_image with that sig. If it fails, ask the user to click restore access; never substitute cloud/official media.'
+                  ? 'Use each local kind through its byte-aware path. Video: inspect unplaced footage with analyze_visual localSig=locator.sig, then pass the same sig to insert_clip only for selected material; do not metadata-register it and then add_clips. Audio: register_media with localSig=locator.sig, call extract_asr with that assetId when speech timing/content is needed (it records the real duration), then add_clips with role=narration. Image: call inspect_images before assigning its role, then prepare_local_image with locator.sig before using it. If local access fails, ask the user to restore access; never substitute cloud/official media.'
                   : 'Use returned urls only for an explicitly cloud-scoped request.',
               },
             };
@@ -1107,9 +1329,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!file) {
               return { ok: false, error: 'local image access is unavailable — ask the user to click “restore access” on that exact local asset, then retry; do not use another image' };
             }
-            // Folder handles can disappear across embedded-browser sessions. Pin this one explicitly
-            // selected image in OPFS so preview/capture/export can resolve the durable local locator.
-            if (folder?.file) await saveLocalVideo(folder.file, entry.sig, undefined, { pinned: true });
+            // A readable native handle is not durable permission. Pin every explicitly prepared
+            // image in OPFS, including the direct-handle path, so a refresh cannot leave a valid
+            // timeline clip pointing at bytes the preview/export pipeline can no longer reach.
+            await saveLocalVideo(file, entry.sig, undefined, { pinned: true });
             return {
               ok: true,
               summary: t('workbench.preparedLocalImage', { name: entry.label }),
@@ -1122,6 +1345,101 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 privacy: 'The image bytes stay in this browser/device. The project stores only the local sig.',
               },
             };
+          }
+          case 'inspect_images': {
+            const refs = Array.isArray(input.refs)
+              ? [...new Set((input.refs as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))].slice(0, 8)
+              : [];
+            if (!refs.length) return { ok: false, error: 'at least one exact image ref is required' };
+            const frames: Array<{ atSec: number; image_base64: string; mime: string; expected: string }> = [];
+            const resolved: Array<{ ref: string; label: string }> = [];
+            const failed: Array<{ ref: string; error: string }> = [];
+            try {
+              for (let index = 0; index < refs.length; index += 1) {
+                if (stopped()) throw abortErr();
+                const ref = refs[index]!;
+                report(`Inspecting image ${index + 1}/${refs.length}…`, index / refs.length);
+                const localSig = ref.startsWith('local:') ? ref.slice('local:'.length) : ref;
+                const localEntry = ctx.localAssetIndexRef.current.find(
+                  (entry) => entry.kind === 'image' && entry.sig === localSig,
+                );
+                let label = localEntry?.label || ref;
+                let blob: Blob | null = null;
+                if (localEntry) {
+                  const direct = await loadLocalVideo(localEntry.sig);
+                  const folder = !direct && localEntry.folder
+                    ? await loadLocalFolderFile(localEntry.folder.id, localEntry.folder.path, localEntry.sig)
+                    : null;
+                  blob = direct ?? folder?.file ?? null;
+                } else {
+                  const asset = documentRef.current.assets[ref];
+                  if (!asset || asset.kind !== 'image') {
+                    failed.push({ ref, error: 'image ref not found' });
+                    continue;
+                  }
+                  label = asset.label || ref;
+                  if (asset.locator.localSig) {
+                    blob = await loadLocalVideo(asset.locator.localSig);
+                  } else {
+                    const source = resolveAssetUrl(asset);
+                    if (source) {
+                      const requestUrl = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/')
+                        ? source
+                        : `/api/media/fetch?url=${encodeURIComponent(source)}`;
+                      const response = await race(fetch(requestUrl, { ...(signal ? { signal } : {}) }));
+                      if (response.ok) blob = await response.blob();
+                    }
+                  }
+                }
+                if (!blob) {
+                  failed.push({ ref, error: localEntry ? 'local image access unavailable' : 'image bytes unavailable' });
+                  continue;
+                }
+                try {
+                  const encoded = await race(imageBlobForInspection(blob));
+                  frames.push({
+                    atSec: index,
+                    image_base64: encoded.base64,
+                    mime: encoded.mime,
+                    expected: `Still-image asset ${JSON.stringify(label)} (${ref}). Describe only visible evidence; do not infer from the filename.`,
+                  });
+                  resolved.push({ ref, label });
+                } catch (error) {
+                  failed.push({ ref, error: error instanceof Error ? error.message : 'image preparation failed' });
+                }
+              }
+              if (!frames.length) return { ok: false, error: failed[0]?.error || 'no readable images to inspect', data: { failed } };
+              report(`Reviewing ${frames.length} image${frames.length === 1 ? '' : 's'}…`, 0.85);
+              const response = await race(fetch('/api/studio/review', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ mode: 'assets', frames }),
+                ...(signal ? { signal } : {}),
+              }));
+              const body = (await race(response.json().catch(() => ({})))) as {
+                frames?: Array<{ atSec: number; scene?: string }>;
+                error?: string;
+                detail?: string;
+              };
+              if (!response.ok || !body.frames) {
+                return { ok: false, error: body.detail || body.error || `image inspection failed: HTTP ${response.status}`, data: { failed } };
+              }
+              const descriptions = resolved.map((item, index) => ({
+                ...item,
+                description: body.frames?.find((frame) => frame.atSec === frames[index]?.atSec)?.scene || 'No grounded description returned.',
+              }));
+              return {
+                ok: true,
+                summary: `Inspected ${descriptions.length} image${descriptions.length === 1 ? '' : 's'}`,
+                data: {
+                  images: descriptions,
+                  ...(failed.length ? { failed } : {}),
+                  instruction: 'Use these pixel-grounded descriptions for selection and planning. Do not replace them with filename guesses.',
+                },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
           }
           case 'list_models': {
             const kind = input.kind === 'image' || input.kind === 'video' ? `?kind=${input.kind}` : '';
@@ -1908,12 +2226,58 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'apply_layout': {
             const layout = String(input.layout);
+            const layoutIds = Array.isArray(input.blockIds) ? input.blockIds.map(String) : [];
+            const mediaLocations = new Map(documentRef.current.timeline.tracks.flatMap((track) =>
+              track.clips
+                .filter((clip) => clip.kind === 'media')
+                .map((clip) => [clip.id, { trackId: track.id, clip }] as const),
+            ));
+            const mediaOnly = layoutIds.length > 0
+              && !input.shotId
+              && layoutIds.every((id) => mediaLocations.has(id));
+            if (mediaOnly) {
+              const syntheticBlocks: Block[] = layoutIds.map((id, index) => ({
+                id,
+                templateId: 'custom',
+                slots: { innerHtml: '<div></div>', timelineBody: '' },
+                startSec: 0,
+                durationSec: 1,
+                trackIndex: index + 1,
+              }));
+              const planned = applyCompositionLayout(
+                { ...c, blocks: [...c.blocks, ...syntheticBlocks], shots: ensureShots(c) },
+                {
+                  layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
+                  blockIds: layoutIds,
+                },
+              );
+              if ('error' in planned) return { ok: false, error: planned.error };
+              const boxes = new Map(planned.comp.blocks
+                .filter((block) => layoutIds.includes(block.id) && block.box)
+                .map((block) => [block.id, block.box!] as const));
+              let next = documentRef.current;
+              for (const id of layoutIds) {
+                const location = mediaLocations.get(id)!;
+                const box = boxes.get(id);
+                if (!box) return { ok: false, error: `layout did not produce geometry for media clip: ${id}` };
+                const patched = applyEditorCommand(next, {
+                  type: 'clip.patch',
+                  trackId: location.trackId,
+                  clipId: id,
+                  patch: { box },
+                });
+                if (!patched.ok) return { ok: false, error: editorErrorMessage(patched.error), data: { code: patched.error.code, trackIds: patched.error.trackIds } };
+                next = patched.document;
+              }
+              setDocument(next);
+              return { ok: true, summary: `Applied ${layout} layout`, data: { blockIds: layoutIds, mediaClipIds: layoutIds } };
+            }
             const edit = applyLayoutDocumentEdit({
               document: documentRef.current,
               composition: { ...c, shots: ensureShots(c) },
               layout: {
                 layout: layout as Parameters<typeof applyCompositionLayout>[1]['layout'],
-                blockIds: Array.isArray(input.blockIds) ? input.blockIds.map(String) : [],
+                blockIds: layoutIds,
                 ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
                 ...(typeof input.videoPosition === 'string' ? { videoPosition: input.videoPosition as 'left' | 'right' | 'top' | 'bottom' } : {}),
               },
@@ -2228,21 +2592,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
               // New elements always get bespoke visual reasoning. No Frame means the neutral visual
               // craft baseline, not a fallback to the fixed component-library cards.
-              let parsed = await composeBlockChecked(
+              let parsed = await race(composeBlockChecked(
                 seed,
                 `Create a new overlay element for this content: ${String(input.instruction ?? '')}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
                 newBlockComposeMode(),
-              );
+              ));
               // An explicit user request never maps to "nothing worth showing" — a deliberate null
               // here means no component carries the ask, so take the free-form path rather than
               // bouncing the request back at the user.
               if (parsed.declined) {
-                parsed = await composeBlockChecked(
+                parsed = await race(composeBlockChecked(
                   seed,
                   `Create a new overlay element; choose the visual form from the content and editorial purpose: ${String(input.instruction ?? '')}${sceneDirection}`,
                   (acc) => report(noteOf(acc) || t('panels.generating')),
-                );
+                ));
               }
               const nb = withEditableBlockGeometry({
                 id: seed.id,
@@ -2276,7 +2640,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // what the block already IS — silently converting one into the other would throw away
               // whatever the user tuned by hand.
               const current = kitChoiceOf(b);
-              const parsed = await composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('workbench.editing')), current ? { kit: true, current } : undefined);
+              const parsed = await race(composeBlockChecked(seed, String(input.instruction ?? ''), (acc) => report(noteOf(acc) || t('workbench.editing')), current ? { kit: true, current } : undefined));
               // A declined edit means the model refused to change the component — keep the block
               // exactly as it is (never silently convert a kit block to markup) and hand the note
               // back so the agent can rephrase or explain.
@@ -2297,6 +2661,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: false, error: t('workbench.unknownOperationTool', { tool: toolId }) };
         }
       } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') throw e;
         console.warn(`[studio-tool] ${toolId} failed`, e);
         return { ok: false, error: t('editorError.operationFailed') };
       }
@@ -2352,6 +2717,10 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   try {
     result = await pending;
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      rollbackFailure();
+      throw error;
+    }
     console.warn('[studio-tool] asynchronous operation failed', error);
     rollbackFailure();
     return { ok: false, error: t('editorError.operationFailed') };
@@ -2417,7 +2786,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           mainTranscript: asrRef.current ?? [],
           atSec,
         });
-        const base = { theme: c2.theme, ...(c2.palette ? { palette: c2.palette } : {}), ...(c2.frameId ? { frameId: c2.frameId } : {}) };
+        const base = {
+          theme: c2.theme,
+          ...(c2.palette ? { palette: c2.palette } : {}),
+          ...(c2.frameId ? { frameId: c2.frameId } : {}),
+          ...(c2.customVisualStyle ? { customVisualStyle: c2.customVisualStyle } : {}),
+        };
         const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
         if (bid) {
           const b = c2.blocks.find((x) => x.id === bid);

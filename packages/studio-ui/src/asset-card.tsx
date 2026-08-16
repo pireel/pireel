@@ -8,8 +8,14 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Image as ImageIcon, Loader2, Pause, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
+import { Image as ImageIcon, Loader2, MoreHorizontal, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { imageThumb } from '@pireel/ui/image-url';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@pireel/ui/dropdown-menu';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import type { GenElementResult } from './element-history';
 import { componentPreviewModel, LibraryComponentPreview } from './component-preview';
@@ -134,18 +140,18 @@ export function useAudioPreview() {
 
 /** Duration chip in the thumb's top-right corner (video/audio). The API stores no duration, so
  *  it arrives from client-side metadata and stays hidden until known. */
-export function DurBadge({ sec }: { sec: number | null }) {
+export function DurBadge({ sec, menuOffset = false }: { sec: number | null; menuOffset?: boolean }) {
   if (sec == null || !Number.isFinite(sec) || sec <= 0) return null;
   return (
-    <span className="pointer-events-none absolute right-1 top-1 rounded bg-black/55 px-1 py-0.5 text-[9px] tabular-nums text-white">{fmtDur(sec)}</span>
+    <span className={`pointer-events-none absolute top-1 rounded bg-black/55 px-1 py-0.5 text-[9px] tabular-nums text-white ${menuOffset ? 'right-7' : 'right-1'}`}>{fmtDur(sec)}</span>
   );
 }
 
 /** Grid thumbnail: uniform 120×68 16:9 slot; non-16:9 media is letterboxed — centered and fully
  *  visible (object-contain), never cropped. Generated video has no extracted frame → <video> metadata first frame fills in. */
-export function TileThumb({ item: it }: { item: LibraryItem }) {
+export function TileThumb({ item: it, menuOffset = false }: { item: LibraryItem; menuOffset?: boolean }) {
   if (it.kind === 'video') {
-    return <VideoTile item={it} />;
+    return <VideoTile item={it} menuOffset={menuOffset} />;
   }
   if (it.thumbSrc) {
     return (
@@ -163,7 +169,7 @@ export function TileThumb({ item: it }: { item: LibraryItem }) {
 
 /** Video tile: poster frame (or metadata first frame) letterboxed in the 16:9 slot + duration badge.
  *  Even when a poster image exists, a metadata-only <video> is the duration source. */
-function VideoTile({ item: it }: { item: LibraryItem }) {
+function VideoTile({ item: it, menuOffset = false }: { item: LibraryItem; menuOffset?: boolean }) {
   const [dur, setDur] = useState<number | null>(null);
   return (
     <div className="bg-panel-2 relative aspect-video w-full overflow-hidden">
@@ -178,14 +184,14 @@ function VideoTile({ item: it }: { item: LibraryItem }) {
         onLoadedMetadata={(e) => setDur(e.currentTarget.duration)}
         className={it.thumbSrc ? 'hidden' : 'h-full w-full object-contain'}
       />
-      <DurBadge sec={dur} />
+      <DurBadge sec={dur} menuOffset={menuOffset} />
     </div>
   );
 }
 
 /** Audio grid tile: audio has no picture, so it takes the same 16:9 slot with the play/pause state
  *  as the whole subject; duration is read from an off-DOM metadata-only Audio element. */
-export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: string; coverSrc?: string | null }) {
+export function AudioTile({ playing, url, coverSrc, menuOffset = false }: { playing: boolean; url?: string; coverSrc?: string | null; menuOffset?: boolean }) {
   const [dur, setDur] = useState<number | null>(null);
   useEffect(() => {
     if (!url) return;
@@ -204,7 +210,7 @@ export function AudioTile({ playing, url, coverSrc }: { playing: boolean; url?: 
       <span className={`relative flex size-8 items-center justify-center rounded-full ${playing ? 'bg-accent text-white' : coverSrc ? 'bg-black/50 text-white' : 'bg-panel text-ink-3'}`}>
         {playing ? <Pause size={13} /> : <Play size={13} />}
       </span>
-      <DurBadge sec={dur} />
+      <DurBadge sec={dur} menuOffset={menuOffset} />
     </div>
   );
 }
@@ -281,12 +287,13 @@ export function RowThumb({ item: it, playing }: { item: LibraryItem; playing?: b
 }
 
 /** Grid card: responsive 16:9 thumb + 24px title row; click to preview (audio: toggle playback),
- *  draggable, hover shows insert (+) inside the thumb area and delete top-left. */
+ *  draggable, with insert (+) and a compact rename/delete menu when the source supports it. */
 export function AssetCard({
   item: it,
   playing = false,
   onActivate,
   onInsert,
+  onRename,
   onDelete,
   dragProps,
   insertLabel,
@@ -295,12 +302,15 @@ export function AssetCard({
   playing?: boolean;
   onActivate: () => void;
   onInsert: () => void;
+  /** Semantic rename. When present, rename/delete live in one compact menu. */
+  onRename?: () => void;
   /** Absent = no delete affordance (deletable items pass a handler). */
   onDelete?: () => void;
   dragProps: ReturnType<typeof dragPropsFor>;
   insertLabel: string;
 }) {
   const audio = it.kind === 'audio';
+  const hasOptionsMenu = Boolean(onRename);
   return (
     <div className="bg-panel-2/55 hover:bg-panel-2 group relative w-full overflow-hidden rounded-md transition-colors">
       <button
@@ -314,15 +324,17 @@ export function AssetCard({
         {it.kind === 'element' ? (
           <ElementTile item={it} />
         ) : audio ? (
-          <AudioTile playing={playing} url={it.insertUrl} coverSrc={it.thumbSrc} />
+          <AudioTile playing={playing} url={it.insertUrl} coverSrc={it.thumbSrc} menuOffset={hasOptionsMenu} />
         ) : (
-          <TileThumb item={it} />
+          <TileThumb item={it} menuOffset={hasOptionsMenu} />
         )}
         <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{it.label}</div>
       </button>
-      {/* Hover chrome sits inside the thumb area (label strip is h-6 below): delete top-left, insert "+" bottom-right.
-          Video/audio keep the top-right corner for the duration badge (rendered by the tile itself). */}
-      {onDelete && (
+      {/* Action chrome sits inside the thumb area (label strip is h-6 below). Video/audio move the
+          duration badge left when the top-right options menu is present. */}
+      {hasOptionsMenu ? (
+        <AssetCardMoreMenu onRename={onRename} onDelete={onDelete} />
+      ) : onDelete ? (
         <button
           type="button"
           title={t('panels.deleteAsset')}
@@ -332,7 +344,7 @@ export function AssetCard({
         >
           <Trash2 size={11} />
         </button>
-      )}
+      ) : null}
       <button
         type="button"
         title={insertLabel}
@@ -343,6 +355,47 @@ export function AssetCard({
         <Plus size={12} />
       </button>
     </div>
+  );
+}
+
+/** Compact card action menu. The trigger appears with the card's hover/focus state and offsets
+ * duration metadata so the two controls never overlap. */
+export function AssetCardMoreMenu({
+  onRename,
+  onDelete,
+}: {
+  onRename?: () => void;
+  onDelete?: () => void;
+}) {
+  if (!onRename && !onDelete) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          title={t('panels.assetOptions')}
+          aria-label={t('panels.assetOptions')}
+          onClick={(event) => event.stopPropagation()}
+          className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded bg-black/55 text-white/90 opacity-0 transition-opacity hover:bg-black/75 hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/80 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+        >
+          <MoreHorizontal size={12} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={4} className="min-w-[132px] text-[11px]">
+        {onRename ? (
+          <DropdownMenuItem onSelect={onRename} className="text-[11px]">
+            <Pencil size={12} />
+            {t('panels.renameAsset')}
+          </DropdownMenuItem>
+        ) : null}
+        {onDelete ? (
+          <DropdownMenuItem onSelect={onDelete} variant="destructive" className="text-[11px]">
+            <Trash2 size={12} />
+            {t('panels.deleteAsset')}
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

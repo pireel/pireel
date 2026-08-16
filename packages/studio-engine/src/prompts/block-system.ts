@@ -1,24 +1,25 @@
 /**
  * The free-form path's body: design constraints, layout archetypes, chart recipes, SELF-CHECK.
  *
- * This is the layer the component library is replacing. Everything here exists because the model
- * writes the markup — px scales, surface strategy, token contrast, motion staging. As components
+ * This is the layer the registered Component presets are replacing. Everything here exists because the model
+ * writes the markup — px scales, surface strategy, token contrast, motion staging. As presets
  * take those over, this file shrinks; it is meant to be deleted, not maintained forever, which is
  * why it is isolated instead of interleaved with the shared layers.
  *
  * Assembled into a system prompt by assemble.ts — the base contract (L0), the editorial judgment
- * (L3.1) and the output contract live there and are shared with the component path.
+ * (L3.1) and the output contract live there and are shared with the registered Component path.
  * Note: ``` fences in the body must be written as \`\`\` inside the template literal.
  */
 
-export const BLOCK_HTML_BODY = `You author/edit the fragment as MARKUP. It is ONE designed element from a great data/editorial deck — a metric card, a comparison, a flow/structure diagram, a small hand-built chart, a labelled callout. NOT a full slide, NOT a paragraph of styled text.
+export const BLOCK_HTML_BODY = `You author/edit one Motion Graphic Component as MARKUP. Component is Studio's broader extensible element model; Motion Graphic is the family this contract is designing. It is ONE editable visual composition participating in a video scene: open typography, source annotation, a relationship or process, a data explanation, a transition plate, a full-field chapter/payoff, or a contained information surface when containment is genuinely needed. It is NOT a generic UI widget, a default rounded card, or a paragraph with decoration.
 
 A block has two parts:
 1) INNER HTML: markup + ONE <style> whose selectors are ALL scoped under #BLOCK_ID (e.g. #b7 .num {…}). Never unscoped/global selectors.
 2) TIMELINE BODY: GSAP statements against an already-created paused timeline named \`tl\`, in LOCAL time (0 = block start). e.g. tl.from('#b7 .num',{autoAlpha:0,y:40,duration:0.4},0). No gsap.timeline() call, no registration — body statements only. Deterministic only (no setTimeout/Date/Math.random).
 
 SIZING — the canvas is a FIXED 1080px-wide reference (height follows the video aspect, ≈1920 for 9:16) and is scaled uniformly for preview/export, so use PLAIN px tuned to that 1080-wide reference (a 72px headline reads the same in every fragment). Do NOT scale type to the box SIZE; DO adapt the LAYOUT to the box's ASPECT RATIO.
-- px scale on the 1080-wide canvas (your fragment is a sub-region of it — you are told its px size): hero number 120–280px · headline/keyword 56–104px · body/label 30–46px · kicker/meta 24–32px · padding 36–64px · gaps 16–40px · radius 16–28px · hairline 2px. Reduce CJK headline one tier vs latin. NEVER vw/vh, NEVER cqmin-scaled fonts.
+- Every visible text node MUST resolve to an explicit px font size. Set a readable body baseline on the root wrapper (normally font-size:36px), then override each distinct role in px: hero number 120–280px · headline/keyword 56–104px · body/label 30–46px · kicker/meta 24–32px. Never rely on the browser's 16px default, \`inherit\`, or an unspecified font size.
+- Every \`font-size\` value is one literal \`Npx\`. For all other fixed lengths use px too: padding 36–64px · gaps 16–40px · radius 16–28px · hairline 2px. Percentages are allowed only for relative placement and sizing. NEVER cm/mm/in/pt/pc/Q, em/rem/ch, vw/vh/vmin/vmax, container units, or responsive font formulas such as clamp()/calc(). Reduce CJK headline one tier vs latin.
 - Make .wrap a container and switch ARRANGEMENT by the box's aspect ratio (wide box → side-by-side, tall box → stacked). Sizes stay px; only the layout flips:
     #BLOCK_ID .wrap{position:absolute;inset:0;container-type:size;display:flex;flex-direction:column;justify-content:center;gap:32px;padding:48px}
     /* default above = tall/portrait. When the box is wide, go horizontal: */
@@ -38,17 +39,19 @@ COLOR & CONTRAST — tokens only, and they must ACTUALLY contrast
 - HARD RULE (fixes the "border = background" bug): a border/divider/track MUST use a DIFFERENT token than the surface behind it. Never border:var(--panel) on a var(--panel) card; never fill==stroke. Use three distinct steps — card fill var(--panel), inner track/inset var(--panel-2), separator var(--line). If you can't see the edge, you picked the wrong token.
 - Colors are DERIVED FROM THE FOOTAGE — never hardcode hex.
 
-STRUCTURE, not text — if the fragment is ONLY words, it is WRONG
-- Every fragment needs ≥1 non-text structural element that carries the meaning: a panel/card, a divider rule, a bar/column/ring/line chart, an index kicker ("03"), an SVG connector/arrow, a framed callout. Build it with real flex/grid layout + inline SVG.
+STRUCTURE, not decoration
+- Structured facts need a visible relation that carries the meaning: a divider only when it separates, a bar/column/ring/line only when it encodes data, an SVG connector only when it explains a connection, or a contained surface only when it creates a necessary reading ground. Never add a panel, rule, icon, index, or arrow merely to satisfy a structure quota.
+- A decisive typographic beat MAY be type-only when scale, line break, alignment, negative space, and timed emphasis are the actual structure. It must read as authored editorial composition, not centered slide text and not a sentence placed inside a box.
 - ONE oversized focal element (a number var(--font-num), a keyword, a node) against small calm labels — strong SIZE CONTRAST is the main tool (focal ≥3× the labels). Restraint: delete anything not carrying meaning.
-- Component types: the HOUSE COMPONENT TYPES section below is the shared vocabulary (derived from the component registry — same names, same content budgets as the component path). Pick by content; render in the active theme's language; compose beyond them (structure/hierarchy, loop/cycle, annotated visuals) when the content demands.
+- Motion Graphic Component types: the HOUSE MOTION GRAPHIC TYPES section below is the current shared vocabulary (derived from the Component registry, with the same names and content budgets as the registered path). Pick by content; render in the active theme's language; compose beyond them (structure/hierarchy, loop/cycle, annotated visuals) when the content demands.
 
-LAYOUT ARCHETYPES — same component, DIFFERENT stagings. Pick the ONE that fits the CONTENT best — content fit ALWAYS outranks variety. Variety is a tiebreaker: when several archetypes fit equally well, prefer one the adjacent fragments didn't use; when the best fit repeats a neighbor's archetype, keep it and differentiate in the staging instead (alignment, motion flavor, secondary devices):
+LAYOUT ARCHETYPES — same Motion Graphic job, DIFFERENT stagings. Pick the ONE that fits the CONTENT best — content fit ALWAYS outranks variety. Variety is a tiebreaker: when several archetypes fit equally well, prefer one the adjacent fragments didn't use; when the best fit repeats a neighbor's archetype, keep it and differentiate in the staging instead (alignment, motion flavor, secondary devices):
 - hero-metric — one enormous var(--font-num) number, tiny mono kicker above, unit/note below; optionally a GHOST NUMERAL (same number, ~2.5× larger, var(--panel-2) or 6-8% opacity ink, clipped behind) for depth.
 - split-editorial — asymmetric two-column: a narrow left rail (vertical kicker text / index "03" / 2px accent rule) + the content column right. Feels like a magazine spread, not a centered card.
 - stacked-rows — 2–4 data rows separated by hairlines; labels left, tabular numbers right-aligned; the winning row carries the accent. For rankings / multi-row data.
 - chart-forward — the chart IS the fragment: chart fills ~70% of the box, one caption row above/below, minimal chrome. Use when the trend/share is the message.
 - poster-type — typographic composition for callout/quote: ONE keyword huge (may break into stacked lines, tight leading, weight 800), supporting words tiny and offset; accent underline or circled keyword. No box-in-box.
+- full-field argument — for a chapter turn or payoff that temporarily owns the canvas: use the whole assigned box as one field, establish one dominant statement or relation, and make the entrance/exit hand off cleanly to neighboring footage. Do not center a small card in the field.
 - annotated — the fact + a hand-annotation device: an SVG arrow / circled value / margin note in mono type, like an editor marked up the page. Great for look-at-this beats.
 - badge-verdict — a stamped verdict: circular/rounded badge (accent ring or fill) with a short word, plus a one-line reason. For conclusions / recommendations / warnings.
 Rotate alignment too (left-rail / centered / right-weighted) — 7 fragments that are all centered cards read as ONE template repeated.
@@ -105,10 +108,12 @@ RULES
 - The archetype for THIS content, not a carbon copy of an adjacent fragment: when the archetype repeats, the staging differs (see VARIETY).
 
 SELF-CHECK before you output — silently fix anything that fails:
+- Every text role inherits a declared readable px baseline or has its own literal px font-size; no browser-default 16px text and no non-px CSS length units.
 - Type/element sizes in plain px tuned to 1080×1920 (NOT scaled to box size); layout adapts to the box's aspect ratio; NO vw/vh, NO cqmin fonts.
 - The legibility strategy matches the stated BACKDROP (on footage: direct high-contrast type by default, card/scrim only for dense structured content; open composition on a flat theme page); nothing bleeds to the edge.
 - Every border/divider/track uses a DIFFERENT token than its surface (edges visible).
 - Genuine structure (≥1 non-text element), ONE focal element, size contrast ≥3× — not just words.
 - Motion is STAGED (≥2 stages, hero lands last) and uses ≥2 devices — not a single fade; then everything holds still. Selectors scoped, timing local.
 - Every visible text element carries a unique data-edit key (except animation-rewritten text).
+- The result reads as part of a directed video scene, not a dashboard widget or a miniature presentation slide floating over footage.
 - The archetype is the best fit for THIS content; and it is not a carbon copy of an adjacent fragment (if the archetype repeats, the staging differs).`;

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp, renderBlock } from '@pireel/studio-engine/composition';
+import { type Block, type Composition, assembleBlockHtml, blockKind, blockPreviewDoc, previewMiniComp } from '@pireel/studio-engine/composition';
 import { getTheme, themeVarsCss } from '@pireel/studio-engine/theme';
 import { injectPreviewRuntime } from './sample-composition';
 import { injectPreviewContentBoundsReporter, type PreviewContentBounds } from './preview-content-bounds';
@@ -160,7 +160,6 @@ export function BlockPreviewFrame({
       return;
     }
     if (replayKey !== undefined) setLoop(true, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replayKey]);
   return (
     <div
@@ -278,6 +277,8 @@ export function InlineBlockPreview({
   animate = false,
   person = null,
   ground = 'checker',
+  backdrop,
+  children,
 }: {
   comp: Composition;
   block: Block;
@@ -288,8 +289,15 @@ export function InlineBlockPreview({
   person?: PreviewPerson | null;
   /** Preview ground: 'checker' = honest ground (transparent checkerboard, library/card default); 'stage' = stage paper ground (theme wall). */
   ground?: 'stage' | 'checker';
+  /** Trusted scene layer behind the block, used when a card previews the block in composition rather than in isolation. */
+  backdrop?: ReactNode;
+  /** Screen-space chrome over the scaled stage, such as a caption sample. */
+  children?: ReactNode;
 }) {
-  const { innerHtml, timelineBody } = useMemo(() => renderBlock(block), [block]);
+  // Use the production assembler here as well. Rendering only the template body
+  // silently discarded block.box, so Frame/Motion Graphic samples appeared as a
+  // full-canvas layer even though their production placement was safe.
+  const { html, timelineBody } = useMemo(() => assembleBlockHtml(block, comp), [block, comp]);
   const theme = getTheme(comp.theme);
   const vars = useMemo(() => themeVarsCss(theme, comp.palette), [theme, comp.palette]);
   const stageBg = comp.palette?.paper ?? theme.background;
@@ -322,7 +330,6 @@ export function InlineBlockPreview({
       tlRef.current?.kill();
       tlRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timelineBody, animate]);
 
   return (
@@ -338,13 +345,15 @@ export function InlineBlockPreview({
             el.style.cssText = `position:absolute;left:${padX}px;top:${padY}px;width:${comp.width}px;height:${comp.height}px;transform:scale(${scale});transform-origin:top left;overflow:hidden;${ground === 'checker' ? 'background:transparent;' : `background:${stageBg};`}${vars}font-family:var(--font-body);color:var(--fg);`;
         }}
       >
+        {backdrop}
         {/* Placeholder person underneath (normal overlay: graphics in front of the person) */}
         {person && !person.front && <PersonBust person={person} canvasH={comp.height} />}
-        {/* Dialect blocks' selectors are all #id-scoped, so they drop into the main document without style bleed */}
-        <div id={block.id} style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: innerHtml }} />
+        {/* The assembled block includes the same framing box and sizing context used by editor/export. */}
+        <div style={{ position: 'absolute', inset: 0 }} dangerouslySetInnerHTML={{ __html: html }} />
         {/* Person on top (personFront: text-behind-person / sticker person) -> silhouette sits in front of the graphics */}
         {person?.front && <PersonBust person={person} canvasH={comp.height} />}
       </div>
+      {children}
     </div>
   );
 }

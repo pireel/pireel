@@ -6,7 +6,7 @@
  *
  *   fragment contract     never changes (this stack's base; the editor's own is on the agent side)
  *   L1 props grammar      never changes
- *   L4 vocabulary         changes with the retrieved component candidates (bounded)
+ *   L4 vocabulary         changes with the retrieved Component candidates (bounded)
  *   L3.1 editorial        changes when the preset changes
  *   output contract       changes with the generation path
  *   L3.2 theme voice      changes whenever the user switches themes  ← last, on purpose
@@ -19,6 +19,7 @@ import { BLOCK_HTML_BODY } from './block-system';
 import { FRAGMENT_CONTRACT } from './fragment-contract';
 import { L1_PROPS_SPEC } from './l1-props-spec';
 import { catalogSection, componentNormsSection } from './l4-catalog';
+import { MOTION_GRAPHIC_CAPABILITY_MAP, motionGraphicPatternSection } from './motion-graphic-patterns';
 import { getPreset } from './presets';
 
 interface ComponentSystemOptions {
@@ -26,6 +27,8 @@ interface ComponentSystemOptions {
   /** Retrieved query-time subset. Omit only for catalog inspection/tests; production generation
    * should always pass the candidates selected for the current editing moment. */
   componentIds?: string[];
+  /** Query-time bespoke form references; bounded separately from typed Component schemas. */
+  patternIds?: string[];
 }
 
 function componentIdsFor(options?: ComponentSystemOptions): string[] {
@@ -35,34 +38,42 @@ function componentIdsFor(options?: ComponentSystemOptions): string[] {
 /** Path-specific output contract — the only part of the stack that knows what the answer looks like. */
 const KIT_OUTPUT = `OUTPUT
 After the note line, ONE \`\`\`json fence, holding exactly one of:
-{"component": "<id>", "props": { … }}   — a component carries this moment. Only keys listed for
-                                          that component; anything else is dropped.
-{"custom": true}                        — the moment DESERVES a graphic but no component carries it
+{"component": "<id>", "props": { … }}   — a registered Motion Graphic Component carries this moment. Only keys
+                                          listed for that Component are kept; anything else is dropped.
+{"custom": true}                        — the moment DESERVES a Motion Graphic but no preset carries it
                                           (a diagram, a bespoke layout, something the user described
                                           that fits no schema). A free-form designer takes over.
-null                                    — the moment deserves NO graphic at all.
-Prefer a component whenever one fits; custom is an escape, not a style choice.`;
+null                                    — the moment deserves NO Motion Graphic at all.
+Prefer a registered Motion Graphic Component whenever one fits; custom is an escape, not a style choice.`;
 
 const HTML_OUTPUT = `OUTPUT
 After the note line, in THIS order:
 - one \`\`\`html block = the full INNER HTML,
 - then one \`\`\`js block = the full TIMELINE BODY.`;
 
-/** The component path's system prompt. It is reserved for an explicit library-component choice or
+/** The registered Component path's system prompt. It is currently used for an explicit Motion Graphic preset choice or
  *  editing an existing kit block; new generation uses the free-form path even without a Frame.
- *  Components themselves stay unthemed. */
+ *  registered Component edit. Registered presets themselves stay unthemed. */
 export function buildKitSystem(opts?: ComponentSystemOptions): string {
   const preset = getPreset(opts?.presetId);
   return [FRAGMENT_CONTRACT, L1_PROPS_SPEC, catalogSection(componentIdsFor(opts)), preset.editorial, KIT_OUTPUT].join('\n\n');
 }
 
-/** The free-form path's system prompt. Same base contract and L3.1 as the component path — only
+/** The free-form path's system prompt. Same base contract and L3.1 as the registered Component path — only
  *  the capability layer and the output contract differ, which is the whole claim of the stack. */
 export function buildHtmlSystem(opts?: ComponentSystemOptions): string {
   const preset = getPreset(opts?.presetId);
-  // The house component types ride in DERIVED — the themed path and the component path speak the
+  // The house Motion Graphic Component types ride in DERIVED — the themed path and the preset path speak the
   // same vocabulary from the same schemas (a theme restyles these types, it doesn't rename them).
-  return [FRAGMENT_CONTRACT, BLOCK_HTML_BODY, componentNormsSection(componentIdsFor(opts)), preset.editorial, HTML_OUTPUT].join('\n\n');
+  return [
+    FRAGMENT_CONTRACT,
+    BLOCK_HTML_BODY,
+    MOTION_GRAPHIC_CAPABILITY_MAP,
+    componentNormsSection(componentIdsFor(opts)),
+    motionGraphicPatternSection(opts?.patternIds ?? []),
+    preset.editorial,
+    HTML_OUTPUT,
+  ].join('\n\n');
 }
 
 /** The default free-form system (spoken preset) — the theme brief is appended by withActiveTheme,

@@ -19,6 +19,40 @@ function stripBlockPlacement(block: ReturnType<typeof captionBlocksFromAsr>[numb
   return payload;
 }
 
+/** a professional NLE treats caption word timing as clip-local data and rescales it with a text-clip trim.
+ * Our renderer stores edited-timeline seconds, so materialize the equivalent mapping here while
+ * leaving the source transcript and sourceRef untouched. */
+function retimeCaptionBlock(
+  block: ReturnType<typeof captionBlocksFromAsr>[number],
+  startFrame: number,
+  endFrame: number,
+  fps: number,
+  shouldRetime: boolean,
+): GraphicBlockPayload {
+  if (!shouldRetime) return stripBlockPlacement(block);
+  const words = Array.isArray(block.slots.words)
+    ? block.slots.words as Array<{ text: string; start: number; end: number }>
+    : [];
+  if (!words.length) return stripBlockPlacement(block);
+  const baseDuration = Math.max(1 / fps, block.durationSec);
+  const nextStartSec = timelineFramesToSeconds(startFrame, fps);
+  const nextDurationSec = timelineFramesToSeconds(endFrame - startFrame, fps);
+  const scale = nextDurationSec / baseDuration;
+  return stripBlockPlacement({
+    ...block,
+    startSec: nextStartSec,
+    durationSec: nextDurationSec,
+    slots: {
+      ...block.slots,
+      words: words.map((word) => ({
+        ...word,
+        start: nextStartSec + Math.max(0, word.start - block.startSec) * scale,
+        end: nextStartSec + Math.max(0, word.end - block.startSec) * scale,
+      })),
+    },
+  });
+}
+
 type SpeechTimelineClip = NarrativeTimelineClip | MediaTimelineClip | AudioTimelineClip;
 
 type CaptionSourceSelection = NonNullable<EditorDocumentV2['semantics']['managedCaptionSource']>;
@@ -107,6 +141,14 @@ function uniqueClipId(preferred: string, used: Set<string>): string {
   return id;
 }
 
+function sameSourceRef(left: CaptionSourceRef | undefined, right: CaptionSourceRef | undefined): boolean {
+  return !!left && !!right
+    && left.assetId === right.assetId
+    && left.segmentIndex === right.segmentIndex
+    && left.wordStart === right.wordStart
+    && left.wordEnd === right.wordEnd;
+}
+
 /** Rebuild the semantic managed-caption lane directly from V2 transcript and narrative truth. */
 export function relayManagedCaptionTrack(
   document: EditorDocumentV2,
@@ -178,15 +220,24 @@ export function relayManagedCaptionTrack(
       : undefined;
     const id = uniqueClipId(block.id || `caption_${index + 1}`, usedIds);
     const previous = existingById.get(id);
+    const timingOverride = previous?.kind === 'caption'
+      && sameSourceRef(previous.sourceRef, sourceRef)
+      ? previous.timingOverride
+      : undefined;
+    const derivedStartFrame = secondsToTimelineFrames(block.startSec, document.canvas.fps);
+    const derivedEndFrame = derivedStartFrame + positiveDurationFrames(block.durationSec, document.canvas.fps);
+    const startFrame = Math.max(0, derivedStartFrame + (timingOverride?.startOffsetFrames ?? 0));
+    const endFrame = Math.max(startFrame + 1, derivedEndFrame + (timingOverride?.endOffsetFrames ?? 0));
     return {
       id,
       kind: 'caption',
-      startFrame: secondsToTimelineFrames(block.startSec, document.canvas.fps),
-      durationFrames: positiveDurationFrames(block.durationSec, document.canvas.fps),
+      startFrame,
+      durationFrames: endFrame - startFrame,
       enabled: previous?.enabled ?? true,
       ...(previous?.linkGroupId ? { linkGroupId: previous.linkGroupId } : {}),
-      block: stripBlockPlacement(block),
+      block: retimeCaptionBlock(block, startFrame, endFrame, document.canvas.fps, !!timingOverride),
       managed: true,
+      ...(timingOverride ? { timingOverride } : {}),
       ...(sourceRef
         ? {
             sourceRef,

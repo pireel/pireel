@@ -111,7 +111,8 @@ async function materialize(
     ?.trim();
   const type =
     responseType || source.fallbackType || 'application/octet-stream';
-  if (!localAssetKindOf({ name: source.filename, type })) {
+  const sourceKind = localAssetKindOf({ name: source.filename, type });
+  if (!sourceKind) {
     await response.body.cancel();
     throw new Error(`unsupported local media: ${source.filename}`);
   }
@@ -119,7 +120,7 @@ async function materialize(
     name: source.filename || 'import',
     type,
     expectedSize,
-    pinned: Boolean(source.folder),
+    pinned: sourceKind === 'image' || Boolean(source.folder),
   });
   return { file, sig: source.sig, persisted: true };
 }
@@ -136,10 +137,13 @@ export async function importLocalSource(
   const folder = source.folder;
   if (!persisted) {
     await saveLocalVideo(file, sig, handle, {
-      // Folder-input files have no reusable handle, so their OPFS copy is the source of truth.
-      pinned: Boolean(folder && !handle),
-      // A single-file handle also keeps a bounded OPFS fallback for embedded browser refreshes.
-      fallbackCopy: Boolean(handle && !folder),
+      // Still images are small enough to keep durably and are rendered from several runtimes
+      // (parent timeline + opaque preview iframe). Never make their availability depend only on a
+      // native handle whose permission can fall back to "prompt" after a refresh.
+      pinned: kind === 'image' || Boolean(folder && !handle),
+      // A single-file handle keeps a bounded fallback. Images keep one even when they came from a
+      // folder handle so a hot reload does not turn a valid clip into an unresolved locator.
+      fallbackCopy: kind === 'image' || Boolean(handle && !folder),
     });
   }
   return {

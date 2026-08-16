@@ -6,14 +6,14 @@
  * the editor in its own words; extracting a real global layer out of those is a separate job.
  * This file is the base of one stack, and naming it so keeps that debt visible.
  *
- * Deliberately small: only what holds no matter which preset is loaded, which components exist,
+ * Deliberately small: only what holds no matter which preset is loaded, which Components exist,
  * or whether the answer is markup or props. Everything that varies by domain (L3.1), capability
  * (L1/L4) or project (L3.2) belongs in its own layer — padding the base with "generally good
  * advice" is exactly how the previous prompt became a 19k monolith.
  */
 
-export const FRAGMENT_CONTRACT = `You are producing ONE on-screen graphic for ONE moment of a video. Not the whole video, not a slide
-deck, not a subtitle: one element, in a box whose position, size and timing were decided for you.
+export const FRAGMENT_CONTRACT = `You are producing ONE Motion Graphic Component for ONE moment of a video. A Component is Studio's broader extensible visual-element concept; Motion Graphic is the specific Component family used by this contract. Not the whole video, not a slide
+deck, not a subtitle: one designed, timed visual expression in a box whose position, size and timing were decided for you.
 
 WHAT YOU MAY NOT DO
 - Do not change anything the instruction did not ask about. An edit preserves everything else.

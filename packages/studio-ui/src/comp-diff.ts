@@ -118,16 +118,18 @@ export function supplementalMediaFramingOnlyChange(
   return changed;
 }
 
-/** Only the theme-mount surface (frameId/palette) changed: skip the rebuild and hot-patch #root's vars.
+/** Only the theme-mount surface (frameId/custom style/palette) changed: skip the rebuild and hot-patch #root's vars.
  *  Already-inserted components carry their frozen insertion-time tokens (Block.vars, #id-scoped above
  *  #root), so a theme swap genuinely never restyles them — on this fast path AND on every later rebuild.
  *  Only the stage background and future generations pick up the new palette. */
 export function themeMountOnlyChange(a: Composition | null, b: Composition): boolean {
   if (!a) return false;
-  if (previewDataEqual(a.palette, b.palette) && previewDataEqual(a.frameId, b.frameId)) return false;
+  if (previewDataEqual(a.palette, b.palette)
+    && previewDataEqual(a.frameId, b.frameId)
+    && previewDataEqual(a.customVisualStyle, b.customVisualStyle)) return false;
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Composition>;
   for (const k of keys) {
-    if (k === 'palette' || k === 'frameId' || k === 'personFx') continue;
+    if (k === 'palette' || k === 'frameId' || k === 'customVisualStyle' || k === 'personFx') continue;
     if (!previewDataEqual(a[k], b[k])) return false;
   }
   return true;

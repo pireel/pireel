@@ -6,7 +6,7 @@ export type StudioScenarioSkillId = typeof STUDIO_AUTO_SKILL_ID | StudioScenario
 
 /**
  * A Markdown-first expert playbook. The body intentionally stays prose: it should shape judgment,
- * not turn a flexible editing Skill into a rigid workflow graph or component recipe.
+ * not turn a flexible editing Skill into a rigid workflow graph or Component/Motion Graphic recipe.
  */
 export interface StudioScenarioSkill {
   id: StudioScenarioSkillDefinitionId;

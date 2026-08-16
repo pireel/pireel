@@ -1,6 +1,6 @@
 /**
  * ACTIVE THEME wrapper: appends the current theme brief (themeForLlm output) to
- * the end of the component-generation system prompt.
+ * the end of the Motion Graphic Component-generation system prompt.
  * Variable injection = function params + native ${}, compile-time safety net.
  */
 
@@ -10,7 +10,10 @@ export function withActiveTheme(system: string, theme?: string): string {
   return `${system}
 
 === ACTIVE THEME (preset design system) ===
-Compose strictly within this theme. Use its tokens via var(--name); do NOT invent new palettes, fonts, or backgrounds. Select and arrange within it — protect the aesthetic.
+The theme fills only unspecified visual decisions. Resolve conflicts in this order: the latest explicit user instruction; the current project/manual UI controls; saved custom visual controls; then this theme. Current manual caption, layout, palette, canvas, crop and placement choices are user decisions—preserve them. Never reapply a theme default over a newer project value. Within the remaining freedom, use the theme's tokens via var(--name); do NOT invent new palettes, fonts, or backgrounds.
+
+FIXED PRODUCT SURFACES:
+- The Code Motion Graphic owns its editor chrome, syntax colors, diff colors, line focus and animation grammar. Do not rebuild or recolor that internal code viewport from the active visual direction. The theme may only position the Code block and design the surrounding scene.
 
 THEME DISTINCTIVENESS IS STRUCTURAL, NOT A RECOLOR:
 - If the instruction includes DIRECTOR SCENE CONTEXT, treat its named signature treatment, visual anchor, composition, motion plan, sound plan, and B-roll decision as one binding scene contract. Do not discard them and design an isolated widget.

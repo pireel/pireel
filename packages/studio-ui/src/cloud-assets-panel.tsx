@@ -26,9 +26,23 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@pireel/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@pireel/ui/dialog';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import { type GenJob, listStudioGens, pollCreation } from './gen-api';
-import { type ElementEntry, type GenElementResult, loadElementEntries, removeElementEntry, syncElementEntries } from './element-history';
+import {
+  addElementEntry,
+  type ElementEntry,
+  type GenElementResult,
+  loadElementEntries,
+  removeElementEntry,
+  syncElementEntries,
+} from './element-history';
 import {
   AssetCard,
   AssetLightbox,
@@ -63,6 +77,7 @@ const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: 'audio', label: 'panels.music' },
 ];
 const CLOUD_FILTER_ITEM_CLASS = 'pl-2 text-[10.5px] data-[state=checked]:bg-panel-2 data-[state=checked]:text-ink [&>span:first-child]:hidden';
+const CLOUD_ASSET_LABEL_MAX_LENGTH = 80;
 
 /** Measure a local file's natural dims before upload (instant, no network) → persist so the grid/insert can reuse. */
 const fileDims = (f: File, kind: 'image' | 'video'): Promise<{ w: number; h: number } | null> =>
@@ -167,6 +182,8 @@ export function CloudAssetsPanel({
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
+  const [renaming, setRenaming] = useState<LibraryItem | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
 
   // Uploads: fetch images/videos in parallel and merge (the API requires a single kind value).
@@ -355,6 +372,55 @@ export function CloudAssetsPanel({
     }
   };
 
+  const beginRename = (it: LibraryItem) => {
+    setRenaming(it);
+    setRenameDraft(it.label);
+  };
+
+  const commitRename = async () => {
+    if (!renaming) return;
+    const label = renameDraft.trim().slice(0, CLOUD_ASSET_LABEL_MAX_LENGTH);
+    if (!label || label === renaming.label) return;
+
+    if (renaming.kind === 'element') {
+      const id = renaming.id.slice(3);
+      const entry = elements.find((candidate) => candidate.id === id);
+      if (!entry) return;
+      addElementEntry(projectId, {
+        ...entry,
+        element: { ...entry.element, label },
+      });
+      setElements(loadElementEntries(projectId));
+      setPreview((current) => (current?.id === renaming.id ? { ...current, label } : current));
+      setRenaming(null);
+      setRenameDraft('');
+      toast.success(t('panels.assetRenamed'));
+      return;
+    }
+
+    if (!renaming.uploadId) return;
+    const uploadId = renaming.uploadId;
+    setUploads((current) => current.map((item) => (item.uploadId === uploadId ? { ...item, label } : item)));
+    setPreview((current) => (current?.uploadId === uploadId ? { ...current, label } : current));
+    setRenaming(null);
+    setRenameDraft('');
+    try {
+      const response = await fetch(`/api/me/uploads/${encodeURIComponent(uploadId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      toast.success(t('panels.assetRenamed'));
+    } catch {
+      setUploads((current) =>
+        current.map((item) => (item.uploadId === uploadId ? { ...item, label: renaming.label } : item)),
+      );
+      setPreview((current) => (current?.uploadId === uploadId ? renaming : current));
+      toast.error(t('panels.renameAssetFailed'));
+    }
+  };
+
   const insertOf = (it: LibraryItem) => {
     if (it.kind === 'element') {
       if (it.element) onInsertElement(it.element, it.prompt ?? it.label);
@@ -377,6 +443,7 @@ export function CloudAssetsPanel({
       playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
       onActivate={() => activate(it)}
       onInsert={() => insertOf(it)}
+      onRename={it.deletable && (it.uploadId || it.kind === 'element') ? () => beginRename(it) : undefined}
       onDelete={it.deletable ? () => void doDelete(it) : undefined}
       dragProps={dragPropsFor(it, onDragAsset)}
       insertLabel={insertLabel(it)}
@@ -494,6 +561,59 @@ export function CloudAssetsPanel({
           }}
         />
       )}
+      <Dialog
+        open={Boolean(renaming)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenaming(null);
+            setRenameDraft('');
+          }
+        }}
+      >
+        <DialogContent className="bg-panel border-line w-[min(420px,calc(100vw-2rem))] gap-3 p-4">
+          <DialogHeader className="pr-7">
+            <DialogTitle className="text-ink text-[14px]">{t('panels.renameAsset')}</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void commitRename();
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1.5">
+              <span className="text-ink-2 text-[11px] font-medium">{t('panels.assetName')}</span>
+              <input
+                autoFocus
+                value={renameDraft}
+                maxLength={CLOUD_ASSET_LABEL_MAX_LENGTH}
+                onChange={(event) => setRenameDraft(event.target.value)}
+                placeholder={t('panels.assetNamePlaceholder')}
+                className="border-line bg-panel-2 text-ink placeholder:text-ink-4 focus:border-accent h-8 w-full rounded-md border px-2.5 text-[12px] outline-none transition-colors"
+              />
+            </label>
+            <DialogFooter className="mt-1 flex-row justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setRenaming(null);
+                  setRenameDraft('');
+                }}
+                className="border-line text-ink-2 hover:bg-panel-2 h-7 rounded-md border px-3 text-[11px]"
+              >
+                {t('panels.cancel')}
+              </button>
+              <button
+                type="submit"
+                disabled={!renameDraft.trim() || renameDraft.trim() === renaming?.label}
+                className="bg-ink text-bg h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
+              >
+                {t('panels.saveName')}
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

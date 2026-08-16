@@ -5,6 +5,7 @@ import {
   groupFolderRestoreEntries,
   pendingLocalAssetEntries,
   reconcileLocalAssetRegistry,
+  renameLocalAssetEntry,
   triggerFolderInput,
 } from './local-asset-folders';
 
@@ -72,5 +73,27 @@ describe('local folder recovery', () => {
     expect(pendingLocalAssetEntries(entries, new Set(['loaded.png:1:1'])).map((item) => item.sig)).toEqual([
       'still-pending.png:2:2',
     ]);
+  });
+
+  it('renames only display metadata without changing the local file identity', () => {
+    const original = entry('product.mov:20:3', 'folder-a', 'clips/product.mov');
+    const renamed = renameLocalAssetEntry(
+      [original, entry('other.mov:10:2')],
+      original.sig,
+      '  Product close-up and texture details  ',
+    );
+
+    expect(renamed[0]).toEqual({
+      ...original,
+      label: 'Product close-up and texture details',
+    });
+    expect(renamed[0]?.sig).toBe(original.sig);
+    expect(renamed[0]?.folder).toEqual(original.folder);
+    expect(renamed[1]?.label).toBe('other.mov:10:2');
+  });
+
+  it('rejects an empty semantic label', () => {
+    const entries = [entry('product.mov:20:3')];
+    expect(renameLocalAssetEntry(entries, entries[0]!.sig, '   ')).toBe(entries);
   });
 });

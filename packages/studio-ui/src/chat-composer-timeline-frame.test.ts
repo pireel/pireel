@@ -9,6 +9,13 @@ import { Composer, type ComposerHandle } from './chat-composer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+if (typeof Range.prototype.getClientRects !== 'function') {
+  Object.defineProperty(Range.prototype, 'getClientRects', {
+    configurable: true,
+    value: () => [],
+  });
+}
+
 const mounted: Array<{ root: ReturnType<typeof createRoot>; host: HTMLDivElement }> = [];
 
 afterEach(() => {
@@ -19,7 +26,9 @@ afterEach(() => {
   }
 });
 
-function renderComposer() {
+function renderComposer(
+  elements: Parameters<typeof Composer>[0]['elements'] = [],
+) {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -30,14 +39,13 @@ function renderComposer() {
     root.render(createElement(IntlProvider, { locale: 'zh', messages: {}, children: createElement(Composer, {
       placeholder: '输入',
       status: 'ready',
-      elements: [],
+      elements,
       skillId: STUDIO_AUTO_SKILL_ID,
       scenarioSkills: [],
       onPickSkill: () => undefined,
       frame: null,
       frames: [],
       onPickFrame: () => undefined,
-      onRemoveFrame: () => undefined,
       timelineFramePickActive: false,
       timelineFramePickBusy: false,
       timelineFramePickAvailable: true,
@@ -51,6 +59,108 @@ function renderComposer() {
 }
 
 describe('Composer timeline-frame tags', () => {
+  it('inserts an @ mention where the trigger was typed in the middle of text', () => {
+    vi.useFakeTimers();
+    const { host } = renderComposer([
+      {
+        id: 'chart-a',
+        label: '数据图',
+        kind: 'chart',
+        isShot: false,
+      },
+    ]);
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    const selection = window.getSelection()!;
+
+    act(() => {
+      editor.textContent = '前后';
+      const beforeTrigger = document.createRange();
+      beforeTrigger.setStart(editor.firstChild!, 1);
+      beforeTrigger.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(beforeTrigger);
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', { key: '@', bubbles: true }),
+      );
+
+      editor.firstChild!.textContent = '前@后';
+      const afterTrigger = document.createRange();
+      afterTrigger.setStart(editor.firstChild!, 2);
+      afterTrigger.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(afterTrigger);
+      editor.dispatchEvent(
+        new InputEvent('input', { bubbles: true, inputType: 'insertText' }),
+      );
+      vi.runAllTimers();
+    });
+
+    act(() => {
+      editor.firstChild!.textContent = '前@数后';
+      const afterQuery = document.createRange();
+      afterQuery.setStart(editor.firstChild!, 3);
+      afterQuery.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(afterQuery);
+      editor.dispatchEvent(
+        new InputEvent('input', { bubbles: true, inputType: 'insertText' }),
+      );
+    });
+
+    const option = host.querySelector<HTMLButtonElement>(
+      '[data-trigger-list] button',
+    )!;
+    expect(option).not.toBeNull();
+    act(() => option.click());
+
+    const mention = editor.querySelector<HTMLElement>(
+      '[data-ref-id="chart-a"]',
+    )!;
+    expect(mention.previousSibling?.textContent).toBe('前');
+    expect(mention.nextSibling?.textContent).toBe(' ');
+    expect(mention.nextSibling?.nextSibling?.textContent).toBe('后');
+  });
+
+  it('keeps literal @ text intact when the picker is opened from the toolbar', () => {
+    vi.useFakeTimers();
+    const { host } = renderComposer([
+      {
+        id: 'chart-a',
+        label: '数据图',
+        kind: 'chart',
+        isShot: false,
+      },
+    ]);
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    const selection = window.getSelection()!;
+    act(() => {
+      editor.textContent = '邮箱 a@b';
+      const range = document.createRange();
+      range.setStart(editor.firstChild!, editor.textContent.length);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      editor.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    const trigger = host
+      .querySelector('svg.lucide-at-sign')
+      ?.closest<HTMLButtonElement>('button');
+    expect(trigger).not.toBeNull();
+    act(() => {
+      trigger!.click();
+      vi.runAllTimers();
+    });
+    act(() =>
+      host.querySelector<HTMLButtonElement>('[data-trigger-list] button')!.click(),
+    );
+
+    const mention = editor.querySelector<HTMLElement>(
+      '[data-ref-id="chart-a"]',
+    )!;
+    expect(mention.previousSibling?.textContent).toBe('邮箱 a@b');
+  });
+
   it('uses one compact tag system and lets both element and frame tags be removed', () => {
     const { host, methodsRef } = renderComposer();
     act(() => methodsRef.current!.insertElementPill({
@@ -67,8 +177,13 @@ describe('Composer timeline-frame tags', () => {
     expect(frameTag.classList).toContain('sc-pill');
     expect(elementTag.classList).toContain('h-6');
     expect(frameTag.classList).toContain('h-6');
+    expect(elementTag.classList).toContain('max-w-[160px]');
+    expect(frameTag.classList).toContain('max-w-[160px]');
     expect(elementTag.classList).toContain('relative');
     expect(frameTag.classList).toContain('relative');
+    expect(elementTag.querySelectorAll(':scope > span')).toHaveLength(1);
+    expect(frameTag.querySelectorAll(':scope > span')).toHaveLength(2);
+    expect(elementTag.title).toBe('@主标题');
     const elementRemove = elementTag.querySelector<HTMLButtonElement>('button[aria-label]')!;
     const frameRemove = frameTag.querySelector<HTMLButtonElement>('button[aria-label]')!;
     expect(elementRemove.classList).toContain('absolute');

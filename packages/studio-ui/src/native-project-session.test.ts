@@ -42,4 +42,40 @@ describe('project-level local asset directory', () => {
     active.assets[sharedAsset.id] = sharedAsset;
     expect(nativeProjectSharedLocalAssets(active, { schemaVersion: 3, localAssets: [] })).toEqual([]);
   });
+
+  it('keeps the shared semantic name when an inactive output still has the old filename', () => {
+    const active = emptyProjectDocument();
+    const inactive = emptyProjectDocument();
+    const staleAsset = { ...sharedAsset, library: { createdAt: 5 } };
+    active.assets[staleAsset.id] = staleAsset;
+    inactive.assets[staleAsset.id] = staleAsset;
+    active.timeline.tracks[0]!.clips.push({
+      id: 'active-clip', kind: 'narrative', assetId: staleAsset.id,
+      startFrame: 0, durationFrames: 30, enabled: true,
+      sourceInSec: 0, sourceOutSec: 1, properties: { treatment: 'full' },
+    });
+    inactive.timeline.tracks[0]!.clips.push({
+      id: 'inactive-clip', kind: 'narrative', assetId: staleAsset.id,
+      startFrame: 0, durationFrames: 30, enabled: true,
+      sourceInSec: 0, sourceOutSec: 1, properties: { treatment: 'full' },
+    });
+    const renamed = {
+      sig: staleAsset.locator.localSig,
+      label: 'Customer showing the mobile checkout flow',
+      kind: 'video' as const,
+      createdAt: staleAsset.library.createdAt,
+    };
+
+    expect(nativeProjectSharedLocalAssets(active, {
+      schemaVersion: 3,
+      localAssets: [renamed],
+      outputs: {
+        active: { id: 'active', title: '', order: 0, createdAt: 1, updatedAt: 1 },
+        inactive: [{
+          id: 'inactive', title: '', order: 1, createdAt: 1, updatedAt: 1,
+          document: inactive, videoSig: null, videoDurationSec: null, coverThumb: null,
+        }],
+      },
+    })[0]?.label).toBe(renamed.label);
+  });
 });

@@ -29,6 +29,7 @@ export function AssetsPanel({
   localAssetIndex,
   localAssetIndexSyncReady,
   onLocalAssetIndexChange,
+  onLocalAssetAvailable,
   videoSig,
   mainSourceUrl,
   hasMainSource,
@@ -53,6 +54,8 @@ export function AssetsPanel({
   /** Wait until cloud/local project hydration finishes before publishing this browser's merged index. */
   localAssetIndexSyncReady?: boolean;
   onLocalAssetIndexChange?: (entries: LocalAssetIndexEntry[]) => void;
+  /** Reports browser-readable local bytes to the workbench render runtimes. */
+  onLocalAssetAvailable?: (asset: { sig: string; kind: 'video' | 'image' | 'audio'; file: File }) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — "My" labels it by filename. */
   videoSig?: string | null;
   /** Native primary asset runtime URL and existence; Composition.video is not source identity. */
@@ -122,6 +125,7 @@ export function AssetsPanel({
           cloudRegistry={localAssetIndex}
           registrySyncReady={localAssetIndexSyncReady}
           onRegistryChange={onLocalAssetIndexChange}
+          onLocalAssetAvailable={onLocalAssetAvailable}
           videoSig={videoSig}
           mainSourceUrl={mainSourceUrl}
           hasMainSource={hasMainSource}

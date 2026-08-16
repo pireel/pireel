@@ -3,6 +3,7 @@ import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } fro
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
 import type { DirectorPlanV1, NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
+import type { CustomVisualStyle } from '../visual-style';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
 
@@ -62,6 +63,7 @@ export interface EditorAppearance {
   palette?: Record<string, string>;
   captionStyle?: Partial<CaptionStyle>;
   frameId?: string;
+  customVisualStyle?: CustomVisualStyle;
   personFx?: PersonFx;
 }
 
@@ -163,6 +165,12 @@ export interface CaptionTimelineClip extends TimelineClipBase {
   block: GraphicBlockPayload;
   managed: boolean;
   sourceRef?: CaptionSourceRef;
+  /** User trim relative to the cue's derived word timing. Keeping offsets instead of absolute
+   *  frames lets the caption continue to follow its speech after upstream ripple edits. */
+  timingOverride?: {
+    startOffsetFrames: number;
+    endOffsetFrames: number;
+  };
   anchor: TimelineAnchor;
 }
 

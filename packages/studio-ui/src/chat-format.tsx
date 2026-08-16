@@ -39,7 +39,7 @@ export function PiAvatar({ thinking = false, size = 22 }: { thinking?: boolean; 
 }
 
 export const CHAT_PILL_CLASS =
-  'sc-pill group/chat-pill relative mx-0.5 inline-flex h-6 max-w-[180px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
+  'sc-pill group/chat-pill relative mx-0.5 inline-flex h-6 max-w-[160px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
 
 export const CHAT_PILL_ICON_CLASS =
   'bg-accent/10 inline-flex h-4 w-5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-[11px] leading-none';
@@ -95,10 +95,7 @@ export function makeElementPill(
   span.dataset.refId = el.id;
   if (opts.auto) span.dataset.auto = '1';
   span.className = CHAT_PILL_CLASS;
-  const icon = document.createElement('span');
-  icon.className = CHAT_PILL_ICON_CLASS;
-  icon.textContent = elementIcon(el);
-  span.appendChild(icon);
+  span.title = `@${el.label}`;
   const text = document.createElement('span');
   text.className = CHAT_PILL_LABEL_CLASS;
   text.textContent = `@${el.label}`;
@@ -121,8 +118,7 @@ export function renderTextWithElementPills(text: string, elements: StudioElement
     const el = map.get(m[1]!);
     if (el) {
       out.push(
-        <span key={`${m.index}-${m[1]}`} className={CHAT_PILL_CLASS}>
-          <span className={CHAT_PILL_ICON_CLASS}>{elementIcon(el)}</span>
+        <span key={`${m.index}-${m[1]}`} className={CHAT_PILL_CLASS} title={`@${el.label}`}>
           <span className={CHAT_PILL_LABEL_CLASS}>@{el.label}</span>
         </span>,
       );

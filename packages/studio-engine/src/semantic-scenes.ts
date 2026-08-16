@@ -75,10 +75,10 @@ export function resolveDirectorSceneContext(
   };
 }
 
-/** Prompt context is prose on purpose: the treatment contract directs one scene without selecting a stock component. */
+/** Prompt context is prose on purpose: the treatment contract directs one scene without selecting a registered Component. */
 export function formatDirectorSceneContext(context: DirectorSceneContext): string {
   const { plan, scene, previous, next } = context;
-  return `DIRECTOR SCENE CONTEXT — editorial direction, never a component recipe:
+  return `DIRECTOR SCENE CONTEXT — editorial direction, never a rigid Component or Motion Graphic recipe:
 - Whole-video goal: ${plan.goal}${plan.audience ? `; audience: ${plan.audience}` : ''}
 - Creative thesis: ${plan.creativeThesis}
 - Scene: ${scene.id} · ${scene.label}

@@ -193,7 +193,7 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'compose_context',
 ]);
 
-const TREATMENTS = new Set(['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b']);
+const TREATMENTS = new Set(['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b']);
 const r1 = (x: number) => Math.round(x * 10) / 10;
 
 // desegmentCues here = the browser's on-load reverse migration (workbench applies it to asrRef): transcripts stored by
@@ -1254,9 +1254,9 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       // failure; the retry carries blockId to reuse it → the new block's scoped-CSS
       // #id no longer changes each round and can converge. A bid pointing to a
       // non-existent block = last round's handed-back new-block id, treated as the
-      // new-block id as-is (no more "component not found" that dead-ends the retry).
+      // new-block id as-is (no more "Component not found" that dead-ends the retry).
       const applyId = target?.id ?? bid ?? blockId('ai');
-      // The raw text follows whichever contract the brief carried — component JSON on a themeless
+      // The raw text follows whichever contract the brief carried — registered Component JSON on a themeless
       // project, fenced markup on a themed one. Shape-detect and give each answer its own meaning
       // (shared interpreter with the browser bridge, so the semantics cannot drift).
       const shape = interpretApplyRaw(raw);
@@ -1291,10 +1291,10 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         };
       }
       if (shape.kind === 'kit-unknown') {
-        return { result: { ok: false, error: `unknown component "${shape.component}" — use an id from the brief's COMPONENTS list, answer {"custom": true} for a bespoke build, or null for no graphic` } };
+        return { result: { ok: false, error: `unknown Motion Graphic "${shape.component}" — use an id from the brief's MOTION GRAPHIC TYPES list, answer {"custom": true} for a bespoke build, or null for no graphic` } };
       }
       if (shape.kind === 'custom') {
-        // The model judged no component carries this. Markup needs the markup contract — hand the
+        // The model judged no registered Motion Graphic Component carries this. Markup needs the markup contract — hand the
         // agent back to the brief rather than accepting free-form output against the kit brief.
         return { result: { ok: false, error: 'the model chose a bespoke build — call compose_block_brief again with format:"html" for the markup contract, generate against it, then apply_block with that raw text' } };
       }
@@ -1361,7 +1361,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         clipTranscripts,
         atSec,
       });
-      const base = { theme: c.theme, ...(c.palette ? { palette: c.palette } : {}), ...(c.frameId ? { frameId: c.frameId } : {}) };
+      const base = {
+        theme: c.theme,
+        ...(c.palette ? { palette: c.palette } : {}),
+        ...(c.frameId ? { frameId: c.frameId } : {}),
+        ...(c.customVisualStyle ? { customVisualStyle: c.customVisualStyle } : {}),
+      };
       const bid = typeof input.blockId === 'string' ? input.blockId : undefined;
       if (bid) {
         const b = findBlock(bid);

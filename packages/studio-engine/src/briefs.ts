@@ -15,7 +15,7 @@
  */
 
 import { type BlockEdit, type ComposeContext, type KitChoice, buildBlockPrompt, buildKitPrompt, parseKitResponse, withTheme } from './compose';
-import { buildHtmlSystem, buildKitSystem, retrieveComponentCandidates } from './prompts';
+import { buildHtmlSystem, buildKitSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns } from './prompts';
 import { type ThemeId, getTheme, themeForLlm } from './theme';
 import { isComponentId } from '@pireel/studio-kit';
 
@@ -38,7 +38,7 @@ export function assembleComposeTheme(
     theme += `\n\n=== HOST VISUAL CRAFT BASELINE ===\nThis is a neutral quality floor, not a hidden Frame or visual identity. Apply its craft in a project without a Frame. When a Frame follows, keep the quality checks but let the Frame win every visible aesthetic decision.\n\n${baseline}`;
   }
   if (frame) {
-    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this frame conflicts with the generic component styling, archetypes or default taste above, THE FRAME WINS. The engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
+    theme += `\n\n=== FRAME DESIGN LANGUAGE — "${frame.title}" ===\nWhere this Frame conflicts with generic Motion Graphic styling, archetypes or default taste above, THE FRAME WINS. The Component engineering contract (1080px-wide reference, #ID scoping, tl local time, no external libraries, chart recipes' mechanics) always holds.\n\n${frame.body}`;
   }
   return theme;
 }
@@ -54,13 +54,13 @@ export interface ComposeBriefInput {
   /** Optional private host context that raises the quality floor without becoming a Frame. */
   visualBaseline?: string;
   lang?: string;
-  /** Domain preset constrains the searchable component vocabulary before query-time retrieval. */
+  /** Domain preset constrains the searchable Component vocabulary before query-time retrieval. */
   presetId?: string;
   /** Override the routing (an agent answered {"custom": true} and needs the markup contract for a
    *  project; or wants to fill props on an existing kit block). Default: existing kit → kit,
    *  otherwise html. New generation stays bespoke even without a Frame. */
   format?: 'kit' | 'html';
-  /** The component a targeted kit block currently shows, so a BYO edit keeps unmentioned props. */
+  /** The registered Component a targeted kit block currently shows, so a BYO edit keeps unmentioned props. */
   kitCurrent?: KitChoice | null;
 }
 
@@ -69,7 +69,13 @@ export interface ComposeBriefInput {
  *  generates HTML (the optional Frame is a prose description the model builds from). Existing kit
  *  blocks keep their typed-props contract; new generation stays bespoke even without a Frame. The
  *  returned `format` names which contract the text will follow. */
-export function assembleComposeBrief(input: ComposeBriefInput): { system: string; prompt: string; format: 'kit' | 'html'; candidateComponents: string[] } {
+export function assembleComposeBrief(input: ComposeBriefInput): {
+  system: string;
+  prompt: string;
+  format: 'kit' | 'html';
+  candidateComponents: string[];
+  candidatePatterns: string[];
+} {
   const format = input.format ?? (input.kitCurrent ? 'kit' : 'html');
   const candidateComponents = retrieveComponentCandidates({
     instruction: input.instruction,
@@ -78,10 +84,16 @@ export function assembleComposeBrief(input: ComposeBriefInput): { system: string
     ...(input.kitCurrent ? { current: input.kitCurrent } : {}),
     ...(input.presetId ? { presetId: input.presetId } : {}),
   });
+  const candidatePatterns = retrieveMotionGraphicPatterns({
+    instruction: input.instruction,
+    block: input.block,
+    ...(input.context ? { context: input.context } : {}),
+  });
   if (format === 'kit') {
     return {
       format,
       candidateComponents,
+      candidatePatterns,
       system: buildKitSystem({ componentIds: candidateComponents, ...(input.presetId ? { presetId: input.presetId } : {}) }),
       prompt: buildKitPrompt({
         block: input.block,
@@ -95,8 +107,13 @@ export function assembleComposeBrief(input: ComposeBriefInput): { system: string
   return {
     format,
     candidateComponents,
+    candidatePatterns,
     system: withTheme(
-      buildHtmlSystem({ componentIds: candidateComponents, ...(input.presetId ? { presetId: input.presetId } : {}) }),
+      buildHtmlSystem({
+        componentIds: candidateComponents,
+        patternIds: candidatePatterns,
+        ...(input.presetId ? { presetId: input.presetId } : {}),
+      }),
       assembleComposeTheme(input.theme, input.palette, input.frame, input.visualBaseline),
     ),
     prompt: buildBlockPrompt({

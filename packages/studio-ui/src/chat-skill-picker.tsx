@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useRef, type RefObject } from 'react';
-import { Check } from 'lucide-react';
+import { useMemo, useRef, useState, type RefObject } from 'react';
+import { Check, Loader2, Trash2, Upload } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
+import { toast } from '@pireel/ui/toast';
 import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
@@ -11,10 +12,14 @@ import type { StudioScenarioSkillOption } from './shell-context';
 import { t } from './i18n';
 
 interface SkillOption {
-  id: StudioScenarioSkillId;
+  id: string;
   label: string;
   summary: string;
+  custom?: boolean;
+  action?: 'import';
 }
+
+const IMPORT_MARKDOWN_ID = '__import_markdown_skill__';
 
 function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compact?: boolean }) {
   const size = compact ? 16 : 22;
@@ -139,7 +144,17 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
 }
 
 function SkillMark({ option, compact = false }: { option: SkillOption; compact?: boolean }) {
-  return <SkillGlyph id={option.id} compact={compact} />;
+  if (option.action === 'import') return <Upload size={compact ? 14 : 18} aria-hidden />;
+  return <SkillGlyph id={option.id as StudioScenarioSkillId} compact={compact} />;
+}
+
+function importErrorMessage(error: unknown): string {
+  const code = error instanceof Error ? error.message : 'skill_request_failed';
+  if (code === 'invalid_skill_file_type') return t('chatGen.skill.import.onlyMarkdown');
+  if (code === 'body_too_large' || code === 'skill_too_many_lines') return t('chatGen.skill.import.tooLarge');
+  if (code === 'user_skill_limit_reached') return t('chatGen.skill.import.limitReached');
+  if (code === 'invalid_skill_text' || code === 'invalid_skill_markdown') return t('chatGen.skill.import.invalid');
+  return t('chatGen.skill.import.failed');
 }
 
 export function ChatSkillPicker({
@@ -148,6 +163,8 @@ export function ChatSkillPicker({
   skills,
   disabled,
   onChange,
+  onImportMarkdown,
+  onDeleteCustom,
   onTriggerPick,
 }: {
   editorRef: RefObject<HTMLElement | null>;
@@ -155,11 +172,16 @@ export function ChatSkillPicker({
   skills: readonly StudioScenarioSkillOption[];
   disabled?: boolean;
   onChange: (id: StudioScenarioSkillId) => void;
+  onImportMarkdown?: (file: File) => Promise<StudioScenarioSkillOption>;
+  onDeleteCustom?: (id: string) => Promise<void>;
   /** Remove the `/query` token when the picker was opened from the composer. */
   onTriggerPick?: () => void;
 }) {
   const popoverRef = useRef<TriggerPopoverHandle>(null);
-  const options = useMemo<SkillOption[]>(
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const selectableOptions = useMemo<SkillOption[]>(
     () => [
       {
         id: STUDIO_AUTO_SKILL_ID,
@@ -170,14 +192,24 @@ export function ChatSkillPicker({
         id: skill.id,
         label: skill.title,
         summary: skill.summary,
+        custom: skill.custom,
       })),
     ],
     [skills],
   );
-  const selected = options.find((item) => item.id === skillId) ?? options[0]!;
+  const options = useMemo<SkillOption[]>(() => [
+    ...selectableOptions,
+    ...(onImportMarkdown ? [{
+      id: IMPORT_MARKDOWN_ID,
+      label: t('chatGen.skill.import.title'),
+      summary: t('chatGen.skill.import.summary'),
+      action: 'import' as const,
+    }] : []),
+  ], [selectableOptions, onImportMarkdown]);
+  const selected = selectableOptions.find((item) => item.id === skillId) ?? selectableOptions[0]!;
 
-  // No host catalog means there is nothing useful to choose: keep OSS automatic routing visually quiet.
-  if (options.length === 1) return null;
+  // No host catalog means there is nothing useful to choose: keep the empty Skill state visually quiet.
+  if (selectableOptions.length === 1 && !onImportMarkdown) return null;
 
   return (
     <>
@@ -197,6 +229,28 @@ export function ChatSkillPicker({
         <span className="truncate">{selected.label}</span>
       </button>
 
+      {onImportMarkdown && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".md,text/markdown"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (!file || importing) return;
+            setImporting(true);
+            void onImportMarkdown(file)
+              .then((skill) => {
+                onChange(skill.id);
+                toast.success(t('chatGen.skill.import.success', { title: skill.title }));
+              })
+              .catch((error) => toast.error(importErrorMessage(error)))
+              .finally(() => setImporting(false));
+          }}
+        />
+      )}
+
       <TriggerPopover<SkillOption>
         ref={popoverRef}
         trigger="/"
@@ -205,14 +259,39 @@ export function ChatSkillPicker({
         items={options}
         itemSearchText={(item) => `${item.label} ${item.summary}`}
         itemKey={(item) => item.id}
-        title={t('chatGen.pickSkillN', { n: options.length })}
+        title={t('chatGen.pickSkillN', { n: selectableOptions.length })}
         initialActiveKey={skillId}
         className="w-[330px]"
         onPick={(item, context) => {
           if (context.source === 'trigger') onTriggerPick?.();
-          onChange(item.id);
+          if (item.action === 'import') {
+            fileInputRef.current?.click();
+            return;
+          }
+          onChange(item.id as StudioScenarioSkillId);
         }}
         renderItem={(item, { active, pick, setActive }) => {
+          if (item.action === 'import') {
+            return (
+              <button
+                type="button"
+                data-active={active || undefined}
+                disabled={importing}
+                onMouseEnter={setActive}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={pick}
+                className={`border-line mt-1 flex w-full items-start gap-2.5 border-t px-2.5 pb-2 pt-3 text-left disabled:opacity-50 ${active ? 'bg-panel-2' : ''}`}
+              >
+                <span className="text-ink-3 grid h-8 w-8 shrink-0 place-items-center">
+                  {importing ? <Loader2 size={17} className="animate-spin" /> : <SkillMark option={item} />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="text-ink truncate text-[12.5px] font-medium">{item.label}</span>
+                  <span className="text-ink-4 mt-0.5 block text-[11px] leading-snug">{item.summary}</span>
+                </span>
+              </button>
+            );
+          }
           const selectedItem = item.id === skillId;
           return (
             <button
@@ -233,6 +312,33 @@ export function ChatSkillPicker({
                 </span>
                 <span className="text-ink-4 mt-0.5 line-clamp-2 text-[11px] leading-snug">{item.summary}</span>
               </span>
+              {item.custom && onDeleteCustom && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={t('chatGen.skill.delete')}
+                  title={t('chatGen.skill.delete')}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (deletingId || !window.confirm(t('chatGen.skill.deleteConfirm', { title: item.label }))) return;
+                    setDeletingId(item.id);
+                    void onDeleteCustom(item.id)
+                      .then(() => {
+                        if (selectedItem) onChange(STUDIO_AUTO_SKILL_ID);
+                        toast.success(t('chatGen.skill.deleted'));
+                      })
+                      .catch(() => toast.error(t('chatGen.skill.deleteFailed')))
+                      .finally(() => setDeletingId(null));
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') event.currentTarget.click();
+                  }}
+                  className="text-ink-4 hover:bg-line hover:text-ink grid h-7 w-7 shrink-0 place-items-center rounded"
+                >
+                  {deletingId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                </span>
+              )}
             </button>
           );
         }}

@@ -274,7 +274,12 @@ function expectedTrack(asset: EditorMediaAsset, requestedRole?: string): { type:
   return { type: 'visual', role: 'broll' };
 }
 
-function ensureTrack(document: EditorDocumentV2, asset: EditorMediaAsset, item: Input): { document: EditorDocumentV2; track: EditorTrack; receipts: EditorCommandReceipt[] } | AgentTimelineOutcome {
+function ensureTrack(
+  document: EditorDocumentV2,
+  asset: EditorMediaAsset,
+  item: Input,
+  placement?: { startFrame: number; durationFrames: number },
+): { document: EditorDocumentV2; track: EditorTrack; receipts: EditorCommandReceipt[] } | AgentTimelineOutcome {
   const requestedId = string(item.trackId);
   if (requestedId) {
     const track = document.timeline.tracks.find((candidate) => candidate.id === requestedId);
@@ -282,7 +287,16 @@ function ensureTrack(document: EditorDocumentV2, asset: EditorMediaAsset, item: 
     return { document, track, receipts: [] };
   }
   const desired = expectedTrack(asset, string(item.role));
-  const existing = document.timeline.tracks.find((track) => track.type === desired.type && track.role === desired.role);
+  const roleTracks = document.timeline.tracks.filter((track) => track.type === desired.type && track.role === desired.role);
+  // A caller that omits trackId has not identified anything it intends to replace. Keep overlapping
+  // visual evidence/backgrounds on parallel lanes; an exact trackId remains the explicit overwrite
+  // escape hatch. Audio retains its semantic single-lane behavior.
+  const existing = desired.type === 'visual' && placement
+    ? roleTracks.find((track) => track.clips.every((clip) => (
+        clip.startFrame + clip.durationFrames <= placement.startFrame
+        || clip.startFrame >= placement.startFrame + placement.durationFrames
+      )))
+    : roleTracks[0];
   if (existing) return { document, track: existing, receipts: [] };
   const id = uniqueId(`track_${desired.role}`, new Set(document.timeline.tracks.map((track) => track.id)));
   const inserted = applyEditorCommand(document, {
@@ -295,8 +309,16 @@ function ensureTrack(document: EditorDocumentV2, asset: EditorMediaAsset, item: 
 
 function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item: Input, used: Set<string>): TimelineClipPlacement | AgentTimelineOutcome {
   const sourceInSec = Math.max(0, sec(item.sourceInSec));
-  const fallbackDuration = asset.kind === 'image' ? 5 : asset.metadata.durationSec ?? 5;
-  const requestedDuration = sec(item.durationSec, Math.max(0.2, fallbackDuration - sourceInSec));
+  const explicitSourceOutSec = Number(item.sourceOutSec);
+  const explicitDurationSec = Number(item.durationSec);
+  const inferredDuration = Number.isFinite(explicitSourceOutSec) && explicitSourceOutSec > sourceInSec
+    ? explicitSourceOutSec - sourceInSec
+    : asset.kind === 'image'
+      ? 5
+      : asset.metadata.durationSec != null
+        ? asset.metadata.durationSec - sourceInSec
+        : 5;
+  const requestedDuration = Number.isFinite(explicitDurationSec) ? explicitDurationSec : Math.max(0.2, inferredDuration);
   if (requestedDuration <= 0) return fail('durationSec must be positive');
   const durationFrames = positiveDurationFrames(requestedDuration, document.canvas.fps);
   const id = uniqueId(string(item.id) ?? `clip_${asset.id}`, used);
@@ -349,6 +371,111 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
   } as MediaTimelineClip & { offsetFrames: number };
 }
 
+export type VisualTimelineResizeEdge = 'left' | 'right';
+
+function resizedMediaKeyframes(
+  clip: MediaTimelineClip,
+  newStartFrame: number,
+  newDurationFrames: number,
+): MediaTimelineClip['keyframes'] {
+  if (!clip.keyframes) return undefined;
+  const shift = clip.startFrame - newStartFrame;
+  const rows = <T extends { frame: number }>(values: readonly T[] | undefined): T[] | undefined => values
+    ?.map((value) => ({ ...value, frame: value.frame + shift }))
+    .filter((value) => value.frame >= 0 && value.frame <= newDurationFrames);
+  const box = rows(clip.keyframes.box);
+  const opacity = rows(clip.keyframes.opacity);
+  return {
+    ...(box?.length ? { box } : {}),
+    ...(opacity?.length ? { opacity } : {}),
+  };
+}
+
+/** Trim/extend one ordinary visual-lane clip without changing its playback speed. */
+export function resizeVisualTimelineClip(
+  document: EditorDocumentV2,
+  clipId: string,
+  edge: VisualTimelineResizeEdge,
+  atSec: number,
+): AgentTimelineOutcome {
+  if (!Number.isFinite(atSec)) return fail('visual clip resize time must be finite');
+  const found = locatedClip(document, clipId);
+  if (!found || found.track.type !== 'visual' || found.clip.kind !== 'media') {
+    return fail(`visual media clip not found: ${clipId}`);
+  }
+  if (found.track.locked) return fail(`track is locked: ${found.track.id}`);
+  const asset = document.assets[found.clip.assetId];
+  if (!asset || (asset.kind !== 'image' && asset.kind !== 'video')) return fail(`visual asset not found: ${found.clip.assetId}`);
+
+  const fps = document.canvas.fps;
+  const minFrames = positiveDurationFrames(0.2, fps);
+  const oldStartFrame = found.clip.startFrame;
+  const oldEndFrame = oldStartFrame + found.clip.durationFrames;
+  const siblings = found.track.clips
+    .filter((clip) => clip.id !== clipId)
+    .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id));
+  const previousEndFrame = siblings
+    .filter((clip) => clip.startFrame + clip.durationFrames <= oldStartFrame)
+    .reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0);
+  const nextStartFrame = siblings
+    .filter((clip) => clip.startFrame >= oldEndFrame)
+    .reduce((start, clip) => Math.min(start, clip.startFrame), Number.POSITIVE_INFINITY);
+  const requestedFrame = secondsToTimelineFrames(Math.max(0, atSec), fps);
+  const sourceRate = asset.kind === 'video'
+    ? (found.clip.sourceOutSec - found.clip.sourceInSec) / timelineFramesToSeconds(found.clip.durationFrames, fps)
+    : 0;
+
+  let newStartFrame = oldStartFrame;
+  let newEndFrame = oldEndFrame;
+  let sourceInSec = found.clip.sourceInSec;
+  let sourceOutSec = found.clip.sourceOutSec;
+  if (edge === 'left') {
+    const sourceFloorFrame = asset.kind === 'video' && sourceRate > 0
+      ? oldStartFrame - secondsToTimelineFrames(sourceInSec / sourceRate, fps)
+      : 0;
+    newStartFrame = Math.max(previousEndFrame, sourceFloorFrame, Math.min(requestedFrame, oldEndFrame - minFrames));
+    if (asset.kind === 'video' && sourceRate > 0) {
+      sourceInSec = Math.max(0, sourceInSec + timelineFramesToSeconds(newStartFrame - oldStartFrame, fps) * sourceRate);
+    }
+  } else {
+    const sourceCeilingFrame = asset.kind === 'video' && sourceRate > 0 && asset.metadata.durationSec != null
+      ? oldEndFrame + secondsToTimelineFrames(Math.max(0, asset.metadata.durationSec - sourceOutSec) / sourceRate, fps)
+      : Number.POSITIVE_INFINITY;
+    newEndFrame = Math.min(nextStartFrame, sourceCeilingFrame, Math.max(requestedFrame, oldStartFrame + minFrames));
+    if (asset.kind === 'video' && sourceRate > 0) {
+      sourceOutSec += timelineFramesToSeconds(newEndFrame - oldEndFrame, fps) * sourceRate;
+      if (asset.metadata.durationSec != null) sourceOutSec = Math.min(asset.metadata.durationSec, sourceOutSec);
+    }
+  }
+  const newDurationFrames = newEndFrame - newStartFrame;
+  if (newStartFrame === oldStartFrame && newDurationFrames === found.clip.durationFrames) {
+    return mutation(document, 'Visual clip duration unchanged', [], {
+      clipId, startSec: timelineFramesToSeconds(oldStartFrame, fps), endSec: timelineFramesToSeconds(oldEndFrame, fps),
+    });
+  }
+
+  const resized: MediaTimelineClip = {
+    ...found.clip,
+    startFrame: newStartFrame,
+    durationFrames: newDurationFrames,
+    sourceInSec,
+    sourceOutSec,
+    keyframes: resizedMediaKeyframes(found.clip, newStartFrame, newDurationFrames),
+  };
+  const tracks = document.timeline.tracks.map((track) => track.id === found.track.id
+    ? { ...track, clips: track.clips.map((clip) => clip.id === clipId ? resized : clip).sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id)) }
+    : track);
+  const next = { ...document, timeline: { ...document.timeline, tracks } };
+  return mutation(next, `Resized visual clip to ${timelineFramesToSeconds(newDurationFrames, fps)}s`, [], {
+    clipId,
+    startSec: timelineFramesToSeconds(newStartFrame, fps),
+    endSec: timelineFramesToSeconds(newEndFrame, fps),
+    durationSec: timelineFramesToSeconds(newDurationFrames, fps),
+    sourceInSec,
+    sourceOutSec,
+  });
+}
+
 function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   const items = Array.isArray(input.clips) ? input.clips : [];
   if (!items.length) return fail('clips is required');
@@ -361,13 +488,20 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     const assetId = string(item.assetId);
     const asset = assetId ? next.assets[assetId] : undefined;
     if (!asset) return fail(`clips[${index}] asset not found: ${assetId ?? ''}`);
-    const ensured = ensureTrack(next, asset, item);
-    if ('ok' in ensured) return ensured;
-    next = ensured.document;
-    receipts.push(...ensured.receipts);
     const placement = placementFor(next, asset, item, used);
     if ('ok' in placement) return placement;
     const atFrame = secondsToTimelineFrames(Math.max(0, sec(item.startSec, sec(input.atSec))), next.canvas.fps);
+    const ensured = ensureTrack(
+      next,
+      asset,
+      item,
+      mode === 'overwrite' && asset.kind !== 'audio'
+        ? { startFrame: atFrame, durationFrames: placement.durationFrames }
+        : undefined,
+    );
+    if ('ok' in ensured) return ensured;
+    next = ensured.document;
+    receipts.push(...ensured.receipts);
     const inserted = applyEditorCommand(next, {
       type: 'clips.insert',
       trackId: ensured.track.id,
@@ -382,7 +516,32 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     receipts.push(inserted.receipt);
     created.push(placement.id);
   }
-  return mutation(next, `${mode === 'ripple' ? 'Inserted' : 'Added'} ${created.length} clip${created.length === 1 ? '' : 's'}`, receipts, { clipIds: created });
+  const activePlacements = created.flatMap((clipId) => {
+    const found = locatedClip(next, clipId);
+    if (!found) return [];
+    return [{
+      clipId,
+      trackId: found.track.id,
+      ...('assetId' in found.clip ? { assetId: found.clip.assetId } : {}),
+      startSec: timelineFramesToSeconds(found.clip.startFrame, next.canvas.fps),
+      endSec: timelineFramesToSeconds(found.clip.startFrame + found.clip.durationFrames, next.canvas.fps),
+      durationSec: timelineFramesToSeconds(found.clip.durationFrames, next.canvas.fps),
+      ...((found.clip.kind === 'media' || found.clip.kind === 'narrative' || found.clip.kind === 'audio')
+        ? { sourceInSec: found.clip.sourceInSec, sourceOutSec: found.clip.sourceOutSec }
+        : {}),
+    }];
+  });
+  const overwrittenClipIds = [...new Set(receipts.flatMap((receipt) => receipt.removedClipIds))];
+  return mutation(
+    next,
+    `${mode === 'ripple' ? 'Inserted' : 'Added'} ${activePlacements.length} clip${activePlacements.length === 1 ? '' : 's'}${overwrittenClipIds.length ? `; replaced ${overwrittenClipIds.length}` : ''}`,
+    receipts,
+    {
+      clipIds: activePlacements.map((placement) => placement.clipId),
+      placements: activePlacements,
+      ...(overwrittenClipIds.length ? { overwrittenClipIds } : {}),
+    },
+  );
 }
 
 function moveClips(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {

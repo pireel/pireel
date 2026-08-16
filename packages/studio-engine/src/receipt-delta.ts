@@ -65,7 +65,7 @@ export function compReceiptDelta(before: Composition, after: Composition): Recei
   if (before.width !== after.width || before.height !== after.height) {
     delta.canvas = { from: [before.width, before.height], to: [after.width, after.height] };
   }
-  const topLevel = ['theme', 'palette', 'frameId', 'captionStyle', 'audioTracks', 'audioDenoise', 'video'] as const;
+  const topLevel = ['theme', 'palette', 'frameId', 'customVisualStyle', 'captionStyle', 'audioTracks', 'audioDenoise', 'video'] as const;
   const compositionUpdated = topLevel.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
   if (compositionUpdated.length) delta.compositionUpdated = [...compositionUpdated];
 

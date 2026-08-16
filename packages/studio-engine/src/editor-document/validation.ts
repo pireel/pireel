@@ -8,6 +8,7 @@ import {
   type EditorTrackType,
   type TimelineClip,
 } from './types';
+import { normalizeCustomVisualStyle } from '../visual-style';
 
 export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   if (!value || typeof value !== 'object') return false;
@@ -39,6 +40,8 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
   if (document.semantics.directorPlan !== undefined && !isDirectorPlanV1(document.semantics.directorPlan)) return false;
+  if (document.appearance.customVisualStyle !== undefined
+    && !normalizeCustomVisualStyle(document.appearance.customVisualStyle)) return false;
   return true;
 }
 
@@ -75,6 +78,12 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
       if (!allowedClipKinds[track.type].has(clip.kind)) push('error', 'clip-track-type-mismatch', `${clipPath}.kind`, `${clip.kind} clips cannot live on a ${track.type} track.`);
       if (!Number.isInteger(clip.startFrame) || clip.startFrame < 0) push('error', 'invalid-clip-start', `${clipPath}.startFrame`, 'Clip start must be a non-negative integral frame.');
       if (!Number.isInteger(clip.durationFrames) || clip.durationFrames <= 0) push('error', 'invalid-clip-duration', `${clipPath}.durationFrames`, 'Clip duration must be a positive integral frame count.');
+      if (clip.kind === 'caption' && clip.timingOverride && (
+        !Number.isInteger(clip.timingOverride.startOffsetFrames)
+        || !Number.isInteger(clip.timingOverride.endOffsetFrames)
+      )) {
+        push('error', 'invalid-caption-timing', `${clipPath}.timingOverride`, 'Caption timing offsets must be integral frame counts.');
+      }
       if ('assetId' in clip && clip.assetId && !document.assets[clip.assetId]) push('error', 'dangling-asset', `${clipPath}.assetId`, `Missing asset: ${clip.assetId}`);
       if ((clip.kind === 'narrative' || clip.kind === 'media') && clip.sourceOutSec <= clip.sourceInSec) push('error', 'invalid-source-range', clipPath, 'Source out must be after source in.');
       if (clip.kind === 'media' || clip.kind === 'narrative') {
@@ -97,7 +106,7 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
         if (clip.kind === 'media' && clip.video) {
           const video = clip.video;
           const asset = document.assets[clip.assetId];
-          const treatments = new Set(['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b']);
+          const treatments = new Set(['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b']);
           const finiteOptional = (value: number | undefined) => value == null || Number.isFinite(value);
           const validAudio = finiteOptional(video.volumeDb)
             && (video.volumeDb == null || (video.volumeDb >= -60 && video.volumeDb <= 20))

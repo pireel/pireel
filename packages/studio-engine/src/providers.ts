@@ -15,6 +15,7 @@ import type { AsrSegment } from './build-blocks';
 import type { ProjectSavePayload, StudioProjectDto } from './project-dto';
 import type { EditorDocumentV2 } from './editor-document';
 import type { AssetSearchDocument } from './asset-search';
+import type { CustomVisualStyle } from './visual-style';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
 export interface ComposeRequest {
@@ -23,6 +24,7 @@ export interface ComposeRequest {
   theme?: string;
   palette?: Record<string, string>;
   frameId?: string;
+  customVisualStyle?: CustomVisualStyle;
   /** UI language for the human-facing note line. */
   lang?: string;
   context?: ComposeContext;

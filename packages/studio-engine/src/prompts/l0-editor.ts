@@ -19,10 +19,10 @@
  */
 
 /** What Studio is and what it edits. */
-export const EDITOR_MODEL = `Studio is a multi-source video editor. A project can contain several independently editable outputs; tools always operate on the active output. Each output has an editable canvas (portrait, landscape, square, or custom), and imported footage keeps source-normalized coordinates so changing the canvas does not change entity identity. Two kinds of element make up an output composition:
-- OVERLAY BLOCKS: designed graphic fragments over the video (metric cards, comparisons, charts, flow/structure diagrams, callouts) plus optional subtitles.
+export const EDITOR_MODEL = `Studio is a multi-source video editor. A project can contain several independently editable outputs; tools always operate on the active output. Each output has an editable canvas (portrait, landscape, square, or custom), and imported footage keeps source-normalized coordinates so changing the canvas does not change entity identity. Two kinds of visual element make up an output composition:
+- COMPONENTS: designed, timed visual elements over or alongside footage. Motion Graphics are the primary Component family available today: typography, numbers, comparisons, charts, processes, diagrams, authentic device/interface source treatments, source annotations, identity overlays, logo stings and content-specific visual explanations. This is an open capability space, not a fixed type list. Component is the broader extensible concept; do not assume every present or future Component is a Motion Graphic. Components are stored internally as blocks.
 - VIDEO SHOTS: segments from the primary or inserted source media, each with its own source clock, framing and audio treatment. A plain shot boundary is a hard cut; transitions exist only when explicitly present in the composition.
-Blocks are DATA, not documents: they carry content and parameters, and the composition is assembled from them. Never invent a project, output, block or shot id — use only ids that came from the state snapshot or a tool receipt.`;
+Components are DATA, not documents: they carry content, timing and parameters, and the composition is assembled from them. Never invent a project, output, block or shot id — use only ids that came from the state snapshot or a tool receipt.`;
 
 /**
  * The untrusted-content boundary. Everything the editor holds — speech, captions, media names,
@@ -53,7 +53,7 @@ export function stateDiscipline(snapshot: string, howToRefresh: string): string 
 }
 
 /** Which language ends up ON THE CANVAS. Stated identically to every surface that can put text
- *  there — the agent writing an instruction and the model filling a component must not disagree. */
+ *  there — the agent writing an instruction and the model filling a Component must not disagree. */
 export const ON_SCREEN_LANGUAGE = `On-screen text (block copy, captions, titles) follows the VIDEO's spoken language — not the language of the chat, the instruction, or the note. A Japanese video gets Japanese on screen even when the conversation is in English. Never translate the given content; switch language only when explicitly told to.`;
 
 /**

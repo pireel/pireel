@@ -730,7 +730,7 @@ describe('半分取景的空位框不压视频', () => {
 
 describe('空位框不进字幕带', () => {
   it('所有取景的空位框 y+h ≤ 0.84(字幕层的地界)', () => {
-    for (const tr of ['corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const) {
+    for (const tr of ['corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b'] as const) {
       const b = treatmentVacancyBox(tr)!;
       expect(b.y + b.h, `${tr} 空位框伸进了字幕带`).toBeLessThanOrEqual(0.84 + 1e-9);
     }
@@ -741,7 +741,7 @@ describe('取景 clipPath 可插值(所有取景同 token 数)', () => {
   // GSAP 补间复杂字符串按数字 token 配对:'inset(0%)' 对 'inset(0% 50% 0% 0%)' 数量不齐,
   // 过渡时 transform 平滑滑动而裁切瞬跳。钉住:每种取景的 clipPath 都是 4 个数字。
   it('每种取景 4 个 inset 分量,任意两种之间都能补间', () => {
-    const ALL = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+    const ALL = ['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
     for (const tr of ALL) {
       const clip = shotTransformVars(tr).clipPath;
       expect(clip.match(/[\d.]+%/g), `${tr} → ${clip}`).toHaveLength(4);
@@ -776,6 +776,8 @@ describe('原子媒体取景(transform + crop)', () => {
       crop: { top: 0, right: 0, bottom: 0, left: 0 },
       rounding: 54,
     });
+    expect(resolveShotMediaFraming({ treatment: 'corner-tr' }).transform).toEqual({ scale: 0.34, offsetX: 0.31, offsetY: -0.31 });
+    expect(resolveShotMediaFraming({ treatment: 'corner-bl' }).transform).toEqual({ scale: 0.34, offsetX: -0.31, offsetY: 0.31 });
   });
 });
 
@@ -833,7 +835,7 @@ describe('parseClipInset(导出侧读回取景裁切)', () => {
   // 导出 bug 的根:readTransform 只读 transform,铺满半分的裁切在 clip-path 里 —— 整幅平移、
   // 没裁,看起来"只切了四分之一"。producer(shotTransformVars)与 parser 同仓互钉。
   it('往返:每种取景 emit 的 clipPath 解析回一致的 inset 分量', () => {
-    const ALL = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+    const ALL = ['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
     for (const tr of ALL) {
       for (const crop of [undefined, 0, 30, 100]) {
         const clip = shotTransformVars(tr, undefined, crop).clipPath;

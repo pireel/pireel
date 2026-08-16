@@ -7,6 +7,22 @@ export interface FolderRestoreGroup {
   entries: LocalAssetIndexEntry[];
 }
 
+export const LOCAL_ASSET_LABEL_MAX_LENGTH = 80;
+
+/** A user-authored semantic label is project metadata, not a filename mutation. Keep the stable
+ * sig and every recovery field untouched so rename never breaks local-byte access. */
+export function renameLocalAssetEntry(
+  entries: LocalAssetIndexEntry[],
+  sig: string,
+  label: string,
+): LocalAssetIndexEntry[] {
+  const normalized = label.trim().slice(0, LOCAL_ASSET_LABEL_MAX_LENGTH);
+  if (!normalized) return entries;
+  return entries.map((entry) =>
+    entry.sig === sig ? { ...entry, label: normalized } : entry,
+  );
+}
+
 /** Reconcile the browser cache with the project index. Before cloud hydration the union keeps the
  * UI useful offline. Once hydration confirms a cloud index (including an explicit empty array),
  * the cloud is authoritative so a deletion made in another browser cannot be resurrected here. */

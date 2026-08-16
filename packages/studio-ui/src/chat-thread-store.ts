@@ -16,7 +16,7 @@ export interface StoredThread {
   updatedAt: number;
   /** Frame attached to the session (theme button highlight comes back when restoring the session). */
   frame?: AttachedFrame | null;
-  /** Rich Markdown Studio Skill attached to this session; missing on legacy threads means automatic routing. */
+  /** Rich Markdown Studio Skill attached to this session; missing means no Skill. */
   skillId?: StudioScenarioSkillId;
 }
 

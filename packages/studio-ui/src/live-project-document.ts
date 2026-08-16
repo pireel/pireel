@@ -15,6 +15,7 @@ import {
   type EditorMediaAsset,
   applyEditorDocumentPersistenceMetadata,
   freezeEditorDocumentBlockVars,
+  localImageLocator,
   prepareEditorDocumentForPersistence,
   pruneEmptyNonPrimaryTracks,
   compositionToEditorDocument,
@@ -46,7 +47,13 @@ export interface LiveProjectDocumentSession {
 const isCompatibilityPlaceholder = (url: string) => url.startsWith('blob:pireel-offline/');
 
 export function resolveLiveAssetUrl(session: LiveProjectDocumentSession, asset: EditorMediaAsset): string | undefined {
-  return session.runtimeAssetUrls.get(asset.id) ?? asset.locator.remoteUrl;
+  return session.runtimeAssetUrls.get(asset.id)
+    ?? asset.locator.remoteUrl
+    // Device-local images deliberately persist only their stable signature. The preview runtime
+    // recognizes this locator and receives the matching File over postMessage after an explicit
+    // prepare/restore step. Treating localSig as unresolved dropped the clip before an <img> node
+    // could be assembled, so the timeline showed the image while the canvas stayed empty.
+    ?? (asset.kind === 'image' && asset.locator.localSig ? localImageLocator(asset.locator.localSig) : undefined);
 }
 
 /** Attach session-only bytes to a durable asset identity without mutating the document. */
@@ -88,7 +95,7 @@ export function rememberCompositionRuntimeUrls(
 function projectRuntimeComposition(session: LiveProjectDocumentSession, document: EditorDocumentV2): Composition {
   return projectDocumentToComposition(
     document,
-    { resolveAssetUrl: (asset) => session.runtimeAssetUrls.get(asset.id) },
+    { resolveAssetUrl: (asset) => resolveLiveAssetUrl(session, asset) },
   );
 }
 

@@ -10,6 +10,13 @@ import { useSyncExternalStore } from 'react';
 let t = 0;
 const subs = new Set<() => void>();
 
+/** Playback clocks may arrive from more than one asynchronous surface (the parent decoder and a
+ *  sandboxed preview document). Normal playback is forward-only; a delayed sample must never move
+ *  the transport backwards. Explicit seeks and loop resets bypass this helper and write directly. */
+export function monotonicPlaybackSecond(current: number, incoming: number): number {
+  return Math.max(current, incoming);
+}
+
 export const playhead = {
   get: (): number => t,
   set(v: number): void {

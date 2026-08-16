@@ -15,7 +15,7 @@
  * the instruction's language).
  */
 
-import { BLOCK_SYSTEM, buildHtmlSystem, retrieveComponentCandidates, withActiveTheme } from './prompts';
+import { BLOCK_SYSTEM, buildHtmlSystem, retrieveComponentCandidates, retrieveMotionGraphicPatterns, withActiveTheme } from './prompts';
 
 /** Minimal chat shape (matches @/lib/models ModelRouter.chat). */
 interface ChatHint {
@@ -195,8 +195,14 @@ export async function composeBlock(
     ...(args.context ? { context: args.context } : {}),
     ...(args.presetId ? { presetId: args.presetId } : {}),
   });
+  const candidatePatterns = retrieveMotionGraphicPatterns({
+    instruction: args.instruction,
+    block: args.block,
+    ...(args.context ? { context: args.context } : {}),
+  });
   const system = buildHtmlSystem({
     componentIds: candidateComponents,
+    patternIds: candidatePatterns,
     ...(args.presetId ? { presetId: args.presetId } : {}),
   });
   const r = await models.chat({ system: withTheme(system, args.theme), prompt: buildBlockPrompt(args), hint: args.hint ?? HINT });

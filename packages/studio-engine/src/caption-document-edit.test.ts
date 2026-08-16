@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AsrSegment } from './build-blocks';
-import { applyCaptionDocumentEdit } from './caption-document-edit';
+import { applyCaptionDocumentEdit, resizeManagedCaptionTiming } from './caption-document-edit';
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
@@ -104,6 +104,49 @@ describe('native caption lifecycle transaction', () => {
     const afterTrack = styled.document.timeline.tracks.find((candidate) => candidate.id === styled.document.semantics.managedCaptionTrackId)!;
     expect(afterTrack.clips.map((clip) => clip.kind === 'caption' ? clip.sourceRef : undefined)).toEqual(before);
     expect(styled.document.semantics.transcripts[assetId]![0]!.cueLayout).toEqual(['0:3']);
+  });
+
+  it('persists both edge trims as source-relative offsets across a narrative ripple', () => {
+    const enabled = applyCaptionDocumentEdit({
+      document: captionFixture(), patch: { on: true, preset: 'ln-clean' }, mainTranscript: transcript, clipTranscripts: {},
+    });
+    expect(enabled.ok).toBe(true);
+    if (!enabled.ok) return;
+    const trackId = enabled.document.semantics.managedCaptionTrackId!;
+    const initialClip = enabled.document.timeline.tracks.find((track) => track.id === trackId)!.clips[0]!;
+    const left = resizeManagedCaptionTiming(enabled.document, initialClip.id, 'left', 0.5);
+    expect(left.ok).toBe(true);
+    if (!left.ok) return;
+    const right = resizeManagedCaptionTiming(left.document, initialClip.id, 'right', 3);
+    expect(right.ok).toBe(true);
+    if (!right.ok) return;
+    const trimmed = right.document.timeline.tracks.find((track) => track.id === trackId)!.clips[0]!;
+    expect(trimmed).toMatchObject({
+      startFrame: 15,
+      durationFrames: 75,
+      timingOverride: { startOffsetFrames: 15, endOffsetFrames: -24 },
+    });
+
+    const primary = right.document.timeline.tracks.find((track) => track.id === right.document.semantics.primaryNarrativeTrackId)!;
+    primary.clips[0] = { ...primary.clips[0]!, startFrame: primary.clips[0]!.startFrame + 30 };
+    const relaid = applyCaptionDocumentEdit({
+      document: right.document, mainTranscript: null, clipTranscripts: {},
+    });
+    expect(relaid.ok).toBe(true);
+    if (!relaid.ok) return;
+    const relaidClip = relaid.document.timeline.tracks.find((track) => track.id === trackId)!.clips[0]!;
+    expect(relaidClip).toMatchObject({
+      startFrame: 45,
+      durationFrames: 75,
+      timingOverride: { startOffsetFrames: 15, endOffsetFrames: -24 },
+    });
+    expect(relaidClip.kind).toBe('caption');
+    if (relaidClip.kind !== 'caption') return;
+    const words = relaidClip.block.slots.words as Array<{ start: number; end: number }>;
+    expect(words[0]!.start).toBeCloseTo(1.5);
+    expect(words.at(-1)!.end).toBeGreaterThan(3.7);
+    expect(words.at(-1)!.end).toBeLessThan(4);
+    expect(relaid.document.semantics.transcripts[relaid.document.semantics.primaryNarrativeAssetId!]![0]!.words).toEqual(transcript[0]!.words);
   });
 
   it('turns captions off without deleting their lane or remembered style', () => {

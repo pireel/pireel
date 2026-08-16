@@ -62,7 +62,7 @@ export function renderTitle(id: string, raw: unknown, ctx: RenderCtx): RenderRes
 <style>${shared}
 #${id} .wrap{align-items:center;text-align:center;gap:${s.gap}px;}
 #${id} .cta{background:${tk('--sk-accent')};border-radius:999px;padding:${Math.round(s.gap * 0.45)}px ${Math.round(s.gap * 1.4)}px;}
-#${id} .cta .sub{color:#fff;text-shadow:none;}
+#${id} .cta .sub{color:${tk('--sk-panel')};text-shadow:none;}
 </style>`;
     tl.push(heroLand(`#${id} .t`, 0.08, { from: 0.92 }));
     if (p.sub) tl.push(heroLand(`#${id} .cta`, 0.42, { from: 0.8, dur: 0.45 }));

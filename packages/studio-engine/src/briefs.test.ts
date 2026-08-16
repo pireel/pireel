@@ -16,7 +16,7 @@ describe('BYO 简报组装(与自家 LLM 路径同一批提示词纯函数)', ()
       kitCurrent: { component: 'metric', props: { value: '47%' } },
     });
     expect(kit.format).toBe('kit');
-    expect(kit.system).toContain('COMPONENTS');
+    expect(kit.system).toContain('MOTION GRAPHIC TYPES');
     expect(kit.system).toContain('{"custom": true}');
     expect(kit.system).not.toContain('ACTIVE THEME'); // 组件无主题:不给 token 表
     expect(kit.prompt).toContain('把数字改成 52%');

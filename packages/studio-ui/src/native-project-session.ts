@@ -90,7 +90,21 @@ export function nativeProjectSharedLocalAssets(
   for (const document of documents) {
     for (const entry of nativeProjectLocalAssets(document)) {
       const previous = merged.get(entry.sig);
-      if (!previous || entry.createdAt >= previous.createdAt) merged.set(entry.sig, entry);
+      if (!previous) {
+        merged.set(entry.sig, entry);
+        continue;
+      }
+      // The project-level directory owns user edits such as semantic rename. Output documents may
+      // still carry an older filename label until each output is opened and saved; never let one
+      // stale output overwrite the shared name while filling any metadata the directory lacks.
+      merged.set(entry.sig, {
+        ...entry,
+        ...previous,
+        kind: previous.kind ?? entry.kind,
+        w: previous.w ?? entry.w,
+        h: previous.h ?? entry.h,
+        folder: previous.folder ?? entry.folder,
+      });
     }
   }
   return [...merged.values()].sort((left, right) => right.createdAt - left.createdAt);

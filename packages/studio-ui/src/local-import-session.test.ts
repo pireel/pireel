@@ -164,6 +164,26 @@ describe('unified local import session', () => {
     });
   });
 
+  it('pins a folder-handle image in OPFS so a refresh does not require permission again', async () => {
+    installMemoryOpfs();
+    const image = new File(['image-pixels'], 'traffic.png', {
+      type: 'image/png',
+      lastModified: 17,
+    });
+    const handle = { getFile: async () => image } as FileSystemFileHandle;
+    const sig = fileSig(image);
+
+    const session = await runLocalImportSession([{
+      type: 'browser',
+      file: image,
+      handle,
+      folder: { id: 'folder-data', name: '数据图', path: 'traffic.png' },
+    }]);
+
+    expect(session.rejected).toEqual([]);
+    expect(await (await loadLocalVideo(sig))?.text()).toBe('image-pixels');
+  });
+
   it('streams loopback response chunks into OPFS without materializing a Blob', async () => {
     const dir = installMemoryOpfs();
     const encoder = new TextEncoder();

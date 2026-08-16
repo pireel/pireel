@@ -28,6 +28,14 @@ export interface StudioScenarioSkillOption {
   summary: string;
   /** Compact picker mark; presentation only, never included in the model prompt. */
   icon?: string;
+  /** User-owned account Skill. Enables management controls; never changes prompt authority. */
+  custom?: boolean;
+}
+
+export interface StudioCustomScenarioSkillManager {
+  list(): Promise<readonly StudioScenarioSkillOption[]>;
+  importMarkdown(file: File): Promise<StudioScenarioSkillOption>;
+  delete(id: string): Promise<void>;
 }
 
 export type StudioGenerationType = 'image' | 'video' | 'element' | 'audio';
@@ -56,9 +64,11 @@ export interface StudioShell {
     videoDurationOptions(modelId: string): string[];
     videoResolutionOptions(modelId: string): string[];
   };
-  /** Host-owned expert catalog. Omitted means the OSS editor runs with generic automatic routing only. */
+  /** Host-owned expert catalog. Omitted means the editor runs with no selectable Skill. */
   scenarioSkills?: readonly StudioScenarioSkillOption[];
-  /** Initial Skill for a fresh hosted conversation; ignored unless present in scenarioSkills. */
+  /** Optional host-owned persistence for account-scoped Markdown Skills. */
+  customScenarioSkills?: StudioCustomScenarioSkillManager;
+  /** Initial Skill for a fresh hosted conversation; omit to start without a Skill. */
   defaultScenarioSkillId?: string;
   /** Host-owned curated media surface. Omitted means OSS renders only project-local and cloud assets. */
   curatedAssets?: {

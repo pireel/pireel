@@ -8,12 +8,71 @@ import {
 } from './caption-layout-state';
 import {
   applyEditorCommand,
+  secondsToTimelineFrames,
   syncCaptionTranscripts,
   type CaptionStylePatch,
   type EditorCommandError,
   type EditorCommandReceipt,
   type EditorDocumentV2,
 } from './editor-document';
+
+export type ManagedCaptionResizeResult =
+  | { ok: true; document: EditorDocumentV2 }
+  | { ok: false; document: EditorDocumentV2; error: EditorCommandError };
+
+/** Trim one derived caption without mutating ASR word timing. The persisted offsets remain attached
+ * to the source word range, so later narrative ripple edits move the customized caption with speech. */
+export function resizeManagedCaptionTiming(
+  document: EditorDocumentV2,
+  clipId: string,
+  edge: 'left' | 'right',
+  atSec: number,
+): ManagedCaptionResizeResult {
+  const trackId = document.semantics.managedCaptionTrackId;
+  const trackIndex = document.timeline.tracks.findIndex((track) => track.id === trackId);
+  if (trackIndex < 0) {
+    return { ok: false, document, error: { code: 'track-not-found', message: 'Managed caption track does not exist.', trackIds: trackId ? [trackId] : [] } };
+  }
+  const track = document.timeline.tracks[trackIndex]!;
+  if (track.locked) {
+    return { ok: false, document, error: { code: 'track-locked', message: `Track is locked: ${track.id}`, trackIds: [track.id] } };
+  }
+  const clipIndex = track.clips.findIndex((clip) => clip.id === clipId);
+  const clip = track.clips[clipIndex];
+  if (!clip || clip.kind !== 'caption' || !clip.managed) {
+    return { ok: false, document, error: { code: 'clip-not-found', message: `Managed caption does not exist: ${clipId}` } };
+  }
+  if (!Number.isFinite(atSec)) {
+    return { ok: false, document, error: { code: 'invalid-range', message: 'Caption trim time must be finite.' } };
+  }
+
+  const currentEndFrame = clip.startFrame + clip.durationFrames;
+  const requestedFrame = secondsToTimelineFrames(Math.max(0, atSec), document.canvas.fps);
+  const nextStartFrame = edge === 'left'
+    ? Math.min(currentEndFrame - 1, requestedFrame)
+    : clip.startFrame;
+  const nextEndFrame = edge === 'right'
+    ? Math.max(clip.startFrame + 1, requestedFrame)
+    : currentEndFrame;
+  if (nextStartFrame === clip.startFrame && nextEndFrame === currentEndFrame) {
+    return { ok: true, document };
+  }
+  const prior = clip.timingOverride ?? { startOffsetFrames: 0, endOffsetFrames: 0 };
+  const timingOverride = {
+    startOffsetFrames: prior.startOffsetFrames + nextStartFrame - clip.startFrame,
+    endOffsetFrames: prior.endOffsetFrames + nextEndFrame - currentEndFrame,
+  };
+  const clips = [...track.clips];
+  clips[clipIndex] = {
+    ...clip,
+    startFrame: nextStartFrame,
+    durationFrames: nextEndFrame - nextStartFrame,
+    timingOverride,
+  };
+  const tracks = [...document.timeline.tracks];
+  tracks[trackIndex] = { ...track, clips };
+  return { ok: true, document: { ...document, timeline: { ...document.timeline, tracks } } };
+}
 
 export interface CaptionDocumentEditInput {
   document: EditorDocumentV2;

@@ -24,6 +24,12 @@ export interface NormalizableElement {
 
 export const DEFAULT_EDITABLE_ELEMENT_BOX: EditableBlockBox = { x: 0.14, y: 0.3, w: 0.72, h: 0.4 };
 export const DEFAULT_KIT_ELEMENT_BOX: EditableBlockBox = { x: 0.07, y: 0.34, w: 0.86, h: 0.3 };
+/** Code needs a readable viewport rather than the shallow strip used by titles and callouts. */
+export const DEFAULT_CODE_KIT_ELEMENT_BOX: EditableBlockBox = { x: 0.08, y: 0.18, w: 0.84, h: 0.64 };
+
+export function defaultKitElementBox(templateId: string): EditableBlockBox {
+  return templateId === 'kit:code' ? DEFAULT_CODE_KIT_ELEMENT_BOX : DEFAULT_KIT_ELEMENT_BOX;
+}
 
 /** Initial overlay landing area. Portrait social video reserves extra room for the device cutout and
  *  the platform chrome/caption strip; landscape and square canvases use a lighter inset. This is an
@@ -188,7 +194,7 @@ export function normalizeElementForInsert(
 /** Add editable geometry to a malformed visual block while preserving captions/transitions. */
 export function withEditableBlockGeometry(block: Block, canvasW: number, canvasH: number): Block {
   if (isUsableEditableBlockBox(block.box) || isSentenceCaption(block) || blockKind(block) === 'transition') return block;
-  if (block.templateId.startsWith('kit:')) return { ...block, box: { ...DEFAULT_KIT_ELEMENT_BOX } };
+  if (block.templateId.startsWith('kit:')) return { ...block, box: { ...defaultKitElementBox(block.templateId) } };
   if (block.templateId !== 'custom') return { ...block, box: { ...DEFAULT_EDITABLE_ELEMENT_BOX } };
 
   const innerHtml = typeof block.slots.innerHtml === 'string' ? block.slots.innerHtml : '';

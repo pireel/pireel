@@ -89,4 +89,32 @@ describe('native project document boundary', () => {
       library: { createdAt: 1 },
     }));
   });
+
+  it('persists the project-library label onto an existing timeline asset', () => {
+    const document = compositionToEditorDocument({
+      projectId: 'project-1',
+      composition: {
+        ...emptyComposition(),
+        video: { url: 'blob:main', durationSec: 4, sourceWidth: 1920, sourceHeight: 1080 },
+        shots: [{ id: 'talk', srcStart: 0, srcEnd: 4, treatment: 'full' as const }],
+      },
+      videoSig: 'source.mp4:20:3',
+    }).document;
+    const assetId = document.semantics.primaryNarrativeAssetId!;
+    document.assets[assetId] = { ...document.assets[assetId]!, label: 'source.mp4' };
+
+    const merged = applyEditorDocumentPersistenceMetadata({
+      projectId: 'project-1',
+      document,
+      localAssets: [{
+        sig: 'source.mp4:20:3',
+        label: 'Founder explaining the pricing model',
+        kind: 'video',
+        createdAt: 1,
+      }],
+    });
+
+    expect(merged.assets[assetId]?.label).toBe('Founder explaining the pricing model');
+    expect(merged.assets[assetId]?.locator.localSig).toBe('source.mp4:20:3');
+  });
 });

@@ -49,7 +49,7 @@ export interface StudioToolDef {
   chatOnly?: boolean;
 }
 
-const TREATMENTS = ['full', 'punch-in', 'corner-br', 'corner-tl', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
+const TREATMENTS = ['full', 'punch-in', 'corner-tl', 'corner-tr', 'corner-bl', 'corner-br', 'split-l', 'split-r', 'split-t', 'split-b'] as const;
 const AGENT_MEDIA_BOX_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -82,7 +82,7 @@ const AGENT_CLIP_ITEM_SCHEMA = {
     role: { type: 'string', enum: ['broll', 'narration', 'music', 'sfx'], description: 'Semantic lane role. Audio defaults to narration; visual media defaults to broll.' },
     sceneId: { type: 'string', description: 'Director scene that owns this visual clip. For a planned edit, pass the exact scene id; audio clips ignore it.' },
     startSec: { type: 'number', description: 'Edited-timeline start in seconds.' },
-    durationSec: { type: 'number', description: 'Timeline duration. Defaults to source duration (images default to 5s).' },
+    durationSec: { type: 'number', description: 'Initial timeline duration. Defaults to the registered source remainder; when source duration is unavailable it starts at an editable 5s. Five seconds is a default, never a limit.' },
     sourceInSec: { type: 'number' }, sourceOutSec: { type: 'number' },
     fit: { type: 'string', enum: ['contain', 'cover'] },
     box: AGENT_MEDIA_BOX_SCHEMA,
@@ -118,7 +118,7 @@ function obj(
 }
 
 export const STUDIO_TOOLS: StudioToolDef[] = [
-  /* ---------- frame (theme content pack; server-executed, client only renders the card, no runTool impl) ---------- */
+  /* ---------- visual direction (server-owned Frame playbook; client only renders the card) ---------- */
   {
     id: 'read_frame',
     kind: 'card',
@@ -126,7 +126,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.read_frame.label',
     description:
-      "Load the attached Frame's complete video design-system playbook (signature/native treatments, material and image treatment, footage relationship, composition, density, typography, temporal behavior, sequence contour, sound-image relationship, captions, ratio adaptation and review judgment). When <frame_attached> appears in the system prompt, call this ONCE — BEFORE planning or generating anything — then read it as a whole. Use its named situations as composition grammars in the Director Plan, not as prebuilt components, and adapt its audiovisual world to each Scene's purpose, evidence and observed footage. It is not a catalog of fixed output types, block recipes, or a foundational editing method with colors attached. Its result persists in the conversation: if a read_frame result for this Frame is already in the history, do NOT call it again. No input needed.",
+      "Load the attached visual direction's art-direction playbook. Carry its shape language, material and image treatment, typography personality, spatial composition and motion grammar across the edit; explicit palette, caption and layout controls override fixed assumptions. When <frame_attached> appears, call this ONCE before planning or generating. Use named situations as adaptable composition grammars, not prebuilt Motion Graphic templates. The Skill and Director still own story and Scene strategy. If its result already exists in history, do NOT call again. No input needed.",
     inputSchema: obj({}, []),
   },
   {
@@ -136,7 +136,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🖼️',
     label: 'tools.attach_frame.label',
     description:
-      "Attach a Frame (visual-directing content pack) to this conversation by id — its design tokens apply to the composition immediately and <frame_attached> will then tell you to read_frame. Call only after the user explicitly chooses a Frame or explicitly delegates the choice. Skill and Frame are independent; never select or reject one from supposed Skill compatibility. Also usable to SWITCH Frames when the user requests it.",
+      "Attach a visual direction by Frame id. Its art-direction grammar applies across the edit; palette, captions and layout remain independent project controls. <frame_attached> will then tell you to read_frame. Call only after the user chooses a direction or delegates the choice. Skill and visual direction are independent. Also usable to switch directions when requested.",
     inputSchema: obj({ frame_id: { type: 'string', description: 'Frame id from the catalog, e.g. "biennale-poster"' } }, ['frame_id']),
   },
   {
@@ -167,17 +167,17 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
               durationSec: { type: 'number', description: 'Positive duration in seconds; the interval must end no later than the next scene starts.' },
               viewerTask: { type: 'string', enum: [...VIEWER_TASKS] },
               narrativeRole: { type: 'string', enum: [...NARRATIVE_ROLES] },
-              sceneFamily: { type: 'string', enum: [...SCENE_FAMILIES], description: 'Shared vocabulary, not a component or layout selector. Use custom when the edit needs another family.' },
+              sceneFamily: { type: 'string', enum: [...SCENE_FAMILIES], description: 'Shared scene vocabulary, not a Motion Graphic or layout selector. Use custom when the edit needs another family.' },
               customFamily: { type: 'string', description: 'Free-form family name; required only when sceneFamily is custom.' },
               purpose: { type: 'string', description: 'Why this scene exists and what should change for the viewer.' },
               evidence: { type: 'array', items: { type: 'string' }, description: 'Transcript/footage/product/asset facts that support this scene.' },
-              treatmentId: { type: 'string', description: 'Concise kebab-case name for the chosen Frame-native treatment or, when themeless, a content-specific treatment. Name the composition idea, never a generic component such as top-label or CTA-card.' },
+              treatmentId: { type: 'string', description: 'Concise kebab-case name for the chosen Frame-native treatment or, when themeless, a content-specific treatment. Name the composition idea, never a generic shell such as top-label or CTA-card.' },
               visualAnchor: { type: 'string', description: 'Concrete subject, action, evidence, or relationship that must dominate and remain unobscured.' },
-              visualTreatment: { type: 'string', description: 'Executable source-aware composition: framing/crop, graphic-to-footage relationship, hierarchy, placement/safe zones, density and exit state. Functional nouns are not literal boxes.' },
-              motionPlan: { type: 'string', description: 'How the scene enters, develops with exact speech/action beats, holds, and exits; use the Frame motion grammar.' },
+              visualTreatment: { type: 'string', description: 'Executable source-aware composition: framing/crop, Motion-Graphic-to-footage relationship, hierarchy, placement/safe zones, density and exit state. When a Motion Graphic is earned, name the content-specific communicative form (for example matched comparison, causal flow, real browser proof, code execution, share chart or identity overlay), not merely a broad family. Capability names are landmarks, never literal boxes or a closed enum.' },
+              motionPlan: { type: 'string', description: 'How the scene enters, develops with exact speech/action beats, reaches a visual payoff, holds, and clears/exits; use the Frame motion grammar.' },
               soundPlan: { type: 'string', description: 'How voice, source sound, music, silence and any sparse graphic cue support this scene.' },
-              assetStrategy: { type: 'string', description: 'Which source/project/official/generated material should carry the scene, and why.' },
-              brollDecision: { type: 'string', enum: [...BROLL_DECISIONS], description: 'none keeps A-roll/source continuity; source uses supplied footage; search retrieves truthful external material; generate proposes new media only when generation is separately authorized.' },
+              assetStrategy: { type: 'string', description: 'Choose the strongest primary visual medium and why it beats the nearest materially different alternative: keep source; user/project/official asset; credible search; generated image; editable graphic; or none. Real people/products/events/interfaces/evidence prefer truthful source/search material. Generation may create an authored/stylized scene, controlled composition, illustrative subject, concept, physical metaphor, atmosphere, transition plate or otherwise unavailable shot; never use it as invented proof or quota filler. The Frame shapes its visual language but never decides whether generation is allowed.' },
+              brollDecision: { type: 'string', enum: [...BROLL_DECISIONS], description: 'none keeps A-roll/source continuity; source uses supplied footage; search retrieves truthful external material; generate creates the strongest non-evidentiary visual for the beat when available alternatives are weaker.' },
               brollRationale: { type: 'string', description: 'Why this moment earns or rejects a picture change. Prefer cognitive anchors—evidence, process, relation, state change, or a sharp metaphor—not decoration or coverage quotas.' },
               visualMetaphor: { type: 'string', description: 'Optional one-sentence visual proposition for metaphorical B-roll: one idea, one physical action/relation, normally 3–6 meaningful objects.' },
             },
@@ -293,8 +293,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📝',
     label: 'tools.extract_asr.label',
     description:
-      'Transcribe actual spoken audio into measured timed sentences/words. With no input it analyzes the main video and inserted video sources. For audio-only narration, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth, not necessarily timing truth: reuse it directly for meaning and ordinary copy; call this only when the task needs real word timing, pauses, performed wording, karaoke/caption sync, beat-aware scenes, or another audio-derived fact. It does NOT add captions or cut clips. Cached per file.',
+      'Transcribe actual spoken audio into measured timed sentences/words. With no input it analyzes the main video and inserted video sources. For an unplaced device-local video/audio returned by list_assets/search_assets or explicitly @-mentioned by the user, pass its exact localSig; the visible @asset_… token is a reference token, not an assetId. For registered audio-only narration, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth, not necessarily timing truth: reuse it directly for meaning and ordinary copy; call this only when the task needs real word timing, pauses, performed wording, karaoke/caption sync, beat-aware scenes, or another audio-derived fact. It does NOT add captions or cut clips. Cached main/registered sources are reused; unplaced local-source results are returned directly in the receipt.',
     inputSchema: obj({
+      localSig: { type: 'string', description: 'Optional exact device-local video/audio sig. Use this for an unplaced local source; never pass its @asset_… reference token as assetId.' },
       assetId: { type: 'string', description: 'Optional exact registered audio asset id to analyze.' },
       clipId: { type: 'string', description: 'Optional exact placed audio clip id; resolves its asset automatically.' },
     }, []),
@@ -335,8 +336,12 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.analyze_visual.label',
     description:
-      'Analyze the footage LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content). Returns compact semantic segments plus subjectTracks: repeated source-normalized subject geometry is already clustered locally into stable intervals with representative safe areas. Consume subjectTracks directly; do NOT re-cluster every raw sample or create cuts where the track remains stable. These are observations, not edit decisions: use them with set_canvas, split_shot, set_shot_framing, and apply_layout as required. It does NOT show the rendered result; call review_visuals for final visual QA. Slow (runs frame-by-frame in the browser) — shows live progress + ETA. No input. Cached per file.',
-    inputSchema: obj({}, []),
+      'Analyze one video LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content). For an unplaced device-local video, pass its exact localSig from list_assets/search_assets so footage can be understood before Director planning or timeline insertion. Otherwise omit selectors when the project has one video or a mounted primary video; with multiple project videos, pass an exact assetId or clipId from get_timeline/inspect_media. Audio-led projects may analyze their B-roll video directly; it does not need to be promoted to the primary lane. Returns compact semantic segments plus subjectTracks: repeated source-normalized subject geometry is already clustered locally into stable intervals with representative safe areas. Consume subjectTracks directly; do NOT re-cluster every raw sample or create cuts where the track remains stable. These are observations, not edit decisions: use them with set_canvas, split_shot, set_shot_framing, and apply_layout as required. It does NOT show the rendered result; call review_visuals for final visual QA. Slow (runs frame-by-frame in the browser) — shows live progress + ETA. Cached per file.',
+    inputSchema: obj({
+      localSig: { type: 'string', description: 'Exact device-local video sig returned by list_assets/search_assets. Use before placing a local source.' },
+      assetId: { type: 'string', description: 'Exact registered video asset id. Omit when there is only one project video or a mounted primary video.' },
+      clipId: { type: 'string', description: 'Exact timeline clip id whose video asset should be analyzed.' },
+    }, []),
   },
   /* ---------- block content (generated via compose, card) ---------- */
   {
@@ -346,10 +351,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✨',
     label: 'tools.add_block.label',
     description:
-      'Add a NEW overlay element. The visual form and animation are generated from meaning, not limited to stock cards. Use when the user wants something that is not on screen yet. When executing a saved Director Plan, pass its exact sceneId: runtime injects that scene\'s purpose, evidence, visual treatment, asset strategy and neighboring-scene contrast, generates bespoke themed HTML, and binds the new clip back to the Semantic Scene. For an unplanned small edit, put a concrete self-contained instruction (what it says + the look). Write on-screen content in the video\'s language. Set atSec and durationSec to the complete spoken thought it supports; both otherwise default to the current playhead and 3 seconds.',
+      'Add a NEW Motion Graphic Component. Component is the upper-level extensible element concept; this tool currently authors its Motion Graphic family. Name the content-specific communicative job—comparison, chart, process, flowchart, code/editor, phone/browser, real-source annotation, identity, or another form the evidence requires—then describe the source-aware layout and one primary motion idea. These examples are an open capability map, not a closed type list. Runtime retrieves at most a few relevant structural references and the designer may combine, transform or ignore them; the active Frame owns the final visual language. When executing a saved Director Plan, pass its exact sceneId: runtime injects that scene\'s purpose, evidence, visual treatment, asset strategy and neighboring-scene contrast, generates bespoke themed HTML, and binds the new clip back to the Semantic Scene. For an unplanned small edit, give a concrete self-contained instruction with exact on-screen content, layout, and the enter > develop > payoff > hold > clear timing. Write on-screen content in the video\'s language. Set atSec and durationSec to the complete spoken thought it supports; both otherwise default to the current playhead and 3 seconds. Never use an opaque full-canvas Motion Graphic over useful footage unless the scene intentionally becomes a full-field chapter or payoff.',
     inputSchema: obj(
       {
-        instruction: { type: 'string', description: 'Instruction describing the new element (content + style).' },
+        instruction: { type: 'string', description: 'Instruction describing the Motion Graphic: type, exact content, source-aware layout, style, primary motion idea, payoff and clear/exit.' },
         sceneId: { type: 'string', description: 'Exact scene id from the saved Director Plan. Required for planned full-draft graphics; omit for an unplanned local edit.' },
         atSec: { type: 'number', description: 'Timeline start in seconds. Omit to use the playhead.' },
         durationSec: { type: 'number', description: 'On-screen duration in seconds (>= 0.3). Omit only for an intentional 3-second element.' },
@@ -364,7 +369,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.edit_block.label',
     description:
-      "Edit ONE existing overlay block's content, styling or animation (e.g. make the keyword red and bigger, change the caption effect, add an outline, slow it down). Pass the target `blockId` (from <composition_state>; if the user wrote @id use that) and a concrete `instruction`. Do NOT use this for moving/resizing — timeline timing is move_block/resize_block, on-screen position/size is place_block.",
+      "Edit ONE existing Component's content, visual composition or animation. For a Motion Graphic Component, preserve its communicative job unless the user asks to change it, and keep a readable payoff/hold/clear lifecycle. Pass the target `blockId` (from <composition_state>; if the user wrote @id use that) and a concrete `instruction`. Do NOT use this for moving/resizing: timeline timing is move_block/resize_block, on-screen position/size is place_block.",
     inputSchema: obj(
       {
         blockId: { type: 'string', description: 'Target block id from <composition_state>.' },
@@ -510,6 +515,15 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({ assetIds: { type: 'array', items: { type: 'string' } }, clipIds: { type: 'array', items: { type: 'string' } } }, []),
   },
   {
+    id: 'inspect_images', kind: 'card', busyText: 'tools.inspect_images.busy', icon: '👁️', label: 'tools.inspect_images.label',
+    chatOnly: true,
+    description:
+      'Inspect the ACTUAL PIXELS of up to 8 still images before choosing, describing, or placing them. Pass exact local sigs / local:<sig> refs returned by list_assets/search_assets, or exact registered image asset ids from inspect_media. Returns one grounded visual description per image, including visible subject, composition, text/data and likely editorial use. Use this instead of inferring image contents from filenames or dimensions. This sends compressed inspection copies to the configured vision service but does not upload the source files to the media library.',
+    inputSchema: obj({
+      refs: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' }, description: 'Exact local sig, local:<sig>, or registered image asset id. Maximum 8.' },
+    }, ['refs']),
+  },
+  {
     id: 'organize_media', kind: 'badge', icon: '🏷️', label: 'tools.organize_media.label',
     description: 'Batch-update project media labels, descriptions, search tags, and collection metadata. It never changes bytes or timeline placement.',
     inputSchema: obj({
@@ -534,7 +548,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_texts', kind: 'badge', icon: 'T', label: 'tools.add_texts.label',
-    description: 'Add one or more ordinary title/subtitle text clips as native graphic blocks. This is the atomic text primitive; use richer generated components only when custom layout or animation is actually needed.',
+    description: 'Add one or more ordinary title/subtitle text Components as native graphic blocks. This is the atomic text primitive; use a generated Motion Graphic Component only when custom composition or animation is actually needed.',
     inputSchema: obj({
       items: { type: 'array', items: {
         type: 'object', additionalProperties: false,
@@ -549,7 +563,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'update_text', kind: 'badge', icon: '✏️', label: 'tools.update_text.label',
-    description: 'Batch-update native title text clips by stable clip id: main text, subtitle, start, and duration. It does not rewrite arbitrary custom HTML components.',
+    description: 'Batch-update native title text Components by stable clip id: main text, subtitle, start, and duration. It does not rewrite arbitrary custom HTML Components such as Motion Graphics.',
     inputSchema: obj({
       items: { type: 'array', items: {
         type: 'object', additionalProperties: false,
@@ -560,7 +574,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
-    description: 'Place one or more registered assets with overwrite semantics. Each item replaces its own destination interval; items on the same lane and time replace earlier items rather than forming a sequence. Use insert_clips to open time, or insert_clip with a local sig for device-local video in the main narrative sequence. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended.',
+    description: 'Place one or more registered assets without opening timeline time. When trackId is omitted, overlapping visual media is placed on a free semantic lane so it coexists with current footage; pass an exact trackId only when replacement is intentional. The receipt returns the actual placed timeline/source ranges and any overwritten clip ids. A 5-second fallback is only an editable initial duration, never proof of source length or coverage. For a planned repeat/fill, inspect the source, pass explicit contiguous durationSec/source ranges, trim the final repetition, then verify the returned placements with get_timeline before claiming the interval is covered. Use insert_clips to open time, or insert_clip with a local sig for device-local video in the main narrative sequence. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
@@ -672,7 +686,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🗂️',
     label: 'tools.list_assets.label',
     description:
-      "List one explicit user-asset scope (most recent first). `mine` = device-local index and is the least-privilege default; entries carry a sig and may need restore/preparation. `cloud` = uploaded assets with direct urls. Never switch scopes or substitute another asset unless the user asks. Also returns this project's video-source summary.",
+      "List one explicit user-asset scope (most recent first). `mine` = device-local index and is the least-privilege default; entries carry a sig and may need restore/preparation. Route by kind: local video sig → insert_clip (it probes real duration); local audio sig → register_media.localSig, targeted extract_asr when needed, then add_clips role=narration; local image sig → prepare_local_image. Do not metadata-register a local video and place it with add_clips. `cloud` = uploaded assets with direct urls. Never switch scopes or substitute another asset unless the user asks. Also returns this project's video-source summary.",
     inputSchema: obj(
       {
         scope: { type: 'string', enum: ['mine', 'cloud'], description: 'Asset scope. Defaults to mine; use cloud only when the user explicitly refers to cloud/uploaded/generated material.' },
@@ -688,11 +702,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔍',
     label: 'tools.search_assets.label',
     description:
-      "Search one EXPLICIT ASSET LIBRARY scope by natural-language metadata: mine=device-local indexed files; cloud=uploads, this project's generation history, and saved elements; official=curated stickers, BGM, kit components, and component templates; all=only when the user explicitly asks to search every library. Scope is a permission boundary: never retry or substitute from another scope. Device-local media stays metadata-only until the exact file is prepared; official semantic search uses only its precomputed index. Results carry stable ids plus locators (url/sig/component/template). This does NOT search inside videos or the web.",
+      "Search one EXPLICIT ASSET LIBRARY scope by natural-language metadata: mine=device-local indexed files; cloud=uploads, this project's generation history, and saved Motion Graphics; official=curated stickers, BGM, and Motion Graphic presets; all=only when the user explicitly asks to search every library. Scope is a permission boundary: never retry or substitute from another scope. Device-local media stays metadata-only until the exact file is prepared; official semantic search uses only its precomputed index. Results carry stable ids plus locators (url/sig/component/template). This does NOT search inside videos or the web.",
     inputSchema: obj(
       {
         query: { type: 'string', description: 'Natural-language asset description, name, category, mood, or use case (max 200 characters).' },
-        scope: { type: 'string', enum: ['mine', 'cloud', 'official', 'all'], description: 'Required scope. Use mine for local/device/my, cloud only for explicit cloud/uploaded/generated material, official for curated components/media, and all only for an explicit cross-library request.' },
+        scope: { type: 'string', enum: ['mine', 'cloud', 'official', 'all'], description: 'Required scope. Use mine for local/device/my, cloud only for explicit cloud/uploaded/generated material, official for curated Motion Graphics/media, and all only for an explicit cross-library request.' },
         kind: { type: 'string', enum: ['all', 'image', 'video', 'audio', 'element'], description: 'Optional asset-kind filter.' },
         limit: { type: 'number', description: 'Maximum matches (default 12, max 30).' },
       },
@@ -716,9 +730,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.generate_image.label',
     description:
-      "Start ONE hosted image generation task (CHARGES the user's Pireel account). This is an atomic media operation: it returns an asynchronous creation id in the active project's generation history and does NOT insert the result into the edit. Use returned/supplied asset URLs as references; never invent locators. Do not poll repeatedly in the same turn.",
+      "Start ONE hosted image generation task (CHARGES the user's Pireel account). In a requested complete creative edit, use it without a separate permission pause whenever generated imagery is the strongest medium for the Director Scene: an authored/stylized scene, controlled composition, illustrative subject, concept, physical metaphor, atmosphere, transition plate or otherwise unavailable non-evidentiary shot. The active Frame governs visual language, not permission. Never generate documentary/product evidence or filler. This is an atomic media operation: it returns an asynchronous creation id in the active project's generation history and does NOT insert the result into the edit. Use returned/supplied asset URLs as references; never invent locators. Do not poll repeatedly in the same turn.",
     inputSchema: obj({
-      prompt: { type: 'string', description: 'Concrete visual prompt for the generated image.' },
+      prompt: { type: 'string', description: 'Production-ready visual prompt: narrative job and relationship to the surrounding cut; exact subject + physical action/relation; environment and truth boundary; camera distance/angle/lens, lighting and depth; composition, subject placement, destination ratio, crop-safe overscan and negative space; relevant active-Frame image treatment/palette/material/texture/visual-world traits expressed as visible properties; identity/product consistency; and exclusions (normally no embedded text, logos, watermarks, fake UI or invented evidence). Prefer one strong proposition over keyword soup.' },
       modelId: { type: 'string', description: 'Optional stable id from list_models; omit for the catalog default.' },
       size: { type: 'string', description: 'Output dimensions, e.g. 1440x2560, 2560x1440, or 2048x2048.' },
       quality: { type: 'string', description: 'Optional model-specific quality tier.' },
@@ -773,7 +787,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.prepare_local_image.label',
     chatOnly: true,
     description:
-      'Prepare ONE exact device-local image for durable use inside a generated component. Call only when the user explicitly asked to use that local image, and pass the exact sig returned by list_assets/search_assets. Listing the sig does NOT grant access to its bytes. The bytes remain on this device in OPFS; the project stores only a device-local locator, never an R2 URL. If local bytes need a user gesture, it fails with a restore-access instruction; never upload or replace it with another image.',
+      'Prepare ONE exact device-local image for durable use inside a generated Motion Graphic. Call only when the user explicitly asked to use that local image, and pass the exact sig returned by list_assets/search_assets. Listing the sig does NOT grant access to its bytes. The bytes remain on this device in OPFS; the project stores only a device-local locator, never an R2 URL. If local bytes need a user gesture, it fails with a restore-access instruction; never upload or replace it with another image.',
     inputSchema: obj({ sig: { type: 'string', description: 'Exact local image sig returned by list_assets/search_assets.' } }, ['sig']),
   },
   /* ---------- reusable voice / portrait animation primitives ---------- */
@@ -1068,7 +1082,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_treatment.label',
     description:
-      'Set how one video clip on any visual lane is framed: full (full screen), punch-in (zoom in for emphasis), corner-br/corner-tl (shrink to a corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split USE split-b — video in the bottom half, graphic in the top (the split band re-frames around the speaker, so their position in the frame does not matter); split-t only on explicit user request. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE clip — split a primary shot first when only part should change.',
+      'Set how one video clip on any visual lane is framed: full (full screen), punch-in (zoom in for emphasis), corner-tl/corner-tr/corner-bl/corner-br (shrink to any corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split USE split-b — video in the bottom half, graphic in the top (the split band re-frames around the speaker, so their position in the frame does not matter); split-t only on explicit user request. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE clip — split a primary shot first when only part should change.',
     inputSchema: obj(
       {
         shotId: { type: 'string' },

@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Block } from '@pireel/studio-engine/composition';
 import {
+  DEFAULT_CODE_KIT_ELEMENT_BOX,
   DEFAULT_EDITABLE_ELEMENT_BOX,
   DEFAULT_KIT_ELEMENT_BOX,
   editableOverlaySafeArea,
@@ -41,6 +42,12 @@ describe('editable block geometry', () => {
 
     expect(repaired.box).toEqual(DEFAULT_KIT_ELEMENT_BOX);
     expect(repaired.slots).toEqual({ props: { value: '42' } });
+  });
+
+  it('gives code blocks a taller readable viewport', () => {
+    const repaired = withEditableBlockGeometry(block({ templateId: 'kit:code', slots: { props: { code: 'const ready = true;' } } }), 1080, 1920);
+
+    expect(repaired.box).toEqual(DEFAULT_CODE_KIT_ELEMENT_BOX);
   });
 
   it('preserves existing geometry and intentional boxless caption/transition layers', () => {

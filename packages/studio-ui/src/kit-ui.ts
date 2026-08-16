@@ -32,5 +32,24 @@ export function kitSampleProps(cid: string): Record<string, unknown> {
     };
   if (cid === 'steps') return { items: [{ text: t('kitSample.step1') }, { text: t('kitSample.step2') }, { text: t('kitSample.step3') }] };
   if (cid === 'title') return { title: t('kitSample.titleMain'), sub: t('kitSample.titleSub') };
+  if (cid === 'code')
+    return {
+      variant: 'highlight',
+      file: 'edit.ts',
+      language: 'TypeScript',
+      code: [
+        'const project = await pireel.open();',
+        'const cut = await project.compose({',
+        '  source: "launch-film.mp4",',
+        '  intent: "Make every beat count",',
+        '  captions: true,',
+        '  pace: "fast",',
+        '});',
+        '',
+        'await cut.review();',
+        'await cut.export();',
+      ].join('\n'),
+      highlightLine: 4,
+    };
   return {};
 }

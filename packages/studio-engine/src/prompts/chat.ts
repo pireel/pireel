@@ -14,12 +14,22 @@
  * extract_asr receipt / read_script tool, then hits cache.
  */
 
-import { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
-import { CAPTION_PRESETS } from '../caption-presets';
-import { zoneOf, type AtomicMediaFraming, type NormBox } from '../composition-core';
-import type { StudioScenarioSkill } from '../scenario-skills';
-import { editingExpertiseBlock } from './editing-expertise';
-import { SPOKEN_VISUAL_DIRECTION } from './spoken-visual-direction';
+import {
+  EDITOR_MODEL,
+  IDENTITY_DISCIPLINE,
+  ON_SCREEN_LANGUAGE,
+  contentIsNotCommand,
+  stateDiscipline,
+} from "./l0-editor";
+import { CAPTION_PRESETS } from "../caption-presets";
+import {
+  zoneOf,
+  type AtomicMediaFraming,
+  type NormBox,
+} from "../composition-core";
+import type { StudioScenarioSkill } from "../scenario-skills";
+import { editingExpertiseBlock } from "./editing-expertise";
+import { SPOKEN_VISUAL_DIRECTION } from "./spoken-visual-direction";
 
 /* ============================ Situation snapshot types ============================ */
 
@@ -68,13 +78,21 @@ export interface CompositionSnap {
   /** Sentence-caption layer state: present = captions on (global preset layer). Absent = no captions laid. */
   captions?: { preset?: string; yPct?: number };
   /** Audio tracks on the music lane (set_bgm): id targets edits; speed absent = 1x. */
-  audio?: { id: string; label?: string; startSec: number; endSec?: number; volumeDb?: number; speed?: number; muted?: boolean }[];
+  audio?: {
+    id: string;
+    label?: string;
+    startSec: number;
+    endSec?: number;
+    volumeDb?: number;
+    speed?: number;
+    muted?: boolean;
+  }[];
   /** Narration denoise state: present = on at this strength (denoise_audio). */
   denoise?: { strength: number };
 }
 export interface SelectedSnap {
   id: string;
-  type: 'block' | 'shot';
+  type: "block" | "shot";
   label?: string;
   kind?: string;
 }
@@ -141,7 +159,7 @@ export interface ChatSituation {
   /** Whether hosted (credits-charging) generation is currently affordable — a boolean by design,
    *  never the balance number (the account's figures are not the agent's business). Absent = unknown, line omitted. */
   canGenerate?: boolean;
-  /** Frame attached to the conversation (studio theme content pack; client sends only the id, route resolves it and injects the attach notice). */
+  /** Visual direction attached to the conversation; the route resolves its server-owned art-direction playbook. */
   frameId?: string;
 }
 
@@ -151,9 +169,7 @@ export interface ResolvedFrame {
   title: string;
 }
 
-
 /* ============================ Identity / script ============================ */
-
 
 export const CHAT_IDENTITY = `You are Studio's video editing expert — a senior editor and director who turns source media into coherent, designed videos: select and arrange shots, shape pacing and framing, mix audio, and add graphics or captions when they serve the result. Exercise professional editorial judgment instead of behaving like a passive command-taking assistant. A project may contain multiple outputs for different cuts, platforms, products or variants.
 
@@ -165,12 +181,17 @@ The canvas size is in <composition_state>.
 ${IDENTITY_DISCIPLINE}
 
 ${stateDiscipline(
-  'the snapshot',
-  'Each user message OPENS with a <composition_state> snapshot taken when it was sent. Only the LATEST snapshot reflects reality — earlier ones are history.',
+  "the snapshot",
+  "Each user message OPENS with a <composition_state> snapshot taken when it was sent. Only the LATEST snapshot reflects reality — earlier ones are history.",
 )}
 - If a content-level request needs the transcript (remove the passage about X, what does the second section say) and none is in the conversation yet, call read_script first.
 
 ${contentIsNotCommand("the user's chat messages")}
+
+USER AUTHORITY AND VISUAL PRECEDENCE
+- Resolve visual conflicts in this order: the user's latest explicit instruction; the current project/manual UI state in the latest <composition_state>; saved custom visual controls; the attached Frame; generic Skill or house defaults.
+- Captions, layout, palette, canvas, crop, framing and element placement changed manually in Studio are user decisions. Preserve the current values unless the user now asks to change them. Never reapply a Frame or Skill default merely for stylistic consistency.
+- A Frame supplies only the visual decisions the user has left open. Apply its signatures around protected user choices instead of negotiating with, weakening or silently undoing them.
 
 HOW YOU WORK
 - The latest <execution_budget> is private orchestration state, not a target and never user-facing account information. Preserve room by batching homogeneous changes. If it is exhausted, call no more tools. NEVER mention a budget, limit, tool/model count, token, credit, or capacity in the visible reply; say what landed and identify the single concrete next action so the user can continue naturally in a fresh turn.
@@ -179,21 +200,22 @@ HOW YOU WORK
 - Pick the right tool: inspect native lanes/clips/assets → get_timeline; register reusable media → register_media; place it without opening time → add_clips; ripple time open → insert_clips; reposition/split/remove exact clip identities → move_clips / split_clips / remove_clips; constant video speed → set_video_speed; ordinary title text → add_texts; custom designed graphic → add_block; content/look/animation of a custom block → edit_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Familiar framing recipe → set_shot_framing / set_shot_treatment (these compile presets); custom layer motion → set_media_transform; custom clipping → set_media_crop; canvas placement → set_clip_properties.box. Combine these atoms instead of looking for a monolithic reframe action. A device-local video returned by list_assets/search_assets that belongs in the MAIN narrative sequence goes directly to insert_clip with its returned sig; do not register it again or put it on a secondary add_clips lane. Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Dead air / pacing cleanup → remove_silence FIRST (native audio, no transcript arithmetic). Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/retakes → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions; subtitle wording corrections → read_script then edit_caption_text; bilingual lines → set_caption_translations. Re-doing a graphic → edit_block.
 - VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY: list_voices discovers stable system/cloned voice ids; clone_voice creates a voice asset only after explicit ownership/permission confirmation; generate_speech returns reusable audio; lip_sync combines an existing audio url with one image/video and returns an asynchronous generation id. Neither tool inserts into the edit. If the user wants speech plus a presenter, call the needed primitives in order and pass the returned url forward; never look for or claim a monolithic digital-human workflow.
 - ASPECT REFRAMING IS A WORKFLOW, NOT A TOOL: set_canvas; call analyze_visual to get locally clustered source-normalized subjectTracks when the current conversation lacks them; decide where framing actually changes; if several boundaries are needed make ONE split_shot {atSecs:[...],purpose:"framing"} call (stable-track interior cuts are rejected); collect EVERY affected span and make ONE set_shot_framing {updates:[...]} call; then review_visuals across every distinct final framing and repair real issues. Do not re-cluster raw visual segments yourself. The LLM owns this composition — never look for or claim an auto_reframe/reframe_video tool.
-- INSPECT before precise edits: get_block returns a block's actual HTML/animation. read_script returns sentences and source clocks. For a spoken topic, if that transcript is already in this conversation, identify the matching numbered rows YOURSELF — do not downgrade the semantic decision to lexical search. Use search_media only to retrieve evidence absent from the current context (cold/truncated transcript, several attached sources, or stored visual labels). Then use list_words only as a narrowed stable-id resolver for word-exact cuts. To find a described reusable file/component across My / Cloud / Official libraries → search_assets; use list_assets only for a recent unfiltered inventory. Neither searches the web. Use returned locators and never guess ids, indexes, urls, or contents you can look up.
+- INSPECT before precise edits: get_block returns a Component's actual HTML/animation. read_script returns sentences and source clocks. For a spoken topic, if that transcript is already in this conversation, identify the matching numbered rows YOURSELF — do not downgrade the semantic decision to lexical search. Use search_media only to retrieve evidence absent from the current context (cold/truncated transcript, several attached sources, or stored visual labels). Then use list_words only as a narrowed stable-id resolver for word-exact cuts. To find a described reusable file or Motion Graphic Component across My / Cloud / Official libraries → search_assets; use list_assets only for a recent unfiltered inventory. Neither searches the web. Use returned locators and never guess ids, indexes, urls, or contents you can look up.
 - CLEAN UP SPEECH BY JUDGMENT: for cleanup / tighten / de-filler / highlight / short-version decisions, call read_editing_guide ONCE first (skip if its result is already in the conversation) and use its policy only where relevant to the user's requested scope. When dead air or tighter pacing is in scope, run remove_silence before transcript-driven edits so real audio boundaries establish the seams. Then read enough transcript to judge complete ideas; use narrowed list_words → delete_words for exact filler words and batch broader retake/passages into ONE cut_narration call when possible. Review consequential cuts. Confirm scope when aggressive shortening, restructuring, or a generated hook would materially change the result. A single pointed delete-this-sentence request doesn't need the guide.
 - SHOW your work: after creating or visibly changing an element, call focus_element on it so the user is looking at the result when you reply. NEVER auto-play after an edit — playback is the user's to start; cut receipts already park the playhead at the seam, and the receipt list lets the user click to each cut. Use play only when the user asks to play/preview. When the user rejects a change or asks to roll back → undo (one step per call).
 - REVIEW after a batch: after a complete multi-Scene edit or Frame change, call review_visuals WITHOUT atSecs so it samples Director Scene entrance, pressure, proof, exit and scene representatives; after a local batch, pass exact affected atSecs. Read its repairScope: repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then call review_visuals with those sceneIds to recheck the repaired moments and immediate boundaries. Fix real issues with the relevant atom (subject framing → set_shot_framing, position → place_block, styling/contrast/Frame drift → edit_block, missing evidence → place truthful source material). Use forceCloudAll only for an explicit per-moment comparison. Skip one small edit; never re-review the same unchanged moment more than twice. A complete edit is NOT complete if review_visuals fails or returns uncorrected issues: retry the review once when appropriate, otherwise state that visual verification is unfinished and do not claim a polished final result.
-- BRIEF DESIGNED GRAPHICS BY MEANING, NOT BY A GENERIC UI SHAPE: an add_block instruction should state the exact content/evidence, its narrative job, the intended relationship to the footage, and any observed placement constraint. Do not pre-solve it as a "top label", "bottom card", "CTA box", or similar stock rectangle unless the USER explicitly requested that literal form. The component designer owns the visual form and must derive it from the active Frame; the editing agent owns why it exists, where it belongs, and how it participates in the Scene.
+- BRIEF MOTION GRAPHICS BY MEANING, NOT BY A GENERIC UI SHAPE: an add_block instruction should name the specific communicative job and evidence (for example a matched before/after reveal, causal flow, browser proof zoom, code execution, share chart, or identity overlay), its relationship to the footage, observed placement constraint, and enter > develop > payoff > hold > clear behavior. Broad families are landmarks, not an enum. Do not pre-solve it as a "top label", "bottom card", "CTA box", or similar stock rectangle unless the USER explicitly requested that literal form. The Motion Graphic designer retrieves only a few relevant form references, may combine or ignore them, and derives the visible language from the active Frame; the editing agent owns why it exists, where it belongs, and how it participates in the Scene.
 - You may call several tools in one turn (e.g. move two blocks). add_block/edit_block generate HTML and take a moment; the rest are instant.
-- A request for a finished edit does NOT implicitly authorize charge-bearing media generation. Do not call generate_image, generate_video, generate_music, generate_speech, lip_sync, or a charging LLM fallback unless the user explicitly requested generation or approved that concrete generated layer after you surfaced it. Prefer existing/local/official assets and BYO editing. If generation would materially improve or unblock the result, offer it at the single next decision boundary and wait.
+- IMAGE GENERATION IS AN ART-DIRECTION DECISION for a requested complete creative edit, not a forbidden fallback and not a decoration quota. First decide the strongest visual medium for each Scene: keep the source when the performance/action already carries it; use user/project/official or credibly searched imagery when real people, products, places, events, interfaces or evidence must remain truthful; use editable graphics for data, process, hierarchy and relationships; use generated imagery when an authored or stylized scene, controlled composition, illustrative subject, concept, physical metaphor, atmosphere, transition plate or otherwise unavailable shot will communicate the beat better than the available alternatives. Consider at least two materially different media or visual directions for an image-led Scene and record in assetStrategy why the chosen one wins; do not generate multiple candidates merely to satisfy that comparison. A complete-edit request authorizes a proportionate number of such images when <composition_state> does not say generation is unavailable; do not pause only to ask whether an image may be generated and do not impose an arbitrary image-count ceiling when more are genuinely needed for quality. Never present generated imagery as documentary or product evidence, and never add irrelevant images to satisfy a quota. Video, music, speech and lip-sync generation still require an explicit user request or approval because they change the deliverable more materially. The active Frame governs HOW a generated image should look and coexist with footage; it never decides WHETHER image generation is allowed.
+- Before generate_image, construct one production-ready prompt from the Director Scene and the chosen Frame: state the image's narrative job and how it enters/exits the surrounding cut; the exact subject and physical action/relation; environment and factual boundaries; camera distance, angle, lens/lighting and depth; composition, subject placement, destination ratio, crop-safe overscan and intentional negative space for captions/graphics; the Frame's relevant image treatment, palette, material, texture and visual-world traits expressed as concrete visible properties rather than a pasted style-name list; reference-image identity/product constraints; and exclusions such as embedded text, logos, watermarks, fake UI or invented evidence. Prefer one strong image proposition over keyword soup. Use referenceImages whenever identity, product or recurring-subject consistency matters. Design the edit around the returned asset's real proportions instead of stretching it.
 - If the request is ambiguous or names an element that doesn't exist, ask ONE short clarifying question instead of guessing.
 
 SKILLS AND ORCHESTRATION
-- A selected Studio Skill is a rich Markdown expert playbook. Read it as a whole and apply its domain judgment; it is NOT a structured configuration, component recipe, fixed sequence, or command to run every suggestion. Adapt it to the user's request, evidence, active output, and <composition_state>.
-- Skill and Frame are orthogonal session inputs. A Skill shapes editorial judgment; a Frame shapes visual expression. NEVER infer, choose, reject, or switch a Frame because a Skill is active, and NEVER infer a Skill from a Frame. If the user attached a Frame, direct through it without applying a compatibility matrix. If no Frame is attached, remain themeless unless the user chooses one or explicitly delegates the choice. Themeless means no authored visual world, NOT no design: apply the host's neutral visual-craft quality floor and generate content-specific compositions rather than falling back to fixed generic cards. For a COMPLETE creative build where visual language materially shapes the result, proactively offer one or two Frame candidates plus a themeless choice after you understand the footage and the user's visual intent; base the recommendations on that evidence, never on supposed Skill compatibility, and WAIT for the choice. This is a hard pre-pilot checkpoint: do not set_director_plan, create/duplicate outputs, generate media, or begin the publishable-looking edit until the user chooses a candidate, explicitly delegates the selection, or chooses themeless. This recommends without silently selecting, and the full Frame library remains available.
+- A selected Studio Skill is a rich Markdown expert playbook. Read it as a whole and apply its domain judgment; it is NOT a structured configuration, fixed Component/Motion Graphic recipe, fixed sequence, or command to run every suggestion. Adapt it to the user's request, evidence, active output, and <composition_state>.
+- Skill and visual direction are orthogonal session inputs. A Skill shapes editorial judgment; a Frame supplies art direction: shape language, material and image treatment, typography personality, spatial composition and motion grammar. Palette, captions and layout remain independent project controls. NEVER infer, choose, reject or switch a visual direction because a Skill is active, and never infer a Skill from a Frame. If no Frame is attached, use the neutral visual-craft floor without inventing a branded visual world. For a COMPLETE creative build where visual language materially shapes the result, proactively offer one or two Frame candidates plus a direction-free choice after you understand the footage and visual intent; WAIT for the choice. This is a hard pre-pilot checkpoint: do not set_director_plan, create/duplicate outputs, generate media or begin the publishable edit until the user chooses, delegates selection or explicitly stays direction-free.
 - A Skill may require discovery, a user-owned input, a choice among editorial directions, or an approval checkpoint before the complete edit can continue. Do not force it through as one uninterrupted execution. Inspect what is safe and useful first; when the missing decision changes selection, truth, cost, or the shape of the deliverable, pause at that boundary. For a small set of named choices call ask_user and WAIT for the result. For open-ended information, ask ONE concise natural-language question and stop; ask_user is not for free-form answers. Resolve only ONE blocking decision per wait: never pair an ask_user card with a second open-ended question in the same response. Do not make scaled, expensive, irreversible, or publishable-looking mutations past the unresolved decision. Skip a checkpoint when the request or evidence already resolves it.
 - A request for a set, batch, family, several, multiple, or variants is NOT permission to make one output. Before editing, recover the requested output count, purpose and meaningful variation dimension from context. If any is missing, offer two or three concrete family shapes with tradeoffs through ask_user and WAIT. Every output needs a distinct editorial hypothesis; never multiply one equal-order timeline with cosmetic differences.
-- There is no scenario-specific edit macro. For a broad whole-video request (for example, "edit this into a finished video") or an explicitly requested complete edit, run remove_silence first when dead-air cleanup is in scope: it is acoustic preprocessing, needs no transcript, and is the sole timeline mutation allowed before planning. Then read the relevant transcript and footage evidence and resolve any Skill-required user-owned decision that blocks the structure. A supplied or generated script is SEMANTIC truth, not automatically TIMING truth: reuse it without ASR for meaning, wording, and ordinary planning; independently decide whether the task needs measured performed-audio timing (word-synced captions/animation, pauses, actual delivery, or beat-aware scene boundaries), and only then call extract_asr with the exact audio assetId/clipId. If source video exists and the latest snapshot says visual analysis is not ready, call analyze_visual BEFORE set_director_plan whenever a Frame is attached or the requested result depends on composition, placement, motion, or visual polish: transcript alone cannot direct the picture. If extract_asr fails once, do not call it again in the same user request; continue only with transcript-independent work and state that semantic cleanup remains pending. For a multi-source montage, inspect the actual footage and choose useful action spans; uniform slices, filename-order assembly, or one untouched span per file are an ingest check, never a finished creative edit. Honor the user's independent Frame state—attached or themeless—then call set_director_plan before other timeline mutations. Treat B-roll selection as DIRECTOR judgment, before asset retrieval or component generation: do not illustrate every sentence or fill a quota. Give a picture change only to a cognitive anchor—truthful evidence, a process/action the viewer needs to see, a relation or state change, or one sharp physical metaphor. Keep A-roll/source continuity when the face, cadence, emotion, or existing action already carries the meaning. For each scene, save one named treatment plus its visual anchor, source-aware composition, motion plan, sound plan, asset strategy, and explicit B-roll decision/rationale. When a Frame is attached, treatmentId must name or faithfully extend one of its signature/native situations, and visualTreatment must make at least two of that treatment's non-token signatures concrete. A metaphor is a one-sentence visual proposition, not a paraphrased caption: reduce the abstract idea to one physical action or relation and normally 3–6 meaningful objects. Execute the saved contract through ordinary batched tools. A complete Frame edit MUST NOT be implemented as add_block calls alone: keep the footage as the visual protagonist and combine the lightest fitting source-native shot/framing/layout/transition/caption/audio operations with graphics only where they add meaning. After every planned add_block, immediately place/size it from the actual footage observations with place_block unless that Semantic Scene is intentionally designed-fullscreen; never leave a generated element at its generic centered geometry over a full-frame speaker. Every planned add_block, add_texts, add_clips, insert_clips, and insert_clip call MUST pass the exact sceneId for visual/graphic material so it is directed by that scene and linked back to it. Replace the plan only when later evidence or tool results materially change the scene structure.
+- There is no scenario-specific edit macro. For a broad whole-video request (for example, "edit this into a finished video") or an explicitly requested complete edit, run remove_silence first when dead-air cleanup is in scope: it is acoustic preprocessing, needs no transcript, and is the sole timeline mutation allowed before planning. Then read the relevant transcript and footage evidence and resolve any Skill-required user-owned decision that blocks the structure. A supplied or generated script is SEMANTIC truth, not automatically TIMING truth: reuse it without ASR for meaning, wording, and ordinary planning; independently decide whether the task needs measured performed-audio timing (word-synced captions/animation, pauses, actual delivery, or beat-aware scene boundaries), and only then call extract_asr with the exact audio assetId/clipId. If source video exists and the latest snapshot says visual analysis is not ready, call analyze_visual BEFORE set_director_plan whenever a Frame is attached or the requested result depends on composition, placement, motion, or visual polish: transcript alone cannot direct the picture. If extract_asr fails once, do not call it again in the same user request; continue only with transcript-independent work and state that semantic cleanup remains pending. For a multi-source montage, inspect the actual footage and choose useful action spans; uniform slices, filename-order assembly, or one untouched span per file are an ingest check, never a finished creative edit. Honor the user's independent Frame state—attached or themeless—then call set_director_plan before other timeline mutations. Treat B-roll selection as DIRECTOR judgment, before asset retrieval or Motion Graphic generation: do not illustrate every sentence or fill a quota. Give a picture change only to a cognitive anchor—truthful evidence, a process/action the viewer needs to see, a relation or state change, or one sharp physical metaphor. Keep A-roll/source continuity when the face, cadence, emotion, or existing action already carries the meaning. For each scene, save one named treatment plus its visual anchor, source-aware composition, motion plan, sound plan, asset strategy, and explicit B-roll decision/rationale. When a Frame is attached, treatmentId must name or faithfully extend one of its signature/native situations, and visualTreatment must make at least two of that treatment's non-token signatures concrete. A metaphor is a one-sentence visual proposition, not a paraphrased caption: reduce the abstract idea to one physical action or relation and normally 3–6 meaningful objects. Execute the saved contract through ordinary batched tools. A complete Frame edit MUST NOT be implemented as add_block calls alone: keep the footage as the visual protagonist and combine the lightest fitting source-native shot/framing/layout/transition/caption/audio operations with Motion Graphics only where they add meaning. After every planned add_block, immediately place/size it from the actual footage observations with place_block unless that Semantic Scene is intentionally designed-fullscreen; never leave a generated element at its generic centered geometry over a full-frame speaker. Every planned add_block, add_texts, add_clips, insert_clips, and insert_clip call MUST pass the exact sceneId for visual/graphic material so it is directed by that scene and linked back to it. Replace the plan only when later evidence or tool results materially change the scene structure.
 - Do not create a Director Plan or build a complete draft when the user asked for one local change. Infer the smallest useful combination of general editing primitives for that local request.
 - Visual analysis is an independent observation tool. Call it only when requested framing, placement, layout, or visual QA actually benefits from footage observations.
 
@@ -227,76 +249,104 @@ export function wrapSpokenTranscript(body: string): string {
  * recordings fall back to search_media for evidence outside this bounded window. */
 export const AGENT_TRANSCRIPT_MAX_CHARS = 24_000;
 export function wrapAgentTranscript(body: string): string {
-  const bounded = body.length > AGENT_TRANSCRIPT_MAX_CHARS
-    ? `${body.slice(0, AGENT_TRANSCRIPT_MAX_CHARS)}\n…(truncated; use search_media to retrieve evidence outside this window)`
-    : body;
+  const bounded =
+    body.length > AGENT_TRANSCRIPT_MAX_CHARS
+      ? `${body.slice(0, AGENT_TRANSCRIPT_MAX_CHARS)}\n…(truncated; use search_media to retrieve evidence outside this window)`
+      : body;
   return wrapSpokenTranscript(bounded);
 }
 
 /* ============================ Situation assembly + system assembly ============================ */
 
 const n = (x: number | undefined): string =>
-  typeof x === 'number' ? (Math.round(x * 10) / 10).toString() : '?';
+  typeof x === "number" ? (Math.round(x * 10) / 10).toString() : "?";
 
 /** Build the current situation when sending a message (called client-side,
  *  attached to the user message's metadata.situation; the route materializes it
  *  into a <composition_state> text part — kept out of system so prefix caching holds). */
-export function buildSituation(body: ChatSituation): string {
+export function buildSituation(
+  body: ChatSituation,
+  options: { freshConversation?: boolean } = {},
+): string {
   const c = body.composition ?? {};
   const lines: string[] = [];
+  if (options.freshConversation) {
+    lines.push(
+      "Conversation boundary: this is the first user message in an independent new conversation. No instruction, approval, unresolved task, or intent from another conversation carries into this one. The project state below describes the current editable artifact; it is not an instruction to continue prior intent. Follow only requests made in this conversation.",
+    );
+  }
   if (body.output) {
     lines.push(
       `Active output: #${body.output.position} "${body.output.title}" (stable id ${body.output.id}; ${body.output.total} total). All unqualified edits and @ element references target this active output. Ordinal positions are live and may change after deletion; output ids do not.`,
     );
   }
   const canvas =
-    typeof c.width === 'number' && typeof c.height === 'number' && c.width > 0 && c.height > 0
-      ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? 'landscape — prefer corner-* for big-area moments, split-l/r second' : 'portrait — prefer split-b for big-area moments (video bottom, graphic top; the split re-frames around the speaker, so use split-t only on explicit request), corner-* second'}).`
-      : '';
-  lines.push(`Edited duration: ${n(c.durationSec)}s. Theme: ${c.theme ?? 'general'}.${canvas}`);
+    typeof c.width === "number" &&
+    typeof c.height === "number" &&
+    c.width > 0 &&
+    c.height > 0
+      ? ` Canvas: ${Math.round(c.width)}×${Math.round(c.height)} (${c.width >= c.height ? "landscape — prefer corner-* for big-area moments, split-l/r second" : "portrait — prefer split-b for big-area moments (video bottom, graphic top; the split re-frames around the speaker, so use split-t only on explicit request), corner-* second"}).`
+      : "";
+  lines.push(
+    `Edited duration: ${n(c.durationSec)}s. Theme: ${c.theme ?? "general"}.${canvas}`,
+  );
 
   // Pipeline state: agent knows which steps ran, won't blindly re-run or claim a transcript that doesn't exist
   const p = body.pipeline;
   if (p) {
-    const flag = (b: boolean | undefined) => (b ? 'done' : 'not yet');
-    lines.push(`Pipeline: transcript ${flag(p.asr)} · narration plan ${flag(p.plan)} · visual analysis ${flag(p.visual)}.`);
+    const flag = (b: boolean | undefined) => (b ? "done" : "not yet");
+    lines.push(
+      `Pipeline: transcript ${flag(p.asr)} · narration plan ${flag(p.plan)} · visual analysis ${flag(p.visual)}.`,
+    );
   }
 
   if (body.directorPlan) {
     const plan = body.directorPlan;
     lines.push(
-      `Director Plan: goal "${plan.goal}"${plan.audience ? ` · audience "${plan.audience}"` : ''}. Creative thesis: "${plan.creativeThesis}". This is the saved editorial decision artifact; continue it through ordinary tools and pass the exact sceneId to every planned visual or graphic placement.`,
+      `Director Plan: goal "${plan.goal}"${plan.audience ? ` · audience "${plan.audience}"` : ""}. Creative thesis: "${plan.creativeThesis}". This is saved project state, not a user request by itself. Use its exact sceneId when this conversation explicitly continues or edits that plan; otherwise preserve it without treating it as the current task.`,
     );
     lines.push(
       `Executable scenes (exact sceneId · interval · viewer task · narrative role · family · linked real clip ids · editorial direction):\n${plan.scenes
         .map((scene) => {
-          const family = scene.customFamily ? `${scene.sceneFamily}:${scene.customFamily}` : scene.sceneFamily;
-          const linked = scene.clipIds?.length ? scene.clipIds.map((id) => `@${id}`).join(', ') : '(none yet)';
+          const family = scene.customFamily
+            ? `${scene.sceneFamily}:${scene.customFamily}`
+            : scene.sceneFamily;
+          const linked = scene.clipIds?.length
+            ? scene.clipIds.map((id) => `@${id}`).join(", ")
+            : "(none yet)";
           const detail = [
             `purpose: ${scene.purpose}`,
-            scene.evidence?.length ? `evidence: ${scene.evidence.join(' | ')}` : '',
-            scene.treatmentId ? `treatment: ${scene.treatmentId}` : '',
-            scene.visualAnchor ? `anchor: ${scene.visualAnchor}` : '',
-            scene.visualTreatment ? `visual: ${scene.visualTreatment}` : '',
-            scene.motionPlan ? `motion: ${scene.motionPlan}` : '',
-            scene.soundPlan ? `sound: ${scene.soundPlan}` : '',
-            scene.assetStrategy ? `assets: ${scene.assetStrategy}` : '',
-            scene.brollDecision ? `B-roll: ${scene.brollDecision}${scene.brollRationale ? ` — ${scene.brollRationale}` : ''}` : '',
-            scene.visualMetaphor ? `visual proposition: ${scene.visualMetaphor}` : '',
-          ].filter(Boolean).join(' · ');
+            scene.evidence?.length
+              ? `evidence: ${scene.evidence.join(" | ")}`
+              : "",
+            scene.treatmentId ? `treatment: ${scene.treatmentId}` : "",
+            scene.visualAnchor ? `anchor: ${scene.visualAnchor}` : "",
+            scene.visualTreatment ? `visual: ${scene.visualTreatment}` : "",
+            scene.motionPlan ? `motion: ${scene.motionPlan}` : "",
+            scene.soundPlan ? `sound: ${scene.soundPlan}` : "",
+            scene.assetStrategy ? `assets: ${scene.assetStrategy}` : "",
+            scene.brollDecision
+              ? `B-roll: ${scene.brollDecision}${scene.brollRationale ? ` — ${scene.brollRationale}` : ""}`
+              : "",
+            scene.visualMetaphor
+              ? `visual proposition: ${scene.visualMetaphor}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
           return `  sceneId=${scene.id} · "${scene.label}" · ${n(scene.startSec)}→${n(scene.endSec)}s · ${scene.viewerTask} · ${scene.narrativeRole} · ${family} · clips ${linked}\n    ${detail}`;
         })
-        .join('\n')}`,
+        .join("\n")}`,
     );
   }
 
   // Credits guardrail (visibility only, boolean by design): unattended agents must not burn calls into a wall,
   // and must route to the BYO flow / tell the user instead of retrying charged tools
-  if (typeof body.canGenerate === 'boolean') {
+  if (typeof body.canGenerate === "boolean") {
     lines.push(
       body.canGenerate
-        ? 'Hosted generation (charges Pireel credits): available.'
-        : 'Hosted generation (add_block / edit_block / analyze_visual): credits EXHAUSTED — these will fail; do not call them. BYO agents: use compose_block_brief instead. Otherwise tell the user their Pireel credits are used up.',
+        ? "Hosted generation (charges Pireel credits): available."
+        : "Hosted generation (add_block / edit_block / analyze_visual): credits EXHAUSTED — these will fail; do not call them. BYO agents: use compose_block_brief instead. Otherwise tell the user their Pireel credits are used up.",
     );
   }
 
@@ -307,22 +357,23 @@ export function buildSituation(body: ChatSituation): string {
   // video" or out of sync with another tab
   if (body.videoBytesReady === false) {
     lines.push(
-      'VIDEO BYTES NOT LOADED (yet): this tab has the full project DATA, but the source video bytes are still being restored (local cache / cloud vault) or missing. Video-dependent tools (capture_frame, extract_asr, visual_brief, export) will fail until loaded — re-check get_state in ~10s. Data-level edits are safe now. If it stays not-loaded, the video may exceed the backup size limit — ask the user to open the project in the browser where they originally added the video.',
+      "VIDEO BYTES NOT LOADED (yet): this tab has the full project DATA, but the source video bytes are still being restored (local cache / cloud vault) or missing. Video-dependent tools (capture_frame, extract_asr, visual_brief, export) will fail until loaded — re-check get_state in ~10s. Data-level edits are safe now. If it stays not-loaded, the video may exceed the backup size limit — ask the user to open the project in the browser where they originally added the video.",
     );
   }
 
   const blocks = c.blocks ?? [];
   // Screen zone tag (3×3 grid by box center + width %) — overlap/placement reasoning without a frame capture; reposition via place_block
-  const zone = (b: BlockSnap): string => (b.box ? ` · ${zoneOf(b.box)} w${Math.round(b.box.w * 100)}%` : '');
+  const zone = (b: BlockSnap): string =>
+    b.box ? ` · ${zoneOf(b.box)} w${Math.round(b.box.w * 100)}%` : "";
   lines.push(
     blocks.length
       ? `Overlay blocks (id · kind · start→end · screen zone):\n${blocks
           .map(
             (b) =>
-              `  @${b.id} · ${b.kind ?? 'custom'}${b.label ? ` · "${b.label}"` : ''} · ${n(b.startSec)}→${n((b.startSec ?? 0) + (b.durationSec ?? 0))}s${zone(b)}`,
+              `  @${b.id} · ${b.kind ?? "custom"}${b.label ? ` · "${b.label}"` : ""} · ${n(b.startSec)}→${n((b.startSec ?? 0) + (b.durationSec ?? 0))}s${zone(b)}`,
           )
-          .join('\n')}`
-      : 'Overlay blocks: (none yet).',
+          .join("\n")}`
+      : "Overlay blocks: (none yet).",
   );
 
   const shots = c.shots ?? [];
@@ -331,19 +382,21 @@ export function buildSituation(body: ChatSituation): string {
       `Video shots (id · edited a→b · src c→d · framing). TWO CLOCKS: "edited" is the final-timeline clock — cut_range/split_shot/trim_shot/add_block addresses use IT. "src" is that segment's own source-file clock — the narration transcript uses the MAIN source clock (convert: edited = editedStart + (srcTime − srcStart), only within a main-source shot). Segments tagged [clip X] come from a DIFFERENT source file: their src times do NOT map to the narration transcript (read_script has a section per clip). cut_narration is main-only; for exact inserted-clip words use list_words {shotId} → delete_words, otherwise cut them by edited seconds or delete/trim the segment:\n${shots
         .map(
           (s, i) =>
-            `  @${s.id} · #${s.index ?? i + 1} · edited ${n(s.editedStart)}→${n(s.editedEnd)} · src ${n(s.srcStart)}→${n(s.srcEnd)} · ${s.treatment ?? 'full'}${s.size != null ? ` size=${n(s.size)}` : ''}${s.crop != null ? ` crop=${n(s.crop)}` : ''}${s.scale != null ? ` scale=${n(s.scale)} anchor=${n(s.anchorX)},${n(s.anchorY)}` : ''}${s.mediaFraming ? ` · atom scale=${n(s.mediaFraming.transform.scale)} offset=${n(s.mediaFraming.transform.offsetX)},${n(s.mediaFraming.transform.offsetY)} insets=${n(s.mediaFraming.crop.top)},${n(s.mediaFraming.crop.right)},${n(s.mediaFraming.crop.bottom)},${n(s.mediaFraming.crop.left)}` : ''}${s.source ? ` · [clip ${s.source}]` : ''}${s.audioMuted ? ' · [muted]' : s.volumeDb != null ? ` · [vol ${n(s.volumeDb)}dB]` : ''}`,
+            `  @${s.id} · #${s.index ?? i + 1} · edited ${n(s.editedStart)}→${n(s.editedEnd)} · src ${n(s.srcStart)}→${n(s.srcEnd)} · ${s.treatment ?? "full"}${s.size != null ? ` size=${n(s.size)}` : ""}${s.crop != null ? ` crop=${n(s.crop)}` : ""}${s.scale != null ? ` scale=${n(s.scale)} anchor=${n(s.anchorX)},${n(s.anchorY)}` : ""}${s.mediaFraming ? ` · atom scale=${n(s.mediaFraming.transform.scale)} offset=${n(s.mediaFraming.transform.offsetX)},${n(s.mediaFraming.transform.offsetY)} insets=${n(s.mediaFraming.crop.top)},${n(s.mediaFraming.crop.right)},${n(s.mediaFraming.crop.bottom)},${n(s.mediaFraming.crop.left)}` : ""}${s.source ? ` · [clip ${s.source}]` : ""}${s.audioMuted ? " · [muted]" : s.volumeDb != null ? ` · [vol ${n(s.volumeDb)}dB]` : ""}`,
         )
-        .join('\n')}`,
+        .join("\n")}`,
     );
   } else {
-    lines.push('Video shots: (single full clip; use split_shot before per-shot edits).');
+    lines.push(
+      "Video shots: (single full clip; use split_shot before per-shot edits).",
+    );
   }
 
   const caps = c.captions;
   lines.push(
     caps
-      ? `Captions: ON — preset ${caps.preset ?? '?'}, baseline ${n(caps.yPct)}% from top. Restyle/move via set_captions, turn off via remove_captions.`
-      : 'Captions: off. set_captions turns them on (laid from the transcript).',
+      ? `Captions: ON — preset ${caps.preset ?? "?"}, baseline ${n(caps.yPct)}% from top. Restyle/move via set_captions, turn off via remove_captions.`
+      : "Captions: off. set_captions turns them on (laid from the transcript).",
   );
 
   if (c.audio?.length) {
@@ -351,24 +404,26 @@ export function buildSituation(body: ChatSituation): string {
       `Audio tracks (music lane; adjust/remove via set_bgm with trackId):\n${c.audio
         .map(
           (a) =>
-            `  @${a.id}${a.label ? ` · "${a.label}"` : ''} · ${n(a.startSec)}s→${a.endSec != null ? `${n(a.endSec)}s` : '?'} · ${a.muted ? 'muted' : `${n(a.volumeDb ?? -18)}dB`}${a.speed != null && a.speed !== 1 ? ` · ${a.speed}x` : ''}`,
+            `  @${a.id}${a.label ? ` · "${a.label}"` : ""} · ${n(a.startSec)}s→${a.endSec != null ? `${n(a.endSec)}s` : "?"} · ${a.muted ? "muted" : `${n(a.volumeDb ?? -18)}dB`}${a.speed != null && a.speed !== 1 ? ` · ${a.speed}x` : ""}`,
         )
-        .join('\n')}`,
+        .join("\n")}`,
     );
   }
   if (c.denoise) {
-    lines.push(`Narration denoise: ON (${Math.round(c.denoise.strength * 100)}%). Retune/turn off via denoise_audio.`);
+    lines.push(
+      `Narration denoise: ON (${Math.round(c.denoise.strength * 100)}%). Retune/turn off via denoise_audio.`,
+    );
   }
 
   if (body.selected) {
     lines.push(
-      `Currently selected: ${body.selected.type} @${body.selected.id}${body.selected.label ? ` ("${body.selected.label}")` : ''}. Treat a bare instruction with no @id as referring to this.`,
+      `Currently selected: ${body.selected.type} @${body.selected.id}${body.selected.label ? ` ("${body.selected.label}")` : ""}. Treat a bare instruction with no @id as referring to this.`,
     );
   } else {
-    lines.push('Currently selected: (nothing).');
+    lines.push("Currently selected: (nothing).");
   }
   lines.push(`Playhead: ${n(body.playheadSec)}s.`);
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /** Full chat system = identity/script + frame attach notice (or, when none is
@@ -379,21 +434,30 @@ export function buildSituation(body: ChatSituation): string {
 /** Caption preset catalog (fully static, goes into system: set_captions picks an
  *  id from here, never invents styles). Also in the MCP instructions
  *  (prompts/mcp.ts) — external agents get the same catalog. */
-export const CAPTION_CATALOG_BLOCK = `\n\n<caption_catalog>\nCaption style presets for set_captions — two modes: emphasis (word-by-word: whole line shown, the spoken word highlighted) / line (clean full-line fade-in). Pick by fit (name + mode); NEVER invent an id. yPct/scale tune position & size separately.\n${CAPTION_PRESETS.map((p) => `- ${p.id} · ${p.name} · ${p.mode}`).join('\n')}\n</caption_catalog>`;
+export const CAPTION_CATALOG_BLOCK = `\n\n<caption_catalog>\nCaption style presets for set_captions — two modes: emphasis (word-by-word: whole line shown, the spoken word highlighted) / line (clean full-line fade-in). Pick by fit (name + mode); NEVER invent an id. yPct/scale tune position & size separately.\n${CAPTION_PRESETS.map((p) => `- ${p.id} · ${p.name} · ${p.mode}`).join("\n")}\n</caption_catalog>`;
 
 export function buildChatSystem(
   frame?: ResolvedFrame | null,
   frameCatalog?: string,
   scenarioSkill?: StudioScenarioSkill | null,
   editingExpertise?: string,
+  scenarioSkillCatalog?: readonly {
+    id: string;
+    title: string;
+    summary: string;
+  }[],
 ): string {
   const frameBlock = frame
-    ? `\n\n<frame_attached id="${frame.id}" title="${frame.title}">\nThe user independently selected the frame "${frame.title}" — a complete video design system expressed as a rich Markdown playbook. Call read_frame ONCE to load it BEFORE planning or generating anything, then read it as a whole. Its tokens are already applied to the composition; carry its visual thesis, named signature/native situations, material and image treatment, footage relationship, composition and density, typography, temporal behavior, sequence contour, sound-image relationship, caption language, ratio adaptation and review judgment into the Director Plan and every relevant visual action. Use named situations as composition grammars and treatment ids, not as prebuilt components: adapt the chosen grammar and its audiovisual world to each Scene's purpose and evidence as well as the observed footage, and allow sequence contrast without losing identity. A Frame is NOT a set of fixed output types, scene routes, quotas, block recipes, or a foundational editing method with colors attached. In other words, adapt its audiovisual world to each Scene's purpose and evidence rather than reproducing a showcase layout. Skill and Frame are orthogonal: do not judge this Frame's compatibility from the active Skill and do not switch it because another Frame seems more typical. If a read_frame result for this frame already exists in the conversation, do not call it again. Where the frame conflicts with an explicit user instruction, factual evidence, accessibility or brand obligations, those requirements win.\n</frame_attached>`
+    ? `\n\n<frame_attached id="${frame.id}" title="${frame.title}">\nThe user independently selected the visual direction "${frame.title}" — a rich art-direction playbook. Call read_frame ONCE to load it BEFORE planning or generating anything, then read it as a whole. Carry its structural signatures into the Director Plan and every relevant visual action only where the user has left a choice open: shape language, material and image treatment, typography personality, spatial composition and motion grammar. The latest explicit user instruction and current manually configured project values are authoritative. Project-level palette, caption and layout controls are independent explicit choices and override fixed assumptions in the direction playbook; never reset current values after reading the Frame. The Skill and Director still own story, evidence, timing, B-roll need and Scene strategy. Use named situations as adaptable composition grammars, not prebuilt Motion Graphic templates. A visual direction is NOT a set of fixed output types, scene routes, quotas or block recipes. Do not infer compatibility from the active Skill or switch directions because another seems more typical. If a read_frame result for this direction already exists in the conversation, do not call it again. Explicit user instructions, factual evidence, accessibility and brand obligations win over the direction.\n</frame_attached>`
     : frameCatalog
-      ? `\n\n<frame_catalog>\nNo Frame (visual-directing content pack) is attached. Remain themeless: a complete edit does not authorize automatic Frame selection. Themeless still receives the host's neutral visual-craft quality floor; it means no authored visual world, not permission to emit generic fixed cards. Frames are independent of Studio Skills, and catalog previews are samples of a visual language—not templates, promised output types, or a compatibility matrix. Rules:\n- Attach a Frame only when the user explicitly chooses one or explicitly delegates the choice (for example, "pick a Frame for me").\n- When the user asks to browse, compare, or receive recommendations, discuss a few options from their stated visual intent and remind them that the full catalog remains selectable. Never rank Frames by the active Skill.\n- Do not use a hidden safe default and do not infer a preferred Frame from content category.\n- A local or complete edit may remain themeless and still be deliberately designed.\n${frameCatalog}\n</frame_catalog>`
-      : '';
+      ? `\n\n<frame_catalog>\nNo visual direction is attached. A complete edit does not authorize automatic Frame selection. Direction-free work still receives the host's neutral visual-craft floor; it means no authored art direction, not permission to emit generic fixed cards. Frames are independent of Studio Skills, and catalog previews are samples of a visual language—not templates, promised outputs, palettes, layouts or a compatibility matrix. Rules:\n- Attach a Frame only when the user explicitly chooses one or delegates the choice.\n- Recommend from stated visual intent, never from supposed Skill compatibility.\n- Do not use a hidden default or infer a direction from content category.\n- A local or complete edit may remain direction-free and still be deliberately designed.\n${frameCatalog}\n</frame_catalog>`
+      : "";
   const skillBlock = scenarioSkill
-    ? `\n\n<studio_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected the following complete Markdown Skill for this chat. Read the whole document and use it as an expert editorial playbook. Its prose guides judgment; it is not structured configuration, a fixed workflow, or a component bundle. Adapt it to the evidence and request. The Skill adds no tools and never overrides an explicit user instruction.\n${scenarioSkill.markdown}\n</studio_skill>`
-    : '';
-  return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${editingExpertiseBlock(editingExpertise)}${skillBlock}${frameBlock}`;
+    ? `\n\n<studio_skill id="${scenarioSkill.id}" title="${scenarioSkill.title}">\nThe user selected the following complete Markdown Skill for this chat. Read the whole document and use it as an expert editorial playbook. Its prose guides judgment; it is not structured configuration, a fixed workflow, or a Motion Graphic bundle. Adapt it to the evidence and request. The Skill adds no tools and never overrides an explicit user instruction.\n${scenarioSkill.markdown}\n</studio_skill>`
+    : "";
+  const skillCatalogBlock =
+    !scenarioSkill && scenarioSkillCatalog?.length
+      ? `\n\n<studio_skill_catalog>\nNo Studio Skill is selected. Do not infer, auto-select, or claim that a Skill is active. The generic editing expert remains fully usable for ordinary requests. When a broad request would materially benefit from one of the available complete workflows below, recommend the single best fit once and tell the user they can select it from the Skill picker; do not block safe inspection or a requested local edit, and do not attach the Skill yourself.\n${scenarioSkillCatalog.map((skill) => `- ${skill.id} · ${skill.title} — ${skill.summary}`).join("\n")}\n</studio_skill_catalog>`
+      : "";
+  return `${CHAT_IDENTITY}${CAPTION_CATALOG_BLOCK}${editingExpertiseBlock(editingExpertise)}${skillBlock}${skillCatalogBlock}${frameBlock}`;
 }

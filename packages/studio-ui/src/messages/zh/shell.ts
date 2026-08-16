@@ -3,7 +3,7 @@ export const SHELL_ZH: Record<string, string> = {
   'shell.deleteProject': '删除项目',
   'shell.deleteTitleProjectChat': '删除「{title}」？项目内容与对话记录一并删除，不可恢复。',
   'shell.myProjects': '我的项目',
-  'shell.nElements': '{n} 组件',
+  'shell.nElements': '{n} 动态图形',
   'shell.newProject': '新建项目',
   'shell.nShots': '{n} 镜',
   'shell.oneProjectManyOutputs': '一个项目可以容纳多段素材和多个可独立编辑的成片。',

@@ -621,7 +621,7 @@ function PresetPop({ current, onPick }: { current: string; onPick: (id: string |
           <div className="text-ink-4 mb-1 text-[10px]">{t(sec.title)}</div>
           <div className="grid grid-cols-2 gap-1.5">
             {CAPTION_PRESETS.filter((p) => p.mode === sec.mode).map((p) => (
-              <PresetCard key={p.id} preset={p} active={p.id === current} onPick={(id) => onPick(id)} />
+              <CaptionPresetCard key={p.id} preset={p} active={p.id === current} onPick={(id) => onPick(id)} />
             ))}
           </div>
         </div>
@@ -688,7 +688,7 @@ function SwatchPop({ title, swatches, value, allowNone, noneActive, onNone, onPi
   );
 }
 
-function PresetCard({ preset, active, onPick }: { preset: CaptionPreset; active: boolean; onPick: (id: string) => void }) {
+export function CaptionPresetCard({ preset, active, onPick }: { preset: CaptionPreset; active: boolean; onPick: (id: string) => void }) {
   return (
     <button
       type="button"
@@ -699,7 +699,7 @@ function PresetCard({ preset, active, onPick }: { preset: CaptionPreset; active:
       }`}
     >
       <div className="flex h-[58px] items-center justify-center bg-[#2b2b2e] px-3">
-        <PresetSample p={preset} />
+        <CaptionPresetSample p={preset} />
       </div>
       {active ? (
         <span className="bg-accent text-accent-foreground absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium">
@@ -715,9 +715,9 @@ function PresetCard({ preset, active, onPick }: { preset: CaptionPreset; active:
 }
 
 /** Lay out the sample text in the preset's frozen form (pure CSS): emphasis presets highlight the middle word (recolor/underline/highlight box), line presets lay it flat. */
-function PresetSample({ p }: { p: CaptionPreset }) {
+export function CaptionPresetSample({ p, segments }: { p: CaptionPreset; segments?: [string, string, string] }) {
   // Demo sample: three segments (the middle one gets the emphasis treatment); localized via the catalogs like everything else
-  const sample = [t('captions.samplePre'), t('captions.sampleWord'), t('captions.samplePost')];
+  const sample = segments ?? [t('captions.samplePre'), t('captions.sampleWord'), t('captions.samplePost')];
   const fontFamily = p.font === 'serif' ? "'Noto Serif SC','Songti SC',serif" : p.font === 'mono' ? "'IBM Plex Mono',ui-monospace,monospace" : undefined;
   const base: CSSProperties = {
     color: p.text,

@@ -72,6 +72,8 @@ describe('Studio scenario skill registry', () => {
     expect(isStudioScenarioSkillId(STUDIO_AUTO_SKILL_ID)).toBe(true);
     expect(isStudioScenarioSkillId('long-to-shorts')).toBe(true);
     expect(isStudioScenarioSkillId('host-specialist')).toBe(true);
+    expect(isStudioScenarioSkillId('usk_0123456789abcdef01234567')).toBe(true);
+    expect(isStudioScenarioSkillId('usk_../../other-user')).toBe(false);
     expect(isStudioScenarioSkillId('Bad Skill')).toBe(false);
   });
 
@@ -87,7 +89,7 @@ describe('Studio scenario skill registry', () => {
     const selected = parseStudioScenarioSkill(raw('talking-head-edit', 'Talking-head edit'));
     const system = buildChatSystem(null, undefined, selected);
     expect(system).toContain('A selected Studio Skill is a rich Markdown expert playbook');
-    expect(system).toContain('not structured configuration, a fixed workflow, or a component bundle');
+    expect(system).toContain('not structured configuration, a fixed workflow, or a Motion Graphic bundle');
     expect(system).not.toContain('SPEECH-LED DRAFT PIPELINE');
   });
 });

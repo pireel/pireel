@@ -17,6 +17,7 @@
  */
 
 import type { ThemeId } from './theme';
+import type { CustomVisualStyle } from './visual-style';
 import { type Clip, editedDuration, spans } from './trim';
 import { BASE_CAPTION_FONT_PX, DEFAULT_CAPTION_PRESET, DEFAULT_SUB_CAPTION_PRESET, getCaptionPreset } from './caption-presets';
 
@@ -102,7 +103,17 @@ export interface StudioVideo {
  *  The split axis is a canvas decision, not a taste one — halving the LONG side leaves two usable
  *  halves, halving the short side leaves slivers (l/r on a portrait frame) or flat strips (t/b on a
  *  landscape one). Vertical platforms lean on t/b the way wide ones lean on l/r. */
-export type ShotTreatment = 'full' | 'punch-in' | 'corner-br' | 'corner-tl' | 'split-l' | 'split-r' | 'split-t' | 'split-b';
+export type ShotTreatment =
+  | 'full'
+  | 'punch-in'
+  | 'corner-tl'
+  | 'corner-tr'
+  | 'corner-bl'
+  | 'corner-br'
+  | 'split-l'
+  | 'split-r'
+  | 'split-t'
+  | 'split-b';
 
 /**
  * One shot on the video track = one **clip**: keeps the source-video segment [srcStart, srcEnd).
@@ -430,8 +441,10 @@ export function patchShotAudio<T extends VideoShot>(s: T, patch: { volumeDb?: nu
 export const SHOT_TREATMENTS: { id: ShotTreatment; name: string }[] = [
   { id: 'full', name: 'common.none' },
   { id: 'punch-in', name: 'common.zoomIn' },
-  { id: 'corner-br', name: 'common.cornerBottomRight' },
   { id: 'corner-tl', name: 'common.cornerTopLeft' },
+  { id: 'corner-tr', name: 'common.cornerTopRight' },
+  { id: 'corner-bl', name: 'common.cornerBottomLeft' },
+  { id: 'corner-br', name: 'common.cornerBottomRight' },
   { id: 'split-l', name: 'common.leftHalf' },
   { id: 'split-r', name: 'common.rightHalf' },
   { id: 'split-t', name: 'common.topHalf' },
@@ -496,6 +509,8 @@ export interface Composition {
   /** Mounted frame theme-pack id (written to the document alongside palette on mount): the compose request carries it,
    *  the server injects that frame's design language into ACTIVE THEME (overrides generic aesthetics, engineering contract untouched). */
   frameId?: string;
+  /** Structured user-composed Frame, persisted so every generation path receives the same choices. */
+  customVisualStyle?: CustomVisualStyle;
   /** Global person-effect style (toolbar "Person" panel): person-on-top / feather / stroke / background swap.
    *  Only takes effect on matte-enabled (VideoShot.personMatte) shot segments; default = all defaults. */
   personFx?: PersonFx;
@@ -564,8 +579,10 @@ export function shotsFromSentences(sentences: { start: number }[], videoDuration
 export const TREAT_SIZE_DEFAULT: Record<ShotTreatment, number> = {
   full: 0,
   'punch-in': 18,
-  'corner-br': 35,
   'corner-tl': 35,
+  'corner-tr': 35,
+  'corner-bl': 35,
+  'corner-br': 35,
   'split-l': 50,
   'split-r': 50,
   'split-t': 50,
@@ -576,7 +593,7 @@ export const TREAT_SIZE_DEFAULT: Record<ShotTreatment, number> = {
 export function treatmentScale(tr: ShotTreatment, size?: number): number {
   const v = Math.max(0, Math.min(100, size ?? TREAT_SIZE_DEFAULT[tr])) / 100;
   if (tr === 'punch-in') return 1.05 + v * 0.95;
-  if (tr === 'corner-br' || tr === 'corner-tl') return 0.2 + v * 0.4;
+  if (tr.startsWith('corner-')) return 0.2 + v * 0.4;
   if (tr.startsWith('split-')) return 0.3 + v * 0.4;
   return 1;
 }
@@ -670,6 +687,10 @@ function legacyShotTransformVars(tr: ShotTreatment, size?: number, crop?: number
       return { scale: r3(s), xPercent: corner, yPercent: corner, borderRadius: 54, clipPath: NONE };
     case 'corner-tl':
       return { scale: r3(s), xPercent: -corner, yPercent: -corner, borderRadius: 54, clipPath: NONE };
+    case 'corner-tr':
+      return { scale: r3(s), xPercent: corner, yPercent: -corner, borderRadius: 54, clipPath: NONE };
+    case 'corner-bl':
+      return { scale: r3(s), xPercent: -corner, yPercent: corner, borderRadius: 54, clipPath: NONE };
     case 'split-l':
       return { scale: 1, xPercent: near, yPercent: 0, borderRadius: 0, clipPath: `inset(0% ${cutFar}% 0% ${cutNear}%)` };
     case 'split-r':
@@ -805,6 +826,10 @@ export function treatmentVacancyBox(tr: ShotTreatment, size?: number): NormBox |
       return { x: 0.06, y: 0.1, w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
     case 'corner-tl': // video shrinks to top-left → frees a large bottom block
       return { x: 0.06, y: Math.min(0.7, s + 0.06), w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
+    case 'corner-tr': // video shrinks to top-right → frees a large bottom block
+      return { x: 0.06, y: Math.min(0.7, s + 0.06), w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
+    case 'corner-bl': // video shrinks to bottom-left → frees a large top block
+      return { x: 0.06, y: 0.1, w: 0.88, h: Math.max(0.2, 0.86 - s - 0.06) };
     // A split fills its share exactly, so the freed band is the remaining (1 - s), inset by a margin.
     case 'split-l': // video takes the left band → frees the right
       return { x: s + 0.04, y: 0.06, w: Math.max(0.2, 1 - s - 0.08), h: 0.88 };
@@ -1109,6 +1134,8 @@ export function placementFramingNotes(shots: VideoShot[], startSec: number, dura
     'split-r': ['right half', 'left half'],
     'corner-br': ['bottom-right corner', 'top area'],
     'corner-tl': ['top-left corner', 'bottom area'],
+    'corner-tr': ['top-right corner', 'bottom area'],
+    'corner-bl': ['bottom-left corner', 'top area'],
   };
   const from = startSec;
   const to = startSec + Math.max(0, durationSec);

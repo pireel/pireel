@@ -1,115 +1,66 @@
 'use client';
 
 /**
- * Framing panel (auto-opens when a shot is selected): one SVG effect card per framing
- * type (person silhouette + image/text placeholder bars in a 9:16 mini-frame, isomorphic
- * to the real effect); click to apply — mirrors the person panel's style-card interaction.
+ * Framing panel: intent-level layout cards map directly onto the existing ShotTreatment values.
+ * Split and corner directions are an inline secondary choice, matching the custom-frame UI.
  * What fills the freed-up empty area isn't handled here: just insert from the upload/gen panels.
  * Split/delete aren't here either: they live in the toolbar above the timeline (no duplicate entry).
  */
 
 import { useEffect, useState } from 'react';
 import type { ShotFilter, ShotTreatment, VideoShot } from '@pireel/studio-engine/composition';
-import { SHOT_TREATMENTS, TREAT_SIZE_DEFAULT } from '@pireel/studio-engine/composition';
+import { TREAT_SIZE_DEFAULT } from '@pireel/studio-engine/composition';
 import { AudioLevel } from './audio-level';
 import { t } from './i18n';
+import {
+  InlineLayoutPositionPicker,
+  LayoutStrategyOption,
+  type LayoutPositionId,
+  type LayoutStrategyPreviewId,
+} from './layout-strategy-picker';
 
-/** One framing effect card: 1:1 frame filling the card, silhouette + image/text placeholder bars positioned by type (label sits below the card). */
-function TreatmentPreview({ t }: { t: ShotTreatment }) {
-  const bust = (x: number, y: number, s: number) => (
-    <g transform={`translate(${x} ${y}) scale(${s})`} fill="currentColor">
-      <circle cx="0" cy="-8.5" r="6" />
-      <path d="M-10 13 C-10 2 -5 -1 0 -1 C5 -1 10 2 10 13 Z" />
-    </g>
-  );
-  const bars = (x: number, y: number, w: number) => (
-    <g fill="var(--color-accent, #3f4be8)" opacity="0.5">
-      <rect x={x} y={y} width={w} height="5" rx="2.5" />
-      <rect x={x} y={y + 10} width={w * 0.68} height="5" rx="2.5" />
-      <rect x={x} y={y + 20} width={w * 0.84} height="5" rx="2.5" />
-    </g>
-  );
-  // Video area (light rounded rect)
-  const vid = (x: number, y: number, w: number, h: number, r = 3) => <rect x={x} y={y} width={w} height={h} rx={r} className="fill-ink-4/25" />;
-  let inner: React.ReactNode;
-  switch (t) {
-    case 'punch-in':
-      // Punch-in: silhouette pushed to the top edge, cropped out of the frame
-      inner = (
-        <>
-          {vid(2, 2, 92, 92)}
-          {bust(48, 74, 5.2)}
-        </>
-      );
-      break;
-    case 'corner-br':
-      inner = (
-        <>
-          {bars(10, 16, 44)}
-          {vid(52, 52, 41, 41)}
-          {bust(72.5, 80, 2.4)}
-        </>
-      );
-      break;
-    case 'corner-tl':
-      inner = (
-        <>
-          {vid(3, 3, 41, 41)}
-          {bust(23.5, 31, 2.4)}
-          {bars(42, 62, 44)}
-        </>
-      );
-      break;
-    // Splits FILL their half — flush to the edges, no margin, square inner corner
-    case 'split-l':
-      inner = (
-        <>
-          {vid(0, 0, 48, 96, 0)}
-          {bust(24, 58, 3.4)}
-          {bars(57, 38, 31)}
-        </>
-      );
-      break;
-    case 'split-r':
-      inner = (
-        <>
-          {bars(8, 38, 31)}
-          {vid(48, 0, 48, 96, 0)}
-          {bust(72, 58, 3.4)}
-        </>
-      );
-      break;
-    case 'split-t':
-      inner = (
-        <>
-          {vid(0, 0, 96, 48, 0)}
-          {bust(48, 33, 3.4)}
-          {bars(14, 60, 68)}
-        </>
-      );
-      break;
-    case 'split-b':
-      inner = (
-        <>
-          {bars(14, 14, 68)}
-          {vid(0, 48, 96, 48, 0)}
-          {bust(48, 81, 3.4)}
-        </>
-      );
-      break;
-    default:
-      // None (no framing): empty frame + slash marker
-      inner = <line x1="14" y1="82" x2="82" y2="14" stroke="currentColor" strokeOpacity="0.45" strokeWidth="3" strokeLinecap="round" />;
-  }
-  return (
-    <svg viewBox="0 0 96 96" className="text-ink-3 w-full" aria-hidden>
-      <rect x="0.75" y="0.75" width="94.5" height="94.5" rx="5" fill="none" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.5" />
-      <clipPath id={`tp-${t}`}>
-        <rect x="1.5" y="1.5" width="93" height="93" rx="4.5" />
-      </clipPath>
-      <g clipPath={`url(#tp-${t})`}>{inner}</g>
-    </svg>
-  );
+type FramingLayoutId = Exclude<LayoutStrategyPreviewId, 'smart'>;
+
+const FRAMING_LAYOUTS: { id: FramingLayoutId; label: string }[] = [
+  { id: 'none', label: 'common.none' },
+  { id: 'zoom', label: 'common.zoomIn' },
+  { id: 'split-top-bottom', label: 'customFrame.layout.splitTopBottom' },
+  { id: 'split-left-right', label: 'customFrame.layout.splitLeftRight' },
+  { id: 'presenter-corner', label: 'customFrame.layout.presenterCorner' },
+];
+
+const FRAMING_POSITIONS: Record<Exclude<FramingLayoutId, 'none' | 'zoom'>, { id: LayoutPositionId; label: string; treatment: ShotTreatment }[]> = {
+  'split-top-bottom': [
+    { id: 'top', label: 'customFrame.position.top', treatment: 'split-t' },
+    { id: 'bottom', label: 'customFrame.position.bottom', treatment: 'split-b' },
+  ],
+  'split-left-right': [
+    { id: 'left', label: 'customFrame.position.left', treatment: 'split-l' },
+    { id: 'right', label: 'customFrame.position.right', treatment: 'split-r' },
+  ],
+  'presenter-corner': [
+    { id: 'top-left', label: 'customFrame.corner.topLeft', treatment: 'corner-tl' },
+    { id: 'top-right', label: 'customFrame.corner.topRight', treatment: 'corner-tr' },
+    { id: 'bottom-left', label: 'customFrame.corner.bottomLeft', treatment: 'corner-bl' },
+    { id: 'bottom-right', label: 'customFrame.corner.bottomRight', treatment: 'corner-br' },
+  ],
+};
+
+export function framingLayout(treatment: ShotTreatment): FramingLayoutId {
+  if (treatment === 'full') return 'none';
+  if (treatment === 'punch-in') return 'zoom';
+  if (treatment === 'split-t' || treatment === 'split-b') return 'split-top-bottom';
+  if (treatment === 'split-l' || treatment === 'split-r') return 'split-left-right';
+  return 'presenter-corner';
+}
+
+export function treatmentForLayout(layout: FramingLayoutId, current: ShotTreatment): ShotTreatment {
+  if (framingLayout(current) === layout) return current;
+  if (layout === 'none') return 'full';
+  if (layout === 'zoom') return 'punch-in';
+  if (layout === 'split-top-bottom') return 'split-b';
+  if (layout === 'split-left-right') return 'split-r';
+  return 'corner-br';
 }
 
 const FILTER_FIELDS: { key: keyof ShotFilter; name: string }[] = [
@@ -172,29 +123,37 @@ export function ShotTreatmentPanel({
     setDragFilter(null);
   };
   const muted = !!shot.audioMuted;
+  const activeLayout = framingLayout(shot.treatment);
+  const activePositions = activeLayout === 'none' || activeLayout === 'zoom' ? null : FRAMING_POSITIONS[activeLayout];
+  const activePosition = activePositions?.find((option) => option.treatment === shot.treatment)?.id;
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Title (framing · scene N)/close live in the floating-window header; only a one-line hint here */}
       <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.framingAppliesWholeShot')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">
-        <div className="grid grid-cols-3 gap-2">
-          {SHOT_TREATMENTS.map((tr) => {
-            const active = shot.treatment === tr.id;
-            return (
-              <button
-                key={tr.id}
-                type="button"
-                onClick={() => onSetTreatment(shot.id, tr.id)}
-                aria-label={t('panels.framingName', { name: t(tr.name) })}
-                className="group flex flex-col items-center gap-1"
-              >
-                <div className={`w-full rounded-lg border-2 transition ${active ? 'border-accent' : 'border-transparent group-hover:border-line-2'}`}>
-                  <TreatmentPreview t={tr.id} />
-                </div>
-                <span className={`text-[10.5px] ${active ? 'text-ink font-medium' : 'text-ink-3 group-hover:text-ink'}`}>{t(tr.name)}</span>
-              </button>
-            );
-          })}
+        <div>
+          <div className="grid grid-cols-3 gap-2">
+            {FRAMING_LAYOUTS.map((layout) => (
+              <LayoutStrategyOption
+                key={layout.id}
+                id={layout.id}
+                label={t(layout.label)}
+                selected={activeLayout === layout.id}
+                onPick={() => onSetTreatment(shot.id, treatmentForLayout(layout.id, shot.treatment))}
+              />
+            ))}
+          </div>
+          {activePositions && activePosition && (
+            <InlineLayoutPositionPicker
+              title={t('customFrame.corner.position')}
+              options={activePositions.map((option) => ({ id: option.id, label: t(option.label) }))}
+              value={activePosition}
+              onPick={(position) => {
+                const treatment = activePositions.find((option) => option.id === position)?.treatment;
+                if (treatment) onSetTreatment(shot.id, treatment);
+              }}
+            />
+          )}
         </div>
 
         {/* Size (non-"none" types): punch-in = zoom amount, corner = inset size, split = video width share */}

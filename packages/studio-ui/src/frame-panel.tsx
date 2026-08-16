@@ -1,31 +1,29 @@
-'use client';
+"use client";
 
 /**
- * The frame panel on the right rail = studio's theme template library (Hyperframes official name: frame.md).
- * One frame = one large theme content pack (knowledge voiceover / food blogger / …, open-ended themes),
- * a "content-aware template" — once attached to the chat, the agent fits your voiceover content into its playbook.
- * Unrelated to the /create line's skill system.
- * - List = one big **cover** card per row (theme name as the hero, hints at style without listing details,
- *   positioned like a PPT theme cover);
- * - Open = theme detail: summary + **visual-language samples** (showcase word → real block,
- *   rendered by BlockPreviewFrame via the same Hyperframes stack, following the project theme color; see showcase-blocks).
- *   Samples demonstrate a dialect; they are not fixed output types or templates the agent must repeat;
- * - "Use" = attach the frame to the right chat (not copy the prompt text!); the request carries frameId and
- *   the server injects the playbook. The chat input's theme button opens the same catalog.
+ * Frame is the internal art-direction playbook behind the user-facing "visual direction" choice.
+ * The unified dialog layers one direction with independent palette, caption and layout controls;
+ * Skill and Director remain responsible for editorial purpose, evidence and scene strategy.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { useLocale } from 'use-intl';
-import { ArrowLeft, ChevronRight } from 'lucide-react';
-import { SkillIcon } from '@pireel/ui/skill-icon';
-import { imageThumb } from '@pireel/ui/image-url';
-import { t } from './i18n';
-import type { Composition } from '@pireel/studio-engine/composition';
-import type { SupportedLocale as Locale } from '@pireel/studio-frames/locales';
-import { framePack, kindLabel } from '@pireel/studio-frames/locales';
-import { InlineBlockPreview, type PreviewPerson } from './block-preview-card';
-import { coverBlock, showcaseBlock } from '@pireel/studio-frames/showcase-blocks';
-import { type FrameCatalogItem, useFrameCatalog } from './use-frame-catalog';
+import { useCallback, useMemo, useRef, useState } from "react";
+import { useLocale } from "use-intl";
+import { SlidersHorizontal } from "lucide-react";
+import { SkillIcon } from "@pireel/ui/skill-icon";
+import { imageThumb } from "@pireel/ui/image-url";
+import { t } from "./i18n";
+import type { Composition } from "@pireel/studio-engine/composition";
+import { CUSTOM_FRAME_ID } from "@pireel/studio-engine/visual-style";
+import type { SupportedLocale as Locale } from "@pireel/studio-frames/locales";
+import { framePack } from "@pireel/studio-frames/locales";
+import { InlineBlockPreview, type PreviewPerson } from "./block-preview-card";
+import { coverBlock } from "@pireel/studio-frames/showcase-blocks";
+import { type FrameCatalogItem, useFrameCatalog } from "./use-frame-catalog";
+import { CustomFrameDialog } from "./custom-frame-dialog";
+import {
+  customFrameCatalogItem,
+  useCustomFrameStyle,
+} from "./custom-frame-style";
 
 const CARD_W = 300; // 16:9 single-column big card (panel content width ~302)
 
@@ -38,15 +36,32 @@ const personOf = (f: FrameCatalogItem): PreviewPerson | null =>
   f.personFx
     ? {
         front: true,
-        strokeColor: f.personFx['stroke-color'] ?? null,
+        strokeColor: f.personFx["stroke-color"] ?? null,
       }
     : null;
 
-export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: FrameCatalogItem) => void }) {
+export function FramePanel({
+  comp,
+  onUse,
+  onClear,
+}: {
+  comp: Composition;
+  onUse: (frame: FrameCatalogItem) => void;
+  onClear: () => void;
+}) {
   const locale = useLocale() as Locale; // frame content has its own locale adaptation pack (title/summary/preview copy)
   const frames = useFrameCatalog();
-  const [openId, setOpenId] = useState<string | null>(null);
-  const open = openId ? frames.find((f) => f.id === openId) : null;
+  const [customStyle, saveCustomStyle] = useCustomFrameStyle();
+  const customFrame = useMemo(
+    () =>
+      customFrameCatalogItem(
+        customStyle,
+        t("customFrame.title"),
+        t("customFrame.summary"),
+      ),
+    [customStyle],
+  );
+  const [customOpen, setCustomOpen] = useState<string | null>(null);
   // Restore scroll position when returning to the list: save scrollTop before opening, write it back when
   // the list container remounts (useCallback keeps a stable ref, runs only on mount)
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -55,99 +70,167 @@ export function FramePanel({ comp, onUse }: { comp: Composition; onUse: (frame: 
     listRef.current = el;
     if (el) el.scrollTop = savedListScroll.current;
   }, []);
-  const openFrame = useCallback((id: string) => {
+  const openFrame = useCallback((frame: FrameCatalogItem) => {
     savedListScroll.current = listRef.current?.scrollTop ?? 0;
-    setOpenId(id);
+    setCustomOpen(frame.id);
   }, []);
-
-  if (open) {
-    return (
-      <div className="flex h-full min-h-0 w-full flex-col">
-        <div className="border-line flex items-center gap-2 border-b px-3 py-2">
-          <button
-            type="button"
-            onClick={() => setOpenId(null)}
-            className="text-ink-3 hover:bg-panel-2 hover:text-ink -ml-1 inline-flex h-6 w-6 items-center justify-center rounded"
-            title={t('panels.backList')}
-          >
-            <ArrowLeft size={13} />
-          </button>
-          <SkillIcon iconKey={open.iconKey} emoji={open.icon} size={22} rounded="rounded-md" />
-          <span className="text-ink truncate text-[12px] font-medium">{framePack(locale, open.id)?.title ?? open.title}</span>
-        </div>
-        {/* key switches by frame: changing theme force-remounts the scroll container, resetting scroll to zero */}
-        <div key={open.id} className="min-h-0 flex-1 overflow-auto p-2.5">
-          <div className="text-ink-2 text-[11.5px] leading-relaxed">{open.summary}</div>
-          {open.showcase.length > 0 ? (
-            <>
-              <div className="text-ink mb-1.5 mt-3 text-[11px] font-medium">{t('panels.themeProduces')}</div>
-              <div className="flex flex-col gap-2">
-                {open.showcase.map((kind) => (
-                  <ShowcaseCard key={kind} comp={comp} frame={open} kind={kind} locale={locale} />
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="text-ink-4 mt-3 text-[10.5px]">{t('panels.noPreviewsThemeUse')}</div>
-          )}
-        </div>
-        <div className="border-line border-t p-2.5">
-          <button
-            type="button"
-            onClick={() => onUse(open)}
-            className="bg-accent w-full rounded-md py-2 text-[12px] font-medium text-white transition hover:brightness-110"
-          >
-            {t('captions.use')}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      {/* Single-level title: "Theme" lives in the material bar tabs header; only the description row stays here (same convention as the captions panel) */}
-      <div className="border-line border-b px-3 py-2">
-        <div className="text-ink-4 text-[10.5px]">{t('panels.openOneSeeWhat')}</div>
-      </div>
       <div ref={attachList} className="min-h-0 flex-1 overflow-auto p-2.5">
         {frames.length === 0 ? (
-          <div className="text-ink-4 pt-10 text-center text-[11px]">{t('panels.loadingCatalog')}</div>
+          <div className="text-ink-4 pt-10 text-center text-[11px]">
+            {t("panels.loadingCatalog")}
+          </div>
         ) : (
           <div className="flex flex-col gap-2.5">
+            <CustomFrameCard
+              frame={customFrame}
+              onOpen={() => setCustomOpen(CUSTOM_FRAME_ID)}
+            />
             {frames.map((f) => (
-              <CoverCard key={f.id} comp={comp} frame={f} locale={locale} onOpen={() => openFrame(f.id)} />
+              <CoverCard
+                key={f.id}
+                comp={comp}
+                frame={f}
+                locale={locale}
+                onOpen={() => openFrame(f)}
+              />
             ))}
           </div>
         )}
       </div>
+      <CustomFrameDialog
+        style={customOpen ? (comp.customVisualStyle ?? customStyle) : null}
+        frames={frames}
+        frameId={customOpen}
+        comp={comp}
+        onClose={() => setCustomOpen(null)}
+        onUse={(style, directionId) => {
+          saveCustomStyle(style);
+          const direction = frames.find((frame) => frame.id === directionId);
+          onUse(
+            customFrameCatalogItem(
+              style,
+              t("customFrame.title"),
+              t("customFrame.summary"),
+              direction,
+            ),
+          );
+          setCustomOpen(null);
+        }}
+        onDisable={() => {
+          onClear();
+          setCustomOpen(null);
+        }}
+      />
     </div>
+  );
+}
+
+function CustomFrameCard({
+  frame,
+  onOpen,
+}: {
+  frame: FrameCatalogItem;
+  onOpen: () => void;
+}) {
+  const palette = frame.palette ?? {};
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="border-line hover:border-accent group relative w-full overflow-hidden rounded-lg border text-left transition"
+    >
+      <div
+        className="relative aspect-video overflow-hidden"
+        style={{
+          background: `linear-gradient(145deg, ${palette.panel ?? "#191919"}, ${palette["panel-2"] ?? "#2a2a2a"})`,
+        }}
+      >
+        <div className="absolute inset-3 grid grid-cols-[1fr_1.25fr] gap-2">
+          <div className="flex flex-col justify-between">
+            <SlidersHorizontal
+              size={17}
+              style={{ color: palette.accent ?? "#fff" }}
+            />
+            <span
+              className="text-[13px] font-semibold leading-tight"
+              style={{ color: palette.fg ?? "#fff" }}
+            >
+              {t("customFrame.mixYourOwn")}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {[
+              palette.paper,
+              palette.accent,
+              palette["accent-2"],
+              palette.muted,
+            ].map((color, index) => (
+              <span
+                key={index}
+                className="rounded-sm"
+                style={{ background: color ?? "#777" }}
+              />
+            ))}
+          </div>
+        </div>
+        <PreviewBadge />
+      </div>
+      <div className="px-2 py-1.5">
+        <span className="text-ink block truncate text-[11px] font-medium">
+          {frame.title}
+        </span>
+      </div>
+    </button>
   );
 }
 
 /** List cover card: a style cover with the theme name as hero (real render, hints at style without listing
  *  details); frames without a cover (user uploads, etc.) fall back to an icon-row style. */
-function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: FrameCatalogItem; locale: Locale; onOpen: () => void }) {
+function CoverCard({
+  comp,
+  frame,
+  locale,
+  onOpen,
+}: {
+  comp: Composition;
+  frame: FrameCatalogItem;
+  locale: Locale;
+  onOpen: () => void;
+}) {
   const block = useMemo(() => coverBlock(frame.id, locale), [frame.id, locale]);
-  const coverSrc = frame.coverKey ? imageThumb(frame.coverKey, 'list') : null;
+  const coverSrc = frame.coverKey ? imageThumb(frame.coverKey, "list") : null;
   const previewComp = useMemo<Composition>(
-    () => ({ ...comp, width: 1920, height: 1080, ...(frame.palette ? { palette: frame.palette } : {}) }),
+    () => ({
+      ...comp,
+      width: 1920,
+      height: 1080,
+      ...(frame.palette ? { palette: frame.palette } : {}),
+    }),
     [comp, frame.palette],
   );
   if (!coverSrc && !block) {
     return (
       <button
         type="button"
-        title={frame.summary}
+        title={framePack(locale, frame.id)?.title ?? frame.title}
         onClick={onOpen}
-        className="border-line hover:border-accent group flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition"
+        className="border-line hover:border-accent group relative flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition"
       >
-        <SkillIcon iconKey={frame.iconKey} emoji={frame.icon} size={34} rounded="rounded-lg" />
+        <SkillIcon
+          iconKey={frame.iconKey}
+          emoji={frame.icon}
+          size={34}
+          rounded="rounded-lg"
+        />
         <span className="min-w-0 flex-1">
-          <span className="text-ink block truncate text-[11.5px] font-medium">{framePack(locale, frame.id)?.title ?? frame.title}</span>
-          <span className="text-ink-4 block truncate text-[10px]">{frame.summary}</span>
+          <span className="text-ink block truncate text-[11.5px] font-medium">
+            {framePack(locale, frame.id)?.title ?? frame.title}
+          </span>
         </span>
-        <ChevronRight size={13} className="text-ink-4 group-hover:text-accent shrink-0" />
+        <PreviewBadge />
       </button>
     );
   }
@@ -156,7 +239,7 @@ function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: 
       type="button"
       title={framePack(locale, frame.id)?.title ?? frame.title}
       onClick={onOpen}
-      className="border-line hover:border-accent group w-full overflow-hidden rounded-lg border text-left transition"
+      className="border-line hover:border-accent group relative w-full overflow-hidden rounded-lg border text-left transition"
     >
       {coverSrc ? (
         <img
@@ -166,63 +249,29 @@ function CoverCard({ comp, frame, locale, onOpen }: { comp: Composition; frame: 
           className="block aspect-video w-full object-cover"
         />
       ) : (
-        <InlineBlockPreview comp={previewComp} block={block!} width={CARD_W} animate="hover" person={personOf(frame)} ground="stage" />
+        <InlineBlockPreview
+          comp={previewComp}
+          block={block!}
+          width={CARD_W}
+          animate="hover"
+          person={personOf(frame)}
+          ground="stage"
+        />
       )}
-      <div className="flex items-center gap-1.5 px-2 py-1.5">
-        <span className="text-ink-4 min-w-0 flex-1 truncate text-[10px]">{frame.summary}</span>
-        <PaletteDots palette={frame.palette} />
-        <ChevronRight size={12} className="text-ink-4 group-hover:text-accent shrink-0" />
+      <PreviewBadge />
+      <div className="px-2 py-1.5">
+        <span className="text-ink block truncate text-[11px] font-medium">
+          {framePack(locale, frame.id)?.title ?? frame.title}
+        </span>
       </div>
     </button>
   );
 }
 
-/** Visual-language sample for a showcase word: builds a real block, rendered by BlockPreviewFrame
- * (same preview/export stack, frozen on a stable frame). It demonstrates the dialect rather than
- * promising a fixed production template. Unknown words fall back to a text card. */
-function ShowcaseCard({ comp, frame, kind, locale }: { comp: Composition; frame: FrameCatalogItem; kind: string; locale: Locale }) {
-  const block = useMemo(() => showcaseBlock(frame.id, kind, locale), [frame.id, kind, locale]);
-  // Preview is always a 16:9 canvas + the frame's own design tokens (palette swaps font/radius/shadow too)
-  const previewComp = useMemo<Composition>(
-    () => ({ ...comp, width: 1920, height: 1080, ...(frame.palette ? { palette: frame.palette } : {}) }),
-    [comp, frame.palette],
-  );
-  if (!block) {
-    return (
-      <div className="border-line flex h-[54px] items-center justify-center rounded-lg border">
-        <span className="bg-panel-2 text-ink-2 rounded px-2 py-1 text-[10px]">{kindLabel(locale, kind)}</span>
-      </div>
-    );
-  }
+function PreviewBadge() {
   return (
-    <div className="border-line overflow-hidden rounded-lg border">
-      {/* Output card person = small corner figure: only visible in front (dialect background is opaque), shrunk into the corner to reduce occlusion */}
-      <InlineBlockPreview
-        comp={previewComp}
-        block={block}
-        width={CARD_W}
-        ground="checker"
-        animate
-        person={(() => {
-          const p = personOf(frame);
-          return p ? { ...p, size: 'corner' as const } : null;
-        })()}
-      />
-      <div className="text-ink-3 px-1.5 py-1 text-[10px]">{kindLabel(locale, kind)}</div>
-    </div>
-  );
-}
-
-/** Small color strip of the theme's design tokens (accent / panel / paper, three dots), so the theme is recognizable at a glance in a list row. */
-function PaletteDots({ palette }: { palette?: Record<string, string> | null }) {
-  if (!palette) return null;
-  const dots = ['accent', 'panel', 'paper'].map((k) => palette[k]).filter(Boolean) as string[];
-  if (!dots.length) return null;
-  return (
-    <span className="inline-flex shrink-0 items-center gap-0.5">
-      {dots.map((c, i) => (
-        <span key={i} className="border-line h-2.5 w-2.5 rounded-full border" style={{ background: c }} />
-      ))}
+    <span className="pointer-events-none absolute right-2 top-2 translate-y-1 rounded bg-black/75 px-2 py-1 text-[10px] font-medium text-white opacity-0 backdrop-blur transition group-hover:translate-y-0 group-hover:opacity-100">
+      {t("panels.previewFrame")}
     </span>
   );
 }

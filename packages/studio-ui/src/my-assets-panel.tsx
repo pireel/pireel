@@ -32,10 +32,18 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@pireel/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@pireel/ui/dialog';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import {
   AssetCard,
+  AssetCardMoreMenu,
   AssetLightbox,
   type LibraryItem,
   type PanelDragAsset,
@@ -66,8 +74,10 @@ import {
 import {
   folderImportTriggerProps,
   groupFolderRestoreEntries,
+  LOCAL_ASSET_LABEL_MAX_LENGTH,
   pendingLocalAssetEntries,
   reconcileLocalAssetRegistry,
+  renameLocalAssetEntry,
   triggerFolderInput,
   type FolderRestoreGroup,
 } from './local-asset-folders';
@@ -176,7 +186,7 @@ function LocalVisualSearchLoading() {
 }
 
 /** Missing-source card (per-asset, dashed): click = restore access (permission re-grant / vault / re-pick), hover ✕ = drop. */
-function RestoreTile({ label, kind = 'video', onRestore, onDelete }: { label: string; kind?: LocalKind; onRestore: () => void; onDelete: () => void }) {
+function RestoreTile({ label, kind = 'video', onRestore, onRename, onDelete }: { label: string; kind?: LocalKind; onRestore: () => void; onRename?: () => void; onDelete: () => void }) {
   const Icon = kind === 'image' ? ImageIcon : kind === 'audio' ? Music : Clapperboard;
   return (
     <div className="border-line hover:border-accent group relative w-full overflow-hidden rounded-md border border-dashed transition">
@@ -187,15 +197,7 @@ function RestoreTile({ label, kind = 'video', onRestore, onDelete }: { label: st
         </div>
         <div className="text-ink-3 h-6 truncate px-1.5 py-1 text-[10px] leading-4">{label}</div>
       </button>
-      <button
-        type="button"
-        onClick={onDelete}
-        title={t('panels.deleteAsset')}
-        aria-label={t('panels.deleteAsset')}
-        className="absolute left-1 top-1 hidden h-5 w-5 items-center justify-center rounded bg-black/55 text-white hover:bg-red-600 group-hover:inline-flex"
-      >
-        <Trash2 size={11} />
-      </button>
+      <AssetCardMoreMenu onRename={onRename} onDelete={onDelete} />
     </div>
   );
 }
@@ -250,6 +252,7 @@ export function MyAssetsPanel({
   cloudRegistry,
   registrySyncReady,
   onRegistryChange,
+  onLocalAssetAvailable,
   videoSig,
   mainSourceUrl,
   hasMainSource,
@@ -269,6 +272,8 @@ export function MyAssetsPanel({
   cloudRegistry?: LocalAssetIndexEntry[];
   registrySyncReady?: boolean;
   onRegistryChange?: (entries: LocalAssetIndexEntry[]) => void;
+  /** Reports recovered local bytes to the workbench render runtimes. */
+  onLocalAssetAvailable?: (asset: { sig: string; kind: LocalKind; file: File }) => void;
   /** First-loaded source's fileSig (workbench-held, not in comp) — labels it by filename + keys its eviction. */
   videoSig?: string | null;
   mainSourceUrl?: string | null;
@@ -300,6 +305,8 @@ export function MyAssetsPanel({
   const [importing, setImporting] = useState(false);
   const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
+  const [renaming, setRenaming] = useState<{ sig: string; label: string; kind: LocalKind } | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [serviceManifestUrl, setServiceManifestUrl] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return new URLSearchParams(window.location.hash.slice(1)).get('local-import');
@@ -429,13 +436,14 @@ export function MyAssetsPanel({
         if (f) {
           link(e.sig, URL.createObjectURL(f));
           noteCover(e.sig, f, e.kind ?? 'video');
+          onLocalAssetAvailable?.({ sig: e.sig, kind: e.kind ?? 'video', file: f });
         }
       }
     })();
     return () => {
       dead = true;
     };
-  }, [projectId, normalizedCloudRegistry, cloudRegistryKnown, registrySyncReady]);
+  }, [projectId, normalizedCloudRegistry, cloudRegistryKnown, registrySyncReady, onLocalAssetAvailable]);
 
   // A legacy/offline project with no cloud index can seed it from the browser cache after hydration.
   // A known cloud index is never republished from localStorage; the rehydrate effect adopted it.
@@ -457,6 +465,8 @@ export function MyAssetsPanel({
   }
   const trackCards = useMemo<TrackCard[]>(() => {
     const out: TrackCard[] = [];
+    const semanticLabel = (sig: string | null | undefined, fallback: string) =>
+      (sig ? reg.find((entry) => entry.sig === sig)?.label : undefined) ?? fallback;
     if (hasMainSource || (videoSig && (comp.shots ?? []).some((s) => !s.src))) {
       const url = mainSourceUrl ?? undefined;
       out.push({
@@ -468,7 +478,7 @@ export function MyAssetsPanel({
           origin: 'upload',
           insertUrl: url,
           thumbSrc: null,
-          label: videoSig ? sigName(videoSig) : t('panels.video'),
+          label: semanticLabel(videoSig, videoSig ? sigName(videoSig) : t('panels.video')),
           createdAt: 0,
           deletable: true,
           sig: videoSig,
@@ -492,7 +502,7 @@ export function MyAssetsPanel({
           origin: 'upload',
           insertUrl: s.src,
           thumbSrc: null,
-          label: s.srcSig ? sigName(s.srcSig) : t('panels.video'),
+          label: semanticLabel(s.srcSig, s.srcSig ? sigName(s.srcSig) : t('panels.video')),
           createdAt: 0,
           deletable: true,
           sig: s.srcSig,
@@ -501,13 +511,18 @@ export function MyAssetsPanel({
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, videoSig, mainSourceUrl, hasMainSource]);
+  }, [comp.shots, videoSig, mainSourceUrl, hasMainSource, reg]);
 
   /** sig → the track src it appears as (null = the main source). Lets an IMPORT card represent an
    *  on-track asset: its delete also does the track surgery via this mapping. */
   const trackSrcBySig = useMemo(() => {
     const m = new Map<string, string | null>();
     for (const c of trackCards) if (c.it.sig) m.set(c.it.sig, c.src);
+    return m;
+  }, [trackCards]);
+  const trackCardBySig = useMemo(() => {
+    const m = new Map<string, TrackCard>();
+    for (const card of trackCards) if (card.it.sig) m.set(card.it.sig, card);
     return m;
   }, [trackCards]);
   /** Imports, split by whether their bytes are reachable right now. THE IMPORT CARD REPRESENTS the
@@ -517,7 +532,8 @@ export function MyAssetsPanel({
     const live: LibraryItem[] = [];
     const restore: RegEntry[] = [];
     for (const e of reg) {
-      const url = links.get(e.sig);
+      const trackCard = trackCardBySig.get(e.sig);
+      const url = links.get(e.sig) ?? (trackCard?.live ? trackCard.it.insertUrl : undefined);
       if (url)
         live.push({
           id: `import:${e.sig}`,
@@ -535,13 +551,13 @@ export function MyAssetsPanel({
       else restore.push(e);
     }
     return { liveImports: live, restoreCards: restore };
-  }, [reg, links, covers]);
+  }, [reg, links, covers, trackCardBySig]);
 
   const kindShows = (k: LocalKind) => kind === 'all' || kind === k;
   const hasAny = liveImports.length > 0 || trackCards.length > 0 || restoreCards.length > 0;
   const needle = query.trim().toLocaleLowerCase();
   const matchesQuery = (label: string) => !needle || label.toLocaleLowerCase().includes(needle);
-  const registrySigs = useMemo(() => new Set(reg.map((e) => e.sig)), [reg]);
+  const registrySigs = useMemo(() => new Set(reg.map((entry) => entry.sig)), [reg]);
   const folderRestoreGroups = useMemo(() => groupFolderRestoreEntries(restoreCards), [restoreCards]);
   const visibleImports = liveImports.filter((it) => kindShows(it.kind as LocalKind) && matchesQuery(it.label));
   const visibleTrackCards = kindShows('video')
@@ -571,6 +587,7 @@ export function MyAssetsPanel({
         ]);
         link(asset.sig, url);
         noteCover(asset.sig, asset.file, asset.kind);
+        onLocalAssetAvailable?.({ sig: asset.sig, kind: asset.kind, file: asset.file });
       }
     } finally {
       setImporting(false);
@@ -646,6 +663,7 @@ export function MyAssetsPanel({
     if (!asset) return false;
     link(e.sig, URL.createObjectURL(asset.file));
     noteCover(e.sig, asset.file, asset.kind);
+    onLocalAssetAvailable?.({ sig: e.sig, kind: asset.kind, file: asset.file });
     if (trackSrcBySig.has(e.sig)) onReconnectSource?.(trackSrcBySig.get(e.sig) ?? null, e.sig);
     return true;
   };
@@ -801,6 +819,31 @@ export function MyAssetsPanel({
     toast.success(t('panels.deleted'));
   };
 
+  const beginRename = (sig: string, label: string, kind: LocalKind) => {
+    setRenaming({ sig, label, kind });
+    setRenameDraft(label);
+  };
+
+  const commitRename = () => {
+    if (!renaming || !renameDraft.trim()) return;
+    updateReg((entries) => {
+      if (entries.some((entry) => entry.sig === renaming.sig))
+        return renameLocalAssetEntry(entries, renaming.sig, renameDraft);
+      return [
+        {
+          sig: renaming.sig,
+          label: renameDraft.trim().slice(0, LOCAL_ASSET_LABEL_MAX_LENGTH),
+          kind: renaming.kind,
+          createdAt: Date.now(),
+        },
+        ...entries,
+      ];
+    });
+    setRenaming(null);
+    setRenameDraft('');
+    toast.success(t('panels.assetRenamed'));
+  };
+
   // ---- insert ----------------------------------------------------------------------------------
 
   const mediaOf = (it: LibraryItem): PanelMediaAsset => ({
@@ -936,6 +979,7 @@ export function MyAssetsPanel({
                   playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
                   onActivate={() => activate(it)}
                   onInsert={() => insertOf(it)}
+                  onRename={it.sig ? () => beginRename(it.sig!, it.label, it.kind as LocalKind) : undefined}
                   onDelete={() => void doDelete(it, it.sig && trackSrcBySig.has(it.sig) ? trackSrcBySig.get(it.sig)! : undefined)}
                   dragProps={dragPropsFor(it, onDragAsset)}
                   insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
@@ -948,6 +992,7 @@ export function MyAssetsPanel({
                     item={c.it}
                     onActivate={() => activate(c.it)}
                     onInsert={() => insertOf(c.it)}
+                    onRename={c.it.sig ? () => beginRename(c.it.sig!, c.it.label, 'video') : undefined}
                     onDelete={() => void doDelete(c.it, c.src)}
                     dragProps={dragPropsFor(c.it, onDragAsset)}
                     insertLabel={t('panels.insert')}
@@ -958,6 +1003,7 @@ export function MyAssetsPanel({
                     key={c.it.id}
                     label={c.it.label}
                     onRestore={() => onReconnectSource?.(c.src, c.it.sig)}
+                    onRename={c.it.sig ? () => beginRename(c.it.sig!, c.it.label, 'video') : undefined}
                     onDelete={() => void doDelete(c.it, c.src)}
                   />
                 ),
@@ -979,6 +1025,7 @@ export function MyAssetsPanel({
                   label={e.label}
                   kind={e.kind ?? 'video'}
                   onRestore={() => void reconnect(e)}
+                  onRename={() => beginRename(e.sig, e.label, e.kind ?? 'video')}
                   onDelete={() => evictRestoreEntry(e)}
                 />
               ))}
@@ -1044,6 +1091,59 @@ export function MyAssetsPanel({
           }}
         />
       )}
+      <Dialog
+        open={Boolean(renaming)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenaming(null);
+            setRenameDraft('');
+          }
+        }}
+      >
+        <DialogContent className="bg-panel border-line w-[min(420px,calc(100vw-2rem))] gap-3 p-4">
+          <DialogHeader className="pr-7">
+            <DialogTitle className="text-ink text-[14px]">{t('panels.renameAsset')}</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              commitRename();
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1.5">
+              <span className="text-ink-2 text-[11px] font-medium">{t('panels.assetName')}</span>
+              <input
+                autoFocus
+                value={renameDraft}
+                maxLength={LOCAL_ASSET_LABEL_MAX_LENGTH}
+                onChange={(event) => setRenameDraft(event.target.value)}
+                placeholder={t('panels.assetNamePlaceholder')}
+                className="border-line bg-panel-2 text-ink placeholder:text-ink-4 focus:border-accent h-8 w-full rounded-md border px-2.5 text-[12px] outline-none transition-colors"
+              />
+            </label>
+            <DialogFooter className="mt-1 flex-row justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setRenaming(null);
+                  setRenameDraft('');
+                }}
+                className="border-line text-ink-2 hover:bg-panel-2 h-7 rounded-md border px-3 text-[11px]"
+              >
+                {t('panels.cancel')}
+              </button>
+              <button
+                type="submit"
+                disabled={!renameDraft.trim() || renameDraft.trim() === renaming?.label}
+                className="bg-ink text-bg h-7 rounded-md px-3 text-[11px] font-medium disabled:pointer-events-none disabled:opacity-35"
+              >
+                {t('panels.saveName')}
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

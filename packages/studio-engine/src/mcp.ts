@@ -176,7 +176,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'list_frames',
       description:
-        'List available frames (theme content packs that define the whole design language: palette, fonts, composition rules). Use before recommending or attaching a theme; apply one with attach_frame, read its playbook with read_frame.',
+        'List available visual directions. Each Frame defines structural art direction — shape, material, image treatment, typography personality and motion grammar — while palette, captions and layout remain independent controls. Apply one with attach_frame and read its playbook with read_frame.',
       inputSchema: EMPTY_SCHEMA,
     },
     {
@@ -216,7 +216,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        'Get the generation contract {system, prompt} for ONE overlay block, assembled from the live composition. Component schemas are retrieved from the instruction/current moment at request time (maximum three), never dumped as the full registry. New work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing kit block keeps the component contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit component-library choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Pass `blockId` + `instruction` to rewrite an existing block; omit `blockId` and pass `instruction` + optional `atSec` to create one. The default way to create/edit block content — charges no Pireel credits.',
+        'Get the generation contract {system, prompt} for ONE Component, assembled from the live composition. Component is the broad extensible visual-element concept; Motion Graphics are the primary family available here: typography, numbers, comparisons, charts, processes, diagrams, authentic device/interface source treatments, source annotations, identity and content-specific forms. The capability map is open, not a fixed type list. Relevant registered schemas are retrieved from the current moment (maximum three), while bespoke generation separately retrieves at most four structural form references; neither dumps the full library or limits invention. New Motion Graphic work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing registered Component keeps the typed contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit registered-Component choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. Pass `blockId` + `instruction` to rewrite an existing block; omit `blockId` and pass `instruction` + optional `atSec` to create one. The default way to create/edit Component content — charges no Pireel credits.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -224,7 +224,7 @@ export function buildMcpTools(): McpToolDef[] {
           blockId: { type: 'string', description: 'Existing block to rewrite. Omit for a new element.' },
           atSec: { type: 'number', description: 'New element only: timeline start seconds (defaults to playhead).' },
           instruction: { type: 'string', description: 'What to build or change.' },
-          format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract. Default: existing kit block → kit; every new or custom block → html, with or without a Frame. Use kit only for an explicit component-library choice.' },
+          format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract. Default: existing registered Component → kit; every new or custom Motion Graphic Component → html, with or without a Frame. Use kit only for an explicit registered-Component choice.' },
         },
         required: ['instruction'],
       },
@@ -232,7 +232,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'apply_block',
       description:
-        'Validate and place a block you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text in whichever contract the brief carried (component json or fenced markup). On lint failure you get the issues back — fix ONLY those and re-apply. Existing blockId → overwrites; no blockId → inserts a new element. Optional label renames either an existing or new timeline element.',
+        'Validate and place a Component you generated from compose_block_brief. Pass the SAME blockId/atSec you gave the brief, and `raw` = your full generated text in whichever contract the brief carried (registered Component JSON or fenced Motion Graphic markup). On lint failure you get the issues back — fix ONLY those and re-apply. Existing blockId → overwrites; no blockId → inserts a new element. Optional label renames either an existing or new timeline element.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,

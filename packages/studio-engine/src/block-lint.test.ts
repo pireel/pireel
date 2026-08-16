@@ -9,7 +9,7 @@ describe('lintBlock(块产物静态检查)', () => {
     const html = `
 <div class="wrap"><b data-edit="headline">完播率提升</b><i class="ul"></i></div>
 <style>
-#b7 .wrap{position:absolute;inset:0;container-type:size;display:flex}
+#b7 .wrap{position:absolute;inset:0;container-type:size;display:flex;font-size:36px}
 @container (aspect-ratio > 1.1){ #b7 .wrap{flex-direction:row} }
 #b7 .ul{height:8px;background:var(--accent)}
 </style>`;
@@ -42,11 +42,22 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(container.map((i) => i.code)).toContain('unscoped-selector');
   });
 
-  it('vw/vh、script、非确定性 API、缺 data-edit 各自命中', () => {
-    expect(ok(`<div data-edit="t">文字四个字</div><style>#b7 .x{font-size:5vw}</style>`).map((i) => i.code)).toContain('viewport-units');
+  it('非 px 长度、script、非确定性 API、缺 data-edit 各自命中', () => {
+    for (const value of ['1cm', '12pt', '2rem', '5vw', '8cqmin']) {
+      const issues = ok(`<div data-edit="t">文字四个字</div><style>#b7 .x{font-size:${value}}</style>`);
+      expect(issues.map((i) => i.code), value).toContain('non-px-length-unit');
+      expect(HARD_LINT_CODES.has('non-px-length-unit')).toBe(true);
+    }
     expect(ok(`<div data-edit="t">文</div><script>alert(1)</script>`).map((i) => i.code)).toContain('script-tag');
     expect(ok(`<div data-edit="t">文字四个字</div>`, 'setTimeout(()=>{},100)').map((i) => i.code)).toContain('nondeterministic');
     expect(ok(`<div>这是一段没有句柄的可见文字</div>`).map((i) => i.code)).toContain('no-data-edit');
+  });
+
+  it('可见文字没有 px 字号基线时命中硬错误，避免落到浏览器默认 16px', () => {
+    const missing = ok(`<div data-edit="t">没有字号</div><style>#b7 .x{color:white}</style>`);
+    expect(missing.map((i) => i.code)).toContain('missing-font-size');
+    expect(HARD_LINT_CODES.has('missing-font-size')).toBe(true);
+    expect(ok(`<div data-edit="t">明确字号</div><style>#b7 .x{font-size:36px}</style>`)).toEqual([]);
   });
 
   it('纯结构无文本(如只有图形)不要求 data-edit', () => {

@@ -125,7 +125,9 @@ export function applyEditorDocumentPersistenceMetadata(
     if (existing) {
       assets[existing.id] = {
         ...existing,
-        label: existing.label ?? entry.label,
+        // The project media directory owns the user-authored semantic name. File identity remains
+        // the localSig; persisting a rename must update an already-registered timeline asset too.
+        label: entry.label,
         locator: { ...existing.locator, ...(cloudKey ? { cloudKey } : {}) },
         metadata: {
           ...existing.metadata,

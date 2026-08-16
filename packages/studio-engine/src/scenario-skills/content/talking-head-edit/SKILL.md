@@ -11,7 +11,7 @@ graphics, music, and visual relief around what the viewer needs at each moment.
 
 Keep this Skill flexible. Use its principles to make editorial judgments from the actual recording,
 request, and available media. Do not turn the headings below into a fixed pipeline, scene quota, or
-component recipe.
+Component/Motion Graphic recipe.
 
 ## Protect the source of truth
 

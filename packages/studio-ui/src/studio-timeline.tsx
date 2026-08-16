@@ -164,6 +164,8 @@ interface StudioTimelineProps {
   onDeselectAll: () => void;
   onMoveBlock: (id: string, newStartSec: number) => void;
   onResizeBlock: (id: string, newStartSec: number, newDurationSec: number) => void;
+  /** Managed caption edge trim. The caption remains source-anchored; only its display window changes. */
+  onResizeCaption?: (id: string, edge: 'left' | 'right', atSec: number) => void;
   /** Overlay track reorder (gutter drag): pass the new top-to-bottom track-number order; workbench recomputes z. */
   onReorderTracks: (topToBottom: number[]) => void;
   /** A panel asset is being dragged: the timeline exposes primary, existing visual and new visual-lane targets. */
@@ -176,6 +178,8 @@ interface StudioTimelineProps {
   onDropAssetClip?: (t: number, target: TimelineMediaDropTarget, mode: TimelineInsertMode) => void;
   /** Move an existing visual clip horizontally, back to primary, or to another/new visual lane. */
   onMoveVisualClip?: (clipId: string, startSec: number, target: TimelineMediaDropTarget) => void;
+  /** Trim/extend an ordinary visual-lane clip from one timeline edge. */
+  onResizeVisualClip?: (clipId: string, edge: 'left' | 'right', atSec: number) => void;
   /** Select one native visual clip. Selection is mutually exclusive with shots, blocks and audio. */
   onSelectVisualClip?: (clipId: string) => void;
   /** Audio asset dropped anywhere on the timeline: add a clip starting at the drop time (music lane). */
@@ -307,12 +311,14 @@ function StudioTimelineImpl({
   onDeselectAll,
   onMoveBlock,
   onResizeBlock,
+  onResizeCaption,
   onReorderTracks,
   assetDragging,
   assetDragKind,
   onDropAsset,
   onDropAssetClip,
   onMoveVisualClip,
+  onResizeVisualClip,
   onSelectVisualClip,
   onDropAssetAudio,
   onMoveAudio,
@@ -406,6 +412,11 @@ function StudioTimelineImpl({
     mode: TimelineInsertMode;
   } | null>(null);
   const [trDrag, setTrDrag] = useState<{ cut: number; half: number } | null>(null); // live half-width while dragging a transition handle (symmetric)
+  const [captionResize, setCaptionResize] = useState<{
+    id: string;
+    startSec: number;
+    durationSec: number;
+  } | null>(null);
   const [marquee, setMarquee] = useState<{ l: number; r: number } | null>(null); // scene-track marquee rectangle (content px)
   const laneRef = useRef<HTMLDivElement | null>(null); // scene-track DOM (content-coordinate base, moves with scroll)
   const marqueeDraggedRef = useRef(false); // whether this pointer-down became a marquee drag (used to suppress the subsequent shot click)
@@ -882,7 +893,8 @@ function StudioTimelineImpl({
     }
     return out;
   }, [pps, sourcePeaks, visualTracks]);
-  // Sentence captions get their own read-only "caption lane" (follows the transcript, no drag/trim, edited from the caption panel), always at the bottom
+  // Sentence captions get their own lane. Their copy follows the transcript; either display edge can
+  // be trimmed directly while the engine keeps the result anchored to the same source words.
   const captionBlocks = useMemo(
     () => comp.blocks.filter(isSentenceCaption).sort((a, b) => a.startSec - b.startSec),
     [comp.blocks],
@@ -928,11 +940,12 @@ function StudioTimelineImpl({
   // stable identity: `?? []` alone would hand the memo below a fresh array on every render
   const audioClips = useMemo(() => comp.audioTracks ?? [], [comp.audioTracks]);
   const musicLane = audioClips.length > 0 || assetDragKind === 'audio';
-  // a professional NLE keeps a stable bottom drop zone. Dragging never inserts/removes a fake row, so the
-  // timeline and the music lane don't jump under the pointer midway through a gesture.
-  const musicTop = tracksH + VISUAL_TRACK_DROP_ZONE_H + ROW_GAP;
+  // The bottom visual-lane drop target is useful only while there is no following row. Once the
+  // music lane exists, that row itself supplies the bottom hit area; reserving another 38px above
+  // it looks like an empty track and makes the inter-track spacing inconsistent.
+  const musicTop = tracksH + ROW_GAP;
   const tracksHWithMusic = musicLane ? musicTop + AUDIO_ROW_H : tracksH;
-  const tracksHeight = Math.max(tracksHWithMusic, tracksH + VISUAL_TRACK_DROP_ZONE_H);
+  const tracksHeight = musicLane ? tracksHWithMusic : tracksH + VISUAL_TRACK_DROP_ZONE_H;
 
   const layerStackOrder = (lane: TimelineLaneKey) => {
     if (lane === CAP_LANE) return captionStackOrder;
@@ -1162,6 +1175,11 @@ function StudioTimelineImpl({
   } | null>(null);
   const visualClipDragRef = useRef(visualClipDrag);
   visualClipDragRef.current = visualClipDrag;
+  const [visualClipResize, setVisualClipResize] = useState<{
+    clipId: string;
+    edge: 'left' | 'right';
+    atSec: number;
+  } | null>(null);
   const visualTargetTop = (target: TimelineMediaDropTarget) => {
     if (target.kind === 'primary') return SCENE_PAD_T;
     if (target.kind === 'visual') return rowTop(visualLaneKey(target.trackId)) + VISUAL_SCENE_PAD_T;
@@ -1325,7 +1343,7 @@ function StudioTimelineImpl({
                 );
               })}
               {musicLane && (
-                <div className="flex items-center gap-1 px-2 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: VISUAL_TRACK_DROP_ZONE_H + ROW_GAP }}>
+                <div className="flex items-center gap-1 px-2 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: ROW_GAP }}>
                   <Music size={13} className="text-accent" />
                   {onToggleAudioMute && <MuteToggle muted={!!audioMuted} onToggle={onToggleAudioMute} />}
                 </div>
@@ -1708,10 +1726,17 @@ function StudioTimelineImpl({
                   forcing either lane to ripple. */}
               {visualTracks.flatMap((track) => (track.clips ?? []).map((clip) => {
                 const live = visualClipDrag?.clipId === clip.clipId ? visualClipDrag : null;
+                const liveResize = visualClipResize?.clipId === clip.clipId ? visualClipResize : null;
                 const selected = selectedVisualClipId === clip.clipId;
                 const top = rowTop(visualLaneKey(track.trackId)) + VISUAL_SCENE_PAD_T;
-                const left = x(clip.startSec);
-                const width = Math.max(20, x(clip.endSec - clip.startSec));
+                const displayStart = liveResize?.edge === 'left'
+                  ? Math.max(0, Math.min(liveResize.atSec, clip.endSec - 0.2))
+                  : clip.startSec;
+                const displayEnd = liveResize?.edge === 'right'
+                  ? Math.max(clip.startSec + 0.2, liveResize.atSec)
+                  : clip.endSec;
+                const left = x(displayStart);
+                const width = Math.max(20, x(displayEnd - displayStart));
                 const visualStrip = clip.kind === 'video'
                   ? clip.usePrimaryFilmstrip ? filmstrip ?? [] : clip.source ? clipStrips?.[clip.source] ?? [] : []
                   : [];
@@ -1816,6 +1841,30 @@ function StudioTimelineImpl({
                         {clip.label || t('panels.image')}
                       </span>
                     )}
+                    {(['left', 'right'] as const).map((edge) => (
+                      <div
+                        key={edge}
+                        role="none"
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          if (!onResizeVisualClip) return;
+                          let latest = edge === 'left' ? clip.startSec : clip.endSec;
+                          drag(
+                            event,
+                            (clientX) => {
+                              latest = snap(secAt(clientX));
+                              setVisualClipResize({ clipId: clip.clipId, edge, atSec: latest });
+                              setGuide(latest);
+                            },
+                            (moved) => {
+                              setVisualClipResize(null);
+                              if (moved) onResizeVisualClip(clip.clipId, edge, latest);
+                            },
+                          );
+                        }}
+                        className={`absolute inset-y-0 z-10 w-1.5 cursor-ew-resize transition-colors ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${selected ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
+                      />
+                    ))}
                   </div>
                 );
               }))}
@@ -2024,25 +2073,84 @@ function StudioTimelineImpl({
                 />
               )}
 
-              {/* Caption lane: sentence-caption chips (follow the transcript, no drag/trim; click = SELECT that caption + jump the playhead; text edited from the caption panel) */}
+              {/* Caption lane: click selects/jumps; either edge trims the display window without changing copy. */}
               {hasCaptions &&
-                captionBlocks.map((b) => (
-                  <div
-                    key={b.id}
-                    aria-disabled={disabledClipIds?.has(b.id)}
-                    className={`absolute overflow-hidden bg-rose-500/12 ring-1 ring-rose-400/25 transition hover:bg-rose-500/20 ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
-                    style={{ left: x(b.startSec), width: Math.max(10, x(b.durationSec)), top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectBlock(b.id, false); // picking a concrete caption on the timeline selects it (the one place that sets caption selection outside the stage)
-                      onSeek(secAt(e.clientX));
-                    }}
-                  >
-                    <div className="pointer-events-none flex h-full items-center px-2">
-                      <span className="text-ink-2 truncate text-[10px]">{b.label || t('panels.captions')}</span>
+                captionBlocks.map((b) => {
+                  const preview = captionResize?.id === b.id ? captionResize : b;
+                  const selected = selectedBlockIds.has(b.id);
+                  const width = Math.max(10, x(preview.durationSec));
+                  const precisionControls = width >= 18;
+                  const end = b.startSec + b.durationSec;
+                  const minDurationSec = 1 / Math.max(1, framePickFps);
+                  return (
+                    <div
+                      key={b.id}
+                      aria-disabled={disabledClipIds?.has(b.id)}
+                      className={`group absolute overflow-hidden bg-rose-500/12 ring-1 transition hover:bg-rose-500/20 ${selected ? 'ring-rose-400/60' : 'ring-rose-400/25'} ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
+                      style={{ left: x(preview.startSec), width, top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectBlock(b.id, false); // picking a concrete caption on the timeline selects it (the one place that sets caption selection outside the stage)
+                        onSeek(secAt(e.clientX));
+                      }}
+                    >
+                      <div className="pointer-events-none flex h-full items-center gap-1.5 px-2">
+                        <span className="text-ink-2 truncate text-[10px]">{b.label || t('panels.captions')}</span>
+                        {selected && width > 82 && (
+                          <span className="text-ink-3 ml-auto shrink-0 font-mono text-[9px] tabular-nums">
+                            {preview.durationSec.toFixed(1)}s
+                          </span>
+                        )}
+                      </div>
+                      {onResizeCaption && precisionControls && !disabledClipIds?.has(b.id) && (
+                        <>
+                          <span
+                            aria-label="Trim caption start"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              onSelectBlock(b.id, false);
+                              let latest = b.startSec;
+                              drag(
+                                e,
+                                (cx) => {
+                                  const snapped = snap(secAt(cx), [b.startSec, end]);
+                                  latest = Math.max(0, Math.min(end - minDurationSec, quantizeTimelineFrameSecond(snapped, dur, framePickFps)));
+                                  setCaptionResize({ id: b.id, startSec: latest, durationSec: end - latest });
+                                },
+                                (moved) => {
+                                  setCaptionResize(null);
+                                  if (moved) onResizeCaption(b.id, 'left', latest);
+                                },
+                              );
+                            }}
+                            className={`absolute inset-y-0 left-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.left} ${selected ? 'bg-white/30' : 'bg-transparent group-hover:bg-white/20'}`}
+                          />
+                          <span
+                            aria-label="Trim caption end"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              onSelectBlock(b.id, false);
+                              let latest = end;
+                              drag(
+                                e,
+                                (cx) => {
+                                  const snapped = snap(secAt(cx), [b.startSec, end]);
+                                  latest = Math.min(dur, Math.max(b.startSec + minDurationSec, quantizeTimelineFrameSecond(snapped, dur, framePickFps)));
+                                  setCaptionResize({ id: b.id, startSec: b.startSec, durationSec: latest - b.startSec });
+                                },
+                                (moved) => {
+                                  setCaptionResize(null);
+                                  if (moved) onResizeCaption(b.id, 'right', latest);
+                                },
+                              );
+                            }}
+                            className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${selected ? 'bg-white/30' : 'bg-transparent group-hover:bg-white/20'}`}
+                          />
+                        </>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
               {/* Music lane (bottom row), in its own component: a move/trim/fade gesture writes a value per
                   pointer frame, and keeping that state down there is what stops it re-rendering the whole

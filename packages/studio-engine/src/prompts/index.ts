@@ -27,6 +27,13 @@ export { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotComm
 export { L1_PROPS_SPEC } from './l1-props-spec';
 export { catalogSection } from './l4-catalog';
 export { MAX_COMPONENT_CANDIDATES, retrieveComponentCandidates } from './component-retrieval';
+export {
+  MAX_MOTION_GRAPHIC_PATTERNS,
+  MOTION_GRAPHIC_CAPABILITY_MAP,
+  MOTION_GRAPHIC_PATTERNS,
+  motionGraphicPatternSection,
+  retrieveMotionGraphicPatterns,
+} from './motion-graphic-patterns';
 export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
 export { SPOKEN_VISUAL_DIRECTION } from './spoken-visual-direction';
 export * from './chat';

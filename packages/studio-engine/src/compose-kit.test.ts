@@ -144,10 +144,10 @@ describe('custom escape — built-ins are a library, not a cage', () => {
   });
 });
 
-describe('两路共享同一份组件词汇(派生,不许各说各话)', () => {
-  it('HTML 路径带 HOUSE COMPONENT TYPES,内容与 kit 目录同源', () => {
+describe('两路共享同一份动态图形词汇(派生,不许各说各话)', () => {
+  it('HTML 路径带 HOUSE MOTION GRAPHIC TYPES,内容与 kit 目录同源', () => {
     const html = buildHtmlSystem();
-    expect(html).toContain('HOUSE COMPONENT TYPES');
+    expect(html).toContain('HOUSE MOTION GRAPHIC TYPES');
     for (const id of Object.keys(components)) expect(html).toContain(`  ${id} — `);
     expect(html).toContain('floor of consistency, not a ceiling'); // 词汇是地板不是天花板
   });
