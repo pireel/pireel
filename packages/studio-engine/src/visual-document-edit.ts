@@ -2,6 +2,7 @@
 
 import {
   applyEditorCommand,
+  isVisualEditorTrack,
   pruneEmptyNonPrimaryTracks,
   secondsToTimelineFrames,
   type EditorCommandError,
@@ -48,7 +49,7 @@ function failure(
 
 function visualClip(document: EditorDocumentV2, clipId: string) {
   for (const track of document.timeline.tracks) {
-    if (track.type !== 'visual') continue;
+    if (!isVisualEditorTrack(track)) continue;
     const clip = track.clips.find((candidate): candidate is NarrativeTimelineClip | MediaTimelineClip => (
       candidate.id === clipId && (candidate.kind === 'narrative' || candidate.kind === 'media')
     ));
@@ -156,7 +157,7 @@ export function moveVisualDocumentClip(input: MoveVisualDocumentClipInput): Move
   }
 
   const target = document.timeline.tracks.find((track) => track.id === targetTrackId);
-  if (!target || target.type !== 'visual') {
+  if (!target || !isVisualEditorTrack(target)) {
     return failure(input.document, target ? 'invalid-command' : 'track-not-found', `Visual target track does not exist: ${targetTrackId}`, 'target');
   }
   if (target.locked) return failure(input.document, 'track-locked', `Visual target track is locked: ${target.id}`);

@@ -106,6 +106,35 @@ describe('native narrative structure edits', () => {
     expect(result.assetId).toBe(inserted.assetId);
   });
 
+  it('promotes primary footage into an existing graphics lane because both are visual lanes', () => {
+    const inserted = addNarrativeDocumentClip({
+      document: emptyDocument(), mode: 'overwrite', atSec: 0,
+      shot: { id: 'primary-clip', src: 'https://cdn.test/primary.mp4', srcStart: 0, srcEnd: 2, treatment: 'full' },
+    });
+    expect(inserted.ok).toBe(true);
+    if (!inserted.ok) return;
+    inserted.document.timeline.tracks.push({
+      id: 'mixed', type: 'graphics', role: 'graphics', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 3, clips: [{
+        id: 'title', kind: 'graphic', startFrame: 90, durationFrames: 30, enabled: true,
+        anchor: { type: 'timeline' }, block: { templateId: 'custom', slots: {} },
+      }],
+    });
+
+    const result = moveNarrativeDocumentClipToVisualTrack({
+      document: inserted.document,
+      clipId: 'primary-clip',
+      atSec: 0,
+      targetTrackId: 'mixed',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.find((track) => track.id === 'mixed')?.clips.map((clip) => clip.kind)).toEqual([
+      'media',
+      'graphic',
+    ]);
+  });
+
   it('rolls insertion back when a sync-locked sibling lane is locked', () => {
     const document = emptyDocument();
     document.timeline.tracks.push({

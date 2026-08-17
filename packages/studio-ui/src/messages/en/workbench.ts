@@ -312,6 +312,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.movedNameSecS": 'Moved "{name}" to {sec}s',
   "workbench.movePlayheadToSplitAudio":
     "Move the playhead inside this audio clip to split it",
+  "workbench.movePlayheadToSplitSelection":
+    "Move the playhead inside the selected clip to split it",
   "workbench.movePlayheadToTrimAudio":
     "Move the playhead inside this audio clip to trim it",
   "workbench.movePlayheadToTrim":

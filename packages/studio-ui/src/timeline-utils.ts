@@ -15,7 +15,7 @@ export const VISUAL_SCENE_PAD_T = 3;
 export const VISUAL_SCENE_PAD_B = 3;
 export const ROW_GAP = 2;
 export const RULER_H = 24;
-export const GUTTER = 58; // kind icon + the track's mute toggle
+export const GUTTER = 68; // fixed columns: track kind + mute + visibility
 export const CAP_LANE = -1; // "caption lane" sentinel track number: read-only, no drag/reorder, not in z-reorder, not in marquee; real track numbers are always >=0
 export const EDGE_PAD = 12; // breathing room between gutter and content: keeps the first block's outset selection ring from being clipped by the sticky gutter
 export const SHOT_GAP = 2; // hairline gap between shot cards (taken off the right edge, left edge stays time-accurate)

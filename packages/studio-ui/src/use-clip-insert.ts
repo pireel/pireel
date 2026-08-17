@@ -395,7 +395,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
     if (input.target.kind === 'visual') {
       const requestedTrackId = input.target.trackId;
       const track = document.timeline.tracks.find((candidate) => candidate.id === requestedTrackId);
-      if (!track || track.type !== 'visual' || track.id === document.semantics.primaryNarrativeTrackId) {
+      if (!track || track.type === 'audio' || track.id === document.semantics.primaryNarrativeTrackId) {
         toast.error(t('workbench.failedFetchInsertClip'));
         return '';
       }

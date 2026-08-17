@@ -69,6 +69,7 @@ import {
   type CaptionStyle,
   type Composition,
   type EditorDocumentV2,
+  type EditorMediaAsset,
   type MediaRef,
   type CutTransitionEffect,
   type TransitionDirection,
@@ -91,7 +92,6 @@ import {
   addNarrativeDocumentClip,
   moveVisualDocumentClip,
   applyOverlayDocumentEdits,
-  applyNarrationSplitCommands,
   removeNarrationClipsWithoutRipple,
   removeOverlayDocumentClips,
   moveOverlayDocumentClip,
@@ -527,7 +527,12 @@ export function HyperframesWorkbench({
                 stackOrder: track.stackOrder,
                 hidden: track.hidden,
                 muted: track.muted,
-                ...(track.type === "visual"
+                ranges: track.clips.map((entry) => ({
+                  clipId: entry.clipId,
+                  startSec: entry.startSec,
+                  endSec: entry.endSec,
+                })),
+                ...(track.type !== "audio"
                   ? {
                       clips: track.clips.flatMap((entry) =>
                         entry.clip.kind === "media" &&
@@ -1008,6 +1013,11 @@ export function HyperframesWorkbench({
   const duration = renderPlan.durationSec;
   const hasVideoTrack = renderPlan.narrative.length > 0;
   const hasContent = renderPlan.durationFrames > 0;
+  const hasSplitSelection =
+    !!selectedAudioId ||
+    !!selectedVisualClipId ||
+    selectedBlockIds.size > 0 ||
+    selectedShotIds.size > 0;
   // Canvas ratio: seeded by the FIRST inserted source (insertClipCore), overridable here; other
   // sources contain-fit into it (frame shim letterboxes, never crops).
   const CANVAS_RATIOS = [
@@ -1379,6 +1389,114 @@ export function HyperframesWorkbench({
     },
     [],
   );
+  const localRuntimePreparingRef = useRef<Map<string, Promise<
+    | { ok: true; prepared: boolean }
+    | { ok: false; error: string }
+  >>>(new Map());
+  const localRuntimeReadyAssetIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    localRuntimePreparingRef.current.clear();
+    localRuntimeReadyAssetIdsRef.current.clear();
+  }, [projectId]);
+  /** One device-local runtime contract for every media kind. The durable document keeps only sigs;
+   * this boundary restores/pins bytes and attaches session-only URLs without uploading anything. */
+  const prepareLocalAssetRuntime = useCallback(
+    (asset: EditorMediaAsset): Promise<
+      | { ok: true; prepared: boolean }
+      | { ok: false; error: string }
+    > => {
+      const sig = asset.locator.localSig;
+      if (!sig) return Promise.resolve({ ok: true, prepared: false });
+      if (localRuntimeReadyAssetIdsRef.current.has(asset.id)) {
+        return Promise.resolve({ ok: true, prepared: false });
+      }
+      const current = localRuntimePreparingRef.current.get(asset.id);
+      if (current) return current;
+      const task = (async () => {
+        const entry = localAssetIndexRef.current.find(
+          (item) =>
+            item.sig === sig &&
+            (item.kind ?? "video") === asset.kind,
+        );
+        const direct = await loadLocalVideo(sig);
+        const folder = !direct && entry?.folder
+          ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, sig)
+          : null;
+        const file = direct ?? folder?.file ?? null;
+        if (!file) {
+          const source = resolveAssetUrl(asset);
+          if (source && !source.startsWith("blob:")) {
+            localRuntimeReadyAssetIdsRef.current.add(asset.id);
+            return { ok: true as const, prepared: false };
+          }
+          return {
+            ok: false as const,
+            error: `local ${asset.kind} access is unavailable — restore access to “${asset.label || sig}”, then retry`,
+          };
+        }
+        // OPFS pinning improves refresh recovery, but a full local cache must not prevent the
+        // currently authorized File/folder handle from being used in this session.
+        try {
+          await saveLocalVideo(file, sig, undefined, {
+            pinned: asset.kind === "image" || asset.kind === "audio",
+          });
+        } catch {
+          // The authorized File remains usable for this session even when the local cache is full.
+        }
+        if (asset.kind === "image") {
+          localRuntimeReadyAssetIdsRef.current.add(asset.id);
+          return { ok: true as const, prepared: true };
+        }
+        const url = URL.createObjectURL(file);
+        clipFilesRef.current.set(url, file);
+        rememberAssetUrl(asset.id, url);
+        localRuntimeReadyAssetIdsRef.current.add(asset.id);
+        return { ok: true as const, prepared: true };
+      })().finally(() => {
+        localRuntimePreparingRef.current.delete(asset.id);
+      });
+      localRuntimePreparingRef.current.set(asset.id, task);
+      return task;
+    },
+    [rememberAssetUrl, resolveAssetUrl],
+  );
+  // Heal metadata-only clips from older agent runs as soon as this device can resolve their bytes.
+  // Images already restore through postLocalImages; audio/video need a session URL before they can
+  // enter the render projection and audio engine.
+  useEffect(() => {
+    let cancelled = false;
+    const referencedAssetIds = new Set(
+      editorDocument.timeline.tracks.flatMap((track) =>
+        track.clips.flatMap((clip) =>
+          "assetId" in clip && clip.assetId ? [clip.assetId] : [],
+        ),
+      ),
+    );
+    const missing = [...referencedAssetIds]
+      .map((assetId) => editorDocument.assets[assetId])
+      .filter(
+        (asset): asset is EditorMediaAsset =>
+          !!asset?.locator.localSig &&
+          asset.kind !== "image" &&
+          asset.id !== editorDocument.semantics.primaryNarrativeAssetId &&
+          !localRuntimeReadyAssetIdsRef.current.has(asset.id),
+      );
+    if (!missing.length) return () => { cancelled = true; };
+    void (async () => {
+      let prepared = false;
+      for (const asset of missing) {
+        const result = await prepareLocalAssetRuntime(asset);
+        prepared ||= result.ok && result.prepared;
+        if (!result.ok) {
+          console.warn(
+            `[studio] local ${asset.kind} runtime restore failed for ${asset.id}: ${result.error}`,
+          );
+        }
+      }
+      if (!cancelled && prepared) setEditorDocument(editorDocumentRef.current);
+    })();
+    return () => { cancelled = true; };
+  }, [editorDocument, localAssetIndexRev, prepareLocalAssetRuntime, resolveAssetUrl, setEditorDocument]);
   // Persistence metadata is folded into V2 synchronously without coupling the live-document module
   // to workbench feature refs.
   livePersistenceMetadataRef.current = {
@@ -4182,7 +4300,7 @@ export function HyperframesWorkbench({
     if (selectedVisualClipId) {
       for (const track of renderPlan.tracks) {
         if (
-          track.type !== "visual" ||
+          track.type === "audio" ||
           track.id === renderPlan.primaryNarrativeTrackId ||
           track.hidden
         )
@@ -5101,9 +5219,12 @@ export function HyperframesWorkbench({
     if (!selectedVisualClipId) return;
     const exists = renderPlan.tracks.some(
       (track) =>
-        track.type === "visual" &&
+        track.type !== "audio" &&
         track.role !== "primaryNarrative" &&
-        track.clips.some((entry) => entry.clipId === selectedVisualClipId),
+        track.clips.some(
+          (entry) =>
+            entry.clipId === selectedVisualClipId && entry.clip.kind === "media",
+        ),
     );
     if (!exists) setSelectedVisualClipId(null);
   }, [renderPlan, selectedVisualClipId]);
@@ -5148,12 +5269,9 @@ export function HyperframesWorkbench({
       clipTranscripts: clipAsrRef.current,
     });
 
-  /** Cut: split the current shot in two at the playhead (content unchanged). Compute first, push the snapshot after —
-   *  if it lands on a boundary and doesn't cut, don't touch the undo/redo stack (clearing the redo line without re-rendering would leave button states stale). */
+  /** Split the selected timeline clip(s) at the playhead. Selection owns the operation; track type does not. */
   const splitAtPlayhead = () => {
     const c = compRef.current;
-    // An audio clip is selected → the toolbar acts on IT (same rule the Del key follows): split it in two
-    // at the playhead, leaving the timeline untouched.
     const audId = selectedAudioIdRef.current;
     if (audId) {
       const clip = (c.audioTracks ?? []).find((x) => x.id === audId);
@@ -5163,23 +5281,64 @@ export function HyperframesWorkbench({
         toast.error(split.error ?? t("workbench.movePlayheadToSplitAudio"));
       return;
     }
-    const shots = ensureShots(c);
-    if (!shots.length) return;
-    if (
-      splitBlockedByTransition(shots, tRef.current, primaryNarrative.placements)
-    ) {
+
+    const selectedIds = selectedVisualClipIdRef.current
+      ? [selectedVisualClipIdRef.current]
+      : selectedBlockIdsRef.current.size
+        ? [...selectedBlockIdsRef.current]
+        : [...selectedShotIdsRef.current];
+    if (!selectedIds.length) return;
+
+    const current = editorDocumentRef.current;
+    const atFrame = Math.round(tRef.current * current.canvas.fps);
+    const primarySelected = selectedIds.some((clipId) =>
+      current.timeline.tracks
+        .find((track) => track.id === current.semantics.primaryNarrativeTrackId)
+        ?.clips.some((clip) => clip.id === clipId),
+    );
+    if (primarySelected && splitBlockedByTransition(
+      ensureShots(c),
+      tRef.current,
+      primaryNarrative.placements,
+    )) {
       toast.error(t("workbench.removeTransitionToSplit"));
       return;
     }
-    const split = applyNarrationSplitCommands(editorDocumentRef.current, [
-      tRef.current,
-    ]);
-    if (!split.ok) {
-      toast.error(editorErrorMessage(split.error));
+
+    let next = current;
+    let splitCount = 0;
+    for (const clipId of selectedIds) {
+      const track = next.timeline.tracks.find((candidate) =>
+        candidate.clips.some(
+          (clip) =>
+            clip.id === clipId &&
+            atFrame > clip.startFrame &&
+            atFrame < clip.startFrame + clip.durationFrames,
+        ),
+      );
+      // A linked partner may already have been split by an earlier selected clip. Clips that do
+      // not cross the playhead are intentionally left unchanged, matching NLE multi-selection.
+      if (!track) continue;
+      const split = applyEditorCommand(next, {
+        type: "clip.split",
+        trackId: track.id,
+        clipId,
+        atFrame,
+        includeLinked: true,
+      });
+      if (!split.ok) {
+        toast.error(editorErrorMessage(split.error));
+        return;
+      }
+      next = split.document;
+      splitCount += 1;
+    }
+    if (!splitCount) {
+      toast.error(t("workbench.movePlayheadToSplitSelection"));
       return;
     }
     pushUndoSnapshot();
-    setEditorDocument(split.document);
+    setEditorDocument(next);
   };
   /** Trim left / right: cut the source footage on the left/right of the playhead in the current shot, everything after
    *  shifts left, captions/effect blocks compress along with it. Native publication updates compRef synchronously, so sequential Agent trims cannot swallow the previous step. */
@@ -5468,7 +5627,7 @@ export function HyperframesWorkbench({
   const deleteVisualClip = (clipId: string) => {
     const track = editorDocumentRef.current.timeline.tracks.find(
       (candidate) =>
-        candidate.type === "visual" &&
+        candidate.type !== "audio" &&
         candidate.id !==
           editorDocumentRef.current.semantics.primaryNarrativeTrackId &&
         candidate.clips.some((clip) => clip.id === clipId),
@@ -6270,6 +6429,7 @@ export function HyperframesWorkbench({
     projectId,
     documentRef: editorDocumentRef,
     resolveAssetUrl,
+    prepareLocalAssetRuntime,
     setDocument: setEditorDocument,
     listProjectOutputs: listProjectOutputsForAgent,
     resolveProjectOutput: projectOutputs.resolve,
@@ -6776,11 +6936,25 @@ export function HyperframesWorkbench({
     onResizeBlock: resizeBlock,
     onResizeCaption: resizeCaption,
     /** Move a block across stable native tracks. The emptied source lane remains in the document. */
-    onMoveBlockTrack: (id: string, trackIndex: number) => {
+    onMoveBlockTrack: (
+      id: string,
+      targetLane: { trackId?: string; stackOrder: number },
+      startSec: number,
+    ) => {
       if (genLockToast(id)) return;
-      const target = editorDocumentRef.current.timeline.tracks.find(
-        (track) => track.type === "graphics" && track.stackOrder === trackIndex,
-      );
+      const target = targetLane.trackId
+        ? editorDocumentRef.current.timeline.tracks.find(
+            (track) =>
+              track.id === targetLane.trackId &&
+              track.type !== "audio" &&
+              track.role !== "primaryNarrative",
+          )
+        : editorDocumentRef.current.timeline.tracks.find(
+            (track) =>
+              track.type !== "audio" &&
+              track.role !== "primaryNarrative" &&
+              track.stackOrder === targetLane.stackOrder,
+          );
       if (!target) {
         toast.error(t("workbench.elementNotFound"));
         return;
@@ -6789,6 +6963,7 @@ export function HyperframesWorkbench({
         document: editorDocumentRef.current,
         clipId: id,
         toTrackId: target.id,
+        startSec,
       });
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
@@ -6798,10 +6973,12 @@ export function HyperframesWorkbench({
       setEditorDocument(edit.document);
     },
     /** Dragging into a row gap creates a first-class lane between its native stack neighbors. */
-    onMoveBlockNewTrack: (id: string, slot: number) => {
+    onMoveBlockNewTrack: (id: string, slot: number, startSec: number) => {
       if (genLockToast(id)) return;
       const graphics = editorDocumentRef.current.timeline.tracks
-        .filter((track) => track.type === "graphics")
+        .filter(
+          (track) => track.type !== "audio" && track.role !== "primaryNarrative",
+        )
         .sort((left, right) => right.stackOrder - left.stackOrder);
       const insertAt = Math.max(0, Math.min(graphics.length, slot));
       const above = graphics[insertAt - 1]?.stackOrder;
@@ -6822,6 +6999,7 @@ export function HyperframesWorkbench({
           name: "Graphics",
           stackOrder,
         },
+        startSec,
       });
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
@@ -6878,6 +7056,8 @@ export function HyperframesWorkbench({
         id,
         edge === "in" ? { fadeInSec: sec } : { fadeOutSec: sec },
       ),
+    onToggleAudioClipMute: (id: string, muted: boolean) =>
+      audioOps.patchClip(id, { muted }),
     onSelectAudio: (id: string | null) => {
       setSelectedAudioId(id);
       if (id) {
@@ -6903,22 +7083,39 @@ export function HyperframesWorkbench({
       if (musicTrack)
         patchTrackFlags(musicTrack.id, { muted: !musicTrack.muted });
     },
+    onToggleTrackMute: (trackId: string) => {
+      const track = renderPlan.tracks.find(
+        (candidate) => candidate.id === trackId,
+      );
+      // Caption and graphics tracks have no source audio. Keeping the guard here makes the
+      // callback safe even if another timeline surface starts forwarding arbitrary track ids.
+      if (track)
+        patchTrackFlags(trackId, { muted: !track.muted });
+    },
     onToggleTrackHidden: (trackId: string) => {
       const track = renderPlan.tracks.find(
         (candidate) => candidate.id === trackId,
       );
       if (track) patchTrackFlags(trackId, { hidden: !track.hidden });
     },
-    onReorderTracks: (topToBottom: number[]) => {
+    onReorderTracks: (
+      topToBottom: Array<{ trackId?: string; stackOrder: number }>,
+    ) => {
       const graphics = editorDocumentRef.current.timeline.tracks.filter(
-        (track) => track.type === "graphics",
+        (track) => track.type !== "audio" && track.role !== "primaryNarrative",
       );
-      const ids = topToBottom
-        .map(
-          (stackOrder) =>
-            graphics.find((track) => track.stackOrder === stackOrder)?.id,
-        )
-        .filter((id): id is string => !!id);
+      const used = new Set<string>();
+      const ids = topToBottom.flatMap((target) => {
+        const track = target.trackId
+          ? graphics.find((candidate) => candidate.id === target.trackId)
+          : graphics.find(
+              (candidate) =>
+                candidate.stackOrder === target.stackOrder && !used.has(candidate.id),
+            );
+        if (!track) return [];
+        used.add(track.id);
+        return [track.id];
+      });
       const edit = reorderOverlayDocumentTracks(editorDocumentRef.current, ids);
       if (!edit.ok) {
         toast.error(editorErrorMessage(edit.error));
@@ -9447,7 +9644,7 @@ export function HyperframesWorkbench({
                   <button
                     type="button"
                     onClick={splitAtPlayhead}
-                    disabled={!hasVideoTrack && !selectedAudioId}
+                    disabled={!hasSplitSelection}
                     aria-label={t("workbench.split")}
                     className="hover:text-ink hover:bg-panel-2 rounded p-1 disabled:opacity-40"
                   >

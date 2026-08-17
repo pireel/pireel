@@ -38,7 +38,7 @@ export const REF_WIDTH = 1080;
  *  Caption geometry derives from the real width, so a 16:9 canvas holds a full single-line subtitle
  *  (~21em ≈ 42 latin chars) while portrait stays at the ~11-char line. */
 export function normalizeDims(w: number, h: number): { width: number; height: number } {
-  if (!w || !h) return { width: REF_WIDTH, height: 1920 };
+  if (!w || !h) return { width: 1920, height: REF_WIDTH };
   return w >= h
     ? { width: Math.round((REF_WIDTH * w) / h), height: REF_WIDTH }
     : { width: REF_WIDTH, height: Math.round((REF_WIDTH * h) / w) };

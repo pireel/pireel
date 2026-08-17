@@ -103,6 +103,79 @@ describe('Agent composition transaction boundary', () => {
     expect(execute).toContain('do not retry it in the same user request');
     expect(buildChatSystem(null)).toContain('the sole timeline mutation allowed before planning');
     expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
+    expect(buildChatSystem(null)).toContain('Build one cross-media evidence map before planning');
+    expect(buildChatSystem(null)).toContain('repetition used only to fill uncovered time is a planning failure');
+    expect(buildChatSystem(null)).toContain('compare actual clip ownership and media coverage');
+  });
+
+  it('prepares every referenced device-local media asset before clips are committed', async () => {
+    const h = harness();
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [
+        { id: 'local-video', kind: 'video', localSig: 'video:sig', durationSec: 8 },
+        { id: 'local-image', kind: 'image', localSig: 'image:sig' },
+        { id: 'local-audio', kind: 'audio', localSig: 'audio:sig', durationSec: 6 },
+      ],
+    });
+    expect(registered.ok).toBe(true);
+    if (!registered.document) throw new Error('registration did not return a document');
+    h.ctx.setDocument(registered.document);
+    const prepareLocalAssetRuntime = vi.fn().mockResolvedValue({ ok: true, prepared: true });
+    Object.assign(h.ctx, {
+      prepareLocalAssetRuntime,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'add_clips', {
+      clips: [
+        { assetId: 'local-video', startSec: 0, durationSec: 4 },
+        { assetId: 'local-image', startSec: 4, durationSec: 4 },
+        { assetId: 'local-audio', startSec: 0, durationSec: 6, role: 'narration' },
+      ],
+    });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(prepareLocalAssetRuntime.mock.calls.map(([asset]) => asset.id)).toEqual([
+      'local-video',
+      'local-image',
+      'local-audio',
+    ]);
+    expect(
+      h.documentRef.current.timeline.tracks
+        .flatMap((track) => track.clips)
+        .filter((clip) => 'assetId' in clip && typeof clip.assetId === 'string' && clip.assetId.startsWith('local-')),
+    ).toHaveLength(3);
+  });
+
+  it('does not mutate the timeline when device-local bytes cannot be restored', async () => {
+    const h = harness();
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: 'missing-video', kind: 'video', localSig: 'missing:sig', durationSec: 8 }],
+    });
+    expect(registered.ok).toBe(true);
+    if (!registered.document) throw new Error('registration did not return a document');
+    h.ctx.setDocument(registered.document);
+    const before = h.documentRef.current;
+    Object.assign(h.ctx, {
+      prepareLocalAssetRuntime: vi.fn().mockResolvedValue({ ok: false, error: 'restore local access' }),
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'add_clips', {
+      clips: [{ assetId: 'missing-video', startSec: 0, durationSec: 4 }],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: 'restore local access',
+      data: { assetId: 'missing-video', availability: 'metadata-only' },
+    });
+    expect(h.documentRef.current).toBe(before);
+    expect(h.undoStackRef.current).toHaveLength(0);
   });
 
   it('keeps speech edits visually directed without an implicit Smart Select frame', () => {
@@ -231,6 +304,7 @@ describe('Agent composition transaction boundary', () => {
       },
     });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(video);
+    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(video, sig, undefined, { pinned: false });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
   });
 

@@ -30,7 +30,7 @@ describe('EditorDocument V2 migration', () => {
   it('creates a valid, deliberately empty primary narrative track for a blank project', () => {
     const { document, issues } = migrate(emptyComposition());
     expect(document.version).toBe(EDITOR_DOCUMENT_VERSION);
-    expect(document.canvas).toEqual({ width: 1080, height: 1920, fps: 30, configured: false });
+    expect(document.canvas).toEqual({ width: 1920, height: 1080, fps: 30, configured: false });
     expect(document.timeline.tracks).toHaveLength(1);
     expect(document.timeline.tracks[0]).toMatchObject({ id: 'track_primary_narrative', role: 'primaryNarrative', clips: [] });
     expect(document.assets).toEqual({});

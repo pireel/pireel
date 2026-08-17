@@ -48,7 +48,9 @@ const isCompatibilityPlaceholder = (url: string) => url.startsWith('blob:pireel-
 
 export function resolveLiveAssetUrl(session: LiveProjectDocumentSession, asset: EditorMediaAsset): string | undefined {
   return session.runtimeAssetUrls.get(asset.id)
-    ?? asset.locator.remoteUrl
+    ?? (asset.locator.remoteUrl && !isCompatibilityPlaceholder(asset.locator.remoteUrl)
+      ? asset.locator.remoteUrl
+      : undefined)
     // Device-local images deliberately persist only their stable signature. The preview runtime
     // recognizes this locator and receives the matching File over postMessage after an explicit
     // prepare/restore step. Treating localSig as unresolved dropped the clip before an <img> node

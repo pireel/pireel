@@ -2,16 +2,12 @@ import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { pruneEmptyNonPrimaryTracks } from '../prune-empty-tracks';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { editorTrackAcceptsClip } from '../track-compatibility';
 
 type OverlayClip = Extract<TimelineClip, { kind: 'graphic' | 'caption' }>;
 
 function overlayClip(clip: TimelineClip): clip is OverlayClip {
   return clip.kind === 'graphic' || clip.kind === 'caption';
-}
-
-function acceptsOverlay(track: EditorTrack, clip: OverlayClip): boolean {
-  if (clip.kind === 'graphic') return track.type === 'graphics';
-  return track.type === 'caption' && (!clip.managed || track.role === 'managedCaptions');
 }
 
 /** Move one overlay identity between compatible lanes, retaining timing, payload and anchors. */
@@ -30,7 +26,7 @@ export function moveOverlayClip(
   }
   const target = document.timeline.tracks.find((track) => track.id === toTrackId);
   if (!target) return commandFailure(document, 'track-not-found', `Track does not exist: ${toTrackId}`, { trackIds: [toTrackId] });
-  if (!acceptsOverlay(target, clip)) {
+  if (!editorTrackAcceptsClip(target, clip)) {
     return commandFailure(document, 'invalid-command', `${clip.kind} clip ${clipId} cannot move to ${target.type} track ${toTrackId}.`, { path: 'toTrackId', trackIds: [toTrackId] });
   }
   const lockedTrackIds = [...new Set([source, target].filter((track) => track.locked).map((track) => track.id))];

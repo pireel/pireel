@@ -50,7 +50,7 @@ export function supplementalVisualFileBindings<T>(
 export function supplementalVisualMedia(plan: EditorRenderPlan): SupplementalVisualMediaClip[] {
   const result: SupplementalVisualMediaClip[] = [];
   for (const track of plan.tracks) {
-    if (track.type !== 'visual' || track.id === plan.primaryNarrativeTrackId || track.hidden) continue;
+    if (track.type === 'audio' || track.id === plan.primaryNarrativeTrackId || track.hidden) continue;
     for (const entry of track.clips) {
       if (entry.clip.kind !== 'media' || !entry.clip.enabled || !entry.asset || !entry.resolvedSource) continue;
       if (entry.asset.kind !== 'image' && entry.asset.kind !== 'video') continue;

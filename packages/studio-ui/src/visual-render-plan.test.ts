@@ -56,8 +56,12 @@ describe('supplemental visual render plan', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     document.assets.broll = { id: 'broll', kind: 'video', locator: { remoteUrl: 'https://cdn.test/b.mp4' }, metadata: { durationSec: 4 } };
     document.timeline.tracks.push({
-      id: 'broll-track', type: 'visual', role: 'broll', muted: true, hidden: false, locked: false,
+      id: 'broll-track', type: 'graphics', role: 'graphics', muted: true, hidden: false, locked: false,
       syncLocked: false, stackOrder: 3, clips: [
+        {
+          id: 'label', kind: 'graphic', startFrame: 0, durationFrames: 30, enabled: true,
+          anchor: { type: 'timeline' }, block: { templateId: 'custom', slots: {} },
+        },
         {
           id: 'on', kind: 'media', assetId: 'broll', startFrame: 60, durationFrames: 90, enabled: true,
           sourceInSec: 1, sourceOutSec: 4, fit: 'cover', box: { x: 0.1, y: 0.2, w: 0.6, h: 0.5 },

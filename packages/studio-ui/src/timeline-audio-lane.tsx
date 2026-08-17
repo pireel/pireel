@@ -14,7 +14,7 @@
  */
 
 import { memo, useCallback, useMemo, useState } from 'react';
-import { Music, VolumeX } from 'lucide-react';
+import { Music, Volume2, VolumeX } from 'lucide-react';
 import {
   AUDIO_FADE_MAX_SEC,
   type AudioClip,
@@ -72,6 +72,8 @@ export interface AudioLaneProps {
   onMove?: (id: string, startSec: number) => void;
   onTrim?: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => void;
   onFade?: (id: string, edge: 'in' | 'out', sec: number) => void;
+  /** Toggle one clip without touching its level or the containing track's mute state. */
+  onToggleMute?: (id: string, muted: boolean) => void;
   onOpenPanel?: () => void;
   /** Pointer x → edited seconds, and the snap pass, both owned by the timeline (they need its scroll box). */
   secAt: (clientX: number) => number;
@@ -80,7 +82,7 @@ export interface AudioLaneProps {
   drag: (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => void;
 }
 
-function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onOpenPanel, secAt, snap, drag }: AudioLaneProps) {
+function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, snap, drag }: AudioLaneProps) {
   /** Live gesture value (this component's whole reason to exist): the clip under the pointer renders
    *  from base + patch, and the commit lands once on release. */
   const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
@@ -170,7 +172,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
                 split the reference editor uses, which is why its knees sit in a lane instead of on
                 the chip's corner. */}
             <div
-              className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 ${selected ? 'bg-accent/18' : 'bg-accent/10'}`}
+              className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-1 px-1.5 pr-6 ${selected ? 'bg-accent/18' : 'bg-accent/10'}`}
               style={{ height: CHIP_LABEL_H }}
             >
               {clip.muted ? <VolumeX size={9} className="text-ink-4 shrink-0" /> : <Music size={9} className="text-accent shrink-0" />}
@@ -179,6 +181,30 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
                 <span className="text-ink-3 bg-panel/70 shrink-0 rounded px-1 text-[9px] leading-[12px] tabular-nums">{d.speed.toFixed(2).replace(/0$/, '')}×</span>
               )}
             </div>
+            {width >= 34 && onToggleMute && (
+              <button
+                type="button"
+                aria-label={clip.muted ? t('workbench.audioUnmuted') : t('workbench.audioMuted')}
+                aria-pressed={!!clip.muted}
+                title={clip.muted ? t('workbench.audioUnmuted') : t('workbench.audioMuted')}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleMute(base.id, !clip.muted);
+                }}
+                className={`bg-panel/85 text-ink-3 hover:bg-panel hover:text-ink focus-visible:ring-accent absolute top-0.5 right-1 z-30 flex h-3 w-3 items-center justify-center rounded-[2px] shadow-sm backdrop-blur-sm transition-opacity focus-visible:ring-1 focus-visible:outline-none ${
+                  clip.muted
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover/aud:opacity-100 focus-visible:opacity-100'
+                }`}
+              >
+                {clip.muted ? <VolumeX size={9} /> : <Volume2 size={9} />}
+              </button>
+            )}
             {/* Body: the full media at the current zoom, slid left by the in-point so the chip's overflow
                 crops it. The fade shapes the wave by CLIPPING it to the tapered silhouette — same edge the
                 gain follows — instead of being baked into the bar heights, so the bars stay static. */}

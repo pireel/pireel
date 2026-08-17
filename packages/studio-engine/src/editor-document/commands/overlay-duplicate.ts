@@ -1,6 +1,7 @@
 import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { editorTrackAcceptsClip } from '../track-compatibility';
 
 type OverlayClip = Extract<TimelineClip, { kind: 'graphic' | 'caption' }>;
 
@@ -46,10 +47,7 @@ export function duplicateOverlayClip(
   const targetId = toTrackId ?? source.id;
   const target = document.timeline.tracks.find((track) => track.id === targetId);
   if (!target) return commandFailure(document, 'track-not-found', `Track does not exist: ${targetId}`, { trackIds: [targetId] });
-  const compatible = clip.kind === 'graphic'
-    ? target.type === 'graphics'
-    : target.type === 'caption' && (!clip.managed || target.role === 'managedCaptions');
-  if (!compatible) {
+  if (!editorTrackAcceptsClip(target, clip)) {
     return commandFailure(document, 'invalid-command', `${clip.kind} clip ${clipId} cannot duplicate to ${target.type} track ${targetId}.`, { path: 'toTrackId', trackIds: [targetId] });
   }
   if (target.locked) return commandFailure(document, 'track-locked', `Track is locked: ${targetId}`, { trackIds: [targetId] });

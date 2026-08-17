@@ -161,4 +161,55 @@ describe('EditorDocument V2 track commands', () => {
     expect(result.document).toBe(document);
     expect(document).toEqual(before);
   });
+
+  it('treats every non-audio lane as one NLE-style visual compatibility group', () => {
+    const document = documentWithAsset();
+    document.timeline.tracks.push({
+      id: 'mixed',
+      type: 'graphics',
+      role: 'graphics',
+      name: 'Mixed visual lane',
+      muted: false,
+      hidden: false,
+      locked: false,
+      syncLocked: false,
+      stackOrder: 2,
+      clips: [graphicClip('title')],
+    }, {
+      id: 'audio',
+      type: 'audio',
+      role: 'music',
+      muted: false,
+      hidden: false,
+      locked: false,
+      syncLocked: false,
+      stackOrder: 0,
+      clips: [],
+    });
+
+    const inserted = applyEditorCommand(document, {
+      type: 'clips.insert',
+      trackId: 'mixed',
+      atFrame: 60,
+      clips: [{ ...mediaClip('video-on-graphics'), offsetFrames: 0 }],
+      mode: 'overwrite',
+    });
+    expect(inserted.ok).toBe(true);
+    if (!inserted.ok) return;
+    expect(inserted.document.timeline.tracks.find((track) => track.id === 'mixed')?.clips.map((clip) => clip.kind)).toEqual([
+      'graphic',
+      'media',
+    ]);
+    expect(validateEditorDocumentV2(inserted.document)).toEqual([]);
+
+    const rejected = applyEditorCommand(inserted.document, {
+      type: 'clip.move',
+      trackId: 'mixed',
+      clipId: 'video-on-graphics',
+      startFrame: 60,
+      toTrackId: 'audio',
+    });
+    expect(rejected).toMatchObject({ ok: false, error: { code: 'invalid-command', path: 'toTrackId' } });
+    expect(rejected.document).toBe(inserted.document);
+  });
 });

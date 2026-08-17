@@ -90,6 +90,88 @@ describe('overlay track transactions', () => {
     expect(moved.document.timeline.tracks.filter((track) => track.type === 'graphics').map((track) => track.id)).toEqual(['middle']);
   });
 
+  it('overwrites the occupied destination range when a component moves onto a media lane', () => {
+    const document = documentWithGraphics();
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/video.mp4' }, metadata: { durationSec: 3 },
+    };
+    document.timeline.tracks.push({
+      id: 'media-lane', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 2, clips: [{
+        id: 'video-clip', kind: 'media', assetId: 'video', startFrame: 0, durationFrames: 90,
+        sourceInSec: 0, sourceOutSec: 3, enabled: true,
+      }],
+    });
+
+    const moved = moveOverlayDocumentClip({
+      document,
+      clipId: 'card',
+      toTrackId: 'media-lane',
+    });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    const clips = moved.document.timeline.tracks.find((track) => track.id === 'media-lane')?.clips ?? [];
+    expect(clips.find((item) => item.id === 'card')).toMatchObject({
+      id: 'card', kind: 'graphic', startFrame: 0, durationFrames: 30,
+    });
+    expect(clips.find((item) => item.id === 'video-clip')).toMatchObject({
+      id: 'video-clip', kind: 'media', startFrame: 30, durationFrames: 60, sourceInSec: 1, sourceOutSec: 3,
+    });
+  });
+
+  it('overwrites blockers when a component is dragged horizontally on the same lane', () => {
+    const document = documentWithGraphics();
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/video.mp4' }, metadata: { durationSec: 3 },
+    };
+    const lane = document.timeline.tracks.find((track) => track.id === 'low')!;
+    lane.clips.push({
+      id: 'video-clip', kind: 'media', assetId: 'video', startFrame: 60, durationFrames: 90,
+      sourceInSec: 0, sourceOutSec: 3, enabled: true,
+    });
+
+    const moved = applyOverlayDocumentEdits({ document, updates: [{ clipId: 'card', startSec: 2 }] });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    const clips = moved.document.timeline.tracks.find((track) => track.id === 'low')?.clips ?? [];
+    expect(clips.find((item) => item.id === 'card')).toMatchObject({ startFrame: 60, durationFrames: 30 });
+    expect(clips.find((item) => item.id === 'video-clip')).toMatchObject({
+      startFrame: 90, durationFrames: 60, sourceInSec: 1, sourceOutSec: 3,
+    });
+  });
+
+  it('commits track and time together without clearing the pointer\'s old destination range', () => {
+    const document = documentWithGraphics();
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/video.mp4' }, metadata: { durationSec: 4 },
+    };
+    document.timeline.tracks.push({
+      id: 'media-lane', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 2, clips: [{
+        id: 'old-position', kind: 'media', assetId: 'video', startFrame: 0, durationFrames: 30,
+        sourceInSec: 0, sourceOutSec: 1, enabled: true,
+      }, {
+        id: 'final-position', kind: 'media', assetId: 'video', startFrame: 60, durationFrames: 90,
+        sourceInSec: 1, sourceOutSec: 4, enabled: true,
+      }],
+    });
+
+    const moved = moveOverlayDocumentClip({
+      document,
+      clipId: 'card',
+      toTrackId: 'media-lane',
+      startSec: 2,
+    });
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    const clips = moved.document.timeline.tracks.find((track) => track.id === 'media-lane')?.clips ?? [];
+    expect(clips.find((item) => item.id === 'old-position')).toMatchObject({ startFrame: 0, durationFrames: 30 });
+    expect(clips.find((item) => item.id === 'card')).toMatchObject({ startFrame: 60, durationFrames: 30 });
+    expect(clips.find((item) => item.id === 'final-position')).toMatchObject({
+      startFrame: 90, durationFrames: 60, sourceInSec: 2, sourceOutSec: 4,
+    });
+  });
+
   it('reassigns duplicated and retimed graphics to the scene at their new placement', () => {
     const base = documentWithGraphics();
     const plan = directorPlanFromSeconds({

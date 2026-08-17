@@ -16,8 +16,8 @@ export function emptyEditorDocumentV2(options: EmptyEditorDocumentOptions = {}):
   return {
     version: EDITOR_DOCUMENT_VERSION,
     canvas: {
-      width: isFinitePositive(options.width) ? Math.round(options.width) : 1080,
-      height: isFinitePositive(options.height) ? Math.round(options.height) : 1920,
+      width: isFinitePositive(options.width) ? Math.round(options.width) : 1920,
+      height: isFinitePositive(options.height) ? Math.round(options.height) : 1080,
       fps,
       configured: false,
     },

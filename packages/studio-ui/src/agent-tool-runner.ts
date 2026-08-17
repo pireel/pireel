@@ -223,6 +223,13 @@ export interface AgentToolCtx {
   compRef: MutableRefObject<Composition>;
   documentRef: MutableRefObject<EditorDocumentV2>;
   resolveAssetUrl: (asset: EditorMediaAsset) => string | null | undefined;
+  /** Make a durable device-local asset playable/renderable in this browser session. Timeline
+   * placement calls this before committing, so a metadata-only registration can never report a
+   * successful clip while its bytes are still unavailable. */
+  prepareLocalAssetRuntime: (asset: EditorMediaAsset) => Promise<
+    | { ok: true; prepared: boolean }
+    | { ok: false; error: string }
+  >;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
   ensureShots: (c: Composition) => VideoShot[];
   /** Cloud project id — undo's history-ring fallback targets it when the in-memory stack is empty. */
@@ -314,7 +321,7 @@ export interface AgentToolCtx {
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
   const {
-    compRef, documentRef, resolveAssetUrl, setDocument, ensureShots, projectId,
+    compRef, documentRef, resolveAssetUrl, prepareLocalAssetRuntime, setDocument, ensureShots, projectId,
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
     setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
@@ -408,6 +415,29 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           return { ok: false, error: t('workbench.nameGeneratingEditAfter', { name: b ? bname(b) : hit }) };
         }
       }
+      if (toolId === 'add_clips' || toolId === 'insert_clips') {
+        const referencedAssetIds = [
+          ...new Set(
+            (Array.isArray(input.clips) ? input.clips : [])
+              .map((item) => (item && typeof item === 'object' && typeof (item as { assetId?: unknown }).assetId === 'string'
+                ? (item as { assetId: string }).assetId.trim()
+                : ''))
+              .filter(Boolean),
+          ),
+        ];
+        for (const assetId of referencedAssetIds) {
+          const asset = documentRef.current.assets[assetId];
+          if (!asset?.locator.localSig) continue;
+          const ready = await prepareLocalAssetRuntime(asset);
+          if (!ready.ok) {
+            return {
+              ok: false,
+              error: ready.error,
+              data: { assetId, availability: 'metadata-only' },
+            };
+          }
+        }
+      }
       if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         if (AGENT_TIMELINE_TOOL_IDS.has(toolId)) {
@@ -477,6 +507,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const file = direct ?? folder?.file ?? null;
                 if (!file) {
                   return { ok: false, error: 'local media access is unavailable — ask the user to restore access, then retry' };
+                }
+                try {
+                  await saveLocalVideo(file, entry.sig, undefined, { pinned: localKind === 'audio' });
+                } catch {
+                  // The authorized File remains usable for this ASR call even when the local cache is full.
                 }
                 report(t('tools.extract_asr.busy'));
                 const probe = await probeVideoFile(file).catch(() => null);
@@ -970,7 +1005,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const sourceClip = sourceTrack?.clips.find((clip) => clip.id === b.id);
             const target = sourceClip?.kind === 'caption'
               ? sourceTrack
-              : documentRef.current.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+              : documentRef.current.timeline.tracks.find((track) =>
+                  track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder);
             const edit = duplicateOverlayDocumentClip({
               document: documentRef.current,
               clipId: b.id,
@@ -1243,7 +1279,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 assets,
                 project,
                 usageHint: scope === 'mine'
-                  ? 'Use each local kind through its byte-aware path. Video: inspect unplaced footage with analyze_visual localSig=locator.sig, then pass the same sig to insert_clip only for selected material; do not metadata-register it and then add_clips. Audio: register_media with localSig=locator.sig, call extract_asr with that assetId when speech timing/content is needed (it records the real duration), then add_clips with role=narration. Image: call inspect_images before assigning its role, then prepare_local_image with locator.sig before using it. If local access fails, ask the user to restore access; never substitute cloud/official media.'
+                  ? 'Register the exact localSig when an asset will be placed; add_clips/insert_clips prepare device-local image, audio, and video bytes transactionally and fail without changing the timeline when access is unavailable. Inspect only when the editorial decision needs pixel, action, speech, or timing evidence. prepare_local_image remains for embedding a local image inside generated Motion Graphic HTML. Use insert_clip for a selected local-video span that belongs in the main narrative sequence. Never substitute cloud/official media without the user asking.'
                   : 'Use returned urls only for an explicitly cloud-scoped request.',
               },
             };

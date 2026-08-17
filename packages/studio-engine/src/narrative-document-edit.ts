@@ -3,6 +3,7 @@
 import type { VideoShot } from './composition-core';
 import {
   applyEditorCommand,
+  isVisualEditorTrack,
   positiveDurationFrames,
   secondsToTimelineFrames,
   type EditorCommandError,
@@ -305,7 +306,7 @@ export function moveNarrativeDocumentClipToVisualTrack(
     targetTrackId = input.newTrack.id;
   }
   const target = document.timeline.tracks.find((track) => track.id === targetTrackId);
-  if (!target || target.type !== 'visual' || target.id === primary.id) {
+  if (!target || !isVisualEditorTrack(target) || target.id === primary.id) {
     return failure(input.document, 'invalid-command', `Visual target track does not exist: ${targetTrackId ?? ''}`, 'targetTrack');
   }
   if (target.locked) return failure(input.document, 'track-locked', `Visual target track is locked: ${target.id}`);

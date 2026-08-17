@@ -613,10 +613,8 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(visualSchema.properties).toHaveProperty("assetId");
     expect(visualSchema.properties).toHaveProperty("clipId");
     const assets = STUDIO_TOOLS.find((tool) => tool.id === "list_assets")!;
-    expect(assets.description).toContain("local video sig → insert_clip");
-    expect(assets.description).toContain(
-      "Do not metadata-register a local video",
-    );
+    expect(assets.description).toContain("placement tools prepare bytes transactionally");
+    expect(assets.description).toContain("every media kind");
   });
   it("批量切分带 framing 目的,稳定人物区间内由运行时拒绝冗余切点", () => {
     const split = STUDIO_TOOLS.find((tool) => tool.id === "split_shot")!;

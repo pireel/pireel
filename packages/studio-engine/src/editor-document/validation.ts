@@ -9,6 +9,7 @@ import {
   type TimelineClip,
 } from './types';
 import { normalizeCustomVisualStyle } from '../visual-style';
+import { editorTrackAcceptsClip } from './track-compatibility';
 
 export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   if (!value || typeof value !== 'object') return false;
@@ -45,13 +46,6 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   return true;
 }
 
-const allowedClipKinds: Record<EditorTrackType, Set<TimelineClip['kind']>> = {
-  visual: new Set(['narrative', 'media']),
-  graphics: new Set(['graphic']),
-  audio: new Set(['audio']),
-  caption: new Set(['caption']),
-};
-
 /** Structural and referential validation. Offline assets are valid; dangling asset ids are not. */
 export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocumentIssue[] {
   const issues: EditorDocumentIssue[] = [];
@@ -75,7 +69,7 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
       const clipPath = `${trackPath}.clips[${clipIndex}]`;
       if (clipIds.has(clip.id)) push('error', 'duplicate-clip-id', `${clipPath}.id`, `Duplicate clip id: ${clip.id}`);
       clipIds.add(clip.id);
-      if (!allowedClipKinds[track.type].has(clip.kind)) push('error', 'clip-track-type-mismatch', `${clipPath}.kind`, `${clip.kind} clips cannot live on a ${track.type} track.`);
+      if (!editorTrackAcceptsClip(track, clip)) push('error', 'clip-track-type-mismatch', `${clipPath}.kind`, `${clip.kind} clips cannot live on a ${track.role ?? track.type} track.`);
       if (!Number.isInteger(clip.startFrame) || clip.startFrame < 0) push('error', 'invalid-clip-start', `${clipPath}.startFrame`, 'Clip start must be a non-negative integral frame.');
       if (!Number.isInteger(clip.durationFrames) || clip.durationFrames <= 0) push('error', 'invalid-clip-duration', `${clipPath}.durationFrames`, 'Clip duration must be a positive integral frame count.');
       if (clip.kind === 'caption' && clip.timingOverride && (

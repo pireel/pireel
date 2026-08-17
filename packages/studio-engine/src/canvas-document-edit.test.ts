@@ -79,7 +79,7 @@ describe('atomic V2 canvas edit', () => {
       stackOrder: 9,
       clips: [],
     });
-    expect(initial.canvas).toMatchObject({ width: 1080, height: 1920, configured: true });
+    expect(initial.canvas).toMatchObject({ width: 1920, height: 1080, configured: true });
   });
 
   it('changes the canvas while preserving media aspect, relative centre, and unknown geometry', () => {
@@ -142,6 +142,6 @@ describe('atomic V2 canvas edit', () => {
       clipTranscripts: {},
     });
     expect(result).toMatchObject({ ok: false, document, error: { code: 'track-locked' } });
-    expect(document.canvas).toMatchObject({ width: 1080, height: 1920 });
+    expect(document.canvas).toMatchObject({ width: 1920, height: 1080 });
   });
 });

@@ -536,7 +536,7 @@ export interface PersonFx {
 }
 
 export function emptyComposition(): Composition {
-  return { width: 1080, height: 1920, theme: 'general', video: null, blocks: [], shots: [] };
+  return { width: 1920, height: 1080, theme: 'general', video: null, blocks: [], shots: [] };
 }
 
 /** Materialized video-track clips. New documents always persist `shots`; the synthetic legacy clip

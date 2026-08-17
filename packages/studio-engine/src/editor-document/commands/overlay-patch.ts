@@ -1,5 +1,7 @@
 import type { EditorDocumentV2, EditorTrack, GraphicBlockPayload, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
+import { clearRangeFromClip } from './clip-geometry';
+import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import {
   commandFailure,
   emptyCommandReceipt,
@@ -57,6 +59,7 @@ export function patchOverlayClips(
   )));
   const seen = new Set<string>();
   const nextById = new Map<string, TimelineClip>();
+  const geometryIds = new Set<string>();
   const targetTrackIds = new Set<string>();
   const affectedTrackIds = new Set<string>();
   for (const [index, update] of updates.entries()) {
@@ -81,6 +84,7 @@ export function patchOverlayClips(
     if (JSON.stringify(next) !== JSON.stringify(found.clip)) {
       nextById.set(update.clipId, next);
       affectedTrackIds.add(found.track.id);
+      if (update.patch.startFrame != null || update.patch.durationFrames != null) geometryIds.add(update.clipId);
     }
   }
   const lockedTrackIds = document.timeline.tracks
@@ -91,15 +95,55 @@ export function patchOverlayClips(
   }
   if (!nextById.size) return { ok: true, document, receipt: emptyCommandReceipt('overlay.patch') };
 
-  const tracks = document.timeline.tracks.map((track): EditorTrack => (
-    affectedTrackIds.has(track.id)
-      ? { ...track, clips: track.clips.map((clip) => nextById.get(clip.id) ?? clip) }
-      : track
-  ));
-  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks } };
+  const usedIds = new Set(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
+  const removedClipIds = new Set<string>();
+  const createdClipIds: string[] = [];
+  const splitPairs = new Map<string, string[]>();
+  let tracks = document.timeline.tracks.map((track): EditorTrack => {
+    if (!affectedTrackIds.has(track.id)) return track;
+    const moving = track.clips
+      .filter((clip) => geometryIds.has(clip.id))
+      .map((clip) => nextById.get(clip.id) ?? clip);
+    let stationary = track.clips
+      .filter((clip) => !geometryIds.has(clip.id))
+      .map((clip) => nextById.get(clip.id) ?? clip);
+    for (const clip of moving) {
+      const startFrame = clip.startFrame;
+      const endFrame = startFrame + clip.durationFrames;
+      stationary = stationary.flatMap((candidate) => {
+        const edit = clearRangeFromClip(candidate, startFrame, endFrame, document.canvas.fps, usedIds);
+        edit.removedClipIds.forEach((id) => removedClipIds.add(id));
+        createdClipIds.push(...edit.createdClipIds);
+        for (const [originalId, rightId] of edit.splitPairs) {
+          splitPairs.set(originalId, [...(splitPairs.get(originalId) ?? []), rightId]);
+        }
+        return edit.clips;
+      });
+    }
+    return { ...track, clips: [...stationary, ...moving].sort((left, right) => left.startFrame - right.startFrame) };
+  });
+  const survivingClipIds = new Set(tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
+  const detached = detachDanglingClipAnchors(tracks, survivingClipIds);
+  if (detached.lockedTrackIds.length) {
+    return commandFailure(document, 'track-locked', `Overlay timing would detach anchors on locked track(s): ${detached.lockedTrackIds.join(', ')}`, {
+      trackIds: detached.lockedTrackIds,
+    });
+  }
+  tracks = detached.tracks;
+  const semantics = {
+    ...document.semantics,
+    scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs),
+    ...(document.semantics.managedCaptionSource?.mode === 'clip'
+      && removedClipIds.has(document.semantics.managedCaptionSource.clipId)
+      ? { managedCaptionSource: { mode: 'auto' as const } }
+      : {}),
+  };
+  const next: EditorDocumentV2 = { ...document, timeline: { ...document.timeline, tracks }, semantics };
   const outputIssue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   if (outputIssue) return commandFailure(document, 'invalid-command', outputIssue.message, { path: outputIssue.path });
   const receipt = emptyCommandReceipt('overlay.patch');
-  receipt.affectedTrackIds = [...affectedTrackIds];
+  receipt.affectedTrackIds = [...new Set([...affectedTrackIds, ...detached.changedTrackIds])];
+  receipt.removedClipIds = [...removedClipIds];
+  receipt.createdClipIds = createdClipIds;
   return { ok: true, document: next, receipt };
 }

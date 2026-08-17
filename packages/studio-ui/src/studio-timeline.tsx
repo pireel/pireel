@@ -18,6 +18,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
+  type Block,
   type BlockKind,
   type Composition,
   blockKind,
@@ -63,7 +64,6 @@ import {
   rulerStep,
   stripTiles,
   visibleStripTiles,
-  timelinePlacementOverlaps,
 } from './timeline-utils';
 import { FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
 import { AudioLane } from './timeline-audio-lane';
@@ -88,6 +88,7 @@ export interface TimelineTrackState {
   stackOrder: number;
   hidden: boolean;
   muted: boolean;
+  ranges?: readonly { clipId: string; startSec: number; endSec: number }[];
   clips?: readonly TimelineVisualClipState[];
 }
 
@@ -107,6 +108,11 @@ export interface TimelineVisualClipState {
 type TimelineLaneKey = number | `visual:${string}`;
 const visualLaneKey = (trackId: string): TimelineLaneKey => `visual:${trackId}`;
 const visualTrackId = (lane: TimelineLaneKey): string | null => typeof lane === 'string' ? lane.slice('visual:'.length) : null;
+
+export interface TimelineBlockTrackTarget {
+  trackId?: string;
+  stackOrder: number;
+}
 
 interface StudioTimelineProps {
   comp: Composition;
@@ -150,12 +156,11 @@ interface StudioTimelineProps {
   onBoxSelectShots: (ids: string[]) => void;
   /** Move a primary clip in time or onto another visual lane. The destination uses overwrite semantics. */
   onMoveShot?: (id: string, startSec: number, target: TimelineMediaDropTarget) => void;
-  /** Move a block across tracks (drag chip vertically into another element track row): changing trackIndex = changing z (NLE convention).
-   *  Empty tracks vanish on their own — track rows derive from blocks, so emptying one collapses it; no explicit cleanup. */
-  onMoveBlockTrack?: (id: string, trackIndex: number) => void;
+  /** Move a block across physical tracks. trackId is canonical; stackOrder is retained only for legacy hosts. */
+  onMoveBlockTrack?: (id: string, target: TimelineBlockTrackTarget, startSec: number) => void;
   /** Drag a block into a row gap = spawn a new track (like a mainstream editor): slot = insert position in the overlay tracks' top-to-bottom display order (0..N).
    *  Workbench recomputes all z (same rule as gutter drag-reorder; z=1 is always the caption layer). */
-  onMoveBlockNewTrack?: (id: string, slot: number) => void;
+  onMoveBlockNewTrack?: (id: string, slot: number, startSec: number) => void;
   /** Select a block. additive = Cmd/Ctrl multi-select (toggle in/out of the set, without moving the playhead). */
   onSelectBlock: (id: string, additive?: boolean) => void;
   /** Marquee blocks: drag a rectangle over empty element-track space (can span tracks); matched block ids all become the multi-select set. */
@@ -166,8 +171,8 @@ interface StudioTimelineProps {
   onResizeBlock: (id: string, newStartSec: number, newDurationSec: number) => void;
   /** Managed caption edge trim. The caption remains source-anchored; only its display window changes. */
   onResizeCaption?: (id: string, edge: 'left' | 'right', atSec: number) => void;
-  /** Overlay track reorder (gutter drag): pass the new top-to-bottom track-number order; workbench recomputes z. */
-  onReorderTracks: (topToBottom: number[]) => void;
+  /** Visual track reorder (gutter drag): preserve physical ids; stackOrder alone is not identity. */
+  onReorderTracks: (topToBottom: TimelineBlockTrackTarget[]) => void;
   /** A panel asset is being dragged: the timeline exposes primary, existing visual and new visual-lane targets. */
   assetDragging?: boolean;
   /** Image on a graphics row stays a PiP component; image/video on visual targets become native V2 media clips. */
@@ -190,6 +195,8 @@ interface StudioTimelineProps {
   onTrimAudio?: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => void;
   /** Music-lane fade knee released: commit that clip's fade length (seconds). */
   onFadeAudio?: (id: string, edge: 'in' | 'out', sec: number) => void;
+  /** Per-clip mute, independent from the audio track mute toggle. */
+  onToggleAudioClipMute?: (id: string, muted: boolean) => void;
   /** Peak envelopes per clip sig (lane waveform); absent = bytes not mounted, chip draws label-only. */
   audioPeaks?: Map<string, Float32Array>;
   /** Peak envelopes per VIDEO source ('main' / insert-clip url): the scene cards draw their own audio. */
@@ -203,6 +210,8 @@ interface StudioTimelineProps {
   audioMuted?: boolean;
   onToggleAudioMute?: () => void;
   trackStates?: readonly TimelineTrackState[];
+  /** Track-level mute for ordinary media lanes. Images remain visible; video source audio is silenced. */
+  onToggleTrackMute?: (trackId: string) => void;
   onToggleTrackHidden?: (trackId: string) => void;
   disabledClipIds?: ReadonlySet<string>;
   /** Music-lane selection (shared with the audio panel; Del deletes the selected clip in workbench). */
@@ -254,7 +263,7 @@ function MuteToggle({ muted, onToggle }: { muted: boolean; onToggle: () => void 
         e.stopPropagation();
         onToggle();
       }}
-      className={`hover:bg-panel-2 rounded p-0.5 transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+      className={`hover:bg-panel-2 flex h-4 w-4 items-center justify-center rounded transition ${muted ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
     >
       {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
     </button>
@@ -273,7 +282,7 @@ function VisibilityToggle({ hidden, onToggle }: { hidden: boolean; onToggle: () 
         event.stopPropagation();
         onToggle();
       }}
-      className={`hover:bg-panel-2 rounded p-0.5 transition ${hidden ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
+      className={`hover:bg-panel-2 flex h-4 w-4 items-center justify-center rounded transition ${hidden ? 'text-accent' : 'text-ink-4 hover:text-ink-2'}`}
     >
       {hidden ? <EyeOff size={12} /> : <Eye size={12} />}
     </button>
@@ -324,6 +333,7 @@ function StudioTimelineImpl({
   onMoveAudio,
   onTrimAudio,
   onFadeAudio,
+  onToggleAudioClipMute,
   audioPeaks,
   sourcePeaks,
   videoMuted,
@@ -333,6 +343,7 @@ function StudioTimelineImpl({
   audioMuted,
   onToggleAudioMute,
   trackStates,
+  onToggleTrackMute,
   onToggleTrackHidden,
   disabledClipIds,
   selectedAudioId,
@@ -498,9 +509,8 @@ function StudioTimelineImpl({
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
-    const nativeVisualSpans = (trackStates ?? []).flatMap((track) => track.type === 'visual'
-      ? (track.clips ?? []).map((clip) => ({ start: clip.startSec, end: clip.endSec }))
-      : []);
+    const nativeVisualSpans = (trackStates ?? []).flatMap((track) =>
+      (track.clips ?? []).map((clip) => ({ start: clip.startSec, end: clip.endSec })));
     return timelineSnapPoints(dur, [...sceneSpans, ...nativeVisualSpans], comp.blocks, comp.audioTracks ?? []);
   }, [dur, sceneSpans, comp.blocks, comp.audioTracks, trackStates]);
   const snap = useCallback(
@@ -842,7 +852,15 @@ function StudioTimelineImpl({
 
   // Representative kind per track (take that track's first block); track 0 = video
   const trackKind = (track: TimelineLaneKey): BlockKind | 'video' => {
-    if (track === 0 || visualTrackId(track)) return 'video';
+    if (track === 0) return 'video';
+    const nativeId = visualTrackId(track);
+    if (nativeId) {
+      const native = trackStates?.find((candidate) => candidate.trackId === nativeId);
+      if ((native?.clips?.length ?? 0) > 0) return 'video';
+      if (native?.role === 'managedCaptions' || native?.type === 'caption') return 'caption';
+      const block = comp.blocks.find((candidate) => native?.ranges?.some((range) => range.clipId === candidate.id));
+      return block ? blockKind(block) : 'custom';
+    }
     const b = comp.blocks.find((bk) => bk.trackIndex === track);
     return b ? blockKind(b) : 'custom';
   };
@@ -853,20 +871,30 @@ function StudioTimelineImpl({
   // Track 0 = scene rail (taller when there's video); per-track height/offset.
   // **Display order != track-number order**: visual-output tracks sort by descending native stack
   // order (NLE convention, upper rows cover lower ones). The scene rail remains the semantic anchor.
-  const sceneRail = hasVideoLane || (trackStates ?? []).some((track) => track.type === 'visual' && track.role !== 'primaryNarrative');
+  const visualTracks = useMemo(
+    () => (trackStates ?? []).filter((track) =>
+      track.type !== 'audio'
+      && track.role !== 'primaryNarrative'),
+    [trackStates],
+  );
+  const representedStackOrders = useMemo(
+    () => new Set(visualTracks.map((track) => track.stackOrder)),
+    [visualTracks],
+  );
+  const sceneRail = hasVideoLane || visualTracks.some((track) => (track.clips?.length ?? 0) > 0);
   const H0 = sceneRail ? SCENE_H : ROW_H;
   // V2 graphics lanes are native identities and published empty lanes are pruned automatically.
   // Legacy hosts without trackStates retain the blocks-derived fallback.
   const overlayTracks = useMemo(() => {
     const set = new Set<number>();
-    for (const track of trackStates ?? []) if (track.type === 'graphics') set.add(track.stackOrder);
-    for (const b of comp.blocks) if (b.trackIndex > 0 && !isSentenceCaption(b)) set.add(b.trackIndex);
+    for (const track of trackStates ?? []) {
+      if (track.type === 'graphics' && !representedStackOrders.has(track.stackOrder)) set.add(track.stackOrder);
+    }
+    for (const b of comp.blocks) {
+      if (b.trackIndex > 0 && !isSentenceCaption(b) && !representedStackOrders.has(b.trackIndex)) set.add(b.trackIndex);
+    }
     return [...set].sort((a, b) => b - a);
-  }, [comp.blocks, trackStates]);
-  const visualTracks = useMemo(
-    () => (trackStates ?? []).filter((track) => track.type === 'visual' && track.role !== 'primaryNarrative'),
-    [trackStates],
-  );
+  }, [comp.blocks, representedStackOrders, trackStates]);
   const visualWaves = useMemo(() => {
     const out = new Map<string, { body: string; wave: string }>();
     if (!sourcePeaks?.size) return out;
@@ -900,13 +928,17 @@ function StudioTimelineImpl({
     [comp.blocks],
   );
   const hasCaptions = captionBlocks.length > 0;
-  const captionStackOrder = trackStates?.find(
+  const captionTrack = trackStates?.find(
     (track) => track.type === 'caption' && track.role === 'managedCaptions',
-  )?.stackOrder ?? 1;
+  );
+  const captionStackOrder = captionTrack?.stackOrder ?? 1;
+  const captionLane = captionTrack && representedStackOrders.has(captionTrack.stackOrder)
+    ? visualLaneKey(captionTrack.trackId)
+    : CAP_LANE;
   const layerTracks = useMemo<TimelineLaneKey[]>(() => [
     ...overlayTracks,
     ...visualTracks.map((track) => visualLaneKey(track.trackId)),
-    ...(hasCaptions ? [CAP_LANE] : []),
+    ...(hasCaptions && captionLane === CAP_LANE ? [CAP_LANE] : []),
   ].sort((left, right) => {
     const stackOf = (lane: TimelineLaneKey) => {
       if (lane === CAP_LANE) return captionStackOrder;
@@ -915,10 +947,16 @@ function StudioTimelineImpl({
       return lane as number;
     };
     return stackOf(right) - stackOf(left);
-  }), [overlayTracks, visualTracks, hasCaptions, captionStackOrder]);
+  }), [overlayTracks, visualTracks, hasCaptions, captionLane, captionStackOrder]);
   const displayTracks = useMemo<TimelineLaneKey[]>(() => [0, ...layerTracks], [layerTracks]);
   const dispIdx = useMemo(() => new Map(displayTracks.map((tk, i) => [tk, i])), [displayTracks]);
-  const rowH = (track: TimelineLaneKey) => track === 0 ? H0 : visualTrackId(track) ? VISUAL_SCENE_H : ROW_H;
+  const rowH = (track: TimelineLaneKey) => {
+    if (track === 0) return H0;
+    const visualId = visualTrackId(track);
+    return visualId && (visualTracks.find((candidate) => candidate.trackId === visualId)?.clips?.length ?? 0) > 0
+      ? VISUAL_SCENE_H
+      : ROW_H;
+  };
   // Mixed-height layout: detached video lanes are a compact version of the primary rail, while
   // graphics/caption lanes stay smaller still.
   // Deriving every top from the preceding lane avoids the old fixed-ROW_H assumption that made a
@@ -930,6 +968,16 @@ function StudioTimelineImpl({
     rowCursor += rowH(track) + (index < displayTracks.length - 1 ? ROW_GAP : 0);
   });
   const rowTop = (track: TimelineLaneKey) => rowTops.get(track) ?? 0;
+  const laneForStackOrder = (stackOrder: number): TimelineLaneKey => {
+    const native = visualTracks.find((track) => track.stackOrder === stackOrder);
+    return native ? visualLaneKey(native.trackId) : stackOrder;
+  };
+  const nativeLaneByClipId = new Map<string, TimelineLaneKey>();
+  for (const track of visualTracks) {
+    const lane = visualLaneKey(track.trackId);
+    for (const range of track.ranges ?? []) nativeLaneByClipId.set(range.clipId, lane);
+  }
+  const laneForBlock = (block: Block): TimelineLaneKey => nativeLaneByClipId.get(block.id) ?? laneForStackOrder(block.trackIndex);
   const tracksH = rowCursor;
   const slotTop = (slot: number) => {
     if (slot <= 0) return 0;
@@ -973,34 +1021,17 @@ function StudioTimelineImpl({
   };
   const primarySpans = sceneSpans.map((span) => ({ id: span.shot.id, startSec: span.start, endSec: span.end }));
   type MovingMediaPlacement = { clipId: string; startSec: number; durationSec: number };
-  const laneOverlaps = (trackId: string, placement: MovingMediaPlacement) => {
-    const clips = visualTracks.find((track) => track.trackId === trackId)?.clips ?? [];
-    return timelinePlacementOverlaps(
-      clips.map((clip) => ({ id: clip.clipId, startSec: clip.startSec, endSec: clip.endSec })),
-      placement.startSec,
-      placement.durationSec,
-      placement.clipId,
-    );
-  };
-  const primaryOverlaps = (placement: MovingMediaPlacement) => timelinePlacementOverlaps(
-    primarySpans,
-    placement.startSec,
-    placement.durationSec,
-    placement.clipId,
-  );
-  /** Deterministic vertical hit testing: actual row gaps create lanes; row bodies never have a fuzzy
-   * boundary halo. Incompatible rows and occupied media rows resolve to one fixed adjacent new lane,
-   * so the ghost cannot bounce back to primary while crossing tracks. */
+  /** NLE-style hit testing: dropping on a row means that exact physical row and uses overwrite
+   * semantics. Only dropping in the gap creates a new row. */
   const visualMoveTargetAt = (
     clientY: number,
     allowPrimary: boolean,
-    placement: MovingMediaPlacement,
+    _placement: MovingMediaPlacement,
   ): TimelineMediaDropTarget => {
     const bounds = tracksRef.current?.getBoundingClientRect();
     const y = bounds ? clientY - bounds.top : H0 / 2;
     if (y < H0) {
       if (!allowPrimary) return newVisualTargetForSlot(0);
-      if (!snapEnabled && primaryOverlaps(placement)) return newVisualTargetForSlot(0);
       return { kind: 'primary' };
     }
     for (let index = 0; index < layerTracks.length; index += 1) {
@@ -1009,10 +1040,7 @@ function StudioTimelineImpl({
       if (y < top) return newVisualTargetForSlot(index);
       if (y < top + rowH(lane)) {
         const trackId = visualTrackId(lane);
-        if (trackId && !laneOverlaps(trackId, placement)) return { kind: 'visual', trackId };
-        // Occupied visual lanes always stack directly below themselves. Graphics/caption bodies
-        // always stack directly above themselves. Neither choice changes inside the row body.
-        return newVisualTargetForSlot(trackId ? index + 1 : index);
+        return trackId ? { kind: 'visual', trackId } : newVisualTargetForSlot(index);
       }
     }
     return newVisualTargetForSlot(layerTracks.length);
@@ -1024,9 +1052,6 @@ function StudioTimelineImpl({
     if (assetDragKind === 'audio') return 'audio';
     if (assetDragKind === 'element') return (event.target as Element | null)?.closest?.('[data-main-track]') ? null : 'block';
     if (assetDragKind !== 'image' && assetDragKind !== 'video') return null;
-    // Keep the established image-on-graphics gesture as PiP; video (or a row-gap image) gets a
-    // native visual lane whose stack sits exactly at the indicated vertical slot.
-    if (assetDragKind === 'image' && (event.target as Element | null)?.closest?.('[data-graphics-track]')) return 'block';
     return visualMoveTargetAt(event.clientY, assetDragKind === 'video', {
       clipId: '__external_asset__',
       startSec: atSec,
@@ -1052,7 +1077,7 @@ function StudioTimelineImpl({
           .filter((b) => {
             const bl = x(b.startSec);
             const br = x(b.startSec + b.durationSec);
-            const bt = rowTop(b.trackIndex) + 4;
+            const bt = rowTop(laneForBlock(b)) + 4;
             const bb = bt + (ROW_H - 8);
             return bl < hi && br > lo && bt < bot && bb > top; // intersect on both timeline x and track y
           })
@@ -1069,7 +1094,7 @@ function StudioTimelineImpl({
 
   // Gutter drag-reorder: the dragged row follows via translateY, the target slot draws an insert line, release commits the new display order
   const [trackDrag, setTrackDrag] = useState<{
-    track: number;
+    track: TimelineLaneKey;
     fromSlot: number;
     toSlot: number;
     fromIndex: number;
@@ -1078,18 +1103,26 @@ function StudioTimelineImpl({
   } | null>(null);
   const trackDragRef = useRef(trackDrag);
   trackDragRef.current = trackDrag;
-  const startTrackDrag = (e: React.PointerEvent, track: number) => {
-    if (overlayTracks.length <= 1) return; // only one overlay track, nothing to reorder (caption lane doesn't count)
+  const reorderableTracks = layerTracks.filter((candidate) => candidate !== CAP_LANE);
+  const trackInsertionLineTop = (drag: NonNullable<typeof trackDrag>) => {
+    const others = reorderableTracks.filter((candidate) => candidate !== drag.track);
+    const before = others[drag.toIndex];
+    if (before != null) return rowTop(before) - ROW_GAP / 2;
+    const last = others.at(-1);
+    return last == null ? rowTop(drag.track) : rowTop(last) + rowH(last) + ROW_GAP / 2;
+  };
+  const startTrackDrag = (e: React.PointerEvent, track: TimelineLaneKey) => {
+    if (reorderableTracks.length <= 1) return;
     e.preventDefault();
     const fromSlot = dispIdx.get(track)!;
-    const fromIndex = overlayTracks.indexOf(track);
+    const fromIndex = reorderableTracks.indexOf(track);
     const sy = e.clientY;
     const mv = (ev: PointerEvent) => {
       if (ev.buttons === 0) { up(); return; }
       const dy = ev.clientY - sy;
-      const center = rowTop(track) + ROW_H / 2 + dy;
-      const others = overlayTracks.filter((candidate) => candidate !== track);
-      const toIndex = others.filter((candidate) => center > rowTop(candidate) + ROW_H / 2).length;
+      const center = rowTop(track) + rowH(track) / 2 + dy;
+      const others = reorderableTracks.filter((candidate) => candidate !== track);
+      const toIndex = others.filter((candidate) => center > rowTop(candidate) + rowH(candidate) / 2).length;
       const before = others[toIndex];
       const after = others[toIndex - 1];
       const toSlot = before != null ? dispIdx.get(before)! : after != null ? dispIdx.get(after)! + 1 : fromSlot;
@@ -1102,10 +1135,16 @@ function StudioTimelineImpl({
       const td = trackDragRef.current;
       setTrackDrag(null);
       if (td && td.toIndex !== td.fromIndex) {
-        const order = overlayTracks.slice(); // overlay tracks top-to-bottom (excludes caption lane)
+        const order = reorderableTracks.slice();
         const [moved] = order.splice(td.fromIndex, 1);
         order.splice(td.toIndex, 0, moved!);
-        onReorderTracks(order);
+        onReorderTracks(order.map((lane) => {
+          const trackId = visualTrackId(lane);
+          return {
+            ...(trackId ? { trackId } : {}),
+            stackOrder: layerStackOrder(lane),
+          };
+        }));
       }
     };
     window.addEventListener('pointermove', mv);
@@ -1164,9 +1203,20 @@ function StudioTimelineImpl({
   };
 
   // Block cross-track drag: while dragging, the pointer landing in an element track row's core band = snap to row (to), landing in a row gap = spawn a new track (gap = insert position, draws a horizontal insert line); horizontal move stays live, release commits. Only one of to/gap is ever set.
-  const [blockTrackDrag, setBlockTrackDrag] = useState<{ id: string; to: number | null; gap: number | null } | null>(null);
+  const [blockTrackDrag, setBlockTrackDrag] = useState<{
+    id: string;
+    startSec: number;
+    to: TimelineLaneKey | null;
+    gap: number | null;
+  } | null>(null);
   const blockTrackDragRef = useRef(blockTrackDrag);
   blockTrackDragRef.current = blockTrackDrag;
+  const previewBlockTrackDrag = (next: NonNullable<typeof blockTrackDrag>) => {
+    // Pointer-up can arrive before React paints the last pointer-move. Keep the transaction ref
+    // synchronous so release always commits the exact row/time shown by the final ghost.
+    blockTrackDragRef.current = next;
+    setBlockTrackDrag(next);
+  };
   const [visualClipDrag, setVisualClipDrag] = useState<{
     clipId: string;
     startSec: number;
@@ -1321,6 +1371,8 @@ function StudioTimelineImpl({
                 const meta =
                   track === CAP_LANE
                     ? KIND_META.caption
+                    : visualId && k === 'video'
+                      ? { label: 'panels.multimediaTrack', icon: Film, dot: 'text-accent' }
                     : k === 'video'
                       ? { label: sceneRail ? t('panels.scene') : t('panels.video'), icon: Film, dot: 'text-accent' }
                       : KIND_META[k];
@@ -1329,23 +1381,42 @@ function StudioTimelineImpl({
                 return (
                   <div
                     key={track}
-                    onPointerDown={typeof track === 'number' && track > 0 ? (e) => startTrackDrag(e, track) : undefined}
-                    className={`flex items-center gap-1 px-2 text-[11px] ${typeof track === 'number' && track > 0 ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
+                    onPointerDown={track !== 0 && track !== CAP_LANE ? (e) => startTrackDrag(e, track) : undefined}
+                    title={t(meta.label)}
+                    className={`grid grid-cols-[16px_16px_16px] items-center gap-0.5 px-2 text-[11px] ${track !== 0 && track !== CAP_LANE ? 'cursor-grab active:cursor-grabbing' : ''} ${dragging ? 'bg-panel-2 relative z-10 rounded' : ''}`}
                     style={{ height: rowH(track), marginTop: track === 0 ? 0 : ROW_GAP, transform: dragging ? `translateY(${trackDrag!.dy}px)` : undefined }}
                   >
-                    <Icon size={13} className={meta.dot} />
-                    {track === 0 && onToggleVideoMute && <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />}
-                    {track === 0 && onToggleVideoHidden && <VisibilityToggle hidden={!!videoHidden} onToggle={onToggleVideoHidden} />}
-                    {nativeTrack && onToggleTrackHidden && (
+                    <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
+                      <Icon size={13} className={meta.dot} />
+                    </span>
+                    {track === 0 && onToggleVideoMute ? (
+                      <MuteToggle muted={!!videoMuted} onToggle={onToggleVideoMute} />
+                    ) : nativeTrack?.clips?.some((clip) => clip.kind === 'video') && onToggleTrackMute ? (
+                      <MuteToggle muted={nativeTrack.muted} onToggle={() => onToggleTrackMute(nativeTrack.trackId)} />
+                    ) : (
+                      <span className="h-4 w-4" aria-hidden />
+                    )}
+                    {track === 0 && onToggleVideoHidden ? (
+                      <VisibilityToggle hidden={!!videoHidden} onToggle={onToggleVideoHidden} />
+                    ) : nativeTrack && onToggleTrackHidden ? (
                       <VisibilityToggle hidden={nativeTrack.hidden} onToggle={() => onToggleTrackHidden(nativeTrack.trackId)} />
+                    ) : (
+                      <span className="h-4 w-4" aria-hidden />
                     )}
                   </div>
                 );
               })}
               {musicLane && (
-                <div className="flex items-center gap-1 px-2 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: ROW_GAP }}>
-                  <Music size={13} className="text-accent" />
-                  {onToggleAudioMute && <MuteToggle muted={!!audioMuted} onToggle={onToggleAudioMute} />}
+                <div className="grid grid-cols-[16px_16px_16px] items-center gap-0.5 px-2 text-[11px]" style={{ height: AUDIO_ROW_H, marginTop: ROW_GAP }}>
+                  <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
+                    <Music size={13} className="text-accent" />
+                  </span>
+                  {onToggleAudioMute ? (
+                    <MuteToggle muted={!!audioMuted} onToggle={onToggleAudioMute} />
+                  ) : (
+                    <span className="h-4 w-4" aria-hidden />
+                  )}
+                  <span className="h-4 w-4" aria-hidden />
                 </div>
               )}
             </div>
@@ -1486,7 +1557,7 @@ function StudioTimelineImpl({
                   onPointerDown={(e) => {
                     if (e.target !== e.currentTarget) return;
                     // Element track (track>0) blank: start marquee (drag = marquee, click = deselect + seek); track 0 = scene rail handled by laneRef
-                    if (typeof track === 'number' && track > 0) onOverlayPointerDown(e);
+                    if (track !== 0) onOverlayPointerDown(e);
                     else {
                       onSelect(null);
                       onSeek(secAt(e.clientX));
@@ -1505,7 +1576,7 @@ function StudioTimelineImpl({
               {trackDrag && trackDrag.toSlot !== trackDrag.fromSlot && (
                 <div
                   className="bg-accent/90 pointer-events-none absolute left-0 right-0 z-40 h-0.5 rounded"
-                  style={{ top: slotTop(trackDrag.toSlot) - (trackDrag.toSlot > trackDrag.fromSlot ? -ROW_H - 2 : 4) }}
+                  style={{ top: trackInsertionLineTop(trackDrag) }}
                 />
               )}
 
@@ -1950,20 +2021,23 @@ function StudioTimelineImpl({
 
               {/* Overlay element chip: type icon + label + time when selected; whole-block drag + trim at both ends */}
               {comp.blocks.map((b) => {
-                const track = b.trackIndex;
+                const track = laneForBlock(b);
+                const btd = blockTrackDrag?.id === b.id ? blockTrackDrag : null;
                 const sel = selectedBlockIds.has(b.id);
                 const k = blockKind(b);
                 const meta = { ...KIND_META[k], ...KIND_CHIP[k] };
                 const Icon = meta.icon;
-                const left = x(b.startSec);
+                const left = x(btd?.startSec ?? b.startSec);
                 const width = Math.max(16, x(b.durationSec));
                 // Sentence captions don't enter the timeline: captions are a pure computed output of the script (edited from the script panel / caption panel);
                 // a row of chips that follow the transcript and can't be dragged or trimmed is just noise
                 if (isSentenceCaption(b)) return null;
-                // During cross-track drag: chip renders snapped to the target row; if it hits a row gap it rides the insert line (trackIndex only really changes on release)
-                const btd = blockTrackDrag?.id === b.id ? blockTrackDrag : null;
+                // During cross-track drag the chip follows an exact physical lane identity. stackOrder
+                // is render z only and cannot identify a lane when two imported tracks share a value.
                 const crossing = !!btd && (btd.gap != null || btd.to !== track);
-                const top = btd?.gap != null ? slotTop(1 + btd.gap) - ROW_GAP / 2 - (ROW_H - 8) / 2 : rowTop(btd?.to ?? track) + 4;
+                const top = btd?.gap != null
+                  ? slotTop(1 + btd.gap) - ROW_GAP / 2 - (ROW_H - 8) / 2
+                  : rowTop(btd?.to ?? track) + 4;
                 return (
                   <div
                     key={b.id}
@@ -1985,36 +2059,54 @@ function StudioTimelineImpl({
                         e,
                         (cx, cy) => {
                           if (additive) return;
-                          onMoveBlock(b.id, snap(Math.max(0, secAt(cx) - grab), [b.startSec, b.startSec + b.durationSec]));
+                          const startSec = snap(Math.max(0, secAt(cx) - grab), [b.startSec, b.startSec + b.durationSec]);
                           // Vertical: a row's core band = snap to row; a row gap (including the scene track's lower edge / caption lane's sides) = new-track insert position
-                          if (!onMoveBlockTrack) return;
+                          if (!onMoveBlockTrack) {
+                            previewBlockTrackDrag({ id: b.id, startSec, to: track, gap: null });
+                            return;
+                          }
                           const base = tracksRef.current?.getBoundingClientRect();
                           if (!base) return;
                           const y = cy - base.top;
-                          let to: number | null = null;
-                          for (const tk of overlayTracks) {
-                            if (y >= rowTop(tk) + 4 && y <= rowTop(tk) + ROW_H - 4) {
-                              to = tk;
+                          let to: TimelineLaneKey | null = null;
+                          const compatibleLanes = layerTracks.filter((lane) => lane !== CAP_LANE);
+                          for (const lane of compatibleLanes) {
+                            if (y >= rowTop(lane) + 4 && y <= rowTop(lane) + rowH(lane) - 4) {
+                              to = lane;
                               break;
                             }
                           }
                           if (to != null || !onMoveBlockNewTrack) {
                             // Missed a row's core band and new-track isn't supported: keep the last matched row
                             const prev = blockTrackDragRef.current?.id === b.id ? blockTrackDragRef.current : null;
-                            setBlockTrackDrag({ id: b.id, to: to ?? prev?.to ?? track, gap: null });
+                            previewBlockTrackDrag({ id: b.id, startSec, to: to ?? prev?.to ?? track, gap: null });
                           } else {
                             let g = 0; // insert position = count of row core bands passed
-                            for (const tk of overlayTracks) if (y > rowTop(tk) + ROW_H - 4) g += 1;
-                            setBlockTrackDrag({ id: b.id, to: null, gap: g });
+                            for (const lane of compatibleLanes) {
+                              if (y > rowTop(lane) + rowH(lane) - 4) g += 1;
+                            }
+                            previewBlockTrackDrag({ id: b.id, startSec, to: null, gap: g });
                           }
                         },
                         (moved) => {
                           const td = blockTrackDragRef.current;
+                          blockTrackDragRef.current = null;
                           setBlockTrackDrag(null);
                           if (moved) {
                             if (td?.id === b.id) {
-                              if (td.gap != null) onMoveBlockNewTrack?.(b.id, td.gap);
-                              else if (td.to != null && td.to !== track) onMoveBlockTrack?.(b.id, td.to);
+                              if (td.gap != null) onMoveBlockNewTrack?.(b.id, td.gap, td.startSec);
+                              else if (td.to != null && td.to !== track) {
+                                const targetTrackId = visualTrackId(td.to);
+                                const stackOrder = targetTrackId
+                                  ? visualTracks.find((candidate) => candidate.trackId === targetTrackId)?.stackOrder
+                                  : td.to;
+                                if (typeof stackOrder === 'number') {
+                                  onMoveBlockTrack?.(b.id, {
+                                    ...(targetTrackId ? { trackId: targetTrackId } : {}),
+                                    stackOrder,
+                                  }, td.startSec);
+                                }
+                              } else onMoveBlock(b.id, td.startSec);
                             }
                             return;
                           }
@@ -2087,7 +2179,7 @@ function StudioTimelineImpl({
                       key={b.id}
                       aria-disabled={disabledClipIds?.has(b.id)}
                       className={`group absolute overflow-hidden bg-rose-500/12 ring-1 transition hover:bg-rose-500/20 ${selected ? 'ring-rose-400/60' : 'ring-rose-400/25'} ${TIMELINE_ITEM_RADIUS} ${disabledClipIds?.has(b.id) ? 'opacity-45 grayscale' : ''}`}
-                      style={{ left: x(preview.startSec), width, top: rowTop(CAP_LANE) + 4, height: ROW_H - 8 }}
+                      style={{ left: x(preview.startSec), width, top: rowTop(captionLane) + 4, height: ROW_H - 8 }}
                       onClick={(e) => {
                         e.stopPropagation();
                         onSelectBlock(b.id, false); // picking a concrete caption on the timeline selects it (the one place that sets caption selection outside the stage)
@@ -2168,6 +2260,7 @@ function StudioTimelineImpl({
                   onMove={onMoveAudio}
                   onTrim={onTrimAudio}
                   onFade={onFadeAudio}
+                  onToggleMute={onToggleAudioClipMute}
                   onOpenPanel={onOpenMusicPanel}
                   secAt={secAt}
                   snap={snap}

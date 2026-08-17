@@ -48,6 +48,47 @@ describe('V2 clip split commands', () => {
     expect(result.document.semantics.scenes[0]?.clipIds).toEqual(['talk', 'talk~split-195']);
   });
 
+  it('splits selected media and graphic clips on non-primary tracks', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.cutaway = {
+      id: 'cutaway', kind: 'video', locator: { localSig: 'cutaway-sig' }, metadata: { durationSec: 3 },
+    };
+    document.timeline.tracks.push({
+      id: 'media', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 2, clips: [{
+        id: 'cutaway-clip', kind: 'media', assetId: 'cutaway', startFrame: 0, durationFrames: 90,
+        sourceInSec: 0, sourceOutSec: 3, enabled: true,
+      }],
+    });
+    document.timeline.tracks.push({
+      id: 'graphics', type: 'graphics', role: 'graphics', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 3, clips: [{
+        id: 'card', kind: 'graphic', startFrame: 0, durationFrames: 90, enabled: true,
+        block: { templateId: 'custom', slots: { title: 'Selected clip' } }, anchor: { type: 'timeline' },
+      }],
+    });
+
+    const mediaSplit = applyEditorCommand(document, {
+      type: 'clip.split', trackId: 'media', clipId: 'cutaway-clip', atFrame: 30,
+    });
+    expect(mediaSplit.ok).toBe(true);
+    if (!mediaSplit.ok) return;
+    const graphicSplit = applyEditorCommand(mediaSplit.document, {
+      type: 'clip.split', trackId: 'graphics', clipId: 'card', atFrame: 60,
+    });
+    expect(graphicSplit.ok).toBe(true);
+    if (!graphicSplit.ok) return;
+
+    expect(graphicSplit.document.timeline.tracks.find((track) => track.id === 'media')?.clips).toMatchObject([
+      { id: 'cutaway-clip', durationFrames: 30, sourceInSec: 0, sourceOutSec: 1 },
+      { id: 'cutaway-clip~split-30', startFrame: 30, durationFrames: 60, sourceInSec: 1, sourceOutSec: 3 },
+    ]);
+    expect(graphicSplit.document.timeline.tracks.find((track) => track.id === 'graphics')?.clips).toMatchObject([
+      { id: 'card', durationFrames: 60, block: { slots: { title: 'Selected clip' } } },
+      { id: 'card~split-60', startFrame: 60, durationFrames: 30, block: { slots: { title: 'Selected clip' } } },
+    ]);
+  });
+
   it('resolves multiple native timeline points without collapsing the leading gap', () => {
     const document = documentWithGap();
     const result = applyNarrationSplitCommands(document, [3.5, 6.5]);

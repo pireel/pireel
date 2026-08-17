@@ -363,10 +363,10 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
   const document: EditorDocumentV2 = {
     version: EDITOR_DOCUMENT_VERSION,
     canvas: {
-      width: isFinitePositive(comp.width) ? Math.round(comp.width) : 1080,
-      height: isFinitePositive(comp.height) ? Math.round(comp.height) : 1920,
+      width: isFinitePositive(comp.width) ? Math.round(comp.width) : 1920,
+      height: isFinitePositive(comp.height) ? Math.round(comp.height) : 1080,
       fps,
-      configured: input.canvasConfigured ?? (hasLegacyContent || comp.width !== 1080 || comp.height !== 1920),
+      configured: input.canvasConfigured ?? (hasLegacyContent || comp.width !== 1920 || comp.height !== 1080),
     },
     appearance: {
       theme: comp.theme ?? 'general',

@@ -200,7 +200,8 @@ export function useElementOps(deps: ElementOpsDeps) {
   /** Layer: move a block up/down one layer (trackIndex±1, DOM order = stacking; 0 = video, clamped to [1,55]). */
   const bumpBlockLayer = (b: Block, dir: 1 | -1) => {
     const stackOrder = Math.max(1, Math.min(55, b.trackIndex + dir));
-    const existing = documentRef.current.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+    const existing = documentRef.current.timeline.tracks.find((track) =>
+      track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder);
     const used = new Set(documentRef.current.timeline.tracks.map((track) => track.id));
     let trackId = `track_graphics_${stackOrder}`;
     let suffix = 2;

@@ -53,6 +53,23 @@ describe('canonical live project document', () => {
     expect(plan.tracks.find((track) => track.id === 'data-track')?.clips[0]?.resolvedSource).toBe(source);
   });
 
+  it('never treats a persisted offline placeholder as a usable runtime URL', () => {
+    const session = createLiveProjectDocumentSession('project-1', emptyComposition());
+    const sig = 'voice.wav:4096:8';
+    const audio = {
+      id: 'voice',
+      kind: 'audio' as const,
+      locator: { localSig: sig, remoteUrl: 'blob:pireel-offline/voice' },
+      metadata: { durationSec: 12 },
+    };
+    expect(resolveLiveAssetUrl(session, audio)).toBeUndefined();
+    expect(resolveLiveAssetUrl(session, {
+      ...audio,
+      id: 'still',
+      kind: 'image',
+    })).toBe(localImageLocator(sig));
+  });
+
   it('restores a graphics-only V2 snapshot without requiring a main video', () => {
     const session = createLiveProjectDocumentSession('project-1', {
       ...emptyComposition(),

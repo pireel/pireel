@@ -25,7 +25,7 @@ describe('Composition render view', () => {
   it('filters visual flags without deleting the editing projection', () => {
     const document = emptyEditorDocumentV2();
     const graphics: EditorTrack = {
-      id: 'graphics', type: 'graphics', role: 'graphics', name: 'Graphics',
+      id: 'graphics', type: 'visual', role: 'broll', name: 'Mixed visual lane',
       muted: false, hidden: true, locked: false, syncLocked: true, stackOrder: 2,
       clips: [{
         id: 'title', kind: 'graphic', startFrame: 0, durationFrames: 30, enabled: true,

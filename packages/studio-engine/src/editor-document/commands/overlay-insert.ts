@@ -1,6 +1,7 @@
 import type { EditorDocumentV2, EditorMediaAsset, EditorTrack, GraphicTimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
+import { editorTrackAcceptsClip } from '../track-compatibility';
 
 function assetError(asset: EditorMediaAsset): string | null {
   if (!asset.id.trim()) return 'Overlay asset id is required.';
@@ -20,7 +21,7 @@ export function insertOverlayClip(
   if (issue) return commandFailure(document, 'invalid-document', issue.message, { path: issue.path });
   const track = document.timeline.tracks.find((candidate) => candidate.id === trackId);
   if (!track) return commandFailure(document, 'track-not-found', `Track does not exist: ${trackId}`, { trackIds: [trackId] });
-  if (track.type !== 'graphics') return commandFailure(document, 'invalid-command', `Track is not a graphics lane: ${trackId}`, { trackIds: [trackId] });
+  if (!editorTrackAcceptsClip(track, clip)) return commandFailure(document, 'invalid-command', `Track cannot contain graphic clips: ${trackId}`, { trackIds: [trackId] });
   if (track.locked) return commandFailure(document, 'track-locked', `Track is locked: ${trackId}`, { trackIds: [trackId] });
   if (!clip.id.trim()) return commandFailure(document, 'invalid-command', 'Overlay clip id is required.', { path: 'clip.id' });
   if (clip.kind !== 'graphic') return commandFailure(document, 'invalid-command', 'overlay.insert requires a graphic clip.', { path: 'clip.kind' });

@@ -274,6 +274,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.motion": "动效",
   "workbench.movedNameSecS": "已把「{name}」移到 {sec}s",
   "workbench.movePlayheadToSplitAudio": "把播放头移到这段音频中间再分割",
+  "workbench.movePlayheadToSplitSelection": "把播放头移到所选片段中间再分割",
   "workbench.movePlayheadToTrimAudio": "把播放头移到这段音频中间再裁剪",
   "workbench.movePlayheadToTrim": "把播放头放到片段中间再剪",
   "workbench.msgUndoHint": "{msg}(⌘Z 撤销)",

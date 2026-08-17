@@ -55,7 +55,6 @@ export function mediaTimelineClipAsVideoShot(clip: MediaTimelineClip): VideoShot
 export function mediaVideoClipEntries(document: EditorDocumentV2): MediaVideoClipEntry[] {
   const entries: MediaVideoClipEntry[] = [];
   for (const track of document.timeline.tracks) {
-    if (track.type !== 'visual') continue;
     for (const clip of track.clips) {
       if (clip.kind !== 'media' || document.assets[clip.assetId]?.kind !== 'video') continue;
       entries.push({ trackId: track.id, clip, shot: mediaTimelineClipAsVideoShot(clip) });

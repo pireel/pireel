@@ -10,7 +10,7 @@ import {
   type EditorDocumentV2,
 } from './editor-document';
 import type { Block } from './composition-core';
-import type { OverlayDocumentEditResult } from './overlay-document-edit';
+import { applyOverlayDocumentEdits, type OverlayDocumentEditResult } from './overlay-document-edit';
 import { assignClipToBestDirectorScene, assignClipToSemanticScene } from './semantic-scenes';
 
 type OverlayDocumentEditFailure = Extract<OverlayDocumentEditResult, { ok: false }>;
@@ -30,6 +30,8 @@ interface OverlayTrackTarget {
 export interface MoveOverlayDocumentClipInput extends OverlayTrackTarget {
   document: EditorDocumentV2;
   clipId: string;
+  /** Optional final timeline position. Track and time then commit as one publish transaction. */
+  startSec?: number;
 }
 
 export interface DuplicateOverlayDocumentClipInput extends OverlayTrackTarget {
@@ -108,6 +110,31 @@ function uniqueTrackId(document: EditorDocumentV2, stackOrder: number): string {
   return id;
 }
 
+/** NLE-style lane placement: a physical track is sequential. Placing a visual clip into an
+ * occupied interval trims/splits/removes the blockers before the new clip lands. */
+function clearOverlayDestination(
+  document: EditorDocumentV2,
+  trackId: string,
+  startFrame: number,
+  durationFrames: number,
+): { ok: true; document: EditorDocumentV2; receipts: EditorCommandReceipt[] } | OverlayDocumentEditFailure {
+  const cleared = applyEditorCommand(document, {
+    type: 'range.remove',
+    trackId,
+    startFrame,
+    endFrame: startFrame + durationFrames,
+    mode: 'lift',
+    includeLinked: false,
+    pruneEmptyTracks: false,
+  });
+  if (!cleared.ok) return { ok: false, document, error: cleared.error };
+  return {
+    ok: true,
+    document: cleared.document,
+    receipts: cleared.document === document ? [] : [cleared.receipt],
+  };
+}
+
 /** Insert a legacy-shaped Block through a native graphic clip/lane identity. */
 export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput): InsertOverlayDocumentClipResult {
   if (!input.block.id.trim()) return failure(input.document, 'invalid-command', 'Overlay block id is required.', { path: 'block.id' });
@@ -118,7 +145,8 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
   const existing = input.toTrackId
     ? input.document.timeline.tracks.find((track) => track.id === input.toTrackId)
     : !input.newTrack
-      ? input.document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder)
+      ? input.document.timeline.tracks.find((track) =>
+          track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder)
       : undefined;
   const target = insertTargetTrack(input.document, existing
     ? { toTrackId: existing.id }
@@ -127,14 +155,18 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
       : { newTrack: { id: uniqueTrackId(input.document, stackOrder), stackOrder, name: `Graphics ${stackOrder}` } });
   if (!target.ok) return target;
   const { id, startSec, durationSec, trackIndex: _trackIndex, ...block } = input.block;
-  const inserted = applyEditorCommand(target.document, {
+  const startFrame = secondsToTimelineFrames(startSec, target.document.canvas.fps);
+  const durationFrames = positiveDurationFrames(durationSec, target.document.canvas.fps);
+  const cleared = clearOverlayDestination(target.document, target.trackId, startFrame, durationFrames);
+  if (!cleared.ok) return { ok: false, document: input.document, error: cleared.error };
+  const inserted = applyEditorCommand(cleared.document, {
     type: 'overlay.insert',
     trackId: target.trackId,
     clip: {
       id,
       kind: 'graphic',
-      startFrame: secondsToTimelineFrames(startSec, target.document.canvas.fps),
-      durationFrames: positiveDurationFrames(durationSec, target.document.canvas.fps),
+      startFrame,
+      durationFrames,
       enabled: true,
       block,
       ...(input.asset ? { assetId: input.asset.id } : {}),
@@ -150,7 +182,7 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
   return {
     ok: true,
     document: assigned.document,
-    receipts: [...target.receipts, inserted.receipt],
+    receipts: [...target.receipts, ...cleared.receipts, inserted.receipt],
     clipId: id,
     trackId: target.trackId,
     ...(assigned.sceneId ? { sceneId: assigned.sceneId } : {}),
@@ -160,15 +192,58 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
 
 /** Move an overlay to an existing or newly-created lane; an emptied source lane is pruned. */
 export function moveOverlayDocumentClip(input: MoveOverlayDocumentClipInput): OverlayDocumentEditResult {
+  if (input.startSec != null && (!Number.isFinite(input.startSec) || input.startSec < 0)) {
+    return failure(input.document, 'invalid-range', 'Overlay move startSec must be a non-negative finite number.', { path: 'startSec' });
+  }
+  const sourceTrack = input.document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === input.clipId));
+  const sourceClip = sourceTrack?.clips.find((clip) => clip.id === input.clipId);
+  if (!sourceTrack || !sourceClip || (sourceClip.kind !== 'graphic' && sourceClip.kind !== 'caption')) {
+    return failure(input.document, 'clip-not-found', `Overlay clip does not exist: ${input.clipId}`, { path: 'clipId' });
+  }
   const target = insertTargetTrack(input.document, input);
   if (!target.ok) return target;
-  const moved = applyEditorCommand(target.document, {
+  const desiredStartFrame = input.startSec == null
+    ? sourceClip.startFrame
+    : secondsToTimelineFrames(input.startSec, target.document.canvas.fps);
+  const timingChanged = desiredStartFrame !== sourceClip.startFrame;
+  if (sourceTrack.id === target.trackId) {
+    if (!timingChanged) return { ok: true, document: input.document, receipts: [] };
+    return applyOverlayDocumentEdits({
+      document: input.document,
+      updates: [{ clipId: input.clipId, startSec: input.startSec! }],
+    });
+  }
+  // When time also changes, move the stable identity first and let the timing transaction clear
+  // only the final destination range. Clearing the old range would destroy unrelated material the
+  // pointer merely passed over during the gesture.
+  if (timingChanged) {
+    const moved = applyEditorCommand(target.document, {
+      type: 'overlay.move',
+      clipId: input.clipId,
+      toTrackId: target.trackId,
+    });
+    if (!moved.ok) return { ok: false, document: input.document, error: moved.error };
+    const timed = applyOverlayDocumentEdits({
+      document: moved.document,
+      updates: [{ clipId: input.clipId, startSec: input.startSec! }],
+    });
+    if (!timed.ok) return { ok: false, document: input.document, error: timed.error };
+    return { ok: true, document: timed.document, receipts: [...target.receipts, moved.receipt, ...timed.receipts] };
+  }
+  const cleared = clearOverlayDestination(
+    target.document,
+    target.trackId,
+    sourceClip.startFrame,
+    sourceClip.durationFrames,
+  );
+  if (!cleared.ok) return { ok: false, document: input.document, error: cleared.error };
+  const moved = applyEditorCommand(cleared.document, {
     type: 'overlay.move',
     clipId: input.clipId,
     toTrackId: target.trackId,
   });
   if (!moved.ok) return { ok: false, document: input.document, error: moved.error };
-  return { ok: true, document: moved.document, receipts: [...target.receipts, moved.receipt] };
+  return { ok: true, document: moved.document, receipts: [...target.receipts, ...cleared.receipts, moved.receipt] };
 }
 
 /** Duplicate an overlay to an existing or newly-created lane as one publish transaction. */
@@ -198,14 +273,15 @@ export function reorderOverlayDocumentTracks(
   document: EditorDocumentV2,
   topToBottomTrackIds: readonly string[],
 ): OverlayDocumentEditResult {
-  const graphics = document.timeline.tracks.filter((track) => track.type === 'graphics');
+  const graphics = document.timeline.tracks.filter((track) =>
+    track.type !== 'audio' && track.role !== 'primaryNarrative');
   const ids = [...new Set(topToBottomTrackIds)];
   if (ids.length !== topToBottomTrackIds.length || ids.length !== graphics.length) {
-    return failure(document, 'invalid-command', 'Overlay reorder must contain every graphics lane exactly once.', { path: 'topToBottomTrackIds' });
+    return failure(document, 'invalid-command', 'Visual reorder must contain every non-primary visual lane exactly once.', { path: 'topToBottomTrackIds' });
   }
   const byId = new Map(graphics.map((track) => [track.id, track] as const));
   const missing = ids.filter((id) => !byId.has(id));
-  if (missing.length) return failure(document, 'track-not-found', `Graphics track does not exist: ${missing.join(', ')}`, { trackIds: missing });
+  if (missing.length) return failure(document, 'track-not-found', `Visual track does not exist: ${missing.join(', ')}`, { trackIds: missing });
   const stackOrders = graphics.map((track) => track.stackOrder).sort((left, right) => right - left);
   const changed = ids.filter((id, index) => byId.get(id)!.stackOrder !== stackOrders[index]);
   const locked = changed.filter((id) => byId.get(id)!.locked);

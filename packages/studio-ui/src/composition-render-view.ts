@@ -39,7 +39,7 @@ export function compositionRenderView(composition: Composition, plan: EditorRend
   const blocks = composition.blocks.filter((block) => {
     const state = states.get(block.id);
     return !!state
-      && (state.track.type === 'graphics' || state.track.type === 'caption')
+      && state.track.type !== 'audio'
       && state.enabled
       && !state.track.hidden;
   });

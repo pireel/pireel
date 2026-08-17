@@ -2,6 +2,7 @@ import type { EditorDocumentV2, EditorTrack, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
 import { assignClipToBestDirectorScene } from '../../semantic-scenes';
+import { editorTrackAcceptsClip } from '../track-compatibility';
 
 export interface MoveEditorClipOptions {
   trackId: string;
@@ -25,6 +26,12 @@ export function moveEditorClip(document: EditorDocumentV2, options: MoveEditorCl
   const targetId = options.toTrackId ?? options.trackId;
   const target = document.timeline.tracks.find((track) => track.id === targetId);
   if (!target) return commandFailure(document, 'track-not-found', `Track does not exist: ${targetId}`, { trackIds: [targetId] });
+  if (!editorTrackAcceptsClip(target, moving)) {
+    return commandFailure(document, 'invalid-command', `${moving.kind} clip ${moving.id} cannot move to ${target.type} track ${targetId}.`, {
+      path: 'toTrackId',
+      trackIds: [targetId],
+    });
+  }
 
   const ids = new Set<string>([moving.id]);
   if ((options.includeLinked ?? true) && moving.linkGroupId) {

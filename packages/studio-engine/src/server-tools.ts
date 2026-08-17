@@ -597,7 +597,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const sourceClip = sourceTrack?.clips.find((clip) => clip.id === b.id);
       const target = sourceClip?.kind === 'caption'
         ? sourceTrack
-        : p.document.timeline.tracks.find((track) => track.type === 'graphics' && track.stackOrder === stackOrder);
+        : p.document.timeline.tracks.find((track) =>
+            track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder);
       const edit = duplicateOverlayDocumentClip({
         document: p.document,
         clipId: b.id,

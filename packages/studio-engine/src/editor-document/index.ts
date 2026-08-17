@@ -24,5 +24,6 @@ export * from './read-model';
 export * from './transcript-address';
 export * from './render-plan';
 export * from './time';
+export * from './track-compatibility';
 export * from './types';
 export * from './validation';

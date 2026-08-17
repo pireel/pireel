@@ -14,7 +14,7 @@ import {
   type ActiveProjectOutputState,
 } from './project-outputs';
 
-const state = (width = 1080): ActiveProjectOutputState => {
+const state = (width = 1920): ActiveProjectOutputState => {
   const document = emptyProjectDocument();
   document.canvas.width = width;
   return {
@@ -42,7 +42,7 @@ describe('project outputs', () => {
     expect(next.outputs.inactive[0]!.document.version).toBe(2);
     expect(next.outputs.inactive[0]).toMatchObject({ videoSig: 'main-sig', videoDurationSec: 12 });
     expect(next.target.document.version).toBe(2);
-    expect(next.target.document.canvas).toMatchObject({ width: 1080, height: 1920, configured: true });
+    expect(next.target.document.canvas).toMatchObject({ width: 1920, height: 1080, configured: true });
     expect(next.target.document.timeline.tracks.every((track) => track.clips.length === 0)).toBe(true);
     expect(next.target.document.assets).toEqual({});
     expect(next.target).toMatchObject({ videoSig: null, videoDurationSec: null, coverThumb: null });
@@ -50,10 +50,10 @@ describe('project outputs', () => {
 
   it('switches atomically and preserves edits made to the previous active output', () => {
     const created = createBlankProjectOutput(createProjectOutputs(10), state(), 'Cut B', undefined, 20);
-    const switched = switchProjectOutput(created.outputs, state(1920), 'output-main', 30)!;
+    const switched = switchProjectOutput(created.outputs, state(1080), 'output-main', 30)!;
     expect(switched.outputs.active.id).toBe('output-main');
-    expect(switched.target.document.canvas.width).toBe(1080);
-    expect(switched.outputs.inactive.find((item) => item.title === 'Cut B')!.document.canvas.width).toBe(1920);
+    expect(switched.target.document.canvas.width).toBe(1920);
+    expect(switched.outputs.inactive.find((item) => item.title === 'Cut B')!.document.canvas.width).toBe(1080);
     expect(listProjectOutputs(switched.outputs, state()).map((item) => item.order)).toEqual([0, 1]);
   });
 

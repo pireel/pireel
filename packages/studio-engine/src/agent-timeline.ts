@@ -400,7 +400,7 @@ export function resizeVisualTimelineClip(
 ): AgentTimelineOutcome {
   if (!Number.isFinite(atSec)) return fail('visual clip resize time must be finite');
   const found = locatedClip(document, clipId);
-  if (!found || found.track.type !== 'visual' || found.clip.kind !== 'media') {
+  if (!found || found.track.type === 'audio' || found.clip.kind !== 'media') {
     return fail(`visual media clip not found: ${clipId}`);
   }
   if (found.track.locked) return fail(`track is locked: ${found.track.id}`);

@@ -8,8 +8,8 @@ const overlapFrames = (startA: number, endA: number, startB: number, endB: numbe
 
 function sceneEligibleClips(document: EditorDocumentV2): TimelineClip[] {
   return document.timeline.tracks
-    .filter((track) => track.type === 'visual' || track.type === 'graphics')
     .flatMap((track) => track.clips)
+    .filter((clip) => clip.kind !== 'audio' && clip.kind !== 'caption')
     .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id));
 }
 
