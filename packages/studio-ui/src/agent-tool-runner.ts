@@ -81,6 +81,7 @@ import { type CutSeamEntry, finalizeCutSeams, spans as clipSpans, tightenCutRang
 import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
+import { beatsForWindow } from '@pireel/studio-engine/captions-relay';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sentence-edit';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
@@ -2624,7 +2625,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               });
               if (explicitSceneId && !sceneContext) return { ok: false, error: `Director scene does not exist: ${explicitSceneId}` };
               const sceneDirection = sceneContext ? `\n\n${formatDirectorSceneContext(sceneContext)}` : '';
-              const seed = { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') };
+              const seed = {
+                id: blockId('ai'),
+                kind: 'custom',
+                innerHtml: '<div></div>',
+                timelineBody: '',
+                label: t('workbench.newElement'),
+                durationSec,
+                beats: beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, at, durationSec),
+              };
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
               // New elements always get bespoke visual reasoning. No Frame means the neutral visual
               // craft baseline, not a fallback to the fixed component-library cards.
@@ -2671,7 +2680,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!b) return { ok: false, error: t('workbench.elementNotFound') };
             try {
               markGenerating([b.id], true); // lock editing during the rewrite too (the result replaces the whole slots)
-              const seed = { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label };
+              const seed = {
+                id: b.id,
+                kind: blockKind(b),
+                ...renderBlock(b),
+                label: b.label,
+                durationSec: b.durationSec,
+                beats: beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, b.startSec, b.durationSec),
+                ...(b.box ? { boxPx: { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } } : {}),
+              };
               // A kit block is edited as props; anything else keeps writing markup. Editing follows
               // what the block already IS — silently converting one into the other would throw away
               // whatever the user tuned by hand.
@@ -2800,7 +2817,7 @@ export function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<s
 async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
   const {
     compRef, documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, tRef,
-    pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef, asrRef,
+    pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef, asrRef, clipAsrRef,
   } = ctx;
     const c2 = compRef.current;
     const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) => {
@@ -2820,8 +2837,17 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           shots: c2.shots ?? [],
           placements: renderTimeline.placements,
           mainTranscript: asrRef.current ?? [],
+          clipTranscripts: clipAsrRef.current,
           atSec,
         });
+        const contextForWindow = (startSec: number, durationSec: number) => {
+          const script = scriptAt(startSec);
+          const beats = beatsForWindow(c2.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
+          return {
+            ...(script ? { script } : {}),
+            ...(beats.length ? { beats } : {}),
+          };
+        };
         const base = {
           theme: c2.theme,
           ...(c2.palette ? { palette: c2.palette } : {}),
@@ -2833,26 +2859,42 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           const b = c2.blocks.find((x) => x.id === bid);
           if (!b) return { ok: false, error: t('workbench.elementNotFoundIds') };
           if (genIdsRef.current.has(b.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
-          const script = scriptAt(b.startSec);
+          const context = contextForWindow(b.startSec, b.durationSec);
           return {
             ok: true,
             summary: t('workbench.fetchedBlockContext'),
             data: {
               ...base,
-              block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label },
+              block: {
+                id: b.id,
+                kind: blockKind(b),
+                ...renderBlock(b),
+                label: b.label,
+                durationSec: b.durationSec,
+                ...(b.box ? { boxPx: { w: Math.round(b.box.w * c2.width), h: Math.round(b.box.h * c2.height) } } : {}),
+              },
               // A kit block is edited as props: hand the brief what it currently shows, so an
               // external edit keeps unmentioned fields exactly like the in-app path does.
               ...(b.templateId.startsWith('kit:') ? { kitCurrent: kitChoiceOf(b) } : {}),
-              ...(script ? { context: { script } } : {}),
+              ...(Object.keys(context).length ? { context } : {}),
             },
           };
         }
         const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c2)) : Math.round(tRef.current * 10) / 10;
-        const script = scriptAt(at);
+        const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
+          ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
+          : 3;
+        const context = contextForWindow(at, durationSec);
         return {
           ok: true,
           summary: t('workbench.fetchedNewElementContext'),
-          data: { ...base, atSec: at, block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement') }, ...(script ? { context: { script } } : {}) },
+          data: {
+            ...base,
+            atSec: at,
+            durationSec,
+            block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement'), durationSec },
+            ...(Object.keys(context).length ? { context } : {}),
+          },
         };
       }
       case 'apply_block': {

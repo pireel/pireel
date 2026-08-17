@@ -183,6 +183,7 @@ import {
   desegmentCues,
   sanitizeTranscriptSegs,
 } from "@pireel/studio-engine/build-blocks";
+import { beatsForWindow } from "@pireel/studio-engine/captions-relay";
 import {
   type Box as GraphicBox,
   pickGraphicBox,
@@ -2992,6 +2993,13 @@ export function HyperframesWorkbench({
         timelineBody: draft.timelineBody,
         label: b.label,
         durationSec: b.durationSec,
+        beats: beatsForWindow(
+          compRef.current.shots ?? [],
+          asrRef.current,
+          clipAsrRef.current,
+          b.startSec,
+          b.durationSec,
+        ),
         ...(boxPx ? { boxPx } : {}),
       };
       const parsed = await composeBlockChecked(seed, instruction, (acc) =>

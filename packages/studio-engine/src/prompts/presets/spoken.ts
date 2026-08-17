@@ -41,9 +41,14 @@ pick a worse-fitting treatment just to be different.
 
 TIMING
 You are told how long the graphic is on screen, and — when the speech is aligned — when each thing
-is said. Sequential content (steps, a list, a pipeline, a timeline) reveals ONE BY ONE across that
-duration at presenter rhythm, each item landing when its content is spoken. Non-sequential content
-gets one calm reveal near the start, then holds still.
+is said. When timed spoken beats are provided, every independently spoken content item stays hidden
+until the beat that first mentions it, then reveals or becomes active at that exact local time. This
+applies to comparisons, chart series, rows, annotations and supporting claims as well as explicit
+sequences; never show the component's complete final state at time 0. A persistent heading or frame
+may enter near the start. When no timed beats are available, sequential content (steps, a list, a
+pipeline, a timeline) reveals ONE BY ONE across the duration at presenter rhythm; genuinely single-
+beat content gets one calm reveal near the start, then holds still. A Frame controls HOW these reveals
+move, never WHETHER they follow the speech.
 
 NAMED MOVES
 The brief may name an editing move — HANDOFF (build the compact echo, badge-small), ANCHOR (this

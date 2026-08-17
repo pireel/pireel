@@ -818,6 +818,39 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(script).toContain('LATE MOMENT TARGET');
     expect(script).not.toContain('INTRO PREFIX');
   });
+  it('compose_context 把元素窗口内的口播时点转成组件局部时间', () => {
+    const project = proj({
+      transcript: [
+        { start: 1, end: 2, text: '第一点' },
+        { start: 3, end: 4, text: '第二点' },
+        { start: 5, end: 6, text: '窗口外' },
+      ],
+    });
+    const existing = runServerTool('compose_context', { blockId: 'b1' }, project);
+    const existingData = existing.result.data as {
+      block: { durationSec: number };
+      context: { beats: Array<{ text: string; start: number; end: number }> };
+    };
+    expect(existingData.block.durationSec).toBe(3);
+    expect(existingData.context.beats).toEqual([
+      { text: '第一点', start: 0, end: 1 },
+      { text: '第二点', start: 2, end: 3 },
+    ]);
+
+    const created = runServerTool('compose_context', { atSec: 1, durationSec: 5 }, project);
+    const createdData = created.result.data as {
+      durationSec: number;
+      block: { durationSec: number };
+      context: { beats: Array<{ text: string; start: number; end: number }> };
+    };
+    expect(createdData.durationSec).toBe(5);
+    expect(createdData.block.durationSec).toBe(5);
+    expect(createdData.context.beats.map((beat) => [beat.text, beat.start])).toEqual([
+      ['第一点', 0],
+      ['第二点', 2],
+      ['窗口外', 4],
+    ]);
+  });
   it('apply_block 更新已有元素时同步应用明确提供的 label', () => {
     const raw = '更新卡片\n```html\n<div><style>#b1 .title{color:red}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
     const result = runServerTool('apply_block', { raw, blockId: 'b1', label: '新名称' }, proj());

@@ -181,6 +181,9 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     expect(d.callBridge).toHaveBeenCalledWith('compose_context', { blockId: 'b1', instruction: '做张对比卡' }, 60_000);
     expect(d.assembleComposeBrief).toHaveBeenCalledWith({ block: { id: 'b1' }, theme: 'general' }, '做张对比卡');
     expect((r!.result as { isError: boolean }).isError).toBe(false);
+    const tool = buildMcpTools().find((candidate) => candidate.name === 'compose_block_brief')!;
+    expect((tool.inputSchema as { properties: Record<string, unknown> }).properties).toHaveProperty('durationSec');
+    expect(tool.description).toContain('transcript beats');
   });
   it('compose_block_brief 无 instruction 会打回;apply_block 直接过桥', async () => {
     const d = deps({ callBridge: vi.fn(async () => ({ ok: true, data: { block: { id: 'b2' } } })) });

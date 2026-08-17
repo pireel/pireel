@@ -40,6 +40,8 @@ describe('the component path', () => {
     expect(KIT).toContain('VERBATIM');
     expect(KIT).toContain('null');
     expect(KIT).toContain("VIDEO's spoken language");
+    expect(KIT).toContain("complete final state at time 0");
+    expect(KIT).toContain("Frame controls HOW these reveals");
   });
 
   it('does not teach markup — that is what the components are for', () => {
@@ -70,6 +72,8 @@ describe('buildKitPrompt', () => {
     expect(p).toContain('the whole talk');
     expect(p).toContain('«THIS»');
     expect(p).toContain('47% 复购');
+    expect(p).toContain('keep later content hidden until that beat');
+    expect(p).toContain('NEVER the complete final state at time 0');
   });
 
   it('shows the current choice when editing, so unmentioned props survive', () => {

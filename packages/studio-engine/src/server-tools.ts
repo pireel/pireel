@@ -101,6 +101,7 @@ import { buildSituation, wrapAgentTranscript } from './prompts';
 import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type CutSeamEntry, finalizeCutSeams, narrationRowMarks, spans as clipSpans, tightenCutRanges } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
+import { beatsForWindow } from './captions-relay';
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { ensureTemplatesRegistered } from './templates';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-search';
@@ -1362,6 +1363,14 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         clipTranscripts,
         atSec,
       });
+      const contextForWindow = (startSec: number, durationSec: number) => {
+        const script = scriptAt(startSec);
+        const beats = beatsForWindow(c.shots ?? [], mainTranscript, clipTranscripts, startSec, durationSec);
+        return {
+          ...(script ? { script } : {}),
+          ...(beats.length ? { beats } : {}),
+        };
+      };
       const base = {
         theme: c.theme,
         ...(c.palette ? { palette: c.palette } : {}),
@@ -1372,28 +1381,44 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (bid) {
         const b = findBlock(bid);
         if (!b) return { result: { ok: false, error: 'block not found' } };
-        const script = scriptAt(b.startSec);
+        const context = contextForWindow(b.startSec, b.durationSec);
         return {
           result: {
             ok: true,
             summary: 'Fetched block context (cloud)',
             data: {
               ...base,
-              block: { id: b.id, kind: blockKind(b), ...renderBlock(b), label: b.label },
+              block: {
+                id: b.id,
+                kind: blockKind(b),
+                ...renderBlock(b),
+                label: b.label,
+                durationSec: b.durationSec,
+                ...(b.box ? { boxPx: { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } } : {}),
+              },
               // A kit block edits as props — same as the bridge context (unmentioned fields survive).
               ...(b.templateId.startsWith('kit:') ? { kitCurrent: { component: b.templateId.slice(4), props: (b.slots as { props?: Record<string, unknown> }).props ?? {} } } : {}),
-              ...(script ? { context: { script } } : {}),
+              ...(Object.keys(context).length ? { context } : {}),
             },
           },
         };
       }
       const at = typeof input.atSec === 'number' ? Math.min(Math.max(0, input.atSec), totalDuration(c)) : 0;
-      const script = scriptAt(at);
+      const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
+        ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
+        : 3;
+      const context = contextForWindow(at, durationSec);
       return {
         result: {
           ok: true,
           summary: 'Fetched new block context (cloud)',
-          data: { ...base, atSec: at, block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: 'New block' }, ...(script ? { context: { script } } : {}) },
+          data: {
+            ...base,
+            atSec: at,
+            durationSec,
+            block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: 'New block', durationSec },
+            ...(Object.keys(context).length ? { context } : {}),
+          },
         },
       };
     }

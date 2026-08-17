@@ -67,7 +67,7 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
   const parts: string[] = [];
   if (args.block.durationSec)
     parts.push(
-      `This fragment is on screen for about ${args.block.durationSec.toFixed(1)}s. For SEQUENTIAL content (steps / numbered list / pipeline / timeline), reveal the items ONE BY ONE spread ACROSS this whole duration (PPT / presenter rhythm — advance through them over the seconds), and highlight the active item; do NOT reveal them all at time 0. For non-sequential content, one calm reveal near the start then hold still.`,
+      `This fragment is on screen for about ${args.block.durationSec.toFixed(1)}s. When timed SPOKEN BEATS are supplied below, they own reveal timing. Otherwise, for SEQUENTIAL content (steps / numbered list / pipeline / timeline), reveal the items ONE BY ONE spread ACROSS this whole duration (PPT / presenter rhythm — advance through them over the seconds), and highlight the active item; do NOT reveal them all at time 0. Genuinely single-beat content gets one calm reveal near the start then holds still.`,
     );
   if (args.block.label) parts.push(`This block currently shows: ${args.block.label}`);
   if (args.context?.neighbors?.length)
@@ -84,7 +84,7 @@ function momentParts(args: { block: BlockEdit; context?: ComposeContext }): stri
     parts.push(
       `SPOKEN BEATS inside this fragment — what the speaker says and WHEN, in LOCAL seconds (0 = this fragment's start):\n${args.context.beats
         .map((x) => `  ${x.start.toFixed(1)}–${x.end.toFixed(1)}s 「${x.text}」`)
-        .join('\n')}\nSYNC the reveals to these timestamps: reveal/highlight each item EXACTLY when its content is spoken (match each item to the beat that mentions it), using these local times directly as the GSAP positions — NOT an even auto-spread.`,
+        .join('\n')}\nSYNC the reveals to these timestamps: map EVERY independently spoken content item to the beat that first mentions it; keep later content hidden until that beat, then reveal/highlight it EXACTLY at the listed local time. Use these local times directly as GSAP positions — NOT an even auto-spread and NEVER the complete final state at time 0.`,
     );
   return parts;
 }
