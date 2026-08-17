@@ -180,16 +180,11 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       toast.error(t('common.uploadVideoFirst'));
       return;
     }
-    const hasMountedClipSource = ensureShots(compRef.current).some((shot) => !!shot.src);
-    if (!videoFileRef.current && !hasMountedClipSource) {
-      toast.error(t('workbench.restoreVideoSourceBeforeCaptions'));
-      return;
-    }
     if (captionGenBusyRef.current) return;
     captionGenBusyRef.current = true;
     setCapGenBusy(true);
     try {
-      if (videoFileRef.current) await stepAsr();
+      await stepAsr();
       await ensureClipTranscripts();
     } catch {
       toast.error(t('workbench.transcriptExtractionFailedTry'));
@@ -293,17 +288,10 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       // materializes blocks from the transcript.
       let segs = asrRef.current;
       let transcribedForAttempt = false;
-      if (!source.hasNarrativeTranscript && !segs?.length) {
-        const hasMountedClipSource = ensureShots(compRef.current).some((shot) => !!shot.src);
-        if (!videoFileRef.current && !hasMountedClipSource) {
-          toast.error(t('workbench.restoreVideoSourceBeforeCaptions'));
-          return;
-        }
-        if (videoFileRef.current) {
-          toast.info(t('workbench.extractingTranscript'));
-          segs = await stepAsr();
-          transcribedForAttempt = true;
-        }
+      if (!source.hasSpeechTranscript) {
+        toast.info(t('workbench.extractingTranscript'));
+        segs = await stepAsr();
+        transcribedForAttempt = true;
       }
       // V2 primary lanes can be built entirely from ordinary narrative assets. Their bytes and
       // transcripts live in the per-source maps, not in the legacy special main-video File.

@@ -108,6 +108,7 @@ import {
   BASE_CAPTION_FONT_PX,
   emptyComposition,
   emptyEditorDocumentV2,
+  dominantTimelineSpeechTrack,
   editorDocumentRenderPlan,
   freeTrack,
   getCaptionPreset,
@@ -288,7 +289,7 @@ import { wordsFromText } from "@pireel/studio-engine/caption-fx";
 import { AssetsPanel, type GenType, type PanelDragAsset } from "./assets-panel";
 import { addElementEntry } from "./element-history";
 import { useStudioShell } from "./shell-context";
-import { type ScriptCut, ScriptPanel } from "./script-panel";
+import { ScriptPanel, TimelineScriptPanel } from "./script-panel";
 import { CaptionsPanel } from "./captions-panel";
 import { FramePanel } from "./frame-panel";
 import { PersonFxPanel, type MatteState } from "./person-fx-panel";
@@ -560,6 +561,9 @@ export function HyperframesWorkbench({
                                 })(),
                                 sourceInSec: entry.clip.sourceInSec,
                                 sourceOutSec: entry.clip.sourceOutSec,
+                                ...(entry.asset.metadata.durationSec != null
+                                  ? { sourceDurationSec: entry.asset.metadata.durationSec }
+                                  : {}),
                                 ...(entry.asset.id ===
                                 editorDocument.semantics.primaryNarrativeAssetId
                                   ? { usePrimaryFilmstrip: true }
@@ -3858,6 +3862,55 @@ export function HyperframesWorkbench({
       : null;
   }
 
+  const speechFileForAsset = useCallback(
+    async (asset: EditorMediaAsset): Promise<File | null> => {
+      if (
+        asset.id === editorDocumentRef.current.semantics.primaryNarrativeAssetId &&
+        videoFileRef.current
+      ) {
+        return videoFileRef.current;
+      }
+      if (asset.locator.localSig) {
+        const direct = await loadLocalVideo(asset.locator.localSig);
+        if (direct) return direct;
+        const entry = localAssetIndexRef.current.find(
+          (item) => item.sig === asset.locator.localSig,
+        );
+        if (entry?.folder) {
+          const folder = await loadLocalFolderFile(
+            entry.folder.id,
+            entry.folder.path,
+            asset.locator.localSig,
+          );
+          if (folder?.file) return folder.file;
+        }
+      }
+      const source = resolveAssetUrl(asset);
+      if (!source) return null;
+      const mounted = clipFilesRef.current.get(source);
+      if (mounted) return mounted;
+      const requestUrl =
+        source.startsWith("blob:") ||
+        source.startsWith("data:") ||
+        source.startsWith("/")
+          ? source
+          : `/api/media/fetch?url=${encodeURIComponent(source)}`;
+      const response = await fetch(requestUrl);
+      if (!response.ok)
+        throw new Error(`media fetch failed: HTTP ${response.status}`);
+      const fallbackType = asset.kind === "audio" ? "audio/mpeg" : "video/mp4";
+      const contentType =
+        response.headers.get("content-type")?.split(";")[0] || fallbackType;
+      const extension = asset.kind === "audio" ? "mp3" : "mp4";
+      return new File(
+        [await response.blob()],
+        `${asset.label || asset.id}.${extension}`,
+        { type: contentType, lastModified: 0 },
+      );
+    },
+    [resolveAssetUrl],
+  );
+
   // Independent transcript and visual-analysis capabilities (in-flight deduped).
   const { stepAsr, refreshAsr, stepVisual } = useMediaAnalysis({
     videoFileRef,
@@ -3867,6 +3920,7 @@ export function HyperframesWorkbench({
     setVisual,
     documentRef: editorDocumentRef,
     setDocument: setEditorDocument,
+    speechFileForAsset,
     currentVideo,
   });
 
@@ -6372,13 +6426,16 @@ export function HyperframesWorkbench({
   // Script-panel scissors (cut/restore/replace-word/extract) — see use-script-cut.ts.
   const {
     cutSrcRanges,
+    cutTimelineRanges,
     restoreSrcRanges,
     replaceScriptWord,
+    replaceTimelineScriptWord,
     extractForScript,
     asrBusy,
   } = useScriptCut({
     projectId,
     comp,
+    document: editorDocument,
     floatWin,
     asrSentences,
     compRef,
@@ -6396,6 +6453,9 @@ export function HyperframesWorkbench({
     ensureShots,
     stepAsr,
   });
+  const dominantScriptTrack = dominantTimelineSpeechTrack(editorDocument);
+  const useNativeScriptPanel = !primaryNarrativeClips(editorDocument).length
+    || (!!dominantScriptTrack && dominantScriptTrack.trackId !== editorDocument.semantics.primaryNarrativeTrackId);
   const registerLocalAsset = (entry: LocalAssetIndexEntry) => {
     const previous = localAssetIndexRef.current.find(
       (item) => item.sig === entry.sig,
@@ -9164,21 +9224,35 @@ export function HyperframesWorkbench({
               floatWin covers the rail, so only one is ever visible. */}
                 {!floatWin && libTab === "script" && (
                   <div className="flex min-h-0 flex-1 flex-col">
-                    <ScriptPanel
-                      sentences={asrSentences}
-                      clipSentences={clipAsr}
-                      shots={ensureShots(comp)}
-                      videoDurationSec={primaryAssetDurationSec ?? 0}
-                      extracting={asrBusy}
-                      onExtract={() => void extractForScript()}
-                      onSeek={(sec) => {
-                        applyT(Math.max(0, sec));
-                        locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
-                      }}
-                      onCut={cutSrcRanges}
-                      onRestore={restoreSrcRanges}
-                      onReplaceWord={replaceScriptWord}
-                    />
+                    {!useNativeScriptPanel ? (
+                      <ScriptPanel
+                        sentences={asrSentences}
+                        clipSentences={clipAsr}
+                        shots={ensureShots(comp)}
+                        videoDurationSec={primaryAssetDurationSec ?? 0}
+                        extracting={asrBusy}
+                        onExtract={() => void extractForScript()}
+                        onSeek={(sec) => {
+                          applyT(Math.max(0, sec));
+                          locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
+                        }}
+                        onCut={cutSrcRanges}
+                        onRestore={restoreSrcRanges}
+                        onReplaceWord={replaceScriptWord}
+                      />
+                    ) : (
+                      <TimelineScriptPanel
+                        document={editorDocument}
+                        extracting={asrBusy}
+                        onExtract={() => void extractForScript()}
+                        onSeek={(sec) => {
+                          applyT(Math.max(0, sec));
+                          locateTimeline(true);
+                        }}
+                        onCut={cutTimelineRanges}
+                        onReplaceWord={replaceTimelineScriptWord}
+                      />
+                    )}
                   </div>
                 )}
                 {!floatWin && libTab === "audio" && (
@@ -9293,21 +9367,35 @@ export function HyperframesWorkbench({
                 {floatWin && (
                   <div className="flex min-h-0 flex-1">
                     {floatWin === "script" && (
-                      <ScriptPanel
-                        sentences={asrSentences}
-                        clipSentences={clipAsr}
-                        shots={ensureShots(comp)}
-                        videoDurationSec={primaryAssetDurationSec ?? 0}
-                        extracting={asrBusy}
-                        onExtract={() => void extractForScript()}
-                        onSeek={(sec) => {
-                          applyT(Math.max(0, sec));
-                          locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
-                        }}
-                        onCut={cutSrcRanges}
-                        onRestore={restoreSrcRanges}
-                        onReplaceWord={replaceScriptWord}
-                      />
+                      !useNativeScriptPanel ? (
+                        <ScriptPanel
+                          sentences={asrSentences}
+                          clipSentences={clipAsr}
+                          shots={ensureShots(comp)}
+                          videoDurationSec={primaryAssetDurationSec ?? 0}
+                          extracting={asrBusy}
+                          onExtract={() => void extractForScript()}
+                          onSeek={(sec) => {
+                            applyT(Math.max(0, sec));
+                            locateTimeline(true); // clicking a word in the script also brings that moment into view on the timeline
+                          }}
+                          onCut={cutSrcRanges}
+                          onRestore={restoreSrcRanges}
+                          onReplaceWord={replaceScriptWord}
+                        />
+                      ) : (
+                        <TimelineScriptPanel
+                          document={editorDocument}
+                          extracting={asrBusy}
+                          onExtract={() => void extractForScript()}
+                          onSeek={(sec) => {
+                            applyT(Math.max(0, sec));
+                            locateTimeline(true);
+                          }}
+                          onCut={cutTimelineRanges}
+                          onReplaceWord={replaceTimelineScriptWord}
+                        />
+                      )
                     )}
                     {floatWin === "code" &&
                       (() => {

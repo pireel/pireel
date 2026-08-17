@@ -174,6 +174,8 @@ export const PANELS_EN: Record<string, string> = {
     "Active: preview and export both play the denoised audio",
   "panels.denoiseStrength": "Strength",
   "panels.dropAudioHere": "Drop audio here",
+  "panels.emptyPrimaryTrackDropVideo": "Primary track is empty · Drop in a video to start",
+  "panels.releaseVideoOnPrimaryTrack": "Release to add to the primary track",
   "panels.generate": "Generate",
   "panels.generateMusic": "Generate music",
   "panels.generatingMusic": "Generating…",

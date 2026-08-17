@@ -165,6 +165,8 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.denoiseReadyHint": "已生效:预览与导出都是降噪后的声音",
   "panels.denoiseStrength": "强度",
   "panels.dropAudioHere": "松手把音频放到这里",
+  "panels.emptyPrimaryTrackDropVideo": "主轨为空 · 拖入视频开始剪辑",
+  "panels.releaseVideoOnPrimaryTrack": "松手放入主轨",
   "panels.generate": "生成",
   "panels.generateMusic": "生成配乐",
   "panels.generatingMusic": "生成中…",

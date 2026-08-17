@@ -10,7 +10,12 @@
  */
 
 import { useRef, type MutableRefObject } from 'react';
-import { applyEditorCommand, syncCaptionTranscripts, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import {
+  applyEditorCommand,
+  timelineTranscriptionTargets,
+  type EditorDocumentV2,
+  type EditorMediaAsset,
+} from '@pireel/studio-engine/composition';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type VisualTimeline, analyzeVisual } from './visual';
@@ -26,12 +31,23 @@ export interface MediaAnalysisDeps {
   setVisual: (v: VisualTimeline | null) => void;
   documentRef: MutableRefObject<EditorDocumentV2>;
   setDocument: (document: EditorDocumentV2) => void;
+  /** Resolve authorized bytes for any placed timeline audio/video asset. */
+  speechFileForAsset: (asset: EditorMediaAsset) => Promise<File | null>;
   /** Current video (blob preview URL + canvas size), null when there's no video. */
   currentVideo: () => { url: string; durationSec: number; width: number; height: number } | null;
 }
 
+function transcriptWordCount(segments: readonly AsrSegment[]): number {
+  return segments.reduce((count, segment) => (
+    count + (segment.words?.length ?? Math.max(1, segment.text.trim().split(/\s+|(?=\p{Script=Han})/u).filter(Boolean).length))
+  ), 0);
+}
+
 export function useMediaAnalysis(deps: MediaAnalysisDeps) {
-  const { videoFileRef, asrRef, visualRef, setAsrSentences, setVisual, documentRef, setDocument, currentVideo } = deps;
+  const {
+    videoFileRef, asrRef, visualRef, setAsrSentences, setVisual, documentRef, setDocument,
+    speechFileForAsset, currentVideo,
+  } = deps;
 
   const inflightRef = useRef<{ asr?: Promise<AsrSegment[]>; visual?: Promise<VisualTimeline | null> }>({});
   function dedup<K extends 'asr' | 'visual', T>(key: K, run: () => Promise<T>): Promise<T> {
@@ -47,17 +63,62 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
   /** Extract transcript: ASR only (lib-cached) + store sentences. Does not lay captions,
    * add graphics, or cut shots. Returns sentences. */
   function runAsr(report: ((text: string) => void) | undefined, force: boolean): Promise<AsrSegment[]> {
-    if (!force && asrRef.current?.length) return Promise.resolve(asrRef.current);
     return dedup('asr', async () => {
-      const vf = videoFileRef.current;
-      if (!vf) throw new Error(t('common.uploadVideoFirst'));
-      if (force) deleteCachedAsr(fileSig(vf));
+      const current = documentRef.current;
+      const targets = timelineTranscriptionTargets(current);
+      if (!targets.length) throw new Error(t('common.uploadVideoFirst'));
       report?.(t('common.transcribing'));
-      const segs = await studioProviders().transcriber.transcribe(vf);
-      asrRef.current = segs;
-      setAsrSentences(segs);
-      setDocument(syncCaptionTranscripts(documentRef.current, segs, {}));
-      return segs;
+      const primaryAssetId = current.semantics.primaryNarrativeAssetId;
+      const transcripts = { ...current.semantics.transcripts };
+      let firstError: unknown;
+      for (const target of targets) {
+        const existing = transcripts[target.assetId] as AsrSegment[] | undefined;
+        const refreshThisAsset = force && target.assetId === primaryAssetId;
+        if (Object.prototype.hasOwnProperty.call(transcripts, target.assetId) && !refreshThisAsset) continue;
+        const asset = current.assets[target.assetId];
+        if (!asset) continue;
+        try {
+          const file = target.assetId === primaryAssetId && videoFileRef.current
+            ? videoFileRef.current
+            : await speechFileForAsset(asset);
+          if (!file) continue;
+          if (refreshThisAsset) deleteCachedAsr(fileSig(file));
+          transcripts[target.assetId] = await studioProviders().transcriber.transcribe(file);
+        } catch (error) {
+          firstError ??= error;
+        }
+      }
+      const available = targets
+        .map((target) => ({ target, segments: transcripts[target.assetId] as AsrSegment[] | undefined }))
+        .filter((entry): entry is { target: typeof targets[number]; segments: AsrSegment[] } => !!entry.segments?.length);
+      if (!available.length) {
+        if (firstError instanceof Error) throw firstError;
+        throw new Error(t('workbench.restoreVideoSourceBeforeCaptions'));
+      }
+      // ASR can run for minutes. Merge only transcript results into the latest document so an
+      // unrelated timeline edit made while it was running is never rolled back by the completion.
+      const latest = documentRef.current;
+      const mergedTranscripts = { ...latest.semantics.transcripts };
+      for (const target of targets) {
+        if (!latest.assets[target.assetId] || !Object.prototype.hasOwnProperty.call(transcripts, target.assetId)) continue;
+        mergedTranscripts[target.assetId] = transcripts[target.assetId]!;
+      }
+      const document = {
+        ...latest,
+        semantics: { ...latest.semantics, transcripts: mergedTranscripts },
+      };
+      const latestPrimaryAssetId = latest.semantics.primaryNarrativeAssetId;
+      const main = latestPrimaryAssetId
+        ? mergedTranscripts[latestPrimaryAssetId] as AsrSegment[] | undefined
+        : undefined;
+      if (main?.length) {
+        asrRef.current = main;
+        setAsrSentences(main);
+      }
+      setDocument(document);
+      return main?.length
+        ? main
+        : available.sort((left, right) => transcriptWordCount(right.segments) - transcriptWordCount(left.segments))[0]!.segments;
     });
   }
   function stepAsr(report?: (text: string) => void): Promise<AsrSegment[]> {

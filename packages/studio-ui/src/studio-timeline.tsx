@@ -63,6 +63,9 @@ import {
   quantizeTimelineFrameSecond,
   rulerStep,
   stripTiles,
+  timelinePointerSecond,
+  timelineResizeSurfaceDuration,
+  timelineSourceResizeEnd,
   visibleStripTiles,
 } from './timeline-utils';
 import { FramePickCursor, HoverCursor, PlayheadCursor } from './timeline-overlays';
@@ -101,6 +104,7 @@ export interface TimelineVisualClipState {
   source?: string;
   sourceInSec: number;
   sourceOutSec: number;
+  sourceDurationSec?: number;
   usePrimaryFilmstrip?: boolean;
   enabled: boolean;
 }
@@ -373,7 +377,6 @@ function StudioTimelineImpl({
     [shots, videoPlacements],
   );
   const hasVideoLane = sceneSpans.length > 0;
-  const videoDur = hasVideoLane ? Math.max(...sceneSpans.map((span) => span.end)) : 0;
   /** Scene-card audio bands, precomputed per shot. These are the timeline's heaviest drawing by far — one
    *  path with up to WAVE_MAX_BARS sub-paths per card — and they depend only on the cut, the zoom and that
    *  shot's own audio. Building them inside the render meant every unrelated gesture that re-renders the
@@ -428,6 +431,12 @@ function StudioTimelineImpl({
     startSec: number;
     durationSec: number;
   } | null>(null);
+  const [visualClipResize, setVisualClipResize] = useState<{
+    clipId: string;
+    edge: 'left' | 'right';
+    atSec: number;
+  } | null>(null);
+  const [endResizeSec, setEndResizeSec] = useState<number | null>(null);
   const [marquee, setMarquee] = useState<{ l: number; r: number } | null>(null); // scene-track marquee rectangle (content px)
   const laneRef = useRef<HTMLDivElement | null>(null); // scene-track DOM (content-coordinate base, moves with scroll)
   const marqueeDraggedRef = useRef(false); // whether this pointer-down became a marquee drag (used to suppress the subsequent shot click)
@@ -471,7 +480,12 @@ function StudioTimelineImpl({
     endScrubRef.current();
   }, [framePickActive]);
 
-  const W = Math.max(320, dur * pps);
+  const surfaceDur = timelineResizeSurfaceDuration(
+    dur,
+    pps,
+    endResizeSec ?? undefined,
+  );
+  const W = Math.max(320, surfaceDur * pps);
   const x = useCallback((s: number) => s * pps, [pps]);
   const updateVisibleRange = useCallback(() => {
     const el = scrollRef.current;
@@ -495,17 +509,6 @@ function StudioTimelineImpl({
     observer.observe(el);
     return () => observer.disconnect();
   }, [updateVisibleRange]);
-  const filmTiles = useMemo(() => visibleStripTiles(
-    filmstrip ?? [],
-    0,
-    videoDur,
-    tileDur,
-    pps,
-    0,
-    visibleRange.startSec,
-    visibleRange.endSec,
-  ), [filmstrip, pps, tileDur, videoDur, visibleRange]);
-
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
@@ -570,7 +573,7 @@ function StudioTimelineImpl({
 
   // stable identities: the music lane is memoized, and a fresh closure per render would defeat that
   const rawSecAt = useCallback((clientX: number) => (clientX - (contentRef.current?.getBoundingClientRect().left ?? 0)) / pps, [pps]);
-  const secAt = useCallback((clientX: number) => Math.max(0, Math.min(dur, rawSecAt(clientX))), [dur, rawSecAt]);
+  const secAt = useCallback((clientX: number) => timelinePointerSecond(rawSecAt(clientX), dur), [dur, rawSecAt]);
   const frameSecAt = useCallback((clientX: number) => {
     return quantizeTimelineFrameSecond(secAt(clientX), dur, framePickFps);
   }, [dur, framePickFps, secAt]);
@@ -1225,11 +1228,6 @@ function StudioTimelineImpl({
   } | null>(null);
   const visualClipDragRef = useRef(visualClipDrag);
   visualClipDragRef.current = visualClipDrag;
-  const [visualClipResize, setVisualClipResize] = useState<{
-    clipId: string;
-    edge: 'left' | 'right';
-    atSec: number;
-  } | null>(null);
   const visualTargetTop = (target: TimelineMediaDropTarget) => {
     if (target.kind === 'primary') return SCENE_PAD_T;
     if (target.kind === 'visual') return rowTop(visualLaneKey(target.trackId)) + VISUAL_SCENE_PAD_T;
@@ -1583,15 +1581,23 @@ function StudioTimelineImpl({
               {/* Track 0 is persistent document structure: it remains a drop target when empty, like a
                   conventional NLE. With clips it expands into the scene rail. */}
               <div ref={laneRef} data-main-track onPointerDown={onLanePointerDown} className="absolute left-0 right-0" style={{ top: 0, height: H0 }}>
-                  {/* Filmstrip base fill (fixed tile width, nearest source frame; like cloud editors). Not filled when there are scene cards —
-                      the filmstrip gets clipped inside each card; otherwise the continuous base leaks through the cards' transparent rounded corners, hiding the corners/gaps */}
+                  {/* An empty primary track is intentional document state, not a missing render. Give it
+                      its own persistent drop affordance instead of deriving a zero-width filmstrip from
+                      a zero-duration filmstrip. It remains presentation-only; dropping still routes through the timeline. */}
                   {sceneSpans.length === 0 && (
-                    <div className={`bg-ink/10 pointer-events-none absolute top-3 bottom-2 left-0 overflow-hidden ring-1 ring-white/10 ${TIMELINE_ITEM_RADIUS}`} style={{ width: x(videoDur) }}>
-                      {filmTiles.map((tl, i) => (
-                        // max-w-none: preflight's img max-width:100% is relative to the container, so a narrow card would squeeze tiles thin and expose gaps (same for all three tile spots)
-                        <img key={i} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute inset-y-0 h-full object-cover" style={{ left: tl.left, width: thumbW }} />
-                      ))}
-                      {(filmstrip ?? []).length === 0 && <div className="h-full w-full bg-gradient-to-r from-accent/20 to-accent/8" />}
+                    <div
+                      data-empty-main-track-placeholder
+                      className={`pointer-events-none absolute top-3 bottom-2 left-2 flex items-center overflow-hidden border border-dashed px-3 transition-colors ${TIMELINE_ITEM_RADIUS} ${assetDragging && assetDragKind === 'video' ? 'border-accent/70 bg-accent/10 text-accent' : 'border-line/80 bg-panel/45 text-ink-4'}`}
+                      style={{ width: Math.max(220, Math.min(420, W - 16)) }}
+                    >
+                      <span className="relative mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-sm bg-ink/6">
+                        <Film size={14} />
+                        <Plus size={8} strokeWidth={2.5} className="bg-panel absolute -right-0.5 -bottom-0.5 rounded-full" />
+                      </span>
+                      <span className="truncate text-[10px] font-medium tracking-wide">
+                        {t(assetDragging && assetDragKind === 'video' ? 'panels.releaseVideoOnPrimaryTrack' : 'panels.emptyPrimaryTrackDropVideo')}
+                      </span>
+                      <span className="ml-3 h-px min-w-8 flex-1 bg-current opacity-15" />
                     </div>
                   )}
                   {/* Scene cards (shot clips, semi-transparent so the filmstrip shows through): index + current-scene highlight.
@@ -1920,15 +1926,31 @@ function StudioTimelineImpl({
                           event.stopPropagation();
                           if (!onResizeVisualClip) return;
                           let latest = edge === 'left' ? clip.startSec : clip.endSec;
+                          const maximumEndSec = clip.kind === 'video'
+                            ? timelineSourceResizeEnd(
+                                clip.startSec,
+                                clip.endSec,
+                                clip.sourceInSec,
+                                clip.sourceOutSec,
+                                clip.sourceDurationSec,
+                              )
+                            : Number.POSITIVE_INFINITY;
+                          setVisualClipResize({ clipId: clip.clipId, edge, atSec: latest });
+                          if (edge === 'right') setEndResizeSec(latest);
                           drag(
                             event,
                             (clientX) => {
-                              latest = snap(secAt(clientX));
+                              latest = Math.min(
+                                maximumEndSec,
+                                snap(timelinePointerSecond(rawSecAt(clientX), dur, edge === 'right')),
+                              );
                               setVisualClipResize({ clipId: clip.clipId, edge, atSec: latest });
+                              if (edge === 'right') setEndResizeSec(latest);
                               setGuide(latest);
                             },
                             (moved) => {
                               setVisualClipResize(null);
+                              setEndResizeSec(null);
                               if (moved) onResizeVisualClip(clip.clipId, edge, latest);
                             },
                           );
@@ -2146,10 +2168,19 @@ function StudioTimelineImpl({
                     <span
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        drag(e, (cx) => {
-                          const ne = Math.max(b.startSec + MIN_DUR, snap(secAt(cx), [b.startSec + b.durationSec]));
-                          onResizeBlock(b.id, b.startSec, ne - b.startSec);
-                        });
+                        setEndResizeSec(b.startSec + b.durationSec);
+                        drag(
+                          e,
+                          (cx) => {
+                            const ne = Math.max(
+                              b.startSec + MIN_DUR,
+                              snap(timelinePointerSecond(rawSecAt(cx), dur, true), [b.startSec + b.durationSec]),
+                            );
+                            setEndResizeSec(ne);
+                            onResizeBlock(b.id, b.startSec, ne - b.startSec);
+                          },
+                          () => setEndResizeSec(null),
+                        );
                       }}
                       className={`absolute inset-y-0 right-0 w-1.5 cursor-ew-resize ${TIMELINE_ITEM_EDGE_RADIUS.right} ${sel ? 'bg-white/50' : 'bg-white/0 group-hover:bg-white/40'}`}
                     />
@@ -2223,15 +2254,21 @@ function StudioTimelineImpl({
                               e.stopPropagation();
                               onSelectBlock(b.id, false);
                               let latest = end;
+                              setEndResizeSec(latest);
                               drag(
                                 e,
                                 (cx) => {
-                                  const snapped = snap(secAt(cx), [b.startSec, end]);
-                                  latest = Math.min(dur, Math.max(b.startSec + minDurationSec, quantizeTimelineFrameSecond(snapped, dur, framePickFps)));
+                                  const snapped = snap(timelinePointerSecond(rawSecAt(cx), dur, true), [b.startSec, end]);
+                                  latest = Math.max(
+                                    b.startSec + minDurationSec,
+                                    Math.round(snapped * Math.max(1, framePickFps)) / Math.max(1, framePickFps),
+                                  );
+                                  setEndResizeSec(latest);
                                   setCaptionResize({ id: b.id, startSec: b.startSec, durationSec: latest - b.startSec });
                                 },
                                 (moved) => {
                                   setCaptionResize(null);
+                                  setEndResizeSec(null);
                                   if (moved) onResizeCaption(b.id, 'right', latest);
                                 },
                               );
@@ -2252,6 +2289,7 @@ function StudioTimelineImpl({
                   clips={audioClips}
                   disabledIds={disabledClipIds}
                   dur={dur}
+                  surfaceDur={surfaceDur}
                   pps={pps}
                   top={musicTop}
                   peaks={audioPeaks}
@@ -2263,6 +2301,8 @@ function StudioTimelineImpl({
                   onToggleMute={onToggleAudioClipMute}
                   onOpenPanel={onOpenMusicPanel}
                   secAt={secAt}
+                  endSecAt={(clientX) => timelinePointerSecond(rawSecAt(clientX), dur, true)}
+                  onEndResizePreview={setEndResizeSec}
                   snap={snap}
                   drag={drag}
                 />

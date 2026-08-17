@@ -25,6 +25,43 @@ export const DEFAULT_PPS = 78;
 export const MIN_DUR = 0.3;
 export const SNAP_PX = 8;
 
+/** Convert a content-space pointer second to timeline time. Most interactions stay inside the
+ * current project, while a right trim handle must be able to create a later project end. */
+export function timelinePointerSecond(rawSec: number, durationSec: number, allowAfterEnd = false): number {
+  const second = Math.max(0, Number.isFinite(rawSec) ? rawSec : 0);
+  const duration = Math.max(0, Number.isFinite(durationSec) ? durationSec : 0);
+  return allowAfterEnd ? second : Math.min(duration, second);
+}
+
+/** Keep a fixed physical editing tail after the project end, then move that tail with an active
+ * end-trim pointer. Pixel-based space stays equally usable at every zoom level and avoids a layout
+ * jump when the user first grabs the last clip. */
+export function timelineResizeSurfaceDuration(durationSec: number, pps: number, resizeEndSec?: number): number {
+  const duration = Math.max(0, Number.isFinite(durationSec) ? durationSec : 0);
+  const tailSec = Math.max(2, 160 / Math.max(1, Number.isFinite(pps) ? pps : 1));
+  const pointer = resizeEndSec == null
+    ? duration
+    : Math.max(0, Number.isFinite(resizeEndSec) ? resizeEndSec : 0);
+  return Math.max(duration, pointer) + tailSec;
+}
+
+/** Latest timeline end reachable without changing playback speed. Unknown source duration remains
+ * unbounded; the document command performs the same final clamp when the gesture commits. */
+export function timelineSourceResizeEnd(
+  startSec: number,
+  endSec: number,
+  sourceInSec: number,
+  sourceOutSec: number,
+  sourceDurationSec?: number,
+): number {
+  if (sourceDurationSec == null || !Number.isFinite(sourceDurationSec)) return Number.POSITIVE_INFINITY;
+  const timelineSpan = endSec - startSec;
+  const sourceSpan = sourceOutSec - sourceInSec;
+  if (timelineSpan <= 0 || sourceSpan <= 0) return endSec;
+  const sourceRate = sourceSpan / timelineSpan;
+  return endSec + Math.max(0, sourceDurationSec - sourceOutSec) / sourceRate;
+}
+
 export interface TimelinePlacementSpan {
   id: string;
   startSec: number;

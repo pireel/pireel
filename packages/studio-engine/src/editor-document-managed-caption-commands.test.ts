@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyEditorCommand,
+  dominantTimelineSpeechTrack,
   emptyEditorDocumentV2,
+  timelineSpeechRangesForAsset,
+  timelineTranscriptionTargets,
   type CaptionTimelineClip,
   type EditorDocumentV2,
   type NarrativeTimelineClip,
@@ -74,6 +77,86 @@ function documentWithCaptions(): EditorDocumentV2 {
 }
 
 describe('EditorDocument V2 managed caption command', () => {
+  it('finds captionable timeline media without requiring a primary narrative clip', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { localSig: 'video-sig' }, metadata: { durationSec: 5, hasAudio: true },
+    };
+    document.assets.silent = {
+      id: 'silent', kind: 'video', locator: { localSig: 'silent-sig' }, metadata: { durationSec: 5, hasAudio: false },
+    };
+    document.timeline.tracks.push({
+      id: 'media', type: 'visual', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+      clips: [
+        { id: 'video-clip', kind: 'media', assetId: 'video', startFrame: 30, durationFrames: 150, enabled: true, sourceInSec: 0, sourceOutSec: 5 },
+        { id: 'silent-clip', kind: 'media', assetId: 'silent', startFrame: 180, durationFrames: 150, enabled: true, sourceInSec: 0, sourceOutSec: 5 },
+      ],
+    });
+
+    expect(timelineTranscriptionTargets(document)).toMatchObject([
+      { trackId: 'media', clipId: 'video-clip', assetId: 'video' },
+    ]);
+  });
+
+  it('builds the manual transcript from the dominant speech track without a primary clip', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { localSig: 'voice-sig' }, metadata: { durationSec: 10 },
+    };
+    document.semantics.transcripts.voice = [{
+      start: 2, end: 8, text: 'one two three', words: [
+        { text: 'one', start: 2, end: 3 },
+        { text: 'two', start: 4, end: 5 },
+        { text: 'three', start: 7, end: 8 },
+      ],
+    }];
+    document.timeline.tracks.push({
+      id: 'voice-track', type: 'audio', role: 'narration', muted: false, hidden: false, locked: false, syncLocked: false, stackOrder: 1,
+      clips: [{
+        id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 60, durationFrames: 90,
+        enabled: true, sourceInSec: 2, sourceOutSec: 8, properties: { speed: 2 }, anchor: { type: 'timeline' },
+      }],
+    });
+
+    expect(dominantTimelineSpeechTrack(document)).toMatchObject({
+      trackId: 'voice-track',
+      clips: [{ id: 'voice-clip', assetId: 'voice' }],
+    });
+    expect(timelineSpeechRangesForAsset(document, 'voice-track', 'voice', 4, 5)).toEqual([{
+      trackId: 'voice-track', clipId: 'voice-clip', assetId: 'voice',
+      startFrame: 90, endFrame: 105, sourceFromSec: 4, sourceToSec: 5,
+    }]);
+  });
+
+  it('uses a linked audio partner once instead of transcribing linked video audio twice', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.camera = {
+      id: 'camera', kind: 'video', locator: { localSig: 'camera-sig' }, metadata: { durationSec: 5, hasAudio: true },
+    };
+    document.assets.mic = {
+      id: 'mic', kind: 'audio', locator: { localSig: 'mic-sig' }, metadata: { durationSec: 5 },
+    };
+    document.timeline.tracks.push(
+      {
+        id: 'camera-track', type: 'visual', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+        clips: [{ id: 'camera-clip', kind: 'media', assetId: 'camera', linkGroupId: 'av', startFrame: 0, durationFrames: 150, enabled: true, sourceInSec: 0, sourceOutSec: 5 }],
+      },
+      {
+        id: 'mic-track', type: 'audio', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 2,
+        clips: [{ id: 'mic-clip', kind: 'audio', assetId: 'mic', linkGroupId: 'av', startFrame: 0, durationFrames: 150, enabled: true, sourceInSec: 0, sourceOutSec: 5, properties: {}, anchor: { type: 'timeline' } }],
+      },
+    );
+
+    expect(timelineTranscriptionTargets(document)).toMatchObject([
+      { trackId: 'mic-track', clipId: 'mic-clip', assetId: 'mic' },
+    ]);
+    expect(timelineTranscriptionTargets(document, { mode: 'clip', clipId: 'camera-clip' })).toMatchObject([
+      { trackId: 'mic-track', clipId: 'mic-clip', assetId: 'mic' },
+    ]);
+    document.semantics.transcripts.mic = transcript;
+    expect(dominantTimelineSpeechTrack(document)?.trackId).toBe('mic-track');
+  });
+
   it('derives through native gaps and retiming while preserving track and clip flags', () => {
     const document = documentWithCaptions();
     const result = applyEditorCommand(document, { type: 'captions.relay' });
@@ -120,5 +203,40 @@ describe('EditorDocument V2 managed caption command', () => {
     if (!result.ok) return;
     expect(result.document.semantics.managedCaptionSource).toEqual({ mode: 'auto' });
     expect(result.document.timeline.tracks.find((track) => track.id === 'managed-captions')!.clips[0]).toMatchObject({ startFrame: 30, sourceRef: { assetId: 'voice' } });
+  });
+
+  it('auto-selects the track with the most spoken words instead of preferring a shorter primary transcript', () => {
+    const document = documentWithCaptions();
+    document.semantics.transcripts['main-asset'] = [{ start: 0, end: 1, text: 'hello', words: [{ text: 'hello', start: 0, end: 1 }] }];
+    document.assets.voice = { id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.mp3' }, metadata: { durationSec: 6 } };
+    document.semantics.transcripts.voice = transcript;
+    document.timeline.tracks.push({
+      id: 'voice-track', type: 'audio', role: 'narration', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+      clips: [{ id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 30, durationFrames: 180, enabled: true, sourceInSec: 0, sourceOutSec: 6, properties: {}, anchor: { type: 'timeline' } }],
+    });
+
+    const result = applyEditorCommand(document, { type: 'captions.relay', source: { mode: 'auto' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.find((track) => track.id === 'managed-captions')!.clips[0]).toMatchObject({
+      startFrame: 30,
+      sourceRef: { assetId: 'voice' },
+    });
+  });
+
+  it('ignores muted tracks for automatic transcription and caption source selection', () => {
+    const document = documentWithCaptions();
+    document.assets.voice = { id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.mp3' }, metadata: { durationSec: 6 } };
+    document.semantics.transcripts.voice = transcript;
+    document.timeline.tracks.push({
+      id: 'muted-voice', type: 'audio', role: 'narration', muted: true, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+      clips: [{ id: 'muted-voice-clip', kind: 'audio', assetId: 'voice', startFrame: 0, durationFrames: 180, enabled: true, sourceInSec: 0, sourceOutSec: 6, properties: {}, anchor: { type: 'timeline' } }],
+    });
+
+    expect(timelineTranscriptionTargets(document)).not.toContainEqual(expect.objectContaining({ trackId: 'muted-voice' }));
+    expect(dominantTimelineSpeechTrack(document)?.trackId).toBe('track_primary_narrative');
+    expect(timelineTranscriptionTargets(document, { mode: 'track', trackId: 'muted-voice' })).toMatchObject([
+      { trackId: 'muted-voice', clipId: 'muted-voice-clip', assetId: 'voice' },
+    ]);
   });
 });

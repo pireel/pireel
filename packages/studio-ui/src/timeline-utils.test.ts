@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { packedPrimaryPlacement, quantizeTimelineFrameSecond, timelinePlacementOverlaps, visibleStripTiles } from './timeline-utils';
+import {
+  packedPrimaryPlacement,
+  quantizeTimelineFrameSecond,
+  timelinePointerSecond,
+  timelineResizeSurfaceDuration,
+  timelineSourceResizeEnd,
+  timelinePlacementOverlaps,
+  visibleStripTiles,
+} from './timeline-utils';
 
 describe('quantizeTimelineFrameSecond', () => {
   it('picks the nearest exact frame and never returns the exclusive duration edge', () => {
@@ -34,6 +42,24 @@ describe('timeline placement rules', () => {
 
   it('excludes the moving primary clip before choosing its new packed position', () => {
     expect(packedPrimaryPlacement(spans, 'a', 20, 3)).toEqual({ index: 1, startSec: 2 });
+  });
+});
+
+describe('timeline end resizing', () => {
+  it('lets an end handle move beyond the current project duration', () => {
+    expect(timelinePointerSecond(14, 10)).toBe(10);
+    expect(timelinePointerSecond(14, 10, true)).toBe(14);
+  });
+
+  it('adds scrollable tail space while the end handle is active', () => {
+    expect(timelineResizeSurfaceDuration(10, 80)).toBeGreaterThan(10);
+    expect(timelineResizeSurfaceDuration(10, 80, 10)).toBeGreaterThan(10);
+    expect(timelineResizeSurfaceDuration(10, 80, 14)).toBeGreaterThan(14);
+  });
+
+  it('stops a media end handle at the remaining source duration', () => {
+    expect(timelineSourceResizeEnd(5, 10, 2, 7, 12)).toBe(15);
+    expect(timelineSourceResizeEnd(5, 10, 2, 7, undefined)).toBe(Number.POSITIVE_INFINITY);
   });
 });
 

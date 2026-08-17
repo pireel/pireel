@@ -13,22 +13,25 @@ import {
   type Composition,
   type EditorDocumentV2,
   type VideoShot,
+  applyEditorCommand,
   applyCaptionDocumentEdit,
   applyNarrationDocumentEdit,
-  hasPrimaryNarrativeClips,
   insertNarrativeAssetRange,
   shotId,
+  timelineSpeechRangesForAsset,
+  timelineTranscriptionTargets,
 } from '@pireel/studio-engine/composition';
 import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/studio-engine/trim';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
-import type { ScriptCut } from './script-panel';
+import type { ScriptCut, TimelineScriptCut } from './script-panel';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 
 export interface ScriptCutDeps {
   projectId: string;
   comp: Composition;
+  document: EditorDocumentV2;
   /** Which tool panel is open ('script' triggers auto-extract). */
   floatWin: string | null;
   asrSentences: AsrSegment[] | null;
@@ -50,9 +53,75 @@ export interface ScriptCutDeps {
 
 export function useScriptCut(deps: ScriptCutDeps) {
   const {
-    projectId, comp, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
+    projectId, comp, document: liveDocument, floatWin, asrSentences, compRef, tRef, asrRef, clipAsrRef, setClipAsr, setAsrSentences,
     documentRef, setDocument, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureShots, stepAsr,
   } = deps;
+
+  const cutTimelineRanges = (cuts: TimelineScriptCut[], msg: string) => {
+    if (!cuts.length) return;
+    const trackIds = new Set(cuts.map((cut) => cut.trackId));
+    if (trackIds.size !== 1) {
+      toast.error('Selected words span multiple unlinked tracks. Edit one track at a time.');
+      return;
+    }
+    let document = documentRef.current;
+    const byTrack = new Map<string, Array<{ startFrame: number; endFrame: number }>>();
+    for (const cut of cuts) {
+      const mapped = timelineSpeechRangesForAsset(
+        document,
+        cut.trackId,
+        cut.assetId,
+        cut.range[0],
+        cut.range[1],
+        cut.clipId,
+      );
+      byTrack.set(cut.trackId, [...(byTrack.get(cut.trackId) ?? []), ...mapped]);
+    }
+    let removedFrames = 0;
+    for (const [trackId, sourceRanges] of byTrack) {
+      const merged: Array<{ startFrame: number; endFrame: number }> = [];
+      for (const range of [...sourceRanges].sort((left, right) => left.startFrame - right.startFrame)) {
+        const previous = merged.at(-1);
+        if (previous && range.startFrame <= previous.endFrame) previous.endFrame = Math.max(previous.endFrame, range.endFrame);
+        else merged.push({ startFrame: range.startFrame, endFrame: range.endFrame });
+      }
+      for (const range of merged.sort((left, right) => right.startFrame - left.startFrame)) {
+        const edit = applyEditorCommand(document, {
+          type: 'range.remove',
+          trackId,
+          startFrame: range.startFrame,
+          endFrame: range.endFrame,
+          mode: 'ripple',
+          includeLinked: true,
+        });
+        if (!edit.ok) {
+          toast.error(editorErrorMessage(edit.error));
+          return;
+        }
+        document = edit.document;
+        removedFrames += edit.receipt.removedFrames ?? 0;
+      }
+    }
+    if (!removedFrames) {
+      toast.info(t('workbench.thoseRangesAlreadyOut'));
+      return;
+    }
+    const captions = applyEditorCommand(document, { type: 'captions.relay' });
+    if (!captions.ok) {
+      toast.error(editorErrorMessage(captions.error));
+      return;
+    }
+    pushUndoSnapshot();
+    setDocument(captions.document);
+    setSelectedShotId(null);
+    setSelectedId(null);
+    const endFrame = captions.document.timeline.tracks.reduce(
+      (end, track) => Math.max(end, ...track.clips.map((clip) => clip.startFrame + clip.durationFrames), 0),
+      0,
+    );
+    applyT(Math.max(0, Math.min(tRef.current, Math.max(0, endFrame / captions.document.canvas.fps - 0.05))));
+    toast.success(t('workbench.msgUndoHint', { msg }));
+  };
   /** The script panel's scissors: delete a batch of (source, source-time range) (shared by delete-sentence / delete-silence
    *  / delete-filler; the mapping math is in trim.removeSrcRanges); grouped and computed per source (source timelines are
    *  independent), overlay blocks compressed in deletion order; one document publish avoids rebuild flicker. */
@@ -201,10 +270,52 @@ export function useScriptCut(deps: ScriptCutDeps) {
     setDocument(edit.document);
     toast.success(t('workbench.replacedText', { text: txt }));
   };
+  const replaceTimelineScriptWord = (
+    assetId: string,
+    si: number,
+    word: { start: number; end: number },
+    text: string,
+  ) => {
+    const txt = text.trim();
+    if (!txt) return;
+    const current = documentRef.current;
+    const segments = current.semantics.transcripts[assetId] as AsrSegment[] | undefined;
+    if (!segments?.[si]) return;
+    const isSame = (candidate: { start: number; end: number }) => (
+      Math.abs(candidate.start - word.start) < 1e-3 && Math.abs(candidate.end - word.end) < 1e-3
+    );
+    const segment = segments[si]!;
+    const words = (segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end))
+      .map((candidate) => (isSame(candidate) ? { ...candidate, text: txt } : candidate));
+    const nextSegments = [...segments];
+    nextSegments[si] = { ...segment, words, text: words.map((candidate) => candidate.text).join('') };
+    const patched: EditorDocumentV2 = {
+      ...current,
+      semantics: {
+        ...current.semantics,
+        transcripts: { ...current.semantics.transcripts, [assetId]: nextSegments },
+      },
+    };
+    const captions = applyEditorCommand(patched, { type: 'captions.relay' });
+    if (!captions.ok) {
+      toast.error(editorErrorMessage(captions.error));
+      return;
+    }
+    if (assetId === current.semantics.primaryNarrativeAssetId) {
+      asrRef.current = nextSegments;
+      setAsrSentences(nextSegments);
+    }
+    setDocument(captions.document);
+    toast.success(t('workbench.replacedText', { text: txt }));
+  };
   /** The script panel's "extract narration script" (spinner prevents double-clicks; errors toast). */
   const [asrBusy, setAsrBusy] = useState(false);
   const asrBusyRef = useRef(false);
   const extractForScript = async () => {
+    if (!timelineTranscriptionTargets(documentRef.current).length) {
+      toast.error(t('common.uploadVideoFirst'));
+      return;
+    }
     if (asrBusyRef.current) return;
     asrBusyRef.current = true;
     setAsrBusy(true);
@@ -221,9 +332,19 @@ export function useScriptCut(deps: ScriptCutDeps) {
   // Opening the script panel auto-extracts (no button needed): fileSig cache hit returns instantly; runs ASR once if uncached.
   // Only triggers when asrSentences is still null (never extracted) — an empty array = extracted but empty, don't retry in a loop
   useEffect(() => {
-    if (floatWin !== 'script' || !hasPrimaryNarrativeClips(documentRef.current) || asrSentences != null) return;
+    const targets = timelineTranscriptionTargets(liveDocument);
+    const needsTranscript = targets.some((target) => !Object.prototype.hasOwnProperty.call(liveDocument.semantics.transcripts, target.assetId));
+    if (floatWin !== 'script' || !targets.length || !needsTranscript) return;
     void extractForScript();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatWin, comp.shots, asrSentences]);
-  return { cutSrcRanges, restoreSrcRanges, replaceScriptWord, extractForScript, asrBusy };
+  }, [floatWin, comp.shots, asrSentences, liveDocument]);
+  return {
+    cutSrcRanges,
+    cutTimelineRanges,
+    restoreSrcRanges,
+    replaceScriptWord,
+    replaceTimelineScriptWord,
+    extractForScript,
+    asrBusy,
+  };
 }

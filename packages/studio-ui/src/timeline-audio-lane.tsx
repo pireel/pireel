@@ -62,6 +62,8 @@ export interface AudioLaneProps {
   disabledIds?: ReadonlySet<string>;
   /** Timeline duration (s) and scale (px per second). */
   dur: number;
+  /** Temporary scroll/drawing extent while a right trim crosses the current timeline end. */
+  surfaceDur?: number;
   pps: number;
   /** Row offset inside the track area. */
   top: number;
@@ -77,12 +79,15 @@ export interface AudioLaneProps {
   onOpenPanel?: () => void;
   /** Pointer x → edited seconds, and the snap pass, both owned by the timeline (they need its scroll box). */
   secAt: (clientX: number) => number;
+  /** Right trims may cross the current project end; the parent grows its scroll surface in sync. */
+  endSecAt?: (clientX: number) => number;
+  onEndResizePreview?: (second: number | null) => void;
   snap: (sec: number, exclude?: number[]) => number;
   /** The timeline's drag shell: pointer capture + rAF coalescing + edge auto-scroll. */
   drag: (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => void;
 }
 
-function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, snap, drag }: AudioLaneProps) {
+function AudioLaneImpl({ clips, disabledIds, dur, surfaceDur = dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, endSecAt = secAt, onEndResizePreview, snap, drag }: AudioLaneProps) {
   /** Live gesture value (this component's whole reason to exist): the clip under the pointer renders
    *  from base + patch, and the commit lands once on release. */
   const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
@@ -103,7 +108,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
         // wave slice, fades, knee positions) derives from it, so there is one source of truth
         const clip = audioDrag?.id === base.id ? { ...base, ...audioDrag.patch } : base;
         const w = audioClipWindow(clip, dur);
-        const end = Math.min(dur, w.end);
+        const end = Math.min(surfaceDur, w.end);
         const contentW = px(Math.max(0.05, w.end - w.start)); // the clip's real length in px
         const width = Math.max(14, px(Math.max(0.05, end - w.start))); // visible box (clipped at the timeline end)
         const selected = selectedId === clip.id;
@@ -236,16 +241,23 @@ function AudioLaneImpl({ clips, disabledIds, dur, pps, top, peaks, selectedId, o
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   let patch = audioTrimPatch(base, edge, edge === 'left' ? w.start : w.end);
+                  if (edge === 'right') onEndResizePreview?.(w.end);
                   drag(
                     e,
                     (cx) => {
                       // always measured off the ORIGINAL clip, so the edge tracks the pointer
                       // without accumulating rounding from the live preview
-                      patch = audioTrimPatch(base, edge, Math.max(0, snap(secAt(cx), [w.start, w.end])));
+                      const atSec = edge === 'right' ? endSecAt(cx) : secAt(cx);
+                      const at = Math.max(0, snap(atSec, [w.start, w.end]));
+                      patch = audioTrimPatch(base, edge, at);
+                      if (edge === 'right') {
+                        onEndResizePreview?.(audioClipWindow({ ...base, ...patch }, dur).end);
+                      }
                       setAudioDrag({ id: base.id, patch });
                     },
                     (moved) => {
                       setAudioDrag(null);
+                      if (edge === 'right') onEndResizePreview?.(null);
                       onSelect?.(base.id);
                       if (moved) onTrim?.(base.id, patch);
                     },

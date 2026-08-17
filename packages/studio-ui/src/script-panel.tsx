@@ -13,7 +13,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Scissors, ScrollText } from 'lucide-react';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
-import type { VideoShot } from '@pireel/studio-engine/composition';
+import {
+  dominantTimelineSpeechTrack,
+  type EditorDocumentV2,
+  type SpeechTimelineClip,
+  type VideoShot,
+} from '@pireel/studio-engine/composition';
 import { narrationGaps, srcToEditedLoose, tightenCutRanges } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { t } from './i18n';
@@ -37,6 +42,13 @@ export type SrcRange = [number, number];
 type Gap = { after: number; wi?: number; range: SrcRange; alive: boolean; rawDur: number; aliveDur: number };
 /** Source-tagged cut/restore unit: src=null is the talking-head source, otherwise the inserted source's src key — each source's timeline is independent. */
 export type ScriptCut = { src: string | null; range: SrcRange };
+/** Native track-addressed cut used when the semantic primary lane is empty. */
+export type TimelineScriptCut = {
+  trackId: string;
+  clipId: string;
+  assetId: string;
+  range: SrcRange;
+};
 type Word = { text: string; start: number; end: number };
 
 /** The script is multi-source: each sentence belongs to one source (talking-head src=null / inserted src = that segment's src key).
@@ -490,6 +502,247 @@ export function ScriptPanel({
                 </button>
               )}
             </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type TimelineScriptItem = {
+  trackId: string;
+  clipId: string;
+  assetId: string;
+  si: number;
+  words: Word[];
+  at: number;
+  clip: SpeechTimelineClip;
+  hasTrueWords: boolean;
+};
+
+type TimelineScriptPopover =
+  | { kind: 'word'; item: TimelineScriptItem; word: Word; x: number; y: number }
+  | { kind: 'selection'; cuts: TimelineScriptCut[]; count: number; x: number; y: number };
+
+function speechClipSourceRange(clip: SpeechTimelineClip, fps: number): SrcRange {
+  const speed = clip.kind === 'audio' && Number.isFinite(clip.properties.speed) && clip.properties.speed! > 0
+    ? clip.properties.speed!
+    : 1;
+  return [
+    clip.sourceInSec,
+    clip.sourceOutSec ?? clip.sourceInSec + clip.durationFrames / fps * speed,
+  ];
+}
+
+function speechSourceToTimelineSec(clip: SpeechTimelineClip, sourceSec: number, fps: number): number {
+  const [sourceIn, sourceOut] = speechClipSourceRange(clip, fps);
+  const ratio = Math.max(0, Math.min(1, (sourceSec - sourceIn) / Math.max(0.001, sourceOut - sourceIn)));
+  return (clip.startFrame + ratio * clip.durationFrames) / fps;
+}
+
+/** Live NLE-style transcript for projects whose spoken media lives outside the semantic primary
+ * lane. Words are grouped by their real clip occurrence, so deleting one occurrence never edits a
+ * different track merely because both assets share the same source clock. */
+export function TimelineScriptPanel({
+  document,
+  extracting,
+  onExtract,
+  onSeek,
+  onCut,
+  onReplaceWord,
+}: {
+  document: EditorDocumentV2;
+  extracting: boolean;
+  onExtract: () => void;
+  onSeek: (timelineSec: number) => void;
+  onCut: (cuts: TimelineScriptCut[], msg: string) => void;
+  onReplaceWord: (assetId: string, sentenceIndex: number, word: Word, text: string) => void;
+}) {
+  const speechTrack = useMemo(() => dominantTimelineSpeechTrack(document), [document]);
+  const items = useMemo(() => {
+    if (!speechTrack) return [] as TimelineScriptItem[];
+    const out: TimelineScriptItem[] = [];
+    for (const clip of speechTrack.clips) {
+      const [sourceIn, sourceOut] = speechClipSourceRange(clip, document.canvas.fps);
+      const segments = document.semantics.transcripts[clip.assetId] as AsrSegment[] | undefined;
+      for (const [si, segment] of (segments ?? []).entries()) {
+        const rawWords = segment.words?.length ? segment.words : wordsFromText(segment.text, segment.start, segment.end);
+        const words = rawWords.filter((word) => {
+          const midpoint = (word.start + word.end) / 2;
+          return midpoint >= sourceIn && midpoint <= sourceOut;
+        });
+        if (!words.length) continue;
+        out.push({
+          trackId: speechTrack.trackId,
+          clipId: clip.id,
+          assetId: clip.assetId,
+          si,
+          words,
+          at: speechSourceToTimelineSec(clip, words[0]!.start, document.canvas.fps),
+          clip,
+          hasTrueWords: !!segment.words?.length,
+        });
+      }
+    }
+    return out.sort((left, right) => left.at - right.at || left.clipId.localeCompare(right.clipId) || left.si - right.si);
+  }, [document, speechTrack]);
+  const silences = useMemo(() => {
+    if (!speechTrack) return [] as TimelineScriptCut[];
+    return speechTrack.clips.flatMap((clip) => {
+      const segments = document.semantics.transcripts[clip.assetId] as AsrSegment[] | undefined;
+      if (!segments?.length) return [];
+      const [sourceIn, sourceOut] = speechClipSourceRange(clip, document.canvas.fps);
+      return narrationGaps(segments, sourceOut, MIN_PAUSE_SEC).flatMap((gap) => {
+        const from = Math.max(sourceIn, gap.a);
+        const to = Math.min(sourceOut, gap.b);
+        const tightened = tightenCutRanges([{ from, to }], KEEP_AIR_SEC, 0.05)[0];
+        return tightened
+          ? [{ trackId: speechTrack.trackId, clipId: clip.id, assetId: clip.assetId, range: [tightened.from, tightened.to] as SrcRange }]
+          : [];
+      });
+    });
+  }, [document, speechTrack]);
+  const fillers = useMemo(() => items.flatMap((item) => (
+    item.hasTrueWords
+      ? item.words.filter((word) => FILLER_RE.test(word.text.trim())).map((word) => ({
+          trackId: item.trackId,
+          clipId: item.clipId,
+          assetId: item.assetId,
+          range: wordCutRange(word),
+        }))
+      : []
+  )), [items]);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [popover, setPopover] = useState<TimelineScriptPopover | null>(null);
+  const [replaceMode, setReplaceMode] = useState(false);
+  const [replacement, setReplacement] = useState('');
+
+  useEffect(() => {
+    if (!popover) return;
+    const close = (event: MouseEvent) => {
+      if ((event.target as HTMLElement).closest('[data-script-pop]')) return;
+      setPopover(null);
+      setReplaceMode(false);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [popover]);
+
+  const localXY = (clientX: number, clientY: number) => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    return { x: clientX - (rect?.left ?? 0), y: clientY - (rect?.top ?? 0) };
+  };
+  const cutFor = (item: TimelineScriptItem, word: Word): TimelineScriptCut => ({
+    trackId: item.trackId,
+    clipId: item.clipId,
+    assetId: item.assetId,
+    range: wordCutRange(word),
+  });
+  const onMouseUp = (event: React.MouseEvent) => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !rootRef.current) return;
+    const nodes = [...rootRef.current.querySelectorAll<HTMLElement>('[data-timeline-word]')]
+      .filter((element) => selection.containsNode(element, true));
+    if (nodes.length < 2) return;
+    const cuts = nodes.flatMap((element): TimelineScriptCut[] => {
+      const wordStart = Number(element.dataset.wordStart);
+      const wordEnd = Number(element.dataset.wordEnd);
+      const trackId = element.dataset.trackId;
+      const clipId = element.dataset.clipId;
+      const assetId = element.dataset.assetId;
+      if (!trackId || !clipId || !assetId || !Number.isFinite(wordStart) || !Number.isFinite(wordEnd)) return [];
+      return [{ trackId, clipId, assetId, range: wordCutRange({ start: wordStart, end: wordEnd }) }];
+    });
+    if (!cuts.length) return;
+    const { x, y } = localXY(event.clientX, event.clientY);
+    setPopover({ kind: 'selection', cuts, count: cuts.length, x, y: y + 14 });
+  };
+
+  if (!items.length) {
+    return (
+      <div className="bg-canvas flex h-full min-h-0 w-full flex-col">
+        <PanelHeader hint={t('panels.deleteWordDeleteFootage')} />
+        <div className="text-ink-4 flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-[11.5px]">
+          <ScrollText size={22} />
+          {t('panels.noTranscriptYetTranscribe')}
+          <button type="button" onClick={onExtract} disabled={extracting} className="bg-ink text-bg inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12px] font-medium disabled:opacity-50">
+            {extracting ? <Loader2 size={12} className="animate-spin" /> : <ScrollText size={12} />}
+            {extracting ? t('panels.transcribing') : t('tools.extract_asr.label')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const submitReplacement = (item: TimelineScriptItem, word: Word) => {
+    if (!replacement.trim()) return;
+    onReplaceWord(item.assetId, item.si, word, replacement.trim());
+    setPopover(null);
+    setReplaceMode(false);
+  };
+
+  return (
+    <div className="bg-canvas relative flex h-full min-h-0 w-full flex-col" ref={rootRef}>
+      <PanelHeader hint={items.some((item) => item.hasTrueWords) ? t('panels.clickWordHint') : t('panels.clickWordHintEstimated')} />
+      <div className="flex min-h-9 shrink-0 flex-wrap items-center gap-1.5 px-3 py-1.5">
+        <button type="button" disabled={!silences.length} onClick={() => onCut(silences, t('panels.deletedNSilencesSec', { n: silences.length, sec: silences.reduce((sum, cut) => sum + cut.range[1] - cut.range[0], 0).toFixed(1) }))} className="border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40">
+          <Scissors size={11} /> {silences.length ? t('panels.cutSilencesNSec', { n: silences.length, sec: silences.reduce((sum, cut) => sum + cut.range[1] - cut.range[0], 0).toFixed(1) }) : t('panels.cutSilences')}
+        </button>
+        <button type="button" disabled={!fillers.length} onClick={() => onCut(fillers, t('panels.deletedNFillerWords', { n: fillers.length }))} className="border-line text-ink-2 hover:text-ink inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40">
+          <Scissors size={11} /> {fillers.length ? t('panels.cutFillersN', { n: fillers.length }) : t('panels.cutFillers')}
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden break-words px-3 py-2.5 text-[13px] leading-[1.9]" onMouseUp={onMouseUp}>
+        {items.map((item) => (
+          <span key={`${item.clipId}:${item.si}`}>
+            {item.words.map((word, wordIndex) => (
+              <span key={`${wordIndex}:${word.start}:${word.end}`}>
+                <span
+                  data-timeline-word
+                  data-word-start={word.start}
+                  data-word-end={word.end}
+                  data-track-id={item.trackId}
+                  data-clip-id={item.clipId}
+                  data-asset-id={item.assetId}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const { x, y } = localXY(event.clientX, event.clientY);
+                    setPopover({ kind: 'word', item, word, x, y: y + 14 });
+                    setReplaceMode(false);
+                    setReplacement(word.text);
+                    onSeek(speechSourceToTimelineSec(item.clip, word.start, document.canvas.fps));
+                  }}
+                  className="text-ink hover:bg-accent/15 cursor-pointer rounded-sm px-[1px]"
+                >
+                  {word.text}
+                </span>
+                {wordIndex < item.words.length - 1 && needsSpace(word.text, item.words[wordIndex + 1]!.text) ? ' ' : null}
+              </span>
+            ))}{' '}
+          </span>
+        ))}
+      </div>
+      {popover && (
+        <div data-script-pop className="border-line bg-panel absolute z-50 flex items-center gap-1 rounded-lg border px-1.5 py-1 shadow-xl" style={{ left: Math.max(8, Math.min(popover.x - 40, 240)), top: popover.y }}>
+          {popover.kind === 'word' && !replaceMode && (
+            <>
+              <button type="button" onClick={() => { onCut([cutFor(popover.item, popover.word)], t('panels.deletedWord', { word: popover.word.text })); setPopover(null); }} className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]">
+                {t('tools.delete_block.label')}
+              </button>
+              <div className="bg-line h-3.5 w-px" />
+              <button type="button" onClick={() => setReplaceMode(true)} className="text-ink-2 hover:text-ink px-1.5 py-0.5 text-[11.5px]">{t('panels.replace')}</button>
+            </>
+          )}
+          {popover.kind === 'word' && replaceMode && (
+            <>
+              <input autoFocus value={replacement} onChange={(event) => setReplacement(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitReplacement(popover.item, popover.word); if (event.key === 'Escape') { setPopover(null); setReplaceMode(false); } }} className="border-line bg-panel-2 text-ink w-24 rounded border px-1.5 py-0.5 text-[11.5px] outline-none" aria-label={t('panels.replacementWord')} />
+              <button type="button" disabled={!replacement.trim()} onClick={() => submitReplacement(popover.item, popover.word)} className="text-accent px-1 py-0.5 text-[11.5px] font-medium disabled:opacity-40">{t('panels.ok')}</button>
+            </>
+          )}
+          {popover.kind === 'selection' && (
+            <button type="button" onClick={() => { onCut(popover.cuts, t('panels.deletedNSelectedWords', { n: popover.count })); setPopover(null); window.getSelection()?.removeAllRanges(); }} className="text-ink-2 hover:text-destructive px-1.5 py-0.5 text-[11.5px]">
+              {t('panels.deleteSelectedNWords', { n: popover.count })}
+            </button>
           )}
         </div>
       )}

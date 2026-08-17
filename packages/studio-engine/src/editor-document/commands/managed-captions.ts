@@ -53,12 +53,73 @@ function retimeCaptionBlock(
   });
 }
 
-type SpeechTimelineClip = NarrativeTimelineClip | MediaTimelineClip | AudioTimelineClip;
+export type SpeechTimelineClip = NarrativeTimelineClip | MediaTimelineClip | AudioTimelineClip;
 
 type CaptionSourceSelection = NonNullable<EditorDocumentV2['semantics']['managedCaptionSource']>;
 
+export interface TimelineTranscriptionTarget {
+  trackId: string;
+  clipId: string;
+  assetId: string;
+}
+
+export interface TimelineSpeechTrack {
+  trackId: string;
+  clips: SpeechTimelineClip[];
+}
+
+export interface TimelineSpeechRange {
+  trackId: string;
+  clipId: string;
+  assetId: string;
+  startFrame: number;
+  endFrame: number;
+  sourceFromSec: number;
+  sourceToSec: number;
+}
+
 function isSpeechClip(clip: TimelineClip): clip is SpeechTimelineClip {
   return clip.kind === 'narrative' || clip.kind === 'media' || clip.kind === 'audio';
+}
+
+function isCaptionableClip(document: EditorDocumentV2, clip: TimelineClip): clip is SpeechTimelineClip {
+  if (!isSpeechClip(clip) || !clip.enabled) return false;
+  const asset = document.assets[clip.assetId];
+  return !!asset && (asset.kind === 'audio' || (asset.kind === 'video' && asset.metadata.hasAudio !== false));
+}
+
+/** NLE-style transcription scope over native timeline identity. The primary lane is one
+ * candidate, never a prerequisite. Linked A/V uses the audio-side clip so one recording is not
+ * billed and transcribed twice. Assets are returned once even when split into several clips. */
+export function timelineTranscriptionTargets(
+  document: EditorDocumentV2,
+  selection: CaptionSourceSelection = { mode: 'auto' },
+): TimelineTranscriptionTarget[] {
+  const all = document.timeline.tracks.flatMap((track) => track.clips
+    .filter((clip) => isCaptionableClip(document, clip))
+    .map((clip) => ({ trackId: track.id, trackMuted: track.muted, clip })));
+  const eligible = selection.mode === 'auto' ? all.filter((entry) => !entry.trackMuted) : all;
+  const selected = selection.mode === 'auto'
+    ? eligible
+    : selection.mode === 'track'
+      ? eligible.filter((entry) => entry.trackId === selection.trackId)
+      : eligible.filter((entry) => entry.clip.id === selection.clipId);
+  const selectedGroups = new Set(selected.map((entry) => entry.clip.linkGroupId).filter((id): id is string => !!id));
+  const expanded = selection.mode === 'auto'
+    ? selected
+    : [...selected, ...all.filter((entry) => entry.clip.linkGroupId && selectedGroups.has(entry.clip.linkGroupId))];
+  const audioGroups = new Set(eligible
+    .filter((entry) => entry.clip.kind === 'audio' && entry.clip.linkGroupId)
+    .map((entry) => entry.clip.linkGroupId!));
+  const seenAssets = new Set<string>();
+  return expanded
+    .filter((entry) => entry.clip.kind === 'audio' || !entry.clip.linkGroupId || !audioGroups.has(entry.clip.linkGroupId))
+    .sort((left, right) => left.clip.startFrame - right.clip.startFrame || left.clip.id.localeCompare(right.clip.id))
+    .flatMap((entry) => {
+      if (seenAssets.has(entry.clip.assetId)) return [];
+      seenAssets.add(entry.clip.assetId);
+      return [{ trackId: entry.trackId, clipId: entry.clip.id, assetId: entry.clip.assetId }];
+    });
 }
 
 function transcriptBearingClips(document: EditorDocumentV2, clips: readonly TimelineClip[]): SpeechTimelineClip[] {
@@ -68,26 +129,67 @@ function transcriptBearingClips(document: EditorDocumentV2, clips: readonly Time
     .sort((left, right) => left.startFrame - right.startFrame);
 }
 
-function autoSpeechClips(document: EditorDocumentV2): SpeechTimelineClip[] {
-  const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-  const visualSpeech = transcriptBearingClips(document, primary?.clips ?? []);
-  if (visualSpeech.length) return visualSpeech;
-
-  const narration = document.timeline.tracks.find((track) => track.type === 'audio' && track.role === 'narration');
-  const narrated = transcriptBearingClips(document, narration?.clips ?? []);
-  if (narrated.length) return narrated;
-
+/** The spoken lane a transcript-first UI should expose by default. As in a professional NLE, a semantic
+ * primary lane is only one candidate; the lane with the most surviving words wins. */
+export function dominantTimelineSpeechTrack(document: EditorDocumentV2): TimelineSpeechTrack | null {
   return document.timeline.tracks
-    .map((track) => transcriptBearingClips(document, track.clips))
-    .filter((clips) => clips.length)
+    .filter((track) => !track.muted)
+    .map((track) => ({ trackId: track.id, clips: transcriptBearingClips(document, track.clips) }))
+    .filter((entry) => entry.clips.length)
     .sort((left, right) => (
-      right.reduce((sum, clip) => sum + clip.durationFrames, 0)
-      - left.reduce((sum, clip) => sum + clip.durationFrames, 0)
-    ))[0] ?? [];
+      right.clips.reduce((sum, clip) => sum + spokenWordCount(document, clip), 0)
+      - left.clips.reduce((sum, clip) => sum + spokenWordCount(document, clip), 0)
+    ) || left.trackId.localeCompare(right.trackId))[0] ?? null;
+}
+
+/** Map an asset-clock range to every surviving occurrence on one real speech lane. */
+export function timelineSpeechRangesForAsset(
+  document: EditorDocumentV2,
+  trackId: string,
+  assetId: string,
+  sourceFromSec: number,
+  sourceToSec: number,
+  clipId?: string,
+): TimelineSpeechRange[] {
+  if (!assetId || !Number.isFinite(sourceFromSec) || !Number.isFinite(sourceToSec) || sourceToSec <= sourceFromSec) return [];
+  const track = document.timeline.tracks.find((candidate) => candidate.id === trackId);
+  if (!track) return [];
+  return transcriptBearingClips(document, track.clips).flatMap((clip) => {
+    if (clip.assetId !== assetId || (clipId && clip.id !== clipId)) return [];
+    const range = sourceRange(clip, document.canvas.fps);
+    const sourceFrom = Math.max(sourceFromSec, range.start);
+    const sourceTo = Math.min(sourceToSec, range.end);
+    if (sourceTo - sourceFrom <= 0.001) return [];
+    const sourceSpan = range.end - range.start;
+    if (sourceSpan <= 0) return [];
+    const startFrame = clip.startFrame + Math.round(((sourceFrom - range.start) / sourceSpan) * clip.durationFrames);
+    const endFrame = clip.startFrame + Math.round(((sourceTo - range.start) / sourceSpan) * clip.durationFrames);
+    if (endFrame <= startFrame) return [];
+    return [{
+      trackId,
+      clipId: clip.id,
+      assetId,
+      startFrame,
+      endFrame,
+      sourceFromSec: sourceFrom,
+      sourceToSec: sourceTo,
+    }];
+  }).sort((left, right) => right.startFrame - left.startFrame || left.clipId.localeCompare(right.clipId));
+}
+
+function spokenWordCount(document: EditorDocumentV2, clip: SpeechTimelineClip): number {
+  const range = sourceRange(clip, document.canvas.fps);
+  return (document.semantics.transcripts[clip.assetId] ?? []).reduce((count, segment) => {
+    if (segment.words?.length) {
+      return count + segment.words.filter((word) => word.end > range.start && word.start < range.end).length;
+    }
+    if (segment.end <= range.start || segment.start >= range.end) return count;
+    return count + Math.max(1, segment.text.trim().split(/\s+|(?=\p{Script=Han})/u).filter(Boolean).length);
+  }, 0);
 }
 
 function selectedSpeechClips(document: EditorDocumentV2, selection: CaptionSourceSelection): SpeechTimelineClip[] {
-  if (selection.mode === 'auto') return autoSpeechClips(document);
+  if (selection.mode === 'auto') return dominantTimelineSpeechTrack(document)?.clips ?? [];
   if (selection.mode === 'track') {
     const track = document.timeline.tracks.find((candidate) => candidate.id === selection.trackId);
     return transcriptBearingClips(document, track?.clips ?? []);
