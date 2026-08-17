@@ -53,10 +53,8 @@ import {
   dragPropsFor,
   useAudioPreview,
 } from './asset-card';
-import { audioCoverUrl, fileSig } from './media';
+import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
 import {
-  deleteLocalFolderHandle,
-  deleteLocalVideo,
   getLocalFolderHandle,
   loadLocalFolderFile,
   loadLocalVideo,
@@ -109,8 +107,8 @@ const MEDIA_PICKER_TYPES = [
 
 type LocalKind = LocalAssetKind;
 
-/** srcSig = name:size:lastModified — recover the filename part (it may itself contain colons). */
-const sigName = (sig: string) => sig.split(':').slice(0, -2).join(':') || sig;
+/** Recover the display filename from legacy or content-fingerprinted durable locators. */
+const sigName = (sig: string) => fileNameFromSig(sig);
 
 /** One import-registry entry: WHICH file (identity + display facts), never bytes. */
 type RegEntry = LocalAssetIndexEntry;
@@ -279,7 +277,7 @@ export function MyAssetsPanel({
   mainSourceUrl?: string | null;
   hasMainSource?: boolean;
   /** Delete a source from the TRACK too (workbench-side comp surgery: every shot cut from it goes). null = the main source. */
-  onDeleteAsset?: (src: string | null) => void;
+  onDeleteAsset?: (src: string | null, sig?: string | null) => boolean | void;
   /** Per-asset liveness of a track source's bytes in this session (workbench-held Files). */
   isSrcLive?: (url: string) => boolean;
   /** Per-asset reconnect for a track source whose bytes are missing (handle/OPFS/vault → re-pick). null = main. */
@@ -654,7 +652,7 @@ export function MyAssetsPanel({
   };
 
   const finishReconnect = async (e: RegEntry, f: File, handle?: FileSystemFileHandle) => {
-    if (fileSig(f) !== e.sig) {
+    if (!(await fileMatchesSig(f, e.sig))) {
       toast.error(t('workbench.checksumMismatch'));
       return false;
     }
@@ -685,7 +683,7 @@ export function MyAssetsPanel({
       let restored = 0;
       for (const e of group.entries) {
         const file = e.folder ? byPath.get(e.folder.path) : undefined;
-        if (file && fileSig(file) === e.sig && (await finishReconnect(e, file))) restored += 1;
+        if (file && (await fileMatchesSig(file, e.sig)) && (await finishReconnect(e, file))) restored += 1;
       }
       reportFolderRestore(restored, group.entries.length);
     } finally {
@@ -778,15 +776,10 @@ export function MyAssetsPanel({
 
   // ---- remove ----------------------------------------------------------------------------------
 
-  /** THE removal core: drop every local trace of a sig — native handle + OPFS bytes (forced cache
-   *  eviction; other projects referencing the same file degrade to re-import/cloud), registry
-   *  entry, and the live link (blob revoked). Deleted assets never resurface as restore cards. */
+  /** Remove this project's registry/link. OPFS and native-handle entries are shared recovery caches:
+   * deleting them here can break another project that references the same local file, so lifecycle
+   * pruning owns physical eviction instead. The original device file is never touched. */
   const evict = (sig: string) => {
-    const entry = regRef.current.find((e) => e.sig === sig);
-    if (entry?.folder && regRef.current.filter((e) => e.folder?.id === entry.folder?.id).length === 1) {
-      void deleteLocalFolderHandle(entry.folder.id).catch(() => {});
-    }
-    void deleteLocalVideo(sig).catch(() => {});
     updateReg((r) => r.filter((x) => x.sig !== sig));
     unlink(sig);
     const u = coversRef.current.get(sig);
@@ -800,7 +793,10 @@ export function MyAssetsPanel({
   };
 
   const evictRestoreEntry = (entry: RegEntry) => {
-    if (trackSrcBySig.has(entry.sig)) onDeleteAsset?.(trackSrcBySig.get(entry.sig) ?? null);
+    if (
+      trackSrcBySig.has(entry.sig) &&
+      onDeleteAsset?.(trackSrcBySig.get(entry.sig) ?? null, entry.sig) === false
+    ) return;
     evict(entry.sig);
   };
 
@@ -814,7 +810,7 @@ export function MyAssetsPanel({
       confirmLabel: t('tools.delete_block.label'),
     });
     if (!ok) return;
-    if (src !== undefined) onDeleteAsset?.(src);
+    if (src !== undefined && onDeleteAsset?.(src, it.sig) === false) return;
     if (it.sig) evict(it.sig);
     toast.success(t('panels.deleted'));
   };

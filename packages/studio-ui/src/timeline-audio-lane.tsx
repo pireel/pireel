@@ -201,7 +201,7 @@ function AudioLaneImpl({ clips, disabledIds, dur, surfaceDur = dur, pps, top, pe
                   e.stopPropagation();
                   onToggleMute(base.id, !clip.muted);
                 }}
-                className={`bg-panel/85 text-ink-3 hover:bg-panel hover:text-ink focus-visible:ring-accent absolute top-0.5 right-1 z-30 flex h-3 w-3 items-center justify-center rounded-[2px] shadow-sm backdrop-blur-sm transition-opacity focus-visible:ring-1 focus-visible:outline-none ${
+                className={`bg-panel/85 text-ink-3 hover:bg-panel hover:text-ink focus-visible:ring-accent absolute top-0.5 right-1 z-30 flex h-3 w-3 items-center justify-center rounded-sm shadow-sm backdrop-blur-sm transition-opacity focus-visible:ring-1 focus-visible:outline-none ${
                   clip.muted
                     ? 'opacity-100'
                     : 'opacity-0 group-hover/aud:opacity-100 focus-visible:opacity-100'

@@ -204,7 +204,9 @@ export const PANELS_EN: Record<string, string> = {
   "panels.localVisualSearchDownloadProgress":
     "On-device visual search model download progress",
   "panels.localDeleteBody":
-    "Also removes it from the timeline and clears the on-device cached file",
+    "Also removes it from this project's timeline. The original file on your device is unchanged.",
+  "panels.assetUsedByOtherOutput":
+    "This asset is still used by another output. Remove it there first.",
   "panels.filterAssets": "Filter assets",
   "panels.localReconnect": "Click to restore",
   "panels.localReconnectFailed":

@@ -4,13 +4,14 @@
  * user to re-pick the file. best-effort: unsupported / evicted / any failure silently degrades back
  * to the "re-import" prompt, never worse than not having it.
  *
- * Storage key = fileSig (name:size:lastModified). The File metadata in OPFS (name/mtime/type) is what
+ * Storage key = a hash of the durable media signature (new browser imports add a bounded content
+ * fingerprint; legacy name:size:lastModified locators remain readable). The File metadata in OPFS is what
  * was written to disk, not the original file's — on retrieval the File is rebuilt from the sidecar meta
  * so that fileSig(retrieved) === original sig (draft reconnect validation, ASR/visual-analysis cache,
  * and autosave sig all depend on this identity).
  */
 
-import { fileSig } from './media';
+import { fileMatchesSig, fileNameFromSig, fileSig, rememberDurableFileSig } from './media';
 
 const DIR = 'local-videos';
 const MAX_FILES = 12; // Videos are large — keep only the most recent N (LRU by write time); beyond that, purge with their meta
@@ -74,8 +75,8 @@ async function handleOp<T>(mode: IDBTransactionMode, op: (st: IDBObjectStore) =>
 }
 
 /** Register a picked file's native handle for this sig (the zero-copy backend). */
-export async function saveLocalHandle(sig: string, handle: FileSystemFileHandle): Promise<void> {
-  await handleOp('readwrite', (st) => st.put(handle, sig));
+export async function saveLocalHandle(sig: string, handle: FileSystemFileHandle): Promise<boolean> {
+  return (await handleOp('readwrite', (st) => st.put(handle, sig))) != null;
 }
 
 /** Persist one folder authorization separately from its files. Structured-cloned handles stay on
@@ -125,7 +126,7 @@ export async function loadLocalFolderFile(
     for (const segment of parts.slice(0, -1)) cursor = await cursor.getDirectoryHandle(segment);
     const handle = await cursor.getFileHandle(parts[parts.length - 1]!);
     const file = await handle.getFile();
-    if (fileSig(file) !== sig) return null;
+    if (!(await fileMatchesSig(file, sig))) return null;
     await saveLocalHandle(sig, handle);
     return { file, handle };
   } catch {
@@ -144,7 +145,7 @@ async function loadFromHandle(sig: string): Promise<File | null> {
     }
     if (perm !== 'granted') return null;
     const f = await h.getFile();
-    if (fileSig(f) !== sig) return null; // moved/renamed/edited on disk: identity broken → treat as a miss (reconnect flow takes over)
+    if (!(await fileMatchesSig(f, sig))) return null; // moved/renamed/edited on disk: identity broken → treat as a miss (reconnect flow takes over)
     return f;
   } catch {
     return null;
@@ -159,8 +160,14 @@ interface StoredMeta {
   pinned?: boolean;
 }
 
-/** The sig contains the filename (which may have CJK/spaces/colons); normalize to an OPFS-safe name; size:mtime guarantees uniqueness. */
-const sigKey = (sig: string) => sig.replace(/[^a-zA-Z0-9._-]/g, '_');
+/** OPFS names must not be derived by replacing unsupported characters: two different CJK names can
+ * collapse to the same underscore-only key. Hash the complete durable locator instead. */
+async function sigKey(sig: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sig));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+const legacySigKey = (sig: string): string => sig.replace(/[^a-zA-Z0-9._-]/g, '_');
 
 async function readStoredMeta(dir: FileSystemDirectoryHandle, key: string): Promise<StoredMeta | null> {
   try {
@@ -193,23 +200,23 @@ export async function saveLocalVideo(
   sig: string,
   handle?: FileSystemFileHandle,
   options?: { pinned?: boolean; fallbackCopy?: boolean },
-): Promise<void> {
+): Promise<boolean> {
   file = alignFileToSig(file, sig); // stored meta must match the sig key, or later loads mint a different identity
   if (handle) {
     // A folder authorization can resolve every child zero-copy. Individual file handles also get
     // a bounded OPFS fallback so a reload stays seamless when an embedded browser drops permission.
-    await saveLocalHandle(sig, handle);
-    if (!options?.fallbackCopy) return;
+    const handleSaved = await saveLocalHandle(sig, handle);
+    if (handleSaved && !options?.fallbackCopy) return true;
   }
   // A registered handle already covers this sig — bytes are reachable from disk, don't duplicate into OPFS.
   // Pinned folder-input and requested fallback copies must survive even if a stale handle exists.
-  if (!options?.pinned && !options?.fallbackCopy && (await handleOp('readonly', (st) => st.get(sig))) != null) return;
+  if (!options?.pinned && !options?.fallbackCopy && (await handleOp('readonly', (st) => st.get(sig))) != null) return true;
   const dir = await dirHandle();
-  if (!dir) return;
+  if (!dir) return false;
   try {
     // Request persistence (best-effort): if denied, accept the risk of eviction
     void navigator.storage.persist?.().catch(() => {});
-    const key = sigKey(sig);
+    const key = await sigKey(sig);
     try {
       const existing = await (await dir.getFileHandle(key)).getFile();
       if (existing.size === file.size) {
@@ -221,7 +228,7 @@ export async function saveLocalVideo(
             pinned: true,
           });
         }
-        return; // Same sig fully on disk (content pinned by size+mtime): skip byte rewrite
+        return true; // Same sig fully on disk (content pinned by size+mtime): skip byte rewrite
       }
       // Size mismatch = an interrupted earlier write; fall through and rewrite so the entry heals
     } catch {
@@ -239,8 +246,10 @@ export async function saveLocalVideo(
     await w.close();
     await writeStoredMeta(dir, key, meta);
     await prune(dir);
+    return true;
   } catch (e) {
     console.warn('[studio] save local video failed', e);
+    return false;
   }
 }
 
@@ -297,7 +306,7 @@ export async function saveLocalStream(
   if (!dir) throw new Error('local media storage is unavailable for streamed import');
 
   void navigator.storage.persist?.().catch(() => {});
-  const key = sigKey(sig);
+  const key = await sigKey(sig);
   const expectedSize = options.expectedSize ?? null;
   const sigParts = sig.split(':');
   const sigMtime = Number(sigParts[sigParts.length - 1]);
@@ -382,12 +391,32 @@ export async function loadLocalVideo(sig: string): Promise<File | null> {
   const dir = await dirHandle();
   if (!dir) return null;
   try {
-    const key = sigKey(sig);
-    const fh = await dir.getFileHandle(key);
-    const stored = await fh.getFile();
-    if (!stored.size) return null;
-    const meta = await readStoredMeta(dir, key);
-    return alignFileToSig(meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored, sig);
+    const key = await sigKey(sig);
+    try {
+      const fh = await dir.getFileHandle(key);
+      const stored = await fh.getFile();
+      if (!stored.size) return null;
+      const meta = await readStoredMeta(dir, key);
+      return alignFileToSig(meta ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified }) : stored, sig);
+    } catch {
+      // One-time compatibility read for files written before keys became collision-safe hashes.
+      // Validate metadata before migrating because the old sanitizer could collapse two CJK names.
+      const oldKey = legacySigKey(sig);
+      const oldHandle = await dir.getFileHandle(oldKey);
+      const stored = await oldHandle.getFile();
+      const meta = await readStoredMeta(dir, oldKey);
+      const candidate = meta
+        ? new File([stored], meta.name, { type: meta.type, lastModified: meta.lastModified })
+        : stored;
+      if (!stored.size || !(await fileMatchesSig(candidate, sig))) return null;
+      const aligned = alignFileToSig(candidate, sig);
+      const migrated = await saveLocalVideo(aligned, sig, undefined, { pinned: meta?.pinned });
+      if (migrated) {
+        try { await dir.removeEntry(oldKey); } catch { /* already absent */ }
+        try { await dir.removeEntry(`${oldKey}.meta.json`); } catch { /* already absent */ }
+      }
+      return aligned;
+    }
   } catch {
     return null;
   }
@@ -402,8 +431,11 @@ export function alignFileToSig(f: File, sig: string): File {
   const mt = Number(p[p.length - 1]);
   const size = Number(p[p.length - 2]);
   if (p.length < 3 || !Number.isFinite(mt) || f.size !== size) return f;
-  if (fileSig(f) === sig) return f;
-  return new File([f], p.slice(0, -2).join(':'), { type: f.type, lastModified: mt });
+  if (fileSig(f) === sig) return rememberDurableFileSig(f, sig);
+  return rememberDurableFileSig(
+    new File([f], fileNameFromSig(sig), { type: f.type, lastModified: mt }),
+    sig,
+  );
 }
 
 /** Forced eviction (user deleted the asset): drop the bytes + meta sidecar. Same contract as LRU
@@ -412,7 +444,7 @@ export async function deleteLocalVideo(sig: string): Promise<void> {
   await handleOp('readwrite', (st) => st.delete(sig)); // drop the native handle too (only our reference — the file on disk is untouched)
   const dir = await dirHandle();
   if (!dir) return;
-  const key = sigKey(sig);
+  const key = await sigKey(sig);
   try {
     await dir.removeEntry(key);
   } catch {
@@ -422,6 +454,11 @@ export async function deleteLocalVideo(sig: string): Promise<void> {
     await dir.removeEntry(`${key}.meta.json`);
   } catch {
     /* already gone */
+  }
+  const oldKey = legacySigKey(sig);
+  if (oldKey !== key) {
+    try { await dir.removeEntry(oldKey); } catch { /* already gone */ }
+    try { await dir.removeEntry(`${oldKey}.meta.json`); } catch { /* already gone */ }
   }
 }
 

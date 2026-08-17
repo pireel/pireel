@@ -114,6 +114,7 @@ import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf,
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
 import { loadLocalFolderFile, loadLocalVideo, saveLocalVideo } from './local-media';
+import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { normalizeStudioToolInputReferences } from './studio-tool-input-references';
 import { analyzeVisual, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
@@ -294,7 +295,7 @@ export interface AgentToolCtx {
   setCutTransition: (cutSec: number, effect: CutTransitionEffect | null, direction?: TransitionDirection) => void;
   resizeCutTransition: (shotId: string, durationSec: number) => void;
   // Audio tracks (use-bgm.ts): mount auto-levels from measured loudness; patch/remove target a clip id
-  audioMount: (file: File, label?: string, opts?: { startSec?: number }) => Promise<string | undefined>;
+  audioMount: (file: File, label?: string, opts?: { startSec?: number; sig?: string | null }) => Promise<string | undefined>;
   audioPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => { ok: boolean; error?: string };
   audioRemove: (id: string) => { ok: boolean; error?: string };
   audioRemoveMany: (ids: readonly string[]) => { ok: boolean; error?: string };
@@ -557,13 +558,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 if (!file) {
                   const source = resolveAssetUrl(asset);
                   if (!source) return { ok: false, error: `audio bytes unavailable: ${targetAssetId}` };
-                  const requestUrl = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/')
-                    ? source
-                    : `/api/media/fetch?url=${encodeURIComponent(source)}`;
-                  const response = await race(fetch(requestUrl, { ...(signal ? { signal } : {}) }));
-                  if (!response.ok) return { ok: false, error: `audio fetch failed: HTTP ${response.status}` };
-                  const contentType = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
-                  file = new File([await response.blob()], `${asset.label || targetAssetId}.mp3`, { type: contentType, lastModified: 0 });
+                  try {
+                    file = (await race(materializeRemoteMedia(source, {
+                      name: `${asset.label || targetAssetId}.mp3`,
+                      type: 'audio/mpeg',
+                      sig: asset.locator.localSig,
+                      signal,
+                    }))).file;
+                  } catch (error) {
+                    return { ok: false, error: `audio fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+                  }
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
                 const segs = await race(studioProviders().transcriber.transcribe(file));
@@ -819,13 +823,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 let file = source ? clipFilesRef.current.get(source) ?? null : null;
                 if (!file && targetAsset.locator.localSig) file = await loadLocalVideo(targetAsset.locator.localSig);
                 if (!file && source) {
-                  const requestUrl = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/')
-                    ? source
-                    : `/api/media/fetch?url=${encodeURIComponent(source)}`;
-                  const response = await race(fetch(requestUrl, { ...(signal ? { signal } : {}) }));
-                  if (!response.ok) return { ok: false, error: `video fetch failed: HTTP ${response.status}` };
-                  const contentType = response.headers.get('content-type')?.split(';')[0] || 'video/mp4';
-                  file = new File([await response.blob()], `${targetAsset.label || targetAssetId}.mp4`, { type: contentType, lastModified: 0 });
+                  try {
+                    file = (await race(materializeRemoteMedia(source, {
+                      name: `${targetAsset.label || targetAssetId}.mp4`,
+                      type: 'video/mp4',
+                      sig: targetAsset.locator.localSig,
+                      signal,
+                    }))).file;
+                  } catch (error) {
+                    return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+                  }
                 }
                 if (!file) return { ok: false, error: `video bytes unavailable: ${targetAssetId}` };
                 const probe = await probeVideoFile(file).catch(() => null);
@@ -1420,11 +1427,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   } else {
                     const source = resolveAssetUrl(asset);
                     if (source) {
-                      const requestUrl = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/')
-                        ? source
-                        : `/api/media/fetch?url=${encodeURIComponent(source)}`;
-                      const response = await race(fetch(requestUrl, { ...(signal ? { signal } : {}) }));
-                      if (response.ok) blob = await response.blob();
+                      try {
+                        const materialized = await race(materializeRemoteMedia(source, {
+                          name: label,
+                          type: 'image/jpeg',
+                          signal,
+                        }));
+                        blob = materialized.file;
+                      } catch (error) {
+                        failed.push({ ref, error: `image fetch failed: ${error instanceof Error ? error.message : String(error)}` });
+                        continue;
+                      }
                     }
                   }
                 }
@@ -2473,8 +2486,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const urlIn = typeof input.url === 'string' ? input.url.trim() : '';
             if (urlIn) {
               report(t('workbench.fetchingMusicBytes'));
-              const pr = await fetch(`/api/media/fetch?url=${encodeURIComponent(urlIn)}`);
-              if (!pr.ok) return { ok: false, error: t('workbench.musicGenFailed') };
               const name = (() => {
                 try {
                   return decodeURIComponent(new URL(urlIn).pathname.split('/').pop() || '') || 'bgm.mp3';
@@ -2482,8 +2493,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   return 'bgm.mp3';
                 }
               })();
-              const f = new File([await pr.blob()], name, { type: pr.headers.get('content-type') || 'audio/mpeg' });
-              const newId = await audioMount(f, undefined, typeof knobs.startSec === 'number' ? { startSec: knobs.startSec } : undefined);
+              let materialized;
+              try {
+                materialized = await materializeRemoteMedia(urlIn, { name, type: 'audio/mpeg', signal });
+              } catch {
+                return { ok: false, error: t('workbench.musicGenFailed') };
+              }
+              const newId = await audioMount(materialized.file, undefined, {
+                ...(typeof knobs.startSec === 'number' ? { startSec: knobs.startSec } : {}),
+                sig: materialized.sig,
+              });
               if (!newId) return { ok: false, error: t('workbench.musicGenFailed') };
               const { startSec: _s, ...rest } = knobs;
               if (Object.keys(rest).length) {
@@ -2530,9 +2549,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             try {
               report(t('workbench.fetchingClipBytes'));
               const proxyFetch = async (u: string): Promise<File | null> => {
-                const pr = await fetch(`/api/media/fetch?url=${encodeURIComponent(u)}`);
-                if (!pr.ok) return null;
-                const b = await pr.blob();
                 const name = (() => {
                   try {
                     return decodeURIComponent(new URL(u).pathname.split('/').pop() || '') || 'clip.mp4';
@@ -2540,8 +2556,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     return 'clip.mp4';
                   }
                 })();
-                // Pin lastModified to 0: the synthesized File's sig (name:size:0) is stable across fetches, so cloud backup/OPFS don't store duplicates
-                return new File([b], name, { type: b.type || 'video/mp4', lastModified: 0 });
+                try {
+                  return (await materializeRemoteMedia(u, { name, type: 'video/mp4' })).file;
+                } catch {
+                  return null;
+                }
               };
               let f: File | null = null;
               if (sigIn) {

@@ -1,5 +1,5 @@
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
-import { fileSig } from './media';
+import { durableFileSig } from './media';
 import { saveLocalStream, saveLocalVideo } from './local-media';
 
 export type LocalAssetKind = 'video' | 'image' | 'audio';
@@ -87,7 +87,7 @@ async function materialize(
   if (source.type === 'browser')
     return {
       file: source.file,
-      sig: fileSig(source.file),
+      sig: await durableFileSig(source.file),
       persisted: false,
     };
 
@@ -136,7 +136,7 @@ export async function importLocalSource(
   const handle = source.type === 'browser' ? source.handle : undefined;
   const folder = source.folder;
   if (!persisted) {
-    await saveLocalVideo(file, sig, handle, {
+    const stored = await saveLocalVideo(file, sig, handle, {
       // Still images are small enough to keep durably and are rendered from several runtimes
       // (parent timeline + opaque preview iframe). Never make their availability depend only on a
       // native handle whose permission can fall back to "prompt" after a refresh.
@@ -145,6 +145,9 @@ export async function importLocalSource(
       // folder handle so a hot reload does not turn a valid clip into an unresolved locator.
       fallbackCopy: kind === 'image' || Boolean(handle && !folder),
     });
+    if (!stored) {
+      throw new Error('local media could not be persisted on this device');
+    }
   }
   return {
     file,

@@ -116,6 +116,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.couldNotFetchAsset": "拉取素材失败,稍后再试",
   "workbench.localAssetUnreachable":
     "本地素材不可用,文件可能已移动或缓存被清,重新导入即可",
+  "workbench.localPersistenceUnavailable":
+    "当前会话可以继续使用这个素材，但本地恢复存储不可用；刷新后可能需要重新选择",
   "workbench.srcMissing": "源文件缺失",
   "workbench.canvasRatio": "画布比例",
   "workbench.localVideoUseTrack":

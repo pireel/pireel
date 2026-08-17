@@ -73,6 +73,7 @@ import {
 import { disposeSourceRig, openSource, sampleAt, type SourceRig } from './export-video-source';
 import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl';
 import { injectPreviewRuntime } from './sample-composition';
+import { materializeRemoteMedia } from './remote-media';
 import { buildInlineFontCss } from './export-fonts';
 import { t } from './i18n';
 import {
@@ -222,13 +223,15 @@ async function inlineImages(root: HTMLElement): Promise<void> {
       if (!src || src.startsWith('data:')) return;
       if (parseLocalImageLocator(src)) throw new Error('Local image locator could not be resolved for export');
       try {
-        const sameOrigin = src.startsWith('/') || src.startsWith(location.origin);
-        const url = sameOrigin ? src : `/api/media/fetch?url=${encodeURIComponent(src)}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`image fetch failed (${response.status})`);
-        img.setAttribute('src', await blobDataUri(await response.blob()));
-      } catch {
-        /* One image failing doesn't block export: it's just absent */
+        const materialized = await materializeRemoteMedia(src, {
+          name: 'component-image',
+          type: 'image/png',
+        });
+        img.setAttribute('src', await blobDataUri(materialized.file));
+      } catch (error) {
+        throw new Error(
+          `Required image could not be loaded for export: ${src}${error instanceof Error ? ` (${error.message})` : ''}`,
+        );
       }
     }),
   );

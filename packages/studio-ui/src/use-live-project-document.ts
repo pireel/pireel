@@ -56,6 +56,10 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
     rememberLiveAssetUrl(sessionRef.current!, assetId, url);
   }, []);
 
+  const clearRuntimeAssetUrls = useCallback(() => {
+    sessionRef.current!.runtimeAssetUrls.clear();
+  }, []);
+
   return {
     composition: state.composition,
     compositionRef,
@@ -65,6 +69,7 @@ export function useLiveProjectDocument(options: UseLiveProjectDocumentOptions) {
     dispatchCommand,
     resolveAssetUrl,
     rememberAssetUrl,
+    clearRuntimeAssetUrls,
     persistableDocument,
   };
 }

@@ -25,6 +25,7 @@ export function useProjectOutputRuntime(deps: {
   pendingRestoreRef: MutableRefObject<StudioDraft | null>;
   setVideoFile: (file: File | null) => void;
   pickVideoFile: (file: File, opts?: VideoPickOptions) => Promise<void>;
+  fetchCloudMedia?: (sig: string, cloudKey?: string) => Promise<File | null>;
   recoverLocalClips: (shots: NonNullable<Composition['shots']>) => Promise<void> | void;
   resetEditor: () => void;
 }) {
@@ -59,10 +60,12 @@ export function useProjectOutputRuntime(deps: {
       const wantsMain = shots.some((shot) => !shot.src) || (!shots.length && target.videoDurationSec != null);
       try {
         const primaryId = target.document.semantics.primaryNarrativeAssetId;
-        const mainSig = (primaryId ? target.document.assets[primaryId]?.locator.localSig : undefined) ?? target.videoSig;
+        const mainAsset = primaryId ? target.document.assets[primaryId] : undefined;
+        const mainSig = mainAsset?.locator.localSig ?? target.videoSig;
         if (wantsMain && mainSig) {
           deps.videoSigRef.current = mainSig;
-          const file = previousSig === mainSig && previousFile ? previousFile : await loadLocalVideo(mainSig);
+          let file = previousSig === mainSig && previousFile ? previousFile : await loadLocalVideo(mainSig);
+          if (!file && deps.fetchCloudMedia) file = await deps.fetchCloudMedia(mainSig, mainAsset?.locator.cloudKey);
           if (file) await deps.pickVideoFile(file, outputSwitchVideoPickOptions(mainSig));
           else deps.setVideoFile(null);
         } else {

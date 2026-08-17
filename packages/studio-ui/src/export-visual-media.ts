@@ -1,6 +1,7 @@
 import {
   IDENTITY_MEDIA_FRAMING,
   normalizeAtomicMediaFraming,
+  parseLocalImageLocator,
   shotFilterCss,
   sourceDrawRect,
   supplementalVisualStateAt,
@@ -9,6 +10,8 @@ import {
 } from '@pireel/studio-engine/composition';
 import type { VideoSample } from 'mediabunny';
 import { t } from './i18n';
+import { materializeRemoteMedia } from './remote-media';
+import { loadLocalVideo } from './local-media';
 
 export interface SampledVisualVideo {
   sourceWidth: number;
@@ -21,10 +24,11 @@ type VisualCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingCo
 export async function loadExportVideoFile(source: string, localFiles: Map<string, File>): Promise<File> {
   const local = localFiles.get(source);
   if (local) return local;
-  const direct = source.startsWith('blob:') || source.startsWith('data:') || source.startsWith('/') || source.startsWith(location.origin);
-  const response = await fetch(direct ? source : `/api/media/fetch?url=${encodeURIComponent(source)}`);
-  if (!response.ok) throw new Error(t('workbench.failedFetchInsertClip'));
-  return new File([await response.blob()], 'visual-clip.mp4', { type: 'video/mp4' });
+  try {
+    return (await materializeRemoteMedia(source, { name: 'visual-clip.mp4', type: 'video/mp4' })).file;
+  } catch {
+    throw new Error(t('workbench.failedFetchInsertClip'));
+  }
 }
 
 export async function loadVisualImageBitmaps(
@@ -32,15 +36,15 @@ export async function loadVisualImageBitmaps(
 ): Promise<Map<string, ImageBitmap>> {
   const images = new Map<string, ImageBitmap>();
   await Promise.all(visuals.filter((visual) => visual.kind === 'image').map(async (visual) => {
-    try {
-      const direct = visual.source.startsWith('blob:') || visual.source.startsWith('data:')
-        || visual.source.startsWith('/') || visual.source.startsWith(location.origin);
-      const response = await fetch(direct ? visual.source : `/api/media/fetch?url=${encodeURIComponent(visual.source)}`);
-      if (!response.ok) return;
-      images.set(visual.clipId, await createImageBitmap(await response.blob()));
-    } catch {
-      // Keep rendering the other layers when one offline image cannot be resolved.
-    }
+    const localSig = parseLocalImageLocator(visual.source);
+    const file = localSig
+      ? await loadLocalVideo(localSig)
+      : (await materializeRemoteMedia(visual.source, {
+          name: `visual-${visual.clipId}.image`,
+          type: 'image/png',
+        })).file;
+    if (!file) throw new Error(`Local image is unavailable on this device: ${localSig}`);
+    images.set(visual.clipId, await createImageBitmap(file));
   }));
   return images;
 }

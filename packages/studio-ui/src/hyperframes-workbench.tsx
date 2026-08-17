@@ -191,6 +191,7 @@ import {
 } from "@pireel/studio-engine/graphics-layout";
 import {
   type FilmstripFrame,
+  durableFileSig,
   extractFilmstrip,
   fileSig,
   probeVideoFile,
@@ -202,6 +203,7 @@ import {
   loadLocalVideo,
   saveLocalVideo,
 } from "./local-media";
+import { materializeRemoteMedia } from "./remote-media";
 import {
   importLocalSource,
   localAssetIndexEntry,
@@ -453,6 +455,7 @@ export function HyperframesWorkbench({
     setDocument: setEditorDocument,
     resolveAssetUrl,
     rememberAssetUrl,
+    clearRuntimeAssetUrls,
     persistableDocument,
   } = useLiveProjectDocument({
     projectId,
@@ -1399,7 +1402,9 @@ export function HyperframesWorkbench({
     | { ok: false; error: string }
   >>>(new Map());
   const localRuntimeReadyAssetIdsRef = useRef<Set<string>>(new Set());
+  const localRuntimeGenerationRef = useRef(0);
   useEffect(() => {
+    localRuntimeGenerationRef.current += 1;
     localRuntimePreparingRef.current.clear();
     localRuntimeReadyAssetIdsRef.current.clear();
   }, [projectId]);
@@ -1417,6 +1422,7 @@ export function HyperframesWorkbench({
       }
       const current = localRuntimePreparingRef.current.get(asset.id);
       if (current) return current;
+      const generation = localRuntimeGenerationRef.current;
       const task = (async () => {
         const entry = localAssetIndexRef.current.find(
           (item) =>
@@ -1427,7 +1433,13 @@ export function HyperframesWorkbench({
         const folder = !direct && entry?.folder
           ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, sig)
           : null;
-        const file = direct ?? folder?.file ?? null;
+        const cloud = !direct && !folder?.file && asset.locator.cloudKey
+          ? await studioProviders().vault.fetch(sig)
+          : null;
+        const file = direct ?? folder?.file ?? cloud ?? null;
+        if (generation !== localRuntimeGenerationRef.current) {
+          return { ok: false as const, error: 'media preparation was superseded by an output change' };
+        }
         if (!file) {
           const source = resolveAssetUrl(asset);
           if (source && !source.startsWith("blob:")) {
@@ -3741,7 +3753,7 @@ export function HyperframesWorkbench({
       toast.error(t("workbench.chooseVideoFile"));
       return;
     }
-    const sig = opts?.asSig ?? fileSig(file);
+    const sig = opts?.asSig ?? await durableFileSig(file);
     setBusyImport(true);
     try {
       const p = await probeVideoFile(file);
@@ -3759,7 +3771,9 @@ export function HyperframesWorkbench({
         durationSec: p.durationSec || 30,
       });
 
-      void saveLocalVideo(file, sig); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
+      void saveLocalVideo(file, sig).then((stored) => {
+        if (!stored) toast.info(t("workbench.localPersistenceUnavailable"));
+      }); // OPFS local library: draft restore auto-reconnects after refresh, no re-pick needed
       // Main video stays LOCAL (no auto R2 backup) — kept off deliberately; cross-device video
       // persistence is reserved for a future paid feature. Same-device reconnect uses OPFS above.
       // Inserted clips still back up (insert_clip fetches them from the cloud in another session).
@@ -3889,24 +3903,13 @@ export function HyperframesWorkbench({
       if (!source) return null;
       const mounted = clipFilesRef.current.get(source);
       if (mounted) return mounted;
-      const requestUrl =
-        source.startsWith("blob:") ||
-        source.startsWith("data:") ||
-        source.startsWith("/")
-          ? source
-          : `/api/media/fetch?url=${encodeURIComponent(source)}`;
-      const response = await fetch(requestUrl);
-      if (!response.ok)
-        throw new Error(`media fetch failed: HTTP ${response.status}`);
       const fallbackType = asset.kind === "audio" ? "audio/mpeg" : "video/mp4";
-      const contentType =
-        response.headers.get("content-type")?.split(";")[0] || fallbackType;
       const extension = asset.kind === "audio" ? "mp3" : "mp4";
-      return new File(
-        [await response.blob()],
-        `${asset.label || asset.id}.${extension}`,
-        { type: contentType, lastModified: 0 },
-      );
+      return (await materializeRemoteMedia(source, {
+        name: `${asset.label || asset.id}.${extension}`,
+        type: fallbackType,
+        sig: asset.locator.localSig,
+      })).file;
     },
     [resolveAssetUrl],
   );
@@ -4708,30 +4711,22 @@ export function HyperframesWorkbench({
    *  Measure image/video aspect ratio first, then land the block to scale — the loading placeholder is the right size from the start, no default-box-then-jump.
    *  knownDims: caller already knows the natural size (e.g. the upload masonry already has it) → use it directly, skipping the measure step.
    *  atSec: landing time when dropped on the timeline (default = playhead). */
-  /** Media entering an overlay BLOCK: the sandboxed preview doc (opaque origin) cannot resolve the
-   *  parent's blob: URLs — and blob refs die on refresh anyway. Local IMAGES bake into a bounded
-   *  data URI (≤1600px webp): self-contained in comp, so preview/export/cloud/other devices all
-   *  just work. Local VIDEOS can't (size): null = caller aborts and points at the timeline. */
-  const stageMediaOf = async (media: MediaRef): Promise<MediaRef | null> => {
+  /** Media entering an overlay block: the sandboxed preview cannot resolve parent blob URLs and
+   * blob refs die on refresh. Device-local images therefore persist a durable local locator and are
+   * transferred to the preview only at runtime. Local videos belong on a media track. */
+  const stageMediaOf = async (media: MediaRef & { sig?: string | null }): Promise<MediaRef | null> => {
     if (!media.url.startsWith("blob:")) return media;
     if (media.type === "video") {
       toast.info(t("workbench.localVideoUseTrack"));
       return null;
     }
-    try {
-      const bmp = await createImageBitmap(
-        await (await fetch(media.url)).blob(),
-      );
-      const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
-      const cv = document.createElement("canvas");
-      cv.width = Math.max(1, Math.round(bmp.width * k));
-      cv.height = Math.max(1, Math.round(bmp.height * k));
-      cv.getContext("2d")!.drawImage(bmp, 0, 0, cv.width, cv.height);
-      bmp.close();
-      return { ...media, url: cv.toDataURL("image/webp", 0.85) };
-    } catch {
-      return media; // degrade to the original URL — no worse than before
+    if (!media.sig) {
+      toast.error(t("workbench.localAssetUnreachable"));
+      return null;
     }
+    // Keep private images device-local. The preview receives the File through postMessage and
+    // export resolves the same durable locator from OPFS; project JSON never embeds image bytes.
+    return { type: 'image', url: localImageLocator(media.sig) };
   };
   const insertPanelMedia = async (
     mediaIn: MediaRef,
@@ -4886,7 +4881,7 @@ export function HyperframesWorkbench({
     if (hit) {
       if (genLockToast(hit.id)) return;
       pushUndoSnapshot();
-      const fillMedia = await stageMediaOf({ type: a.type, url: a.url });
+      const fillMedia = await stageMediaOf({ type: a.type, url: a.url, sig: a.sig });
       if (!fillMedia) return;
       setBlockMedia(hit.id, fillMedia);
       setMediaBusyPhase(hit.id, "swap");
@@ -4899,7 +4894,7 @@ export function HyperframesWorkbench({
     const startSec = Math.max(0, Math.round(tNow * 10) / 10);
     const dur = a.type === "video" ? 5 : 3;
     const dims = a.dims ?? (await mediaDims({ type: a.type, url: a.url })); // if the drag carried dimensions, skip measuring
-    const dropMedia = await stageMediaOf({ type: a.type, url: a.url });
+    const dropMedia = await stageMediaOf({ type: a.type, url: a.url, sig: a.sig });
     if (!dropMedia) return;
     const base = mediaBlock({
       startSec,
@@ -5028,12 +5023,11 @@ export function HyperframesWorkbench({
       if (!ok) return;
     }
     try {
-      const r = await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`);
-      if (!r.ok) throw new Error(String(r.status));
-      const blob = await r.blob();
-      await pickVideoFile(
-        new File([blob], "generated.mp4", { type: blob.type || "video/mp4" }),
-      );
+      const materialized = await materializeRemoteMedia(url, {
+        name: "generated.mp4",
+        type: "video/mp4",
+      });
+      await pickVideoFile(materialized.file, { asSig: materialized.sig });
     } catch (e) {
       console.warn("[studio] set main video failed", e);
       toast.error(t("workbench.couldNotReplaceMain"));
@@ -5529,13 +5523,30 @@ export function HyperframesWorkbench({
    *  gets no special treatment (src = null addresses it, even when its bytes are missing). One undo snapshot;
    *  blob URLs stay alive, so undo restores a playable track for
    *  this session (only the OPFS bytes are gone for good). */
-  const deleteAssetSource = (src: string | null) => {
+  const deleteAssetSource = (src: string | null, sig?: string | null): boolean => {
+    if (
+      sig &&
+      projectOutputs.outputsRef.current.inactive.some((output) => {
+        if (output.videoSig === sig) return true;
+        const assetIds = new Set(
+          Object.values(output.document.assets)
+            .filter((asset) => asset.locator.localSig === sig)
+            .map((asset) => asset.id),
+        );
+        return assetIds.size > 0 && output.document.timeline.tracks.some((track) =>
+          track.clips.some((clip) => 'assetId' in clip && typeof clip.assetId === 'string' && assetIds.has(clip.assetId)),
+        );
+      })
+    ) {
+      toast.error(t("panels.assetUsedByOtherOutput"));
+      return false;
+    }
     const isMain = src == null;
     const shots = ensureShots(compRef.current);
     const spans = clipSpans(shots)
       .filter((sp) => (isMain ? !sp.clip.src : sp.clip.src === src))
       .sort((a, b) => b.editedStart - a.editedStart); // end first: earlier spans' coords stay valid
-    if (spans.length === 0 && !isMain) return;
+    if (spans.length === 0 && !isMain) return true;
     const removedClipIds = new Set(spans.map((span) => span.clip.id));
     const primaryTrack = editorDocumentRef.current.timeline.tracks.find(
       (track) =>
@@ -5576,7 +5587,7 @@ export function HyperframesWorkbench({
           });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
-      return;
+      return false;
     }
     pushUndoSnapshot();
     const cleaned = pruneUnusedEditorAssets(edit.document, [
@@ -5611,6 +5622,7 @@ export function HyperframesWorkbench({
     setSelectedShotId(null);
     setSelectedShotIds(new Set());
     applyT(Math.max(0, firstStart));
+    return true;
   };
   /** Per-asset source liveness: are this source's bytes reachable in THIS session? Main = the loaded
    *  File; local clips = the held File map; remote URLs count as live (fetchable). Drives the panel's
@@ -5938,13 +5950,12 @@ export function HyperframesWorkbench({
       let f = clipFilesRef.current.get(s.src) ?? null;
       if (!f && !s.src.startsWith("blob:")) {
         try {
-          const r = await fetch(
-            `/api/media/fetch?url=${encodeURIComponent(s.src)}`,
-          );
-          if (r.ok) {
-            f = new File([await r.blob()], "clip.mp4", { type: "video/mp4" });
-            clipFilesRef.current.set(s.src, f);
-          }
+          f = (await materializeRemoteMedia(s.src, {
+            name: "clip.mp4",
+            type: "video/mp4",
+            sig: s.srcSig,
+          })).file;
+          clipFilesRef.current.set(s.src, f);
         } catch {
           /* fallthrough */
         }
@@ -6267,6 +6278,7 @@ export function HyperframesWorkbench({
     insertLibraryClipAt,
     clipPending,
     clipStrips,
+    resetRuntime: resetClipRuntime,
   } = useClipInsert({
     comp,
     compRef,
@@ -6299,10 +6311,32 @@ export function HyperframesWorkbench({
     undoStackRef.current = [];
     redoStackRef.current = [];
     chatRef.current?.clearElementPills();
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    for (const url of clipFilesRef.current.keys()) {
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+    }
+    clipFilesRef.current.clear();
+    resetClipRuntime();
+    audioOps.resetRuntime();
+    filmstripGenRef.current += 1;
+    setFilmstrip((previous) => {
+      previous.forEach((frame) => URL.revokeObjectURL(frame.url));
+      return [];
+    });
+    for (const url of localImagePreviewUrlsRef.current.values()) URL.revokeObjectURL(url);
+    localImagePreviewUrlsRef.current.clear();
+    setLocalImagePreviewUrls(new Map());
+    localRuntimeGenerationRef.current += 1;
+    localRuntimePreparingRef.current.clear();
+    localRuntimeReadyAssetIdsRef.current.clear();
+    clearRuntimeAssetUrls();
     tRef.current = 0;
     playhead.set(0);
     setT(0);
-  }, [restoreChatAfterTimelineFramePick, setSelectedId, setSelectedShotId]);
+  }, [audioOps, clearRuntimeAssetUrls, resetClipRuntime, restoreChatAfterTimelineFramePick, setSelectedId, setSelectedShotId]);
   const outputRuntime = useProjectOutputRuntime({
     projectId,
     activeId: projectOutputs.outputs.active.id,
@@ -6326,6 +6360,11 @@ export function HyperframesWorkbench({
     pendingRestoreRef,
     setVideoFile,
     pickVideoFile,
+    fetchCloudMedia: async (sig, cloudKey) => {
+      const vaulted = cloudMediaRef.current.video?.sig === sig
+        || Boolean(cloudMediaRef.current.clips?.[sig]);
+      return vaulted || cloudKey ? studioProviders().vault.fetch(sig) : null;
+    },
     recoverLocalClips,
     resetEditor: resetForOutputChange,
   });

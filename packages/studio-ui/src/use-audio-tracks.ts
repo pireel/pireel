@@ -9,7 +9,7 @@
  *  - generation: POST /api/studio/music → bytes → the same mount path as upload.
  */
 
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import {
   type AudioClip,
   type Composition,
@@ -32,6 +32,7 @@ import { bgmAutoVolumeDb, measureBufferLoudnessDb } from './loudness';
 import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
 import { getStudioSpaceId } from './gen-api';
+import { materializeRemoteMedia } from './remote-media';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import { supplementalVisualAudioSpecs } from './visual-render-plan';
@@ -84,6 +85,7 @@ export function useAudioTracks(deps: AudioTracksDeps) {
   /** Main-narration loudness cache (extract+decode is seconds on long videos — measure once per source). */
   const narrDbRef = useRef<{ sig: string; db: number | null } | null>(null);
   const recoverTriedRef = useRef<Set<string>>(new Set());
+  const runtimeGenerationRef = useRef(0);
 
   useEffect(() => {
     const objectUrls = audioObjectUrlsRef.current;
@@ -169,7 +171,9 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     audioFilesRef.current.set(sig, file);
     setAudioFileRev((v) => v + 1);
     if (peaks) setAudioPeaks((m) => new Map(m).set(sig, peaks!));
-    void saveLocalVideo(file, sig); // the OPFS library is byte-agnostic despite the name
+    void saveLocalVideo(file, sig).then((stored) => {
+      if (!stored) toast.info(t('workbench.localPersistenceUnavailable'));
+    }); // the OPFS library is byte-agnostic despite the name
     if (!opts?.sig) backupMediaToCloud(file, sig, 'clip');
     // Drop position when dragged onto the lane, otherwise the playhead (NLE default: new clips land where you are)
     const at = opts?.startSec ?? tRef.current;
@@ -205,22 +209,18 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       const f = await loadLocalVideo(opts.sig);
       if (f) return mountAudioFile(f, label, opts);
     }
-    const r = url.startsWith('blob:')
-      ? await fetch(url).catch(() => null)
-      : await fetch(`/api/media/fetch?url=${encodeURIComponent(url)}`).catch(() => null);
-    if (!r?.ok) {
+    let file: File;
+    try {
+      file = (await materializeRemoteMedia(url, {
+        name: label || 'bgm',
+        type: 'audio/mpeg',
+        sig: opts?.sig,
+      })).file;
+    } catch {
       toast.error(t('workbench.musicGenFailed'));
       return;
     }
-    const type = r.headers.get('content-type')?.split(';')[0] || 'audio/mpeg';
-    const name = (() => {
-      try {
-        return decodeURIComponent(new URL(url).pathname.split('/').pop() || '') || 'bgm';
-      } catch {
-        return 'bgm';
-      }
-    })();
-    return mountAudioFile(new File([await r.blob()], name, { type }), label, opts);
+    return mountAudioFile(file, label, { ...opts, sig: opts?.sig ?? fileSig(file) });
   };
 
   const uploadAudio = async () => {
@@ -318,15 +318,20 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       if (!sig || audioFilesRef.current.has(sig) || !clip.src.startsWith('blob:')) continue;
       if (recoverTriedRef.current.has(sig)) continue;
       recoverTriedRef.current.add(sig);
+      const generation = runtimeGenerationRef.current;
       void (async () => {
         let f = await loadLocalVideo(sig);
         if (!f) f = await studioProviders().vault.fetch(sig);
-        if (!f) return; // stays unusable → panel offers re-pick
+        if (!f || generation !== runtimeGenerationRef.current) return; // stays unusable → panel offers re-pick
         void saveLocalVideo(f, sig);
         audioFilesRef.current.set(sig, f);
         setAudioFileRev((v) => v + 1);
         void decodeAudioFile(f)
-          .then((buf) => setAudioPeaks((m) => new Map(m).set(sig, peaksOf(buf))))
+          .then((buf) => {
+            if (generation === runtimeGenerationRef.current) {
+              setAudioPeaks((m) => new Map(m).set(sig, peaksOf(buf)));
+            }
+          })
           .catch(() => {});
         const url = createAudioObjectUrl(f);
         if (!url) return;
@@ -354,10 +359,13 @@ export function useAudioTracks(deps: AudioTracksDeps) {
       const tag = `${j.key}:${fileSig(j.file)}`;
       if (srcTriedRef.current.has(tag)) continue;
       srcTriedRef.current.add(tag);
+      const generation = runtimeGenerationRef.current;
       void (async () => {
         try {
           const buf = await decodeVideoAudio(j.file);
-          if (buf) setSourcePeaks((m) => new Map(m).set(j.key, { peaks: peaksOf(buf), durationSec: buf.duration }));
+          if (buf && generation === runtimeGenerationRef.current) {
+            setSourcePeaks((m) => new Map(m).set(j.key, { peaks: peaksOf(buf), durationSec: buf.duration }));
+          }
         } catch {
           /* source without an audio track / decode failure: the strip just stays empty */
         }
@@ -405,6 +413,23 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     return out;
   }, [audioPeaks]);
 
+  /** Output checkout is a runtime boundary. Release object URLs and derived decode caches so the
+   * next output cannot accidentally reuse media from the previous deliverable. Durable bytes stay
+   * in OPFS and are recovered by sig when the newly active document is projected. */
+  const resetRuntime = useCallback(() => {
+    runtimeGenerationRef.current += 1;
+    for (const url of audioObjectUrlsRef.current) URL.revokeObjectURL(url);
+    audioObjectUrlsRef.current.clear();
+    audioFilesRef.current.clear();
+    recoverTriedRef.current.clear();
+    srcTriedRef.current.clear();
+    narrDbRef.current = null;
+    setAudioPeaks(new Map());
+    setSourcePeaks(new Map());
+    setSoloId(null);
+    setAudioFileRev((value) => value + 1);
+  }, []);
+
   return {
     audioFilesRef,
     audioPeaks,
@@ -422,5 +447,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     mountAudioFile,
     mountAudioFromUrl,
     generateAudioAsset,
+    resetRuntime,
   };
 }

@@ -33,9 +33,62 @@ export function classifyAsrResponse(value: { asr_ok?: boolean; detail?: string }
   return /returned no (?:text|transcript)|no speech/i.test(value.detail ?? '') ? 'empty' : 'failed';
 }
 
-/** File fingerprint: same file (name/size/mtime) → same key, so ASR/uploads can hit the cache. */
+const durableFileSigs = new WeakMap<File, string>();
+const CONTENT_SIG_MARKER = '#pireel=';
+
+/** Legacy synchronous identity. Newly imported browser files are upgraded through durableFileSig;
+ * callers that receive an aligned/restored File transparently get its remembered durable sig. */
 export function fileSig(file: File): string {
-  return `${file.name}:${file.size}:${file.lastModified}`;
+  return durableFileSigs.get(file) ?? `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+/** Stable lightweight content identity for newly imported files. Hashing three bounded slices keeps
+ * multi-GB videos cheap while preventing unrelated same-name/size/mtime files from sharing OPFS,
+ * ASR or cloud-vault entries. The final size/mtime fields preserve the legacy locator grammar. */
+export async function durableFileSig(file: File): Promise<string> {
+  const remembered = durableFileSigs.get(file);
+  if (remembered) return remembered;
+  const chunkSize = 64 * 1024;
+  const slices = file.size <= chunkSize * 3
+    ? [await file.arrayBuffer()]
+    : await Promise.all(
+        [0, Math.max(0, Math.floor(file.size / 2) - Math.floor(chunkSize / 2)), Math.max(0, file.size - chunkSize)]
+          .map((offset) => file.slice(offset, Math.min(file.size, offset + chunkSize)).arrayBuffer()),
+      );
+  const metadata = new TextEncoder().encode(`${file.size}\n${file.type}`);
+  const total = metadata.byteLength + slices.reduce((sum, value) => sum + value.byteLength, 0);
+  const input = new Uint8Array(total);
+  let cursor = 0;
+  input.set(metadata, cursor);
+  cursor += metadata.byteLength;
+  for (const slice of slices) {
+    input.set(new Uint8Array(slice), cursor);
+    cursor += slice.byteLength;
+  }
+  const digest = await crypto.subtle.digest('SHA-256', input);
+  const hash = [...new Uint8Array(digest)].slice(0, 16).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const sig = `${file.name}${CONTENT_SIG_MARKER}${hash}:${file.size}:${file.lastModified}`;
+  durableFileSigs.set(file, sig);
+  return sig;
+}
+
+export function rememberDurableFileSig(file: File, sig: string): File {
+  durableFileSigs.set(file, sig);
+  return file;
+}
+
+export function fileNameFromSig(sig: string): string {
+  const raw = sig.split(':').slice(0, -2).join(':') || sig;
+  const marker = raw.lastIndexOf(CONTENT_SIG_MARKER);
+  return marker >= 0 && /^[0-9a-f]{32}$/.test(raw.slice(marker + CONTENT_SIG_MARKER.length))
+    ? raw.slice(0, marker)
+    : raw;
+}
+
+export async function fileMatchesSig(file: File, sig: string): Promise<boolean> {
+  return sig.includes(CONTENT_SIG_MARKER)
+    ? (await durableFileSig(file)) === sig
+    : `${file.name}:${file.size}:${file.lastModified}` === sig;
 }
 
 /** Probe video metadata locally (MediaBunny dynamically loaded, no upload). */

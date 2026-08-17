@@ -63,11 +63,19 @@ function harness() {
   const documentRef = { current: compositionToEditorDocument({ projectId: 'test', composition: compRef.current }).document };
   const undoStackRef = { current: [] as EditorDocumentV2[] };
   const redoStackRef = { current: [documentRef.current] };
+  const asrRef = { current: null };
+  const clipAsrRef = { current: {} };
   const setDocument = (document: EditorDocumentV2, runtimeComposition?: Composition) => {
     documentRef.current = document;
     compRef.current = runtimeComposition ?? projectDocumentToComposition(document);
   };
-  return { ctx: { compRef, documentRef, undoStackRef, redoStackRef, setDocument } as unknown as AgentToolCtx, compRef, documentRef, undoStackRef, redoStackRef };
+  return {
+    ctx: { compRef, documentRef, undoStackRef, redoStackRef, asrRef, clipAsrRef, setDocument } as unknown as AgentToolCtx,
+    compRef,
+    documentRef,
+    undoStackRef,
+    redoStackRef,
+  };
 }
 
 describe('Agent composition transaction boundary', () => {

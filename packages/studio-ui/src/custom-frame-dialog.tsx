@@ -1770,7 +1770,7 @@ function MotionGraphicThumbnailGlyph({
   if (kind === "phone")
     return (
       <span
-        className="absolute bottom-1.5 left-1/2 top-1.5 w-5 -translate-x-1/2 rounded-[3px] border-2"
+        className="absolute bottom-1.5 left-1/2 top-1.5 w-5 -translate-x-1/2 rounded-sm border-2"
         style={{ borderColor: ink, background: `${accent}55` }}
       >
         <i

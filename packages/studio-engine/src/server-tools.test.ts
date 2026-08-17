@@ -96,7 +96,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       id: 'empty-broll', type: 'visual', role: 'broll', muted: false, hidden: true,
       locked: false, syncLocked: false, stackOrder: 7, clips: [],
     });
-    const raw = 'native\n```html\n<div><style>#ai-native .t{color:red}</style><div class="t">Native</div></div>\n```\n```js\ntl.to("#ai-native .t",{opacity:1,duration:.3});\n```';
+    const raw = 'native\n```html\n<div><style>#ai-native .t{color:red;font-size:36px}</style><div class="t">Native</div></div>\n```\n```js\ntl.to("#ai-native .t",{opacity:1,duration:.3});\n```';
     const applied = runServerTool('apply_block', { raw, blockId: 'ai-native', atSec: 2 }, p);
     expect(applied.result.ok, JSON.stringify(applied.result)).toBe(true);
     expect(applied.document?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'ai-native')).toMatchObject({ kind: 'graphic', startFrame: 60 });
@@ -790,7 +790,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r5.document!.semantics.transcripts[r5.document!.semantics.primaryNarrativeAssetId!]![0]!.sub).toBeUndefined();
   });
   it('apply_block:同一套 parse+lint;compose_context 占位带 suggested_instruction', () => {
-    const raw = '加一张卡\n```html\n<div id="nb">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';
+    const raw = '加一张卡\n```html\n<div id="nb" style="font-size:36px">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';
     const r = runServerTool('apply_block', { raw, atSec: 2 }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.comp!.blocks).toHaveLength(2);
@@ -852,7 +852,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     ]);
   });
   it('apply_block 更新已有元素时同步应用明确提供的 label', () => {
-    const raw = '更新卡片\n```html\n<div><style>#b1 .title{color:red}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
+    const raw = '更新卡片\n```html\n<div><style>#b1 .title{color:red;font-size:36px}</style><div class="title">Updated</div></div>\n```\n```js\ntl.to("#b1 .title", {opacity:1,duration:.3});\n```';
     const result = runServerTool('apply_block', { raw, blockId: 'b1', label: '新名称' }, proj());
     expect(result.result.ok, JSON.stringify(result.result)).toBe(true);
     expect(result.comp?.blocks.find((block) => block.id === 'b1')?.label).toBe('新名称');
@@ -861,12 +861,12 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     // compose_context 给新元素铸的 id 不在 comp 里——apply 带这个"未知" id 必须原样采用,不许报找不到
     const rc = runServerTool('compose_context', {}, proj());
     const minted = (rc.result.data as { block: { id: string } }).block.id;
-    const rawOk = `note\n\`\`\`html\n<div><style>#${minted} .t{color:red}</style><div class="t">x</div></div>\n\`\`\`\n\`\`\`js\ntl.to("#${minted} .t",{opacity:1,duration:.3});\n\`\`\``;
+    const rawOk = `note\n\`\`\`html\n<div><style>#${minted} .t{color:red;font-size:36px}</style><div class="t">x</div></div>\n\`\`\`\n\`\`\`js\ntl.to("#${minted} .t",{opacity:1,duration:.3});\n\`\`\``;
     const r1 = runServerTool('apply_block', { raw: rawOk, blockId: minted, atSec: 1 }, proj());
     expect(r1.result.ok).toBe(true);
     expect((r1.result.data as { newBlockId: string }).newBlockId).toBe(minted);
     // scope 错 id 且不带 blockId → lint 拦下,回执必须还一个稳定 id;按回执改一轮就收敛,新块用同一 id
-    const rawBad = 'note\n```html\n<div><style>#stale9 .t{color:red}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
+    const rawBad = 'note\n```html\n<div><style>#stale9 .t{color:red;font-size:36px}</style><div class="t">x</div></div>\n```\n```js\ntl.to("#stale9 .t",{opacity:1,duration:.3});\n```';
     const r2 = runServerTool('apply_block', { raw: rawBad, atSec: 1 }, proj());
     expect(r2.result.ok).toBe(false);
     const handed = (r2.result.data as { blockId: string }).blockId;

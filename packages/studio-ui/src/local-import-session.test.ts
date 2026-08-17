@@ -171,8 +171,6 @@ describe('unified local import session', () => {
       lastModified: 17,
     });
     const handle = { getFile: async () => image } as FileSystemFileHandle;
-    const sig = fileSig(image);
-
     const session = await runLocalImportSession([{
       type: 'browser',
       file: image,
@@ -181,7 +179,7 @@ describe('unified local import session', () => {
     }]);
 
     expect(session.rejected).toEqual([]);
-    expect(await (await loadLocalVideo(sig))?.text()).toBe('image-pixels');
+    expect(await (await loadLocalVideo(session.imported[0]!.sig))?.text()).toBe('image-pixels');
   });
 
   it('streams loopback response chunks into OPFS without materializing a Blob', async () => {

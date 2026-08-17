@@ -130,6 +130,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.couldNotFetchAsset": "Could not fetch the asset — try again later",
   "workbench.localAssetUnreachable":
     "Local file unavailable — it may have moved or the cache was cleared; re-import it",
+  "workbench.localPersistenceUnavailable":
+    "This media works in the current session, but local recovery storage is unavailable. You may need to select it again after reloading.",
   "workbench.srcMissing": "Source missing",
   "workbench.canvasRatio": "Canvas ratio",
   "workbench.localVideoUseTrack":
