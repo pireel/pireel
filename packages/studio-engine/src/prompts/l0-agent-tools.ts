@@ -145,7 +145,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.set_director_plan.label',
     description:
-      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence and honoring the user\'s independent Frame state (attached or themeless). Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Scenes must be chronological and non-overlapping: for every scene after the first, startSec must be greater than or equal to the previous scene\'s startSec + durationSec. Every scene commits to one named treatment, concrete visual anchor, source-aware composition, motion/sound behavior, asset strategy, and an explicit B-roll decision. Times use the edited timeline in seconds.',
+      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence, honoring the user\'s independent Frame state (attached or themeless), and receiving Approve from request_approval for the exact current proposal. Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial approved plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Scenes must be chronological and non-overlapping: for every scene after the first, startSec must be greater than or equal to the previous scene\'s startSec + durationSec. Every scene commits to one named treatment, concrete visual anchor, source-aware composition, motion/sound behavior, asset strategy, and an explicit B-roll decision. Times use the edited timeline in seconds.',
     chatOnly: true,
     inputSchema: obj(
       {
@@ -1331,6 +1331,27 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     inputSchema: obj({}, []),
   },
 
+  /* ---------- ask the user for approval of a model-authored proposal (chat surface only) ---------- */
+  {
+    id: 'request_approval',
+    kind: 'card',
+    icon: '✋',
+    label: 'tools.request_approval.label',
+    chatOnly: true,
+    description:
+      "Pause for approval before carrying out a consequential proposal. You decide what the user needs to review from the current request, inspected material, selected Skill/Frame, and intended edit; write that proposal in `content` instead of filling a host-defined checklist. Keep it concrete and proportionate: explain the intended result, the important editorial/visual choices, material use or gaps, and any meaningful consequences only when they matter to THIS proposal. The host renders your content verbatim with generic Reject and Approve actions. After Approve, continue from the approved proposal. After Reject, do not execute it; ask one focused follow-up or present a revised proposal. Use this for broad whole-video plans, batch/pilot plans, or other changes where proceeding first would create substantial rework. Do not use it for small reversible edits or named-choice questions; use ask_user for those.",
+    inputSchema: obj(
+      {
+        title: { type: 'string', description: "Short proposal title in the user's language." },
+        content: {
+          type: 'string',
+          description:
+            "The complete user-facing proposal in the user's language. Its structure and contents are yours to decide from the actual task. Prefer concise headings, short paragraphs, and bullet lines; do not emit JSON or a fixed template.",
+        },
+      },
+      ['content'],
+    ),
+  },
   /* ---------- ask the user a structured question (chat surface only) ---------- */
   {
     id: 'ask_user',

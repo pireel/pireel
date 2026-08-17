@@ -202,6 +202,11 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.askNeedsQuestionOptions":
     "ask_user 需要 question 和至少 2 个 options",
   "workbench.askNoValidChoice": "没有匹配的选项",
+  "workbench.approve": "批准",
+  "workbench.reject": "拒绝",
+  "workbench.approvalNeedsContent": "request_approval 需要 content",
+  "workbench.approvalApproved": "已批准",
+  "workbench.approvalRejected": "已拒绝",
   "workbench.externalAgentLabel": "外部 agent · {label}",
   "workbench.externalAgentLabelFailed": "外部 agent · {label} 失败:{error}",
   "workbench.externalAgentLabelSummary": "外部 agent · {label}:{summary}",

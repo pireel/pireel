@@ -52,6 +52,15 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain(
       "Resolve only ONE blocking decision per wait",
     );
+    expect(CHAT_IDENTITY).toContain(
+      "call request_approval and WAIT before executing it",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "The approval card is not a fixed editing-plan form",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Before Approve, do not call set_director_plan, remove_silence",
+    );
     expect(CHAT_IDENTITY).toContain("is NOT permission to make one output");
     expect(CHAT_IDENTITY).toContain("uniform slices, filename-order assembly");
     expect(CHAT_IDENTITY).toContain(
@@ -75,6 +84,12 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain("This is a hard pre-pilot checkpoint");
     expect(mcpInstructions("test-version")).toContain(
       "Ask one concise question and wait when only the user can resolve that boundary",
+    );
+    expect(mcpInstructions("test-version")).toContain(
+      "present it in your host UI, and WAIT for explicit user approval",
+    );
+    expect(mcpInstructions("test-version")).toContain(
+      "do not force a fixed checklist of layout, theme, duration, or asset gaps",
     );
     expect(mcpInstructions("test-version")).toContain(
       "requires an explicit output count, purpose and meaningful variation dimension",
@@ -438,10 +453,15 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "one strong proposition over keyword soup",
     );
   });
-  it("完整编辑先保存可校验导演方案，但它不是场景宏", () => {
+  it("完整编辑先审批模型自由方案，再保存可校验导演计划", () => {
+    const approval = STUDIO_TOOLS.find((tool) => tool.id === "request_approval")!;
+    expect(approval.chatOnly).toBe(true);
+    expect(approval.description).toContain("instead of filling a host-defined checklist");
+    expect((approval.inputSchema as { required: string[] }).required).toEqual(["content"]);
     const plan = STUDIO_TOOLS.find((tool) => tool.id === "set_director_plan")!;
     expect(plan.chatOnly).toBe(true);
     expect(plan.description).toContain("NOT a macro");
+    expect(plan.description).toContain("receiving Approve from request_approval");
     const schema = plan.inputSchema as {
       required: string[];
       properties: Record<string, unknown>;
@@ -467,13 +487,13 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     );
     expect(sceneSchema.properties).toHaveProperty("visualMetaphor");
     expect(CHAT_IDENTITY).toContain(
-      "call set_director_plan before other timeline mutations",
+      "call set_director_plan before the remaining timeline mutations",
     );
     expect(CHAT_IDENTITY).toContain(
       "Every planned add_block, add_texts, add_clips, insert_clips, and insert_clip call MUST pass the exact sceneId",
     );
     expect(CHAT_IDENTITY).toContain(
-      "call analyze_visual BEFORE set_director_plan whenever a Frame is attached",
+      "call analyze_visual before approval whenever a Frame is attached",
     );
     expect(CHAT_IDENTITY).toContain(
       "MUST NOT be implemented as add_block calls alone",

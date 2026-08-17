@@ -229,6 +229,11 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.askNeedsQuestionOptions":
     "ask_user needs a question and at least 2 options",
   "workbench.askNoValidChoice": "No matching option",
+  "workbench.approve": "Approve",
+  "workbench.reject": "Reject",
+  "workbench.approvalNeedsContent": "request_approval needs content",
+  "workbench.approvalApproved": "Approved",
+  "workbench.approvalRejected": "Rejected",
   "workbench.externalAgentLabel": "External agent · {label}",
   "workbench.externalAgentLabelFailed":
     "External agent · {label} failed: {error}",

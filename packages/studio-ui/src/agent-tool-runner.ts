@@ -133,7 +133,7 @@ import { withEditableBlockGeometry } from './editable-block-geometry';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 
 const IMAGE_INSPECTION_MAX_DIM = 1280;
@@ -2108,6 +2108,26 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ok: true,
               summary: t('workbench.askAnswered', { answer: chosen.join(', ') }),
               data: { selected: chosen, multiSelect: input.multiSelect === true },
+            };
+          }
+          case 'request_approval': {
+            // The model owns the proposal's contents; the host owns only the generic decision
+            // boundary. Keeping one free-form content field avoids turning editorial judgment into
+            // a fixed product checklist while still making the pause explicit and resumable.
+            const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : '';
+            const content = typeof input.content === 'string' ? input.content.trim().slice(0, 6000) : '';
+            if (surface !== 'chat') return { ok: false, error: 'request_approval is chat-surface only — ask for approval in your own UI instead' };
+            if (!content) return { ok: false, error: t('workbench.approvalNeedsContent') };
+            const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
+              'approval',
+              { title, content },
+              { signal },
+            );
+            if (decision == null) throw abortErr();
+            return {
+              ok: true,
+              summary: decision === 'approved' ? t('workbench.approvalApproved') : t('workbench.approvalRejected'),
+              data: { decision },
             };
           }
           case 'export_video': {
