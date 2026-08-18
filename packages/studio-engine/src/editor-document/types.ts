@@ -2,7 +2,7 @@ import type { AudioClip } from '../audio-tracks';
 import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
-import type { DirectorPlanV1, NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
+import type { DirectorPlan, NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 import type { CustomVisualStyle } from '../visual-style';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
@@ -212,7 +212,7 @@ export interface EditorSemanticState {
   transcripts: Record<AssetId, TranscriptSegment[]>;
   scenes: SemanticScene[];
   /** Saved scene-level commitment produced by the editing expert for a complete edit. */
-  directorPlan?: DirectorPlanV1;
+  directorPlan?: DirectorPlan;
   /** Legacy arbitrary storyboard context. Retained for compatibility; new work uses directorPlan. */
   plan?: unknown;
 }

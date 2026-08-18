@@ -9,13 +9,14 @@
  */
 
 import { type Block, blockKind, isSentenceCaption } from '@pireel/studio-engine/composition';
+import {
+  type EditableBlockBox,
+  editableOverlaySafeArea,
+  fitEditableBoxIntoSafeArea,
+} from '@pireel/studio-engine/overlay-placement';
 
-export interface EditableBlockBox {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+export type { EditableBlockBox } from '@pireel/studio-engine/overlay-placement';
+export { editableOverlaySafeArea, fitEditableBoxIntoSafeArea } from '@pireel/studio-engine/overlay-placement';
 
 export interface NormalizableElement {
   seedId: string;
@@ -29,35 +30,6 @@ export const DEFAULT_CODE_KIT_ELEMENT_BOX: EditableBlockBox = { x: 0.08, y: 0.18
 
 export function defaultKitElementBox(templateId: string): EditableBlockBox {
   return templateId === 'kit:code' ? DEFAULT_CODE_KIT_ELEMENT_BOX : DEFAULT_KIT_ELEMENT_BOX;
-}
-
-/** Initial overlay landing area. Portrait social video reserves extra room for the device cutout and
- *  the platform chrome/caption strip; landscape and square canvases use a lighter inset. This is an
- *  insertion default, not an editing constraint — users can still deliberately drag outside it. */
-export function editableOverlaySafeArea(canvasW: number, canvasH: number): EditableBlockBox {
-  const portraitSocial = Number.isFinite(canvasW) && Number.isFinite(canvasH) && canvasW > 0 && canvasH / canvasW >= 1.45;
-  return portraitSocial
-    ? { x: 0.07, y: 0.11, w: 0.86, h: 0.7 }
-    : { x: 0.05, y: 0.07, w: 0.9, h: 0.86 };
-}
-
-/** Scale down and clamp an automatically placed overlay into the platform-safe landing area.
- *  Intentional full-canvas layers are backgrounds, not PiP overlays, and remain full bleed. */
-export function fitEditableBoxIntoSafeArea(
-  box: EditableBlockBox,
-  canvasW: number,
-  canvasH: number,
-): EditableBlockBox {
-  if (box.x <= 0.001 && box.y <= 0.001 && box.w >= 0.999 && box.h >= 0.999) return box;
-  if (![box.x, box.y, box.w, box.h].every(Number.isFinite) || box.w <= 0 || box.h <= 0) return box;
-  const safe = editableOverlaySafeArea(canvasW, canvasH);
-  const scale = Math.min(1, safe.w / box.w, safe.h / box.h);
-  const w = box.w * scale;
-  const h = box.h * scale;
-  const x = Math.max(safe.x, Math.min(safe.x + safe.w - w, box.x));
-  const y = Math.max(safe.y, Math.min(safe.y + safe.h - h, box.y));
-  const round = (value: number) => Math.round(value * 10000) / 10000;
-  return { x: round(x), y: round(y), w: round(w), h: round(h) };
 }
 
 /** A serialized zero/NaN rectangle is as unusable as a missing box: the selection frame collapses

@@ -26,16 +26,34 @@ describe('Director Scene strip geometry', () => {
     const document = emptyEditorDocumentV2({ fps: 25 });
     document.semantics.directorPlan = directorPlanFromSeconds({
       goal: 'Explain.', creativeThesis: 'One clear proof.',
+      rhythmArc: 'Open on the claim, slow into evidence, then hold the proof.',
+      designSystem: {
+        visualConcept: 'Source evidence becomes the visual payoff.',
+        composition: 'Keep the proof large and unobstructed.',
+        typography: 'Use one display statement and compact evidence labels.',
+        colorAndMaterial: 'Neutral source media with one restrained accent.',
+        imagery: 'Preserve real footage and interface detail.',
+        motion: 'Direct attention, settle, then clear cleanly.',
+        sound: 'Keep dialogue continuous and intelligible.',
+      },
       scenes: [{
         id: 'proof', label: 'Visible proof', startSec: 2, durationSec: 3,
         viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show evidence.',
+        evidence: ['The project footage shows the result.'], treatmentId: 'evidence-plane',
+        visualAnchor: 'The supplied proof footage.',
         visualTreatment: 'Let the evidence lead.', assetStrategy: 'Use project footage.',
+        motionPlan: 'Reveal the evidence, hold the result, then clear.',
+        soundPlan: 'Keep the source dialogue audible.',
+        brollDecision: 'source', brollRationale: 'The source itself is the proof.',
       }],
     }, 25).plan!;
     document.semantics.scenes = [{ id: 'proof', clipIds: ['video', 'graphic'] }];
     expect(timelineDirectorScenesFromDocument(document)).toEqual([{
       id: 'proof', label: 'Visible proof', startSec: 2, endSec: 5, purpose: 'Show evidence.',
-      visualTreatment: 'Let the evidence lead.', assetStrategy: 'Use project footage.', clipCount: 2,
+      treatmentId: 'evidence-plane', visualAnchor: 'The supplied proof footage.',
+      visualTreatment: 'Let the evidence lead.', motionPlan: 'Reveal the evidence, hold the result, then clear.',
+      soundPlan: 'Keep the source dialogue audible.', assetStrategy: 'Use project footage.',
+      brollDecision: 'source', brollRationale: 'The source itself is the proof.', clipCount: 2,
     }]);
   });
 });

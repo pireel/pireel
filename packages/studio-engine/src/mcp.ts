@@ -115,9 +115,10 @@ export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
  *  get_state=state snapshot; apply_block=the validate-and-place surface for BYO generation output;
- *  capture_frame=visual verification (returns a captured frame as image content so the agent can "see" its own edits).
+ *  capture_frame=one-moment visual verification; review_sequence=whole-Scene temporal verification
+ *  (both return captured frames as image content so the agent can "see" its own edits).
  *  compose_block_brief is a "bridge-fetch context + server-assemble" composite tool, dispatched separately. */
-export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'visual_brief', 'submit_visual']);
+export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'review_sequence', 'visual_brief', 'submit_visual']);
 
 /** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
 export const MCP_BRIEF_TOOLS: Record<string, string> = {
@@ -129,7 +130,7 @@ const CARD_TIMEOUT_MS = 600_000;
 const BADGE_TIMEOUT_MS = 60_000;
 
 export function bridgeTimeoutMs(toolId: string): number {
-  if (toolId === 'visual_brief') return CARD_TIMEOUT_MS; // runs the free geometry pass inside (minutes-scale); don't cap it at extra's 60s
+  if (toolId === 'visual_brief' || toolId === 'review_sequence') return CARD_TIMEOUT_MS; // multi-frame work can take minutes; don't cap it at extra's 60s
   return STUDIO_TOOL_MAP[toolId]?.kind === 'card' ? CARD_TIMEOUT_MS : BADGE_TIMEOUT_MS;
 }
 
@@ -145,7 +146,7 @@ const EMPTY_SCHEMA = { type: 'object', properties: {}, additionalProperties: fal
 export function buildMcpTools(): McpToolDef[] {
   const out: McpToolDef[] = [];
   for (const d of STUDIO_TOOLS) {
-    if (d.chatOnly) continue; // chat-surface only (e.g. review_visuals — external agents have their own eyes via capture_frame)
+    if (d.chatOnly) continue; // chat-surface only (e.g. hosted review_visuals — external agents use their own eyes via capture_frame/review_sequence)
     if (d.id === 'read_frame') {
       // MCP version takes a frame_id param (the internal chat version reads it from session mount state; MCP has no session)
       out.push({
@@ -216,7 +217,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'compose_block_brief',
       description:
-        'Get the generation contract {system, prompt} for ONE Component, assembled from the live composition. Component is the broad extensible visual-element concept; Motion Graphics are the primary family available here: typography, numbers, comparisons, charts, processes, diagrams, authentic device/interface source treatments, source annotations, identity and content-specific forms. The capability map is open, not a fixed type list. Relevant registered schemas are retrieved from the current moment (maximum three), while bespoke generation separately retrieves at most four structural form references; neither dumps the full library or limits invention. New Motion Graphic work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing registered Component keeps the typed contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit registered-Component choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block. For spoken footage, the brief automatically includes transcript beats inside the element window as LOCAL seconds; later content must stay hidden until its beat. Pass `blockId` + `instruction` to rewrite an existing block; omit `blockId` and pass `instruction` + optional `atSec`/`durationSec` to create one. The default way to create/edit Component content — charges no Pireel credits.',
+        'Get the generation contract {system, prompt} for ONE Component, assembled from the live composition. This is a layer inside an approved composed Scene, not a standalone card: for new work decide atSec/durationSec, intended placement, real backdrop/protected zones and optional Director sceneId BEFORE generation. The brief then supplies the actual box, whole-film design system, Scene treatment and spoken beats. Component is the broad extensible visual-element concept; Motion Graphics are the primary family available here: typography, numbers, comparisons, charts, processes, diagrams, authentic device/interface source treatments, source annotations, identity and content-specific forms. The capability map is open, not a fixed type list. Relevant registered schemas are retrieved from the current moment (maximum three), while bespoke generation separately retrieves at most four structural form references; neither dumps the full library or limits invention. New Motion Graphic work gets the markup contract (note + ```html + ```js) even without a Frame; the host visual-craft baseline supplies neutral quality and an attached Frame supplies the authored visual world. An existing registered Component keeps the typed contract (one ```json fence with {component, props}) so edits preserve its props. Use format:"kit" only for an explicit registered-Component choice. YOU generate the response with your own model, following the contract exactly, then submit the raw text via apply_block with the returned target unchanged. The default way to create/edit Component content — charges no Pireel credits.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -224,6 +225,17 @@ export function buildMcpTools(): McpToolDef[] {
           blockId: { type: 'string', description: 'Existing block to rewrite. Omit for a new element.' },
           atSec: { type: 'number', description: 'New element only: timeline start seconds (defaults to playhead).' },
           durationSec: { type: 'number', description: 'New element only: seconds on screen (default 3). Sets the transcript window whose spoken beats are passed into generation; pass the same value to apply_block.' },
+          sceneId: { type: 'string', description: 'Optional approved Director Scene id. The brief inherits its whole-film design system and scene treatment.' },
+          placement: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
+            },
+            required: ['xPct', 'yPct', 'widthPct', 'heightPct'],
+            description: 'New element only: intended canvas region in percentages. Decide this before generation and copy it unchanged to apply_block.',
+          },
+          backdrop: { type: 'string', description: 'New element only: describe the real footage/background under this region and any face, product, caption or evidence zones that must stay clear.' },
           instruction: { type: 'string', description: 'What to build or change.' },
           format: { type: 'string', enum: ['kit', 'html'], description: 'Override the contract. Default: existing registered Component → kit; every new or custom Motion Graphic Component → html, with or without a Frame. Use kit only for an explicit registered-Component choice.' },
         },
@@ -241,6 +253,15 @@ export function buildMcpTools(): McpToolDef[] {
           blockId: { type: 'string' },
           atSec: { type: 'number' },
           durationSec: { type: 'number', description: 'New element only: seconds on screen (default 3).' },
+          placement: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
+            },
+            required: ['xPct', 'yPct', 'widthPct', 'heightPct'],
+            description: 'Copy the placement returned by compose_block_brief unchanged.',
+          },
           label: { type: 'string', description: 'Optional short timeline label; applies to both existing and new elements.' },
           raw: { type: 'string', description: 'Your full generated text: note, then ```html fence, then ```js fence.' },
         },
@@ -316,6 +337,26 @@ export function buildMcpTools(): McpToolDef[] {
         type: 'object',
         additionalProperties: false,
         properties: { atSec: { type: 'number', description: 'Edited-timeline seconds to capture (defaults to playhead).' } },
+      },
+    },
+    {
+      name: 'review_sequence',
+      description:
+        'SEE the designed edit as a TEMPORAL SEQUENCE, not one lucky thumbnail. Requires an approved Director Plan. The tab samples each selected Semantic Scene at the meaningful entrance, development, payoff and exit states, returns the rendered frames with their exact sceneIds in time order, and reports deterministic structure problems such as missing evidence, repeated geometry or inaudible planned speech. LOOK at every attached image in index order; judge hierarchy, legibility, protected subjects, continuity, buildup, hold and clean exit, then repair only the Scene ids you find affected and re-run this tool. Use capture_frame instead for one small local change.',
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          sceneIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional exact Director Scene ids to review. Omit for the whole approved edit.',
+          },
+          maxMoments: {
+            type: 'number',
+            description: 'Maximum rendered temporal checkpoints, 1–18 (default 12).',
+          },
+        },
       },
     },
     {
@@ -508,7 +549,7 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
       if (!MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && !STUDIO_TOOL_MAP[name]) {
         return rpcError(raw.id, -32602, `unknown tool: ${name}`);
       }
-      const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
+      const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' && name !== 'review_sequence' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
       return toolResponse(raw.id, result);
     }
     default:

@@ -35,7 +35,7 @@ export {
   retrieveMotionGraphicPatterns,
 } from './motion-graphic-patterns';
 export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
-export { SPOKEN_VISUAL_DIRECTION } from './spoken-visual-direction';
+export { VIDEO_DESIGN_METHOD } from './video-design-method';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';
 export { withActiveTheme } from './active-theme';

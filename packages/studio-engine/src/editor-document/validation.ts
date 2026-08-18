@@ -1,5 +1,5 @@
 import { isFinitePositive } from './time';
-import { isDirectorPlanV1, validateDirectorPlanV1 } from '../director-plan';
+import { isDirectorPlan, validateDirectorPlan } from '../director-plan';
 import {
   EDITOR_DOCUMENT_VERSION,
   type EditorDocumentIssue,
@@ -40,7 +40,7 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   ))) return false;
   if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
-  if (document.semantics.directorPlan !== undefined && !isDirectorPlanV1(document.semantics.directorPlan)) return false;
+  if (document.semantics.directorPlan !== undefined && !isDirectorPlan(document.semantics.directorPlan)) return false;
   if (document.appearance.customVisualStyle !== undefined
     && !normalizeCustomVisualStyle(document.appearance.customVisualStyle)) return false;
   return true;
@@ -160,7 +160,7 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
     }
   }
   if (document.semantics.directorPlan !== undefined) {
-    for (const issue of validateDirectorPlanV1(document.semantics.directorPlan)) {
+    for (const issue of validateDirectorPlan(document.semantics.directorPlan)) {
       push('error', `director-plan-${issue.code}`, `semantics.directorPlan${issue.path ? `.${issue.path}` : ''}`, issue.message);
     }
   }

@@ -45,7 +45,7 @@ export interface StudioToolDef {
   description: string;
   /** JSON schema — server wraps it via jsonSchema() into tool(); client only reads input, no validation. */
   inputSchema: Record<string, unknown>;
-  /** Chat-surface only: not exposed on MCP (external agents bring their own capability, e.g. review_visuals vs their own eyes). */
+  /** Chat-surface only: not exposed on MCP (external agents bring their own vision via capture_frame/review_sequence). */
   chatOnly?: boolean;
 }
 
@@ -145,12 +145,28 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.set_director_plan.label',
     description:
-      'Save or replace the editing expert\'s scene-level commitment for a broad whole-video request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence, honoring the user\'s independent Frame state (attached or themeless), and receiving Approve from request_approval for the exact current proposal. Saving also creates real editable boundaries on the primary visual lane without removing content, then binds timeline clips to Semantic Scenes. Save the initial approved plan before other timeline mutations; replace it later only when evidence or tool results materially change the scene structure. This is an editable decision artifact, NOT a macro and NOT a replacement for professional judgment. Do not call for a local change. Scenes must be chronological and non-overlapping: for every scene after the first, startSec must be greater than or equal to the previous scene\'s startSec + durationSec. Every scene commits to one named treatment, concrete visual anchor, source-aware composition, motion/sound behavior, asset strategy, and an explicit B-roll decision. Times use the edited timeline in seconds.',
+      'Save or replace the editing expert\'s whole-video design contract for a broad request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence, honoring the user\'s independent Frame state (attached or themeless), and receiving Approve from request_approval for the exact current proposal. The contract has three levels: one creative thesis, one whole-film rhythm arc, and one shared video design system; chronological Semantic Scenes then vary that system around their actual source evidence and viewer task. Saving creates real editable boundaries on the primary visual lane without removing content and binds timeline clips to Scenes. Save the approved contract before other timeline mutations; replace it only when later evidence materially changes the design or scene structure. This is an editable decision artifact, NOT a macro, checklist, Component recipe or substitute for judgment. Do not call it for a local change. Every later scene starts at or after the previous scene ends. Times use the edited timeline in seconds.',
     chatOnly: true,
     inputSchema: obj(
       {
         goal: { type: 'string', description: 'Concrete viewer or business outcome for this output.' },
         creativeThesis: { type: 'string', description: 'One concise directing idea that governs pacing, evidence and visual contrast.' },
+        rhythmArc: { type: 'string', description: 'Whole-film progression of pace, density, pressure, release and final hold. Describe contrast over time rather than a constant tempo.' },
+        designSystem: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'One shared video design system for the complete output. It is derived from source material, user choices and the attached Frame when present; scenes inherit it instead of inventing independent styles.',
+          properties: {
+            visualConcept: { type: 'string', description: 'The memorable visual idea and intended level of restraint/intensity.' },
+            composition: { type: 'string', description: 'Spatial hierarchy, negative-space policy, source/graphic relationship and layout rhythm.' },
+            typography: { type: 'string', description: 'Display/body/number roles, hierarchy, casing and emphasis behavior.' },
+            colorAndMaterial: { type: 'string', description: 'Ground, ink, accent and material behavior. Preserve explicit project palette choices.' },
+            imagery: { type: 'string', description: 'Treatment of real footage, screenshots, photography, generated imagery, crops and evidence.' },
+            motion: { type: 'string', description: 'Camera and graphic movement, easing, energy, transition, hold and clear behavior.' },
+            sound: { type: 'string', description: 'Dialogue hierarchy, source sound, music, silence and sparse graphic punctuation.' },
+          },
+          required: ['visualConcept', 'composition', 'typography', 'colorAndMaterial', 'imagery', 'motion', 'sound'],
+        },
         skillId: { type: 'string', description: 'Selected Studio Skill id when one is active; independent of frameId.' },
         frameId: { type: 'string', description: 'User-selected Frame id when one is attached; independent of skillId.' },
         audience: { type: 'string', description: 'Intended viewer, when known.' },
@@ -185,7 +201,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           ),
         },
       },
-      ['goal', 'creativeThesis', 'scenes'],
+      ['goal', 'creativeThesis', 'rhythmArc', 'designSystem', 'scenes'],
     ),
   },
   /* ---------- speech-editing playbook (separate skill content pack; server-executed, client only renders the card, no runTool impl) ---------- */
@@ -351,15 +367,28 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '✨',
     label: 'tools.add_block.label',
     description:
-      'Add a NEW Motion Graphic Component. Component is the upper-level extensible element concept; this tool currently authors its Motion Graphic family. Name the content-specific communicative job—comparison, chart, process, flowchart, code/editor, phone/browser, real-source annotation, identity, or another form the evidence requires—then describe the source-aware layout and one primary motion idea. These examples are an open capability map, not a closed type list. Runtime retrieves at most a few relevant structural references and the designer may combine, transform or ignore them; the active Frame owns the final visual language. When executing a saved Director Plan, pass its exact sceneId: runtime injects that scene\'s purpose, evidence, visual treatment, asset strategy and neighboring-scene contrast, generates bespoke themed HTML, and binds the new clip back to the Semantic Scene. For an unplanned small edit, give a concrete self-contained instruction with exact on-screen content, layout, and the enter > develop > payoff > hold > clear timing. Write on-screen content in the video\'s language. Set atSec and durationSec to the complete spoken thought it supports; both otherwise default to the current playhead and 3 seconds. Never use an opaque full-canvas Motion Graphic over useful footage unless the scene intentionally becomes a full-field chapter or payoff.',
+      'Add a NEW Motion Graphic Component as one layer of a composed video Scene. Component is the upper-level extensible element concept; this tool currently authors its Motion Graphic family. Name the content-specific communicative job and evidence, then provide the intended placement BEFORE generation so typography, density and layout are designed for the real occupied region instead of generated as a generic card and resized afterward. For work over footage, describe the observed backdrop and protected subject/caption zones. Runtime injects the saved Scene plus the whole-film design system and binds the result back to that Scene. Registered families are references, not a closed menu; the active Frame owns visual language. Set timing to the complete thought it supports. Use full canvas only when the approved Scene intentionally becomes a full-field chapter, explanation or payoff. A planned placement may still be revised later with place_block, but do not generate first and discover the composition afterward.',
     inputSchema: obj(
       {
         instruction: { type: 'string', description: 'Instruction describing the Motion Graphic: type, exact content, source-aware layout, style, primary motion idea, payoff and clear/exit.' },
         sceneId: { type: 'string', description: 'Exact scene id from the saved Director Plan. Required for planned full-draft graphics; omit for an unplanned local edit.' },
         atSec: { type: 'number', description: 'Timeline start in seconds. Omit to use the playhead.' },
         durationSec: { type: 'number', description: 'On-screen duration in seconds (>= 0.3). Omit only for an intentional 3-second element.' },
+        placement: {
+          type: 'object',
+          additionalProperties: false,
+          description: 'Intended canvas-relative region decided as part of Scene composition BEFORE generation. Values are percentages. Use {xPct:0,yPct:0,widthPct:100,heightPct:100} only for an intentional full-field Scene.',
+          properties: {
+            xPct: { type: 'number', description: 'Top-left X as 0–100% of canvas width.' },
+            yPct: { type: 'number', description: 'Top-left Y as 0–100% of canvas height.' },
+            widthPct: { type: 'number', description: 'Width as 4–100% of canvas width.' },
+            heightPct: { type: 'number', description: 'Height as 3–100% of canvas height.' },
+          },
+          required: ['xPct', 'yPct', 'widthPct', 'heightPct'],
+        },
+        backdrop: { type: 'string', description: 'What is actually behind this region at this time: subject position, motion/detail level, dominant light/dark values, burned-in text and protected caption/product/face zones. Omit only on a flat full-field Scene.' },
       },
-      ['instruction'],
+      ['instruction', 'placement'],
     ),
   },
   {
@@ -475,7 +504,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "LOOK at the rendered result with a scene-level visual QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples one representative moment per Director Scene, explicitly covering entrance, pressure, proof and exit, runs local structure checks, compares frames locally, and sends only visually distinct representatives to paid cloud vision. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing source evidence, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
+      "LOOK at the rendered result with a scene-level viewing-experience QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples each Scene across entrance, development, payoff and exit when duration allows, runs local structure and audible-audio checks, deduplicates genuinely similar frames, and sends only distinct representatives to paid cloud vision. This temporal pass is meant to catch loading flashes, animation that never resolves, unreadable holds, overlays that fail to clear and an approved sound plan whose voice/source sound is absent or muted—not merely judge a good midpoint thumbnail. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing source evidence, missing audible audio, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries at normal playback speed. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
     inputSchema: obj(
       {
         atSecs: { type: 'array', items: { type: 'number' }, description: 'Optional edited-timeline candidate moments for a local review. Omit for automatic Director Scene sampling (max 18).' },

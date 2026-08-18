@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2, isEditorDocumentV2, validateEditorDocumentV2 } from './editor-document';
-import { directorPlanFromSeconds, isDirectorPlanV1, validateDirectorPlanV1 } from './director-plan';
+import { directorPlanFromSeconds, isDirectorPlan, validateDirectorPlan } from './director-plan';
 
 const input = {
   goal: 'Make a first-time viewer understand and remember the product mechanism.',
   creativeThesis: 'Move from human problem to visible proof, then return to the speaker for the payoff.',
+  rhythmArc: 'Begin intimate and compressed, open into a slower proof passage, then hold the human payoff.',
+  designSystem: {
+    visualConcept: 'Human explanation resolving into inspectable product evidence.',
+    composition: 'Speaker-led negative space gives way to one full, legible evidence plane.',
+    typography: 'One restrained display statement with plain evidence labels and tabular numbers.',
+    colorAndMaterial: 'Warm neutral footage with one precise dark-ink accent system.',
+    imagery: 'Preserve real faces and interface pixels; crop only to direct attention.',
+    motion: 'Thought-led punch-ins, localized evidence tracking, clean holds and cuts.',
+    sound: 'Continuous dialogue and room tone; product source sound only when truthful.',
+  },
   skillId: 'product-demo',
   frameId: 'zen-white',
   audience: 'Busy product leads',
@@ -50,13 +60,13 @@ const input = {
   ],
 };
 
-describe('Director Plan V1', () => {
+describe('Director Plan V2', () => {
   it('converts seconds into the editor timebase and validates a rich plan', () => {
     const parsed = directorPlanFromSeconds(input, 30);
     expect(parsed.issues).toEqual([]);
     expect(parsed.plan?.scenes.map((scene) => [scene.startFrame, scene.durationFrames])).toEqual([[0, 120], [120, 240]]);
     expect(parsed.plan?.scenes[1]).toMatchObject({ treatmentId: 'evidence-plane', brollDecision: 'source' });
-    expect(isDirectorPlanV1(parsed.plan)).toBe(true);
+    expect(isDirectorPlan(parsed.plan)).toBe(true);
   });
 
   it('rejects overlapping intervals, duplicate ids, and unnamed custom families', () => {
@@ -97,8 +107,18 @@ describe('Director Plan V1', () => {
     }, 30);
     expect(parsed.plan).toBeUndefined();
     expect(parsed.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
-      'invalid-treatment-id',
+      'missing-treatment-id',
       'invalid-broll-decision',
+    ]));
+  });
+
+  it('rejects a scene list that has no whole-film rhythm or design system', () => {
+    const { rhythmArc: _rhythmArc, designSystem: _designSystem, ...incomplete } = input;
+    const parsed = directorPlanFromSeconds(incomplete, 30);
+    expect(parsed.plan).toBeUndefined();
+    expect(parsed.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'missing-rhythm-arc',
+      'missing-design-system',
     ]));
   });
 
@@ -112,7 +132,7 @@ describe('Director Plan V1', () => {
 
     document.semantics.directorPlan = { ...valid, goal: '' };
     expect(isEditorDocumentV2(document)).toBe(false);
-    expect(validateDirectorPlanV1(document.semantics.directorPlan).map((issue) => issue.code)).toContain('missing-goal');
+    expect(validateDirectorPlan(document.semantics.directorPlan).map((issue) => issue.code)).toContain('missing-goal');
     expect(validateEditorDocumentV2(document).map((issue) => issue.code)).toContain('director-plan-missing-goal');
   });
 });

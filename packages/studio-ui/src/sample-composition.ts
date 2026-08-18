@@ -152,7 +152,14 @@ export const PREVIEW_RUNTIME = `
       var d = num(el, 'data-duration', tl ? tl.duration() : 1e9);
       if (id !== 'root') el.style.visibility = (t >= s && t < s + d) ? 'visible' : 'hidden';
       if (tl) {
-        var tv = Math.max(0, Math.min(t - s, tl.duration()));
+        // Generated Components remember the window they were authored for. If the user later drags
+        // an edge, remap local time through that authored clock: entrances, payoff holds and exits
+        // all survive the resize instead of cutting off or leaving a long dead tail. Untagged legacy
+        // and built-in timelines keep their original absolute-time behaviour.
+        var authored = num(el, 'data-authored-duration', d);
+        var local = Math.max(0, Math.min(t - s, d));
+        var mapped = d > 0 ? local * authored / d : local;
+        var tv = Math.max(0, Math.min(mapped, tl.duration()));
         // First alignment must force a render: a freshly built paused timeline sits at time 0, and
         // tl.time(0) is a same-value no-op — position-0 sets (caption segment reveals) never apply,
         // leaving captions invisible at their own window start until the playhead moves (user-reported:

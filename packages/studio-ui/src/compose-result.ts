@@ -39,10 +39,19 @@ export interface ComposedBlock {
 }
 
 /** The block fields a result becomes. Spread onto a block: `{ ...b, ...composedBlockFields(r) }`. */
-export function composedBlockFields(r: ComposedBlock): { templateId: string; slots: Record<string, unknown> } {
+export function composedBlockFields(r: ComposedBlock, authoredDurationSec?: number): { templateId: string; slots: Record<string, unknown> } {
   return r.kit
     ? { templateId: `kit:${r.kit.component}`, slots: { props: r.kit.props } }
-    : { templateId: 'custom', slots: { innerHtml: r.innerHtml, timelineBody: r.timelineBody } };
+    : {
+        templateId: 'custom',
+        slots: {
+          innerHtml: r.innerHtml,
+          timelineBody: r.timelineBody,
+          ...(typeof authoredDurationSec === 'number' && Number.isFinite(authoredDurationSec) && authoredDurationSec > 0
+            ? { authoredDurationSec }
+            : {}),
+        },
+      };
 }
 
 /** The component a block currently shows, for an edit round. Null for non-kit blocks. */

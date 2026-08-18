@@ -41,6 +41,10 @@ export interface ComposeContext {
   beats?: Array<{ text: string; start: number; end: number }>;
   /** One-line list of the other fragments in this same video (time order, marks this block's position) — anti-monotony: let the model see neighbors and vary archetype/alignment/motion. */
   neighbors?: string[];
+  /** Whole-film design system and current Semantic Scene treatment resolved from the saved plan. */
+  designDirection?: string;
+  /** What the generated layer sits over and which subjects/zones must remain unobstructed. */
+  backdrop?: string;
 }
 
 /* ============================ Single-block edit (shot block) ============================ */
@@ -65,6 +69,8 @@ export { BLOCK_SYSTEM };
  *  outputs incomparable, and comparing them is the whole point of running both. */
 function momentParts(args: { block: BlockEdit; context?: ComposeContext }): string[] {
   const parts: string[] = [];
+  if (args.context?.designDirection) parts.push(args.context.designDirection);
+  if (args.context?.backdrop) parts.push(`BACKDROP AND PROTECTED ZONES:\n${args.context.backdrop}`);
   if (args.block.durationSec)
     parts.push(
       `This fragment is on screen for about ${args.block.durationSec.toFixed(1)}s. When timed SPOKEN BEATS are supplied below, they own reveal timing. Otherwise, for SEQUENTIAL content (steps / numbered list / pipeline / timeline), reveal the items ONE BY ONE spread ACROSS this whole duration (PPT / presenter rhythm — advance through them over the seconds), and highlight the active item; do NOT reveal them all at time 0. Genuinely single-beat content gets one calm reveal near the start then holds still.`,

@@ -15,6 +15,20 @@ const clip: GraphicTimelineClip = {
   block: { templateId: 'custom', slots: {} }, anchor: { type: 'timeline' },
 };
 
+const designContract = {
+  rhythmArc: 'Setup opens into proof and settles.',
+  designSystem: {
+    visualConcept: 'Explanation resolving into evidence.', composition: 'Source-led hierarchy.',
+    typography: 'One display role and quiet labels.', colorAndMaterial: 'Neutral with one accent.',
+    imagery: 'Preserve source truth.', motion: 'Motivated reveal and hold.', sound: 'Voice first.',
+  },
+};
+const treatment = {
+  treatmentId: 'source-led', visualAnchor: 'Current subject', visualTreatment: 'One clear full-canvas hierarchy.',
+  motionPlan: 'Enter, develop, hold, clear.', soundPlan: 'Keep primary voice audible.',
+  assetStrategy: 'Use supplied source.', brollDecision: 'none' as const, brollRationale: 'Continuity is strongest.',
+};
+
 function documentWithGraphics() {
   const document = emptyEditorDocumentV2();
   document.timeline.tracks.push({
@@ -56,9 +70,10 @@ describe('overlay track transactions', () => {
     const plan = directorPlanFromSeconds({
       goal: 'Explain then prove.',
       creativeThesis: 'Quiet setup, visible proof.',
+      ...designContract,
       scenes: [
-        { id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain the setup.' },
-        { id: 'proof', label: 'Proof', startSec: 2, durationSec: 3, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'data-explain', purpose: 'Show the result.' },
+        { ...treatment, id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain the setup.' },
+        { ...treatment, id: 'proof', label: 'Proof', startSec: 2, durationSec: 3, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'data-explain', purpose: 'Show the result.' },
       ],
     }, 30).plan!;
     const planned = applyDirectorPlanToDocument(base, plan);
@@ -175,10 +190,10 @@ describe('overlay track transactions', () => {
   it('reassigns duplicated and retimed graphics to the scene at their new placement', () => {
     const base = documentWithGraphics();
     const plan = directorPlanFromSeconds({
-      goal: 'Explain then prove.', creativeThesis: 'Setup then evidence.',
+      goal: 'Explain then prove.', creativeThesis: 'Setup then evidence.', ...designContract,
       scenes: [
-        { id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' },
-        { id: 'proof', label: 'Proof', startSec: 2, durationSec: 3, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'data-explain', purpose: 'Prove.' },
+        { ...treatment, id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' },
+        { ...treatment, id: 'proof', label: 'Proof', startSec: 2, durationSec: 3, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'data-explain', purpose: 'Prove.' },
       ],
     }, 30).plan!;
     const planned = applyDirectorPlanToDocument(base, plan);
@@ -239,8 +254,8 @@ describe('overlay track transactions', () => {
       clips: [{ id: 'caption', kind: 'caption', startFrame: 0, durationFrames: 30, enabled: true, managed: false, block: { templateId: 'caption', slots: {} }, anchor: { type: 'timeline' } }],
     });
     const plan = directorPlanFromSeconds({
-      goal: 'Explain.', creativeThesis: 'Keep it clear.',
-      scenes: [{ id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' }],
+      goal: 'Explain.', creativeThesis: 'Keep it clear.', ...designContract,
+      scenes: [{ ...treatment, id: 'setup', label: 'Setup', startSec: 0, durationSec: 2, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' }],
     }, 30).plan!;
     const planned = applyDirectorPlanToDocument(base, plan);
     if (!planned.ok) throw new Error(planned.error);

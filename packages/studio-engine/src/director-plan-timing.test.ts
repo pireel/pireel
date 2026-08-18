@@ -2,12 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { directorPlanFromSeconds } from './director-plan';
 import { directorPlanAfterRippleInsertion, directorPlanAfterRippleRemoval } from './director-plan-timing';
 
+const treatment = {
+  treatmentId: 'source-led', visualAnchor: 'The current speaker or evidence.',
+  visualTreatment: 'Keep one clear full-canvas hierarchy around the current source.',
+  motionPlan: 'Enter cleanly, develop with the thought, hold the payoff, and clear.',
+  soundPlan: 'Keep the primary voice audible and continuous.',
+  assetStrategy: 'Use the supplied source that supports this scene.',
+  brollDecision: 'none' as const, brollRationale: 'Source continuity carries this test scene.',
+};
+
 const plan = directorPlanFromSeconds({
   goal: 'Explain and prove.',
   creativeThesis: 'Setup first, evidence second.',
+  rhythmArc: 'Measured setup opens into proof and then settles.',
+  designSystem: {
+    visualConcept: 'Explanation resolving into evidence.', composition: 'Source-led hierarchy.',
+    typography: 'One clear display and restrained labels.', colorAndMaterial: 'Neutral with one accent.',
+    imagery: 'Preserve source truth.', motion: 'Motivated reveals and clean holds.', sound: 'Voice first.',
+  },
   scenes: [
-    { id: 'setup', label: 'Setup', startSec: 0, durationSec: 4, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' },
-    { id: 'proof', label: 'Proof', startSec: 4, durationSec: 6, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Prove.' },
+    { ...treatment, id: 'setup', label: 'Setup', startSec: 0, durationSec: 4, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'Explain.' },
+    { ...treatment, id: 'proof', label: 'Proof', startSec: 4, durationSec: 6, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Prove.' },
   ],
 }, 30).plan!;
 

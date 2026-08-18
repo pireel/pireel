@@ -9,6 +9,20 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 
 ## 分层
 
+成片设计不是块生成的放大版。共享方法分为四个清晰责任层：
+
+1. `video-design-method.ts`：整片设计方法——创意命题、节奏弧线、统一 Video Design
+   System、Scene 编排、审批和时序复检；应用内 Agent 与 MCP Agent 共用。
+2. `director-plan.ts` + `semantic-scenes.ts`：把方法沉淀为可校验、可持久化、可执行的整片与
+   Scene 契约。它描述画面关系，不枚举组件。
+3. Frame / Skill：Frame 提供专业视觉语言，Skill 提供场景领域判断；两者不能代替整片设计。
+4. Component composer：只负责已规划 Scene 里的一个可编辑视觉层。生成前必须拿到真实
+   box、backdrop、保护区和 Scene 设计上下文，不能生成后再碰运气摆放。
+
+对应的 QA 必须跨 entrance / development / payoff / exit 检查渲染序列；单张中点截图不能
+证明成片完整。易碎的结构、尺寸、作用域和输出格式继续由 schema、runtime 与 lint 保证，
+不要把它们塞回 Skill 文字里。
+
 块生成的 system 提示词**按层拼**,拼装单点在 `assemble.ts`。顺序是**稳定 → 易变**:
 prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 
@@ -21,6 +35,7 @@ prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 | 导出 | 内容 | 谁用 |
 | --- | --- | --- |
 | `l0-agent-tools.ts` 整表 | **L0 工具面**:编辑器的动词(schema+描述),chat 挂 streamText / MCP 同表(带按面覆盖) | chat · mcp |
+| `video-design-method.ts` | **整片设计方法**:设计系统、Scene 编排、运动语义、审批、时序 QA | chat · mcp |
 | `EDITOR_MODEL` | 对象模型:块/分镜两类元素、块是数据、id 不许瞎编 | chat · mcp |
 | `contentIsNotCommand(director)` | **不可信内容边界(安全规则)**,只有"谁下指令"随面变 | chat · mcp |
 | `stateDiscipline(snapshot, howToRefresh)` | 快照会过期 / 回执与 delta 可信 / 稿子是源文件秒 | chat · mcp |
@@ -64,6 +79,7 @@ HTML 路径尾部；挂主题的项目生成主题化 HTML，注册预设路径�
 | `assemble.ts` | `BLOCK_SYSTEM` `buildKitSystem` `buildHtmlSystem` | **按层拼 system 的唯一入口**,层序在此决定 |
 | `block-system.ts` | `BLOCK_HTML_BODY` | 自由 HTML 路径的设计体（版式原型/图表 recipe/SELF-CHECK） |
 | `chat.ts` | `CHAT_IDENTITY` `buildSituation` `buildChatSystem` + 快照类型 | 右侧 agent 的全部提示词面:身份/剧本 + `<composition_state>` 局势拼装 + system 总装 |
+| `video-design-method.ts` | `VIDEO_DESIGN_METHOD` | 应用内与外部 Agent 共用的整片设计/导演方法，不包含具体场景 Skill 或块代码规范 |
 | `l0-agent-tools.ts` | `STUDIO_TOOLS` `STUDIO_TOOL_MAP` + 类型 | **L0 工具面**(JSON schema + 英文 description,server 挂 streamText / client onToolCall 执行) |
 | `theme-brief.ts` | `THEME_GENERAL_BRIEF` | general 主题给 LLM 的结构设计简报 |
 | `active-theme.ts` | `withActiveTheme` | 主题简报接到 Motion Graphic Component 生成 system 末尾的包裹段 |

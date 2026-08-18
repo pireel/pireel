@@ -1,11 +1,12 @@
 import type { DirectorScenePlan } from './director-plan';
 import type { EditorDocumentV2, TimelineClip } from './editor-document/types';
 
-export type SceneVisualReviewPhase = 'entrance' | 'pressure' | 'proof' | 'exit' | 'scene';
+export type SceneVisualReviewPhase = 'entrance' | 'develop' | 'payoff' | 'exit' | 'scene';
 
 export type SceneVisualQaIssueKind =
   | 'repeated-geometry'
   | 'missing-evidence'
+  | 'missing-audible-audio'
   | 'caption-subject-collision'
   | 'frame-drift'
   | 'unsafe-delivery-crop';
@@ -36,50 +37,34 @@ function evidenceOf(scene: DirectorScenePlan): string[] {
   return scene.evidence?.map((item) => item.trim()).filter(Boolean) ?? [];
 }
 
-function proofScore(scene: DirectorScenePlan): number {
-  let score = 0;
-  if (scene.narrativeRole === 'prove') score += 6;
-  if (scene.viewerTask === 'believe') score += 4;
-  if (scene.sceneFamily === 'media-evidence' || scene.sceneFamily === 'demo-focus') score += 3;
-  if (evidenceOf(scene).length) score += 2;
-  return score;
-}
-
-function pressureScore(scene: DirectorScenePlan): number {
-  let score = 0;
-  if (scene.narrativeRole === 'hook' || scene.narrativeRole === 'turn') score += 5;
-  if (scene.narrativeRole === 'payoff' || scene.narrativeRole === 'cta') score += 4;
-  if (scene.viewerTask === 'act' || scene.viewerTask === 'feel') score += 3;
-  if (scene.sceneFamily === 'designed-fullscreen' || scene.sceneFamily === 'montage') score += 2;
-  return score;
-}
-
-function choosePhase(
-  scene: DirectorScenePlan,
-  index: number,
-  total: number,
-  proofSceneId?: string,
-  pressureSceneId?: string,
-): SceneVisualReviewPhase {
-  if (index === 0) return 'entrance';
-  if (index === total - 1) return 'exit';
-  if (scene.id === proofSceneId) return 'proof';
-  if (scene.id === pressureSceneId) return 'pressure';
-  return 'scene';
-}
-
 function sampleSecond(scene: DirectorScenePlan, phase: SceneVisualReviewPhase, fps: number): number {
   const start = frameToSec(scene.startFrame, fps);
   const duration = frameToSec(scene.durationFrames, fps);
-  const edgeInset = Math.min(0.25, duration * 0.18);
+  const edgeInset = Math.min(0.2, duration * 0.1);
   if (phase === 'entrance') return start + edgeInset;
+  if (phase === 'develop') return start + duration * 0.4;
+  if (phase === 'payoff') return start + duration * 0.68;
   if (phase === 'exit') return start + Math.max(edgeInset, duration - edgeInset);
   return start + duration * 0.5;
 }
 
-function sceneContext(scene: DirectorScenePlan, phase: SceneVisualReviewPhase, frameId?: string): string {
+function sceneContext(
+  scene: DirectorScenePlan,
+  phase: SceneVisualReviewPhase,
+  plan: NonNullable<EditorDocumentV2['semantics']['directorPlan']>,
+  frameId?: string,
+): string {
   const evidence = evidenceOf(scene);
   return [
+    `creativeThesis: ${plan.creativeThesis}`,
+    `rhythmArc: ${plan.rhythmArc}`,
+    `visualConcept: ${plan.designSystem.visualConcept}`,
+    `compositionGrammar: ${plan.designSystem.composition}`,
+    `typographySystem: ${plan.designSystem.typography}`,
+    `colorAndMaterial: ${plan.designSystem.colorAndMaterial}`,
+    `imageryTreatment: ${plan.designSystem.imagery}`,
+    `motionGrammar: ${plan.designSystem.motion}`,
+    `soundGrammar: ${plan.designSystem.sound}`,
     `semanticScene: ${scene.id} (${scene.label})`,
     `reviewPhase: ${phase}`,
     `viewerTask: ${scene.viewerTask}`,
@@ -100,39 +85,47 @@ function sceneContext(scene: DirectorScenePlan, phase: SceneVisualReviewPhase, f
   ].join('; ');
 }
 
-function rankedSceneId(
-  scenes: DirectorScenePlan[],
-  score: (scene: DirectorScenePlan) => number,
-  excluded: Set<string>,
-): string | undefined {
-  return scenes
-    .filter((scene) => !excluded.has(scene.id))
-    .map((scene, index) => ({ id: scene.id, score: score(scene), index }))
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .find((candidate) => candidate.score > 0)?.id;
-}
-
 function capMoments(moments: SceneVisualReviewMoment[], maxMoments: number): SceneVisualReviewMoment[] {
   if (moments.length <= maxMoments) return moments;
-  const critical = moments.filter((moment) => moment.phase !== 'scene');
-  const picked = new Map(critical.map((moment) => [moment.sceneId, moment]));
-  const ordinary = moments.filter((moment) => moment.phase === 'scene');
+  const picked = new Set<SceneVisualReviewMoment>();
+  const firstEntrance = moments.find((moment) => moment.phase === 'entrance');
+  const lastExit = [...moments].reverse().find((moment) => moment.phase === 'exit');
+  if (firstEntrance) picked.add(firstEntrance);
+  if (lastExit) picked.add(lastExit);
+
+  // A settled/payoff frame is the minimum useful checkpoint for every scene. When the film has
+  // more scenes than the cloud-review cap, sample these evenly rather than biasing the opening.
+  const payoffs = moments.filter((moment) => moment.phase === 'payoff' || moment.phase === 'scene');
+  const payoffRoom = Math.max(0, maxMoments - picked.size);
+  const payoffCount = Math.min(payoffs.length, payoffRoom);
+  for (let index = 0; index < payoffCount; index++) {
+    const candidateIndex = Math.min(
+      payoffs.length - 1,
+      Math.floor(((index + 0.5) * payoffs.length) / Math.max(1, payoffCount)),
+    );
+    const candidate = payoffs[candidateIndex];
+    if (candidate) picked.add(candidate);
+  }
+
+  // Use remaining capacity on temporal states. This catches late-loading media, entrance flashes,
+  // animation that never settles, and overlays that fail to clear—problems a midpoint cannot see.
+  const temporal = moments.filter((moment) => !picked.has(moment));
   const room = Math.max(0, maxMoments - picked.size);
   for (let index = 0; index < room; index++) {
     const candidateIndex = Math.min(
-      ordinary.length - 1,
-      Math.floor(((index + 0.5) * ordinary.length) / Math.max(1, room)),
+      temporal.length - 1,
+      Math.floor(((index + 0.5) * temporal.length) / Math.max(1, room)),
     );
-    const candidate = ordinary[candidateIndex];
-    if (candidate) picked.set(candidate.sceneId, candidate);
+    const candidate = temporal[candidateIndex];
+    if (candidate) picked.add(candidate);
   }
-  return moments.filter((moment) => picked.has(moment.sceneId)).slice(0, maxMoments);
+  return moments.filter((moment) => picked.has(moment)).slice(0, maxMoments);
 }
 
 /**
- * Select one composed-frame checkpoint per Director Scene, while explicitly naming the representative
- * entrance, pressure, proof, and exit states. The result stays open-vocabulary: it samples judgment
- * moments and never selects a component or repair recipe.
+ * Select temporal checkpoints for each Director Scene. Short scenes get one settled sample; longer
+ * scenes get entrance, develop, payoff, and exit samples so QA evaluates motion and media loading as
+ * a sequence rather than mistaking one good thumbnail for a finished scene.
  */
 export function planSceneVisualReview(
   document: EditorDocumentV2,
@@ -144,19 +137,20 @@ export function planSceneVisualReview(
   const scenes = plan.scenes;
   if (!scenes.length) return [];
 
-  const excluded = new Set<string>([scenes[0]!.id, scenes[scenes.length - 1]!.id]);
-  const proofSceneId = rankedSceneId(scenes, proofScore, excluded);
-  if (proofSceneId) excluded.add(proofSceneId);
-  const pressureSceneId = rankedSceneId(scenes, pressureScore, excluded);
-  const moments = scenes.map((scene, index) => {
-    const phase = choosePhase(scene, index, scenes.length, proofSceneId, pressureSceneId);
-    return {
+  const moments = scenes.flatMap((scene) => {
+    const durationSec = frameToSec(scene.durationFrames, document.canvas.fps);
+    const phases: SceneVisualReviewPhase[] = durationSec < 1.2
+      ? ['scene']
+      : durationSec < 2.5
+        ? ['entrance', 'payoff', 'exit']
+        : ['entrance', 'develop', 'payoff', 'exit'];
+    return phases.map((phase) => ({
       atSec: Math.round(sampleSecond(scene, phase, document.canvas.fps) * 100) / 100,
       sceneId: scene.id,
       sceneLabel: scene.label,
       phase,
-      expected: sceneContext(scene, phase, plan.frameId ?? document.appearance.frameId),
-    };
+      expected: sceneContext(scene, phase, plan, plan.frameId ?? document.appearance.frameId),
+    }));
   }).filter((moment) => !selectedIds || selectedIds.has(moment.sceneId));
   return capMoments(moments, Math.min(18, Math.max(1, options.maxMoments ?? 18)));
 }
@@ -179,6 +173,44 @@ function geometrySignature(clip: TimelineClip): string | null {
   return [quantize(box.x), quantize(box.y), quantize(box.w), quantize(box.h)].join(':');
 }
 
+const clipEndFrame = (clip: TimelineClip) => clip.startFrame + clip.durationFrames;
+const overlapsScene = (clip: TimelineClip, scene: DirectorScenePlan) =>
+  clip.enabled
+  && clip.startFrame < scene.startFrame + scene.durationFrames
+  && clipEndFrame(clip) > scene.startFrame;
+
+function sceneNeedsAudibleAudio(scene: DirectorScenePlan): boolean {
+  const plan = scene.soundPlan.toLowerCase();
+  if (/(deliberate silence|full silence|silent scene|no audio|无声|静音)/i.test(plan)) return false;
+  return /(voice|speech|dialogue|dialog|narration|speaker|room tone|source sound|口播|人声|旁白|对白|原声)/i.test(plan);
+}
+
+function hasAudibleAudio(document: EditorDocumentV2, scene: DirectorScenePlan): boolean {
+  return document.timeline.tracks.some((track) => {
+    if (track.muted) return false;
+    return track.clips.some((clip) => {
+      if (!overlapsScene(clip, scene)) return false;
+      if (clip.kind === 'narrative') {
+        const asset = document.assets[clip.assetId];
+        return asset?.metadata.hasAudio !== false
+          && !clip.properties.audioMuted
+          && (clip.properties.volumeDb ?? 0) > -60;
+      }
+      if (clip.kind === 'media') {
+        const asset = document.assets[clip.assetId];
+        return asset?.kind === 'video'
+          && asset.metadata.hasAudio !== false
+          && !clip.video?.audioMuted
+          && (clip.video?.volumeDb ?? 0) > -60;
+      }
+      if (clip.kind === 'audio') {
+        return !clip.properties.muted && (clip.properties.volumeDb ?? -18) > -60;
+      }
+      return false;
+    });
+  });
+}
+
 /** Local structural pass. Visual problems that require pixels remain delegated to cloud vision. */
 export function auditSceneVisualStructure(document: EditorDocumentV2): SceneVisualQaIssue[] {
   const plan = document.semantics.directorPlan;
@@ -188,6 +220,14 @@ export function auditSceneVisualStructure(document: EditorDocumentV2): SceneVisu
   const issues: SceneVisualQaIssue[] = [];
 
   for (const scene of plan.scenes) {
+    if (sceneNeedsAudibleAudio(scene) && !hasAudibleAudio(document, scene)) {
+      issues.push({
+        sceneId: scene.id,
+        blockId: '',
+        kind: 'missing-audible-audio',
+        note: 'The approved sound plan calls for audible voice or source sound, but every overlapping audio-capable clip is absent, disabled, muted, or silent.',
+      });
+    }
     const needsEvidence = scene.narrativeRole === 'prove' || scene.viewerTask === 'believe';
     if (!needsEvidence) continue;
     const semantic = semanticById.get(scene.id);

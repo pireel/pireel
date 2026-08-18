@@ -44,9 +44,9 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
 describe('MCP 工具面', () => {
   it('STUDIO_TOOLS 全量映射 + MCP 专属工具(registry 加工具这里自动长出来)', () => {
     const names = new Set(buildMcpTools().map((t) => t.name));
-    // chatOnly 工具(review_visuals 这类外包眼睛)不出现在 MCP 面——外部 agent 有自己的眼睛(capture_frame)
+    // chatOnly 工具(review_visuals 这类托管视觉模型)不出现在 MCP 面——外部 agent 通过 capture_frame/review_sequence 使用自己的眼睛
     for (const d of STUDIO_TOOLS) expect(names.has(d.id)).toBe(!d.chatOnly);
-    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'get_icons', 'search_stock', 'import_stock']) {
+    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'review_sequence', 'get_icons', 'search_stock', 'import_stock']) {
       expect(names.has(extra)).toBe(true);
     }
   });
@@ -183,7 +183,8 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     expect((r!.result as { isError: boolean }).isError).toBe(false);
     const tool = buildMcpTools().find((candidate) => candidate.name === 'compose_block_brief')!;
     expect((tool.inputSchema as { properties: Record<string, unknown> }).properties).toHaveProperty('durationSec');
-    expect(tool.description).toContain('transcript beats');
+    expect(tool.description).toContain('spoken beats');
+    expect((tool.inputSchema as { properties: Record<string, unknown> }).properties).toHaveProperty('placement');
   });
   it('compose_block_brief 无 instruction 会打回;apply_block 直接过桥', async () => {
     const d = deps({ callBridge: vi.fn(async () => ({ ok: true, data: { block: { id: 'b2' } } })) });
@@ -212,6 +213,24 @@ describe('BYO-brain 契约(brief → 外部生成 → apply,客户端无关)', (
     expect(result.content[0]!.data).toBe('AAAA');
     const capture = buildMcpTools().find((t) => t.name === 'capture_frame')!;
     expect(capture.description).toContain('at most twice');
+  });
+  it('review_sequence:时序帧组回多个 image content', async () => {
+    const d = deps({ callBridge: vi.fn(async () => ({
+      ok: true,
+      summary: '2 temporal checkpoints',
+      data: { frames: [{ index: 0, atSec: 1 }, { index: 1, atSec: 2 }] },
+      images: [
+        { data: 'AAAA', mimeType: 'image/jpeg' },
+        { data: 'BBBB', mimeType: 'image/jpeg' },
+      ],
+    })) });
+    const r = await handleMcpRequest({ id: 201, method: 'tools/call', params: { name: 'review_sequence', arguments: { sceneIds: ['scene-1'] } } }, d);
+    const result = r!.result as { content: { type: string; data?: string }[]; isError: boolean };
+    expect(result.isError).toBe(false);
+    expect(result.content.map((part) => part.type)).toEqual(['text', 'image', 'image']);
+    expect(d.callBridge).toHaveBeenCalledWith('review_sequence', { sceneIds: ['scene-1'] }, 600_000);
+    const review = buildMcpTools().find((tool) => tool.name === 'review_sequence')!;
+    expect(review.description).toContain('TEMPORAL SEQUENCE');
   });
   it('MCP instructions 教 BYO 主路径', async () => {
     const r = await handleMcpRequest({ id: 19, method: 'initialize' }, deps());

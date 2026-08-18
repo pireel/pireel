@@ -130,6 +130,7 @@ import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
 import { detectSpeechSilenceCuts, resolveSpeechSilenceOptions } from './speech-silence';
 import { withEditableBlockGeometry } from './editable-block-geometry';
+import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
@@ -1215,7 +1216,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   repairScope,
                   localComparison,
                   ...(total
-                    ? { hint: `${repairScope.instruction} Use subject framing → set_shot_framing, overlay position → place_block, styling/contrast/Frame drift → edit_block, and missing evidence → place truthful source material.` }
+                    ? { hint: `${repairScope.instruction} Use subject framing → set_shot_framing, overlay position → place_block, styling/contrast/Frame drift → edit_block, missing evidence → place truthful source material, and missing audible audio → inspect track/clip mute and level before changing the approved sound plan.` }
                     : {}),
                 },
               };
@@ -2656,6 +2657,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
                 ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
                 : 3;
+              const plannedPlacement = placementPercentToBox(input.placement, c.width, c.height);
+              if (plannedPlacement.error) return { ok: false, error: plannedPlacement.error };
+              const plannedBox = plannedPlacement.box;
               const explicitSceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
               const sceneContext = resolveDirectorSceneContext(documentRef.current, {
                 ...(explicitSceneId ? { sceneId: explicitSceneId } : {}),
@@ -2670,15 +2674,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 innerHtml: '<div></div>',
                 timelineBody: '',
                 label: t('workbench.newElement'),
+                ...(plannedBox
+                  ? { boxPx: { w: Math.round(plannedBox.w * c.width), h: Math.round(plannedBox.h * c.height) } }
+                  : {}),
                 durationSec,
                 beats: beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, at, durationSec),
               };
+              const backdrop = typeof input.backdrop === 'string' && input.backdrop.trim()
+                ? `\n\nBACKDROP AND PROTECTED ZONES: ${input.backdrop.trim()}`
+                : '';
               // Streaming: the note (the human sentence before the fence) is pushed to the card as it generates; the output passes static checks (bad CSS doesn't enter the composition)
               // New elements always get bespoke visual reasoning. No Frame means the neutral visual
               // craft baseline, not a fallback to the fixed component-library cards.
               let parsed = await race(composeBlockChecked(
                 seed,
-                `Create a new overlay element for this content: ${String(input.instruction ?? '')}${sceneDirection}`,
+                `Create a new Motion Graphic layer for this composed Scene: ${String(input.instruction ?? '')}${backdrop}${sceneDirection}`,
                 (acc) => report(noteOf(acc) || t('panels.generating')),
                 newBlockComposeMode(),
               ));
@@ -2688,17 +2698,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (parsed.declined) {
                 parsed = await race(composeBlockChecked(
                   seed,
-                  `Create a new overlay element; choose the visual form from the content and editorial purpose: ${String(input.instruction ?? '')}${sceneDirection}`,
+                  `Create a new Motion Graphic layer; choose the visual form from the content and editorial purpose: ${String(input.instruction ?? '')}${backdrop}${sceneDirection}`,
                   (acc) => report(noteOf(acc) || t('panels.generating')),
                 ));
               }
               const nb = withEditableBlockGeometry({
                 id: seed.id,
-                ...composedBlockFields(parsed),
+                ...composedBlockFields(parsed, durationSec),
                 startSec: at,
                 durationSec,
                 trackIndex: freeTrack(compRef.current.blocks, at, durationSec),
                 label: String(input.instruction ?? t('workbench.newElement')).slice(0, 12),
+                ...(plannedBox ? { box: plannedBox } : {}),
               }, c.width, c.height);
               const inserted = commitOverlayInsert(nb, sceneContext?.scene.id);
               if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
@@ -2737,7 +2748,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               // exactly as it is (never silently convert a kit block to markup) and hand the note
               // back so the agent can rephrase or explain.
               if (parsed.declined) return { ok: false, error: parsed.note || t('workbench.aiEditFailed') };
-              const editable = withEditableBlockGeometry({ ...b, ...composedBlockFields(parsed) }, c.width, c.height);
+              const editable = withEditableBlockGeometry({ ...b, ...composedBlockFields(parsed, b.durationSec) }, c.width, c.height);
               const updated = commitOverlayEdits([{
                 clipId: b.id,
                 block: { templateId: editable.templateId, slots: editable.slots, box: editable.box },
@@ -2879,12 +2890,19 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           clipTranscripts: clipAsrRef.current,
           atSec,
         });
-        const contextForWindow = (startSec: number, durationSec: number) => {
+        const contextForWindow = (startSec: number, durationSec: number, sceneId?: string) => {
           const script = scriptAt(startSec);
           const beats = beatsForWindow(c2.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
+          const sceneContext = resolveDirectorSceneContext(documentRef.current, {
+            ...(sceneId ? { sceneId } : {}),
+            startFrame: Math.round(startSec * documentRef.current.canvas.fps),
+            durationFrames: Math.max(1, Math.round(durationSec * documentRef.current.canvas.fps)),
+          });
           return {
             ...(script ? { script } : {}),
             ...(beats.length ? { beats } : {}),
+            ...(sceneContext ? { designDirection: formatDirectorSceneContext(sceneContext) } : {}),
+            ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
           };
         };
         const base = {
@@ -2923,7 +2941,16 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
           ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
           : 3;
-        const context = contextForWindow(at, durationSec);
+        const sceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
+        const sceneContext = sceneId ? resolveDirectorSceneContext(documentRef.current, {
+          sceneId,
+          startFrame: Math.round(at * documentRef.current.canvas.fps),
+          durationFrames: Math.max(1, Math.round(durationSec * documentRef.current.canvas.fps)),
+        }) : undefined;
+        if (sceneId && !sceneContext) return { ok: false, error: `Director scene does not exist: ${sceneId}` };
+        const placement = placementPercentToBox(input.placement, c2.width, c2.height);
+        if (placement.error) return { ok: false, error: placement.error };
+        const context = contextForWindow(at, durationSec, sceneId);
         return {
           ok: true,
           summary: t('workbench.fetchedNewElementContext'),
@@ -2931,7 +2958,18 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             ...base,
             atSec: at,
             durationSec,
-            block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: t('workbench.newElement'), durationSec },
+            block: {
+              id: blockId('ai'),
+              kind: 'custom',
+              innerHtml: '<div></div>',
+              timelineBody: '',
+              label: t('workbench.newElement'),
+              durationSec,
+              ...(placement.box ? { boxPx: { w: Math.round(placement.box.w * c2.width), h: Math.round(placement.box.h * c2.height) } } : {}),
+            },
+            ...(input.placement ? { placement: input.placement } : {}),
+            ...(sceneId ? { sceneId } : {}),
+            ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
             ...(Object.keys(context).length ? { context } : {}),
           },
         };
@@ -2944,6 +2982,8 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const requestedLabel = typeof input.label === 'string' && input.label.trim()
           ? input.label.trim().slice(0, 12)
           : undefined;
+        const placement = placementPercentToBox(input.placement, c2.width, c2.height);
+        if (placement.error) return { ok: false, error: placement.error };
         if (target && genIdsRef.current.has(target.id)) return { ok: false, error: t('workbench.blockGeneratingWaitFinish') };
         const fb = target ? renderBlock(target) : { innerHtml: '<div></div>', timelineBody: '' };
         // Stable applyId (same fix as the offline executor in server-tools): an unknown bid IS the
@@ -2979,6 +3019,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
             durationSec: kDur,
             trackIndex: freeTrack(c2.blocks, kAt, kDur),
             label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
+            ...(placement.box ? { box: placement.box } : {}),
           }, c2.width, c2.height);
           const inserted = insertBlock(kb);
           if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
@@ -3007,7 +3048,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         pushUndoSnapshot();
         if (target) {
           const editable = withEditableBlockGeometry(
-            { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody }, ...(requestedLabel ? { label: requestedLabel } : {}) },
+              { ...target, templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec }, ...(requestedLabel ? { label: requestedLabel } : {}) },
             c2.width,
             c2.height,
           );
@@ -3023,11 +3064,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         const nb = withEditableBlockGeometry({
           id: applyId,
           templateId: 'custom',
-          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody },
+          slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur },
           startSec: at,
           durationSec: dur,
           trackIndex: freeTrack(c2.blocks, at, dur),
           label: (typeof input.label === 'string' && input.label ? input.label : t('workbench.newElement')).slice(0, 12),
+          ...(placement.box ? { box: placement.box } : {}),
         }, c2.width, c2.height);
         const inserted = insertBlock(nb);
         if (!inserted.ok) return { ok: false, error: editorErrorMessage(inserted.error), data: { code: inserted.error.code, trackIds: inserted.error.trackIds } };
@@ -3089,12 +3131,120 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
       }
+      case 'review_sequence': {
+        const sceneIds = Array.isArray(input.sceneIds)
+          ? [...new Set((input.sceneIds as unknown[])
+            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+            .map((value) => value.trim()))]
+          : [];
+        const maxMoments = Math.min(18, Math.max(1, Math.round(Number(input.maxMoments) || 12)));
+        const planned = planSceneVisualReview(documentRef.current, {
+          ...(sceneIds.length ? { sceneIds } : {}),
+          maxMoments,
+        });
+        if (!planned.length) {
+          return { ok: false, error: 'review_sequence requires an approved Director Plan with matching Semantic Scenes; use capture_frame for a small unplanned edit' };
+        }
+        const renderTimeline = canonicalRenderTimeline(c2, documentRef.current, ctx.resolveAssetUrl);
+        const moments = planned.map((moment) => ({
+          ...moment,
+          atSec: Math.min(Math.max(0, moment.atSec), renderTimeline.durationSec),
+        }));
+        const requestedAts = [...new Set(moments.map((moment) => moment.atSec))];
+        const momentAttempts = reviewMomentAttempts(compRef, renderTimeline.fingerprint);
+        const { allowedAtSecs, repeatedAtSecs } = selectReviewMoments(requestedAts, momentAttempts);
+        if (!allowedAtSecs.length) {
+          return {
+            ok: false,
+            error: t('workbench.reviewBudgetUnchanged'),
+            data: { repeatedAtSecs, limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
+          };
+        }
+        const allowed = new Set(allowedAtSecs);
+        const selected = moments.filter((moment) => allowed.has(moment.atSec));
+        try {
+          const frames: Array<{
+            index: number;
+            atSec: number;
+            sceneId: string;
+            sceneLabel: string;
+            phase: SceneVisualReviewPhase;
+            expected: string;
+            visible: unknown;
+          }> = [];
+          const images: { data: string; mimeType: string }[] = [];
+          for (let index = 0; index < selected.length; index++) {
+            const moment = selected[index]!;
+            const label = `${Math.round(moment.atSec * 10) / 10}s · ${moment.phase}`;
+            const shot = await captureCompositionFrame({
+              comp: renderTimeline.composition,
+              videoPlacements: renderTimeline.placements,
+              primaryVisualHidden: renderTimeline.primaryHidden,
+              visualMediaClips: renderTimeline.visualMediaClips,
+              timelineDurationSec: renderTimeline.durationSec,
+              videoFile: videoFileRef.current,
+              clipFiles: clipFilesRef.current,
+              atSec: moment.atSec,
+              burnLabel: label,
+              maxDim: 720,
+            });
+            const blocks = renderTimeline.composition.blocks
+              .filter((block) => !isSentenceCaption(block) && moment.atSec >= block.startSec && moment.atSec < block.startSec + block.durationSec)
+              .map((block) => ({
+                id: block.id,
+                kind: blockKind(block),
+                ...(block.label ? { label: block.label } : {}),
+                ...(block.box ? { zone: zoneOf(block.box) } : {}),
+              }));
+            const span = videoShotTimelineSpans(c2.shots ?? [], renderTimeline.placements)
+              .find((candidate) => moment.atSec >= candidate.editedStart - 1e-6 && moment.atSec < candidate.editedEnd + 1e-6);
+            frames.push({
+              index,
+              atSec: moment.atSec,
+              sceneId: moment.sceneId,
+              sceneLabel: moment.sceneLabel,
+              phase: moment.phase,
+              expected: moment.expected,
+              visible: {
+                blocks,
+                ...(span ? { shot: { id: span.clip.id, treatment: span.clip.treatment } } : {}),
+                captionsOn: c2.blocks.some(isSentenceCaption),
+              },
+            });
+            images.push({
+              data: shot.dataUrl.slice(shot.dataUrl.indexOf(',') + 1),
+              mimeType: 'image/jpeg',
+            });
+            const key = reviewMomentKey(moment.atSec);
+            momentAttempts.set(key, (momentAttempts.get(key) ?? 0) + 1);
+          }
+          const reviewedSceneIds = new Set(selected.map((moment) => moment.sceneId));
+          const structuralIssues = auditSceneVisualStructure(documentRef.current)
+            .filter((issue) => reviewedSceneIds.has(issue.sceneId));
+          const repairScope = sceneVisualRepairScope(structuralIssues);
+          return {
+            ok: true,
+            summary: `Captured ${frames.length} temporal checkpoints across ${reviewedSceneIds.size} Scene${reviewedSceneIds.size === 1 ? '' : 's'}`,
+            data: {
+              frames,
+              structuralIssues,
+              repairScope,
+              ...(repeatedAtSecs.length ? { skippedUnchangedAtSecs: repeatedAtSecs } : {}),
+              instruction:
+                'Inspect every attached image in index order as one moving sequence. Judge visual hierarchy, legibility, protected subjects, source truth, continuity between phases, whether motion builds to a readable payoff, holds long enough, and clears cleanly. Treat structuralIssues as deterministic. Repair only affected Semantic Scenes, preserve the rest, then re-run review_sequence for those sceneIds.',
+            },
+            images,
+          };
+        } catch (e) {
+          return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
+        }
+      }
       default:
         return runStudioTool(ctx, tool, input);
     }
 }
 
 export function runExternalTool(ctx: AgentToolCtx, tool: string, input: Record<string, unknown>): Promise<StudioToolResult> {
-  if (QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool) || tool === 'compose_context' || tool === 'capture_frame') return runExternalToolInner(ctx, tool, input);
+  if (QUERY_TOOLS.has(tool) || PROJECT_MUTATION_TOOLS.has(tool) || tool === 'compose_context' || tool === 'capture_frame' || tool === 'review_sequence') return runExternalToolInner(ctx, tool, input);
   return runAtomicCompositionTool(ctx, () => runExternalToolInner(ctx, tool, input));
 }

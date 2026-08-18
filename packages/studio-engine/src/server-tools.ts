@@ -18,6 +18,8 @@
  */
 
 import { interpretApplyRaw } from './briefs';
+import { placementPercentToBox } from './overlay-placement';
+import { formatDirectorSceneContext, resolveDirectorSceneContext } from './semantic-scenes';
 import {
   type Block,
   type Composition,
@@ -1251,6 +1253,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const requestedLabel = typeof input.label === 'string' && input.label.trim()
         ? input.label.trim().slice(0, 12)
         : undefined;
+      const placement = placementPercentToBox(input.placement, c.width, c.height);
+      if (placement.error) return { result: { ok: false, error: placement.error } };
       // Stabilize applyId (fixes a lint infinite loop found on-device): for a new
       // block with no bid, mint an id now and hand it back in the receipt on lint
       // failure; the retry carries blockId to reuse it → the new block's scoped-CSS
@@ -1283,6 +1287,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           durationSec: kDur,
           trackIndex: freeTrack(c.blocks, kAt, kDur),
           label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
+          ...(placement.box ? { box: placement.box } : {}),
         };
         const edit = insertOverlayDocumentClip({ document: p.document, block: kb });
         if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
@@ -1320,7 +1325,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (target) {
         const edit = applyOverlayDocumentEdits({
           document: p.document,
-          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
+          updates: [{ clipId: target.id, block: { templateId: 'custom', slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: target.durationSec }, ...(requestedLabel ? { label: requestedLabel } : {}) } }],
         });
         if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
         return {
@@ -1334,11 +1339,12 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const nb: Block = {
         id: applyId,
         templateId: 'custom',
-        slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody },
+        slots: { innerHtml: parsed.innerHtml, timelineBody: parsed.timelineBody, authoredDurationSec: dur },
         startSec: at,
         durationSec: dur,
         trackIndex: freeTrack(c.blocks, at, dur),
         label: (typeof input.label === 'string' && input.label ? input.label : 'New block').slice(0, 12),
+        ...(placement.box ? { box: placement.box } : {}),
       };
       const edit = insertOverlayDocumentClip({ document: p.document, block: nb });
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
@@ -1363,12 +1369,19 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         clipTranscripts,
         atSec,
       });
-      const contextForWindow = (startSec: number, durationSec: number) => {
+      const contextForWindow = (startSec: number, durationSec: number, sceneId?: string) => {
         const script = scriptAt(startSec);
         const beats = beatsForWindow(c.shots ?? [], mainTranscript, clipTranscripts, startSec, durationSec);
+        const sceneContext = resolveDirectorSceneContext(p.document, {
+          ...(sceneId ? { sceneId } : {}),
+          startFrame: Math.round(startSec * p.document.canvas.fps),
+          durationFrames: Math.max(1, Math.round(durationSec * p.document.canvas.fps)),
+        });
         return {
           ...(script ? { script } : {}),
           ...(beats.length ? { beats } : {}),
+          ...(sceneContext ? { designDirection: formatDirectorSceneContext(sceneContext) } : {}),
+          ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
         };
       };
       const base = {
@@ -1407,7 +1420,16 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const durationSec = typeof input.durationSec === 'number' && Number.isFinite(input.durationSec)
         ? Math.max(0.3, Math.round(input.durationSec * 100) / 100)
         : 3;
-      const context = contextForWindow(at, durationSec);
+      const sceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
+      const sceneContext = sceneId ? resolveDirectorSceneContext(p.document, {
+        sceneId,
+        startFrame: Math.round(at * p.document.canvas.fps),
+        durationFrames: Math.max(1, Math.round(durationSec * p.document.canvas.fps)),
+      }) : undefined;
+      if (sceneId && !sceneContext) return { result: { ok: false, error: `Director scene does not exist: ${sceneId}` } };
+      const placement = placementPercentToBox(input.placement, c.width, c.height);
+      if (placement.error) return { result: { ok: false, error: placement.error } };
+      const context = contextForWindow(at, durationSec, sceneId);
       return {
         result: {
           ok: true,
@@ -1416,7 +1438,18 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
             ...base,
             atSec: at,
             durationSec,
-            block: { id: blockId('ai'), kind: 'custom', innerHtml: '<div></div>', timelineBody: '', label: 'New block', durationSec },
+            block: {
+              id: blockId('ai'),
+              kind: 'custom',
+              innerHtml: '<div></div>',
+              timelineBody: '',
+              label: 'New block',
+              durationSec,
+              ...(placement.box ? { boxPx: { w: Math.round(placement.box.w * c.width), h: Math.round(placement.box.h * c.height) } } : {}),
+            },
+            ...(input.placement ? { placement: input.placement } : {}),
+            ...(sceneId ? { sceneId } : {}),
+            ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
             ...(Object.keys(context).length ? { context } : {}),
           },
         },

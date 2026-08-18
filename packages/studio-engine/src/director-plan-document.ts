@@ -1,5 +1,5 @@
-import type { DirectorPlanV1 } from './director-plan';
-import { validateDirectorPlanV1 } from './director-plan';
+import type { DirectorPlan } from './director-plan';
+import { validateDirectorPlan } from './director-plan';
 import type { EditorDocumentV2 } from './editor-document/types';
 import { splitEditorClip } from './editor-document/commands/split';
 import { validateEditorDocumentV2 } from './editor-document/validation';
@@ -15,9 +15,9 @@ export type ApplyDirectorPlanResult =
  */
 export function applyDirectorPlanToDocument(
   document: EditorDocumentV2,
-  plan: DirectorPlanV1,
+  plan: DirectorPlan,
 ): ApplyDirectorPlanResult {
-  const planIssues = validateDirectorPlanV1(plan);
+  const planIssues = validateDirectorPlan(plan);
   if (planIssues.length) return { ok: false, document, error: planIssues.map((issue) => `${issue.path || 'plan'}: ${issue.message}`).join(' · ') };
 
   const boundaries = [...new Set(plan.scenes.flatMap((scene) => [

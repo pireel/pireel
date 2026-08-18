@@ -493,8 +493,12 @@ function assembleBlockWith(b: Block, comp: Composition, cs: ReturnType<typeof re
     if (typeof b.opacity === 'number' && b.opacity < 0.995) frame.push(`opacity:${n(Math.max(0.05, b.opacity))};`);
     // Whole-block rotation: rotate the outermost container around center (a box block's crop window / full-canvas layer rotates with it); independent of the content layer's scale/autofit
     if (typeof b.rotation === 'number' && Math.abs(b.rotation) > 0.01) frame.push(`transform:rotate(${n(b.rotation)}deg);transform-origin:center center;`);
+    const authoredDuration = b.templateId === 'custom' && typeof b.slots.authoredDurationSec === 'number' && Number.isFinite(b.slots.authoredDurationSec) && b.slots.authoredDurationSec > 0
+      ? `data-authored-duration="${n(b.slots.authoredDurationSec)}" `
+      : '';
     const attrs =
       `id="${b.id}" data-composition-id="${b.id}" ${b.box ? 'data-hf-box="1" ' : ''}` +
+      authoredDuration +
       `data-start="${n(b.startSec)}" data-duration="${n(b.durationSec)}" data-track-index="${b.trackIndex}" ` +
       `data-width="${W}" data-height="${H}"`;
     // Frozen look (Block.vars): the block's insertion-time tokens, scoped to it, override #root's live

@@ -3,9 +3,9 @@ import {
   AGENT_TRANSCRIPT_MAX_CHARS,
   BLOCK_SYSTEM,
   CHAT_IDENTITY,
-  SPOKEN_VISUAL_DIRECTION,
   STUDIO_TOOLS,
   THEME_GENERAL_BRIEF,
+  VIDEO_DESIGN_METHOD,
   buildChatSystem,
   buildSituation,
   mcpInstructions,
@@ -142,29 +142,21 @@ describe("静态提示词完整性", () => {
       "backwards-compatible field name",
     );
   });
-  it("口播全片编排覆盖语义锚点、密度、取景与用户优先级", () => {
+  it("内置 Agent 与 MCP 共享整片视频设计方法", () => {
     for (const phrase of [
-      "proper name",
-      "list, steps or process",
-      "place",
-      "money",
-      "person",
-      "physical object",
-      "action",
-      "tone or emotion",
+      "one creative thesis",
+      "one rhythm arc",
+      "one shared\n  video design system",
+      "full canvas composition through time",
+      "Motion Graphic is one possible layer",
+      "entrance, development, payoff",
+      "normal playback speed",
     ]) {
-      expect(SPOKEN_VISUAL_DIRECTION).toContain(phrase);
+      expect(VIDEO_DESIGN_METHOD).toContain(phrase);
     }
-    expect(SPOKEN_VISUAL_DIRECTION).toContain("5–10 seconds");
-    expect(SPOKEN_VISUAL_DIRECTION).toMatch(
-      /crop,\s+punch-in, wide reset, corner or split/,
-    );
-    expect(SPOKEN_VISUAL_DIRECTION).toContain("OPEN, NOT EXHAUSTIVE");
-    expect(SPOKEN_VISUAL_DIRECTION).toContain("authentic phone/app capture");
-    expect(SPOKEN_VISUAL_DIRECTION).toContain("flowchart");
-    expect(SPOKEN_VISUAL_DIRECTION).toContain("ALWAYS override");
-    expect(CHAT_IDENTITY).toContain(SPOKEN_VISUAL_DIRECTION);
-    expect(mcpInstructions("test-version")).toContain(SPOKEN_VISUAL_DIRECTION);
+    expect(VIDEO_DESIGN_METHOD).toContain("user-set layout");
+    expect(CHAT_IDENTITY).toContain(VIDEO_DESIGN_METHOD);
+    expect(mcpInstructions("test-version")).toContain(VIDEO_DESIGN_METHOD);
   });
   it("Chat 禁止把模型私有工具协议输出给用户", () => {
     expect(CHAT_IDENTITY).toContain("NEVER print or imitate XML, HTML, DSML");
@@ -466,7 +458,9 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       required: string[];
       properties: Record<string, unknown>;
     };
-    expect(schema.required).toEqual(["goal", "creativeThesis", "scenes"]);
+    expect(schema.required).toEqual(["goal", "creativeThesis", "rhythmArc", "designSystem", "scenes"]);
+    expect(schema.properties).toHaveProperty("rhythmArc");
+    expect(schema.properties).toHaveProperty("designSystem");
     expect(schema.properties).toHaveProperty("scenes");
     const sceneSchema = (
       schema.properties.scenes as {
@@ -498,9 +492,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(CHAT_IDENTITY).toContain(
       "MUST NOT be implemented as add_block calls alone",
     );
-    expect(CHAT_IDENTITY).toContain(
-      "immediately place/size it from the actual footage observations with place_block",
-    );
+    expect(CHAT_IDENTITY).toContain("pass placement and backdrop in the creation call");
     expect(CHAT_IDENTITY).toContain(
       "Treat B-roll selection as DIRECTOR judgment",
     );
@@ -556,15 +548,15 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(prepare.chatOnly).toBe(true);
     expect(prepare.description).toContain("does NOT grant access");
   });
-  it("新增动态图形可在创建时对齐完整口播时长", () => {
+  it("新增动态图形在生成前获得完整时长、场景归属与真实画面区域", () => {
     const add = STUDIO_TOOLS.find((tool) => tool.id === "add_block")!;
     const schema = add.inputSchema as { properties: Record<string, unknown> };
     expect(schema.properties).toHaveProperty("durationSec");
     expect(schema.properties).toHaveProperty("sceneId");
-    expect(add.description).toContain("complete spoken thought");
-    expect(add.description).toContain(
-      "binds the new clip back to the Semantic Scene",
-    );
+    expect(schema.properties).toHaveProperty("placement");
+    expect(schema.properties).toHaveProperty("backdrop");
+    expect(add.description).toContain("placement BEFORE generation");
+    expect(add.description).toContain("whole-film design system");
     const insert = STUDIO_TOOLS.find((tool) => tool.id === "insert_clip")!;
     const insertSchema = insert.inputSchema as {
       properties: Record<string, unknown>;
@@ -665,13 +657,13 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     const schema = review.inputSchema as {
       properties: Record<string, unknown>;
     };
-    expect(review.description).toContain("compares frames locally");
-    expect(review.description).toContain("entrance, pressure, proof and exit");
+    expect(review.description).toContain("deduplicates genuinely similar frames");
+    expect(review.description).toContain("entrance, development, payoff and exit");
     expect(review.description).toContain("repairScope");
     expect(schema.properties).toHaveProperty("sceneIds");
     expect(schema.properties).toHaveProperty("forceCloudAll");
     expect(CHAT_IDENTITY).toContain(
-      "samples Director Scene entrance, pressure, proof, exit",
+      "samples Scene entrance, development, payoff and exit states",
     );
     expect(CHAT_IDENTITY).toContain("repair ONLY the listed Semantic Scenes");
   });

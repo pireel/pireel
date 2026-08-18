@@ -9,7 +9,7 @@ import {
   type NarrativeTimelineClip,
   type TimelineClipPlacement,
 } from './editor-document';
-import type { DirectorPlanV1 } from './director-plan';
+import type { DirectorPlan } from './director-plan';
 
 function testDocument(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
@@ -80,13 +80,23 @@ describe('EditorDocument V2 clip insertion commands', () => {
   it('keeps Director intervals and scene membership aligned during a ripple insert', () => {
     const document = testDocument();
     document.timeline.tracks[0]!.clips = [narrative('talk', 0, 300, 0, 10)];
-    const plan: DirectorPlanV1 = {
-      version: 1,
+    const plan: DirectorPlan = {
+      version: 2,
       goal: 'Explain, then prove.',
       creativeThesis: 'Let evidence follow the claim.',
+      rhythmArc: 'Measured explanation opens into a faster proof and stable result.',
+      designSystem: {
+        visualConcept: 'Claim becoming inspectable evidence.',
+        composition: 'Clean source field followed by a dominant evidence plane.',
+        typography: 'One headline role and quiet evidence labels.',
+        colorAndMaterial: 'Neutral field with a single evidence accent.',
+        imagery: 'Preserve authentic source pixels and crop for attention.',
+        motion: 'One motivated transition and a readable proof hold.',
+        sound: 'Continuous speech with restrained source sound.',
+      },
       scenes: [
-        { id: 'claim', label: 'Claim', startFrame: 0, durationFrames: 120, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'State the claim.' },
-        { id: 'proof', label: 'Proof', startFrame: 120, durationFrames: 180, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show the evidence.' },
+        { id: 'claim', label: 'Claim', startFrame: 0, durationFrames: 120, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'State the claim.', treatmentId: 'source-claim', visualAnchor: 'Speaker', visualTreatment: 'Speaker-led source field.', motionPlan: 'Enter, develop, hold, clear.', soundPlan: 'Voice first.', assetStrategy: 'Use source.', brollDecision: 'none', brollRationale: 'Continuity carries the claim.' },
+        { id: 'proof', label: 'Proof', startFrame: 120, durationFrames: 180, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show the evidence.', treatmentId: 'evidence-plane', visualAnchor: 'Evidence', visualTreatment: 'Dominant evidence plane.', motionPlan: 'Reveal, inspect, hold, clear.', soundPlan: 'Voice with truthful source sound.', assetStrategy: 'Use evidence source.', brollDecision: 'source', brollRationale: 'The claim must be seen.' },
       ],
     };
     document.semantics.directorPlan = plan;

@@ -78,6 +78,16 @@ describe('assembleHtml', () => {
     expect((html.match(/window\.__timelines\[/g) ?? []).length).toBe(2); // 两块都照常注册
   });
 
+  it('生成组件保留创作时长，供拖边后按完整场景时钟重映射', () => {
+    const c = emptyComposition();
+    const generated = newBlock('custom', { startSec: 1, durationSec: 8 });
+    generated.slots = { innerHtml: '<div>Designed</div>', timelineBody: '', authoredDurationSec: 5 };
+    c.blocks = [generated];
+    const html = assembleHtml(c);
+    expect(html).toContain('data-authored-duration="5"');
+    expect(html).toContain('data-duration="8"');
+  });
+
   it('palette 派生色注进 #root(覆盖主题默认 accent)', () => {
     const c = emptyComposition();
     c.palette = { accent: 'hsl(10 64% 50%)', line: 'hsl(10 24% 26% / 0.16)' };

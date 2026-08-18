@@ -107,11 +107,11 @@ describe('Agent composition transaction boundary', () => {
 
     const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
-    expect(execute.indexOf('`remove_silence`')).toBeLessThan(execute.indexOf('`extract_asr`'));
+    expect(execute).toContain('After Approve, run `remove_silence` first');
     expect(execute).toContain('do not retry it in the same user request');
-    expect(buildChatSystem(null)).toContain('the sole timeline mutation allowed before planning');
+    expect(buildChatSystem(null)).toContain('Before Approve, do not call set_director_plan, remove_silence');
     expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
-    expect(buildChatSystem(null)).toContain('Build one cross-media evidence map before planning');
+    expect(buildChatSystem(null)).toContain('Build one cross-media evidence map before approval');
     expect(buildChatSystem(null)).toContain('repetition used only to fill uncovered time is a planning failure');
     expect(buildChatSystem(null)).toContain('compare actual clip ownership and media coverage');
   });

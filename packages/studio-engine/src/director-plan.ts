@@ -1,4 +1,4 @@
-export const DIRECTOR_PLAN_VERSION = 1 as const;
+export const DIRECTOR_PLAN_VERSION = 2 as const;
 
 export const VIEWER_TASKS = ['orient', 'understand', 'believe', 'remember', 'feel', 'act'] as const;
 export type ViewerTask = typeof VIEWER_TASKS[number];
@@ -26,6 +26,31 @@ export type SceneFamily = typeof SCENE_FAMILIES[number];
 export const BROLL_DECISIONS = ['none', 'source', 'search', 'generate'] as const;
 export type BrollDecision = typeof BROLL_DECISIONS[number];
 
+/**
+ * Whole-piece design language chosen before individual scenes are authored.
+ *
+ * This is deliberately prose rather than a token/config schema: a Frame, the user's manual
+ * controls, and the source material all contribute to the result. The contract exists so every
+ * downstream scene and generated graphic sees the same visual thesis instead of independently
+ * inventing a style from a few nearby words.
+ */
+export interface VideoDesignSystem {
+  /** The memorable visual idea and intended level of restraint/intensity. */
+  visualConcept: string;
+  /** Spatial hierarchy, negative-space policy, source/graphic relationship, and layout rhythm. */
+  composition: string;
+  /** Display/body/number roles, hierarchy, casing, and emphasis behavior. */
+  typography: string;
+  /** Dominant/ground/accent/material behavior. Explicit user palette choices remain authoritative. */
+  colorAndMaterial: string;
+  /** How real footage, screenshots, photography, generated imagery, crops, and evidence are treated. */
+  imagery: string;
+  /** Camera and graphic movement, easing, energy, transition, hold, and clear behavior. */
+  motion: string;
+  /** Dialogue hierarchy, source sound, music, silence, and sparse graphic punctuation. */
+  sound: string;
+}
+
 export interface DirectorScenePlan {
   id: string;
   label: string;
@@ -41,21 +66,21 @@ export interface DirectorScenePlan {
   /** Supplied transcript, footage, product, or asset evidence supporting the treatment. */
   evidence?: string[];
   /** Stable, human-readable name for the Frame-native treatment chosen for this scene. */
-  treatmentId?: string;
+  treatmentId: string;
   /** The concrete subject, action, evidence, or relation that must remain visually dominant. */
-  visualAnchor?: string;
+  visualAnchor: string;
   /** Free-form direction inside the chosen theme; intentionally not a component enum. */
-  visualTreatment?: string;
+  visualTreatment: string;
   /** How the scene enters, develops with speech/action, holds, and exits. */
-  motionPlan?: string;
+  motionPlan: string;
   /** How voice, source sound, music, silence, and graphic cues relate in this scene. */
-  soundPlan?: string;
+  soundPlan: string;
   /** What source/project/official/generated material should carry the scene, and why. */
-  assetStrategy?: string;
+  assetStrategy: string;
   /** Explicit editorial decision about whether this scene should interrupt A-roll with B-roll. */
-  brollDecision?: BrollDecision;
+  brollDecision: BrollDecision;
   /** Why B-roll helps here, or why the source picture should remain uninterrupted. */
-  brollRationale?: string;
+  brollRationale: string;
   /** One sharp, content-specific visual proposition when metaphorical B-roll is justified. */
   visualMetaphor?: string;
 }
@@ -64,10 +89,14 @@ export interface DirectorScenePlan {
  * A saved decision artifact for a complete edit. It is the bridge from flexible Markdown Skill
  * judgment to executable timeline work, not a workflow definition and not a template graph.
  */
-export interface DirectorPlanV1 {
+export interface DirectorPlan {
   version: typeof DIRECTOR_PLAN_VERSION;
   goal: string;
   creativeThesis: string;
+  /** Whole-film pressure, release, density, and pace progression. */
+  rhythmArc: string;
+  /** Shared design language that every Scene must inherit and vary intentionally. */
+  designSystem: VideoDesignSystem;
   skillId?: string;
   frameId?: string;
   audience?: string;
@@ -84,7 +113,7 @@ const nonEmpty = (value: unknown): value is string => typeof value === 'string' 
 const inList = <T extends string>(value: unknown, list: readonly T[]): value is T =>
   typeof value === 'string' && (list as readonly string[]).includes(value);
 
-export function validateDirectorPlanV1(value: unknown): DirectorPlanIssue[] {
+export function validateDirectorPlan(value: unknown): DirectorPlanIssue[] {
   const issues: DirectorPlanIssue[] = [];
   const push = (code: string, path: string, message: string) => issues.push({ code, path, message });
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -92,10 +121,21 @@ export function validateDirectorPlanV1(value: unknown): DirectorPlanIssue[] {
     return issues;
   }
 
-  const plan = value as Partial<DirectorPlanV1>;
+  const plan = value as Partial<DirectorPlan>;
   if (plan.version !== DIRECTOR_PLAN_VERSION) push('unsupported-version', 'version', `Expected director plan version ${DIRECTOR_PLAN_VERSION}.`);
   if (!nonEmpty(plan.goal)) push('missing-goal', 'goal', 'Director plan needs a concrete viewer or business goal.');
   if (!nonEmpty(plan.creativeThesis)) push('missing-thesis', 'creativeThesis', 'Director plan needs a creative thesis.');
+  if (!nonEmpty(plan.rhythmArc)) push('missing-rhythm-arc', 'rhythmArc', 'Director plan needs a whole-film rhythm arc.');
+  if (!plan.designSystem || typeof plan.designSystem !== 'object' || Array.isArray(plan.designSystem)) {
+    push('missing-design-system', 'designSystem', 'Director plan needs one whole-film video design system.');
+  } else {
+    const designSystem = plan.designSystem as Partial<VideoDesignSystem>;
+    for (const key of ['visualConcept', 'composition', 'typography', 'colorAndMaterial', 'imagery', 'motion', 'sound'] as const) {
+      if (!nonEmpty(designSystem[key])) {
+        push('missing-design-system-field', `designSystem.${key}`, `Video design system needs ${key}.`);
+      }
+    }
+  }
   if (plan.skillId !== undefined && !nonEmpty(plan.skillId)) push('invalid-skill-id', 'skillId', 'Skill id must be non-empty when supplied.');
   if (plan.frameId !== undefined && !nonEmpty(plan.frameId)) push('invalid-frame-id', 'frameId', 'Frame id must be non-empty when supplied.');
   if (plan.audience !== undefined && !nonEmpty(plan.audience)) push('invalid-audience', 'audience', 'Audience must be non-empty when supplied.');
@@ -128,14 +168,14 @@ export function validateDirectorPlanV1(value: unknown): DirectorPlanIssue[] {
     if (scene.evidence !== undefined && (!Array.isArray(scene.evidence) || scene.evidence.some((item) => !nonEmpty(item)))) {
       push('invalid-scene-evidence', `${path}.evidence`, 'Evidence must be an array of non-empty strings.');
     }
-    if (scene.treatmentId !== undefined && !nonEmpty(scene.treatmentId)) push('invalid-treatment-id', `${path}.treatmentId`, 'Treatment id must be non-empty when supplied.');
-    if (scene.visualAnchor !== undefined && !nonEmpty(scene.visualAnchor)) push('invalid-visual-anchor', `${path}.visualAnchor`, 'Visual anchor must be non-empty when supplied.');
-    if (scene.visualTreatment !== undefined && !nonEmpty(scene.visualTreatment)) push('invalid-visual-treatment', `${path}.visualTreatment`, 'Visual treatment must be non-empty when supplied.');
-    if (scene.motionPlan !== undefined && !nonEmpty(scene.motionPlan)) push('invalid-motion-plan', `${path}.motionPlan`, 'Motion plan must be non-empty when supplied.');
-    if (scene.soundPlan !== undefined && !nonEmpty(scene.soundPlan)) push('invalid-sound-plan', `${path}.soundPlan`, 'Sound plan must be non-empty when supplied.');
-    if (scene.assetStrategy !== undefined && !nonEmpty(scene.assetStrategy)) push('invalid-asset-strategy', `${path}.assetStrategy`, 'Asset strategy must be non-empty when supplied.');
-    if (scene.brollDecision !== undefined && !inList(scene.brollDecision, BROLL_DECISIONS)) push('invalid-broll-decision', `${path}.brollDecision`, 'B-roll decision is not recognized.');
-    if (scene.brollRationale !== undefined && !nonEmpty(scene.brollRationale)) push('invalid-broll-rationale', `${path}.brollRationale`, 'B-roll rationale must be non-empty when supplied.');
+    if (!nonEmpty(scene.treatmentId)) push('missing-treatment-id', `${path}.treatmentId`, 'Scene needs a stable name for its authored treatment.');
+    if (!nonEmpty(scene.visualAnchor)) push('missing-visual-anchor', `${path}.visualAnchor`, 'Scene needs one concrete visual anchor.');
+    if (!nonEmpty(scene.visualTreatment)) push('missing-visual-treatment', `${path}.visualTreatment`, 'Scene needs a full-canvas composition and visual treatment.');
+    if (!nonEmpty(scene.motionPlan)) push('missing-motion-plan', `${path}.motionPlan`, 'Scene needs entrance, development, payoff/hold, and exit direction.');
+    if (!nonEmpty(scene.soundPlan)) push('missing-sound-plan', `${path}.soundPlan`, 'Scene needs an intentional sound plan, including deliberate silence when appropriate.');
+    if (!nonEmpty(scene.assetStrategy)) push('missing-asset-strategy', `${path}.assetStrategy`, 'Scene needs a source/evidence/graphic asset strategy.');
+    if (!inList(scene.brollDecision, BROLL_DECISIONS)) push('invalid-broll-decision', `${path}.brollDecision`, 'Scene needs an explicit B-roll decision.');
+    if (!nonEmpty(scene.brollRationale)) push('missing-broll-rationale', `${path}.brollRationale`, 'Scene needs the editorial reason for its B-roll decision.');
     if (scene.visualMetaphor !== undefined && !nonEmpty(scene.visualMetaphor)) push('invalid-visual-metaphor', `${path}.visualMetaphor`, 'Visual metaphor must be non-empty when supplied.');
 
     if (Number.isInteger(scene.startFrame) && Number.isInteger(scene.durationFrames) && Number(scene.durationFrames) > 0) {
@@ -150,12 +190,12 @@ export function validateDirectorPlanV1(value: unknown): DirectorPlanIssue[] {
   return issues;
 }
 
-export function isDirectorPlanV1(value: unknown): value is DirectorPlanV1 {
-  return validateDirectorPlanV1(value).length === 0;
+export function isDirectorPlan(value: unknown): value is DirectorPlan {
+  return validateDirectorPlan(value).length === 0;
 }
 
 /** Convert the editing expert's seconds-based tool input into the document's integral-frame timebase. */
-export function directorPlanFromSeconds(input: Record<string, unknown>, fps: number): { plan?: DirectorPlanV1; issues: DirectorPlanIssue[] } {
+export function directorPlanFromSeconds(input: Record<string, unknown>, fps: number): { plan?: DirectorPlan; issues: DirectorPlanIssue[] } {
   if (!Number.isFinite(fps) || fps <= 0) {
     return { issues: [{ code: 'invalid-fps', path: 'fps', message: 'FPS must be positive.' }] };
   }
@@ -174,27 +214,29 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
       ...(scene.customFamily !== undefined ? { customFamily: scene.customFamily as string } : {}),
       purpose: scene.purpose as string,
       ...(scene.evidence !== undefined ? { evidence: scene.evidence as string[] } : {}),
-      ...(scene.treatmentId !== undefined ? { treatmentId: scene.treatmentId as string } : {}),
-      ...(scene.visualAnchor !== undefined ? { visualAnchor: scene.visualAnchor as string } : {}),
-      ...(scene.visualTreatment !== undefined ? { visualTreatment: scene.visualTreatment as string } : {}),
-      ...(scene.motionPlan !== undefined ? { motionPlan: scene.motionPlan as string } : {}),
-      ...(scene.soundPlan !== undefined ? { soundPlan: scene.soundPlan as string } : {}),
-      ...(scene.assetStrategy !== undefined ? { assetStrategy: scene.assetStrategy as string } : {}),
-      ...(scene.brollDecision !== undefined ? { brollDecision: scene.brollDecision as BrollDecision } : {}),
-      ...(scene.brollRationale !== undefined ? { brollRationale: scene.brollRationale as string } : {}),
+      treatmentId: scene.treatmentId as string,
+      visualAnchor: scene.visualAnchor as string,
+      visualTreatment: scene.visualTreatment as string,
+      motionPlan: scene.motionPlan as string,
+      soundPlan: scene.soundPlan as string,
+      assetStrategy: scene.assetStrategy as string,
+      brollDecision: scene.brollDecision as BrollDecision,
+      brollRationale: scene.brollRationale as string,
       ...(scene.visualMetaphor !== undefined ? { visualMetaphor: scene.visualMetaphor as string } : {}),
     } satisfies DirectorScenePlan;
   });
-  const plan: DirectorPlanV1 = {
+  const plan: DirectorPlan = {
     version: DIRECTOR_PLAN_VERSION,
     goal: input.goal as string,
     creativeThesis: input.creativeThesis as string,
+    rhythmArc: input.rhythmArc as string,
+    designSystem: input.designSystem as VideoDesignSystem,
     ...(input.skillId !== undefined ? { skillId: input.skillId as string } : {}),
     ...(input.frameId !== undefined ? { frameId: input.frameId as string } : {}),
     ...(input.audience !== undefined ? { audience: input.audience as string } : {}),
     scenes,
   };
-  const issues = validateDirectorPlanV1(plan).map((issue) => {
+  const issues = validateDirectorPlan(plan).map((issue) => {
     const match = /^scenes\[(\d+)\]\.(startFrame|durationFrames)$/.exec(issue.path);
     if (!match) return issue;
     const index = Number(match[1]);

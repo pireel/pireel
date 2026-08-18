@@ -791,9 +791,17 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
   });
   it('apply_block:同一套 parse+lint;compose_context 占位带 suggested_instruction', () => {
     const raw = '加一张卡\n```html\n<div id="nb" style="font-size:36px">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';
-    const r = runServerTool('apply_block', { raw, atSec: 2 }, proj());
+    const r = runServerTool('apply_block', {
+      raw, atSec: 2, durationSec: 4,
+      placement: { xPct: 60, yPct: 12, widthPct: 32, heightPct: 28 },
+    }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.comp!.blocks).toHaveLength(2);
+    expect(r.comp!.blocks[1]).toMatchObject({
+      durationSec: 4,
+      box: { x: 0.6, y: 0.12, w: 0.32, h: 0.28 },
+      slots: { authoredDurationSec: 4 },
+    });
     const r2 = runServerTool('compose_context', { blockId: 'b1' }, proj());
     expect(r2.result.ok).toBe(true);
     expect((r2.result.data as { block: { id: string } }).block.id).toBe('b1');

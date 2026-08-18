@@ -1,4 +1,4 @@
-import type { DirectorPlanV1, DirectorScenePlan } from './director-plan';
+import type { DirectorPlan, DirectorScenePlan } from './director-plan';
 import type { EditorSemanticState, SemanticScene } from './editor-document/types';
 
 const endFrame = (scene: DirectorScenePlan) => scene.startFrame + scene.durationFrames;
@@ -20,7 +20,7 @@ function sceneSemantics(scene: DirectorScenePlan, current?: SemanticScene): Sema
 /** Keep the persisted plan and SemanticScene metadata as one canonical scene set. */
 export function withAdjustedDirectorPlan(
   semantics: EditorSemanticState,
-  plan: DirectorPlanV1 | undefined,
+  plan: DirectorPlan | undefined,
 ): EditorSemanticState {
   const current = new Map(semantics.scenes.map((scene) => [scene.id, scene] as const));
   const next: EditorSemanticState = {
@@ -40,10 +40,10 @@ const pointAfterRemoval = (frame: number, startFrame: number, endFrameExclusive:
 
 /** Apply one native ripple removal to scene intervals. Fully removed scenes disappear. */
 export function directorPlanAfterRippleRemoval(
-  plan: DirectorPlanV1,
+  plan: DirectorPlan,
   startFrame: number,
   endFrameExclusive: number,
-): DirectorPlanV1 | undefined {
+): DirectorPlan | undefined {
   if (endFrameExclusive <= startFrame) return plan;
   const scenes = plan.scenes.flatMap((scene): DirectorScenePlan[] => {
     const start = pointAfterRemoval(scene.startFrame, startFrame, endFrameExclusive);
@@ -54,7 +54,7 @@ export function directorPlanAfterRippleRemoval(
 }
 
 export type DirectorPlanInsertionResult =
-  | { ok: true; plan: DirectorPlanV1; sceneId?: string }
+  | { ok: true; plan: DirectorPlan; sceneId?: string }
   | { ok: false; error: string };
 
 /**
@@ -63,7 +63,7 @@ export type DirectorPlanInsertionResult =
  * whether the insert closes the previous scene or opens the next one.
  */
 export function directorPlanAfterRippleInsertion(
-  plan: DirectorPlanV1,
+  plan: DirectorPlan,
   atFrame: number,
   durationFrames: number,
   explicitSceneId?: string,

@@ -1,4 +1,4 @@
-import type { DirectorPlanV1, DirectorScenePlan } from './director-plan';
+import type { DirectorPlan, DirectorScenePlan } from './director-plan';
 import type { EditorDocumentV2, SemanticScene, TimelineClip } from './editor-document/types';
 
 const clipEnd = (clip: TimelineClip) => clip.startFrame + clip.durationFrames;
@@ -16,7 +16,7 @@ function sceneEligibleClips(document: EditorDocumentV2): TimelineClip[] {
 /** Build the executed scene layer from a flexible Director Plan and real timeline geometry. */
 export function semanticScenesFromDirectorPlan(
   document: EditorDocumentV2,
-  plan: DirectorPlanV1,
+  plan: DirectorPlan,
 ): SemanticScene[] {
   const clips = sceneEligibleClips(document);
   return plan.scenes.map((scene) => ({
@@ -35,7 +35,7 @@ export function semanticScenesFromDirectorPlan(
 }
 
 export interface DirectorSceneContext {
-  plan: DirectorPlanV1;
+  plan: DirectorPlan;
   scene: DirectorScenePlan;
   previous?: DirectorScenePlan;
   next?: DirectorScenePlan;
@@ -81,12 +81,20 @@ export function formatDirectorSceneContext(context: DirectorSceneContext): strin
   return `DIRECTOR SCENE CONTEXT — editorial direction, never a rigid Component or Motion Graphic recipe:
 - Whole-video goal: ${plan.goal}${plan.audience ? `; audience: ${plan.audience}` : ''}
 - Creative thesis: ${plan.creativeThesis}
+- Rhythm arc: ${plan.rhythmArc}
+- Shared visual concept: ${plan.designSystem.visualConcept}
+- Shared composition grammar: ${plan.designSystem.composition}
+- Shared typography: ${plan.designSystem.typography}
+- Shared color and material: ${plan.designSystem.colorAndMaterial}
+- Shared imagery treatment: ${plan.designSystem.imagery}
+- Shared motion grammar: ${plan.designSystem.motion}
+- Shared sound grammar: ${plan.designSystem.sound}
 - Scene: ${scene.id} · ${scene.label}
 - Viewer task: ${scene.viewerTask}; narrative role: ${scene.narrativeRole}
 - Scene family: ${scene.sceneFamily}${scene.customFamily ? ` (${scene.customFamily})` : ''}
 - Purpose: ${scene.purpose}
 ${scene.evidence?.length ? `- Evidence: ${scene.evidence.join(' | ')}\n` : ''}${scene.treatmentId ? `- Signature treatment: ${scene.treatmentId}\n` : ''}${scene.visualAnchor ? `- Visual anchor: ${scene.visualAnchor}\n` : ''}${scene.visualTreatment ? `- Composition and visual treatment: ${scene.visualTreatment}\n` : ''}${scene.motionPlan ? `- Motion plan: ${scene.motionPlan}\n` : ''}${scene.soundPlan ? `- Sound plan: ${scene.soundPlan}\n` : ''}${scene.assetStrategy ? `- Asset strategy: ${scene.assetStrategy}\n` : ''}${scene.brollDecision ? `- B-roll decision: ${scene.brollDecision}${scene.brollRationale ? ` — ${scene.brollRationale}` : ''}\n` : ''}${scene.visualMetaphor ? `- Visual proposition: ${scene.visualMetaphor}\n` : ''}- Neighbor contrast: ${previous ? `previous ${previous.id} is ${previous.sceneFamily}` : 'opening scene'}; ${next ? `next ${next.id} is ${next.sceneFamily}` : 'closing scene'}.
-Execute this treatment as one composed scene: preserve the visual anchor, make graphics subordinate to the source unless designed-fullscreen is explicitly justified, and synchronize entrance/change/exit to the motion and sound plans. Do not default to a stock card or reinterpret a functional noun as a literal UI box. Do not repeat a neighboring scene's composition without an editorial reason.`;
+Execute this treatment as one composed scene inside the shared design system: preserve the visual anchor, make graphics subordinate to the source unless designed-fullscreen is explicitly justified, and synchronize entrance/change/exit to the motion and sound plans. Variation must come from the scene's meaning while typography, material, motion character and source treatment remain recognizably one film. Do not default to a stock card or reinterpret a functional noun as a literal UI box. Do not repeat a neighboring scene's composition without an editorial reason.`;
 }
 
 export type SemanticSceneAssignmentResult =

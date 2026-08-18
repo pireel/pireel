@@ -171,6 +171,8 @@ export function useAgentContext(deps: AgentContextDeps) {
             directorPlan: {
               goal: directorPlan.goal,
               creativeThesis: directorPlan.creativeThesis,
+              rhythmArc: directorPlan.rhythmArc,
+              designSystem: directorPlan.designSystem,
               ...(directorPlan.audience ? { audience: directorPlan.audience } : {}),
               scenes: directorPlan.scenes.map((scene) => {
                 const semanticScene = document.semantics.scenes.find((candidate) => candidate.id === scene.id);

@@ -33,6 +33,16 @@ function documentWithNarration() {
 const planInput = {
   goal: 'Move the viewer from problem to visible proof.',
   creativeThesis: 'Human problem first, product evidence second.',
+  rhythmArc: 'Hold on the human problem, accelerate into the action, then settle on proof.',
+  designSystem: {
+    visualConcept: 'Human friction becoming a visible working state.',
+    composition: 'Speaker-led opening followed by an edge-to-edge authentic product plane.',
+    typography: 'Restrained display type and small precise evidence labels.',
+    colorAndMaterial: 'Neutral source color with one measured accent and no decorative glass.',
+    imagery: 'Real speaker and product pixels remain primary evidence.',
+    motion: 'One motivated camera move per thought and localized product-state motion.',
+    sound: 'Continuous voice, source response at proof, sparse punctuation.',
+  },
   skillId: 'product-demo',
   frameId: 'zen-white',
   scenes: [
@@ -95,6 +105,7 @@ describe('Director Plan document execution', () => {
     const brief = formatDirectorSceneContext(context!);
     expect(brief).toContain('Whole-video goal: Move the viewer from problem to visible proof.');
     expect(brief).toContain('Creative thesis: Human problem first, product evidence second.');
+    expect(brief).toContain('Shared visual concept: Human friction becoming a visible working state.');
     expect(brief).toContain('Viewer task: believe');
     expect(brief).toContain('The screen recording shows input and final result');
     expect(brief).toContain('Signature treatment: evidence-plane');
