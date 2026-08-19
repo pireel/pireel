@@ -63,7 +63,7 @@ export interface DirectorScenePlan {
   purpose: string;
   /** Supplied transcript, footage, product, or asset evidence supporting the treatment. */
   evidence?: string[];
-  /** Stable, human-readable name for the Frame-native treatment chosen for this scene. */
+  /** Stable, human-readable name for this content-specific Scene treatment. */
   treatmentId: string;
   /** The concrete subject, action, evidence, or relation that must remain visually dominant. */
   visualAnchor: string;
@@ -92,6 +92,8 @@ export interface DirectorPlan {
   creativeThesis: string;
   /** Whole-film pressure, release, density, and pace progression. */
   rhythmArc: string;
+  /** Delivery platform/placement, ratio and reserved platform-chrome/crop zones. */
+  deliverySafety?: string;
   /** Shared design language that every Scene must inherit and vary intentionally. */
   designSystem: VideoDesignSystem;
   skillId?: string;
@@ -122,6 +124,9 @@ export function validateDirectorPlan(value: unknown): DirectorPlanIssue[] {
   if (!nonEmpty(plan.goal)) push('missing-goal', 'goal', 'Director plan needs a concrete viewer or business goal.');
   if (!nonEmpty(plan.creativeThesis)) push('missing-thesis', 'creativeThesis', 'Director plan needs a creative thesis.');
   if (!nonEmpty(plan.rhythmArc)) push('missing-rhythm-arc', 'rhythmArc', 'Director plan needs a whole-film rhythm arc.');
+  if (plan.deliverySafety !== undefined && !nonEmpty(plan.deliverySafety)) {
+    push('invalid-delivery-safety', 'deliverySafety', 'Delivery safety must describe the destination and protected content region when supplied.');
+  }
   if (!plan.designSystem || typeof plan.designSystem !== 'object' || Array.isArray(plan.designSystem)) {
     push('missing-design-system', 'designSystem', 'Director plan needs one whole-film video design system.');
   } else {
@@ -195,6 +200,7 @@ function canonicalDirectorPlan(plan: DirectorPlan): DirectorPlan {
     goal: plan.goal,
     creativeThesis: plan.creativeThesis,
     rhythmArc: plan.rhythmArc,
+    ...(plan.deliverySafety ? { deliverySafety: plan.deliverySafety } : {}),
     designSystem: plan.designSystem,
     ...(plan.skillId ? { skillId: plan.skillId } : {}),
     ...(plan.frameId ? { frameId: plan.frameId } : {}),
@@ -257,6 +263,9 @@ export function migrateDirectorPlan(value: unknown): DirectorPlan | null {
     rhythmArc: nonEmpty(legacy.rhythmArc)
       ? legacy.rhythmArc
       : 'Preserve the legacy scene order, timing, pacing, and intended escalation.',
+    deliverySafety: nonEmpty(legacy.deliverySafety)
+      ? legacy.deliverySafety
+      : 'Destination platform is unknown. Preserve essential faces, products, evidence, captions and calls to action inside a conservative central safe region; decorative backgrounds alone may bleed.',
     designSystem: {
       visualConcept: thesis,
       composition: 'Preserve the existing per-scene composition, hierarchy, and negative space.',
@@ -309,6 +318,7 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
     goal: input.goal as string,
     creativeThesis: input.creativeThesis as string,
     rhythmArc: input.rhythmArc as string,
+    ...(input.deliverySafety !== undefined ? { deliverySafety: input.deliverySafety as string } : {}),
     designSystem: input.designSystem as VideoDesignSystem,
     ...(input.skillId !== undefined ? { skillId: input.skillId as string } : {}),
     ...(input.frameId !== undefined ? { frameId: input.frameId as string } : {}),

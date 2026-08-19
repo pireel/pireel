@@ -78,6 +78,13 @@ export interface AgentVisualSummary {
   segments: AgentVisualSegment[];
 }
 
+/** Token-free/local observations that are sufficient for crop, framing and empty-space decisions.
+ * Deliberately excludes semantic labels so callers cannot mistake geometry for content understanding. */
+export interface AgentVisualGeometrySummary {
+  sceneCutsSec: number[];
+  subjectTracks: AgentSubjectTrack[];
+}
+
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 const agentRect = (rect: NRect): AgentVisualRect => ({
   x: round3(rect.x),
@@ -253,5 +260,12 @@ export function visualTimelineForAgent(timeline: VisualTimeline): AgentVisualSum
     sceneCutsSec: timeline.cuts.map(round3),
     subjectTracks: stableSubjectTracks(timeline.segments),
     segments: compactSemanticSegments(timeline.segments),
+  };
+}
+
+export function visualGeometryForAgent(timeline: VisualTimeline): AgentVisualGeometrySummary {
+  return {
+    sceneCutsSec: timeline.cuts.map(round3),
+    subjectTracks: stableSubjectTracks(timeline.segments),
   };
 }

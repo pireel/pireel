@@ -55,7 +55,7 @@ export interface BlockEdit {
   innerHtml: string;
   timelineBody: string;
   label?: string;
-  /** This fragment box's real pixel size (inside the 1080×1920 canvas), so the model sizes type/components against the actual frame. */
+  /** This fragment box's real pixel size inside the current canvas, so the model sizes type/components against the actual frame. */
   boxPx?: { w: number; h: number };
   /** On-screen duration (seconds): sequential content spreads its reveals across the whole span (PPT-style) instead of dumping all at once. */
   durationSec?: number;
@@ -100,8 +100,8 @@ export function buildBlockPrompt(args: { block: BlockEdit; instruction: string; 
   if (args.block.boxPx)
     parts.push(
       // "must not overflow" is a hard constraint: autofit (scroll size) can't detect overflow of absolutely-positioned content,
-      // and overflowing text lands on the face / off-canvas — prefer too small over overflow; headline gets a hard cap
-      `This fragment's box is about ${args.block.boxPx.w}×${args.block.boxPx.h}px inside the FIXED 1080px-wide canvas reference (px is consistent — the whole canvas scales uniformly for preview/export). HARD CONSTRAINT: everything must fit INSIDE ${args.block.boxPx.w}×${args.block.boxPx.h}px — nothing may stick out (overflowing content lands on the speaker's face or off-canvas; there is no auto-shrink for absolutely-positioned overflow). When unsure, size type one step SMALLER, never larger. Keep the largest headline ≤ ${Math.max(40, Math.round(args.block.boxPx.h / 4))}px and total content height (with margins) within the box. Adapt the layout to this box's aspect ratio.`,
+      // and overflowing text obscures protected content or falls off-canvas — prefer too small over overflow; headline gets a hard cap
+      `This fragment's real authored box is ${args.block.boxPx.w}×${args.block.boxPx.h}px in the current canvas coordinate system (the full composition scales uniformly for preview/export). HARD CONSTRAINT: everything must fit INSIDE ${args.block.boxPx.w}×${args.block.boxPx.h}px — nothing may obscure a protected subject/evidence region or fall off-canvas; there is no auto-shrink for absolutely-positioned overflow. When unsure, size type one step SMALLER, never larger. Keep the largest headline ≤ ${Math.max(40, Math.round(args.block.boxPx.h / 4))}px and total content height (with margins) within the box. Adapt the layout to this box's aspect ratio.`,
     );
   parts.push(...momentParts(args));
   parts.push(`Current INNER HTML:\n\`\`\`html\n${args.block.innerHtml}\n\`\`\``);

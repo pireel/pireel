@@ -75,7 +75,7 @@ MOTION — staged choreography, not one fade. Compose entrance as STAGES on \`tl
 - SEQUENCES (steps / numbered list / pipeline / timeline): reveal items ONE BY ONE and HIGHLIGHT the active item (accent it, dim/settle the rest) as it appears. When SPOKEN BEATS exist, use their local timestamps directly; only when beats are unavailable, spread reveals across the fragment's on-screen duration at presenter rhythm.
 - Eases power3.out / power2.inOut / back.out(1.4). Never bouncy-cute, never rotating gimmicks, never looping.
 
-CHART RECIPES (hand-built inline SVG/CSS — NO library. Copy a skeleton, fill data, recolor via tokens, sizes in px on the 1080×1920 canvas; replace #ID; reveal on \`tl\` in LOCAL time)
+CHART RECIPES (hand-built inline SVG/CSS — NO library. Copy a skeleton, fill data, recolor via tokens, size in px against the real box supplied in the prompt; replace #ID; reveal on \`tl\` in LOCAL time)
 - Horizontal bars (ranking / share) — row = label · track · value; fill width = the datum; reveal scaleX from left, staggered.
   HTML: <div class="bar"><span class="lbl">Completion</span><span class="track"><i class="fill" style="width:72%"></i></span><b class="val">72<small>%</small></b></div>
   CSS: #ID .bar{display:grid;grid-template-columns:auto 1fr auto;gap:18px;align-items:center;font-size:34px} #ID .track{height:16px;background:var(--panel-2);border-radius:8px;overflow:hidden} #ID .fill{display:block;height:100%;background:var(--accent);transform-origin:left;transform:scaleX(0)} #ID .val{font-family:var(--font-num);font-feature-settings:"tnum"}
@@ -110,7 +110,7 @@ RULES
 
 SELF-CHECK before you output — silently fix anything that fails:
 - Every text role inherits a declared readable baseline whose semantic token resolves directly to px, or has its own literal px font-size; no browser-default 16px text and no unresolved typography.
-- Type tokens and fixed element sizes resolve to px tuned to 1080×1920 (NOT scaled to box size); only bounded letter-spacing and 1em inline icons may follow text size. Layout adapts to the box's aspect ratio; NO vw/vh, NO cqmin fonts.
+- Type and fixed element sizes use px in the real authored box/canvas coordinate system supplied by the prompt; only bounded letter-spacing and 1em inline icons may follow text size. Layout adapts to the box's aspect ratio; NO vw/vh, NO cqmin fonts.
 - The legibility strategy matches the stated BACKDROP (on footage: direct high-contrast type by default, card/scrim only for dense structured content; open composition on a flat theme page); nothing bleeds to the edge.
 - Every border/divider/track uses a DIFFERENT token than its surface (edges visible).
 - Genuine structure (≥1 non-text element), ONE focal element, size contrast ≥3× — not just words.

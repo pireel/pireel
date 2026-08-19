@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildKitPrompt, parseKitResponse } from './compose';
-import { BLOCK_SYSTEM, FRAGMENT_CONTRACT, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem } from './prompts';
+import { BLOCK_SYSTEM, FRAGMENT_CONTRACT, GENERAL_EDITORIAL, L1_PROPS_SPEC, SPOKEN_EDITORIAL, buildHtmlSystem, buildKitSystem } from './prompts';
 import { components } from '@pireel/studio-kit';
 
 const seed = { id: 'b1', kind: 'custom', innerHtml: '', timelineBody: '' };
@@ -17,7 +17,8 @@ describe('the layer stack', () => {
   it('both paths share the base contract and the editorial layer', () => {
     for (const system of [KIT, buildHtmlSystem()]) {
       expect(system).toContain(FRAGMENT_CONTRACT);
-      expect(system).toContain(SPOKEN_EDITORIAL);
+      expect(system).toContain(GENERAL_EDITORIAL);
+      expect(system).not.toContain('The speaker is the piece');
     }
   });
 
@@ -37,11 +38,11 @@ describe('the layer stack', () => {
 
 describe('the component path', () => {
   it('states the rules that keep the screen honest', () => {
-    expect(KIT).toContain('VERBATIM');
+    expect(KIT).toContain('supported by the instruction and supplied');
     expect(KIT).toContain('null');
     expect(KIT).toContain("VIDEO's spoken language");
     expect(KIT).toContain("complete final state at time 0");
-    expect(KIT).toContain("Frame controls HOW these reveals");
+    expect(KIT).toContain("active Frame supplies visible art direction");
   });
 
   it('does not teach markup — that is what the components are for', () => {
@@ -157,12 +158,14 @@ describe('两路共享同一份动态图形词汇(派生,不许各说各话)', (
   });
 });
 
-describe('编辑判断认识手法名(brief 点名 → 按模式执行)', () => {
-  it('两条生成路径都带 NAMED MOVES 段', () => {
+describe('场景垂直判断不会污染默认生成层', () => {
+  it('默认走通用编辑判断，显式 spoken 仍可按需加载', () => {
     for (const sys of [buildKitSystem(), buildHtmlSystem()]) {
-      expect(sys).toContain('NAMED MOVES');
-      expect(sys).toContain('HANDOFF');
-      expect(sys).toContain("execute the pattern, don't reinterpret it");
+      expect(sys).toContain(GENERAL_EDITORIAL);
+      expect(sys).not.toContain('NAMED MOVES');
     }
+    const spoken = buildHtmlSystem({ presetId: 'spoken' });
+    expect(spoken).toContain(SPOKEN_EDITORIAL);
+    expect(spoken).toContain('NAMED MOVES');
   });
 });

@@ -23,11 +23,14 @@ import {
   type TimelineClipPlacement,
 } from './editor-document';
 import type { TranscriptSegment } from './project-dto';
-import { directorPlanFromDocument, directorPlanMarkdownFromDocument } from './director-plan-artifact';
+import { directorPlanFromDocument } from './director-plan-artifact';
+import { directorPlanToMarkdown } from './director-plan-markdown';
+import { sceneDesignsFromDocument, sceneDesignsToMarkdown } from './scene-design';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'get_timeline',
   'read_director_plan',
+  'read_scene_designs',
   'register_media',
   'inspect_media',
   'organize_media',
@@ -167,6 +170,14 @@ export function agentTimelineSnapshot(document: EditorDocumentV2) {
             startSec: timelineFramesToSeconds(scene.startFrame, document.canvas.fps),
             endSec: timelineFramesToSeconds(scene.startFrame + scene.durationFrames, document.canvas.fps),
           })),
+        } : undefined;
+      })(),
+      sceneDesigns: (() => {
+        const designs = sceneDesignsFromDocument(document);
+        return designs?.scenes.length ? {
+          available: true,
+          path: 'scene-designs.md',
+          sceneIds: designs.scenes.map((scene) => scene.sceneId),
         } : undefined;
       })(),
     },
@@ -1049,10 +1060,26 @@ export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, i
   switch (tool) {
     case 'get_timeline': return { ok: true, summary: `${document.timeline.tracks.length} timeline tracks`, data: agentTimelineSnapshot(document) };
     case 'read_director_plan': {
-      const content = directorPlanMarkdownFromDocument(document);
-      return content
-        ? { ok: true, summary: 'Loaded director-plan.md', data: { path: 'director-plan.md', mediaType: 'text/markdown', content } }
-        : fail('No Director Plan is saved for this output');
+      const plan = directorPlanFromDocument(document);
+      if (!plan) return fail('No Director Plan is saved for this output');
+      const requested = Array.isArray(input.sceneIds)
+        ? [...new Set(input.sceneIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
+        : [];
+      const scenes = requested.length ? plan.scenes.filter((scene) => requested.includes(scene.id)) : plan.scenes;
+      if (!scenes.length) return fail(`No requested Director Scenes exist: ${requested.join(', ')}`);
+      const content = directorPlanToMarkdown({ ...plan, scenes });
+      return { ok: true, summary: `Loaded director-plan.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'director-plan.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.id), totalScenes: plan.scenes.length } };
+    }
+    case 'read_scene_designs': {
+      const designs = sceneDesignsFromDocument(document);
+      if (!designs) return fail('No Scene designs are saved for this output');
+      const requested = Array.isArray(input.sceneIds)
+        ? [...new Set(input.sceneIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
+        : [];
+      const scenes = requested.length ? designs.scenes.filter((scene) => requested.includes(scene.sceneId)) : designs.scenes;
+      if (!scenes.length) return fail(`No requested Scene designs exist: ${requested.join(', ')}`);
+      const content = sceneDesignsToMarkdown({ scenes });
+      return { ok: true, summary: `Loaded scene-designs.md (${scenes.length} Scene${scenes.length === 1 ? '' : 's'})`, data: { path: 'scene-designs.md', mediaType: 'text/markdown', content, sceneIds: scenes.map((scene) => scene.sceneId), totalScenes: designs.scenes.length } };
     }
     case 'register_media': return importAssets(document, input);
     case 'inspect_media': return inspectAssets(document, input);

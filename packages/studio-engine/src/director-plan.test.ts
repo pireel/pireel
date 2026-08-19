@@ -7,6 +7,7 @@ const input = {
   goal: 'Make a first-time viewer understand and remember the product mechanism.',
   creativeThesis: 'Move from human problem to visible proof, then return to the speaker for the payoff.',
   rhythmArc: 'Begin intimate and compressed, open into a slower proof passage, then hold the human payoff.',
+  deliverySafety: 'YouTube 16:9; reserve the lower caption band and keep identity, evidence and CTA clear of edge overlays.',
   designSystem: {
     visualConcept: 'Human explanation resolving into inspectable product evidence.',
     composition: 'Speaker-led negative space gives way to one full, legible evidence plane.',
@@ -67,6 +68,7 @@ describe('Director Plan structure', () => {
     expect(parsed.issues).toEqual([]);
     expect(parsed.plan?.scenes.map((scene) => [scene.startFrame, scene.durationFrames])).toEqual([[0, 120], [120, 240]]);
     expect(parsed.plan?.scenes[1]).toMatchObject({ treatmentId: 'evidence-plane', brollDecision: 'source' });
+    expect(parsed.plan?.deliverySafety).toContain('YouTube 16:9');
     expect(isDirectorPlan(parsed.plan)).toBe(true);
   });
 

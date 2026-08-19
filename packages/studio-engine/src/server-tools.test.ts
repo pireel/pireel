@@ -61,6 +61,39 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('stable id output-main');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
   });
+  it('离线 MCP 也能保存整片方案并渐进持久化开放式 Scene 设计', () => {
+    const p = v2proj();
+    const planned = runServerTool('set_director_plan', {
+      goal: 'Teach one idea.', creativeThesis: 'Source and explanation become one field.', rhythmArc: 'Establish, build, hold.',
+      designSystem: {
+        visualConcept: 'One evidence-led field.', composition: 'Source and graphics share hierarchy.',
+        typography: 'One clear display role.', colorAndMaterial: 'Neutral with one accent.', imagery: 'Preserve source truth.',
+        motion: 'Motivated development.', sound: 'Voice first.',
+      },
+      scenes: [{
+        id: 'lesson', label: 'Lesson', startSec: 0, durationSec: 20, viewerTask: 'understand', narrativeRole: 'explain',
+        sceneFamily: 'custom', customFamily: 'authored-lesson', purpose: 'Make the idea visible.', treatmentId: 'shared-field',
+        visualAnchor: 'The demonstrated idea.', visualTreatment: 'Source and explanation remain visible together.',
+        motionPlan: 'Establish, develop, hold, clear.', soundPlan: 'Keep voice audible.', assetStrategy: 'Use source and a restrained explanation.',
+        brollDecision: 'none', brollRationale: 'The source already carries the idea.',
+      }],
+    }, p);
+    expect(planned.result.ok).toBe(true);
+    const designedProject = { ...p, comp: planned.comp!, document: planned.document! };
+    const designed = runServerTool('set_scene_designs', { scenes: [{
+      sceneId: 'lesson', designIntent: 'Reveal the relation without leaving the speaker.',
+      composition: 'Speaker and explanation share one composed field.', choreography: 'Establish, build the relation, hold, clear.',
+      continuity: 'Carry voice and one visual line through the boundary.', successCriteria: 'Both subjects remain readable.',
+    }] }, designedProject);
+    expect(designed.result.ok).toBe(true);
+    const read = runServerTool('read_scene_designs', {}, { ...designedProject, document: designed.document! });
+    expect(read.result).toMatchObject({ ok: true, data: { path: 'scene-designs.md' } });
+    const state = runServerTool('get_state', {}, { ...designedProject, document: designed.document! });
+    expect(state.result.state).toContain('Director Plan saved as director-plan.md');
+    expect(state.result.state).toContain('Authored Scene designs saved as scene-designs.md for 1 Scene(s): lesson');
+    expect(SERVER_EXECUTABLE_TOOLS.has('set_director_plan')).toBe(true);
+    expect(SERVER_EXECUTABLE_TOOLS.has('set_scene_designs')).toBe(true);
+  });
   it('V2 项目上的工具直接补丁原生块，不丢 canonical document', () => {
     const moved = runServerTool('move_block', { blockId: 'b1', startSec: 5.5 }, v2proj());
     expect(moved.result.ok).toBe(true);

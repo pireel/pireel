@@ -7,19 +7,24 @@
  * every assembly goes through — so adding "vlog" later is a new file and a map entry.
  */
 
+import { GENERAL_PRESET } from './general';
 import { type Preset, SPOKEN_PRESET } from './spoken';
 
 export type { Preset };
+export { GENERAL_EDITORIAL, GENERAL_PRESET } from './general';
 export { SPOKEN_EDITORIAL, SPOKEN_PRESET } from './spoken';
 
-const PRESETS: Record<string, Preset> = { [SPOKEN_PRESET.id]: SPOKEN_PRESET };
+const PRESETS: Record<string, Preset> = {
+  [GENERAL_PRESET.id]: GENERAL_PRESET,
+  [SPOKEN_PRESET.id]: SPOKEN_PRESET,
+};
 
-export const DEFAULT_PRESET_ID = SPOKEN_PRESET.id;
+export const DEFAULT_PRESET_ID = GENERAL_PRESET.id;
 
 /** Unknown ids fall back to the default: a stale preset id in a saved project must never break
  *  generation, and a graphic made under the wrong preset beats no graphic at all. */
 export function getPreset(id?: string): Preset {
-  return (id && PRESETS[id]) || SPOKEN_PRESET;
+  return (id && PRESETS[id]) || GENERAL_PRESET;
 }
 
 export function listPresets(): Preset[] {

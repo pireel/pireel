@@ -76,6 +76,6 @@ export function buildHtmlSystem(opts?: ComponentSystemOptions): string {
   ].join('\n\n');
 }
 
-/** The default free-form system (spoken preset) — the theme brief is appended by withActiveTheme,
+/** The default free-form system (scenario-neutral preset) — the theme brief is appended by withActiveTheme,
  *  which is that path's L3.2: it carries the token table, because this path writes CSS. */
 export const BLOCK_SYSTEM = buildHtmlSystem({ componentIds: [] });

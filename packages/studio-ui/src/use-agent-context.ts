@@ -24,6 +24,7 @@ import { narrationRowMarks, spans as clipSpans } from '@pireel/studio-engine/tri
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
+import { sceneDesignsFromDocument } from '@pireel/studio-engine/scene-design';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
@@ -95,6 +96,7 @@ export function useAgentContext(deps: AgentContextDeps) {
     const c = compRef.current;
     const document = documentRef.current;
     const directorPlan = directorPlanFromDocument(document);
+    const sceneDesigns = sceneDesignsFromDocument(document);
     let sel: { id: string; type: 'block' | 'shot'; label?: string; kind?: string } | null = null;
     if (selectedIdRef.current) {
       const b = c.blocks.find((x) => x.id === selectedIdRef.current);
@@ -182,6 +184,15 @@ export function useAgentContext(deps: AgentContextDeps) {
                   ...(semanticScene?.clipIds.length ? { clipIds: semanticScene.clipIds } : {}),
                 };
               }),
+            },
+          }
+        : {}),
+      ...(sceneDesigns?.scenes.length
+        ? {
+            sceneDesigns: {
+              path: 'scene-designs.md',
+              sceneIds: sceneDesigns.scenes.map((scene) => scene.sceneId),
+              hint: 'Call read_scene_designs with only the affected sceneIds before continuing or auditing those authored Scenes when they are not already in this conversation.',
             },
           }
         : {}),

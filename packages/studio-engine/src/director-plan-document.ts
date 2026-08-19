@@ -5,6 +5,7 @@ import { splitEditorClip } from './editor-document/commands/split';
 import { validateEditorDocumentV2 } from './editor-document/validation';
 import { semanticScenesFromDirectorPlan } from './semantic-scenes';
 import { withDirectorPlanInSemantics } from './director-plan-artifact';
+import { withoutSceneDesignsInSemantics } from './scene-design';
 
 export type ApplyDirectorPlanResult =
   | { ok: true; document: EditorDocumentV2; createdClipIds: string[] }
@@ -44,10 +45,14 @@ export function applyDirectorPlanToDocument(
     }
   }
 
+  // An explicitly replaced whole-film contract invalidates its authored Scene passes. Timeline
+  // pixels remain untouched; the next execution pass will progressively author fresh designs
+  // against the new thesis rather than silently reusing stale composition intent.
+  const semanticsWithoutStaleSceneDesigns = withoutSceneDesignsInSemantics(next.semantics);
   next = {
     ...next,
     semantics: withDirectorPlanInSemantics({
-      ...next.semantics,
+      ...semanticsWithoutStaleSceneDesigns,
       scenes: semanticScenesFromDirectorPlan(next, plan),
     }, plan),
   };

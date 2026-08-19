@@ -1,17 +1,23 @@
 import type { DirectorPlan, DirectorScenePlan } from './director-plan';
 import type { EditorDocumentV2, TimelineClip } from './editor-document/types';
 import { directorPlanFromDocument } from './director-plan-artifact';
+import { sceneDesignForDocument } from './scene-design';
 
 export type SceneVisualReviewPhase = 'entrance' | 'develop' | 'payoff' | 'exit' | 'scene';
 
 export type SceneVisualQaIssueKind =
+  | 'missing-scene-design'
   | 'repeated-geometry'
   | 'missing-evidence'
   | 'missing-planned-visual'
   | 'missing-audible-audio'
   | 'caption-subject-collision'
   | 'frame-drift'
-  | 'unsafe-delivery-crop';
+  | 'unsafe-delivery-crop'
+  | 'missing-development'
+  | 'abrupt-handoff'
+  | 'design-fragmentation'
+  | 'unmotivated-motion';
 
 export interface SceneVisualReviewMoment {
   atSec: number;
@@ -51,15 +57,18 @@ function sampleSecond(scene: DirectorScenePlan, phase: SceneVisualReviewPhase, f
 }
 
 function sceneContext(
+  document: EditorDocumentV2,
   scene: DirectorScenePlan,
   phase: SceneVisualReviewPhase,
   plan: DirectorPlan,
   frameId?: string,
 ): string {
   const evidence = evidenceOf(scene);
+  const design = sceneDesignForDocument(document, scene.id);
   return [
     `creativeThesis: ${plan.creativeThesis}`,
     `rhythmArc: ${plan.rhythmArc}`,
+    `deliverySafety: ${plan.deliverySafety ?? 'platform unknown; protect essential content inside a conservative central safe region; decorative bleed only'}`,
     `visualConcept: ${plan.designSystem.visualConcept}`,
     `compositionGrammar: ${plan.designSystem.composition}`,
     `typographySystem: ${plan.designSystem.typography}`,
@@ -83,6 +92,11 @@ function sceneContext(
     `brollDecision: ${scene.brollDecision ?? '(not specified)'}`,
     `brollRationale: ${scene.brollRationale ?? '(not specified)'}`,
     `visualMetaphor: ${scene.visualMetaphor ?? '(not specified)'}`,
+    `authoredSceneDesign: ${design?.designIntent ?? '(missing)'}`,
+    `authoredComposition: ${design?.composition ?? '(missing)'}`,
+    `authoredChoreography: ${design?.choreography ?? '(missing)'}`,
+    `authoredContinuity: ${design?.continuity ?? '(missing)'}`,
+    `renderedSuccessCriteria: ${design?.successCriteria ?? '(missing)'}`,
     `frameId: ${frameId ?? '(themeless)'}`,
   ].join('; ');
 }
@@ -151,7 +165,7 @@ export function planSceneVisualReview(
       sceneId: scene.id,
       sceneLabel: scene.label,
       phase,
-      expected: sceneContext(scene, phase, plan, plan.frameId ?? document.appearance.frameId),
+      expected: sceneContext(document, scene, phase, plan, plan.frameId ?? document.appearance.frameId),
     }));
   }).filter((moment) => !selectedIds || selectedIds.has(moment.sceneId));
   return capMoments(moments, Math.min(18, Math.max(1, options.maxMoments ?? 18)));
@@ -222,6 +236,14 @@ export function auditSceneVisualStructure(document: EditorDocumentV2): SceneVisu
   const issues: SceneVisualQaIssue[] = [];
 
   for (const scene of plan.scenes) {
+    if (!sceneDesignForDocument(document, scene.id)) {
+      issues.push({
+        sceneId: scene.id,
+        blockId: '',
+        kind: 'missing-scene-design',
+        note: 'This planned Scene was executed without a persisted whole-canvas spatial-temporal design.',
+      });
+    }
     if (sceneNeedsAudibleAudio(scene) && !hasAudibleAudio(document, scene)) {
       issues.push({
         sceneId: scene.id,

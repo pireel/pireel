@@ -99,9 +99,13 @@ import {
   selectReviewMoments,
 } from '@pireel/studio-engine/agent-execution-budget';
 import { type StudioToolResult, wrapAgentTranscript } from '@pireel/studio-engine/prompts';
-import { rejectStableFramingSplits, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
+import { rejectStableFramingSplits, visualGeometryForAgent, visualTimelineForAgent } from '@pireel/studio-engine/visual-types';
 import { directorPlanFromSeconds } from '@pireel/studio-engine/director-plan';
 import { applyDirectorPlanToDocument } from '@pireel/studio-engine/director-plan-document';
+import {
+  sceneDesignCollectionFromInput,
+  withSceneDesignsInSemantics,
+} from '@pireel/studio-engine/scene-design';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from '@pireel/studio-engine/semantic-scenes';
 import {
   auditSceneVisualStructure,
@@ -119,7 +123,7 @@ import { loadLocalFolderFile, loadLocalVideo, saveLocalVideo } from './local-med
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { normalizeStudioToolInputReferences } from './studio-tool-input-references';
-import { analyzeVisual, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
+import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
@@ -136,7 +140,7 @@ import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 
 const IMAGE_INSPECTION_MAX_DIM = 1280;
@@ -752,6 +756,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             };
           }
           case 'analyze_visual': {
+            const geometryOnly = input.mode === 'geometry';
+            const analyze = geometryOnly ? analyzeVisualGeometry : analyzeVisual;
             const requestedLocalSig = typeof input.localSig === 'string' ? input.localSig.trim().replace(/^local:/, '') : '';
             if (requestedLocalSig) {
               const entry = ctx.localAssetIndexRef.current.find((item) => item.kind === 'video' && item.sig === requestedLocalSig);
@@ -767,7 +773,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const durationSec = probe?.durationSec;
                 if (!durationSec) return { ok: false, error: `video duration unavailable: ${requestedLocalSig}` };
                 const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
-                const vis = await race(analyzeVisual(file, durationSec, (done, count) => {
+                const vis = await race(analyze(file, durationSec, (done, count) => {
                   const fraction = count > 0 ? done / count : 0;
                   report(t('common.analyzingVisualsPctSec', {
                     pct: Math.round(fraction * 85),
@@ -778,7 +784,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ? {
                       ok: true,
                       summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
-                      data: { localSig: requestedLocalSig, label: entry.label, durationSec, ...visualTimelineForAgent(vis) },
+                      data: {
+                        analysisMode: geometryOnly ? 'local-geometry' : 'semantic',
+                        localSig: requestedLocalSig,
+                        label: entry.label,
+                        durationSec,
+                        ...(geometryOnly ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
+                      },
                     }
                   : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
               } finally {
@@ -826,7 +838,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const useMountedPrimary = targetAssetId === primaryAssetId && !!videoFileRef.current && !!currentVideo();
               let vis: VisualTimeline | null;
               if (useMountedPrimary) {
-                vis = await race(stepVisual(report));
+                const mounted = currentVideo()!;
+                vis = geometryOnly
+                  ? await race(analyzeVisualGeometry(videoFileRef.current!, mounted.durationSec, (done, count) => {
+                      const fraction = count > 0 ? done / count : 0;
+                      report(t('common.analyzingVisualsPctSec', {
+                        pct: Math.round(fraction * 100),
+                        sec: Math.max(1, Math.ceil((1 - fraction) * Math.min(180, Math.max(1, Math.floor(mounted.durationSec * 2))) * 0.13)),
+                      }), fraction);
+                    }).catch(() => null))
+                  : await race(stepVisual(report));
               } else {
                 const source = resolveAssetUrl(targetAsset);
                 let file = source ? clipFilesRef.current.get(source) ?? null : null;
@@ -848,7 +869,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const durationSec = probe?.durationSec || targetAsset.metadata.durationSec;
                 if (!durationSec) return { ok: false, error: `video duration unavailable: ${targetAssetId}` };
                 const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
-                vis = await race(analyzeVisual(file, durationSec, (done, count) => {
+                vis = await race(analyze(file, durationSec, (done, count) => {
                   const fraction = count > 0 ? done / count : 0;
                   report(t('common.analyzingVisualsPctSec', {
                     pct: Math.round(fraction * 85),
@@ -879,7 +900,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ? {
                     ok: true,
                     summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
-                    data: { assetId: targetAssetId, ...visualTimelineForAgent(vis) },
+                    data: {
+                      analysisMode: geometryOnly ? 'local-geometry' : 'semantic',
+                      assetId: targetAssetId,
+                      ...(geometryOnly ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
+                    },
                   }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
             } finally {
@@ -1170,7 +1195,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 });
               }
               report(t('workbench.reviewComparingLocally'));
-              const groups = groupSimilarReviewFrames(candidates, { forceCloudAll: input.forceCloudAll === true });
+              // A broad Director review needs every authored temporal state: similarity itself is
+              // evidence that a promised establish/develop/payoff/clear sequence may not exist.
+              // Local one-off inspections keep the cheaper dedupe path unless explicitly forced.
+              const groups = groupSimilarReviewFrames(candidates, { forceCloudAll: !atsIn.length || input.forceCloudAll === true });
               const frames = groups.map(({ representative }) => ({
                 atSec: representative.atSec,
                 image_base64: representative.image_base64,
@@ -1196,14 +1224,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }), ...(signal ? { signal } : {}) });
               // scene = per-frame one-line description from the vision pass: issues alone can't answer
               // "what does this moment look like", which this tool also serves
-              const j = (await rr.json().catch(() => ({}))) as { frames?: { atSec: number; sceneId?: string; phase?: SceneVisualReviewPhase; scene?: string; issues: { blockId: string; kind: string; note: string }[] }[]; error?: string; detail?: string };
+              const j = (await rr.json().catch(() => ({}))) as {
+                frames?: { atSec: number; sceneId?: string; phase?: SceneVisualReviewPhase; scene?: string; issues: { blockId: string; kind: string; note: string }[] }[];
+                sequenceIssues?: { sceneId?: string; kind: string; note: string }[];
+                error?: string;
+                detail?: string;
+              };
               if (!rr.ok || !j.frames) return { ok: false, error: t('workbench.reviewFailedMessage', { message: j.detail || j.error || String(rr.status) }) };
               const reviewedSceneIds = new Set(candidates.map((candidate) => candidate.sceneId).filter(Boolean));
               const structuralIssues = auditSceneVisualStructure(documentRef.current)
                 .filter((issue) => !reviewedSceneIds.size || reviewedSceneIds.has(issue.sceneId));
               const visualIssues = j.frames.flatMap((frame) => frame.issues.map((issue) => ({ ...issue, sceneId: frame.sceneId ?? sceneAtSecond(documentRef.current, frame.atSec)?.id ?? '' })));
-              const repairScope = sceneVisualRepairScope([...structuralIssues, ...visualIssues]);
-              const total = visualIssues.length + structuralIssues.length;
+              const sequenceIssues = j.sequenceIssues ?? [];
+              const repairScope = sceneVisualRepairScope([...structuralIssues, ...visualIssues, ...sequenceIssues]);
+              const total = visualIssues.length + structuralIssues.length + sequenceIssues.length;
               for (const at of ats) {
                 const key = reviewMomentKey(at);
                 momentAttempts!.set(key, (momentAttempts!.get(key) ?? 0) + 1);
@@ -1220,11 +1254,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 summary,
                 data: {
                   frames: j.frames,
+                  sequenceIssues,
                   structuralIssues,
                   repairScope,
                   localComparison,
                   ...(total
-                    ? { hint: `${repairScope.instruction} Use subject framing → set_shot_framing, overlay position → place_block, styling/contrast/Frame drift → edit_block, missing planned visual/evidence → execute the approved asset strategy and place truthful source material, and missing audible audio → inspect track/clip mute and level before changing the approved sound plan.` }
+                    ? { hint: `${repairScope.instruction} If the ordered states reveal missing development, an abrupt handoff or design fragmentation, revise the affected persisted Scene design first; then implement it. Use subject framing → set_shot_framing, overlay position → place_block, styling/contrast/Frame drift → edit_block, missing planned visual/evidence → execute the approved asset strategy and place truthful source material, and missing audible audio → inspect track/clip mute and level before changing the approved sound plan.` }
                     : {}),
                 },
               };
@@ -2657,6 +2692,23 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 sceneIds: parsed.plan.scenes.map((scene) => scene.id),
                 boundaryClipIds: applied.createdClipIds,
               },
+            };
+          }
+          case 'set_scene_designs': {
+            const plan = directorPlanFromDocument(documentRef.current);
+            if (!plan) return { ok: false, error: 'Save the approved Director Plan before authoring Scene designs.' };
+            const parsed = sceneDesignCollectionFromInput(input, plan);
+            if (!parsed.designs) {
+              return { ok: false, error: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join(' · ') };
+            }
+            setDocument({
+              ...documentRef.current,
+              semantics: withSceneDesignsInSemantics(documentRef.current.semantics, parsed.designs),
+            });
+            return {
+              ok: true,
+              summary: `Authored ${parsed.designs.scenes.length} complete Scene design${parsed.designs.scenes.length === 1 ? '' : 's'}`,
+              data: { sceneIds: parsed.designs.scenes.map((scene) => scene.sceneId) },
             };
           }
           case 'add_block': {

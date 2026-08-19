@@ -251,7 +251,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
   });
   it("Frame 是艺术指导，配色字幕布局作为独立覆盖项", () => {
     const system = buildChatSystem({ id: "zen-white", title: "留白 Zen" });
-    expect(system).toContain("rich art-direction playbook");
+    expect(system).toContain("professional art-direction playbook");
     expect(system).toContain(
       "shape language, material and image treatment, typography personality",
     );
@@ -265,16 +265,16 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "never reset current values after reading the Frame",
     );
     expect(system).toContain(
-      "Skill and Director still own story, evidence, timing",
+      "Skill and Director own story, evidence, timing",
     );
     expect(system).toContain(
-      "A visual direction is NOT a set of fixed output types",
+      "Named situations and showcases are reference vocabulary",
     );
     expect(
       STUDIO_TOOLS.find((tool) => tool.id === "read_frame")?.description,
-    ).toContain("art-direction playbook");
+    ).toContain("professional art-direction playbook");
     expect(mcpInstructions("test-version")).toContain(
-      "A Frame is an art-direction playbook",
+      "A Frame supplies professional art direction",
     );
     expect(mcpInstructions("test-version")).toContain(
       "Palette, captions and layout remain independent project controls",
@@ -353,6 +353,15 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(s).toContain("call read_director_plan");
     expect(s).not.toContain("B-roll:");
     expect(STUDIO_TOOLS.some((tool) => tool.id === "read_director_plan")).toBe(true);
+  });
+  it("buildSituation 携带 Scene 设计文件索引而不重复开放式正文", () => {
+    const s = buildSituation({
+      composition: { durationSec: 10 },
+      sceneDesigns: { path: "scene-designs.md", sceneIds: ["opening", "proof"] },
+    });
+    expect(s).toContain("Authored Scene designs saved as scene-designs.md for 2 Scene(s): opening, proof");
+    expect(s).toContain("Call read_scene_designs");
+    expect(s).not.toContain("protected zones");
   });
   it("新对话把已有项目状态当作素材现状，而不是继承上一段对话的任务", () => {
     const s = buildSituation(
@@ -437,14 +446,15 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(approval.description).toContain("instead of filling a host-defined checklist");
     expect((approval.inputSchema as { required: string[] }).required).toEqual(["content"]);
     const plan = STUDIO_TOOLS.find((tool) => tool.id === "set_director_plan")!;
-    expect(plan.chatOnly).toBe(true);
+    expect(plan.chatOnly).not.toBe(true);
     expect(plan.description).toContain("NOT a macro");
     expect(plan.description).toContain("receiving Approve from request_approval");
     const schema = plan.inputSchema as {
       required: string[];
       properties: Record<string, unknown>;
     };
-    expect(schema.required).toEqual(["goal", "creativeThesis", "rhythmArc", "designSystem", "scenes"]);
+    expect(schema.required).toEqual(["goal", "creativeThesis", "rhythmArc", "deliverySafety", "designSystem", "scenes"]);
+    expect(schema.properties).toHaveProperty("deliverySafety");
     expect(schema.properties).toHaveProperty("rhythmArc");
     expect(schema.properties).toHaveProperty("designSystem");
     expect(schema.properties).toHaveProperty("scenes");
@@ -485,6 +495,19 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(CHAT_IDENTITY).toContain(
       "A complete edit is NOT complete if review_visuals fails",
     );
+    const sceneDesigns = STUDIO_TOOLS.find((tool) => tool.id === "set_scene_designs")!;
+    expect(sceneDesigns.chatOnly).not.toBe(true);
+    expect(sceneDesigns.description).toContain("open design layer");
+    const sceneDesignSchema = sceneDesigns.inputSchema as {
+      properties: { scenes: { items: { required: string[]; properties: Record<string, unknown> } } };
+    };
+    expect(sceneDesignSchema.properties.scenes.items.required).toEqual([
+      "sceneId", "designIntent", "composition", "choreography", "continuity", "successCriteria",
+    ]);
+    expect(sceneDesignSchema.properties.scenes.items.properties).not.toHaveProperty("layout");
+    expect(CHAT_IDENTITY).toContain("set_scene_designs BEFORE its planned visual mutations");
+    expect(CHAT_IDENTITY).toContain("may coexist and interact at the same time");
+    expect(STUDIO_TOOLS.some((tool) => tool.id === "read_scene_designs")).toBe(true);
   });
   it("取景预设与原子 transform/crop 分层，不暴露完整自动重构工具", () => {
     const transform = STUDIO_TOOLS.find(
@@ -643,7 +666,8 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     const schema = review.inputSchema as {
       properties: Record<string, unknown>;
     };
-    expect(review.description).toContain("deduplicates genuinely similar frames");
+    expect(review.description).toContain("sends the ordered temporal states together");
+    expect(review.description).toContain("missing temporal development");
     expect(review.description).toContain("entrance, development, payoff and exit");
     expect(review.description).toContain("repairScope");
     expect(schema.properties).toHaveProperty("sceneIds");

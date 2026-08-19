@@ -3,6 +3,7 @@ import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { emptyEditorDocumentV2 } from './editor-document';
 import { resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
 import { withDirectorPlanInSemantics } from './director-plan-artifact';
+import { withSceneDesignsInSemantics } from './scene-design';
 
 describe('shared agent timeline atoms', () => {
   it('binds planned native visuals and reassigns them when they move across Director scenes', () => {
@@ -29,6 +30,13 @@ describe('shared agent timeline atoms', () => {
       { id: 'claim', clipIds: [] },
       { id: 'proof', clipIds: [] },
     ];
+    document.semantics = withSceneDesignsInSemantics(document.semantics, { scenes: [{
+      sceneId: 'claim', designIntent: 'Keep the claim human.', composition: 'Speaker remains the anchor.',
+      choreography: 'Establish, emphasize, hold, clear.', continuity: 'Carry cadence into proof.', successCriteria: 'Speaker remains readable.',
+    }, {
+      sceneId: 'proof', designIntent: 'Make proof inspectable.', composition: 'Evidence remains dominant.',
+      choreography: 'Reveal, inspect, hold, clear.', continuity: 'Resolve the claim into evidence.', successCriteria: 'Evidence remains readable.',
+    }] });
     document = runAgentTimelineTool(document, 'register_media', {
       assets: [{ id: 'evidence', kind: 'image', url: 'https://cdn.example/evidence.png' }],
     }).document!;
@@ -38,11 +46,20 @@ describe('shared agent timeline atoms', () => {
     expect(placed.ok).toBe(true);
     expect(placed.document!.semantics.scenes.find((scene) => scene.id === 'claim')?.clipIds).toContain('evidence-clip');
     expect((placed.data as { clipIds: string[] }).clipIds).toEqual(['evidence-clip']);
-    expect((runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as { semantics: { directorPlan?: unknown } }).semantics.directorPlan).toBeDefined();
-    const planFile = runAgentTimelineTool(placed.document!, 'read_director_plan', {});
+    const timeline = runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as { semantics: { directorPlan?: unknown; sceneDesigns?: { sceneIds: string[] } } };
+    expect(timeline.semantics.directorPlan).toBeDefined();
+    expect(timeline.semantics.sceneDesigns?.sceneIds).toEqual(['claim', 'proof']);
+    const planFile = runAgentTimelineTool(placed.document!, 'read_director_plan', { sceneIds: ['proof'] });
     expect(planFile.ok).toBe(true);
     expect((planFile.data as { path: string; content: string }).path).toBe('director-plan.md');
     expect((planFile.data as { content: string }).content).toContain('# Director Plan');
+    expect((planFile.data as { content: string }).content).toContain('#### Label\n\nProof');
+    expect((planFile.data as { content: string }).content).not.toContain('State the idea.');
+    const sceneFile = runAgentTimelineTool(placed.document!, 'read_scene_designs', { sceneIds: ['claim'] });
+    expect(sceneFile.ok).toBe(true);
+    expect(sceneFile.data).toMatchObject({ path: 'scene-designs.md', mediaType: 'text/markdown' });
+    expect((sceneFile.data as { content: string }).content).toContain('Keep the claim human.');
+    expect((sceneFile.data as { content: string }).content).not.toContain('Make proof inspectable.');
 
     const moved = runAgentTimelineTool(placed.document!, 'move_clips', {
       items: [{ clipId: 'evidence-clip', startSec: 5 }],

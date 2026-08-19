@@ -103,6 +103,22 @@ describe("custom visual style", () => {
       "A multicolor direction such as Memphis must remain multicolor",
     );
     expect(combined?.body).toContain("the visual direction's defaults");
+    expect(combined?.body).toContain(
+      "This Frame is a professional art direction, not a video scenario",
+    );
+    expect(combined?.body).toContain(
+      "showcase, composition, object or use case below is reference vocabulary",
+    );
     expect(combined?.body).not.toContain("override any fixed palette");
+  });
+
+  it("wraps an official Frame even when the user has no custom controls", () => {
+    const combined = composeVisualDirectionContent(
+      { title: "Quiet", body: "Use deliberate whitespace." },
+      null,
+    );
+    expect(combined?.body).toContain("# Frame authority");
+    expect(combined?.body).toContain("The persisted Scene design");
+    expect(combined?.body).toContain("Use deliberate whitespace.");
   });
 });

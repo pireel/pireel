@@ -20,6 +20,10 @@
 import { interpretApplyRaw } from './briefs';
 import { placementPercentToBox } from './overlay-placement';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from './semantic-scenes';
+import { directorPlanFromSeconds } from './director-plan';
+import { applyDirectorPlanToDocument } from './director-plan-document';
+import { directorPlanFromDocument } from './director-plan-artifact';
+import { sceneDesignCollectionFromInput, sceneDesignsFromDocument, withSceneDesignsInSemantics } from './scene-design';
 import {
   type Block,
   type Composition,
@@ -143,6 +147,9 @@ export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'get_state',
   'get_timeline',
   'read_director_plan',
+  'read_scene_designs',
+  'set_director_plan',
+  'set_scene_designs',
   'register_media',
   'inspect_media',
   'organize_media',
@@ -253,6 +260,8 @@ function offlineState(p: ServerToolProject): string {
   const tag = new Map<string, string>();
   for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
   const cs = isCaptionsOn(c) ? resolveCaptionStyle(c) : null;
+  const directorPlan = directorPlanFromDocument(p.document);
+  const sceneDesigns = sceneDesignsFromDocument(p.document);
   const situation = buildSituation({
     output: {
       id: outputs.active.id,
@@ -301,8 +310,36 @@ function offlineState(p: ServerToolProject): string {
     },
     pipeline: {
       asr: Object.values(p.document.semantics.transcripts).some((segments) => segments.length > 0),
+      plan: !!directorPlan || p.document.semantics.plan !== undefined,
       visual: false,
     },
+    ...(directorPlan
+      ? {
+          directorPlan: {
+            goal: directorPlan.goal,
+            creativeThesis: directorPlan.creativeThesis,
+            ...(directorPlan.audience ? { audience: directorPlan.audience } : {}),
+            scenes: directorPlan.scenes.map((scene) => {
+              const semanticScene = p.document.semantics.scenes.find((candidate) => candidate.id === scene.id);
+              return {
+                id: scene.id,
+                label: scene.label,
+                startSec: scene.startFrame / p.document.canvas.fps,
+                endSec: (scene.startFrame + scene.durationFrames) / p.document.canvas.fps,
+                ...(semanticScene?.clipIds.length ? { clipIds: semanticScene.clipIds } : {}),
+              };
+            }),
+          },
+        }
+      : {}),
+    ...(sceneDesigns?.scenes.length
+      ? {
+          sceneDesigns: {
+            path: 'scene-designs.md',
+            sceneIds: sceneDesigns.scenes.map((scene) => scene.sceneId),
+          },
+        }
+      : {}),
     ...(typeof p.canGenerate === 'boolean' ? { canGenerate: p.canGenerate } : {}),
   });
   return `<composition_state>\nOFFLINE MODE — the studio tab is NOT open. Operating directly on cloud project "${p.title}" (${p.id}). Switching outputs still requires an open studio tab. Video-dependent tools (extract_asr, analyze_visual, capture_frame, visual_brief, export_video, Pireel-LLM generation) need the tab: open one yourself via create_browser_handoff {project_id:"${p.id}"} in your built-in browser (never the OS default browser), or ask the user to open the project.\n${situation}\n</composition_state>`;
@@ -412,6 +449,37 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
   switch (tool) {
     case 'get_state':
       return { result: { ok: true, state: offlineState(p) } };
+    case 'set_director_plan': {
+      const parsed = directorPlanFromSeconds(input, p.document.canvas.fps);
+      if (!parsed.plan) return { result: { ok: false, error: parsed.issues.map((issue) => `${issue.path || 'plan'}: ${issue.message}`).join(' · ') } };
+      const applied = applyDirectorPlanToDocument(p.document, parsed.plan);
+      if (!applied.ok) return { result: { ok: false, error: applied.error } };
+      return {
+        result: {
+          ok: true,
+          summary: `Saved Director Plan with ${parsed.plan.scenes.length} Scenes`,
+          data: { sceneIds: parsed.plan.scenes.map((scene) => scene.id), boundaryClipIds: applied.createdClipIds },
+        },
+        comp: projectDocumentToComposition(applied.document),
+        document: applied.document,
+      };
+    }
+    case 'set_scene_designs': {
+      const plan = directorPlanFromDocument(p.document);
+      if (!plan) return { result: { ok: false, error: 'Save the approved Director Plan before authoring Scene designs.' } };
+      const parsed = sceneDesignCollectionFromInput(input, plan);
+      if (!parsed.designs) return { result: { ok: false, error: parsed.issues.map((issue) => `${issue.path}: ${issue.message}`).join(' · ') } };
+      const document = { ...p.document, semantics: withSceneDesignsInSemantics(p.document.semantics, parsed.designs) };
+      return {
+        result: {
+          ok: true,
+          summary: `Authored ${parsed.designs.scenes.length} complete Scene design${parsed.designs.scenes.length === 1 ? '' : 's'}`,
+          data: { sceneIds: parsed.designs.scenes.map((scene) => scene.sceneId) },
+        },
+        comp: projectDocumentToComposition(document),
+        document,
+      };
+    }
     case 'list_outputs': {
       const outputs = normalizeProjectOutputs(p.context.outputs);
       const ordered = [

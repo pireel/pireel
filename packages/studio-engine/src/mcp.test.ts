@@ -70,6 +70,15 @@ describe('MCP 工具面', () => {
     expect(t.description).not.toContain('<frame_catalog>');
     expect(t.description).toContain('list_frames');
   });
+  it('外部 Agent 能保存同一套 Director Plan 与开放式 Scene 设计', () => {
+    const tools = buildMcpTools();
+    const plan = tools.find((tool) => tool.name === 'set_director_plan')!;
+    const scene = tools.find((tool) => tool.name === 'set_scene_designs')!;
+    expect(plan.description).toContain('external host');
+    expect(plan.description).not.toContain('request_approval');
+    expect(scene.description).toContain('open spatial-temporal design');
+    expect((scene.inputSchema as { properties: { scenes: { items: { properties: Record<string, unknown> } } } }).properties.scenes.items.properties).not.toHaveProperty('layout');
+  });
   it('超时分档:card(浏览器里跑生成/分析)10 分钟,badge(即时)60 秒', () => {
     expect(bridgeTimeoutMs('analyze_visual')).toBe(600_000);
     expect(bridgeTimeoutMs('move_block')).toBe(60_000);

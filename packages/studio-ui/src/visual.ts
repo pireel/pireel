@@ -20,6 +20,7 @@ import type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-
 const MAX_VLM = 8; // VLM (paid) cost cap: segments are NOT dropped; only this many points are sampled to the VLM, other segments inherit semantics from the nearest
 const CAPTION_RESERVE = 0.16; // fixed bottom 16% reserved for captions (don't detect original captions: the start often has none, and captions get added to the bottom in post)
 const DEFAULT_LABEL: VisualLabel = { content: 'talkinghead', person: 'center', safe: 'full', hasText: false, desc: '' };
+const geometryCache = new Map<string, VisualTimeline>();
 
 /* ---------- Visual-analysis cache (localStorage, keyed by file fingerprint; same clip doesn't rerun the VLM) ---------- */
 // v3: segments no longer dropped (full-clip coverage, no gaps) + framing direction set by dense geometry; new prefix invalidates the old 8-segment cache.
@@ -44,6 +45,8 @@ function setCachedVisual(sig: string, v: VisualTimeline): void {
 
 /** Clear the visual-analysis cache: clears one entry for a given sig, otherwise clears all (for forcing a rerun while debugging). */
 export function clearVisualCache(sig?: string): void {
+  if (sig) geometryCache.delete(sig);
+  else geometryCache.clear();
   if (typeof localStorage === 'undefined') return;
   try {
     if (sig) {
@@ -168,7 +171,11 @@ export async function prepareVisualAnalysis(
 }
 
 /** Semantic labels (labels[i] maps 1:1 to prep.frames[i], null = that frame got none) -> assemble the full VisualTimeline and cache it. */
-export function finishVisualAnalysis(prep: VisualPrep, labels: (VisualLabel | null)[]): VisualTimeline {
+export function finishVisualAnalysis(
+  prep: VisualPrep,
+  labels: (VisualLabel | null)[],
+  options: { cache?: boolean } = {},
+): VisualTimeline {
   const { cuts, segsAll, frames, geomFrames, palette } = prep;
   // Sample points (actual sampled frame time -> label), letting non-sampled segments inherit semantics (content/hasText/desc) from the nearest.
   // Match back by the frames' own timestamp, not by index against vlmSegs (index misalignment would smear labels across segments).
@@ -202,8 +209,33 @@ export function finishVisualAnalysis(prep: VisualPrep, labels: (VisualLabel | nu
   // Only cache results where "at least one pass succeeded": semantics all failed + geometry pass all failed = pure fallback data;
   // caching that would pin the failure (reopening the same clip hits the cache and never retries). Partial success is cacheable; use clearVisualCache to force a rerun.
   const vlmOk = labels.some((l) => l !== null);
-  if (vlmOk || geomFrames) setCachedVisual(prep.sig, result);
+  if (options.cache !== false && (vlmOk || geomFrames)) setCachedVisual(prep.sig, result);
   return result;
+}
+
+/** Local-only visual measurements. This path never calls the VLM and never writes the semantic
+ * cache, so a later content/design request still performs full visual understanding. */
+export async function analyzeVisualGeometry(
+  file: File,
+  durationSec: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<VisualTimeline> {
+  const sig = fileSig(file);
+  const semantic = getCachedVisual(sig);
+  if (semantic) {
+    onProgress?.(1, 1);
+    return semantic;
+  }
+  const cached = geometryCache.get(sig);
+  if (cached) {
+    onProgress?.(1, 1);
+    return cached;
+  }
+  const prepared = await prepareVisualAnalysis(file, durationSec, onProgress);
+  if ('cached' in prepared) return prepared.cached;
+  const timeline = finishVisualAnalysis(prepared.prep, [], { cache: false });
+  geometryCache.set(sig, timeline);
+  return timeline;
 }
 
 export async function analyzeVisual(

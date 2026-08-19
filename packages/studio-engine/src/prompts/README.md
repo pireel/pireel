@@ -15,7 +15,9 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
    System、Scene 编排、审批和时序复检；应用内 Agent 与 MCP Agent 共用。
 2. `director-plan-markdown.ts` + `semantic-scenes.ts`：把方法沉淀为可读 Markdown 源稿，
    再编译成可校验、可执行的 Scene 投影。JSON 只属于 tool-call 边界，不是计划源文件。
-   普通局势只带目标与 Scene 索引，完整源稿由 `read_director_plan` 按需进上下文。
+   普通局势只带目标与播放头附近的 Scene 索引，完整源稿由 `read_director_plan` 按需进上下文；
+   常规工作按 `sceneIds` 只读受影响片段，整份读取只用于全片审查。平台/画幅安全区作为
+   Director Plan 的全局 `deliverySafety` 只存一遍，由所有 Scene 继承。
 3. Frame / Skill：Frame 提供专业视觉语言，Skill 提供场景领域判断；两者不能代替整片设计。
 4. Component composer：只负责已规划 Scene 里的一个可编辑视觉层。生成前必须拿到真实
    box、backdrop、保护区和 Scene 设计上下文，不能生成后再碰运气摆放。
@@ -72,7 +74,7 @@ prefix 缓存只到第一处变化为止,越靠前的层越不该动。
 | --- | --- | --- | --- |
 | 片段契约 | `fragment-contract.ts` | 你在做什么/确定性/不许改没要求的/note 在前(**块生成侧的基座,不是全局 L0**) | 几乎不变 |
 | L1 props 规范 | `l1-props-spec.ts` | 字段种类·夹取语义·缺省即成品（也是未来造 Component 预设的语法） | 几乎不变 |
-| L2 预设 | `presets/` | 口播/vlog…**路由层**:决定加载哪套 L3.1 + L4 | 加预设时 |
+| L2 预设 | `presets/` | 默认使用场景无关编辑判断；垂直域可显式加载自己的 L3.1 + L4 | 加预设时 |
 | L4 能力词汇 | `l4-catalog.ts` | 该预设的 Component 目录；当前主要是 Motion Graphic 子集，**从 schema 派生** | 加预设 = 零改动 |
 | L3.1 编辑判断 | `presets/spoken.ts` | 什么值得上屏/verbatim/语言/反单调/节奏 | 常改 |
 | 输出契约 | `assemble.ts` | ```json（注册 Component 路径）/ ```html+```js（自由 Motion Graphic 路径） | 随路径 |

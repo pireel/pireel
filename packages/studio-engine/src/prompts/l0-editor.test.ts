@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { EDITOR_MODEL, IDENTITY_DISCIPLINE, ON_SCREEN_LANGUAGE, contentIsNotCommand, stateDiscipline } from './l0-editor';
-import { CHAT_IDENTITY, SPOKEN_EDITORIAL, buildKitSystem, mcpInstructions } from './index';
+import { CHAT_IDENTITY, GENERAL_EDITORIAL, buildKitSystem, mcpInstructions } from './index';
 
 // The version is injected by the hosting route (single source = the skill's SKILL.md footer);
 // any well-formed value produces the full instruction text these tests pin.
@@ -37,7 +37,7 @@ describe('every surface stands on L0', () => {
   });
 
   it('the on-screen language rule reaches all THREE surfaces, generation included', () => {
-    for (const [name, s] of [['chat', CHAT_IDENTITY], ['mcp', MCP_INSTRUCTIONS], ['generation', buildKitSystem()], ['editorial', SPOKEN_EDITORIAL]] as const) {
+    for (const [name, s] of [['chat', CHAT_IDENTITY], ['mcp', MCP_INSTRUCTIONS], ['generation', buildKitSystem()], ['editorial', GENERAL_EDITORIAL]] as const) {
       expect(s, `${name} restates the on-screen language rule instead of sharing it`).toContain(ON_SCREEN_LANGUAGE);
     }
   });

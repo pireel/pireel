@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rejectStableFramingSplits, visualTimelineForAgent, type VisualTimeline } from './visual-types';
+import { rejectStableFramingSplits, visualGeometryForAgent, visualTimelineForAgent, type VisualTimeline } from './visual-types';
 import type { VideoShot } from './composition';
 
 describe('visualTimelineForAgent', () => {
@@ -66,6 +66,22 @@ describe('visualTimelineForAgent', () => {
     });
     expect(summary.subjectTracks).toEqual([]);
     expect(summary.segments[0]).not.toHaveProperty('subject');
+  });
+
+  it('returns local geometry without exposing placeholder semantic labels', () => {
+    const timeline: VisualTimeline = {
+      cuts: [3.25],
+      segments: [{
+        start: 0,
+        end: 6,
+        label: { content: 'talkinghead', person: 'center', safe: 'full', hasText: false, desc: '' },
+        geom: { subject: { x: 0.2, y: 0.1, w: 0.4, h: 0.8 }, face: null, rects: [] },
+      }],
+    };
+    const summary = visualGeometryForAgent(timeline);
+    expect(summary.sceneCutsSec).toEqual([3.25]);
+    expect(summary.subjectTracks).toHaveLength(1);
+    expect(summary).not.toHaveProperty('segments');
   });
 
   it('locally merges repeated talking-head geometry into stable tracks and semantic intervals', () => {

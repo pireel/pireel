@@ -4,6 +4,7 @@ import { applyDirectorPlanToDocument } from './director-plan-document';
 import { applyEditorCommand, emptyEditorDocumentV2 } from './editor-document';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from './semantic-scenes';
 import { directorPlanFromDocument } from './director-plan-artifact';
+import { withSceneDesignsInSemantics } from './scene-design';
 
 function documentWithNarration() {
   const empty = emptyEditorDocumentV2({ fps: 30 });
@@ -35,6 +36,7 @@ const planInput = {
   goal: 'Move the viewer from problem to visible proof.',
   creativeThesis: 'Human problem first, product evidence second.',
   rhythmArc: 'Hold on the human problem, accelerate into the action, then settle on proof.',
+  deliverySafety: 'TikTok 9:16; reserve the right interaction rail and bottom navigation/caption region. Keep faces, product proof and CTA in the central-left safe field.',
   designSystem: {
     visualConcept: 'Human friction becoming a visible working state.',
     composition: 'Speaker-led opening followed by an edge-to-edge authentic product plane.',
@@ -106,14 +108,58 @@ describe('Director Plan document execution', () => {
     const brief = formatDirectorSceneContext(context!);
     expect(brief).toContain('Whole-video goal: Move the viewer from problem to visible proof.');
     expect(brief).toContain('Creative thesis: Human problem first, product evidence second.');
+    expect(brief).toContain('Delivery safety: TikTok 9:16');
     expect(brief).toContain('Shared visual concept: Human friction becoming a visible working state.');
     expect(brief).toContain('Viewer task: believe');
     expect(brief).toContain('The screen recording shows input and final result');
-    expect(brief).toContain('Signature treatment: evidence-plane');
+    expect(brief).toContain('Content-specific Scene treatment: evidence-plane');
     expect(brief).toContain('Visual anchor: The real product state change.');
     expect(brief).toContain('B-roll decision: source');
     expect(brief).toContain('one composed scene');
     expect(brief).not.toContain('kit:');
+  });
+
+  it('injects the persisted complete Scene design and real intersecting layers into generation context', () => {
+    const document = documentWithNarration();
+    const plan = directorPlanFromSeconds(planInput, 30).plan!;
+    const applied = applyDirectorPlanToDocument(document, plan);
+    if (!applied.ok) throw new Error(applied.error);
+    const designed = {
+      ...applied.document,
+      semantics: withSceneDesignsInSemantics(applied.document.semantics, { scenes: [{
+        sceneId: 'proof',
+        designIntent: 'The real state change grows out of the speaker explanation.',
+        composition: 'Keep source evidence dominant while one restrained annotation shares the frame.',
+        choreography: 'Establish source, reveal the changed control, hold the result, then clear the annotation.',
+        continuity: 'Carry the speaker cadence into evidence and keep the result visible into the next beat.',
+        successCriteria: 'The product result is readable and the voice remains continuous.',
+      }] }),
+    };
+    const context = resolveDirectorSceneContext(designed, { sceneId: 'proof', startFrame: 150, durationFrames: 60 });
+    const brief = formatDirectorSceneContext(context!);
+    expect(brief).toContain('Authored Scene design intent: The real state change grows out of the speaker explanation.');
+    expect(brief).toContain('Authored whole-canvas composition: Keep source evidence dominant');
+    expect(brief).toContain('Existing intersecting layers:');
+    expect(brief).toContain('[narrative]');
+    expect(brief).toContain('one participant in that complete picture');
+  });
+
+  it('invalidates stale Scene designs when the whole Director Plan is explicitly replaced', () => {
+    const document = documentWithNarration();
+    const plan = directorPlanFromSeconds(planInput, 30).plan!;
+    const first = applyDirectorPlanToDocument(document, plan);
+    if (!first.ok) throw new Error(first.error);
+    const designed = {
+      ...first.document,
+      semantics: withSceneDesignsInSemantics(first.document.semantics, { scenes: [{
+        sceneId: 'problem', designIntent: 'Old idea.', composition: 'Old composition.',
+        choreography: 'Old choreography.', continuity: 'Old continuity.', successCriteria: 'Old criteria.',
+      }] }),
+    };
+    const replaced = applyDirectorPlanToDocument(designed, plan);
+    if (!replaced.ok) throw new Error(replaced.error);
+    const context = resolveDirectorSceneContext(replaced.document, { sceneId: 'problem', startFrame: 0, durationFrames: 30 });
+    expect(context?.design).toBeUndefined();
   });
 
   it('rejects scene-boundary application atomically when the primary lane is locked', () => {

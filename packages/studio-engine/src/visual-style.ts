@@ -419,14 +419,45 @@ export interface VisualDirectionContent {
   body: string;
 }
 
+/**
+ * Stable authority boundary prepended to every official Frame playbook.
+ *
+ * Frame documents are intentionally rich and may contain examples, density studies and signature
+ * situations. This wrapper prevents those references from turning into a hidden scenario Skill or
+ * a closed scene/template catalog when the playbook is read by different model hosts.
+ */
+export const FRAME_ART_DIRECTION_CONTRACT = `# Frame authority
+
+This Frame is a professional art direction, not a video scenario, editorial workflow, Scene taxonomy,
+layout preset, asset policy, transition schedule or Motion Graphic catalog. It owns the visible and
+sonic character left open by the user: shape language, material and image treatment, typography
+personality, color-role relationships, spatial tension, motion temperament and sparse sound texture.
+
+The user and current manual project settings are authoritative. The active Skill and Director decide
+story, evidence, source selection, B-roll need, pacing and Scene structure. The persisted Scene design
+then interprets this Frame for the actual canvas, footage, subjects, evidence and neighboring moments.
+Do not let the Frame choose a medium, layout or shot merely because one appears in its examples.
+
+Any named situation, showcase, composition, object or use case below is reference vocabulary that
+demonstrates the direction's transferable visual principles. It is never a required category, template,
+compatibility rule or quota. Synthesize a new content-specific composition when the evidence calls for
+one. Preserve the Frame's recognizable principles, not the surface geometry of an example.`;
+
+export function frameArtDirectionPlaybook(direction: VisualDirectionContent): string {
+  return `${FRAME_ART_DIRECTION_CONTRACT}\n\n${direction.body}`;
+}
+
 /** Combine one structural art direction with the user's independent visual controls. The Frame remains
  * the visual grammar; color, captions and layout are explicit overrides rather than a competing theme. */
 export function composeVisualDirectionContent(
   direction: VisualDirectionContent | null,
   style: CustomVisualStyle | null,
 ): VisualDirectionContent | null {
-  if (!style) return direction;
+  const framed = direction
+    ? { ...direction, body: frameArtDirectionPlaybook(direction) }
+    : null;
+  if (!style) return framed;
   const controls = customVisualStylePlaybook(style);
-  if (!direction) return { title: "User visual controls", body: controls };
-  return { title: direction.title, body: `${direction.body}\n\n${controls}` };
+  if (!framed) return { title: "User visual controls", body: controls };
+  return { title: framed.title, body: `${framed.body}\n\n${controls}` };
 }

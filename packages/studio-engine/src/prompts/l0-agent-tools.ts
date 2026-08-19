@@ -126,7 +126,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎨',
     label: 'tools.read_frame.label',
     description:
-      "Load the attached visual direction's art-direction playbook. Carry its shape language, material and image treatment, typography personality, spatial composition and motion grammar across the edit; explicit palette, caption and layout controls override fixed assumptions. When <frame_attached> appears, call this ONCE before planning or generating. Use named situations as adaptable composition grammars, not prebuilt Motion Graphic templates. The Skill and Director still own story and Scene strategy. If its result already exists in history, do NOT call again. No input needed.",
+      "Load the attached Frame's professional art-direction playbook. Carry its shape language, material and image treatment, typography personality, color-role relationships, spatial tension, motion temperament and sparse sound texture across the edit; explicit palette, caption and layout controls override fixed assumptions. When <frame_attached> appears, call this ONCE before planning or generating. Named situations and showcases are reference vocabulary, never Scene categories, layouts, media decisions or templates. The Skill and Director own story and Scene strategy; the persisted Scene design interprets the Frame for actual evidence and footage. If its result already exists in history, do NOT call again. No input needed.",
     inputSchema: obj({}, []),
   },
   {
@@ -136,7 +136,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🖼️',
     label: 'tools.attach_frame.label',
     description:
-      "Attach a visual direction by Frame id. Its art-direction grammar applies across the edit; palette, captions and layout remain independent project controls. <frame_attached> will then tell you to read_frame. Call only after the user chooses a direction or delegates the choice. Skill and visual direction are independent. Also usable to switch directions when requested.",
+      "Attach a professional visual direction by Frame id. Its transferable art-direction principles apply across the edit; it does not choose story, Scene type, footage, layout or a template. Palette, captions and layout remain independent project controls. <frame_attached> will then tell you to read_frame. Call only after the user chooses a direction or delegates the choice. Skill and visual direction are independent. Also usable to switch directions when requested.",
     inputSchema: obj({ frame_id: { type: 'string', description: 'Frame id from the catalog, e.g. "biennale-poster"' } }, ['frame_id']),
   },
   {
@@ -146,12 +146,12 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.set_director_plan.label',
     description:
       'Save or replace the editing expert\'s whole-video design contract for a broad request or explicitly requested COMPLETE edit, after reading the relevant transcript/footage evidence, honoring the user\'s independent Frame state (attached or themeless), and receiving Approve from request_approval for the exact current proposal. The contract has three levels: one creative thesis, one whole-film rhythm arc, and one shared video design system; chronological Semantic Scenes then vary that system around their actual source evidence and viewer task. Saving creates real editable boundaries on the primary visual lane without removing content and binds timeline clips to Scenes. Save the approved contract before other timeline mutations; replace it only when later evidence materially changes the design or scene structure. This is an editable decision artifact, NOT a macro, checklist, Component recipe or substitute for judgment. Do not call it for a local change. Every later scene starts at or after the previous scene ends. Times use the edited timeline in seconds.',
-    chatOnly: true,
     inputSchema: obj(
       {
         goal: { type: 'string', description: 'Concrete viewer or business outcome for this output.' },
         creativeThesis: { type: 'string', description: 'One concise directing idea that governs pacing, evidence and visual contrast.' },
         rhythmArc: { type: 'string', description: 'Whole-film progression of pace, density, pressure, release and final hold. Describe contrast over time rather than a constant tempo.' },
+        deliverySafety: { type: 'string', description: 'Target platform/placement and ratio; platform chrome, caption, crop and edge-copy zones that must remain clear; the protected region for faces, products, evidence, prices, terms and CTA. If the platform is unknown, state that and use a conservative central safe region rather than inventing exact chrome.' },
         designSystem: {
           type: 'object',
           additionalProperties: false,
@@ -187,7 +187,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
               customFamily: { type: 'string', description: 'Free-form family name; required only when sceneFamily is custom.' },
               purpose: { type: 'string', description: 'Why this scene exists and what should change for the viewer.' },
               evidence: { type: 'array', items: { type: 'string' }, description: 'Transcript/footage/product/asset facts that support this scene.' },
-              treatmentId: { type: 'string', description: 'Concise kebab-case name for the chosen Frame-native treatment or, when themeless, a content-specific treatment. Name the composition idea, never a generic shell such as top-label or CTA-card.' },
+              treatmentId: { type: 'string', description: 'Concise kebab-case name for this content-specific Scene treatment. Derive it from the purpose, evidence and complete composition; do not select a Frame showcase, broad family or generic shell such as top-label or CTA-card.' },
               visualAnchor: { type: 'string', description: 'Concrete subject, action, evidence, or relationship that must dominate and remain unobscured.' },
               visualTreatment: { type: 'string', description: 'Executable source-aware composition: framing/crop, Motion-Graphic-to-footage relationship, hierarchy, placement/safe zones, density and exit state. When a Motion Graphic is earned, name the content-specific communicative form (for example matched comparison, causal flow, real browser proof, code execution, share chart or identity overlay), not merely a broad family. Capability names are landmarks, never literal boxes or a closed enum.' },
               motionPlan: { type: 'string', description: 'How the scene enters, develops with exact speech/action beats, reaches a visual payoff, holds, and clears/exits; use the Frame motion grammar.' },
@@ -201,8 +201,32 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           ),
         },
       },
-      ['goal', 'creativeThesis', 'rhythmArc', 'designSystem', 'scenes'],
+      ['goal', 'creativeThesis', 'rhythmArc', 'deliverySafety', 'designSystem', 'scenes'],
     ),
+  },
+  {
+    id: 'set_scene_designs',
+    kind: 'badge',
+    icon: '◫',
+    label: 'tools.set_scene_designs.label',
+    description:
+      'Author or revise the persistent spatial-temporal design for one or more approved Director Scenes. This is the open design layer between whole-film direction and atomic timeline tools—not a layout, transition, Component or Motion Graphic selector. Work progressively from actual transcript/footage/image evidence and current timeline state. Describe the complete canvas, including simultaneous relationships between source footage, secondary media, typography, captions and Motion Graphics; describe how that combined state establishes, develops, pays off, holds, clears and hands material across the Scene boundary. Do not add layers to satisfy a count: a deliberately clean source-led Scene is valid when it is the strongest design. Call before planned visual mutations for that Scene; call again only when new evidence or rendered review materially changes the design. It does not require another user approval after the whole-film proposal was approved.',
+    inputSchema: obj({
+      scenes: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 24,
+        description: 'A progressive batch of complete Scene designs. Later calls replace matching sceneIds and preserve other Scenes.',
+        items: obj({
+          sceneId: { type: 'string', description: 'Exact id from the saved Director Plan.' },
+          designIntent: { type: 'string', description: 'One content-specific visual argument and memorable payoff; not a style label or Component name.' },
+          composition: { type: 'string', description: 'Whole-canvas hierarchy and simultaneous spatial relationships. Name the visual anchor, supporting layers, scale/overlap/negative space and why they form one shot. Inherit the Director Plan delivery safe area; mention only a Scene-specific protected subject or deliberate decorative bleed instead of repeating the whole platform specification.' },
+          choreography: { type: 'string', description: 'Temporal design of the complete composition: establishment, development, emphasis/payoff, readable hold and clear. Tie changes to exact speech/action/evidence beats when available.' },
+          continuity: { type: 'string', description: 'How picture, motion and sound arrive from the previous Scene and what remains, transforms or exits to motivate the next Scene. A hard cut is valid only when its contrast is intentional.' },
+          successCriteria: { type: 'string', description: 'Observable rendered conditions for hierarchy, legibility, evidence, rhythm, coherence and continuity. State what must be visible/audible, not which tool must be called.' },
+        }, ['sceneId', 'designIntent', 'composition', 'choreography', 'continuity', 'successCriteria']),
+      },
+    }, ['scenes']),
   },
   /* ---------- speech-editing playbook (separate skill content pack; server-executed, client only renders the card, no runTool impl) ---------- */
   {
@@ -352,8 +376,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.analyze_visual.label',
     description:
-      'Analyze one video LOCALLY (scene cuts + MediaPipe safe-zones/face + sparse VLM content). For an unplaced device-local video, pass its exact localSig from list_assets/search_assets so footage can be understood before Director planning or timeline insertion. Otherwise omit selectors when the project has one video or a mounted primary video; with multiple project videos, pass an exact assetId or clipId from get_timeline/inspect_media. Audio-led projects may analyze their B-roll video directly; it does not need to be promoted to the primary lane. Returns compact semantic segments plus subjectTracks: repeated source-normalized subject geometry is already clustered locally into stable intervals with representative safe areas. Consume subjectTracks directly; do NOT re-cluster every raw sample or create cuts where the track remains stable. These are observations, not edit decisions: use them with set_canvas, split_shot, set_shot_framing, and apply_layout as required. It does NOT show the rendered result; call review_visuals for final visual QA. Slow (runs frame-by-frame in the browser) — shows live progress + ETA. Cached per file.',
+      'Analyze one video. mode="geometry" is token-free and browser-local: scene cuts + MediaPipe subject/face tracks and representative empty regions. Use it when the decision is only crop, framing, placement or safe space. mode="semantic" (default) adds sparse hosted VLM content/text descriptions and is required when planning needs to know what the footage depicts, selecting evidence/B-roll, judging design, or building a complete edit. Never substitute geometry for semantic understanding merely to save tokens. For an unplaced device-local video, pass its exact localSig from list_assets/search_assets. Otherwise omit selectors when the project has one video or pass an exact assetId/clipId. Audio-led projects may analyze their B-roll video directly; it does not need to be promoted to the primary lane. Returns source-normalized subjectTracks already clustered locally; consume them directly and do not create cuts where the track remains stable. This does not review the rendered result; complete edits still require review_visuals.',
     inputSchema: obj({
+      mode: { type: 'string', enum: ['geometry', 'semantic'], description: 'geometry = local measurements only; semantic = measurements plus sparse hosted content understanding (default).' },
       localSig: { type: 'string', description: 'Exact device-local video sig returned by list_assets/search_assets. Use before placing a local source.' },
       assetId: { type: 'string', description: 'Exact registered video asset id. Omit when there is only one project video or a mounted primary video.' },
       clipId: { type: 'string', description: 'Exact timeline clip id whose video asset should be analyzed.' },
@@ -504,7 +529,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "LOOK at the rendered result with a scene-level viewing-experience QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples each Scene across entrance, development, payoff and exit when duration allows, runs local structure and audible-audio checks, deduplicates genuinely similar frames, and sends only distinct representatives to paid cloud vision. This temporal pass is meant to catch loading flashes, animation that never resolves, unreadable holds, overlays that fail to clear, an approved source/search/generated visual omitted from its Scene, and an approved sound plan whose voice/source sound is absent or muted—not merely judge a good midpoint thumbnail. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing planned visuals or source evidence, missing audible audio, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries at normal playback speed. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
+      "LOOK at the rendered result with a scene-level viewing-experience QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples each Scene across entrance, development, payoff and exit when duration allows, runs local structure and audible-audio checks, then sends the ordered temporal states together so vision can judge development, layered hierarchy and Scene handoffs—not merely a good midpoint thumbnail. This pass catches loading flashes, every layer appearing fully formed at once, animation that never resolves, unreadable holds, overlays that fail to clear, abrupt boundaries, fragmented layer design, an approved source/search/generated visual omitted from its Scene, and an approved sound plan whose voice/source sound is absent or muted. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs; those local samples may be deduplicated unless forceCloudAll=true. The result detects repeated graphic geometry, missing planned visuals or source evidence, missing audible audio, caption/subject collision, Frame drift, unsafe delivery crops, missing temporal development, abrupt handoffs, design fragmentation and unmotivated motion, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries at normal playback speed. It also describes what each moment actually shows; answer from returned scenes, never imagination. Skip it for one small edit.",
     inputSchema: obj(
       {
         atSecs: { type: 'array', items: { type: 'number' }, description: 'Optional edited-timeline candidate moments for a local review. Omit for automatic Director Scene sampling (max 18).' },
@@ -524,8 +549,14 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'read_director_plan', kind: 'badge', icon: '📄', label: 'tools.read_director_plan.label',
     description:
-      'Load the active output\'s complete human-readable director-plan.md on demand. The ordinary composition snapshot carries only a lightweight plan index. Call this before continuing, revising, or auditing a saved whole-video plan when its Markdown is not already in the conversation. It is read-only and works live, offline, and through MCP.',
-    inputSchema: obj({}, []),
+      'Load the active output\'s human-readable director-plan.md on demand. The ordinary composition snapshot carries only a lightweight plan index. For scene-level work pass only the affected sceneIds: the result keeps the complete whole-film design system and delivery-safety contract but omits unrelated Scenes. Omit sceneIds only for a genuine whole-plan audit. It is read-only and works live, offline, and through MCP.',
+    inputSchema: obj({ sceneIds: { type: 'array', maxItems: 24, items: { type: 'string' }, description: 'Optional exact Scene ids to load with the shared whole-film contract.' } }, []),
+  },
+  {
+    id: 'read_scene_designs', kind: 'badge', icon: '◫', label: 'tools.read_scene_designs.label',
+    description:
+      'Load the active output\'s scene-designs.md. It contains the progressive whole-canvas spatial-temporal designs that atomic timeline operations must execute. Pass only the affected sceneIds for ordinary scene-level work; omit them only for a whole-edit audit. This avoids spending context on unrelated Scenes.',
+    inputSchema: obj({ sceneIds: { type: 'array', maxItems: 24, items: { type: 'string' }, description: 'Optional exact Scene ids to load.' } }, []),
   },
   {
     id: 'register_media', kind: 'badge', icon: '📎', label: 'tools.register_media.label',
@@ -1117,7 +1148,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎯',
     label: 'tools.set_shot_treatment.label',
     description:
-      'Set how one video clip on any visual lane is framed: full (full screen), punch-in (zoom in for emphasis), corner-tl/corner-tr/corner-bl/corner-br (shrink to any corner to make room for graphics), split-l/split-r/split-t/split-b (video takes that half, the other half left for blocks). SPLIT AXIS follows the canvas (size is in <composition_state>): a PORTRAIT canvas splits top/bottom (split-t/split-b), a LANDSCAPE canvas left/right (split-l/split-r). On a top/bottom split USE split-b — video in the bottom half, graphic in the top (the split band re-frames around the speaker, so their position in the frame does not matter); split-t only on explicit user request. Preference when making room: portrait → split first, corner second; landscape → corner first, split second. Framing applies to the WHOLE clip — split a primary shot first when only part should change.',
+      'Set how one video clip on any visual lane is framed: full (full screen), punch-in (zoom in for emphasis), corner-tl/corner-tr/corner-bl/corner-br (shrink to one corner while another visual owns the field), or split-l/split-r/split-t/split-b (the video occupies that named half). Choose the side and treatment from the observed subject/action, evidence, negative space, delivery-safe zones and authored Scene design—not from aspect ratio alone. Framing applies to the WHOLE clip; split the clip first when only one span should change.',
     inputSchema: obj(
       {
         shotId: { type: 'string' },

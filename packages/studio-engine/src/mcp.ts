@@ -177,7 +177,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'list_frames',
       description:
-        'List available visual directions. Each Frame defines structural art direction — shape, material, image treatment, typography personality and motion grammar — while palette, captions and layout remain independent controls. Apply one with attach_frame and read its playbook with read_frame.',
+        'List available visual directions. Each Frame supplies professional art direction — shape, material, image treatment, typography personality, color-role relationships, spatial tension and motion temperament — while story, Scene strategy, palette, captions and layout remain independent. Apply one with attach_frame and read its playbook with read_frame.',
       inputSchema: EMPTY_SCHEMA,
     },
     {
@@ -342,7 +342,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'review_sequence',
       description:
-        'SEE the designed edit as a TEMPORAL SEQUENCE, not one lucky thumbnail. Requires an approved Director Plan. The tab samples each selected Semantic Scene at the meaningful entrance, development, payoff and exit states, returns the rendered frames with their exact sceneIds in time order, and reports deterministic structure problems such as missing evidence, repeated geometry or inaudible planned speech. LOOK at every attached image in index order; judge hierarchy, legibility, protected subjects, continuity, buildup, hold and clean exit, then repair only the Scene ids you find affected and re-run this tool. Use capture_frame instead for one small local change.',
+        'SEE the designed edit as a TEMPORAL SEQUENCE, not one lucky thumbnail. Requires an approved Director Plan. The tab samples each selected Semantic Scene at the meaningful entrance, development, payoff and exit states, returns the rendered frames with their exact sceneIds in time order, and reports deterministic structure problems such as missing Scene design, missing evidence, repeated geometry or inaudible planned speech. Read scene-designs.md when present. LOOK at every attached image in index order; judge the complete layered hierarchy, legibility, protected subjects, buildup, hold, clear, motivated motion and adjacent-Scene handoffs. Repair only the affected Scene designs and implementation, then re-run this tool. Use capture_frame instead for one small local change.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,

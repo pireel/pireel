@@ -15,7 +15,7 @@ import { localAssetMentionId } from './chat-local-asset-mention';
 
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
-const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn() }));
+const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
 const localMediaMocks = vi.hoisted(() => ({
   loadLocalVideo: vi.fn(),
   loadLocalFolderFile: vi.fn(),
@@ -31,6 +31,7 @@ vi.mock('./media', async (importOriginal) => ({
 vi.mock('./visual', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./visual')>()),
   analyzeVisual: visualMocks.analyzeVisual,
+  analyzeVisualGeometry: visualMocks.analyzeVisualGeometry,
 }));
 vi.mock('./local-media', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./local-media')>()),
@@ -83,6 +84,7 @@ describe('Agent composition transaction boundary', () => {
     providerMocks.transcribe.mockReset();
     mediaMocks.probeVideoFile.mockReset();
     visualMocks.analyzeVisual.mockReset();
+    visualMocks.analyzeVisualGeometry.mockReset();
     localMediaMocks.loadLocalVideo.mockReset();
     localMediaMocks.loadLocalFolderFile.mockReset();
     localMediaMocks.saveLocalVideo.mockReset();
@@ -348,6 +350,46 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
     expect(Object.values(h.documentRef.current.assets).some((asset) => asset.locator.localSig === sig)).toBe(false);
+  });
+
+  it('uses local geometry without semantic VLM output for framing-only analysis', async () => {
+    const h = harness();
+    const sig = 'speaker.mp4:80:5';
+    const video = new File(['video-bytes'], 'speaker.mp4', { type: 'video/mp4', lastModified: 5 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 12, width: 1080, height: 1920, hasAudio: true });
+    visualMocks.analyzeVisualGeometry.mockResolvedValue({
+      cuts: [4],
+      segments: [{
+        start: 0,
+        end: 12,
+        label: { content: 'talkinghead', person: 'center', safe: 'full', hasText: false, desc: '' },
+        geom: {
+          subject: { x: 0.25, y: 0.1, w: 0.4, h: 0.8 },
+          face: { x: 0.35, y: 0.15, w: 0.15, h: 0.15 },
+          rects: [{ x: 0.68, y: 0.12, w: 0.27, h: 0.65 }],
+        },
+      }],
+    });
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '口播原片', kind: 'video', createdAt: 1 }] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'analyze_visual', { localSig: sig, mode: 'geometry' });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        analysisMode: 'local-geometry',
+        sceneCutsSec: [4],
+        subjectTracks: [{ subject: { coordinateSpace: 'source-normalized' } }],
+      },
+    });
+    expect((result as { data?: Record<string, unknown> }).data).not.toHaveProperty('segments');
+    expect(visualMocks.analyzeVisualGeometry).toHaveBeenCalled();
+    expect(visualMocks.analyzeVisual).not.toHaveBeenCalled();
   });
 
   it('transcribes a targeted registered audio asset without requiring a main video', async () => {

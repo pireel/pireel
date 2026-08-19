@@ -34,7 +34,16 @@ export {
   motionGraphicPatternSection,
   retrieveMotionGraphicPatterns,
 } from './motion-graphic-patterns';
-export { type Preset, DEFAULT_PRESET_ID, SPOKEN_EDITORIAL, getPreset, listPresets } from './presets';
+export {
+  type Preset,
+  DEFAULT_PRESET_ID,
+  GENERAL_EDITORIAL,
+  GENERAL_PRESET,
+  SPOKEN_EDITORIAL,
+  SPOKEN_PRESET,
+  getPreset,
+  listPresets,
+} from './presets';
 export { VIDEO_DESIGN_METHOD } from './video-design-method';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';

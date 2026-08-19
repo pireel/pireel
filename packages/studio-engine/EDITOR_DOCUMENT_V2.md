@@ -65,7 +65,16 @@ tool-call protocol, and runtime code compiles the Markdown into a disposable typ
 exact Scene data. Legacy inline JSON plans are rewritten to Markdown at persistence boundaries.
 Unsupported or damaged artifacts remain preserved for future repair, but never invalidate or hide
 the timeline. Agent snapshots carry only the plan's goal/thesis and Scene index; `read_director_plan`
-loads the full Markdown just in time instead of repeating a long planning document on every turn.
+loads only requested `sceneIds` plus the shared whole-film contract for ordinary work; omitting the
+filter loads the full Markdown for a genuine whole-film audit. New Agent-authored plans store a
+global `deliverySafety` contract for platform/placement, ratio, reserved chrome/caption/crop zones
+and the protected essential-content region. Legacy plans without it remain readable and inherit the
+conservative generic safe area.
+Progressive whole-canvas Scene design is a separate `scene-designs.md` artifact: open prose records
+composition, temporal choreography, continuity and rendered success criteria without turning layouts,
+Components or transitions into a closed schema. `read_scene_designs` can load only affected Scene ids
+on demand. Replacing the
+whole Director Plan invalidates this derived artifact but never removes its already-compiled timeline.
 
 The required online backfill is `pnpm studio:migrate-documents-v2`. It is dry-run by default and
 requires `--apply`; it migrates project and undo-history rows, skips validation errors, clears the
