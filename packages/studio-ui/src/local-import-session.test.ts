@@ -219,6 +219,23 @@ describe('unified local import session', () => {
     expect(dir.writeCount).toBe(3);
   });
 
+  it('reports browser loopback isolation instead of a generic fetch failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    const session = await runLocalImportSession([{
+      type: 'skill-loopback',
+      localUrl: 'http://127.0.0.1:43123/abcdefgh',
+      sig: 'voice.wav:5:11',
+      filename: 'voice.wav',
+      fallbackType: 'audio/wav',
+    }]);
+
+    expect(session.imported).toEqual([]);
+    expect(session.rejected[0]?.error).toContain(
+      'local loopback is unreachable from this browser',
+    );
+  });
+
   it('rejects truncated loopback bytes without aborting the rest of a batch', async () => {
     installMemoryOpfs();
     vi.stubGlobal(

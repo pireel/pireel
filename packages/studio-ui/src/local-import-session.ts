@@ -94,11 +94,18 @@ async function materialize(
   const url = loopbackImportUrl(source.localUrl);
   if (!url)
     throw new Error('local import URL must be a one-time 127.0.0.1 address');
-  const response = await fetch(url, {
-    cache: 'no-store',
-    credentials: 'omit',
-    referrerPolicy: 'no-referrer',
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    });
+  } catch {
+    throw new Error(
+      'local loopback is unreachable from this browser; open the Studio handoff in a browser that shares the agent host network and retry',
+    );
+  }
   if (!response.ok)
     throw new Error(`local fetch failed: HTTP ${response.status}`);
   if (!response.body)
