@@ -1,12 +1,10 @@
 import { isFinitePositive } from './time';
-import { isDirectorPlan, validateDirectorPlan } from '../director-plan';
+import { normalizeEditorDocumentArtifacts } from '../director-plan-artifact';
 import {
   EDITOR_DOCUMENT_VERSION,
   type EditorDocumentIssue,
   type EditorDocumentV2,
   type EditorTrackRole,
-  type EditorTrackType,
-  type TimelineClip,
 } from './types';
 import { normalizeCustomVisualStyle } from '../visual-style';
 import { editorTrackAcceptsClip } from './track-compatibility';
@@ -40,7 +38,6 @@ export function isEditorDocumentV2(value: unknown): value is EditorDocumentV2 {
   ))) return false;
   if (Object.values(document.semantics.transcripts).some((segments) => !Array.isArray(segments))) return false;
   if (document.semantics.scenes.some((scene) => !scene || typeof scene !== 'object' || !Array.isArray(scene.clipIds))) return false;
-  if (document.semantics.directorPlan !== undefined && !isDirectorPlan(document.semantics.directorPlan)) return false;
   if (document.appearance.customVisualStyle !== undefined
     && !normalizeCustomVisualStyle(document.appearance.customVisualStyle)) return false;
   return true;
@@ -159,12 +156,6 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
       }
     }
   }
-  if (document.semantics.directorPlan !== undefined) {
-    for (const issue of validateDirectorPlan(document.semantics.directorPlan)) {
-      push('error', `director-plan-${issue.code}`, `semantics.directorPlan${issue.path ? `.${issue.path}` : ''}`, issue.message);
-    }
-  }
-
   // Anchor validation needs the complete clip-id set so forward references are legal.
   for (const [trackIndex, track] of document.timeline.tracks.entries()) {
     for (const [clipIndex, clip] of track.clips.entries()) {
@@ -175,6 +166,12 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
     }
   }
   return issues;
+}
+
+/** Decode the stable editor envelope, then canonicalize optional artifacts independently. */
+export function parseEditorDocumentV2(value: unknown): EditorDocumentV2 | null {
+  if (!isEditorDocumentV2(value)) return null;
+  return normalizeEditorDocumentArtifacts(value).document;
 }
 
 export function editorTimelineTotalFrames(document: EditorDocumentV2): number {

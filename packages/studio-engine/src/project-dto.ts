@@ -8,11 +8,10 @@
 import { applyPatch, type Operation } from 'fast-json-patch';
 import { create as createDiffer } from 'jsondiffpatch';
 import { format as formatJsonPatch } from 'jsondiffpatch/formatters/jsonpatch';
-import { isEditorDocumentV2, validateEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
+import { parseEditorDocumentV2, validateEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
 import {
   isProjectContextInput,
   sanitizeProjectContext,
-  type LocalAssetIndexEntry,
   type StudioProjectContext,
 } from './project-context';
 import {
@@ -122,8 +121,9 @@ type ProjectMetaRow = Pick<
 
 export function rowToDto(r: Row): StudioProjectDto {
   const videoDurationSec = r.videoDurationSec == null ? null : Number(r.videoDurationSec);
-  if (!isEditorDocumentV2(r.comp)) throw new Error(`project document is not V2: ${r.id}`);
-  const document = prepareEditorDocumentForPersistence(r.comp);
+  const parsed = parseEditorDocumentV2(r.comp);
+  if (!parsed) throw new Error(`project document is not V2: ${r.id}`);
+  const document = prepareEditorDocumentForPersistence(parsed);
   return {
     id: r.id,
     title: r.title,
@@ -169,7 +169,7 @@ export function rowToMeta(r: ProjectMetaRow): StudioProjectMeta {
 /** Diff wire format from client to server (serverSaveProject builds it from the full payload).
  *  Each big section is one of three: full value / patch+target hash / absent (unchanged). */
 export interface ProjectSaveWire {
-  /** Save protocol version. Old tabs omit this and are told to reload instead of being normalized. */
+  /** Save protocol version. Clients with an incompatible protocol are write-blocked without reload loops. */
   documentSchemaVersion: 2;
   baseVersion: number | null;
   document?: EditorDocumentV2;
@@ -371,8 +371,9 @@ export function sanitizeSavePayload(body: unknown): {
   const videoDurationSec = typeof dur === 'number' && Number.isFinite(dur) ? dur : null;
   let document: EditorDocumentV2 | undefined;
   if (b.document && typeof b.document === 'object') {
-    if (!isEditorDocumentV2(b.document)) return null;
-    const prepared = prepareEditorDocumentForPersistence(b.document);
+    const parsed = parseEditorDocumentV2(b.document);
+    if (!parsed) return null;
+    const prepared = prepareEditorDocumentForPersistence(parsed);
     if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
     document = prepared;
   }
@@ -448,8 +449,9 @@ export function mergeSaveIntoRow(
     const patched = applySectionPatch(existing.document, p.documentPatch);
     if (patched === null) return null;
     // Refuse a patch against a legacy-shaped row. Online migration owns that transition.
-    if (!isEditorDocumentV2(patched)) return null;
-    const prepared = prepareEditorDocumentForPersistence(patched);
+    const parsed = parseEditorDocumentV2(patched);
+    if (!parsed) return null;
+    const prepared = prepareEditorDocumentForPersistence(parsed);
     if (validateEditorDocumentV2(prepared).some((issue) => issue.severity === 'error')) return null;
     if (hashSection(canonicalJson(prepared)) !== p.documentHash) return null;
     document = prepared;

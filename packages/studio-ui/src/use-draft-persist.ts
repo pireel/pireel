@@ -17,7 +17,7 @@ import {
   type Composition,
   type EditorDocumentV2,
   hasTimelineContent,
-  isEditorDocumentV2,
+  parseEditorDocumentV2,
   compositionToEditorDocument,
   primaryNarrativeAsset,
   projectDocumentToComposition,
@@ -78,8 +78,9 @@ function rawDraft(id: string): StudioDraft | null {
     const raw = window.localStorage.getItem(keyFor(id));
     if (!raw) return null;
     const stored = JSON.parse(raw) as StoredStudioDraft;
-    if (!stored || !isEditorDocumentV2(stored.document)) return null;
-    const document = stored.document;
+    if (!stored) return null;
+    const document = parseEditorDocumentV2(stored.document);
+    if (!document) return null;
     return {
       ...stored,
       id: stored.id || id,
@@ -315,7 +316,7 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
  *  Sends the last-read baseVersion; on 409 (someone else wrote a newer version) record the new version and return
  *  'conflict' (caller retries immediately; section hashes not advanced = same sections resend). On 422 need_full
  *  (server has no such row) clear the baseline and resend in full. Network/db unavailable returns 'skip' (local cache covers it). */
-export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'schema-upgraded' | 'skip'> {
+export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'> {
   try {
     const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
     if (!built) return 'ok'; // all five sections unchanged: zero requests
@@ -332,10 +333,14 @@ export async function serverSaveProject(id: string, p: ProjectSavePayload): Prom
     if (r.status === 409) {
       const body = (await r.json()) as {
         error?: string;
-        reloadRequired?: boolean;
+        saveBlocked?: boolean;
         project?: StudioProjectDto;
       };
-      if (body.error === 'document_schema_upgraded' || body.reloadRequired) return 'schema-upgraded';
+      // Keep the retired error name readable for a rolling deployment, but expose one stable
+      // client state: cloud writes are blocked until migration, without reloading the editor.
+      if (body.error === 'document_migration_required' || body.error === 'document_schema_upgraded' || body.saveBlocked) {
+        return 'migration-required';
+      }
       // Someone else wrote a newer version: record the new version + reseed the diff baseline from the server's
       // full state — so the immediate retry's diff is computed against server truth (sections others changed
       // but we didn't touch won't get overwritten; section-level convergence). Don't write back to local UI —

@@ -146,19 +146,19 @@ describe('CloudProjectSaveQueue', () => {
   });
 
   it('stops retrying when the server requires a schema reload', async () => {
-    const onSchemaUpgrade = vi.fn();
-    const save = vi.fn(async () => 'schema-upgraded' as const);
+    const onMigrationRequired = vi.fn();
+    const save = vi.fn(async () => 'migration-required' as const);
     const queue = new CloudProjectSaveQueue({
       getPayload: () => ({ title: 'latest' }),
       save,
       canWrite: () => true,
-      onSchemaUpgrade,
+      onMigrationRequired,
     });
     queue.markDirty();
 
     await queue.flush();
     await vi.runAllTimersAsync();
-    expect(onSchemaUpgrade).toHaveBeenCalledOnce();
+    expect(onMigrationRequired).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledOnce();
   });
 

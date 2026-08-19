@@ -1,6 +1,6 @@
 import type { UIMessage } from 'ai';
 import { describe, expect, it } from 'vitest';
-import { assistantMessageHasRenderableOutput, sanitizeRestored } from './chat-thread-store';
+import { assistantMessageHasRenderableOutput, isRecoverableStudioChatError, sanitizeRestored } from './chat-thread-store';
 
 const assistant = (parts: UIMessage['parts']): UIMessage => ({
   id: 'assistant-1',
@@ -30,5 +30,19 @@ describe('assistantMessageHasRenderableOutput', () => {
     expect(assistantMessageHasRenderableOutput(assistant([
       { type: 'tool-seek', toolCallId: 'tool-1', state: 'output-available', input: {}, output: {} },
     ] as UIMessage['parts']))).toBe(true);
+  });
+});
+
+describe('isRecoverableStudioChatError', () => {
+  it('allows one safe continuation for transport and stream interruption errors', () => {
+    for (const message of ['studio_stream_interrupted', 'Failed to fetch', 'NetworkError', 'connection reset', 'stream terminated']) {
+      expect(isRecoverableStudioChatError(new Error(message)), message).toBe(true);
+    }
+  });
+
+  it('does not retry billing, auth, validation or unknown application errors', () => {
+    for (const message of ['insufficient_tokens', '401 Unauthorized', 'invalid_messages', 'request_too_large', 'tool execution failed']) {
+      expect(isRecoverableStudioChatError(new Error(message)), message).toBe(false);
+    }
   });
 });

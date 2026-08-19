@@ -868,12 +868,11 @@ export function HyperframesWorkbench({
   const [chatRev, setChatRev] = useState(0); // chat thread persist counter: triggers cloud sync
   const bumpChatRev = useCallback(() => setChatRev((v) => v + 1), []); // stable reference (StudioChat is memoized)
   const conflictWarnedRef = useRef(false);
-  const schemaReloadingRef = useRef(false);
-  const reloadForSchemaUpgrade = () => {
-    if (schemaReloadingRef.current) return;
-    schemaReloadingRef.current = true;
-    toast.info(t("workbench.projectSchemaUpgradedReloading"));
-    window.setTimeout(() => window.location.reload(), 900);
+  const migrationWriteBlockedRef = useRef(false);
+  const blockForDocumentMigration = () => {
+    if (migrationWriteBlockedRef.current) return;
+    migrationWriteBlockedRef.current = true;
+    toast.error(t("workbench.projectMigrationSaveBlocked"));
   };
   // Single-writer demotion: set when the bridge kicks this tab (close 4000 = another window took
   // over as the active surface). A displaced tab stops cloud autosave (its 409 rebase-retry is
@@ -6638,7 +6637,7 @@ export function HyperframesWorkbench({
           const result = await studioProviders()
             .projects.save(projectId, payload)
             .catch(() => "skip" as const);
-          if (result === "schema-upgraded") reloadForSchemaUpgrade();
+          if (result === "migration-required") blockForDocumentMigration();
         });
       }
       toast.info(t("workbench.displacedByAnotherWindow"));
@@ -6733,7 +6732,7 @@ export function HyperframesWorkbench({
 
   const cloudSaveOptions = {
     getPayload: buildCloudPayload,
-    canWrite: () => !displacedRef.current && !schemaReloadingRef.current,
+    canWrite: () => !displacedRef.current && !migrationWriteBlockedRef.current,
     save: (payload: ProjectSavePayload) => {
       // Keep metadata refresh and the one-shot displacement flush behind the same
       // request chain as retries; no project PUT/GET observes a half-finished save.
@@ -6751,7 +6750,7 @@ export function HyperframesWorkbench({
       conflictWarnedRef.current = true;
       toast.info(t("workbench.projectAlsoEditedElsewhere"));
     },
-    onSchemaUpgrade: reloadForSchemaUpgrade,
+    onMigrationRequired: blockForDocumentMigration,
   };
   if (
     !cloudSaveQueueRef.current ||
@@ -7488,10 +7487,10 @@ export function HyperframesWorkbench({
   // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
   useEffect(() => {
     // No content gate here: buildCloudPayload decides (full payload / chat-only / null) — chat syncs independently
-    if (!projectId || displaced || schemaReloadingRef.current) return;
+    if (!projectId || displaced || migrationWriteBlockedRef.current) return;
     cloudSaveQueue.markDirty();
     const timer = window.setTimeout(() => {
-      if (displacedRef.current || schemaReloadingRef.current) return; // demoted/upgraded while this timer was armed
+      if (displacedRef.current || migrationWriteBlockedRef.current) return; // demoted/migration-blocked while this timer was armed
       void cloudSaveQueue.flush();
     }, 1200);
     return () => window.clearTimeout(timer);
@@ -7520,7 +7519,7 @@ export function HyperframesWorkbench({
       if (
         document.visibilityState !== "hidden" ||
         displacedRef.current ||
-        schemaReloadingRef.current
+        migrationWriteBlockedRef.current
       )
         return;
       void cloudSaveQueue.flush();
@@ -7535,7 +7534,7 @@ export function HyperframesWorkbench({
   // waiting for the current backoff window or another edit.
   useEffect(() => {
     const retryPendingSave = () => {
-      if (displacedRef.current || schemaReloadingRef.current) return;
+      if (displacedRef.current || migrationWriteBlockedRef.current) return;
       void cloudSaveQueue.flush();
     };
     const onVisible = () => {

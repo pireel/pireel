@@ -1,5 +1,6 @@
 import type { DirectorPlan, DirectorScenePlan } from './director-plan';
 import type { EditorSemanticState, SemanticScene } from './editor-document/types';
+import { withDirectorPlanInSemantics, withoutDirectorPlanInSemantics } from './director-plan-artifact';
 
 const endFrame = (scene: DirectorScenePlan) => scene.startFrame + scene.durationFrames;
 
@@ -27,9 +28,7 @@ export function withAdjustedDirectorPlan(
     ...semantics,
     scenes: plan?.scenes.map((scene) => sceneSemantics(scene, current.get(scene.id))) ?? [],
   };
-  if (plan) next.directorPlan = plan;
-  else delete next.directorPlan;
-  return next;
+  return plan ? withDirectorPlanInSemantics(next, plan) : withoutDirectorPlanInSemantics(next);
 }
 
 const pointAfterRemoval = (frame: number, startFrame: number, endFrameExclusive: number): number => {

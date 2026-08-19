@@ -106,37 +106,12 @@ export interface DirectorSceneSnap {
   label: string;
   startSec: number;
   endSec: number;
-  viewerTask: string;
-  narrativeRole: string;
-  sceneFamily: string;
-  customFamily?: string;
-  purpose: string;
-  evidence?: string[];
-  treatmentId?: string;
-  visualAnchor?: string;
-  visualTreatment?: string;
-  motionPlan?: string;
-  soundPlan?: string;
-  assetStrategy?: string;
-  brollDecision?: string;
-  brollRationale?: string;
-  visualMetaphor?: string;
   /** Real document clips currently owned by this semantic scene. */
   clipIds?: string[];
 }
 export interface DirectorPlanSnap {
   goal: string;
   creativeThesis: string;
-  rhythmArc?: string;
-  designSystem?: {
-    visualConcept: string;
-    composition: string;
-    typography: string;
-    colorAndMaterial: string;
-    imagery: string;
-    motion: string;
-    sound: string;
-  };
   audience?: string;
   scenes: DirectorSceneSnap[];
 }
@@ -159,8 +134,7 @@ export interface ChatSituation {
   playheadSec?: number;
   /** Pipeline state: which stages are done, so the agent doesn't blindly re-run / answer off-target. */
   pipeline?: PipelineSnap;
-  /** Persisted whole-video editorial decision artifact. Exact scene ids and their
-   *  current clip ownership let execution continue across chat turns. */
+  /** Lightweight index for a persisted Markdown decision artifact. Full direction is read on demand. */
   directorPlan?: DirectorPlanSnap;
   /** Whether the main video bytes are loaded (false = tab just opened, being
    *  restored from OPFS/cloud, or missing — video tools will fail, but project
@@ -207,7 +181,7 @@ HOW YOU WORK
 - The latest <execution_budget> is private orchestration state, not a target and never user-facing account information. Preserve room by batching homogeneous changes. If it is exhausted, call no more tools. NEVER mention a budget, limit, tool/model count, token, credit, or capacity in the visible reply; say what landed and identify the single concrete next action so the user can continue naturally in a fresh turn.
 - Every unqualified edit targets the active output in the latest <composition_state>, including selected elements and @ references. Only switch when the user explicitly identifies another output. Use create_output for an empty output and duplicate_output for a copy. Natural-language ordinals such as "the second output" resolve through the current live position map; never treat an ordinal as durable identity. Composition tools affect only the active output.
 - To make a change, CALL A TOOL (tool descriptions define each one). Use the block/shot ids from <composition_state>. When the user writes "@<id>" they mean that exact element; a bare request usually means the selected element.
-- Pick the right tool: inspect native lanes/clips/assets → get_timeline; register reusable media → register_media; place it without opening time → add_clips; ripple time open → insert_clips; reposition/split/remove exact clip identities → move_clips / split_clips / remove_clips; constant video speed → set_video_speed; ordinary title text → add_texts; custom designed graphic → add_block; content/look/animation of a custom block → edit_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Familiar framing recipe → set_shot_framing / set_shot_treatment (these compile presets); custom layer motion → set_media_transform; custom clipping → set_media_crop; canvas placement → set_clip_properties.box. Combine these atoms instead of looking for a monolithic reframe action. Device-local image, audio, and secondary-video placement uses the same register_media → add_clips/insert_clips contract; the host prepares bytes before commit. A device-local video that belongs in the MAIN narrative sequence goes directly to insert_clip with its returned sig. Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Dead air / pacing cleanup → remove_silence FIRST (native audio, no transcript arithmetic). Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/retakes → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions; subtitle wording corrections → read_script then edit_caption_text; bilingual lines → set_caption_translations. Re-doing a graphic → edit_block.
+- Pick the right tool: inspect native lanes/clips/assets → get_timeline; load a saved whole-video plan → read_director_plan; register reusable media → register_media; place it without opening time → add_clips; ripple time open → insert_clips; reposition/split/remove exact clip identities → move_clips / split_clips / remove_clips; constant video speed → set_video_speed; ordinary title text → add_texts; custom designed graphic → add_block; content/look/animation of a custom block → edit_block; copy → duplicate_block; timing → move_block / resize_block; one block's on-screen position/size → place_block; coordinated PIP/split/grid → apply_layout; remove → delete_block(s). Output aspect/resolution → set_canvas. Familiar framing recipe → set_shot_framing / set_shot_treatment (these compile presets); custom layer motion → set_media_transform; custom clipping → set_media_crop; canvas placement → set_clip_properties.box. Combine these atoms instead of looking for a monolithic reframe action. Device-local image, audio, and secondary-video placement uses the same register_media → add_clips/insert_clips contract; the host prepares bytes before commit. A device-local video that belongs in the MAIN narrative sequence goes directly to insert_clip with its returned sig. Shot sound → set_shot_audio; music lane → set_bgm; noisy recording → denoise_audio; cutting → split_shot / trim_shot / delete_shot. Dead air / pacing cleanup → remove_silence FIRST (native audio, no transcript arithmetic). Exact spoken words → reason over read_script first, then call list_words ONCE narrowed to the chosen sentenceIndexes/source range, then ONE delete_words call with returned stable ids; list_words is never a whole-transcript search. Broader spoken passages/retakes → cut_narration; raw edited-timeline or inserted-clip range → cut_range. Subtitles → set_captions/remove_captions; subtitle wording corrections → read_script then edit_caption_text; bilingual lines → set_caption_translations. Re-doing a graphic → edit_block.
 - VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY: list_voices discovers stable system/cloned voice ids; clone_voice creates a voice asset only after explicit ownership/permission confirmation; generate_speech returns reusable audio; lip_sync combines an existing audio url with one image/video and returns an asynchronous generation id. Neither tool inserts into the edit. If the user wants speech plus a presenter, call the needed primitives in order and pass the returned url forward; never look for or claim a monolithic digital-human workflow.
 - ASPECT REFRAMING IS A WORKFLOW, NOT A TOOL: set_canvas; call analyze_visual to get locally clustered source-normalized subjectTracks when the current conversation lacks them; decide where framing actually changes; if several boundaries are needed make ONE split_shot {atSecs:[...],purpose:"framing"} call (stable-track interior cuts are rejected); collect EVERY affected span and make ONE set_shot_framing {updates:[...]} call; then review_visuals across every distinct final framing and repair real issues. Do not re-cluster raw visual segments yourself. The LLM owns this composition — never look for or claim an auto_reframe/reframe_video tool.
 - INSPECT before precise edits: get_block returns a Component's actual HTML/animation. read_script returns sentences and source clocks. For a spoken topic, if that transcript is already in this conversation, identify the matching numbered rows YOURSELF — do not downgrade the semantic decision to lexical search. Use search_media only to retrieve evidence absent from the current context (cold/truncated transcript, several attached sources, or stored visual labels). Then use list_words only as a narrowed stable-id resolver for word-exact cuts. To find a described reusable file or Motion Graphic Component across My / Cloud / Official libraries → search_assets; use list_assets only for a recent unfiltered inventory. Neither searches the web. Use returned locators and never guess ids, indexes, urls, or contents you can look up.
@@ -314,47 +288,16 @@ export function buildSituation(
   if (body.directorPlan) {
     const plan = body.directorPlan;
     lines.push(
-      `Director Plan: goal "${plan.goal}"${plan.audience ? ` · audience "${plan.audience}"` : ""}. Creative thesis: "${plan.creativeThesis}". This is saved project state, not a user request by itself. Use its exact sceneId when this conversation explicitly continues or edits that plan; otherwise preserve it without treating it as the current task.`,
+      `Director Plan saved as director-plan.md: goal "${plan.goal}"${plan.audience ? ` · audience "${plan.audience}"` : ""}; creative thesis "${plan.creativeThesis}". This is project state, not a user request. The full Markdown is intentionally not repeated in every turn: call read_director_plan before continuing, revising, or auditing it unless that tool result is already in this conversation.`,
     );
-    if (plan.rhythmArc) lines.push(`Whole-film rhythm arc: ${plan.rhythmArc}`);
-    if (plan.designSystem) {
-      lines.push(
-        `Shared video design system: concept ${plan.designSystem.visualConcept} · composition ${plan.designSystem.composition} · typography ${plan.designSystem.typography} · color/material ${plan.designSystem.colorAndMaterial} · imagery ${plan.designSystem.imagery} · motion ${plan.designSystem.motion} · sound ${plan.designSystem.sound}. Preserve this system across Scenes unless the user explicitly revises it.`,
-      );
-    }
     lines.push(
-      `Executable scenes (exact sceneId · interval · viewer task · narrative role · family · linked real clip ids · editorial direction):\n${plan.scenes
+      `Director Scene index (exact sceneId · interval · linked real clip ids):\n${plan.scenes
         .map((scene) => {
-          const family = scene.customFamily
-            ? `${scene.sceneFamily}:${scene.customFamily}`
-            : scene.sceneFamily;
-          const linked = scene.clipIds?.length
-            ? scene.clipIds.map((id) => `@${id}`).join(", ")
-            : "(none yet)";
-          const detail = [
-            `purpose: ${scene.purpose}`,
-            scene.evidence?.length
-              ? `evidence: ${scene.evidence.join(" | ")}`
-              : "",
-            scene.treatmentId ? `treatment: ${scene.treatmentId}` : "",
-            scene.visualAnchor ? `anchor: ${scene.visualAnchor}` : "",
-            scene.visualTreatment ? `visual: ${scene.visualTreatment}` : "",
-            scene.motionPlan ? `motion: ${scene.motionPlan}` : "",
-            scene.soundPlan ? `sound: ${scene.soundPlan}` : "",
-            scene.assetStrategy ? `assets: ${scene.assetStrategy}` : "",
-            scene.brollDecision
-              ? `B-roll: ${scene.brollDecision}${scene.brollRationale ? ` — ${scene.brollRationale}` : ""}`
-              : "",
-            scene.visualMetaphor
-              ? `visual proposition: ${scene.visualMetaphor}`
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" · ");
-          return `  sceneId=${scene.id} · "${scene.label}" · ${n(scene.startSec)}→${n(scene.endSec)}s · ${scene.viewerTask} · ${scene.narrativeRole} · ${family} · clips ${linked}\n    ${detail}`;
+          const linked = scene.clipIds?.length ? scene.clipIds.map((id) => `@${id}`).join(", ") : "(none yet)";
+          return `  sceneId=${scene.id} · "${scene.label}" · ${n(scene.startSec)}→${n(scene.endSec)}s · clips ${linked}`;
         })
         .join("\n")}`,
-    );
+      );
   }
 
   // Credits guardrail (visibility only, boolean by design): unattended agents must not burn calls into a wall,

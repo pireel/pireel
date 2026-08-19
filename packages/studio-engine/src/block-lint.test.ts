@@ -60,6 +60,21 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(ok(`<div data-edit="t">明确字号</div><style>#b7 .x{font-size:36px}</style>`)).toEqual([]);
   });
 
+  it('语义字号 token 必须在组件内解析为 px', () => {
+    expect(ok(`<div data-edit="t">语义字号</div><style>#b7{--type-body:36px}#b7 .x{font-size:var(--type-body)}</style>`)).toEqual([]);
+    const unresolved = ok(`<div data-edit="t">未知字号</div><style>#b7 .x{font-size:var(--type-body)}</style>`);
+    expect(unresolved.map((issue) => issue.code)).toContain('non-px-length-unit');
+    expect(unresolved.map((issue) => issue.code)).toContain('missing-font-size');
+  });
+
+  it('只允许有边界的字距和 1em 行内图标跟随字号', () => {
+    expect(ok(`<div data-edit="t">安全相对单位<svg/></div><style>#b7 .x{font-size:36px;letter-spacing:.08em}#b7 svg{width:1em;height:1em}</style>`)).toEqual([]);
+    for (const declaration of ['padding:1em', 'font-size:2em', 'letter-spacing:.4em', 'width:2em']) {
+      const issues = ok(`<div data-edit="t">不稳定相对单位</div><style>#b7 .x{font-size:36px;${declaration}}</style>`);
+      expect(issues.map((issue) => issue.code), declaration).toContain('non-px-length-unit');
+    }
+  });
+
   it('纯结构无文本(如只有图形)不要求 data-edit', () => {
     expect(ok(`<svg viewBox="0 0 10 10"><circle r="4"/></svg><style>#b7 svg{width:100%}</style>`)).toEqual([]);
   });

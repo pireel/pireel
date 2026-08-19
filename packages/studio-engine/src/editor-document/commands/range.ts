@@ -5,6 +5,7 @@ import { clearRangeFromClip, clipOverlapsRange } from './clip-geometry';
 import { detachDanglingClipAnchors, updateScenesForClipChanges } from './clip-references';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
 import { directorPlanAfterRippleRemoval, withAdjustedDirectorPlan } from '../../director-plan-timing';
+import { directorPlanFromDocument } from '../../director-plan-artifact';
 
 export interface RemoveEditorRangeOptions {
   trackId: string;
@@ -123,10 +124,11 @@ export function removeEditorRange(document: EditorDocumentV2, options: RemoveEdi
     ...document.semantics,
     scenes: updateScenesForClipChanges(document.semantics.scenes, removedClipIds, splitPairs),
   };
-  if (mode === 'ripple' && document.semantics.directorPlan) {
+  const directorPlan = directorPlanFromDocument(document);
+  if (mode === 'ripple' && directorPlan) {
     semantics = withAdjustedDirectorPlan(
       semantics,
-      directorPlanAfterRippleRemoval(document.semantics.directorPlan, startFrame, endFrame),
+      directorPlanAfterRippleRemoval(directorPlan, startFrame, endFrame),
     );
   }
   if (semantics.managedCaptionSource?.mode === 'clip' && removedClipIds.has(semantics.managedCaptionSource.clipId)) {

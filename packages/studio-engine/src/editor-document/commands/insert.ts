@@ -4,6 +4,7 @@ import { validateEditorDocumentV2 } from '../validation';
 import { clipEndFrame, splitClipAtFrame } from './clip-geometry';
 import { removeEditorRange } from './range';
 import { directorPlanAfterRippleInsertion, withAdjustedDirectorPlan } from '../../director-plan-timing';
+import { directorPlanFromDocument } from '../../director-plan-artifact';
 import { assignClipToBestDirectorScene, assignClipToSemanticScene } from '../../semantic-scenes';
 import {
   commandFailure,
@@ -219,9 +220,10 @@ export function insertEditorClips(document: EditorDocumentV2, options: InsertEdi
     ...document.semantics,
     scenes: expandScenesForSplits(document.semantics.scenes, splitPairs),
   };
-  if (affectedTrackIds.has(document.semantics.primaryNarrativeTrackId) && document.semantics.directorPlan) {
+  const directorPlan = directorPlanFromDocument(document);
+  if (affectedTrackIds.has(document.semantics.primaryNarrativeTrackId) && directorPlan) {
     const adjusted = directorPlanAfterRippleInsertion(
-      document.semantics.directorPlan,
+      directorPlan,
       options.atFrame,
       spanFrames,
       options.sceneId,

@@ -69,7 +69,7 @@ describe('local project document persistence', () => {
     let requestBody: Record<string, unknown> | undefined;
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return new Response(JSON.stringify({ error: 'document_schema_upgraded', reloadRequired: true }), {
+      return new Response(JSON.stringify({ error: 'document_migration_required', saveBlocked: true }), {
         status: 409,
         headers: { 'content-type': 'application/json' },
       });
@@ -83,7 +83,7 @@ describe('local project document persistence', () => {
       coverThumb: null,
     });
 
-    expect(result).toBe('schema-upgraded');
+    expect(result).toBe('migration-required');
     expect(requestBody).toMatchObject({ documentSchemaVersion: 2, document: { version: 2 } });
     expect(requestBody).not.toHaveProperty('comp');
     expect(requestBody).not.toHaveProperty('context');

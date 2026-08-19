@@ -1,4 +1,5 @@
 import type { DirectorPlan, DirectorScenePlan } from './director-plan';
+import { directorPlanFromDocument } from './director-plan-artifact';
 import type { EditorDocumentV2, SemanticScene, TimelineClip } from './editor-document/types';
 
 const clipEnd = (clip: TimelineClip) => clip.startFrame + clip.durationFrames;
@@ -46,7 +47,7 @@ export function resolveDirectorSceneContext(
   document: EditorDocumentV2,
   placement: { sceneId?: string; startFrame: number; durationFrames: number },
 ): DirectorSceneContext | null {
-  const plan = document.semantics.directorPlan;
+  const plan = directorPlanFromDocument(document);
   if (!plan) return null;
   let index = placement.sceneId
     ? plan.scenes.findIndex((scene) => scene.id === placement.sceneId)

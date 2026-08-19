@@ -9,7 +9,6 @@
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
-  type Block,
   type Composition,
   type EditorDocumentV2,
   type VideoShot,
@@ -24,6 +23,7 @@ import {
 import { narrationRowMarks, spans as clipSpans } from '@pireel/studio-engine/trim';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import { studioProviders } from '@pireel/studio-engine/providers';
+import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import { wrapAgentTranscript } from '@pireel/studio-engine/prompts';
 import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
@@ -94,7 +94,7 @@ export function useAgentContext(deps: AgentContextDeps) {
   const getChatBody = useCallback((): Record<string, unknown> => {
     const c = compRef.current;
     const document = documentRef.current;
-    const directorPlan = document.semantics.directorPlan;
+    const directorPlan = directorPlanFromDocument(document);
     let sel: { id: string; type: 'block' | 'shot'; label?: string; kind?: string } | null = null;
     if (selectedIdRef.current) {
       const b = c.blocks.find((x) => x.id === selectedIdRef.current);
@@ -171,8 +171,6 @@ export function useAgentContext(deps: AgentContextDeps) {
             directorPlan: {
               goal: directorPlan.goal,
               creativeThesis: directorPlan.creativeThesis,
-              rhythmArc: directorPlan.rhythmArc,
-              designSystem: directorPlan.designSystem,
               ...(directorPlan.audience ? { audience: directorPlan.audience } : {}),
               scenes: directorPlan.scenes.map((scene) => {
                 const semanticScene = document.semantics.scenes.find((candidate) => candidate.id === scene.id);
@@ -181,21 +179,6 @@ export function useAgentContext(deps: AgentContextDeps) {
                   label: scene.label,
                   startSec: scene.startFrame / document.canvas.fps,
                   endSec: (scene.startFrame + scene.durationFrames) / document.canvas.fps,
-                  viewerTask: scene.viewerTask,
-                  narrativeRole: scene.narrativeRole,
-                  sceneFamily: scene.sceneFamily,
-                  ...(scene.customFamily ? { customFamily: scene.customFamily } : {}),
-                  purpose: scene.purpose,
-                  ...(scene.evidence?.length ? { evidence: scene.evidence } : {}),
-                  ...(scene.treatmentId ? { treatmentId: scene.treatmentId } : {}),
-                  ...(scene.visualAnchor ? { visualAnchor: scene.visualAnchor } : {}),
-                  ...(scene.visualTreatment ? { visualTreatment: scene.visualTreatment } : {}),
-                  ...(scene.motionPlan ? { motionPlan: scene.motionPlan } : {}),
-                  ...(scene.soundPlan ? { soundPlan: scene.soundPlan } : {}),
-                  ...(scene.assetStrategy ? { assetStrategy: scene.assetStrategy } : {}),
-                  ...(scene.brollDecision ? { brollDecision: scene.brollDecision } : {}),
-                  ...(scene.brollRationale ? { brollRationale: scene.brollRationale } : {}),
-                  ...(scene.visualMetaphor ? { visualMetaphor: scene.visualMetaphor } : {}),
                   ...(semanticScene?.clipIds.length ? { clipIds: semanticScene.clipIds } : {}),
                 };
               }),

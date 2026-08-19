@@ -13,8 +13,9 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 
 1. `video-design-method.ts`：整片设计方法——创意命题、节奏弧线、统一 Video Design
    System、Scene 编排、审批和时序复检；应用内 Agent 与 MCP Agent 共用。
-2. `director-plan.ts` + `semantic-scenes.ts`：把方法沉淀为可校验、可持久化、可执行的整片与
-   Scene 契约。它描述画面关系，不枚举组件。
+2. `director-plan-markdown.ts` + `semantic-scenes.ts`：把方法沉淀为可读 Markdown 源稿，
+   再编译成可校验、可执行的 Scene 投影。JSON 只属于 tool-call 边界，不是计划源文件。
+   普通局势只带目标与 Scene 索引，完整源稿由 `read_director_plan` 按需进上下文。
 3. Frame / Skill：Frame 提供专业视觉语言，Skill 提供场景领域判断；两者不能代替整片设计。
 4. Component composer：只负责已规划 Scene 里的一个可编辑视觉层。生成前必须拿到真实
    box、backdrop、保护区和 Scene 设计上下文，不能生成后再碰运气摆放。
@@ -22,6 +23,22 @@ studio 所有注入 LLM 的提示词住这里,**一个提示词一个 .ts 文件
 对应的 QA 必须跨 entrance / development / payoff / exit 检查渲染序列；单张中点截图不能
 证明成片完整。易碎的结构、尺寸、作用域和输出格式继续由 schema、runtime 与 lint 保证，
 不要把它们塞回 Skill 文字里。
+
+## Motion Graphic 字体与单位决策
+
+目标是让预览、拖动和导出的**最终计算尺寸稳定可读**，不是把所有 CSS/SVG 单位机械地
+改成 `px`。此前“全局只准 px”是为阻止未声明字号、继承叠加、物理单位和 viewport 单位
+造成的极小/极大文字而加的临时护栏，不是最终设计。
+
+- `font-size`：优先使用宿主提供、最终解析成确定 px 的语义字号 Token；特殊焦点尺寸可用
+  明确 px。禁止用 `em`/`rem`/viewport 单位或未声明继承来决定基础字号。
+- `line-height`：使用无单位比例；`letter-spacing`：允许受限范围的 `em`，使字距随字号变化。
+- 行内图标允许 `1em` 跟随文字；独立图标、装饰与布局尺寸使用明确 px 或容器百分比。
+- SVG 内部使用 `viewBox` 与无单位坐标；布局使用 px、百分比与 Flex/Grid。
+- 永久禁止 `cm`/`mm`/`in`/`pt` 等物理单位，以及 `rem`、`vw`/`vh`、`clamp()` 等会让
+  预览与导出环境产生不确定计算结果的字号方案。
+- lint/runtime 最终应检查真实画布上的 computed font size、文字层级、溢出和安全区，
+  而不是把“源码出现 em”当成错误。Frame 可改变字号层级，但用户手动设置始终优先。
 
 块生成的 system 提示词**按层拼**,拼装单点在 `assemble.ts`。顺序是**稳定 → 易变**:
 prefix 缓存只到第一处变化为止,越靠前的层越不该动。

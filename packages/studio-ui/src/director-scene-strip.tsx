@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import type { EditorDocumentV2 } from '@pireel/studio-engine/composition';
+import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import { t } from './i18n';
 
 export const DIRECTOR_SCENE_STRIP_H = 52;
@@ -30,7 +31,7 @@ export interface DirectorSceneGeometry extends TimelineDirectorScene {
 }
 
 export function timelineDirectorScenesFromDocument(document: EditorDocumentV2): TimelineDirectorScene[] {
-  const plan = document.semantics.directorPlan;
+  const plan = directorPlanFromDocument(document);
   if (!plan) return [];
   const semanticScenes = new Map(document.semantics.scenes.map((scene) => [scene.id, scene] as const));
   return plan.scenes.map((scene) => ({

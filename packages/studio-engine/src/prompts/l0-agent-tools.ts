@@ -504,7 +504,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.review_visuals.label',
     chatOnly: true,
     description:
-      "LOOK at the rendered result with a scene-level viewing-experience QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples each Scene across entrance, development, payoff and exit when duration allows, runs local structure and audible-audio checks, deduplicates genuinely similar frames, and sends only distinct representatives to paid cloud vision. This temporal pass is meant to catch loading flashes, animation that never resolves, unreadable holds, overlays that fail to clear and an approved sound plan whose voice/source sound is absent or muted—not merely judge a good midpoint thumbnail. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing source evidence, missing audible audio, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries at normal playback speed. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
+      "LOOK at the rendered result with a scene-level viewing-experience QA pass (your delegated eyes — you cannot see frames yourself). For a broad complete edit, omit atSecs: the runtime samples each Scene across entrance, development, payoff and exit when duration allows, runs local structure and audible-audio checks, deduplicates genuinely similar frames, and sends only distinct representatives to paid cloud vision. This temporal pass is meant to catch loading flashes, animation that never resolves, unreadable holds, overlays that fail to clear, an approved source/search/generated visual omitted from its Scene, and an approved sound plan whose voice/source sound is absent or muted—not merely judge a good midpoint thumbnail. Use sceneIds to review only repaired Semantic Scenes. For a local change, supply exact atSecs. The result detects repeated graphic geometry, missing planned visuals or source evidence, missing audible audio, caption/subject collision, Frame drift and unsafe delivery crops, and returns an exact repairScope. Repair ONLY the listed Semantic Scenes, preserve unaffected scenes, then recheck repaired moments and their immediate boundaries at normal playback speed. It also describes what each moment actually shows; answer from returned scenes, never imagination. Set forceCloudAll=true only when the user explicitly needs an independent reading of every candidate. Skip it for one small edit.",
     inputSchema: obj(
       {
         atSecs: { type: 'array', items: { type: 'number' }, description: 'Optional edited-timeline candidate moments for a local review. Omit for automatic Director Scene sampling (max 18).' },
@@ -519,6 +519,12 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'get_timeline', kind: 'badge', icon: '🧭', label: 'tools.get_timeline.label',
     description:
       'Read the canonical typed timeline: canvas, duration, assets, semantic roles, every track and every clip with both frame and second geometry. Use before generic editing when ids or lane roles are not already present in context. Works live, offline, and through MCP.',
+    inputSchema: obj({}, []),
+  },
+  {
+    id: 'read_director_plan', kind: 'badge', icon: '📄', label: 'tools.read_director_plan.label',
+    description:
+      'Load the active output\'s complete human-readable director-plan.md on demand. The ordinary composition snapshot carries only a lightweight plan index. Call this before continuing, revising, or auditing a saved whole-video plan when its Markdown is not already in the conversation. It is read-only and works live, offline, and through MCP.',
     inputSchema: obj({}, []),
   },
   {

@@ -1,7 +1,7 @@
 /**
  * Static lint of block output (pure function) — LLM-generated innerHtml/timelineBody
  * gets one pass before entering composition: unscoped CSS pollutes the whole
- * document, non-px CSS lengths break fixed-canvas sizing, script tags are an injection
+ * document, unstable CSS lengths break fixed-canvas sizing, script tags are an injection
  * surface, non-deterministic APIs break per-frame rendering, and a missing data-edit
  * handle disables double-click-to-edit.
  * Fails → the caller sends the issue list back to the model for one fix round;
@@ -30,8 +30,44 @@ export const HARD_LINT_CODES: ReadonlySet<string> = new Set([
   'nondeterministic',
 ]);
 
-const FORBIDDEN_LENGTH_UNIT = /(?:^|[^\w.-])(-?(?:\d+(?:\.\d+)?|\.\d+))(rem|em|ex|ch|cap|ic|lh|rlh|cm|mm|q|in|pt|pc|vw|vh|vmin|vmax|cqw|cqh|cqi|cqb|cqmin|cqmax)\b/i;
+const FORBIDDEN_LENGTH_UNIT = /(?:^|[^\w.-])(-?(?:\d+(?:\.\d+)?|\.\d+))(rem|ex|ch|cap|ic|lh|rlh|cm|mm|q|in|pt|pc|vw|vh|vmin|vmax|cqw|cqh|cqi|cqb|cqmin|cqmax)\b/i;
 const PLAIN_PX_FONT_SIZE = /^\s*(?:\d+(?:\.\d+)?|\.\d+)px\s*(?:!important\s*)?$/i;
+const SEMANTIC_FONT_SIZE = /^\s*var\(\s*(--type-[\w-]+)\s*\)\s*(?:!important\s*)?$/i;
+const CSS_DECLARATION = /([\w-]+)\s*:\s*([^;{}]+)/g;
+const EM_LENGTH = /(-?(?:\d+(?:\.\d+)?|\.\d+))em\b/gi;
+
+function declaredTypeTokens(css: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const match of css.matchAll(/(--type-[\w-]+)\s*:\s*(?:\d+(?:\.\d+)?|\.\d+)px\s*(?:!important\s*)?(?=;|})/gi)) {
+    tokens.add(match[1]!.toLowerCase());
+  }
+  return tokens;
+}
+
+function isValidFontSize(value: string, typeTokens: ReadonlySet<string>): boolean {
+  if (PLAIN_PX_FONT_SIZE.test(value)) return true;
+  const semantic = SEMANTIC_FONT_SIZE.exec(value);
+  return Boolean(semantic && typeTokens.has(semantic[1]!.toLowerCase()));
+}
+
+/** `em` is useful only when it deliberately follows a resolved text size. */
+function invalidEmDeclaration(css: string): { property: string; value: string } | undefined {
+  for (const match of css.matchAll(CSS_DECLARATION)) {
+    const property = match[1]!.toLowerCase();
+    const value = match[2]!.trim();
+    const lengths = [...value.matchAll(EM_LENGTH)];
+    if (lengths.length === 0) continue;
+
+    if (property === 'letter-spacing' && lengths.every((entry) => Math.abs(Number(entry[1])) <= 0.2)) {
+      continue;
+    }
+    if ((property === 'width' || property === 'height') && /^1(?:\.0+)?em\s*(?:!important\s*)?$/i.test(value)) {
+      continue;
+    }
+    return { property, value };
+  }
+  return undefined;
+}
 
 export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string }): BlockLintIssue[] {
   const { blockId, innerHtml, timelineBody } = args;
@@ -79,27 +115,37 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
     cssSources.push(styleAttr[1]!);
   }
 
-  const allCss = cssSources.join('\n');
+  const allCss = cssSources.join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  const typeTokens = declaredTypeTokens(allCss);
   const forbidden = FORBIDDEN_LENGTH_UNIT.exec(allCss);
   if (forbidden) {
     issues.push({
       code: 'non-px-length-unit',
-      message: `CSS length unit "${forbidden[2]}" is forbidden — use px for typography and fixed lengths; percentages are allowed only for relative placement and sizing`,
+      message: `CSS length unit "${forbidden[2]}" is unstable on the fixed canvas — use resolved type tokens or px; percentages are allowed only for relative placement and sizing`,
     });
   }
+  const invalidEm = invalidEmDeclaration(allCss);
+  if (invalidEm) {
+    issues.push({
+      code: 'non-px-length-unit',
+      message: `CSS ${invalidEm.property} value "${invalidEm.value.slice(0, 40)}" uses em outside the allowed text-relative cases (bounded letter-spacing or a 1em inline icon)`,
+    });
+  }
+  let hasValidFontSize = false;
   for (const match of allCss.matchAll(/font-size\s*:\s*([^;}]*)/gi)) {
-    if (!PLAIN_PX_FONT_SIZE.test(match[1]!)) {
+    if (!isValidFontSize(match[1]!, typeTokens)) {
       issues.push({
         code: 'non-px-length-unit',
-        message: `font-size must be one explicit px value, received "${match[1]!.trim().slice(0, 40)}"`,
+        message: `font-size must be explicit px or var(--type-*) declared to px in this component, received "${match[1]!.trim().slice(0, 40)}"`,
       });
       break;
     }
+    hasValidFontSize = true;
   }
-  if (visibleText && !/font-size\s*:\s*(?:\d+(?:\.\d+)?|\.\d+)px\b/i.test(allCss)) {
+  if (visibleText && !hasValidFontSize) {
     issues.push({
       code: 'missing-font-size',
-      message: 'visible text has no explicit px font-size — set a readable px baseline on the root wrapper and override headline/body/meta roles in px',
+      message: 'visible text has no stable font-size — set a readable px baseline or declare --type-* tokens in px and apply one on the root wrapper',
     });
   }
 

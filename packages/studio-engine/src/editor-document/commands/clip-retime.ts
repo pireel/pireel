@@ -1,4 +1,8 @@
 import { directorPlanAfterRippleInsertion, directorPlanAfterRippleRemoval, withAdjustedDirectorPlan } from '../../director-plan-timing';
+import {
+  directorPlanFromDocument,
+  withoutDirectorPlanInSemantics,
+} from '../../director-plan-artifact';
 import type { EditorDocumentV2, EditorTrack, MediaTimelineClip, TimelineClip } from '../types';
 import { validateEditorDocumentV2 } from '../validation';
 import { commandFailure, emptyCommandReceipt, type EditorCommandResult } from './types';
@@ -78,21 +82,22 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
 
   let semantics = { ...document.semantics };
   delete semantics.plan;
-  if (target.kind === 'narrative' && document.semantics.directorPlan) {
+  const directorPlan = directorPlanFromDocument(document);
+  if (target.kind === 'narrative' && directorPlan) {
     if (!ripple) {
-      delete semantics.directorPlan;
+      semantics = withoutDirectorPlanInSemantics(semantics);
     } else if (deltaFrames > 0) {
       const sceneId = document.semantics.scenes.find((scene) => scene.clipIds.includes(target.id))?.id
-        ?? document.semantics.directorPlan.scenes.find((scene) => (
+        ?? directorPlan.scenes.find((scene) => (
           target.startFrame >= scene.startFrame && target.startFrame < scene.startFrame + scene.durationFrames
         ))?.id;
-      const adjusted = directorPlanAfterRippleInsertion(document.semantics.directorPlan, oldEndFrame, deltaFrames, sceneId);
-      if (!adjusted.ok) return commandFailure(document, 'invalid-command', adjusted.error, { path: 'semantics.directorPlan' });
+      const adjusted = directorPlanAfterRippleInsertion(directorPlan, oldEndFrame, deltaFrames, sceneId);
+      if (!adjusted.ok) return commandFailure(document, 'invalid-command', adjusted.error, { path: 'semantics.artifacts.directorPlan' });
       semantics = withAdjustedDirectorPlan(semantics, adjusted.plan);
     } else {
       semantics = withAdjustedDirectorPlan(
         semantics,
-        directorPlanAfterRippleRemoval(document.semantics.directorPlan, oldEndFrame + deltaFrames, oldEndFrame),
+        directorPlanAfterRippleRemoval(directorPlan, oldEndFrame + deltaFrames, oldEndFrame),
       );
     }
   }

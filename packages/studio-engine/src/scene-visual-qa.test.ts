@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2 } from './editor-document';
 import type { AudioTimelineClip, EditorDocumentV2, GraphicTimelineClip, MediaTimelineClip } from './editor-document/types';
 import { auditSceneVisualStructure, planSceneVisualReview, sceneAtSecond, sceneVisualRepairScope } from './scene-visual-qa';
+import { directorPlanFromDocument, withDirectorPlanInSemantics } from './director-plan-artifact';
 
 const treatment = {
   treatmentId: 'authored-scene', visualAnchor: 'The scene subject.',
@@ -14,8 +15,7 @@ const treatment = {
 function documentWithPlan(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 });
   document.appearance.frameId = 'knowledge-cards';
-  document.semantics.directorPlan = {
-    version: 2,
+  document.semantics = withDirectorPlanInSemantics(document.semantics, {
     goal: 'Teach one model',
     creativeThesis: 'The relation becomes visible',
     rhythmArc: 'Question, build, correction, proof, synthesis.',
@@ -36,8 +36,8 @@ function documentWithPlan(): EditorDocumentV2 {
       { ...treatment, id: 'proof', label: 'Proof', startFrame: 300, durationFrames: 120, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show the evidence', evidence: ['Recorded result'], brollDecision: 'source', brollRationale: 'The result must be seen.' },
       { ...treatment, id: 'close', label: 'Synthesis', startFrame: 420, durationFrames: 90, viewerTask: 'remember', narrativeRole: 'payoff', sceneFamily: 'speaker-clean', purpose: 'Return to the whole' },
     ],
-  };
-  document.semantics.scenes = document.semantics.directorPlan.scenes.map((scene) => ({ id: scene.id, clipIds: [], label: scene.label }));
+  });
+  document.semantics.scenes = directorPlanFromDocument(document)!.scenes.map((scene) => ({ id: scene.id, clipIds: [], label: scene.label }));
   return document;
 }
 
@@ -78,7 +78,7 @@ describe('scene-level visual QA', () => {
     expect(sceneAtSecond(document, 11)?.id).toBe('proof');
   });
 
-  it('finds proof scenes without source evidence and geometry repeated across three scenes', () => {
+  it('finds an approved source visual omitted from the timeline and geometry repeated across three scenes', () => {
     const document = documentWithPlan();
     const graphics = [graphic('g-open', 0), graphic('g-build', 90), graphic('g-turn', 210)];
     document.timeline.tracks.push({
@@ -92,7 +92,7 @@ describe('scene-level visual QA', () => {
     }
     const issuesBefore = auditSceneVisualStructure(document);
     expect(issuesBefore.filter((issue) => issue.kind === 'repeated-geometry')).toHaveLength(3);
-    expect(issuesBefore).toContainEqual(expect.objectContaining({ sceneId: 'proof', kind: 'missing-evidence' }));
+    expect(issuesBefore).toContainEqual(expect.objectContaining({ sceneId: 'proof', kind: 'missing-planned-visual' }));
 
     document.timeline.tracks.push({
       id: 'broll', type: 'visual', role: 'broll', muted: false, hidden: false,
@@ -101,7 +101,32 @@ describe('scene-level visual QA', () => {
     const broll = document.timeline.tracks.find((candidate) => candidate.role === 'broll')!;
     broll.clips.push(media('proof-source'));
     document.semantics.scenes.find((scene) => scene.id === 'proof')!.clipIds.push('proof-source');
-    expect(auditSceneVisualStructure(document)).not.toContainEqual(expect.objectContaining({ sceneId: 'proof', kind: 'missing-evidence' }));
+    expect(auditSceneVisualStructure(document)).not.toContainEqual(expect.objectContaining({ sceneId: 'proof', kind: 'missing-planned-visual' }));
+  });
+
+  it('audits planned opening imagery even when the scene is not a proof beat', () => {
+    const document = documentWithPlan();
+    const plan = directorPlanFromDocument(document)!;
+    plan.scenes[0]!.brollDecision = 'source';
+    plan.scenes[0]!.assetStrategy = 'Open on the supplied title image before returning to the speaker.';
+    document.semantics = withDirectorPlanInSemantics(document.semantics, plan);
+
+    expect(auditSceneVisualStructure(document)).toContainEqual(expect.objectContaining({
+      sceneId: 'open',
+      kind: 'missing-planned-visual',
+    }));
+
+    document.timeline.tracks.push({
+      id: 'opening-visual', type: 'visual', role: 'broll', muted: false, hidden: false,
+      locked: false, syncLocked: false, stackOrder: 1, clips: [
+        { ...media('opening-image'), startFrame: 0, durationFrames: 90 },
+      ],
+    });
+    document.semantics.scenes.find((scene) => scene.id === 'open')!.clipIds.push('opening-image');
+    expect(auditSceneVisualStructure(document)).not.toContainEqual(expect.objectContaining({
+      sceneId: 'open',
+      kind: 'missing-planned-visual',
+    }));
   });
 
   it('finds a sound plan whose only overlapping audio is muted', () => {

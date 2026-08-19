@@ -58,11 +58,22 @@ always `EditorDocumentV2`. Cloud DTOs, local drafts and save-wire sections carry
 `document`; Composition never crosses a persistence boundary. Runtime `blob:`/`data:` locators and
 unknown top-level keys are removed before hashing or storage.
 
+Optional AI/editorial semantics are opaque artifacts under `semantics.artifacts`. The core
+EditorDocument envelope never validates their internal shape. A Director Plan is persisted as a
+human-readable `text/markdown` source artifact; the JSON accepted by `set_director_plan` is only a
+tool-call protocol, and runtime code compiles the Markdown into a disposable typed view when it needs
+exact Scene data. Legacy inline JSON plans are rewritten to Markdown at persistence boundaries.
+Unsupported or damaged artifacts remain preserved for future repair, but never invalidate or hide
+the timeline. Agent snapshots carry only the plan's goal/thesis and Scene index; `read_director_plan`
+loads the full Markdown just in time instead of repeating a long planning document on every turn.
+
 The required online backfill is `pnpm studio:migrate-documents-v2`. It is dry-run by default and
 requires `--apply`; it migrates project and undo-history rows, skips validation errors, clears the
 retired context shadow, bumps project versions and uses a compare-and-swap guard for live projects.
-Old autosave clients omit `documentSchemaVersion: 2` and receive `document_schema_upgraded` with a
-reload requirement. Runtime request handlers never lazily convert rows.
+Old autosave clients that omit `documentSchemaVersion: 2` receive
+`document_migration_required` and cloud saving is blocked without reloading the editor. Runtime
+reads canonicalize optional artifacts in memory; the next normal full save persists that canonical
+shape. Top-level V1 Composition rows remain owned by the controlled online migration.
 
 ## Command boundary
 

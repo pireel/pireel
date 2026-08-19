@@ -3,6 +3,7 @@ import { directorPlanFromSeconds } from './director-plan';
 import { applyDirectorPlanToDocument } from './director-plan-document';
 import { applyEditorCommand, emptyEditorDocumentV2 } from './editor-document';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from './semantic-scenes';
+import { directorPlanFromDocument } from './director-plan-artifact';
 
 function documentWithNarration() {
   const empty = emptyEditorDocumentV2({ fps: 30 });
@@ -121,7 +122,7 @@ describe('Director Plan document execution', () => {
     const plan = directorPlanFromSeconds(planInput, 30).plan!;
     const applied = applyDirectorPlanToDocument(document, plan);
     expect(applied).toMatchObject({ ok: false, document });
-    expect(document.semantics.directorPlan).toBeUndefined();
+    expect(directorPlanFromDocument(document)).toBeNull();
   });
 
   it('keeps plan timing and scene ownership aligned through B-roll insertion and ripple cuts', () => {
@@ -144,7 +145,7 @@ describe('Director Plan document execution', () => {
     });
     expect(inserted.ok).toBe(true);
     if (!inserted.ok) return;
-    expect(inserted.document.semantics.directorPlan?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
+    expect(directorPlanFromDocument(inserted.document)?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
       ['problem', 0, 120],
       ['proof', 120, 240],
     ]);
@@ -159,7 +160,7 @@ describe('Director Plan document execution', () => {
     });
     expect(cut.ok).toBe(true);
     if (!cut.ok) return;
-    expect(cut.document.semantics.directorPlan?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
+    expect(directorPlanFromDocument(cut.document)?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
       ['problem', 0, 90],
       ['proof', 90, 240],
     ]);

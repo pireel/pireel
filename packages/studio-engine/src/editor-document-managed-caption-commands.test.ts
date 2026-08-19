@@ -3,6 +3,7 @@ import {
   applyEditorCommand,
   dominantTimelineSpeechTrack,
   emptyEditorDocumentV2,
+  spokenTimelineBeats,
   timelineSpeechRangesForAsset,
   timelineTranscriptionTargets,
   type CaptionTimelineClip,
@@ -126,6 +127,35 @@ describe('EditorDocument V2 managed caption command', () => {
       trackId: 'voice-track', clipId: 'voice-clip', assetId: 'voice',
       startFrame: 90, endFrame: 105, sourceFromSec: 4, sourceToSec: 5,
     }]);
+    expect(spokenTimelineBeats(document, 2.75, 1)).toEqual([{
+      text: 'one two three',
+      start: 0,
+      end: 1,
+    }]);
+  });
+
+  it('maps separate audio narration sentences into local Motion Graphic reveal beats', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { localSig: 'voice-sig' }, metadata: { durationSec: 8 },
+    };
+    document.semantics.transcripts.voice = [
+      { start: 2, end: 3, text: '先看问题' },
+      { start: 4, end: 5, text: '再看方法' },
+      { start: 7, end: 8, text: '最后结论' },
+    ];
+    document.timeline.tracks.push({
+      id: 'voice-track', type: 'audio', role: 'narration', muted: false, hidden: false,
+      locked: false, syncLocked: false, stackOrder: 1,
+      clips: [{
+        id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 60, durationFrames: 90,
+        enabled: true, sourceInSec: 2, sourceOutSec: 8, properties: { speed: 2 }, anchor: { type: 'timeline' },
+      }],
+    });
+
+    expect(spokenTimelineBeats(document, 2.5, 2)).toEqual([
+      { text: '再看方法', start: 0.5, end: 1 },
+    ]);
   });
 
   it('uses a linked audio partner once instead of transcribing linked video audio twice', () => {

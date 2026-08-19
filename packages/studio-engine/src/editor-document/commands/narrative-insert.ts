@@ -3,6 +3,7 @@ import { validateEditorDocumentV2 } from '../validation';
 import { insertEditorClips } from './insert';
 import { commandFailure, type EditorCommandResult } from './types';
 import { directorPlanAfterRippleInsertion, withAdjustedDirectorPlan } from '../../director-plan-timing';
+import { directorPlanFromDocument } from '../../director-plan-artifact';
 
 function assetError(asset: EditorMediaAsset): string | null {
   if (!asset.id.trim()) return 'Narrative asset id is required.';
@@ -56,9 +57,10 @@ export function insertNarrativeClip(
     ...inserted.document.semantics,
     ...(inserted.document.semantics.primaryNarrativeAssetId ? {} : { primaryNarrativeAssetId: clip.assetId }),
   };
-  if (mode === 'ripple' && document.semantics.directorPlan) {
+  const directorPlan = directorPlanFromDocument(document);
+  if (mode === 'ripple' && directorPlan) {
     const adjusted = directorPlanAfterRippleInsertion(
-      document.semantics.directorPlan,
+      directorPlan,
       atFrame,
       clip.durationFrames,
       sceneId,

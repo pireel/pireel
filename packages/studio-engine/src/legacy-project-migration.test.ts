@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
+import { emptyEditorDocumentV2 } from './editor-document';
 import { migratePersistedProjectDocument } from './legacy-project-migration';
+import { directorPlanFromDocument } from './director-plan-artifact';
 
 describe('one-shot persisted project migration', () => {
   it('converts a V1 row into V2 deterministically', () => {
@@ -21,6 +23,43 @@ describe('one-shot persisted project migration', () => {
     expect(migrated.migrated).toBe(true);
     expect(migrated.document.version).toBe(2);
     expect(migrated.issues).toEqual([]);
+  });
+
+  it('upgrades a nested Director Plan V1 without remigrating or losing the V2 timeline', () => {
+    const document = emptyEditorDocumentV2();
+    const legacyPlan = {
+      version: 1,
+      goal: 'Teach one durable idea.',
+      creativeThesis: 'Evidence first, explanation second.',
+      scenes: [{
+        id: 'scene-1',
+        label: 'Proof',
+        startFrame: 0,
+        durationFrames: 30,
+        viewerTask: 'believe',
+        narrativeRole: 'hook',
+        sceneFamily: 'media-evidence',
+        purpose: 'Establish trust.',
+      }],
+    };
+    const migrated = migratePersistedProjectDocument({
+      projectId: 'project-1',
+      value: {
+        ...document,
+        semantics: { ...document.semantics, directorPlan: legacyPlan },
+      },
+    });
+
+    expect(migrated.migrated).toBe(true);
+    expect(migrated.issues).toEqual([]);
+    expect(migrated.document.timeline).toEqual(document.timeline);
+    expect(directorPlanFromDocument(migrated.document)).toMatchObject({
+      goal: legacyPlan.goal,
+      creativeThesis: legacyPlan.creativeThesis,
+      rhythmArc: expect.any(String),
+      designSystem: expect.objectContaining({ visualConcept: legacyPlan.creativeThesis }),
+      scenes: [expect.objectContaining({ id: 'scene-1', brollDecision: 'none' })],
+    });
   });
 
   it('folds retired context into V2 assets and clears the need for a runtime shadow', () => {

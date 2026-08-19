@@ -79,6 +79,17 @@ export function assistantMessageHasRenderableOutput(message: UIMessage): boolean
   });
 }
 
+/** Only transport/stream failures are safe to continue from live project state automatically. */
+export function isRecoverableStudioChatError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const normalized = message.toLowerCase();
+  if (!normalized) return false;
+  if (/(insufficient_tokens|not enough credits|unauthorized|forbidden|invalid_|request_too_large|messages_required|no_llm_configured|\b(?:400|401|403|413|422)\b)/i.test(normalized)) {
+    return false;
+  }
+  return /(studio_stream_interrupted|failed to fetch|network(?:error| request failed)?|connection (?:closed|reset|interrupted)|stream (?:closed|interrupted|terminated)|load failed)/i.test(normalized);
+}
+
 export function firstUserText(messages: UIMessage[]): string {
   const first = messages.find((m) => m.role === 'user');
   if (!first) return '';

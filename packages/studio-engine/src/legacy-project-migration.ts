@@ -16,6 +16,7 @@ import {
   applyEditorDocumentPersistenceMetadata,
   prepareEditorDocumentForPersistence,
 } from './project-document';
+import { normalizeEditorDocumentArtifacts } from './director-plan-artifact';
 
 export interface PersistedLegacyProjectInput {
   projectId: string;
@@ -42,7 +43,8 @@ export function migratePersistedProjectDocument(
   const context = input.context ?? {};
   const hasLegacyContext = legacyProjectContextHasState(context);
   if (isEditorDocumentV2(input.value)) {
-    const native = prepareEditorDocumentForPersistence(input.value);
+    const normalized = normalizeEditorDocumentArtifacts(input.value);
+    const native = prepareEditorDocumentForPersistence(normalized.document);
     const document = hasLegacyContext
       ? applyEditorDocumentPersistenceMetadata({
           projectId: input.projectId,
@@ -58,7 +60,7 @@ export function migratePersistedProjectDocument(
       : native;
     return {
       document,
-      migrated: hasLegacyContext,
+      migrated: hasLegacyContext || normalized.changed,
       issues: validateEditorDocumentV2(document),
     };
   }

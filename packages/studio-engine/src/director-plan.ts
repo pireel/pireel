@@ -1,5 +1,3 @@
-export const DIRECTOR_PLAN_VERSION = 2 as const;
-
 export const VIEWER_TASKS = ['orient', 'understand', 'believe', 'remember', 'feel', 'act'] as const;
 export type ViewerTask = typeof VIEWER_TASKS[number];
 
@@ -90,7 +88,6 @@ export interface DirectorScenePlan {
  * judgment to executable timeline work, not a workflow definition and not a template graph.
  */
 export interface DirectorPlan {
-  version: typeof DIRECTOR_PLAN_VERSION;
   goal: string;
   creativeThesis: string;
   /** Whole-film pressure, release, density, and pace progression. */
@@ -122,7 +119,6 @@ export function validateDirectorPlan(value: unknown): DirectorPlanIssue[] {
   }
 
   const plan = value as Partial<DirectorPlan>;
-  if (plan.version !== DIRECTOR_PLAN_VERSION) push('unsupported-version', 'version', `Expected director plan version ${DIRECTOR_PLAN_VERSION}.`);
   if (!nonEmpty(plan.goal)) push('missing-goal', 'goal', 'Director plan needs a concrete viewer or business goal.');
   if (!nonEmpty(plan.creativeThesis)) push('missing-thesis', 'creativeThesis', 'Director plan needs a creative thesis.');
   if (!nonEmpty(plan.rhythmArc)) push('missing-rhythm-arc', 'rhythmArc', 'Director plan needs a whole-film rhythm arc.');
@@ -194,6 +190,90 @@ export function isDirectorPlan(value: unknown): value is DirectorPlan {
   return validateDirectorPlan(value).length === 0;
 }
 
+function canonicalDirectorPlan(plan: DirectorPlan): DirectorPlan {
+  return {
+    goal: plan.goal,
+    creativeThesis: plan.creativeThesis,
+    rhythmArc: plan.rhythmArc,
+    designSystem: plan.designSystem,
+    ...(plan.skillId ? { skillId: plan.skillId } : {}),
+    ...(plan.frameId ? { frameId: plan.frameId } : {}),
+    ...(plan.audience ? { audience: plan.audience } : {}),
+    scenes: plan.scenes,
+  };
+}
+
+/**
+ * Upgrade the persisted Director Plan V1 shape introduced before the whole-film design system.
+ *
+ * Director plans are optional planning metadata inside an EditorDocumentV2. Bumping their nested
+ * schema must not make an otherwise valid editor document unreadable. The generated fields are
+ * deliberately preservation-oriented: they keep the existing scene decisions and timeline intact
+ * until the user deliberately asks for a new direction pass.
+ */
+export function migrateDirectorPlan(value: unknown): DirectorPlan | null {
+  if (isDirectorPlan(value)) {
+    return value && typeof value === 'object' && !Array.isArray(value) && !('version' in value)
+      ? value
+      : canonicalDirectorPlan(value);
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const legacy = value as Record<string, unknown>;
+  if (legacy.version !== 1 || !nonEmpty(legacy.goal) || !nonEmpty(legacy.creativeThesis) || !Array.isArray(legacy.scenes)) {
+    return null;
+  }
+
+  const scenes = legacy.scenes.map((value, index) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    const scene = value as Record<string, unknown>;
+    const label = nonEmpty(scene.label) ? scene.label : `Legacy scene ${index + 1}`;
+    const purpose = nonEmpty(scene.purpose) ? scene.purpose : label;
+    return {
+      ...scene,
+      treatmentId: nonEmpty(scene.treatmentId)
+        ? scene.treatmentId
+        : `legacy-${nonEmpty(scene.sceneFamily) ? scene.sceneFamily : 'scene'}-${index + 1}`,
+      visualAnchor: nonEmpty(scene.visualAnchor) ? scene.visualAnchor : label,
+      visualTreatment: nonEmpty(scene.visualTreatment) ? scene.visualTreatment : purpose,
+      motionPlan: nonEmpty(scene.motionPlan)
+        ? scene.motionPlan
+        : 'Preserve the legacy scene timing and existing timeline motion.',
+      soundPlan: nonEmpty(scene.soundPlan)
+        ? scene.soundPlan
+        : 'Preserve existing dialogue, source audio, and silence unless the user changes them.',
+      assetStrategy: nonEmpty(scene.assetStrategy)
+        ? scene.assetStrategy
+        : 'Use the existing project assets and scene evidence.',
+      brollDecision: inList(scene.brollDecision, BROLL_DECISIONS) ? scene.brollDecision : 'none',
+      brollRationale: nonEmpty(scene.brollRationale)
+        ? scene.brollRationale
+        : 'The legacy plan did not specify B-roll; preserve the existing edit.',
+    };
+  });
+  const thesis = legacy.creativeThesis;
+  const migrated: DirectorPlan = {
+    goal: legacy.goal,
+    creativeThesis: thesis,
+    rhythmArc: nonEmpty(legacy.rhythmArc)
+      ? legacy.rhythmArc
+      : 'Preserve the legacy scene order, timing, pacing, and intended escalation.',
+    designSystem: {
+      visualConcept: thesis,
+      composition: 'Preserve the existing per-scene composition, hierarchy, and negative space.',
+      typography: 'Preserve the project typography and caption hierarchy.',
+      colorAndMaterial: 'Preserve the project palette, contrast, and material cues.',
+      imagery: 'Use the existing source footage and scene asset strategies.',
+      motion: 'Preserve the existing per-scene motion plans and timing.',
+      sound: 'Preserve the existing dialogue, source sound, and per-scene sound plans.',
+    },
+    ...(nonEmpty(legacy.skillId) ? { skillId: legacy.skillId } : {}),
+    ...(nonEmpty(legacy.frameId) ? { frameId: legacy.frameId } : {}),
+    ...(nonEmpty(legacy.audience) ? { audience: legacy.audience } : {}),
+    scenes: scenes as DirectorScenePlan[],
+  };
+  return isDirectorPlan(migrated) ? migrated : null;
+}
+
 /** Convert the editing expert's seconds-based tool input into the document's integral-frame timebase. */
 export function directorPlanFromSeconds(input: Record<string, unknown>, fps: number): { plan?: DirectorPlan; issues: DirectorPlanIssue[] } {
   if (!Number.isFinite(fps) || fps <= 0) {
@@ -226,7 +306,6 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
     } satisfies DirectorScenePlan;
   });
   const plan: DirectorPlan = {
-    version: DIRECTOR_PLAN_VERSION,
     goal: input.goal as string,
     creativeThesis: input.creativeThesis as string,
     rhythmArc: input.rhythmArc as string,

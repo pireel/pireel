@@ -54,7 +54,7 @@ export interface MediaVault {
 /** Project persistence beyond the current device. */
 export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
-  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'schema-upgraded' | 'skip'>;
+  save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'>;
   remove(id: string): Promise<void>;
 }
 

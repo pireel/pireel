@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { directorPlanFromSeconds } from '@pireel/studio-engine/director-plan';
+import { withDirectorPlanInSemantics } from '@pireel/studio-engine/director-plan-artifact';
 import { directorSceneGeometry, timelineDirectorScenesFromDocument } from './director-scene-strip';
 
 describe('Director Scene strip geometry', () => {
@@ -24,7 +25,7 @@ describe('Director Scene strip geometry', () => {
 
   it('projects persisted plan metadata and live SemanticScene clip counts', () => {
     const document = emptyEditorDocumentV2({ fps: 25 });
-    document.semantics.directorPlan = directorPlanFromSeconds({
+    document.semantics = withDirectorPlanInSemantics(document.semantics, directorPlanFromSeconds({
       goal: 'Explain.', creativeThesis: 'One clear proof.',
       rhythmArc: 'Open on the claim, slow into evidence, then hold the proof.',
       designSystem: {
@@ -46,7 +47,7 @@ describe('Director Scene strip geometry', () => {
         soundPlan: 'Keep the source dialogue audible.',
         brollDecision: 'source', brollRationale: 'The source itself is the proof.',
       }],
-    }, 25).plan!;
+    }, 25).plan!);
     document.semantics.scenes = [{ id: 'proof', clipIds: ['video', 'graphic'] }];
     expect(timelineDirectorScenesFromDocument(document)).toEqual([{
       id: 'proof', label: 'Visible proof', startSec: 2, endSec: 5, purpose: 'Show evidence.',

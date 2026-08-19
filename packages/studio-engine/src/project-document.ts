@@ -13,6 +13,7 @@ import {
 } from './editor-document';
 import { migrateLegacyProjectToV2 } from './editor-document/migration';
 import type { LocalAssetIndexEntry, ProjectCloudMediaIndex, TranscriptSegment } from './project-dto';
+import { normalizeEditorDocumentArtifacts } from './director-plan-artifact';
 
 export interface CompositionDocumentInput {
   projectId: string;
@@ -34,7 +35,8 @@ function durableRemoteUrl(url: string | undefined): string | undefined {
 
 /** Drops runtime-only object/data URLs before hashing or persistence. */
 export function prepareEditorDocumentForPersistence(document: EditorDocumentV2): EditorDocumentV2 {
-  const assets = Object.fromEntries(Object.entries(document.assets).map(([id, asset]) => {
+  const canonical = normalizeEditorDocumentArtifacts(document).document;
+  const assets = Object.fromEntries(Object.entries(canonical.assets).map(([id, asset]) => {
     const remoteUrl = durableRemoteUrl(asset.locator.remoteUrl);
     if (remoteUrl === asset.locator.remoteUrl) return [id, asset];
     const { remoteUrl: _runtime, ...durableLocator } = asset.locator;
@@ -44,13 +46,13 @@ export function prepareEditorDocumentForPersistence(document: EditorDocumentV2):
   // persisted format canonical, this drops legacy/runtime keys (notably `video`) that a malformed
   // JSON patch could otherwise smuggle next to the V2 fields.
   return {
-    version: document.version,
-    canvas: document.canvas,
-    appearance: document.appearance,
+    version: canonical.version,
+    canvas: canonical.canvas,
+    appearance: canonical.appearance,
     assets,
-    timeline: document.timeline,
-    semantics: document.semantics,
-    ...(document.processing ? { processing: document.processing } : {}),
+    timeline: canonical.timeline,
+    semantics: canonical.semantics,
+    ...(canonical.processing ? { processing: canonical.processing } : {}),
   };
 }
 

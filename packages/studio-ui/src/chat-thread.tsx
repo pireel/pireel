@@ -56,7 +56,10 @@ import {
   type ToolPartLike,
 } from "./chat-tool-parts";
 import { Composer, type ComposerHandle } from "./chat-composer";
-import { assistantMessageHasRenderableOutput } from "./chat-thread-store";
+import {
+  assistantMessageHasRenderableOutput,
+  isRecoverableStudioChatError,
+} from "./chat-thread-store";
 import { scopeSituationToThread } from "./chat-thread-context";
 import { t } from "./i18n";
 import type { StudioScenarioSkillOption } from "./shell-context";
@@ -125,6 +128,7 @@ export function ChatThread({
   // safety net from resurrecting a turn the user just killed.
   const toolAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
+  const autoRecoveryAttemptedRef = useRef(false);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -347,7 +351,10 @@ export function ChatThread({
   }, [skillId]);
 
   const run = useCallback(
-    (draft: string | StudioChatDraftPart[]) => {
+    (
+      draft: string | StudioChatDraftPart[],
+      options: { preserveAutoRecoveryAttempt?: boolean } = {},
+    ) => {
       const draftParts: StudioChatDraftPart[] =
         typeof draft === "string"
           ? [{ type: "text", text: draft.trim() }]
@@ -357,6 +364,8 @@ export function ChatThread({
       );
       if (!hasContent || status === "streaming" || status === "submitted")
         return;
+      if (!options.preserveAutoRecoveryAttempt)
+        autoRecoveryAttemptedRef.current = false;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
       toolCallsUsedRef.current = 0;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
@@ -421,6 +430,31 @@ export function ChatThread({
     () => run(t("chatGen.continueAfterInterruptionPrompt")),
     [run],
   );
+
+  // Client-side tools may already have committed durable edits before a provider/network stream
+  // drops. Retry exactly once as a NEW user turn against the current project snapshot; never replay
+  // the failed assistant request, and never recover validation/billing/auth failures or a user stop.
+  useEffect(() => {
+    if (
+      status !== "error" ||
+      !error ||
+      userStoppedRef.current ||
+      autoRecoveryAttemptedRef.current ||
+      !isRecoverableStudioChatError(error)
+    ) return;
+    const timer = setTimeout(() => {
+      if (
+        statusRef.current !== "error" ||
+        userStoppedRef.current ||
+        autoRecoveryAttemptedRef.current
+      ) return;
+      autoRecoveryAttemptedRef.current = true;
+      run(t("chatGen.continueAfterInterruptionPrompt"), {
+        preserveAutoRecoveryAttempt: true,
+      });
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [error, run, status]);
 
   // Stop = abort the running tool (it stands down at its next safe boundary) + kill the stream.
   // Order matters: flag first so neither the SDK tail check nor our safety net restarts the turn.

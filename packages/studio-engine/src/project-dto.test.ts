@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { directorPlanFromDocument } from './director-plan-artifact';
 import { emptyProjectDocument } from './project-document';
 import {
   ackedFromDto,
@@ -63,6 +64,33 @@ describe('strict V2 project DTO', () => {
     expect(dto.document.version).toBe(2);
     expect(dto).not.toHaveProperty('comp');
     expect(dto.context).toEqual({ schemaVersion: 3 });
+  });
+
+  it('reads a V2 row with an inline V1 Director Plan and canonicalizes only that artifact', () => {
+    const comp = document();
+    const timeline = comp.timeline;
+    (comp.semantics as typeof comp.semantics & { directorPlan?: unknown }).directorPlan = {
+      version: 1,
+      goal: 'Teach one durable idea.',
+      creativeThesis: 'Evidence first, explanation second.',
+      scenes: [{
+        id: 'proof', label: 'Proof', startFrame: 0, durationFrames: 60,
+        viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence',
+        purpose: 'Show evidence.',
+      }],
+    };
+
+    const dto = rowToDto({ ...row, comp });
+    expect(dto.document.timeline).toBe(timeline);
+    expect(directorPlanFromDocument(dto.document)).toMatchObject({ goal: 'Teach one durable idea.' });
+    expect(directorPlanFromDocument(dto.document)).not.toHaveProperty('version');
+    expect((dto.document.semantics as unknown as Record<string, unknown>).directorPlan).toBeUndefined();
+    expect(dto.document.semantics.artifacts).toMatchObject({
+      directorPlan: { kind: 'pireel.director-plan', mediaType: 'text/markdown' },
+    });
+    expect((dto.document.semantics.artifacts as { directorPlan: { content: string; payload?: unknown } }).directorPlan.content)
+      .toContain('# Director Plan');
+    expect((dto.document.semantics.artifacts as { directorPlan: { payload?: unknown } }).directorPlan.payload).toBeUndefined();
   });
 
   it('rejects V1 rows instead of normalizing them at runtime', () => {

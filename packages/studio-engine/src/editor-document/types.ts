@@ -2,7 +2,7 @@ import type { AudioClip } from '../audio-tracks';
 import type { AtomicMediaFraming, Block, CaptionStyle, PersonFx, VideoShot } from '../composition-core';
 import type { TranscriptSegment } from '../project-dto';
 import type { ThemeId } from '../theme';
-import type { DirectorPlan, NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
+import type { NarrativeRole, SceneFamily, ViewerTask } from '../director-plan';
 import type { CustomVisualStyle } from '../visual-style';
 
 export const EDITOR_DOCUMENT_VERSION = 2 as const;
@@ -211,9 +211,9 @@ export interface EditorSemanticState {
     | { mode: 'clip'; clipId: TimelineClipId };
   transcripts: Record<AssetId, TranscriptSegment[]>;
   scenes: SemanticScene[];
-  /** Saved scene-level commitment produced by the editing expert for a complete edit. */
-  directorPlan?: DirectorPlan;
-  /** Legacy arbitrary storyboard context. Retained for compatibility; new work uses directorPlan. */
+  /** Opaque optional semantic artifacts. Consumers must decode them by key; core validity ignores them. */
+  artifacts?: unknown;
+  /** Legacy arbitrary storyboard context. Retained for compatibility; new work uses the Director Plan artifact. */
   plan?: unknown;
 }
 

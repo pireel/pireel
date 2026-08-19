@@ -330,7 +330,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "All unqualified edits and @ element references target this active output",
     );
   });
-  it("buildSituation 携带可跨轮继续执行的 Director Plan、精确 sceneId 与真实 Clip 归属", () => {
+  it("buildSituation 只携带 Director Plan 索引，完整 Markdown 按需读取", () => {
     const s = buildSituation({
       composition: { durationSec: 10 },
       directorPlan: {
@@ -342,31 +342,17 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
             label: "证据落地",
             startSec: 4,
             endSec: 8,
-            viewerTask: "believe",
-            narrativeRole: "prove",
-            sceneFamily: "media-evidence",
-            purpose: "用原始证据支撑核心判断",
-            evidence: ["产品实拍"],
-            treatmentId: "evidence-plane",
-            visualAnchor: "真实产品结果",
-            visualTreatment: "保留主体，证据占据视觉中心",
-            motionPlan: "证据进入后保持",
-            soundPlan: "保留口播与产品声",
-            assetStrategy: "优先项目素材",
-            brollDecision: "source",
-            brollRationale: "结论需要实拍证明",
             clipIds: ["shot-proof", "block-proof"],
           },
         ],
       },
     });
-    expect(s).toContain('Director Plan: goal "让观众相信结论"');
+    expect(s).toContain('Director Plan saved as director-plan.md: goal "让观众相信结论"');
     expect(s).toContain("sceneId=proof");
     expect(s).toContain("@shot-proof, @block-proof");
-    expect(s).toContain("purpose: 用原始证据支撑核心判断");
-    expect(s).toContain("treatment: evidence-plane");
-    expect(s).toContain("B-roll: source — 结论需要实拍证明");
-    expect(s).toContain("Use its exact sceneId");
+    expect(s).toContain("call read_director_plan");
+    expect(s).not.toContain("B-roll:");
+    expect(STUDIO_TOOLS.some((tool) => tool.id === "read_director_plan")).toBe(true);
   });
   it("新对话把已有项目状态当作素材现状，而不是继承上一段对话的任务", () => {
     const s = buildSituation(

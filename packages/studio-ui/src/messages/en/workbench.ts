@@ -400,8 +400,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.preparedNSampledFrames": "Prepared {n} sampled frames",
   "workbench.projectAlsoEditedElsewhere":
     "This project was also edited elsewhere — saving will continue with your latest changes",
-  "workbench.projectSchemaUpgradedReloading":
-    "This project was upgraded to the new timeline format. Reloading the latest version…",
+  "workbench.projectMigrationSaveBlocked":
+    "This project needs a data migration. Cloud saving is paused; your current edit remains available.",
   "workbench.publishPrepareFailed":
     "Failed to prepare publishing, try again later",
   "workbench.rangeDeletedMayCover":

@@ -1,11 +1,11 @@
-export type CloudProjectSaveResult = 'ok' | 'conflict' | 'schema-upgraded' | 'skip';
+export type CloudProjectSaveResult = 'ok' | 'conflict' | 'migration-required' | 'skip';
 
 export interface CloudProjectSaveQueueOptions<Payload> {
   getPayload: () => Payload | null;
   save: (payload: Payload) => Promise<CloudProjectSaveResult>;
   canWrite: () => boolean;
   onConflict?: () => void;
-  onSchemaUpgrade?: () => void;
+  onMigrationRequired?: () => void;
 }
 
 const INITIAL_RETRY_MS = 1_000;
@@ -132,10 +132,10 @@ export class CloudProjectSaveQueue<Payload> {
       if (this.disposed) return;
     }
 
-    if (result === 'schema-upgraded') {
+    if (result === 'migration-required') {
       this.blocked = true;
       this.clearRetryTimer();
-      this.options.onSchemaUpgrade?.();
+      this.options.onMigrationRequired?.();
       return;
     }
 

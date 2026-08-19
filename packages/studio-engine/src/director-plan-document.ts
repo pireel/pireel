@@ -4,6 +4,7 @@ import type { EditorDocumentV2 } from './editor-document/types';
 import { splitEditorClip } from './editor-document/commands/split';
 import { validateEditorDocumentV2 } from './editor-document/validation';
 import { semanticScenesFromDirectorPlan } from './semantic-scenes';
+import { withDirectorPlanInSemantics } from './director-plan-artifact';
 
 export type ApplyDirectorPlanResult =
   | { ok: true; document: EditorDocumentV2; createdClipIds: string[] }
@@ -45,11 +46,10 @@ export function applyDirectorPlanToDocument(
 
   next = {
     ...next,
-    semantics: {
+    semantics: withDirectorPlanInSemantics({
       ...next.semantics,
-      directorPlan: plan,
       scenes: semanticScenesFromDirectorPlan(next, plan),
-    },
+    }, plan),
   };
   const issue = validateEditorDocumentV2(next).find((candidate) => candidate.severity === 'error');
   return issue

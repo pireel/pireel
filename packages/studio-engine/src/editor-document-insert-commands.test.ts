@@ -10,6 +10,7 @@ import {
   type TimelineClipPlacement,
 } from './editor-document';
 import type { DirectorPlan } from './director-plan';
+import { directorPlanFromDocument, withDirectorPlanInSemantics } from './director-plan-artifact';
 
 function testDocument(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
@@ -81,7 +82,6 @@ describe('EditorDocument V2 clip insertion commands', () => {
     const document = testDocument();
     document.timeline.tracks[0]!.clips = [narrative('talk', 0, 300, 0, 10)];
     const plan: DirectorPlan = {
-      version: 2,
       goal: 'Explain, then prove.',
       creativeThesis: 'Let evidence follow the claim.',
       rhythmArc: 'Measured explanation opens into a faster proof and stable result.',
@@ -99,7 +99,7 @@ describe('EditorDocument V2 clip insertion commands', () => {
         { id: 'proof', label: 'Proof', startFrame: 120, durationFrames: 180, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show the evidence.', treatmentId: 'evidence-plane', visualAnchor: 'Evidence', visualTreatment: 'Dominant evidence plane.', motionPlan: 'Reveal, inspect, hold, clear.', soundPlan: 'Voice with truthful source sound.', assetStrategy: 'Use evidence source.', brollDecision: 'source', brollRationale: 'The claim must be seen.' },
       ],
     };
-    document.semantics.directorPlan = plan;
+    document.semantics = withDirectorPlanInSemantics(document.semantics, plan);
     document.semantics.scenes = [
       { id: 'claim', clipIds: ['talk'] },
       { id: 'proof', clipIds: ['talk'] },
@@ -115,7 +115,7 @@ describe('EditorDocument V2 clip insertion commands', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.document.semantics.directorPlan?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
+    expect(directorPlanFromDocument(result.document)?.scenes.map((scene) => [scene.id, scene.startFrame, scene.durationFrames])).toEqual([
       ['claim', 0, 150],
       ['proof', 150, 180],
     ]);

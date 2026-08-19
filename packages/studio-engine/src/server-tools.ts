@@ -89,6 +89,7 @@ import {
   shotFilterCss,
   shotId,
   splitBlockedByTransition,
+  spokenTimelineBeats,
   totalDuration,
   transcriptContextAt,
   validateComposition,
@@ -141,6 +142,7 @@ export interface ServerToolOutcome {
 export const SERVER_EXECUTABLE_TOOLS: ReadonlySet<string> = new Set([
   'get_state',
   'get_timeline',
+  'read_director_plan',
   'register_media',
   'inspect_media',
   'organize_media',
@@ -1371,7 +1373,10 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       });
       const contextForWindow = (startSec: number, durationSec: number, sceneId?: string) => {
         const script = scriptAt(startSec);
-        const beats = beatsForWindow(c.shots ?? [], mainTranscript, clipTranscripts, startSec, durationSec);
+        const beats = spokenTimelineBeats(p.document, startSec, durationSec);
+        const resolvedBeats = beats.length
+          ? beats
+          : beatsForWindow(c.shots ?? [], mainTranscript, clipTranscripts, startSec, durationSec);
         const sceneContext = resolveDirectorSceneContext(p.document, {
           ...(sceneId ? { sceneId } : {}),
           startFrame: Math.round(startSec * p.document.canvas.fps),
@@ -1379,7 +1384,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         });
         return {
           ...(script ? { script } : {}),
-          ...(beats.length ? { beats } : {}),
+          ...(resolvedBeats.length ? { beats: resolvedBeats } : {}),
           ...(sceneContext ? { designDirection: formatDirectorSceneContext(sceneContext) } : {}),
           ...(typeof input.backdrop === 'string' && input.backdrop.trim() ? { backdrop: input.backdrop.trim() } : {}),
         };

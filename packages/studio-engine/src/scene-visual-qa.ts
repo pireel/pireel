@@ -1,11 +1,13 @@
-import type { DirectorScenePlan } from './director-plan';
+import type { DirectorPlan, DirectorScenePlan } from './director-plan';
 import type { EditorDocumentV2, TimelineClip } from './editor-document/types';
+import { directorPlanFromDocument } from './director-plan-artifact';
 
 export type SceneVisualReviewPhase = 'entrance' | 'develop' | 'payoff' | 'exit' | 'scene';
 
 export type SceneVisualQaIssueKind =
   | 'repeated-geometry'
   | 'missing-evidence'
+  | 'missing-planned-visual'
   | 'missing-audible-audio'
   | 'caption-subject-collision'
   | 'frame-drift'
@@ -51,7 +53,7 @@ function sampleSecond(scene: DirectorScenePlan, phase: SceneVisualReviewPhase, f
 function sceneContext(
   scene: DirectorScenePlan,
   phase: SceneVisualReviewPhase,
-  plan: NonNullable<EditorDocumentV2['semantics']['directorPlan']>,
+  plan: DirectorPlan,
   frameId?: string,
 ): string {
   const evidence = evidenceOf(scene);
@@ -131,7 +133,7 @@ export function planSceneVisualReview(
   document: EditorDocumentV2,
   options: { sceneIds?: string[]; maxMoments?: number } = {},
 ): SceneVisualReviewMoment[] {
-  const plan = document.semantics.directorPlan;
+  const plan = directorPlanFromDocument(document);
   if (!plan) return [];
   const selectedIds = options.sceneIds?.length ? new Set(options.sceneIds) : null;
   const scenes = plan.scenes;
@@ -213,7 +215,7 @@ function hasAudibleAudio(document: EditorDocumentV2, scene: DirectorScenePlan): 
 
 /** Local structural pass. Visual problems that require pixels remain delegated to cloud vision. */
 export function auditSceneVisualStructure(document: EditorDocumentV2): SceneVisualQaIssue[] {
-  const plan = document.semantics.directorPlan;
+  const plan = directorPlanFromDocument(document);
   if (!plan) return [];
   const clips = clipById(document);
   const semanticById = new Map(document.semantics.scenes.map((scene) => [scene.id, scene]));
@@ -228,14 +230,23 @@ export function auditSceneVisualStructure(document: EditorDocumentV2): SceneVisu
         note: 'The approved sound plan calls for audible voice or source sound, but every overlapping audio-capable clip is absent, disabled, muted, or silent.',
       });
     }
-    const needsEvidence = scene.narrativeRole === 'prove' || scene.viewerTask === 'believe';
-    if (!needsEvidence) continue;
     const semantic = semanticById.get(scene.id);
     const owned = semantic?.clipIds.map((id) => clips.get(id)).filter((clip): clip is TimelineClip => Boolean(clip)) ?? [];
     const hasSourceClip = owned.some((clip) =>
       clip.kind === 'media' || clip.kind === 'narrative' || (clip.kind === 'graphic' && Boolean(clip.assetId)),
     );
-    if (!evidenceOf(scene).length || !hasSourceClip) {
+    const plannedVisual = scene.brollDecision !== 'none';
+    if (plannedVisual && !hasSourceClip) {
+      issues.push({
+        sceneId: scene.id,
+        blockId: '',
+        kind: 'missing-planned-visual',
+        note: `The approved Director Plan requires a ${scene.brollDecision} visual, but this Semantic Scene owns no source media clip. Execute its asset strategy before treating the scene as complete.`,
+      });
+    }
+
+    const needsEvidence = scene.narrativeRole === 'prove' || scene.viewerTask === 'believe';
+    if (needsEvidence && (!evidenceOf(scene).length || (!hasSourceClip && !plannedVisual))) {
       issues.push({
         sceneId: scene.id,
         blockId: '',
@@ -278,7 +289,7 @@ export function auditSceneVisualStructure(document: EditorDocumentV2): SceneVisu
 }
 
 export function sceneAtSecond(document: EditorDocumentV2, atSec: number): DirectorScenePlan | null {
-  const plan = document.semantics.directorPlan;
+  const plan = directorPlanFromDocument(document);
   if (!plan) return null;
   const frame = Math.round(atSec * document.canvas.fps);
   return plan.scenes.find((scene) => frame >= scene.startFrame && frame < scene.startFrame + scene.durationFrames) ?? null;

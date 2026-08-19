@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { emptyEditorDocumentV2 } from './editor-document';
 import { resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
+import { withDirectorPlanInSemantics } from './director-plan-artifact';
 
 describe('shared agent timeline atoms', () => {
   it('binds planned native visuals and reassigns them when they move across Director scenes', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
-    document.semantics.directorPlan = {
-      version: 2,
+    document.semantics = withDirectorPlanInSemantics(document.semantics, {
       goal: 'Move from claim to proof.',
       creativeThesis: 'Evidence replaces assertion.',
       rhythmArc: 'Claim holds, proof accelerates, result settles.',
@@ -24,7 +24,7 @@ describe('shared agent timeline atoms', () => {
         { id: 'claim', label: 'Claim', startFrame: 0, durationFrames: 120, viewerTask: 'understand', narrativeRole: 'explain', sceneFamily: 'speaker-clean', purpose: 'State the idea.', treatmentId: 'source-claim', visualAnchor: 'Speaker', visualTreatment: 'Speaker-led source field.', motionPlan: 'Enter, develop, hold, clear.', soundPlan: 'Voice first.', assetStrategy: 'Use source.', brollDecision: 'none', brollRationale: 'Continuity carries the claim.' },
         { id: 'proof', label: 'Proof', startFrame: 120, durationFrames: 180, viewerTask: 'believe', narrativeRole: 'prove', sceneFamily: 'media-evidence', purpose: 'Show evidence.', treatmentId: 'evidence-plane', visualAnchor: 'Evidence', visualTreatment: 'Dominant source evidence plane.', motionPlan: 'Reveal, inspect, hold, clear.', soundPlan: 'Voice with truthful source sound.', assetStrategy: 'Use evidence source.', brollDecision: 'source', brollRationale: 'The claim must be seen.' },
       ],
-    };
+    });
     document.semantics.scenes = [
       { id: 'claim', clipIds: [] },
       { id: 'proof', clipIds: [] },
@@ -39,6 +39,10 @@ describe('shared agent timeline atoms', () => {
     expect(placed.document!.semantics.scenes.find((scene) => scene.id === 'claim')?.clipIds).toContain('evidence-clip');
     expect((placed.data as { clipIds: string[] }).clipIds).toEqual(['evidence-clip']);
     expect((runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as { semantics: { directorPlan?: unknown } }).semantics.directorPlan).toBeDefined();
+    const planFile = runAgentTimelineTool(placed.document!, 'read_director_plan', {});
+    expect(planFile.ok).toBe(true);
+    expect((planFile.data as { path: string; content: string }).path).toBe('director-plan.md');
+    expect((planFile.data as { content: string }).content).toContain('# Director Plan');
 
     const moved = runAgentTimelineTool(placed.document!, 'move_clips', {
       items: [{ clipId: 'evidence-clip', startSec: 5 }],

@@ -9,6 +9,7 @@
 import type { MutableRefObject } from 'react';
 import { editorErrorMessage } from './editor-error';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import { directorPlanFromDocument } from '@pireel/studio-engine/director-plan-artifact';
 import {
   type AudioClip,
   type Block,
@@ -67,6 +68,7 @@ import {
   documentWordRanges,
   documentWordRangesToTimeline,
   splitBlockedByTransition,
+  spokenTimelineBeats,
   totalDuration,
   transcriptContextAt,
   validateComposition,
@@ -134,7 +136,7 @@ import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 
 const IMAGE_INSPECTION_MAX_DIM = 1280;
@@ -339,6 +341,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // once here so individual tools never grow their own @ token / localSig compatibility rules.
       input = normalizeStudioToolInputReferences(toolId, input, ctx.localAssetIndexRef?.current ?? []);
       const c = compRef.current;
+      const motionBeats = (startSec: number, durationSec: number) => {
+        const native = spokenTimelineBeats(documentRef.current, startSec, durationSec);
+        return native.length
+          ? native
+          : beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
+      };
       const r1 = (x: unknown) => Math.round(Number(x) * 10) / 10;
       const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
       const findShot = (id: unknown) => (c.shots ?? []).find((s) => s.id === id);
@@ -1216,7 +1224,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   repairScope,
                   localComparison,
                   ...(total
-                    ? { hint: `${repairScope.instruction} Use subject framing → set_shot_framing, overlay position → place_block, styling/contrast/Frame drift → edit_block, missing evidence → place truthful source material, and missing audible audio → inspect track/clip mute and level before changing the approved sound plan.` }
+                    ? { hint: `${repairScope.instruction} Use subject framing → set_shot_framing, overlay position → place_block, styling/contrast/Frame drift → edit_block, missing planned visual/evidence → execute the approved asset strategy and place truthful source material, and missing audible audio → inspect track/clip mute and level before changing the approved sound plan.` }
                     : {}),
                 },
               };
@@ -2564,7 +2572,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!sigIn && !urlIn) return { ok: false, error: t('workbench.needUrlOrSig') };
             const at = typeof input.atSec === 'number' && Number.isFinite(input.atSec) ? Math.max(0, input.atSec) : tRef.current;
             const explicitSceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
-            if (explicitSceneId && !documentRef.current.semantics.directorPlan?.scenes.some((scene) => scene.id === explicitSceneId)) {
+            if (explicitSceneId && !directorPlanFromDocument(documentRef.current)?.scenes.some((scene) => scene.id === explicitSceneId)) {
               return { ok: false, error: `Director scene does not exist: ${explicitSceneId}` };
             }
             try {
@@ -2678,7 +2686,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ? { boxPx: { w: Math.round(plannedBox.w * c.width), h: Math.round(plannedBox.h * c.height) } }
                   : {}),
                 durationSec,
-                beats: beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, at, durationSec),
+                beats: motionBeats(at, durationSec),
               };
               const backdrop = typeof input.backdrop === 'string' && input.backdrop.trim()
                 ? `\n\nBACKDROP AND PROTECTED ZONES: ${input.backdrop.trim()}`
@@ -2736,7 +2744,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ...renderBlock(b),
                 label: b.label,
                 durationSec: b.durationSec,
-                beats: beatsForWindow(c.shots ?? [], asrRef.current, clipAsrRef.current, b.startSec, b.durationSec),
+                beats: motionBeats(b.startSec, b.durationSec),
                 ...(b.box ? { boxPx: { w: Math.round(b.box.w * c.width), h: Math.round(b.box.h * c.height) } } : {}),
               };
               // A kit block is edited as props; anything else keeps writing markup. Editing follows
@@ -2870,6 +2878,12 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
     pushUndoSnapshot, genIdsRef, videoFileRef, clipFilesRef, asrRef, clipAsrRef,
   } = ctx;
     const c2 = compRef.current;
+    const motionBeats = (startSec: number, durationSec: number) => {
+      const native = spokenTimelineBeats(documentRef.current, startSec, durationSec);
+      return native.length
+        ? native
+        : beatsForWindow(c2.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
+    };
     const patchBlock = (clipId: string, block: Parameters<typeof applyOverlayDocumentEdits>[0]['updates'][number]['block']) => {
       const edit = applyOverlayDocumentEdits({ document: documentRef.current, updates: [{ clipId, block }] });
       if (edit.ok) setDocument(edit.document);
@@ -2892,7 +2906,7 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         });
         const contextForWindow = (startSec: number, durationSec: number, sceneId?: string) => {
           const script = scriptAt(startSec);
-          const beats = beatsForWindow(c2.shots ?? [], asrRef.current, clipAsrRef.current, startSec, durationSec);
+          const beats = motionBeats(startSec, durationSec);
           const sceneContext = resolveDirectorSceneContext(documentRef.current, {
             ...(sceneId ? { sceneId } : {}),
             startFrame: Math.round(startSec * documentRef.current.canvas.fps),

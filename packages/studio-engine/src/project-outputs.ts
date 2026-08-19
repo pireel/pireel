@@ -1,4 +1,4 @@
-import { emptyEditorDocumentV2, isEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
+import { emptyEditorDocumentV2, parseEditorDocumentV2, type EditorDocumentV2 } from './editor-document';
 
 /** One editable deliverable inside a Studio project. The active deliverable stays in the
  * project's top-level document; inactive deliverables are self-contained V2 snapshots. */
@@ -75,7 +75,9 @@ export function normalizeProjectOutputs(value: unknown, now = Date.now()): Studi
   const seen = new Set([active.id]);
   const inactive: StudioProjectOutputSnapshot[] = [];
   for (const [index, raw] of (Array.isArray(value.inactive) ? value.inactive : []).entries()) {
-    if (!isRecord(raw) || !isEditorDocumentV2(raw.document)) continue;
+    if (!isRecord(raw)) continue;
+    const document = parseEditorDocumentV2(raw.document);
+    if (!document) continue;
     const meta = normalizeMeta(raw, {
       id: `output-${index + 2}`,
       title: '',
@@ -87,7 +89,7 @@ export function normalizeProjectOutputs(value: unknown, now = Date.now()): Studi
     seen.add(meta.id);
     inactive.push({
       ...meta,
-      document: storedOutputDocument(raw.document),
+      document: storedOutputDocument(document),
       videoSig: typeof raw.videoSig === 'string' ? raw.videoSig : null,
       videoDurationSec: typeof raw.videoDurationSec === 'number' && Number.isFinite(raw.videoDurationSec) ? raw.videoDurationSec : null,
       coverThumb: typeof raw.coverThumb === 'string' ? raw.coverThumb : null,

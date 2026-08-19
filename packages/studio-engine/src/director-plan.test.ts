@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEditorDocumentV2, isEditorDocumentV2, validateEditorDocumentV2 } from './editor-document';
-import { directorPlanFromSeconds, isDirectorPlan, validateDirectorPlan } from './director-plan';
+import { emptyEditorDocumentV2, isEditorDocumentV2, parseEditorDocumentV2, validateEditorDocumentV2 } from './editor-document';
+import { directorPlanFromSeconds, isDirectorPlan } from './director-plan';
+import { directorPlanFromDocument } from './director-plan-artifact';
 
 const input = {
   goal: 'Make a first-time viewer understand and remember the product mechanism.',
@@ -60,7 +61,7 @@ const input = {
   ],
 };
 
-describe('Director Plan V2', () => {
+describe('Director Plan structure', () => {
   it('converts seconds into the editor timebase and validates a rich plan', () => {
     const parsed = directorPlanFromSeconds(input, 30);
     expect(parsed.issues).toEqual([]);
@@ -122,17 +123,21 @@ describe('Director Plan V2', () => {
     ]));
   });
 
-  it('participates in persisted editor-document validation while legacy plan remains compatible', () => {
+  it('keeps optional planning artifacts independent from core document readability', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     const valid = directorPlanFromSeconds(input, 30).plan!;
-    document.semantics.directorPlan = valid;
+    (document.semantics as typeof document.semantics & { directorPlan?: unknown }).directorPlan = valid;
     document.semantics.plan = { legacy: true };
     expect(isEditorDocumentV2(document)).toBe(true);
-    expect(validateEditorDocumentV2(document)).toEqual([]);
+    const normalized = parseEditorDocumentV2(document)!;
+    expect(validateEditorDocumentV2(normalized)).toEqual([]);
+    expect(directorPlanFromDocument(normalized)).toEqual(valid);
 
-    document.semantics.directorPlan = { ...valid, goal: '' };
-    expect(isEditorDocumentV2(document)).toBe(false);
-    expect(validateDirectorPlan(document.semantics.directorPlan).map((issue) => issue.code)).toContain('missing-goal');
-    expect(validateEditorDocumentV2(document).map((issue) => issue.code)).toContain('director-plan-missing-goal');
+    const damaged = emptyEditorDocumentV2({ fps: 30 });
+    (damaged.semantics as typeof damaged.semantics & { directorPlan?: unknown }).directorPlan = { ...valid, goal: '' };
+    expect(isEditorDocumentV2(damaged)).toBe(true);
+    const recovered = parseEditorDocumentV2(damaged)!;
+    expect(directorPlanFromDocument(recovered)).toBeNull();
+    expect(validateEditorDocumentV2(recovered)).toEqual([]);
   });
 });

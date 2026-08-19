@@ -78,6 +78,14 @@ export interface TimelineSpeechRange {
   sourceToSec: number;
 }
 
+export interface SpokenTimelineBeat {
+  text: string;
+  /** Local seconds from the requested window start. */
+  start: number;
+  /** Local seconds from the requested window start. */
+  end: number;
+}
+
 function isSpeechClip(clip: TimelineClip): clip is SpeechTimelineClip {
   return clip.kind === 'narrative' || clip.kind === 'media' || clip.kind === 'audio';
 }
@@ -219,6 +227,52 @@ function sourceSecToTimelineSec(
   const range = sourceRange(clip, fps);
   const ratio = Math.max(0, Math.min(1, (sourceSec - range.start) / Math.max(0.001, range.end - range.start)));
   return startSec + ratio * (endSec - startSec);
+}
+
+/**
+ * Resolve spoken beats from the canonical multi-track timeline. Motion Graphic composition used
+ * to inspect only legacy video shots, so narration placed on an audio lane arrived with no timing
+ * context and every visual item appeared at once. This follows the same explicit/automatic speech
+ * source selection as managed captions and maps source-clock transcript segments through trim,
+ * retiming, gaps and native clip placement into local Component time.
+ */
+export function spokenTimelineBeats(
+  document: EditorDocumentV2,
+  startSec: number,
+  durationSec: number,
+): SpokenTimelineBeat[] {
+  if (!Number.isFinite(startSec) || !Number.isFinite(durationSec) || durationSec <= 0) return [];
+  const windowStart = Math.max(0, startSec);
+  const windowEnd = windowStart + durationSec;
+  const selection = document.semantics.managedCaptionSource ?? { mode: 'auto' as const };
+  const beats = selectedSpeechClips(document, selection).flatMap((clip) => {
+    const range = sourceRange(clip, document.canvas.fps);
+    return (document.semantics.transcripts[clip.assetId] ?? []).flatMap((segment) => {
+      const text = segment.text?.trim();
+      if (!text) return [];
+      const sourceStart = Math.max(range.start, segment.start);
+      const sourceEnd = Math.min(range.end, segment.end);
+      if (sourceEnd - sourceStart <= 0.03) return [];
+      const timelineStart = sourceSecToTimelineSec(clip, sourceStart, document.canvas.fps);
+      const timelineEnd = sourceSecToTimelineSec(clip, sourceEnd, document.canvas.fps);
+      const overlapStart = Math.max(windowStart, timelineStart);
+      const overlapEnd = Math.min(windowEnd, timelineEnd);
+      if (overlapEnd - overlapStart <= 0.03) return [];
+      return [{
+        text,
+        start: Math.max(0, overlapStart - windowStart),
+        end: Math.min(durationSec, overlapEnd - windowStart),
+      }];
+    });
+  }).sort((left, right) => left.start - right.start || left.end - right.end);
+
+  const seen = new Set<string>();
+  return beats.filter((beat) => {
+    const key = `${beat.text}\u0000${beat.start.toFixed(3)}\u0000${beat.end.toFixed(3)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function priorSourceKeys(document: EditorDocumentV2, clips: readonly TimelineClip[]): Map<string, string> {

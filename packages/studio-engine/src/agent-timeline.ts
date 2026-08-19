@@ -23,9 +23,11 @@ import {
   type TimelineClipPlacement,
 } from './editor-document';
 import type { TranscriptSegment } from './project-dto';
+import { directorPlanFromDocument, directorPlanMarkdownFromDocument } from './director-plan-artifact';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'get_timeline',
+  'read_director_plan',
   'register_media',
   'inspect_media',
   'organize_media',
@@ -153,7 +155,20 @@ export function agentTimelineSnapshot(document: EditorDocumentV2) {
       managedCaptionSource: document.semantics.managedCaptionSource ?? { mode: 'auto' },
       transcriptAssetIds: Object.entries(document.semantics.transcripts).filter(([, segments]) => segments.length).map(([assetId]) => assetId),
       scenes: document.semantics.scenes,
-      directorPlan: document.semantics.directorPlan,
+      directorPlan: (() => {
+        const plan = directorPlanFromDocument(document);
+        return plan ? {
+          available: true,
+          goal: plan.goal,
+          creativeThesis: plan.creativeThesis,
+          scenes: plan.scenes.map((scene) => ({
+            id: scene.id,
+            label: scene.label,
+            startSec: timelineFramesToSeconds(scene.startFrame, document.canvas.fps),
+            endSec: timelineFramesToSeconds(scene.startFrame + scene.durationFrames, document.canvas.fps),
+          })),
+        } : undefined;
+      })(),
     },
   };
 }
@@ -1033,6 +1048,12 @@ function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOut
 export function runAgentTimelineTool(document: EditorDocumentV2, tool: string, input: Input): AgentTimelineOutcome {
   switch (tool) {
     case 'get_timeline': return { ok: true, summary: `${document.timeline.tracks.length} timeline tracks`, data: agentTimelineSnapshot(document) };
+    case 'read_director_plan': {
+      const content = directorPlanMarkdownFromDocument(document);
+      return content
+        ? { ok: true, summary: 'Loaded director-plan.md', data: { path: 'director-plan.md', mediaType: 'text/markdown', content } }
+        : fail('No Director Plan is saved for this output');
+    }
     case 'register_media': return importAssets(document, input);
     case 'inspect_media': return inspectAssets(document, input);
     case 'organize_media': return organizeAssets(document, input);
