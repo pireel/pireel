@@ -985,6 +985,7 @@ function PreviewSet({
   style: CustomVisualStyle;
   direction: FrameCatalogItem;
 }) {
+  const [selectedSceneId, setSelectedSceneId] = useState("talking-head");
   if (direction.id === "performance-native")
     return <ProductNativePreviewSet style={style} direction={direction} />;
 
@@ -994,7 +995,6 @@ function PreviewSet({
   );
   const visualDirection = visualDirectionKind(direction.id);
   const samples = directionSamples(visualDirection);
-  const [selectedSceneId, setSelectedSceneId] = useState("talking-head");
   const activeSceneId =
     selectedSceneId === "talking-head" ||
     samples.some((sample) => sample.id === selectedSceneId)
