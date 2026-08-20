@@ -371,75 +371,77 @@ function renderMedia(slots: Slots, id: string, startSec = 0, durationSec?: numbe
 
 /* ============================ register built-in templates ============================ */
 
-registerTemplate({
-  id: 'custom',
-  name: 'engine.customHtml',
-  kind: 'custom',
-  defaultTrackIndex: 2,
-  slots: { innerHtml: { type: 'text', label: 'HTML' }, timelineBody: { type: 'text', label: 'engine.gsapTimelineBody' } },
-  render: (slots) => ({ innerHtml: str(slots.innerHtml, '<div></div>'), timelineBody: str(slots.timelineBody) }),
-});
-registerTemplate({
-  id: 'title',
-  name: 'common.titleCard',
-  kind: 'title',
-  defaultTrackIndex: 2,
-  slots: { text: { type: 'text', label: 'common.title', required: true }, sub: { type: 'text', label: 'engine.subtitle' } },
-  render: renderTitle,
-});
-registerTemplate({
-  id: 'stat',
-  name: 'common.bigNumber',
-  kind: 'stat',
-  defaultTrackIndex: 2,
-  slots: { value: { type: 'text', label: 'common.number', required: true }, label: { type: 'text', label: 'engine.label' } },
-  render: renderStat,
-});
-registerTemplate({
-  id: 'list',
-  name: 'common.bulletList',
-  kind: 'list',
-  defaultTrackIndex: 2,
-  slots: { title: { type: 'text', label: 'engine.heading' }, items: { type: 'text[]', label: 'engine.bulletPoints', required: true } },
-  render: renderList,
-});
-registerTemplate({
-  id: 'transition',
-  name: 'tools.add_transition.label',
-  kind: 'transition',
-  defaultTrackIndex: 3, // topmost, covers the cut beneath
-  slots: { effect: { type: 'enum', label: 'engine.effect', options: ['wipe', 'flash', 'fade', 'slide'] } },
-  render: renderTransition,
-});
-registerTemplate({
-  id: 'caption',
-  name: 'engine.animatedCaptions',
-  kind: 'caption',
-  defaultTrackIndex: 1,
-  slots: {
-    words: { type: 'words', label: 'engine.wordTimings', required: true },
-    effect: { type: 'enum', label: 'engine.effect', options: ['kinetic-slam'] },
-    sub: { type: 'text', label: 'engine.translationLine' },
-  },
-  render: renderCaption,
-});
-registerTemplate({
-  id: 'media',
-  name: 'common.media',
-  kind: 'media',
-  defaultTrackIndex: 2,
-  slots: { media: { type: 'image', label: 'engine.imageVideo' } },
-  render: renderMedia,
-});
+let builtInTemplatesRegistered = false;
 
 /**
  * Force-load anchor: all templates register via this module's TOP-LEVEL registerTemplate side
  * effects. Under sideEffects:false, if nobody imports a named export of this module the bundler
  * tree-shakes the whole thing away (REGISTRY empty → getTemplate returns undefined → blockKind
  * crashes). The MCP worker path (server-tools' blockKind/renderBlock) is exactly this case.
- * Having the consumer import and call this empty function forces the module into the bundle and
- * top-level evaluation (completing registration).
+ * Registration lives inside this function rather than relying on module side effects: Rollup can
+ * legally erase an empty anchor plus its module even when a package marks the source as side-effectful.
  */
 export function ensureTemplatesRegistered(): void {
-  /* Empty impl: its only purpose is to give the bundler a non-shakeable reference, incidentally triggering this module's top-level side effects. */
+  if (builtInTemplatesRegistered) return;
+  builtInTemplatesRegistered = true;
+  registerTemplate({
+    id: 'custom',
+    name: 'engine.customHtml',
+    kind: 'custom',
+    defaultTrackIndex: 2,
+    slots: { innerHtml: { type: 'text', label: 'HTML' }, timelineBody: { type: 'text', label: 'engine.gsapTimelineBody' } },
+    render: (slots) => ({ innerHtml: str(slots.innerHtml, '<div></div>'), timelineBody: str(slots.timelineBody) }),
+  });
+  registerTemplate({
+    id: 'title',
+    name: 'common.titleCard',
+    kind: 'title',
+    defaultTrackIndex: 2,
+    slots: { text: { type: 'text', label: 'common.title', required: true }, sub: { type: 'text', label: 'engine.subtitle' } },
+    render: renderTitle,
+  });
+  registerTemplate({
+    id: 'stat',
+    name: 'common.bigNumber',
+    kind: 'stat',
+    defaultTrackIndex: 2,
+    slots: { value: { type: 'text', label: 'common.number', required: true }, label: { type: 'text', label: 'engine.label' } },
+    render: renderStat,
+  });
+  registerTemplate({
+    id: 'list',
+    name: 'common.bulletList',
+    kind: 'list',
+    defaultTrackIndex: 2,
+    slots: { title: { type: 'text', label: 'engine.heading' }, items: { type: 'text[]', label: 'engine.bulletPoints', required: true } },
+    render: renderList,
+  });
+  registerTemplate({
+    id: 'transition',
+    name: 'tools.add_transition.label',
+    kind: 'transition',
+    defaultTrackIndex: 3, // topmost, covers the cut beneath
+    slots: { effect: { type: 'enum', label: 'engine.effect', options: ['wipe', 'flash', 'fade', 'slide'] } },
+    render: renderTransition,
+  });
+  registerTemplate({
+    id: 'caption',
+    name: 'engine.animatedCaptions',
+    kind: 'caption',
+    defaultTrackIndex: 1,
+    slots: {
+      words: { type: 'words', label: 'engine.wordTimings', required: true },
+      effect: { type: 'enum', label: 'engine.effect', options: ['kinetic-slam'] },
+      sub: { type: 'text', label: 'engine.translationLine' },
+    },
+    render: renderCaption,
+  });
+  registerTemplate({
+    id: 'media',
+    name: 'common.media',
+    kind: 'media',
+    defaultTrackIndex: 2,
+    slots: { media: { type: 'image', label: 'engine.imageVideo' } },
+    render: renderMedia,
+  });
 }

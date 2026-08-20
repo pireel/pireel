@@ -224,6 +224,7 @@ import {
   decodeBake,
 } from "./transition-bake";
 import { studioProviders } from "@pireel/studio-engine/providers";
+import { ensureTemplatesRegistered } from "@pireel/studio-engine/templates";
 import {
   customVisualStylePalette,
   type CustomVisualStyle,
@@ -270,6 +271,7 @@ import {
   type ProjectSavePayload,
   type StudioProjectDto,
 } from "@pireel/studio-engine/project-dto";
+
 import { useGenerationLock } from "./use-generation-lock";
 import { useMediaAnalysis } from "./use-media-analysis";
 import { useStudioExport } from "./use-export";
@@ -394,6 +396,11 @@ import {
   fitEditableBoxIntoSafeArea,
   withEditableBlockGeometry,
 } from "./editable-block-geometry";
+
+// The workbench calls semantic template helpers during its first render. Keep the
+// registration call in this concrete client entry as well as the engine barrel:
+// production tree-shaking can flatten a re-export barrel before evaluating it.
+ensureTemplatesRegistered();
 
 const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
 const RAIL_NAV_W = 48; // vertical primary-nav strip on the rail's outer edge; railW measures the CONTENT column only

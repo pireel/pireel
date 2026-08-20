@@ -16,4 +16,11 @@ describe('composition public entry template registry', () => {
     expect(blockKind(block)).toBe('custom');
     expect(renderBlock(block).innerHtml).toContain('ready');
   });
+
+  it('degrades an unavailable template safely instead of crashing the project', () => {
+    const missing = getTemplate('retired-template');
+
+    expect(missing.kind).toBe('custom');
+    expect(missing.render({ innerHtml: '<em>kept</em>' }, 'legacy').innerHtml).toContain('kept');
+  });
 });

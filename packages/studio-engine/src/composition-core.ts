@@ -1024,11 +1024,36 @@ export interface Template {
 }
 
 const REGISTRY = new Map<string, Template>();
+const BUILT_IN_TEMPLATE_KINDS: Readonly<Record<string, BlockKind>> = {
+  custom: 'custom',
+  title: 'title',
+  stat: 'stat',
+  list: 'list',
+  transition: 'transition',
+  caption: 'caption',
+  media: 'media',
+};
+
+const fallbackTemplate = (id: string): Template => ({
+  id,
+  name: id,
+  kind: BUILT_IN_TEMPLATE_KINDS[id] ?? 'custom',
+  defaultTrackIndex: 2,
+  slots: {},
+  // A missing optional template module must not take down an entire project.
+  // Custom blocks retain their authored HTML; unknown templates degrade to an
+  // empty element until their renderer is available.
+  render: (slots) => ({
+    innerHtml: typeof slots.innerHtml === 'string' ? slots.innerHtml : '<div></div>',
+    timelineBody: typeof slots.timelineBody === 'string' ? slots.timelineBody : '',
+  }),
+});
+
 export function registerTemplate(t: Template): void {
   REGISTRY.set(t.id, t);
 }
 export function getTemplate(id: string): Template {
-  return REGISTRY.get(id) ?? REGISTRY.get('custom')!;
+  return REGISTRY.get(id) ?? REGISTRY.get('custom') ?? fallbackTemplate(id);
 }
 export function listTemplates(): Template[] {
   return [...REGISTRY.values()];
