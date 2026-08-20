@@ -57,9 +57,11 @@ describe('local project document persistence', () => {
       savedAt: 1,
     }));
     storage.setItem('studio:chat:v1', JSON.stringify([{ id: 'legacy-message' }]));
+    storage.setItem('studio:chat:v1:project-1', JSON.stringify([{ id: 'project-message' }]));
     migrateLegacyDraft();
     expect(storage.getItem('studio:draft:v1')).toBeNull();
     expect(storage.getItem('studio:chat:v1')).toBeNull();
+    expect(storage.getItem('studio:chat:v1:project-1')).toBeNull();
     expect(storage.getItem('studio:draft:legacy-single')).toBeNull();
   });
 
@@ -77,7 +79,6 @@ describe('local project document persistence', () => {
 
     const result = await serverSaveProject(id, {
       document: stored.document,
-      chat: [],
       videoSig: null,
       videoDurationSec: null,
       coverThumb: null,

@@ -58,6 +58,12 @@ export interface ProjectStore {
   remove(id: string): Promise<void>;
 }
 
+/** Server-authoritative Studio chat sessions. Browser storage is not part of this contract. */
+export interface ChatThreadStore {
+  list(projectId: string): Promise<unknown[] | null>;
+  save(projectId: string, thread: unknown): Promise<void>;
+}
+
 /** Generic asset upload (panel images, stock uploads …) — returns a public URL + storage key. */
 export interface AssetUploader {
   upload(blob: Blob, opts: { contentType: string; filename?: string }): Promise<{ url: string; key: string }>;
@@ -101,6 +107,8 @@ export interface StudioProviders {
   transcriber: Transcriber;
   vault: MediaVault;
   projects: ProjectStore;
+  /** Built-in chat persistence, independent from project document/version sync. */
+  chats?: ChatThreadStore;
   uploads: AssetUploader;
   /** Project component library sync (absent = pure-local localStorage library, e.g. the OSS shell). */
   elements?: ElementStore;

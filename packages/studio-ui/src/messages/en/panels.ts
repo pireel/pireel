@@ -212,6 +212,8 @@ export const PANELS_EN: Record<string, string> = {
   "panels.localReconnectFailed":
     "Couldn’t restore access — the file may have moved or been deleted",
   "panels.import": "Import",
+  "panels.uploadFile": "Upload file",
+  "panels.chooseFolder": "Folder",
   "panels.importFolder": "Import folder",
   "panels.importFromLocalService": "Import from local service",
   "panels.localServiceInvalid": "The local import address is invalid",
@@ -308,6 +310,19 @@ export const PANELS_EN: Record<string, string> = {
   "customFrame.motionGraphics": "Motion Graphics",
   "customFrame.motionGraphicsHint":
     "Capability samples, not a template catalog; content and visual direction determine the final form",
+  "customFrame.productNative.hint":
+    "Real product footage stays primary. Display type, benefits and CTA enter only when needed; color comes from the product, packaging and brand.",
+  "customFrame.productNative.productHeadline": "Recognize the product first",
+  "customFrame.productNative.productNote": "Complete form · package · brand truth",
+  "customFrame.productNative.actionHeadline": "See real use",
+  "customFrame.productNative.actionNote": "Carry the action from contact to completion",
+  "customFrame.productNative.textureHeadline": "Make texture legible",
+  "customFrame.productNative.textureNote": "Give the result an inspectable hold",
+  "customFrame.productNative.typeHeadline": "Lightweight. Easy to spread.",
+  "customFrame.productNative.typeNote": "Display type follows the product and never covers it",
+  "customFrame.productNative.releaseHeadline": "Real result. Direct action.",
+  "customFrame.productNative.releaseNote": "Product, benefit and CTA settle together",
+  "customFrame.productNative.cta": "Explore product →",
   "customFrame.sample.words": "Words and quotes",
   "customFrame.sample.number": "Key number",
   "customFrame.sample.comparison": "Comparison",

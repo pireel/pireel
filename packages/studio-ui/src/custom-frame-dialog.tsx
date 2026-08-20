@@ -985,6 +985,9 @@ function PreviewSet({
   style: CustomVisualStyle;
   direction: FrameCatalogItem;
 }) {
+  if (direction.id === "performance-native")
+    return <ProductNativePreviewSet style={style} direction={direction} />;
+
   const palette = customVisualStylePalette(
     style,
     direction.id === CUSTOM_FRAME_ID ? null : direction.palette,
@@ -1075,6 +1078,209 @@ function PreviewSet({
       <p className="text-ink-4 text-[10px] leading-relaxed">
         {t("customFrame.motionGraphicsHint")}
       </p>
+    </div>
+  );
+}
+
+const PRODUCT_NATIVE_PREVIEWS = [
+  {
+    id: "product",
+    label: "PRODUCT",
+    kicker: "PRODUCT / 01",
+    headlineKey: "customFrame.productNative.productHeadline",
+    noteKey: "customFrame.productNative.productNote",
+    zoom: 1,
+    origin: "center",
+  },
+  {
+    id: "action",
+    label: "ACTION",
+    kicker: "REAL USE / 02",
+    headlineKey: "customFrame.productNative.actionHeadline",
+    noteKey: "customFrame.productNative.actionNote",
+    zoom: 1.72,
+    origin: "82% 18%",
+  },
+  {
+    id: "texture",
+    label: "TEXTURE",
+    kicker: "DETAIL / 03",
+    headlineKey: "customFrame.productNative.textureHeadline",
+    noteKey: "customFrame.productNative.textureNote",
+    zoom: 1.82,
+    origin: "82% 82%",
+  },
+  {
+    id: "type",
+    label: "LIGHT TYPE",
+    kicker: "BENEFIT / 04",
+    headlineKey: "customFrame.productNative.typeHeadline",
+    noteKey: "customFrame.productNative.typeNote",
+    zoom: 1.14,
+    origin: "30% 50%",
+  },
+  {
+    id: "release",
+    label: "RESULT / CTA",
+    kicker: "RESULT / 05",
+    headlineKey: "customFrame.productNative.releaseHeadline",
+    noteKey: "customFrame.productNative.releaseNote",
+    zoom: 1.18,
+    origin: "30% 50%",
+  },
+] as const;
+
+function ProductNativePreviewSet({
+  style,
+  direction,
+}: {
+  style: CustomVisualStyle;
+  direction: FrameCatalogItem;
+}) {
+  const palette = customVisualStylePalette(style, direction.palette);
+  const [selectedId, setSelectedId] = useState<string>(
+    PRODUCT_NATIVE_PREVIEWS[0].id,
+  );
+  const selected =
+    PRODUCT_NATIVE_PREVIEWS.find((sample) => sample.id === selectedId) ??
+    PRODUCT_NATIVE_PREVIEWS[0];
+
+  return (
+    <div className="space-y-3">
+      <div className="overflow-hidden rounded-lg bg-black shadow-[0_18px_42px_rgb(0_0_0/0.2)]">
+        <ProductNativeScene
+          coverKey={
+            direction.coverKey ?? "/studio/frame-covers/performance-native.jpg"
+          }
+          palette={palette}
+          sample={selected}
+        />
+      </div>
+      <div
+        role="tablist"
+        aria-label={t("customFrame.previewSet")}
+        className="flex gap-2 overflow-x-auto pb-1"
+      >
+        {PRODUCT_NATIVE_PREVIEWS.map((sample) => {
+          const active = selected.id === sample.id;
+          return (
+            <button
+              key={sample.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-label={sample.label}
+              onClick={() => setSelectedId(sample.id)}
+              className={`relative w-[96px] shrink-0 overflow-hidden rounded-md bg-black text-left transition duration-200 hover:opacity-100 active:scale-[.98] ${active ? "opacity-100" : "opacity-55 hover:opacity-80"}`}
+            >
+              <ProductNativeScene
+                coverKey={
+                  direction.coverKey ??
+                  "/studio/frame-covers/performance-native.jpg"
+                }
+                palette={palette}
+                sample={sample}
+                thumbnail
+              />
+              {active ? (
+                <span
+                  aria-hidden
+                  className="ring-accent pointer-events-none absolute inset-0 z-10 rounded-md ring-2 ring-inset"
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-ink-4 text-[10px] leading-relaxed">
+        {t("customFrame.productNative.hint")}
+      </p>
+    </div>
+  );
+}
+
+function ProductNativeScene({
+  coverKey,
+  palette,
+  sample,
+  thumbnail = false,
+}: {
+  coverKey: string;
+  palette: Record<string, string>;
+  sample: (typeof PRODUCT_NATIVE_PREVIEWS)[number];
+  thumbnail?: boolean;
+}) {
+  const isType = sample.id === "type";
+  const isRelease = sample.id === "release";
+  return (
+    <div
+      className="relative aspect-video overflow-hidden"
+      style={{ background: palette.paper }}
+    >
+      <img
+        src={coverKey}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500"
+        style={{
+          transform: `scale(${sample.zoom})`,
+          transformOrigin: sample.origin,
+        }}
+      />
+      <span
+        className="absolute left-[4.5%] top-[6%] h-1 w-[7%] rounded-full"
+        style={{ background: palette.accent }}
+      />
+      {!thumbnail ? (
+        <>
+          <span
+            className="absolute left-[4.5%] top-[10%] font-mono text-[9px] font-semibold tracking-[0.16em]"
+            style={{ color: palette.fg }}
+          >
+            {sample.kicker}
+          </span>
+          <div
+            className={`absolute max-w-[43%] ${isRelease ? "bottom-[7%] right-[4.5%] text-right" : "bottom-[8%] left-[4.5%]"}`}
+          >
+            <strong
+              className={`${isType ? "text-[clamp(24px,4.8vw,58px)]" : "text-[clamp(20px,3.4vw,44px)]"} block text-balance font-black leading-[0.94] tracking-[-0.055em]`}
+              style={{ color: palette.fg }}
+            >
+              {t(sample.headlineKey)}
+            </strong>
+            <span
+              className="mt-2 inline-flex rounded-full px-3 py-1 text-[10px] font-semibold tracking-[0.04em]"
+              style={{
+                background: isRelease ? palette.fg : palette.paper,
+                color: isRelease ? palette.paper : palette.fg,
+                boxShadow: "0 6px 18px rgb(0 0 0 / .1)",
+              }}
+            >
+              {t(sample.noteKey)}
+            </span>
+          </div>
+          {sample.id === "texture" ? (
+            <span
+              aria-hidden
+              className="absolute bottom-[25%] right-[21%] h-12 w-12 rounded-full border-2"
+              style={{ borderColor: palette.accent }}
+            />
+          ) : null}
+          {isRelease ? (
+            <span
+              className="absolute bottom-[7%] left-[4.5%] rounded-full px-4 py-2 text-[11px] font-bold"
+              style={{ background: palette.accent, color: palette.fg }}
+            >
+              {t("customFrame.productNative.cta")}
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <span
+          className="absolute bottom-1.5 left-2 rounded-sm bg-black/70 px-1.5 py-0.5 font-mono text-[6px] font-semibold tracking-[0.12em] text-white"
+        >
+          {sample.label}
+        </span>
+      )}
     </div>
   );
 }

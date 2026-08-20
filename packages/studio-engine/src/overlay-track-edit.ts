@@ -74,6 +74,18 @@ function targetError(document: EditorDocumentV2, target: OverlayTrackTarget): Ov
   if (target.newTrack && !Number.isFinite(target.newTrack.stackOrder)) {
     return failure(document, 'invalid-range', 'New overlay stackOrder must be finite.', { path: 'newTrack.stackOrder' });
   }
+  if (target.toTrackId) {
+    const track = document.timeline.tracks.find((candidate) => candidate.id === target.toTrackId);
+    if (!track) {
+      return failure(document, 'track-not-found', `Track does not exist: ${target.toTrackId}`, { trackIds: [target.toTrackId] });
+    }
+    if (track.type !== 'graphics') {
+      return failure(document, 'invalid-track-role', 'Motion Graphics can only be placed on a graphics track.', {
+        path: 'toTrackId',
+        trackIds: [target.toTrackId],
+      });
+    }
+  }
   return null;
 }
 
@@ -146,7 +158,7 @@ export function insertOverlayDocumentClip(input: InsertOverlayDocumentClipInput)
     ? input.document.timeline.tracks.find((track) => track.id === input.toTrackId)
     : !input.newTrack
       ? input.document.timeline.tracks.find((track) =>
-          track.type !== 'audio' && track.role !== 'primaryNarrative' && track.stackOrder === stackOrder)
+          track.type === 'graphics' && track.stackOrder === stackOrder)
       : undefined;
   const target = insertTargetTrack(input.document, existing
     ? { toTrackId: existing.id }

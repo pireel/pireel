@@ -70,7 +70,6 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.elapsedRemaining': '{a}s · ~{b}s left',
   'chatGen.emptyStateIntro': 'Describe the output you want, or choose a Skill for a complete professional editing workflow.',
   'chatGen.executionFailed': 'Execution failed',
-  'chatGen.executionBudgetExhausted': 'This stage finished safely. The next step can continue from the current progress.',
   'chatGen.continueFromCurrentState': 'Continue from current progress',
   'chatGen.continueAfterInterruptionPrompt': 'Continue the interrupted work. Inspect the current project state first, complete only what remains, and do not repeat changes that already landed.',
   'chatGen.interruptedStatePreserved': 'The connection was interrupted. Changes that already landed are still preserved.',

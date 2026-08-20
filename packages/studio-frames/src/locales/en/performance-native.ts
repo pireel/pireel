@@ -1,12 +1,12 @@
 import type { FrameLocalePack } from '../types';
 
 export const pack: FrameLocalePack = {
-  title: 'Performance Native',
+  title: 'Product Native',
   summary:
-    'Phone-close people, full-field product action, forceful reading, real source sound, and inspectable proof create a direct feed-native conversion world without imitating platform chrome.',
+    'Real product footage stays full and tactile while product-derived color, light display type, source sound, proof and a direct CTA shape a fresh short-form ad.',
   copy: {
-    '原生': 'PERFORMANCE',
-    '转化': 'NATIVE',
+    '商品': 'PRODUCT',
+    '原生': 'NATIVE',
     '真实上手，': 'REAL USE,',
     '直接看懂': 'DIRECTLY UNDERSTOOD',
     '人和产品': 'PERSON AND PRODUCT',

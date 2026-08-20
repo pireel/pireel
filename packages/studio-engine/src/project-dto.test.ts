@@ -29,7 +29,6 @@ const document = () => {
 
 const payload = (over: Partial<ProjectSavePayload> = {}): ProjectSavePayload => ({
   document: document(),
-  chat: [{ id: 't1' }],
   videoSig: 'sig1',
   videoDurationSec: 12.5,
   coverThumb: 'data:image/jpeg;base64,xxx',
@@ -39,7 +38,6 @@ const payload = (over: Partial<ProjectSavePayload> = {}): ProjectSavePayload => 
 const existing = (value: unknown = document()) => ({
   title: '我的片子',
   document: value,
-  chat: [{ id: 'old' }],
   videoSig: 'sig-old',
   videoDurationSec: '30' as string | number | null,
   coverThumb: 'thumb-old',
@@ -55,7 +53,7 @@ describe('canonical JSON', () => {
 
 describe('strict V2 project DTO', () => {
   const row = {
-    id: 'project-1', title: 'native', comp: document(), chat: [], context: {}, videoSig: 'sig1',
+    id: 'project-1', title: 'native', comp: document(), context: {}, videoSig: 'sig1',
     videoDurationSec: '12.5', coverThumb: null, version: 7, updatedAt: new Date(1000),
   };
 
@@ -117,28 +115,30 @@ describe('strict V2 project DTO', () => {
 });
 
 describe('V2 incremental save wire', () => {
-  it('sends native document/chat/meta on a cold baseline and skips an unchanged save', () => {
+  it('sends native document/meta on a cold baseline and skips an unchanged save', () => {
     const first = buildSaveWire(payload(), 3, null)!;
     expect(first.wire).toMatchObject({ baseVersion: 3, documentSchemaVersion: 2, videoSig: 'sig1' });
     expect(first.wire.document).toBeDefined();
-    expect(first.wire.chat).toBeDefined();
     expect(first.wire).not.toHaveProperty('context');
     expect(buildSaveWire(payload(), 4, first.acked)).toBeNull();
   });
 
-  it('keeps document absent for chat-only saves', () => {
-    const chatOnly = payload({ document: undefined, chat: [{ id: 'consultation' }] });
-    const first = buildSaveWire(chatOnly, null, null)!;
+  it('keeps document absent for context-only saves', () => {
+    const contextOnly = payload({ document: undefined, context: { schemaVersion: 3 } });
+    const first = buildSaveWire(contextOnly, null, null)!;
     expect(first.wire.document).toBeUndefined();
-    expect(first.wire.chat).toBeDefined();
-    const next = buildSaveWire(payload({ chat: chatOnly.chat }), 1, first.acked)!;
+    expect(first.wire.context).toBeDefined();
+    const next = buildSaveWire(payload(), 1, first.acked)!;
     expect(next.wire.document ?? next.wire.documentPatch).toBeDefined();
   });
 
   it('emits only the changed section', () => {
-    const first = buildSaveWire(payload(), 3, null)!;
-    const next = buildSaveWire(payload({ chat: [{ id: 't1' }, { id: 't2' }] }), 4, first.acked)!;
-    expect(next.wire.chat ?? next.wire.chatPatch).toBeDefined();
+    const first = buildSaveWire(payload({ context: { schemaVersion: 3 } }), 3, null)!;
+    const next = buildSaveWire(payload({ context: {
+      schemaVersion: 3,
+      localAssets: [{ sig: 'clip.mp4:1:1', label: 'clip.mp4', createdAt: 1 }],
+    } }), 4, first.acked)!;
+    expect(next.wire.context ?? next.wire.contextPatch).toBeDefined();
     expect(next.wire.document).toBeUndefined();
     expect(next.wire.documentPatch).toBeUndefined();
     expect(next.wire.coverThumb).toBeUndefined();
@@ -183,6 +183,7 @@ describe('save request boundary', () => {
   it('rejects retired document/context wire fields instead of silently accepting them', () => {
     expect(sanitizeSavePayload({ comp: document() })).toBeNull();
     expect(sanitizeSavePayload({ compPatch: [], compHash: 'legacy' })).toBeNull();
+    expect(sanitizeSavePayload({ chat: [] })).toBeNull();
     expect(sanitizeSavePayload({ context: { asr: ['legacy'] } })).toBeNull();
     expect(sanitizeSavePayload({ context: {} })).toBeNull();
     expect(sanitizeSavePayload({ context: { schemaVersion: 2 } })).toBeNull();
@@ -231,14 +232,13 @@ describe('conflict baseline', () => {
   it('re-seeds from a server V2 DTO using the same canonical hashes', () => {
     const value = payload();
     const acked = ackedFromDto({
-      document: value.document!, chat: value.chat, context: { schemaVersion: 3 }, coverThumb: value.coverThumb,
+      document: value.document!, context: { schemaVersion: 3 }, coverThumb: value.coverThumb,
       title: '未命名项目', videoSig: value.videoSig, videoDurationSec: value.videoDurationSec,
     });
     const next = buildSaveWire(value, 9, acked);
     if (next) {
       expect(next.wire.document).toBeUndefined();
       expect(next.wire.documentPatch).toBeUndefined();
-      expect(next.wire.chat).toBeUndefined();
       expect(next.wire.coverThumb).toBeUndefined();
     }
   });

@@ -19,6 +19,7 @@ import {
   type EditorTrackRole,
   type EditorTrackType,
   type MediaTimelineClip,
+  type NarrativeTimelineClip,
   type TimelineClip,
   type TimelineClipPlacement,
 } from './editor-document';
@@ -297,6 +298,9 @@ function expectedTrack(asset: EditorMediaAsset, requestedRole?: string): { type:
     const role = requestedRole === 'music' || requestedRole === 'sfx' || requestedRole === 'narration' ? requestedRole : 'narration';
     return { type: 'audio', role };
   }
+  if (asset.kind === 'video' && requestedRole === 'primary') {
+    return { type: 'visual', role: 'primaryNarrative' };
+  }
   return { type: 'visual', role: 'broll' };
 }
 
@@ -317,7 +321,9 @@ function ensureTrack(
   // A caller that omits trackId has not identified anything it intends to replace. Keep overlapping
   // visual evidence/backgrounds on parallel lanes; an exact trackId remains the explicit overwrite
   // escape hatch. Audio retains its semantic single-lane behavior.
-  const existing = desired.type === 'visual' && placement
+  const existing = desired.role === 'primaryNarrative'
+    ? roleTracks[0]
+    : desired.type === 'visual' && placement
     ? roleTracks.find((track) => track.clips.every((clip) => (
         clip.startFrame + clip.durationFrames <= placement.startFrame
         || clip.startFrame >= placement.startFrame + placement.durationFrames
@@ -375,6 +381,11 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
     } as AudioTimelineClip & { offsetFrames: number };
     return clip;
   }
+  const wantsPrimary = string(item.role) === 'primary'
+    || string(item.trackId) === document.semantics.primaryNarrativeTrackId;
+  if (wantsPrimary && asset.kind !== 'video') {
+    return fail('The primary narrative lane accepts video assets only; place images on a visual overlay lane.');
+  }
   const box = item.box === undefined ? undefined : mediaBox(item.box);
   if (item.box !== undefined && !box) return fail('visual media box must be a positive normalized rect inside the canvas');
   const anchorX = item.anchorX === undefined ? undefined : unit(item.anchorX);
@@ -383,6 +394,21 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
   if (item.anchorX !== undefined && anchorX === undefined) return fail('anchorX must be within 0..1');
   if (item.anchorY !== undefined && anchorY === undefined) return fail('anchorY must be within 0..1');
   if (item.opacity !== undefined && opacity === undefined) return fail('opacity must be within 0..1');
+  if (wantsPrimary) {
+    return {
+      ...common,
+      kind: 'narrative',
+      assetId: asset.id,
+      sourceInSec,
+      sourceOutSec: sec(item.sourceOutSec, sourceInSec + requestedDuration),
+      ...(box ? { box } : {}),
+      properties: {
+        treatment: 'full',
+        ...(typeof item.volumeDb === 'number' ? { volumeDb: item.volumeDb } : {}),
+        ...(typeof item.muted === 'boolean' ? { audioMuted: item.muted } : {}),
+      },
+    } as NarrativeTimelineClip & { offsetFrames: number };
+  }
   return {
     ...common,
     kind: 'media',
@@ -539,6 +565,21 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
     next = inserted.document;
+    if (ensured.track.role === 'primaryNarrative') {
+      const firstPrimary = ensured.track.id === inserted.document.semantics.primaryNarrativeTrackId
+        ? inserted.document.timeline.tracks
+            .find((track) => track.id === ensured.track.id)
+            ?.clips
+            .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative')
+            .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id))[0]
+        : undefined;
+      if (firstPrimary) {
+        next = {
+          ...next,
+          semantics: { ...next.semantics, primaryNarrativeAssetId: firstPrimary.assetId },
+        };
+      }
+    }
     receipts.push(inserted.receipt);
     created.push(placement.id);
   }

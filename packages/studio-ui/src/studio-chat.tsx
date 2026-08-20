@@ -10,10 +10,10 @@
  *    Composition client-side (runTool injected by the workbench), addToolOutput feeds back to continue.
  *    Block generation goes through /api/studio/compose.
  *  · Tool calls render in the stream as a badge (instant ops) or a card (generative)
- *  · Multi-session: threads live in localStorage, switching remounts by key; startProgress still drives "one-tap film".
+ *  · Multi-session: server snapshots are injected by the shell; switching remounts by thread id.
  *
  * Split across modules: chat-format (pills/avatar/dots), chat-tool-parts (badge/card),
- * chat-composer (input), chat-thread (single-thread useChat), chat-thread-store (localStorage).
+ * chat-composer (input), chat-thread (single-thread useChat), chat-thread-store (validation/restore helpers).
  * This file keeps the public types + the multi-session shell.
  */
 
@@ -42,9 +42,8 @@ import { ChatThread } from "./chat-thread";
 import {
   type StoredThread,
   firstUserText,
-  loadThreads,
+  normalizeStoredThreads,
   sanitizeRestored,
-  saveThreads,
 } from "./chat-thread-store";
 import { t } from "./i18n";
 import {
@@ -139,10 +138,10 @@ export interface StudioChatProps {
   timelineFramePickBusy?: boolean;
   timelineFramePickAvailable?: boolean;
   onTimelineFramePickActiveChange?: (active: boolean) => void;
-  /** Session persistence key (per project: studio:chat:v1:<projectId>, sessions belong to a project). */
-  storageKey: string;
-  /** Fired after threads are written to localStorage (the workbench uses it to sync sessions to the cloud too). */
-  onThreadsChange?: () => void;
+  /** Server session snapshots already loaded for this project. */
+  initialThreads: readonly unknown[];
+  /** Fired whenever the active thread has a durable snapshot ready for immediate server persistence. */
+  onThreadChange?: (thread: StoredThread) => void;
   /** Close the chat area (header X; workbench collapses the right region to free up screen). Omit to not render the close button. */
   onClose?: () => void;
 }
@@ -165,8 +164,8 @@ export const StudioChat = memo(
       timelineFramePickAvailable = false,
       onTimelineFramePickActiveChange,
       onFrameApplied,
-      storageKey,
-      onThreadsChange,
+      initialThreads,
+      onThreadChange,
       onClose,
     },
     ref,
@@ -193,8 +192,8 @@ export const StudioChat = memo(
       ? shell.defaultScenarioSkillId!
       : STUDIO_AUTO_SKILL_ID;
     const [threads, setThreads] = useState<StoredThread[]>([]);
-    const onThreadsChangeRef = useRef(onThreadsChange);
-    onThreadsChangeRef.current = onThreadsChange;
+    const onThreadChangeRef = useRef(onThreadChange);
+    onThreadChangeRef.current = onThreadChange;
     const [activeId, setActiveId] = useState<string>(() => mid("thread"));
     const [histOpen, setHistOpen] = useState(false);
     const innerRef = useRef<StudioChatHandle | null>(null);
@@ -227,21 +226,20 @@ export const StudioChat = memo(
       };
     }, [customScenarioSkillManager]);
 
-    // Restore from localStorage after mount (SSR-safe: first frame empty, hydrate on the client). Key is per project,
-    // sessions belong to a project; the workbench remounts per project, so storageKey won't change mid-life
+    // Restore the server-authoritative sessions once both the built-in and custom Skill catalogs are ready.
     const restoredRef = useRef(false);
     useEffect(() => {
       if (!customScenarioSkillsReady || restoredRef.current) return;
       restoredRef.current = true;
-      const loaded = loadThreads(
-        storageKey,
+      const loaded = normalizeStoredThreads(
+        initialThreads,
         scenarioSkills.map((skill) => skill.id),
       );
       if (loaded.length) {
         setThreads(loaded);
         setActiveId(loaded[0]!.id);
       }
-    }, [customScenarioSkillsReady, scenarioSkills, storageKey]);
+    }, [customScenarioSkillsReady, initialThreads, scenarioSkills]);
 
     const importScenarioSkill = useCallback(
       async (file: File) => {
@@ -278,7 +276,7 @@ export const StudioChat = memo(
     );
 
     // Latest threads mirror: onSnapshot computes merged outside the updater (the updater must be pure — React replays
-    // queued updaters during render, and side effects like saveThreads/notifying the workbench inside would become
+    // queued updaters during render, and side effects like notifying the workbench inside would become
     // "setState during render" warnings; been bitten). Snapshots come from the stream-end callback (event time), so the ref reads the current value.
     const threadsRef = useRef(threads);
     threadsRef.current = threads;
@@ -304,10 +302,9 @@ export const StudioChat = memo(
           ...threadsRef.current.filter((t) => t.id !== activeId),
         ];
         setThreads(merged);
-        saveThreads(storageKey, merged);
-        onThreadsChangeRef.current?.(); // persisted to localStorage → notify the workbench to sync to the cloud
+        onThreadChangeRef.current?.(next);
       },
-      [activeId, storageKey],
+      [activeId],
     );
 
     const newConversation = useCallback(() => {

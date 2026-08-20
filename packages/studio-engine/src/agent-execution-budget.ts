@@ -1,13 +1,11 @@
 /**
  * Deterministic safety budgets for Agent-driven Studio work.
  *
- * These limits do not decide edits or compose a feature workflow. They cap orchestration fan-out
- * around the existing atomic tools so a confused model cannot create hundreds of calls, reviews,
- * or proposal operations in one user turn.
+ * These limits do not decide edits or compose a feature workflow. They protect individual
+ * high-fan-out operations and repeated visual reviews without imposing a whole-job call ceiling.
  */
 
 export const STUDIO_AGENT_EXECUTION_LIMITS = {
-  toolCallsPerTurn: 24,
   proposalOperations: 32,
   proposalSplitCalls: 1,
   splitPointsPerCall: 24,
@@ -15,56 +13,6 @@ export const STUDIO_AGENT_EXECUTION_LIMITS = {
   framingUpdatesPerCall: 120,
   reviewsPerUnchangedMoment: 2,
 } as const;
-
-export interface AgentMessagePartLike {
-  type?: unknown;
-  toolName?: unknown;
-}
-
-export interface AgentMessageLike {
-  role?: unknown;
-  parts?: unknown;
-}
-
-export interface AgentTurnUsage {
-  toolCalls: number;
-  remainingToolCalls: number;
-  exhausted: boolean;
-}
-
-const isToolPart = (part: AgentMessagePartLike) =>
-  (typeof part.type === 'string' && part.type.startsWith('tool-')) ||
-  (part.type === 'dynamic-tool' && typeof part.toolName === 'string');
-
-/** Count only work after the latest real user message. SDK `step-start` parts survive persistence and
- * give a more faithful round count when several continuations append to one assistant message. */
-export function studioAgentTurnUsage(messages: readonly AgentMessageLike[]): AgentTurnUsage {
-  let lastUser = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === 'user') {
-      lastUser = index;
-      break;
-    }
-  }
-  let toolCalls = 0;
-  for (const message of messages.slice(lastUser + 1)) {
-    if (message.role !== 'assistant' || !Array.isArray(message.parts)) continue;
-    const parts = message.parts.filter((part): part is AgentMessagePartLike => !!part && typeof part === 'object');
-    toolCalls += parts.filter(isToolPart).length;
-  }
-  const remainingToolCalls = Math.max(0, STUDIO_AGENT_EXECUTION_LIMITS.toolCallsPerTurn - toolCalls);
-  return {
-    toolCalls,
-    remainingToolCalls,
-    exhausted: remainingToolCalls === 0,
-  };
-}
-
-export function studioAgentBudgetPrompt(usage: AgentTurnUsage): string {
-  return usage.exhausted
-    ? `Internal execution capacity is complete (${usage.toolCalls} tool calls). Do not call another tool. In the visible reply NEVER mention budgets, limits, tool calls, tokens, credits, or capacity. Briefly say what has landed, then name the single concrete next action so the user can continue it in a fresh turn.`
-    : `Internal execution capacity: ${usage.remainingToolCalls} tool calls remain in this user turn. This is private orchestration state: NEVER mention it, budgets, limits, tokens, or credits to the user. There is no model-round ceiling: continue the requested job while useful tool capacity remains. Batch homogeneous edits into vectorized atomic tools; never spend one call per shot when a batch field exists.`;
-}
 
 export const reviewMomentKey = (atSec: number) => Math.round(atSec * 10) / 10;
 

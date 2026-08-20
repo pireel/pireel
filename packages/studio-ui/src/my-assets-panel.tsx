@@ -954,16 +954,30 @@ export function MyAssetsPanel({
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto p-2">
         {!hasAny ? (
-          <button
-            type="button"
-            onClick={() => void pickImport()}
-            disabled={importing}
-            aria-label={t('panels.import')}
-            className="border-line text-ink-4 hover:border-accent/60 hover:text-ink focus-visible:ring-accent flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed py-10 transition-colors focus-visible:outline-none focus-visible:ring-1 disabled:cursor-wait disabled:opacity-60"
-          >
+          <div className="border-line text-ink-4 flex w-full flex-col items-center justify-center gap-3 rounded-md border border-dashed px-3 py-9">
             {importing ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
             <span className="text-[11.5px]">{t('panels.noLocalAssets')}</span>
-          </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void pickImport()}
+                disabled={importing}
+                className="bg-accent text-accent-foreground inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[11px] font-medium transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
+              >
+                <Upload size={11} />
+                {t('panels.uploadFile')}
+              </button>
+              <button
+                type="button"
+                onClick={() => void pickFolder()}
+                disabled={importing}
+                className="border-line text-ink-2 hover:bg-panel inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors disabled:cursor-wait disabled:opacity-50"
+              >
+                <FolderOpen size={11} />
+                {t('panels.chooseFolder')}
+              </button>
+            </div>
+          </div>
         ) : !hasVisible ? (
           <div className="text-ink-4 flex h-24 items-center justify-center px-4 text-center text-[11px]">{t('panels.noMatchingAssetsTry')}</div>
         ) : (

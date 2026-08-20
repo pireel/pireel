@@ -320,7 +320,14 @@ export function relayManagedCaptionTrack(
   if (track.locked) return commandFailure(document, 'track-locked', `Track is locked: ${trackId}`, { trackIds: [trackId] });
 
   const selection = requestedSource ?? document.semantics.managedCaptionSource ?? { mode: 'auto' };
-  const speechClips = selectedSpeechClips(document, selection);
+  const automaticTrack = selection.mode === 'auto' ? dominantTimelineSpeechTrack(document) : null;
+  const speechClips = automaticTrack?.clips ?? selectedSpeechClips(document, selection);
+  // `auto` is a discovery instruction, not a durable relationship. Once the first viable speech
+  // lane is chosen, pin that lane so a later mute/unmute action changes playback only and cannot
+  // silently rebind or remove the user's generated captions.
+  const persistedSelection: CaptionSourceSelection = automaticTrack
+    ? { mode: 'track', trackId: automaticTrack.trackId }
+    : selection;
   const captionTruthKnown = Object.values(document.semantics.transcripts).some((segments) => segments.length > 0);
   if (!speechClips.length && !captionTruthKnown && !requestedSource) {
     return { ok: true, document, receipt: emptyCommandReceipt('captions.relay') };
@@ -408,7 +415,10 @@ export function relayManagedCaptionTrack(
         : { anchor: { type: 'timeline' as const } }),
     };
   });
-  if (JSON.stringify(track.clips) === JSON.stringify(clips)) {
+  if (
+    JSON.stringify(track.clips) === JSON.stringify(clips)
+    && JSON.stringify(document.semantics.managedCaptionSource) === JSON.stringify(persistedSelection)
+  ) {
     return { ok: true, document, receipt: emptyCommandReceipt('captions.relay') };
   }
 
@@ -421,7 +431,7 @@ export function relayManagedCaptionTrack(
     timeline: { ...document.timeline, tracks },
     semantics: {
       ...document.semantics,
-      managedCaptionSource: selection,
+      managedCaptionSource: persistedSelection,
       scenes: removedIds.size
         ? document.semantics.scenes.map((scene) => ({ ...scene, clipIds: scene.clipIds.filter((id) => !removedIds.has(id)) }))
         : document.semantics.scenes,

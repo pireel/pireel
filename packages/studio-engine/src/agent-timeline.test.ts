@@ -135,6 +135,43 @@ describe('shared agent timeline atoms', () => {
     });
   });
 
+  it('places an assembled video sequence on the semantic primary lane when role=primary', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'hook', kind: 'video', url: 'https://cdn.example/hook.mp4', durationSec: 3 },
+        { id: 'proof', kind: 'video', url: 'https://cdn.example/proof.mp4', durationSec: 5 },
+      ],
+    }).document!;
+
+    const placed = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'hook-clip', role: 'primary', assetId: 'hook', startSec: 0, durationSec: 3 },
+        { id: 'proof-clip', role: 'primary', assetId: 'proof', startSec: 3, durationSec: 5 },
+      ],
+    });
+
+    expect(placed.ok).toBe(true);
+    const primary = placed.document!.timeline.tracks.find((track) => track.role === 'primaryNarrative')!;
+    expect(primary.clips).toMatchObject([
+      { id: 'hook-clip', kind: 'narrative', assetId: 'hook', startFrame: 0, durationFrames: 90 },
+      { id: 'proof-clip', kind: 'narrative', assetId: 'proof', startFrame: 90, durationFrames: 150 },
+    ]);
+    expect(placed.document!.semantics.primaryNarrativeAssetId).toBe('hook');
+    expect(placed.document!.timeline.tracks.filter((track) => track.role === 'broll')).toHaveLength(0);
+  });
+
+  it('rejects a non-video asset on the primary narrative lane', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [{ id: 'still', kind: 'image', url: 'https://cdn.example/still.png' }],
+    }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', {
+      clips: [{ role: 'primary', assetId: 'still', startSec: 0, durationSec: 3 }],
+    });
+    expect(placed).toMatchObject({ ok: false, error: expect.stringContaining('primary narrative lane accepts video') });
+  });
+
   it('uses five seconds as an editable default when video duration is unknown', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {

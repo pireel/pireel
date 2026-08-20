@@ -70,7 +70,6 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.elapsedRemaining': '已 {a}s · 约剩 {b}s',
   'chatGen.emptyStateIntro': '直接描述成片目标，或选择一个 Skill 获得更完整的专业剪辑流程。',
   'chatGen.executionFailed': '执行失败',
-  'chatGen.executionBudgetExhausted': '当前阶段已安全收尾，下一步可从现有进度继续。',
   'chatGen.continueFromCurrentState': '从当前进度继续',
   'chatGen.continueAfterInterruptionPrompt': '继续完成刚才中断的工作。先检查当前项目状态，只做剩余部分，不要重复已经完成的修改。',
   'chatGen.interruptedStatePreserved': '连接中断，已经完成的修改仍然保留。',

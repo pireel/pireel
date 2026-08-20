@@ -644,18 +644,11 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(schema.properties).toHaveProperty("purpose");
     expect(split.description).toContain("ONE atSecs[] call");
     expect(CHAT_IDENTITY).toContain('purpose:"framing"');
-    expect(CHAT_IDENTITY).toContain("<execution_budget>");
   });
-  it("MCP 与内置 Agent 共享批处理规则，但不把内部容量说成用户预算或积分", () => {
+  it("MCP 与内置 Agent 共享批处理规则，不施加完整任务调用次数上限", () => {
     const instructions = mcpInstructions("test-version");
-    expect(instructions).toContain("INTERNAL EXECUTION CAPACITY");
-    expect(instructions).toContain("24 Pireel tool calls");
-    expect(instructions).toContain(
-      "There is no plan/act or model-round ceiling",
-    );
-    expect(instructions).toContain(
-      "NEVER expose a budget, limit, count, token, credit, or capacity",
-    );
+    expect(instructions).not.toContain("INTERNAL EXECUTION CAPACITY");
+    expect(instructions).not.toContain("Pireel tool calls");
     expect(instructions).toContain(
       'ONE split_shot {atSecs:[...],purpose:"framing"}',
     );

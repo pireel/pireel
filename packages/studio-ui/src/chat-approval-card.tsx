@@ -20,10 +20,10 @@ export function ApprovalCard({ part }: { part: ToolPartLike }) {
   const input = part.input as { title?: unknown; content?: unknown } | undefined;
   const title = typeof input?.title === 'string' ? input.title.trim() : '';
   const content = typeof input?.content === 'string' ? input.content.trim() : '';
-  const answered = part.state === 'output-available';
   const errored = part.state === 'output-error';
   const active = part.state === 'input-available' || part.state === 'input-streaming';
-  const live = active && usePendingInteraction('approval') !== null;
+  const pendingInteraction = usePendingInteraction('approval');
+  const live = active && pendingInteraction !== null;
   const out = part.output as StudioToolResult | undefined;
   const rawDecision = (out?.data as { decision?: unknown } | undefined)?.decision;
   const decision: ApprovalDecision | null = rawDecision === 'approved' || rawDecision === 'rejected' ? rawDecision : null;
@@ -64,8 +64,8 @@ export function ApprovalCard({ part }: { part: ToolPartLike }) {
           onClick={() => decide('approved')}
           className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[12px] font-semibold transition-colors ${
             decision === 'approved'
-              ? 'bg-accent text-white'
-              : 'bg-ink text-bg hover:opacity-90 disabled:opacity-45'
+              ? 'bg-ink text-bg'
+              : 'bg-accent text-accent-foreground hover:opacity-90 disabled:opacity-45'
           }`}
         >
           <Check size={13} strokeWidth={2.4} />

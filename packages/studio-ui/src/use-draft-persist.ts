@@ -37,10 +37,9 @@ import { t } from './i18n';
 const PREFIX = 'studio:draft:';
 const LEGACY_KEY = 'studio:draft:v1'; // single-draft era; 'v1' is a reserved id, skipped during scans
 const LEGACY_CHAT_KEY = 'studio:chat:v1';
+const LEGACY_CHAT_PREFIX = 'studio:chat:v1:';
 
 const keyFor = (id: string) => `${PREFIX}${id}`;
-/** A project's chat session storage key (sessions belong to a project, never mixed across projects). */
-export const chatKeyFor = (id: string) => `studio:chat:v1:${id}`;
 
 export interface StudioDraft {
   /** Project id (= draft id, stable across saves). */
@@ -186,11 +185,6 @@ export function renameProject(id: string, title: string) {
 
 export function deleteProject(id: string) {
   clearDraft(id);
-  try {
-    window.localStorage.removeItem(chatKeyFor(id));
-  } catch {
-    /* ignore */
-  }
 }
 
 /** Retired single-draft cache is discarded; the online V2 row is the recovery source. */
@@ -198,30 +192,16 @@ export function migrateLegacyDraft() {
   try {
     window.localStorage.removeItem(LEGACY_KEY);
     window.localStorage.removeItem(LEGACY_CHAT_KEY);
+    for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(LEGACY_CHAT_PREFIX)) window.localStorage.removeItem(key);
+    }
   } catch {
     /* ignore */
   }
 }
 
 /* ============================ Server sync (cloud wins + local cache) ============================ */
-
-/** Chat thread read path (chatKeyFor's raw array): folded into the project row for upload. Read/write are fault-tolerant. */
-export function readChatThreads(projectId: string): unknown[] {
-  try {
-    const raw = window.localStorage.getItem(chatKeyFor(projectId));
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-export function writeChatThreads(projectId: string, threads: unknown[]) {
-  try {
-    window.localStorage.setItem(chatKeyFor(projectId), JSON.stringify(threads));
-  } catch {
-    /* quota full / private mode */
-  }
-}
 
 /** The version read from a project row (for optimistic concurrency): one per project, sent back on save, refreshed on conflict. */
 const versions = new Map<string, number>();
@@ -319,7 +299,7 @@ async function putWire(id: string, wire: ProjectSaveWire): Promise<Response> {
 export async function serverSaveProject(id: string, p: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'> {
   try {
     const built = buildSaveWire(p, projectVersion(id), sectionCache.get(id) ?? null);
-    if (!built) return 'ok'; // all five sections unchanged: zero requests
+    if (!built) return 'ok'; // all four sections unchanged: zero requests
     let r = await putWire(id, built.wire);
     let acked = built.acked;
     if (r.status === 422) {
@@ -377,7 +357,7 @@ export async function serverDeleteProject(id: string): Promise<void> {
   }
 }
 
-/** Server project → local localStorage cache (draft + sessions): after opening on a new device there's a local
+/** Server project → local localStorage cache: after opening on a new device there's a local
  *  copy too, for instant open next time and offline viewing. Also remembers version to send back on save.
  *  Returns the in-memory draft for the caller to apply directly — persistence can silently fail on quota, and
  *  reading back from localStorage afterward would yield a stale draft (then autosave would write that stale state
@@ -403,7 +383,6 @@ export function cacheProjectLocally(p: StudioProjectDto): StudioDraft {
   } catch {
     /* quota full: only affects next instant-open; the caller applying the return value directly is unaffected */
   }
-  writeChatThreads(p.id, p.chat);
   return draft;
 }
 

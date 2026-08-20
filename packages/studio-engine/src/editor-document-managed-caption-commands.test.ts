@@ -231,8 +231,30 @@ describe('EditorDocument V2 managed caption command', () => {
     const result = applyEditorCommand(document, { type: 'captions.relay', source: { mode: 'auto' } });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.document.semantics.managedCaptionSource).toEqual({ mode: 'auto' });
+    expect(result.document.semantics.managedCaptionSource).toEqual({ mode: 'track', trackId: 'narration' });
     expect(result.document.timeline.tracks.find((track) => track.id === 'managed-captions')!.clips[0]).toMatchObject({ startFrame: 30, sourceRef: { assetId: 'voice' } });
+  });
+
+  it('keeps generated captions pinned when their source track is muted', () => {
+    const document = documentWithCaptions();
+    document.timeline.tracks[0]!.clips = [];
+    document.assets.voice = { id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.mp3' }, metadata: { durationSec: 6 } };
+    document.semantics.transcripts.voice = transcript;
+    document.timeline.tracks.push({
+      id: 'narration', type: 'audio', role: 'narration', muted: false, hidden: false, locked: false, syncLocked: true, stackOrder: 1,
+      clips: [{ id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 30, durationFrames: 180, enabled: true, sourceInSec: 0, sourceOutSec: 6, properties: {}, anchor: { type: 'timeline' } }],
+    });
+    const generated = applyEditorCommand(document, { type: 'captions.relay', source: { mode: 'auto' } });
+    expect(generated.ok).toBe(true);
+    if (!generated.ok) return;
+    const muted = applyEditorCommand(generated.document, { type: 'track.patch', trackId: 'narration', patch: { muted: true } });
+    expect(muted.ok).toBe(true);
+    if (!muted.ok) return;
+    const relaid = applyEditorCommand(muted.document, { type: 'captions.relay' });
+    expect(relaid.ok).toBe(true);
+    if (!relaid.ok) return;
+    expect(relaid.document.semantics.managedCaptionSource).toEqual({ mode: 'track', trackId: 'narration' });
+    expect(relaid.document.timeline.tracks.find((track) => track.id === 'managed-captions')!.clips.length).toBeGreaterThan(0);
   });
 
   it('auto-selects the track with the most spoken words instead of preferring a shorter primary transcript', () => {

@@ -56,6 +56,7 @@ export interface MotionGraphicPreviewCopy {
 
 export function visualDirectionKind(id: string): VisualDirectionKind {
   const directions: Record<string, VisualDirectionKind> = {
+    "performance-native": "organic",
     "editorial-quiet": "editorial",
     "memphis-motion": "memphis",
     "precision-tech": "tech",

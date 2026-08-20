@@ -1,4 +1,4 @@
-/** Performance Native preview dialect: phone-close people, real product action, captions, proof, release. */
+/** Product Native preview dialect: real product action, light display type, proof, and release. */
 import { type Block, mk } from './shared';
 
 const root = (id: string) => `
@@ -25,7 +25,7 @@ const root = (id: string) => `
 export const cover: () => Block = () => mk('cv_pn2', '封面', (id) => `
 <div class="pn cover">
   <div class="red"></div><div class="yellow"></div><div class="phone"><div class="creator"><i class="hair"></i><i class="face"></i><i class="body"></i><i class="eye"></i><i class="mouth"></i></div><div class="hand"></div><div class="bottle"></div><div class="caption">真实上手，<b>直接看懂</b></div></div>
-  <div class="title head" data-edit>原生<br/>转化</div><div class="english num">PERFORMANCE NATIVE</div><div class="line micro">PERSON / PRODUCT / ACTION / PROOF</div>
+  <div class="title head" data-edit>商品<br/>原生</div><div class="english num">PRODUCT NATIVE</div><div class="line micro">PRODUCT / ACTION / TYPE / PROOF</div>
 </div>
 <style>${root(id)}
 #${id} .cover{background:#f7f4ec;}#${id} .red{position:absolute;left:-170px;top:-90px;width:730px;height:1280px;background:var(--accent);transform:rotate(-11deg);}#${id} .yellow{position:absolute;right:-160px;top:-150px;width:670px;height:700px;border-radius:50%;background:var(--accent-2);}

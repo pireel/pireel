@@ -1,4 +1,4 @@
-/** localStorage persistence for studio chat threads: load/save, restore sanitizing, title derivation. */
+/** Server-backed Studio chat thread validation, restore sanitizing, and title derivation. */
 
 import type { UIMessage } from 'ai';
 import { t } from './i18n';
@@ -20,32 +20,21 @@ export interface StoredThread {
   skillId?: StudioScenarioSkillId;
 }
 
-export function loadThreads(storageKey: string, availableSkillIds: readonly string[] = []): StoredThread[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return [];
-    const arr = JSON.parse(raw) as StoredThread[];
-    if (!Array.isArray(arr)) return [];
-    const available = new Set(availableSkillIds);
-    return arr.map((thread) => ({
+export function normalizeStoredThreads(value: unknown, availableSkillIds: readonly string[] = []): StoredThread[] {
+  if (!Array.isArray(value)) return [];
+  const available = new Set(availableSkillIds);
+  return value
+    .filter((thread): thread is StoredThread => !!thread
+      && typeof thread === 'object'
+      && typeof (thread as StoredThread).id === 'string'
+      && Array.isArray((thread as StoredThread).messages))
+    .map((thread) => ({
       ...thread,
       ...(isStudioScenarioSkillId(thread?.skillId)
         && (thread.skillId === 'auto' || available.has(thread.skillId))
         ? { skillId: thread.skillId }
         : { skillId: undefined }),
     }));
-  } catch {
-    return [];
-  }
-}
-export function saveThreads(storageKey: string, threads: StoredThread[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(threads.slice(0, 30)));
-  } catch {
-    /* quota full / private mode — ignore */
-  }
 }
 
 /** Sanitize a restored session: an interrupted tool can no longer continue, and provider-native tool

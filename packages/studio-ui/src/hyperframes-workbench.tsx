@@ -257,9 +257,8 @@ import { useStableCallbacks } from "./use-stable-callbacks";
 import {
   type StudioDraft,
   cacheProjectLocally,
-  chatKeyFor,
   loadDraft,
-  readChatThreads,
+  migrateLegacyDraft,
   saveCoverThumb,
   setProjectVersion,
   useDraftAutosave,
@@ -864,9 +863,8 @@ export function HyperframesWorkbench({
     typeof window === "undefined" ? null : loadDraft(projectId),
   );
   const pendingRestoreRef = useRef<StudioDraft | null>(null); // blocks restored, awaiting reconnection to the original video
-  const [chatEpoch, setChatEpoch] = useState(0); // +1 after adopting a cloud session; remounts StudioChat to re-read local cache
-  const [chatRev, setChatRev] = useState(0); // chat thread persist counter: triggers cloud sync
-  const bumpChatRev = useCallback(() => setChatRev((v) => v + 1), []); // stable reference (StudioChat is memoized)
+  const [chatEpoch, setChatEpoch] = useState(0); // +1 after loading server sessions; remounts StudioChat with that snapshot
+  const [initialChatThreads, setInitialChatThreads] = useState<readonly unknown[] | undefined>(undefined);
   const conflictWarnedRef = useRef(false);
   const migrationWriteBlockedRef = useRef(false);
   const blockForDocumentMigration = () => {
@@ -901,6 +899,28 @@ export function HyperframesWorkbench({
   /** Insert-source transcripts (key = shot.src, sentence times = that source file's own timeline). All sources transcribed when opening the captions / smart-cut panels. */
   const [clipAsr, setClipAsr] = useState<Record<string, AsrSegment[]>>({});
   const [filmstrip, setFilmstrip] = useState<FilmstripFrame[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    migrateLegacyDraft();
+    setInitialChatThreads(undefined);
+    const store = studioProviders().chats;
+    void (store?.list(projectId) ?? Promise.resolve([]))
+      .then((threads) => {
+        if (cancelled) return;
+        setInitialChatThreads(Array.isArray(threads) ? threads : []);
+        setChatEpoch((value) => value + 1);
+      })
+      .catch(() => {
+        if (!cancelled) setInitialChatThreads([]);
+      });
+    return () => { cancelled = true; };
+  }, [projectId]);
+  const persistChatThread = useCallback((thread: unknown) => {
+    void studioProviders().chats?.save(projectId, thread).catch((error) => {
+      console.error("[studio] chat save failed", error);
+      toast.error(t("workbench.syncFailedTryAgain"));
+    });
+  }, [projectId]);
   const [pps, setPps] = useState(DEFAULT_PPS); // timeline zoom (px/sec), controlled by the ruler slider
   const [timelineSnapEnabled, setTimelineSnapEnabled] = useState(true);
   // Primary auto-snap is an invariant while enabled, including after project restore and after an
@@ -2584,16 +2604,45 @@ export function HyperframesWorkbench({
   );
 
   // Draft autosave (1s debounce; don't write on an empty canvas)
-  // First-frame thumbnail (project list card cover): **grab the frame straight from the video file** — filmstrip tiles
-  // are only 96px wide, upscaling from them is blurry at any size (user feedback). A 960-wide jpeg is sharp enough for
-  // retina cards (~440 CSS px).
+  // First-frame thumbnail (project list card cover): use the earliest visible media in the actual
+  // deliverable. A secondary visual lane can be the whole edit, so primary-track presence must not
+  // decide whether an output owns a cover.
   const coverThumbRef = useRef<string | null>(null);
   // Cover clearing must wait for hydration: the first render is intentionally empty even when a
   // saved project has video. Once ready, an empty primary track is authoritative user state.
   const [bootDataReady, setBootDataReady] = useState(false);
-  const hasPrimaryVideo = primaryNarrativeClips(editorDocument).length > 0;
+  const coverVisual = useMemo(() => renderPlan.tracks
+    .filter((track) => !track.hidden && track.type === "visual")
+    .flatMap((track) => track.clips.flatMap((entry) => {
+      if (!entry.clip.enabled || !entry.asset || !entry.resolvedSource) return [];
+      if (entry.asset.kind !== "video" && entry.asset.kind !== "image") return [];
+      const source = entry.asset.kind === "image" && entry.asset.locator.localSig
+        ? localImagePreviewUrls.get(entry.asset.locator.localSig) ?? entry.resolvedSource
+        : entry.resolvedSource;
+      return [{
+        clipId: entry.clipId,
+        kind: entry.asset.kind,
+        source,
+        sourceInSec: entry.clip.kind === "narrative" || entry.clip.kind === "media"
+          ? entry.clip.sourceInSec
+          : 0,
+        startSec: entry.startSec,
+        primary: track.id === renderPlan.primaryNarrativeTrackId,
+      }];
+    }))
+    .sort((left, right) => left.startSec - right.startSec || Number(right.primary) - Number(left.primary) || left.clipId.localeCompare(right.clipId))[0] ?? null,
+  [localImagePreviewUrls, renderPlan]);
+  const hasCoverVisual = editorDocument.timeline.tracks.some((track) => !track.hidden && track.clips.some((clip) => {
+    if (!clip.enabled || !("assetId" in clip) || typeof clip.assetId !== "string") return false;
+    const kind = editorDocument.assets[clip.assetId]?.kind;
+    return kind === "video" || kind === "image";
+  }));
   const currentCoverThumb = () =>
-    primaryNarrativeClips(editorDocumentRef.current).length > 0
+    editorDocumentRef.current.timeline.tracks.some((track) => !track.hidden && track.clips.some((clip) => {
+      if (!clip.enabled || !("assetId" in clip) || typeof clip.assetId !== "string") return false;
+      const kind = editorDocumentRef.current.assets[clip.assetId]?.kind;
+      return kind === "video" || kind === "image";
+    }))
       ? coverThumbRef.current
       : null;
   const activateOutputDocumentRef = useRef<
@@ -2615,54 +2664,74 @@ export function HyperframesWorkbench({
     // A cover describes the current deliverable, not the reusable source kept in the media
     // library. Removing the final timeline video must therefore clear the cover even though
     // videoFile intentionally remains available for inserting again later.
-    if (!hasPrimaryVideo) {
+    if (!hasCoverVisual) {
       if (!bootDataReady) return;
       coverThumbRef.current = null;
       saveCoverThumb(projectId, null);
       return;
     }
-    if (!videoFile) return;
+    if (!coverVisual) return;
     let alive = true;
-    const url = URL.createObjectURL(videoFile);
-    const v = document.createElement("video");
-    v.muted = true;
-    v.preload = "auto";
-    v.src = url;
+    const boundFile = coverVisual.primary
+      ? videoFile
+      : clipFilesRef.current.get(coverVisual.source) ?? null;
+    const objectUrl = boundFile ? URL.createObjectURL(boundFile) : null;
+    const url = objectUrl ?? coverVisual.source;
+    const drawCover = (media: CanvasImageSource, mediaWidth: number, mediaHeight: number) => {
+      if (!alive || !mediaWidth || !mediaHeight) return;
+      const w = 960;
+      const h = Math.max(2, Math.round((editorDocument.canvas.height / editorDocument.canvas.width) * w));
+      const cv = document.createElement("canvas");
+      cv.width = w;
+      cv.height = h;
+      const scale = Math.max(w / mediaWidth, h / mediaHeight);
+      const drawW = mediaWidth * scale;
+      const drawH = mediaHeight * scale;
+      cv.getContext("2d")!.drawImage(media, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+      coverThumbRef.current = cv.toDataURL("image/jpeg", 0.8);
+      saveCoverThumb(projectId, coverThumbRef.current);
+    };
     void (async () => {
       try {
-        await new Promise<void>((res, rej) => {
-          v.onloadeddata = () => res();
-          v.onerror = () => rej(new Error("load failed"));
-          setTimeout(() => rej(new Error("load timeout")), 8000);
-        });
-        v.currentTime = 0.1;
-        await new Promise<void>((res) => {
-          v.onseeked = () => res();
-          setTimeout(res, 1500); // streaming webm seek events are unreliable, use the current frame on timeout
-        });
-        if (!v.videoWidth) return;
-        const w = 960;
-        const h = Math.max(2, Math.round((v.videoHeight / v.videoWidth) * w));
-        const cv = document.createElement("canvas");
-        cv.width = w;
-        cv.height = h;
-        cv.getContext("2d")!.drawImage(v, 0, 0, w, h);
-        if (alive) {
-          coverThumbRef.current = cv.toDataURL("image/jpeg", 0.8);
-          // Backfill straight into the saved draft: frame grab finishes after the debounced save, otherwise the cover stays missing until the next edit
-          saveCoverThumb(projectId, coverThumbRef.current);
+        if (coverVisual.kind === "image") {
+          const image = new Image();
+          if (/^https?:/.test(url)) image.crossOrigin = "anonymous";
+          image.src = url;
+          await new Promise<void>((resolve, reject) => {
+            image.onload = () => resolve();
+            image.onerror = () => reject(new Error("load failed"));
+            setTimeout(() => reject(new Error("load timeout")), 8000);
+          });
+          drawCover(image, image.naturalWidth, image.naturalHeight);
+          return;
         }
+        const video = document.createElement("video");
+        video.muted = true;
+        video.preload = "auto";
+        if (/^https?:/.test(url)) video.crossOrigin = "anonymous";
+        video.src = url;
+        await new Promise<void>((resolve, reject) => {
+          video.onloadeddata = () => resolve();
+          video.onerror = () => reject(new Error("load failed"));
+          setTimeout(() => reject(new Error("load timeout")), 8000);
+        });
+        video.currentTime = Math.max(0, coverVisual.sourceInSec + 0.1);
+        await new Promise<void>((resolve) => {
+          video.onseeked = () => resolve();
+          setTimeout(resolve, 1500);
+        });
+        drawCover(video, video.videoWidth, video.videoHeight);
+        video.removeAttribute("src");
       } catch {
         /* the cover is a bonus, a failed grab doesn't block saving */
       } finally {
-        URL.revokeObjectURL(url);
-        v.removeAttribute("src");
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
       }
     })();
     return () => {
       alive = false;
     };
-  }, [videoFile, projectId, hasPrimaryVideo, bootDataReady]);
+  }, [bootDataReady, coverVisual, editorDocument.canvas.height, editorDocument.canvas.width, hasCoverVisual, projectId, videoFile]);
   // Autosave runs regardless (pure side effect: debounced draft write); the toolbar no longer shows a "project/saved" time
   // videoSigRef first: in the missing-media state (no File on this device) the draft's sig anchor
   // must survive autosave — writing null would wipe the cloud row's reconnect anchor.
@@ -6370,7 +6439,7 @@ export function HyperframesWorkbench({
   const outputTabs = [
     {
       ...projectOutputs.outputs.active,
-      coverThumb: hasPrimaryVideo ? coverThumbRef.current : null,
+      coverThumb: hasCoverVisual ? coverThumbRef.current : null,
       durationSec: totalDuration(comp) || comp.video?.durationSec || null,
       canvasWidth: editorDocument.canvas.width,
       canvasHeight: editorDocument.canvas.height,
@@ -6670,30 +6739,23 @@ export function HyperframesWorkbench({
   });
   bridgeReclaimRef.current = agentBridge.reclaim;
 
-  /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict).
-   *  Tri-state: full payload / chat-only (empty canvas but threads exist, so the document section is
-   *  absent and a just-opened tab cannot blank cloud state) / null (nothing worth saving). */
+  /** Cloud-sync payload from the live refs (shared by the debounced autosave and flush-on-evict). */
   function buildCloudPayload(): ProjectSavePayload | null {
     const c = compRef.current;
     if (!projectId) return null;
     const hasContent = hasTimelineContent(c);
-    // Boot-empty stays chat-only (never blank the cloud from a just-opened tab), but a canvas the
+    // Boot-empty stays unsaved (never blank the cloud from a just-opened tab), but a canvas the
     // user EMPTIED this session (content seen earlier, edits removed it) must persist as empty —
     // otherwise a refresh resurrects the deleted sources from the last non-empty cloud comp.
     if (!hasContent && !everCanvasContentRef.current) {
-      // Chat is independent of canvas content: a consultation-only session still syncs its threads
-      // (chat-only payload: document is absent, so an empty canvas cannot clobber cloud state; the
-      // server seeds an empty V2 document on first insert). No threads either → nothing to save.
-      const threads = readChatThreads(projectId);
       const hasLibraryState = localAssetIndexKnownRef.current;
       const hasInactiveOutputs =
         projectOutputs.outputsRef.current.inactive.length > 0;
-      return threads.length || hasLibraryState || hasInactiveOutputs
+      return hasLibraryState || hasInactiveOutputs
         ? {
             ...(hasLibraryState
               ? { document: persistableDocument(false) }
               : {}),
-            chat: threads,
             context: {
               schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
               outputs: projectOutputs.outputsRef.current,
@@ -6714,7 +6776,6 @@ export function HyperframesWorkbench({
       Object.keys(clipAsrRef.current).length > 0;
     return {
       document: persistableDocument(canDerive),
-      chat: readChatThreads(projectId),
       context: {
         schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
         outputs: projectOutputs.outputsRef.current,
@@ -7365,7 +7426,6 @@ export function HyperframesWorkbench({
     // Cloud project → straight into the workbench: use the in-memory draft returned by cacheProjectLocally directly, not
     // read back from localStorage — if the quota is full the write silently fails and you read a stale old draft, which autosave then writes back to the cloud.
     const applyRemote = (remote: StudioProjectDto) => {
-      setChatEpoch((v) => v + 1); // remount chat to re-read the cloud session
       applyDraft(cacheProjectLocally(remote));
     };
     void (async () => {
@@ -7472,21 +7532,21 @@ export function HyperframesWorkbench({
     };
   }, [bootDataReady, projectId, setLocalAssetIndex]);
 
-  // "Canvas had content this session" — buildCloudPayload uses it to tell boot-empty (chat-only,
-  // never blank the cloud) from user-emptied (must persist the emptiness). Set by restore or edits.
+  // "Canvas had content this session" — buildCloudPayload uses it to tell boot-empty (never blank
+  // the cloud) from user-emptied (must persist the emptiness). Set by restore or edits.
   const everCanvasContentRef = useRef(false);
   useEffect(() => {
     if (hasTimelineContent(comp)) everCanvasContentRef.current = true;
   }, [comp]);
 
-  // Cloud sync (debounced): coalesce one PUT 1.2s after comp or the session changes. The cloud-authoritative write-back —
+  // Project sync (debounced): coalesce one PUT 1.2s after document/context changes. Chat uses its own immediate API.
   // local useDraftAutosave still writes localStorage as a cache, the two are independent. Don't push on an empty canvas (don't blank the cloud).
   // Transcripts, cloud locators and asset-library metadata are folded into the V2 document;
   // the separate project context only carries the multi-output directory.
   // Single-writer: a displaced tab (bridge close 4000) does not autosave at all, and never rebase-retries a 409 —
   // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
   useEffect(() => {
-    // No content gate here: buildCloudPayload decides (full payload / chat-only / null) — chat syncs independently
+    // No content gate here: buildCloudPayload decides (full payload / null).
     if (!projectId || displaced || migrationWriteBlockedRef.current) return;
     cloudSaveQueue.markDirty();
     const timer = window.setTimeout(() => {
@@ -7498,7 +7558,6 @@ export function HyperframesWorkbench({
   }, [
     comp,
     editorDocument,
-    chatRev,
     videoFile,
     projectId,
     cloudMediaRev,
@@ -7618,24 +7677,30 @@ export function HyperframesWorkbench({
           />
           {/* Chat is the only content of this area (hidden entirely when collapsed, session/streaming preserved) */}
           <div className="flex min-h-0 flex-1">
-            <StudioChat
-              key={chatEpoch}
-              ref={chatRef}
-              runTool={chatCbs.runTool}
-              getBody={getChatBody}
-              getComp={getChatComp}
-              timelineFramePickActive={timelineFramePickActive}
-              timelineFramePickBusy={timelineFramePickBusy}
-              timelineFramePickAvailable={
-                duration > 0 && hasTimelineContent(comp)
-              }
-              onTimelineFramePickActiveChange={setTimelineFramePickMode}
-              elements={chatMentionElements}
-              onFrameApplied={onFrameApplied}
-              storageKey={chatKeyFor(projectId)}
-              onThreadsChange={bumpChatRev}
-              onClose={closeChat}
-            />
+            {initialChatThreads ? (
+              <StudioChat
+                key={chatEpoch}
+                ref={chatRef}
+                runTool={chatCbs.runTool}
+                getBody={getChatBody}
+                getComp={getChatComp}
+                timelineFramePickActive={timelineFramePickActive}
+                timelineFramePickBusy={timelineFramePickBusy}
+                timelineFramePickAvailable={
+                  duration > 0 && hasTimelineContent(comp)
+                }
+                onTimelineFramePickActiveChange={setTimelineFramePickMode}
+                elements={chatMentionElements}
+                onFrameApplied={onFrameApplied}
+                initialThreads={initialChatThreads}
+                onThreadChange={persistChatThread}
+                onClose={closeChat}
+              />
+            ) : (
+              <div className="text-ink-4 flex h-full w-full items-center justify-center">
+                <Loader2 size={16} className="animate-spin" />
+              </div>
+            )}
           </div>
         </div>
       </div>
