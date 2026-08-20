@@ -23,7 +23,6 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@pireel/ui/ai-elements/conversation";
-import { Suggestion } from "@pireel/ui/ai-elements/suggestion";
 import {
   Message,
   MessageContent,
@@ -138,6 +137,7 @@ export function ChatThread({
   const frameRef = useRef(frame);
   frameRef.current = frame;
   const [skillId, setSkillId] = useState<StudioScenarioSkillId>(initialSkillId);
+  const [activeStarterId, setActiveStarterId] = useState<string | null>(null);
   const skillRef = useRef(skillId);
   skillRef.current = skillId;
   const onFrameAppliedRef = useRef(onFrameApplied);
@@ -469,6 +469,31 @@ export function ChatThread({
     composerRef.current?.setText(text);
   }, []);
 
+  const starterGroups = useMemo(
+    () =>
+      scenarioSkills
+        .map((skill) => ({
+          skill,
+          starters: skill.starters ?? [],
+        }))
+        .filter((group) => group.starters.length > 0),
+    [scenarioSkills],
+  );
+
+  const pickStarter = useCallback(
+    (nextSkillId: StudioScenarioSkillId, starterId: string, prompt: string) => {
+      setSkillId(nextSkillId);
+      setActiveStarterId(`${nextSkillId}:${starterId}`);
+      fillComposer(prompt);
+    },
+    [fillComposer],
+  );
+
+  const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
+    setSkillId(nextSkillId);
+    setActiveStarterId(null);
+  }, []);
+
   // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(
     handleRef,
@@ -548,24 +573,77 @@ export function ChatThread({
       <Conversation className="min-h-0 flex-1">
         <ConversationContent className="gap-5 p-3">
           {empty ? (
-            <div className="flex h-full flex-col items-center justify-center gap-4">
+            <div className="flex min-h-full flex-col items-center justify-center gap-4 py-3">
               <ConversationEmptyState
                 icon={<PiAvatar size={44} />}
                 title={t("chatGen.greeting")}
                 description={t("chatGen.emptyStateIntro")}
               />
-              {/* Not using Suggestions (horizontal scrollbar): starter prompts wrap across lines instead.
-                  Click = fill into the input (editable/deletable, send authority stays with the user), doesn't send directly */}
-              <div className="flex max-w-full flex-wrap items-center justify-center gap-2 px-3">
-                <Suggestion
-                  suggestion={t("chatGen.cutShotsFirst")}
-                  onClick={fillComposer}
-                />
-                <Suggestion
-                  suggestion={t("chatGen.transcribeToEdit")}
-                  onClick={fillComposer}
-                />
-              </div>
+              {starterGroups.length > 0 ? (
+                <div className="flex w-full max-w-[430px] flex-col gap-3 px-2">
+                  {starterGroups.map(({ skill, starters }) => (
+                    <section key={skill.id} className="min-w-0">
+                      <h3 className="text-ink-3 mb-1.5 px-1 text-[11px] font-medium">
+                        {skill.title}
+                      </h3>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {starters.map((starter) => {
+                          const active =
+                            activeStarterId === `${skill.id}:${starter.id}`;
+                          return (
+                            <button
+                              key={starter.id}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() =>
+                                pickStarter(skill.id, starter.id, starter.prompt)
+                              }
+                              className={`group min-w-0 rounded-xl p-1 text-left transition-colors ${
+                                active
+                                  ? "bg-panel-2"
+                                  : "hover:bg-panel-2/70"
+                              }`}
+                            >
+                              <span
+                                className={`relative block aspect-[3/2] overflow-hidden rounded-lg bg-panel-2 ${
+                                  active ? "ring-1 ring-inset ring-white/45" : ""
+                                }`}
+                              >
+                                <img
+                                  src={starter.imageUrl}
+                                  alt=""
+                                  draggable={false}
+                                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.025]"
+                                />
+                              </span>
+                              <span className="text-ink block truncate px-1 pb-0.5 pt-1.5 text-[12px] font-medium">
+                                {starter.title}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex max-w-full flex-wrap items-center justify-center gap-2 px-3">
+                  <button
+                    type="button"
+                    onClick={() => fillComposer(t("chatGen.cutShotsFirst"))}
+                    className="border-line bg-panel hover:bg-panel-2 rounded-full border px-3 py-1.5 text-[12px]"
+                  >
+                    {t("chatGen.cutShotsFirst")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fillComposer(t("chatGen.transcribeToEdit"))}
+                    className="border-line bg-panel hover:bg-panel-2 rounded-full border px-3 py-1.5 text-[12px]"
+                  >
+                    {t("chatGen.transcribeToEdit")}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             messages.map((m, mi) => {
@@ -822,7 +900,7 @@ export function ChatThread({
           scenarioSkills={scenarioSkills}
           onImportScenarioSkill={onImportScenarioSkill}
           onDeleteScenarioSkill={onDeleteScenarioSkill}
-          onPickSkill={setSkillId}
+          onPickSkill={pickSkill}
           frame={frame}
           frames={frames}
           timelineFramePickActive={timelineFramePickActive}

@@ -28,8 +28,17 @@ export interface StudioScenarioSkillOption {
   summary: string;
   /** Compact picker mark; presentation only, never included in the model prompt. */
   icon?: string;
+  /** Optional editable opening prompts shown in an empty chat. Picking one activates this Skill. */
+  starters?: readonly StudioScenarioSkillStarter[];
   /** User-owned account Skill. Enables management controls; never changes prompt authority. */
   custom?: boolean;
+}
+
+export interface StudioScenarioSkillStarter {
+  id: string;
+  title: string;
+  prompt: string;
+  imageUrl: string;
 }
 
 export interface StudioCustomScenarioSkillManager {
