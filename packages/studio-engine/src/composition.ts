@@ -12,6 +12,13 @@
  * Don't bypass this entry and import sibling files directly — the registry-ready order is guaranteed here.
  */
 
+import { ensureTemplatesRegistered } from './templates';
+
+// Re-export order is not an execution-order guarantee once the production bundler
+// tree-shakes this barrel. Keep a live reference to the registration module so any
+// consumer of the public composition entry can safely call blockKind/renderBlock.
+ensureTemplatesRegistered();
+
 export * from './audio-tracks';
 export * from './caption-presets';
 export * from './caption-layout-metrics';
