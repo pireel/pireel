@@ -45,6 +45,7 @@ import {
   blockId,
   blockKind,
   compReceiptDelta,
+  canvasSizeFollowingFirstVideo,
   canvasSizeFromInput,
   editorDocumentRenderPlan,
   freeTrack,
@@ -180,6 +181,23 @@ async function imageBlobForInspection(blob: Blob): Promise<{ base64: string; mim
   return { base64, mime: inspectionBlob.type || blob.type || 'image/jpeg' };
 }
 const reviewAttemptsByComposition = new WeakMap<object, Map<string, Map<number, number>>>();
+/** Runtime observation cache: a local source that ASR positively classified as speech-free starts
+ * muted when it is later placed. The user/agent can deliberately unmute useful product sound. */
+const speechFreeLocalSigsByDocumentRef = new WeakMap<object, Set<string>>();
+
+function speechFreeLocalSigs(documentRef: object): Set<string> {
+  let values = speechFreeLocalSigsByDocumentRef.get(documentRef);
+  if (!values) {
+    values = new Set();
+    speechFreeLocalSigsByDocumentRef.set(documentRef, values);
+  }
+  return values;
+}
+
+function isNoSpeechAsrResult(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /SUCCESS_WITH_NO_VALID_FRAGMENT|no valid fragment|no speech detected/i.test(message);
+}
 
 function reviewMomentAttempts(compRef: object, compositionHash: string): Map<number, number> {
   let byComposition = reviewAttemptsByComposition.get(compRef);
@@ -431,6 +449,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         }
       }
       if (toolId === 'add_clips' || toolId === 'insert_clips') {
+        const speechFree = speechFreeLocalSigs(documentRef);
+        if (speechFree.size && Array.isArray(input.clips)) {
+          input = {
+            ...input,
+            clips: input.clips.map((value) => {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+              const row = value as Record<string, unknown>;
+              if (typeof row.muted === 'boolean' || typeof row.assetId !== 'string') return row;
+              const asset = documentRef.current.assets[row.assetId];
+              return asset?.kind === 'video' && asset.locator.localSig && speechFree.has(asset.locator.localSig)
+                ? { ...row, muted: true }
+                : row;
+            }),
+          };
+        }
         const referencedAssetIds = [
           ...new Set(
             (Array.isArray(input.clips) ? input.clips : [])
@@ -530,8 +563,27 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
                 report(t('tools.extract_asr.busy'));
                 const probe = await probeVideoFile(file).catch(() => null);
-                const segs = await race(studioProviders().transcriber.transcribe(file));
-                if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
+                const segs = await race(studioProviders().transcriber.transcribe(file)).catch((error) => {
+                  if (isNoSpeechAsrResult(error)) return [];
+                  throw error;
+                });
+                const speechFree = speechFreeLocalSigs(documentRef);
+                if (!segs.length) {
+                  speechFree.add(entry.sig);
+                  return {
+                    ok: true,
+                    summary: t('workbench.noSpeechDetected'),
+                    data: {
+                      localSig: entry.sig,
+                      label: entry.label,
+                      kind: localKind,
+                      speechDetected: false,
+                      defaultSourceAudio: 'muted',
+                      hint: 'This source will start muted when placed. Unmute only when its real product sound or ambience is editorially useful.',
+                    },
+                  };
+                }
+                speechFree.delete(entry.sig);
                 const rd = (value: number) => Math.round(value * 10) / 10;
                 const transcript = wrapAgentTranscript([
                   `DEVICE-LOCAL ${localKind.toUpperCase()} TRANSCRIPT ${JSON.stringify(entry.label)} (source-file seconds):`,
@@ -2282,8 +2334,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.noExportStarted'), data: { status: 'idle', hint: 'call export_video first' } };
           }
           case 'set_canvas': {
-            const size = canvasSizeFromInput(input);
-            if (!size) return { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' };
+            const followsSource = typeof input.preset === 'string' && ['source', 'auto', 'follow-source'].includes(input.preset.toLowerCase());
+            const size = followsSource ? canvasSizeFollowingFirstVideo(documentRef.current) : canvasSizeFromInput(input);
+            if (!size) return { ok: false, error: followsSource
+              ? 'cannot follow source: place a video with known dimensions first'
+              : 'invalid canvas: use source / portrait / landscape / square or width+height (240..7680)' };
             const currentCanvas = documentRef.current.canvas;
             if (size.width === currentCanvas.width && size.height === currentCanvas.height && currentCanvas.configured) {
               return { ok: false, error: 'canvas already has that size' };

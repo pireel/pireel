@@ -1,6 +1,6 @@
 /** Pure workbench helpers: canvas dimension normalization, shot spans, frame → PersonFx mapping. */
 
-import { type Composition, type PersonFx } from '@pireel/studio-engine/composition';
+import { type Composition, type PersonFx, normalizeSourceCanvasSize } from '@pireel/studio-engine/composition';
 import { spans as clipSpans } from '@pireel/studio-engine/trim';
 
 /** personFx recommendation from a frame content pack (kebab string map) → runtime PersonFx. */
@@ -38,10 +38,7 @@ export const REF_WIDTH = 1080;
  *  Caption geometry derives from the real width, so a 16:9 canvas holds a full single-line subtitle
  *  (~21em ≈ 42 latin chars) while portrait stays at the ~11-char line. */
 export function normalizeDims(w: number, h: number): { width: number; height: number } {
-  if (!w || !h) return { width: 1920, height: REF_WIDTH };
-  return w >= h
-    ? { width: Math.round((REF_WIDTH * w) / h), height: REF_WIDTH }
-    : { width: REF_WIDTH, height: Math.round((REF_WIDTH * h) / w) };
+  return normalizeSourceCanvasSize(w, h);
 }
 
 /** A shot's span on the final timeline (start + duration). */

@@ -176,6 +176,31 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     });
     expect([canvas.comp!.width, canvas.comp!.height]).toEqual([1920, 1080]);
   });
+  it('V2 画布可跟随首段主轨视频，后续不同比例素材不改变尺寸', () => {
+    const p = v2proj();
+    const primary = p.document!.timeline.tracks.find((track) => track.id === p.document!.semantics.primaryNarrativeTrackId)!;
+    const first = primary.clips[0]!;
+    if (first.kind !== 'narrative') throw new Error('expected narrative clip');
+    first.assetId = 'portrait-source';
+    p.document!.assets['portrait-source'] = {
+      id: 'portrait-source', kind: 'video', locator: { remoteUrl: 'https://cdn.test/portrait.mp4' },
+      metadata: { durationSec: 10, width: 960, height: 1280 },
+    };
+    p.document!.assets['later-landscape'] = {
+      id: 'later-landscape', kind: 'video', locator: { remoteUrl: 'https://cdn.test/landscape.mp4' },
+      metadata: { durationSec: 5, width: 1920, height: 1080 },
+    };
+    p.document!.timeline.tracks.push({
+      id: 'later-visual', type: 'visual', role: 'broll', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 2, clips: [{
+        id: 'later-clip', kind: 'media', assetId: 'later-landscape', startFrame: 300, durationFrames: 150,
+        enabled: true, sourceInSec: 0, sourceOutSec: 5,
+      }],
+    });
+    const canvas = runServerTool('set_canvas', { preset: 'source' }, p);
+    expect(canvas.result.ok).toBe(true);
+    expect(canvas.document?.canvas).toMatchObject({ width: 1080, height: 1440, configured: true });
+  });
   it('V2 镜头属性工具直接补丁原生片段，并保留主轨间隙与关联版式', () => {
     const p = v2proj();
     const primary = p.document!.timeline.tracks.find((track) => track.id === p.document!.semantics.primaryNarrativeTrackId)!;

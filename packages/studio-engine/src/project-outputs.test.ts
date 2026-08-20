@@ -34,6 +34,11 @@ describe('project outputs', () => {
     const base = createProjectOutputs(10);
     const source = state();
     source.document.canvas.configured = true;
+    source.document.assets.product = {
+      id: 'product', kind: 'video', locator: { localSig: 'product.mp4:1:1' },
+      metadata: { durationSec: 6, width: 960, height: 1280 },
+    };
+    source.document.semantics.transcripts.product = [{ start: 0, end: 1, text: '产品展示' }];
     const next = createBlankProjectOutput(base, source, '', 'pireel-long-to-shorts', 20);
     expect(next.outputs.active.title).toBe('');
     expect(next.outputs.active.skill).toBe('pireel-long-to-shorts');
@@ -44,7 +49,9 @@ describe('project outputs', () => {
     expect(next.target.document.version).toBe(2);
     expect(next.target.document.canvas).toMatchObject({ width: 1920, height: 1080, configured: true });
     expect(next.target.document.timeline.tracks.every((track) => track.clips.length === 0)).toBe(true);
-    expect(next.target.document.assets).toEqual({});
+    expect(next.target.document.assets.product).toEqual(source.document.assets.product);
+    expect(next.target.document.semantics.transcripts.product).toEqual([{ start: 0, end: 1, text: '产品展示' }]);
+    expect(next.target.document.timeline.tracks.every((track) => track.clips.length === 0)).toBe(true);
     expect(next.target).toMatchObject({ videoSig: null, videoDurationSec: null, coverThumb: null });
   });
 

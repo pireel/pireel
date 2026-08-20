@@ -19,6 +19,7 @@ import {
   splitBlockedByTransition,
   treatmentVacancyBox,
 } from './composition-core';
+import type { EditorDocumentV2, NarrativeTimelineClip, MediaTimelineClip } from './editor-document';
 import { STUDIO_AGENT_EXECUTION_LIMITS } from './agent-execution-budget';
 import { spans as clipSpans, splitAtEdited } from './trim';
 
@@ -37,6 +38,39 @@ const PRESET_SIZE: Record<CanvasPreset, { width: number; height: number }> = {
 const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const r4 = (v: number) => Math.round(v * 10000) / 10000;
+
+/** Keep source-following canvases on the same 1080px reference edge used by the editor's type and
+ * caption system. Landscape sources therefore become W×1080, portrait sources 1080×H. */
+export function normalizeSourceCanvasSize(width: number, height: number): { width: number; height: number } {
+  if (!finite(width) || !finite(height) || width <= 0 || height <= 0) return PRESET_SIZE.landscape;
+  return width >= height
+    ? { width: even((1080 * width) / height), height: 1080 }
+    : { width: 1080, height: even((1080 * height) / width) };
+}
+
+/** Resolve the first placed video, matching ordinary NLE project setup: the first primary clip wins;
+ * if the primary lane is empty, use the earliest video on any visible lane. Mixed later sources do
+ * not change the canvas. */
+export function canvasSizeFollowingFirstVideo(document: EditorDocumentV2): { width: number; height: number } | null {
+  const primaryId = document.semantics.primaryNarrativeTrackId;
+  const videoPlacements = document.timeline.tracks.flatMap((track, trackIndex) => track.clips.flatMap((clip) => {
+    if (clip.kind !== 'narrative' && clip.kind !== 'media') return [];
+    const visual = clip as NarrativeTimelineClip | MediaTimelineClip;
+    const asset = document.assets[visual.assetId];
+    if (asset?.kind !== 'video') return [];
+    return [{ track, trackIndex, clip: visual, asset }];
+  }));
+  const first = videoPlacements.sort((left, right) => (
+    Number(right.track.id === primaryId) - Number(left.track.id === primaryId)
+    || left.clip.startFrame - right.clip.startFrame
+    || left.trackIndex - right.trackIndex
+    || left.clip.id.localeCompare(right.clip.id)
+  ))[0];
+  if (!first) return null;
+  const width = first.asset.metadata.width;
+  const height = first.asset.metadata.height;
+  return width && height ? normalizeSourceCanvasSize(width, height) : null;
+}
 
 /** Resolve a canvas tool input. Custom output is even-sized for codecs and bounded to a practical
  *  browser-render range; preset aliases let an agent use the user's aspect-ratio wording directly. */

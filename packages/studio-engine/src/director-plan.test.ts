@@ -115,6 +115,18 @@ describe('Director Plan structure', () => {
     ]));
   });
 
+  it('drops blank optional fields and preserves an authored unknown family as custom', () => {
+    const parsed = directorPlanFromSeconds({
+      ...input,
+      skillId: '', frameId: '', audience: '',
+      scenes: [{ ...input.scenes[0], sceneFamily: 'product-beauty-shot', visualMetaphor: '' }],
+    }, 30);
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.plan).not.toHaveProperty('skillId');
+    expect(parsed.plan?.scenes[0]).toMatchObject({ sceneFamily: 'custom', customFamily: 'product-beauty-shot' });
+    expect(parsed.plan?.scenes[0]).not.toHaveProperty('visualMetaphor');
+  });
+
   it('rejects a scene list that has no whole-film rhythm or design system', () => {
     const { rhythmArc: _rhythmArc, designSystem: _designSystem, ...incomplete } = input;
     const parsed = directorPlanFromSeconds(incomplete, 30);

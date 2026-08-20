@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Composition } from './composition';
-import { applyCompositionLayout, canvasSizeFromInput, validateComposition } from './editing-primitives';
+import { emptyEditorDocumentV2 } from './editor-document';
+import { applyCompositionLayout, canvasSizeFollowingFirstVideo, canvasSizeFromInput, validateComposition } from './editing-primitives';
 
 const comp = (): Composition => ({
   width: 1920,
@@ -19,6 +20,24 @@ describe('canvasSizeFromInput', () => {
     expect(canvasSizeFromInput({ preset: '9:16' })).toEqual({ width: 1080, height: 1920 });
     expect(canvasSizeFromInput({ width: 1001, height: 777 })).toEqual({ width: 1002, height: 778 });
     expect(canvasSizeFromInput({ width: 100, height: 777 })).toBeNull();
+  });
+
+  it('follows the first placed primary video and leaves later mixed ratios irrelevant', () => {
+    const document = emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 });
+    document.assets.first = { id: 'first', kind: 'video', locator: { localSig: 'first' }, metadata: { width: 960, height: 1280 } };
+    document.assets.later = { id: 'later', kind: 'video', locator: { localSig: 'later' }, metadata: { width: 1920, height: 1080 } };
+    const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!;
+    primary.clips.push({
+      id: 'first-clip', kind: 'narrative', assetId: 'first', startFrame: 0, durationFrames: 90,
+      enabled: true, sourceInSec: 0, sourceOutSec: 3, properties: { treatment: 'full' },
+    });
+    document.timeline.tracks.push({
+      id: 'broll', type: 'visual', role: 'broll', name: 'B-roll', muted: false, hidden: false,
+      locked: false, syncLocked: true, stackOrder: 1,
+      clips: [{ id: 'later-clip', kind: 'media', assetId: 'later', startFrame: 0, durationFrames: 90, enabled: true, sourceInSec: 0, sourceOutSec: 3 }],
+    });
+
+    expect(canvasSizeFollowingFirstVideo(document)).toEqual({ width: 1080, height: 1440 });
   });
 });
 

@@ -212,6 +212,11 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
       ...(string(item.url) ? { remoteUrl: string(item.url)! } : current?.locator.remoteUrl ? { remoteUrl: current.locator.remoteUrl } : {}),
     };
     if (!locator.localSig && !locator.cloudKey && !locator.remoteUrl) return fail(`asset needs url, cloudKey, or localSig: ${requestedId}`);
+    const sameSource = Object.values(assets).find((candidate) => candidate.id !== requestedId && (
+      (locator.localSig && candidate.locator.localSig === locator.localSig)
+      || (locator.cloudKey && candidate.locator.cloudKey === locator.cloudKey)
+      || (locator.remoteUrl && candidate.locator.remoteUrl === locator.remoteUrl)
+    ));
     const declaredDurationSec = sec(item.durationSec, -1);
     const estimatedDurationSec = sec(item.estimatedDurationSec, -1);
     const initialDurationSec = declaredDurationSec > 0
@@ -220,6 +225,7 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
         ? estimatedDurationSec
         : undefined;
     const metadata: EditorMediaAsset['metadata'] = {
+      ...sameSource?.metadata,
       ...current?.metadata,
       ...(initialDurationSec ? { durationSec: initialDurationSec } : {}),
       ...(sec(item.width, -1) > 0 ? { width: Math.round(sec(item.width)) } : {}),
@@ -231,7 +237,7 @@ function importAssets(document: EditorDocumentV2, input: Input): AgentTimelineOu
       ...(sec(item.bpm, -1) > 0 ? { bpm: sec(item.bpm) } : {}),
       ...(Number.isFinite(Number(item.beatOffsetSec)) ? { beatOffsetSec: Math.max(0, sec(item.beatOffsetSec)) } : {}),
     };
-    assets = { ...assets, [requestedId]: { id: requestedId, kind, ...(string(item.label) ? { label: string(item.label) } : current?.label ? { label: current.label } : {}), locator, metadata } };
+    assets = { ...assets, [requestedId]: { id: requestedId, kind, ...(string(item.label) ? { label: string(item.label) } : current?.label ? { label: current.label } : sameSource?.label ? { label: sameSource.label } : {}), locator, metadata } };
     const exactText = string(item.transcriptText);
     const supplied = Array.isArray(item.transcript) ? item.transcript.filter((segment): segment is TranscriptSegment => {
       const value = segment as Partial<TranscriptSegment>;
@@ -363,6 +369,13 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
     ...(string(item.linkGroupId) ? { linkGroupId: string(item.linkGroupId) } : {}),
   };
   if (asset.kind === 'audio') {
+    const role = string(item.role) ?? 'narration';
+    const requestedVolumeDb = typeof item.volumeDb === 'number' ? item.volumeDb : undefined;
+    const initialVolumeDb = role === 'narration'
+      ? Math.max(4, requestedVolumeDb ?? 4)
+      : role === 'music'
+        ? Math.min(-24, requestedVolumeDb ?? -24)
+        : requestedVolumeDb;
     const sourceOutSec = sec(item.sourceOutSec, sourceInSec + requestedDuration * Math.max(0.5, sec(item.speed, 1)));
     const clip: TimelineClipPlacement = {
       ...common,
@@ -371,7 +384,7 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
       sourceInSec,
       sourceOutSec,
       properties: {
-        ...(typeof item.volumeDb === 'number' ? { volumeDb: item.volumeDb } : {}),
+        ...(initialVolumeDb != null ? { volumeDb: initialVolumeDb } : {}),
         ...(typeof item.fadeInSec === 'number' ? { fadeInSec: item.fadeInSec } : {}),
         ...(typeof item.fadeOutSec === 'number' ? { fadeOutSec: item.fadeOutSec } : {}),
         ...(typeof item.speed === 'number' ? { speed: item.speed } : {}),
@@ -582,6 +595,20 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     }
     receipts.push(inserted.receipt);
     created.push(placement.id);
+  }
+  const hasNarration = next.timeline.tracks.some((track) => track.role === 'narration' && track.clips.some((clip) => clip.kind === 'audio' && clip.enabled));
+  if (hasNarration) {
+    const musicUpdates = next.timeline.tracks
+      .filter((track) => track.role === 'music')
+      .flatMap((track) => track.clips.flatMap((clip) => clip.kind === 'audio' && (clip.properties.volumeDb ?? 0) > -24
+        ? [{ clipId: clip.id, patch: { volumeDb: -24 } }]
+        : []));
+    if (musicUpdates.length) {
+      const mixed = applyAudioDocumentEdits({ document: next, updates: musicUpdates });
+      if (!mixed.ok) return fail(mixed.error.message, mixed.error);
+      next = mixed.document;
+      receipts.push(...mixed.receipts);
+    }
   }
   const activePlacements = created.flatMap((clipId) => {
     const found = locatedClip(next, clipId);
@@ -1055,6 +1082,9 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
       ...(typeof item.trackIndex === 'number' ? { trackIndex: Math.round(item.trackIndex) } : {}),
       ...(string(item.sub) ? { sub: string(item.sub) } : {}),
     });
+    // Agent-created native text must remain positionable. Manual/legacy titleBlock callers retain
+    // their established full-canvas behaviour; this tool supplies the editable safe-area geometry.
+    block.box = { x: 0.1, y: 0.34, w: 0.8, h: 0.32 };
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
     const inserted = insertOverlayDocumentClip({

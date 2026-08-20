@@ -159,8 +159,9 @@ export function switchProjectOutput(
 
 const outputId = (now: number) => `output-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-/** Create and check out an empty deliverable while snapshotting the current one. Canvas format is
- * project-level working context, so it carries forward; timeline content and media do not. */
+/** Create and check out an empty deliverable while snapshotting the current one. Canvas format and
+ * the reusable project media manifest carry forward; timeline clips, Director artifacts and output
+ * presentation do not. An asset registered for output A must remain addressable while building B. */
 export function createBlankProjectOutput(
   outputs: StudioProjectOutputs,
   state: ActiveProjectOutputState,
@@ -184,11 +185,17 @@ export function createBlankProjectOutput(
     fps: state.document.canvas.fps,
     theme: state.document.appearance.theme,
   });
+  const shared = storedOutputDocument(state.document);
   const target: StudioProjectOutputSnapshot = {
     ...meta,
     document: {
       ...empty,
       canvas: { ...empty.canvas, configured: state.document.canvas.configured },
+      assets: shared.assets,
+      semantics: {
+        ...empty.semantics,
+        transcripts: shared.semantics.transcripts,
+      },
     },
     videoSig: null,
     videoDurationSec: null,

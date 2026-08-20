@@ -71,6 +71,7 @@ import {
   blockId,
   blockKind,
   compReceiptDelta,
+  canvasSizeFollowingFirstVideo,
   canvasSizeFromInput,
   freeTrack,
   freezeBlockVars,
@@ -690,8 +691,11 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
     }
     case 'set_canvas': {
-      const size = canvasSizeFromInput(input);
-      if (!size) return { result: { ok: false, error: 'invalid canvas: use portrait / landscape / square or width+height (240..7680)' } };
+      const followsSource = typeof input.preset === 'string' && ['source', 'auto', 'follow-source'].includes(input.preset.toLowerCase());
+      const size = followsSource ? canvasSizeFollowingFirstVideo(p.document) : canvasSizeFromInput(input);
+      if (!size) return { result: { ok: false, error: followsSource
+        ? 'cannot follow source: place a video with known dimensions first'
+        : 'invalid canvas: use source / portrait / landscape / square or width+height (240..7680)' } };
       const currentCanvas = p.document.canvas;
       if (
         size.width === currentCanvas.width

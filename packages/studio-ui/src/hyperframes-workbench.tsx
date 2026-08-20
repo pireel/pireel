@@ -157,6 +157,7 @@ import {
   videoShotTimelineSpans,
   treatmentVacancyBox,
   type MediaTimelineClip,
+  canvasSizeFollowingFirstVideo,
 } from "@pireel/studio-engine/composition";
 import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
@@ -1057,6 +1058,9 @@ export function HyperframesWorkbench({
   const currentRatioId = CANVAS_RATIOS.find(
     (r) => Math.abs(r.w / r.h - comp.width / comp.height) < 0.02,
   )?.id;
+  const sourceCanvasSize = canvasSizeFollowingFirstVideo(editorDocument);
+  const followsFirstSource = !!sourceCanvasSize
+    && Math.abs(sourceCanvasSize.width / sourceCanvasSize.height - comp.width / comp.height) < 0.02;
   const [ratioOpen, setRatioOpen] = useState(false);
   const applyCanvasRatio = (w: number, h: number) => {
     setRatioOpen(false);
@@ -1079,6 +1083,13 @@ export function HyperframesWorkbench({
     }
     pushUndoSnapshot();
     setEditorDocument(edit.document);
+  };
+  const applySourceCanvasRatio = () => {
+    if (!sourceCanvasSize) {
+      toast.info(t("workbench.followSourceUnavailable"));
+      return;
+    }
+    applyCanvasRatio(sourceCanvasSize.width, sourceCanvasSize.height);
   };
   // Preview box scale: computed after `bufs` below (stage geometry follows the ACTIVE doc's canvas
   // dims, not the live comp — a ratio switch must change shape atomically WITH the buffer swap,
@@ -7749,6 +7760,17 @@ export function HyperframesWorkbench({
                 <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
                   {ratioOpen && (
                     <div className="border-line bg-panel absolute bottom-8 right-0 flex flex-col overflow-hidden rounded-md border shadow-lg">
+                      <button
+                        type="button"
+                        onClick={applySourceCanvasRatio}
+                        className={`px-3 py-1.5 text-left text-[11.5px] transition ${
+                          followsFirstSource
+                            ? "bg-panel-2 text-ink font-medium"
+                            : "text-ink-3 hover:bg-panel-2 hover:text-ink"
+                        }`}
+                      >
+                        {t("workbench.ratioFollowSource")}
+                      </button>
                       {CANVAS_RATIOS.map((r) => (
                         <button
                           key={r.id}
@@ -7771,7 +7793,7 @@ export function HyperframesWorkbench({
                     title={t("workbench.canvasRatio")}
                     className="border-line bg-panel/90 text-ink-2 hover:text-ink inline-flex h-[24px] items-center gap-1 rounded-md border px-2 text-[11px] backdrop-blur"
                   >
-                    {currentRatioId ?? t("workbench.ratioCustom")}
+                    {followsFirstSource ? t("workbench.ratioFollowSource") : currentRatioId ?? t("workbench.ratioCustom")}
                   </button>
                 </div>
                 {/* Floating entries on the preview (outside the toolbar's TooltipProvider scope, use native title — Tooltip would crash):

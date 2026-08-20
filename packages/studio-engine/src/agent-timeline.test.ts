@@ -80,7 +80,7 @@ describe('shared agent timeline atoms', () => {
     });
     expect(placed.ok).toBe(true);
     const narration = placed.document!.timeline.tracks.find((track) => track.role === 'narration')!;
-    expect(narration).toMatchObject({ type: 'audio', clips: [{ kind: 'audio', assetId: 'tts-1' }] });
+    expect(narration).toMatchObject({ type: 'audio', clips: [{ kind: 'audio', assetId: 'tts-1', properties: { volumeDb: 4 } }] });
     const captions = applyCaptionDocumentEdit({
       document: placed.document!, patch: { on: true, preset: 'ln-clean' }, source: { mode: 'track', trackId: narration.id }, mainTranscript: null, clipTranscripts: {},
     });
@@ -88,6 +88,43 @@ describe('shared agent timeline atoms', () => {
     if (!captions.ok) return;
     expect(captions.document.semantics.managedCaptionSource).toEqual({ mode: 'track', trackId: narration.id });
     expect(captions.document.timeline.tracks.find((track) => track.role === 'managedCaptions')!.clips.length).toBeGreaterThan(0);
+  });
+
+  it('starts narration above source level and caps a new music bed below it', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 5 },
+      { id: 'music', kind: 'audio', url: 'https://cdn.example/music.mp3', durationSec: 5 },
+    ] }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'voice-clip', assetId: 'voice', role: 'narration', startSec: 0 },
+      { id: 'music-clip', assetId: 'music', role: 'music', startSec: 0, volumeDb: -14 },
+    ] });
+    expect(placed.ok).toBe(true);
+    expect(placed.document!.timeline.tracks.find((track) => track.role === 'narration')?.clips[0]).toMatchObject({ properties: { volumeDb: 4 } });
+    expect(placed.document!.timeline.tracks.find((track) => track.role === 'music')?.clips[0]).toMatchObject({ properties: { volumeDb: -24 } });
+  });
+
+  it('inherits probed dimensions when an alias registers the same local source', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [{
+      id: 'library-video', kind: 'video', localSig: 'same.mp4:1:1', durationSec: 8, width: 960, height: 1280,
+    }] }).document!;
+    const alias = runAgentTimelineTool(document, 'register_media', { assets: [{
+      id: 'v1', kind: 'video', localSig: 'same.mp4:1:1', durationSec: 4,
+    }] });
+    expect(alias.document!.assets.v1.metadata).toMatchObject({ durationSec: 4, width: 960, height: 1280 });
+  });
+
+  it('gives agent-created title text an editable safe-area box', () => {
+    const added = runAgentTimelineTool(emptyEditorDocumentV2({ fps: 30 }), 'add_texts', {
+      items: [{ id: 'title-1', text: '重点信息', startSec: 0, durationSec: 2 }],
+    });
+    expect(added.ok).toBe(true);
+    expect(added.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'title-1')).toMatchObject({
+      kind: 'graphic',
+      block: { box: { x: 0.1, y: 0.34, w: 0.8, h: 0.32 } },
+    });
   });
 
   it('uses a generated speech estimate as the initial asset and clip duration', () => {

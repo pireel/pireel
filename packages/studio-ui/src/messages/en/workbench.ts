@@ -137,6 +137,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
   "workbench.ratioCustom": "Custom",
+  "workbench.ratioFollowSource": "Follow source",
+  "workbench.followSourceUnavailable": "Add a video clip with known dimensions first",
   "workbench.couldNotGenerateCaptions":
     "Could not generate captions (the transcript may be empty)",
   "workbench.couldNotGetSource":
@@ -367,6 +369,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.noExportStarted": "No export has been started",
   "workbench.noSpeechDetectedTry":
     "No speech detected — try a video with narration",
+  "workbench.noSpeechDetected": "No speech detected; source audio will start muted",
   "workbench.noRemovableDeadAir":
     "No removable narration pauses remain on the timeline with the current detection settings",
   "workbench.noSuchCaptionPreset": "No such caption preset: {preset}",

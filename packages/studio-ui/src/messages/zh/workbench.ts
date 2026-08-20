@@ -123,6 +123,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "本地视频请拖到时间轴插入;画布画中画暂不支持本地视频文件",
   "workbench.ratioCustom": "自定义",
+  "workbench.ratioFollowSource": "跟随素材",
+  "workbench.followSourceUnavailable": "先添加一个有尺寸信息的视频片段",
   "workbench.couldNotGenerateCaptions": "没能生成字幕(口播稿可能是空的)",
   "workbench.couldNotGetSource": "取不到该片段的源文件,无法抠像",
   "workbench.couldNotReadDuration": "读取视频时长失败(换 mp4/mov 试试)",
@@ -322,6 +324,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
     "按 sig 没取到字节——先跑 asset-import helper 上传(它会返回这个 sig)",
   "workbench.noExportStarted": "还没有发起过导出",
   "workbench.noSpeechDetectedTry": "没有识别到人声,换条带口播的视频试试",
+  "workbench.noSpeechDetected": "未检测到口播，素材原声将默认静音",
   "workbench.noRemovableDeadAir":
     "按当前检测设置，时间轴里没有剩余可删除的口播空白",
   "workbench.noSuchCaptionPreset": "没有这个字幕预设:{preset}",

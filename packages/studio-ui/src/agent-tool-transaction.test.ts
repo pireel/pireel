@@ -318,6 +318,37 @@ describe('Agent composition transaction boundary', () => {
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
   });
 
+  it('treats provider no-fragment as a speech-free observation and mutes that local source on placement', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const sig = 'noise-only.mp4:240:12';
+    const video = new File(['noise'], 'noise-only.mp4', { type: 'video/mp4', lastModified: 12 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 6, width: 960, height: 1280, hasAudio: true });
+    providerMocks.transcribe.mockRejectedValue(new Error('SUCCESS_WITH_NO_VALID_FRAGMENT'));
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [{ sig, label: '环境噪声素材', kind: 'video', createdAt: 1 }] },
+      prepareLocalAssetRuntime: async () => ({ ok: true }),
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const observed = await runStudioTool(h.ctx, 'extract_asr', { localSig: sig });
+    expect(observed).toMatchObject({ ok: true, data: { speechDetected: false, defaultSourceAudio: 'muted' } });
+
+    const registered = await runStudioTool(h.ctx, 'register_media', {
+      assets: [{ id: 'noise', kind: 'video', localSig: sig, durationSec: 6, width: 960, height: 1280 }],
+    });
+    expect(registered.ok).toBe(true);
+    const placed = await runStudioTool(h.ctx, 'add_clips', {
+      clips: [{ id: 'noise-clip', assetId: 'noise', role: 'primary', startSec: 0, durationSec: 6 }],
+    });
+    expect(placed.ok).toBe(true);
+    expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'noise-clip'))
+      .toMatchObject({ properties: { audioMuted: true } });
+  });
+
   it('analyzes an unplaced local video by sig before Director planning', async () => {
     const h = harness();
     const sig = 'product-demo.mp4:120:4';

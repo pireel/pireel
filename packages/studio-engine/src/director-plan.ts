@@ -292,6 +292,11 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
   const scenes = rawScenes.map((value) => {
     const scene = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const durationSec = Number(scene.durationSec);
+    const rawSceneFamily = nonEmpty(scene.sceneFamily) ? scene.sceneFamily : '';
+    const sceneFamily = inList(rawSceneFamily, SCENE_FAMILIES) ? rawSceneFamily : 'custom';
+    const customFamily = sceneFamily === 'custom'
+      ? (nonEmpty(scene.customFamily) ? scene.customFamily : rawSceneFamily && rawSceneFamily !== 'custom' ? rawSceneFamily : '')
+      : '';
     return {
       id: scene.id as string,
       label: scene.label as string,
@@ -299,8 +304,8 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
       durationFrames: durationSec > 0 ? Math.max(1, Math.round(durationSec * fps)) : Math.round(durationSec * fps),
       viewerTask: scene.viewerTask as ViewerTask,
       narrativeRole: scene.narrativeRole as NarrativeRole,
-      sceneFamily: scene.sceneFamily as SceneFamily,
-      ...(scene.customFamily !== undefined ? { customFamily: scene.customFamily as string } : {}),
+      sceneFamily: sceneFamily as SceneFamily,
+      ...(customFamily ? { customFamily } : {}),
       purpose: scene.purpose as string,
       ...(scene.evidence !== undefined ? { evidence: scene.evidence as string[] } : {}),
       treatmentId: scene.treatmentId as string,
@@ -311,7 +316,7 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
       assetStrategy: scene.assetStrategy as string,
       brollDecision: scene.brollDecision as BrollDecision,
       brollRationale: scene.brollRationale as string,
-      ...(scene.visualMetaphor !== undefined ? { visualMetaphor: scene.visualMetaphor as string } : {}),
+      ...(nonEmpty(scene.visualMetaphor) ? { visualMetaphor: scene.visualMetaphor } : {}),
     } satisfies DirectorScenePlan;
   });
   const plan: DirectorPlan = {
@@ -320,9 +325,9 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
     rhythmArc: input.rhythmArc as string,
     ...(input.deliverySafety !== undefined ? { deliverySafety: input.deliverySafety as string } : {}),
     designSystem: input.designSystem as VideoDesignSystem,
-    ...(input.skillId !== undefined ? { skillId: input.skillId as string } : {}),
-    ...(input.frameId !== undefined ? { frameId: input.frameId as string } : {}),
-    ...(input.audience !== undefined ? { audience: input.audience as string } : {}),
+    ...(nonEmpty(input.skillId) ? { skillId: input.skillId } : {}),
+    ...(nonEmpty(input.frameId) ? { frameId: input.frameId } : {}),
+    ...(nonEmpty(input.audience) ? { audience: input.audience } : {}),
     scenes,
   };
   const issues = validateDirectorPlan(plan).map((issue) => {

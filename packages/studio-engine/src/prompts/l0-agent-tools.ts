@@ -90,7 +90,7 @@ const AGENT_CLIP_ITEM_SCHEMA = {
     anchorY: { type: 'number', description: 'Cover-crop source anchor 0..1, top to bottom.' },
     opacity: { type: 'number', description: 'Visual opacity 0..1.' },
     enabled: { type: 'boolean' }, linkGroupId: { type: 'string' },
-    volumeDb: { type: 'number' }, fadeInSec: { type: 'number' }, fadeOutSec: { type: 'number' },
+    volumeDb: { type: 'number', description: 'Initial level. Omit for semantic defaults: narration is lifted for clarity and music starts safely under narration; adjust later only after a deliberate mix decision.' }, fadeInSec: { type: 'number' }, fadeOutSec: { type: 'number' },
     speed: { type: 'number' }, muted: { type: 'boolean' },
   },
   required: ['assetId'],
@@ -640,7 +640,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
-    description: 'Place one or more registered assets without opening timeline time. Device-local image, audio, and video bytes are prepared before commit; unavailable access fails without changing the timeline. Use role=primary for the continuous full-frame video story spine; use role=broll only for deliberate concurrent overlay/PiP evidence. When trackId is omitted, overlapping broll is placed on a free semantic lane so it coexists with current footage; pass an exact trackId only when replacement is intentional. The receipt returns the actual placed timeline/source ranges and any overwritten clip ids. A 5-second fallback is only an editable initial duration, never proof of source length or coverage. Reuse is valid only when the repeated occurrence has a distinct editorial job or treatment; inspect the source, pass deliberate duration/source ranges, and verify placements instead of looping one span as filler. Use insert_clips to open time. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended.',
+    description: 'Place one or more registered assets without opening timeline time. Device-local image, audio, and video bytes are prepared before commit; unavailable access fails without changing the timeline. Use role=primary for the continuous full-frame video story spine; use role=broll only for deliberate concurrent overlay/PiP evidence. When trackId is omitted, overlapping broll is placed on a free semantic lane so it coexists with current footage; pass an exact trackId only when replacement is intentional. The receipt returns the actual placed timeline/source ranges and any overwritten clip ids. A 5-second fallback is only an editable initial duration, never proof of source length or coverage. Reuse is valid only when the repeated occurrence has a distinct editorial job or treatment; inspect the source, pass deliberate duration/source ranges, and verify placements instead of looping one span as filler. Use insert_clips to open time. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended. Omit initial volumeDb unless the user specified a level: narration defaults to a clarity lift, and music is capped to a speech-safe bed while narration exists.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
@@ -1094,10 +1094,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '▣',
     label: 'tools.set_canvas.label',
     description:
-      'Change the composition canvas while preserving normalized block/layout coordinates. Use preset portrait/9:16 (1080×1920), landscape/16:9 (1920×1080), square/1:1 (1080×1080), or custom even codec-safe width+height. This does NOT auto-reframe every shot; follow with set_shot_framing/apply_layout as needed.',
+      'Change the composition canvas while preserving normalized block/layout coordinates. Use preset source/auto/follow-source to match the first placed video clip (the normal default when no exact delivery ratio was requested); later mixed-ratio clips do not change it. Or use portrait/9:16 (1080×1920), landscape/16:9 (1920×1080), square/1:1 (1080×1080), or custom even codec-safe width+height. This does NOT auto-reframe every shot; follow with set_shot_framing/apply_layout as needed.',
     inputSchema: obj(
       {
-        preset: { type: 'string', enum: ['portrait', 'vertical', '9:16', 'landscape', 'horizontal', '16:9', 'square', '1:1'] },
+        preset: { type: 'string', enum: ['source', 'auto', 'follow-source', 'portrait', 'vertical', '9:16', 'landscape', 'horizontal', '16:9', 'square', '1:1'] },
         width: { type: 'number', description: 'Custom width, 240..7680. Use together with height.' },
         height: { type: 'number', description: 'Custom height, 240..7680. Use together with width.' },
       },
