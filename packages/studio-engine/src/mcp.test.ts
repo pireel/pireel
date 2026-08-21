@@ -70,6 +70,13 @@ describe('MCP 工具面', () => {
     expect(t.description).not.toContain('<frame_catalog>');
     expect(t.description).toContain('list_frames');
   });
+  it('本地导入先用内置浏览器,仅在明确回环错误后切换受控浏览器', () => {
+    const tool = buildMcpTools().find((candidate) => candidate.name === 'import_media')!;
+    expect(tool.description).toContain('built-in/embedded browser first');
+    expect(tool.description).toContain('local loopback is unreachable from this browser');
+    expect(tool.description).toContain('If and only if');
+    expect(tool.description).not.toContain('prefer connected Chrome');
+  });
   it('外部 Agent 能保存同一套 Director Plan 与开放式 Scene 设计', () => {
     const tools = buildMcpTools();
     const plan = tools.find((tool) => tool.name === 'set_director_plan')!;

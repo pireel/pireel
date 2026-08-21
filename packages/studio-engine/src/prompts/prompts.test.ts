@@ -112,6 +112,12 @@ describe("静态提示词完整性", () => {
     expect(mcpInstructions("test-version")).toContain(
       "distribution-specific update section",
     );
+    expect(mcpInstructions("test-version")).toContain(
+      "verified Skill-to-Plugin migration section",
+    );
+    expect(mcpInstructions("test-version")).toContain(
+      "never delete the working standalone connection first",
+    );
     expect(mcpInstructions("test-version")).toContain("Plugin SemVer");
     expect(mcpInstructions("test-version")).not.toContain(
       "npx skills update pireel",
