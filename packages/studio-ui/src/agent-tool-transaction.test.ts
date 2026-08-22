@@ -91,6 +91,39 @@ describe('Agent composition transaction boundary', () => {
     vi.unstubAllGlobals();
   });
 
+  it('treats already-filled primary clips and an already-configured canvas as successful no-ops', async () => {
+    const h = harness();
+    h.documentRef.current = {
+      ...h.documentRef.current,
+      canvas: { ...h.documentRef.current.canvas, configured: true },
+    };
+
+    const fill = runAgentTimelineTool(h.documentRef.current, 'set_clip_properties', {
+      items: [{ clipId: 's1', fit: 'cover' }],
+    });
+    expect(fill).toMatchObject({
+      ok: true,
+      data: { unchangedPrimaryFillClipIds: ['s1'] },
+    });
+
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    const { classifyStudioReviewFailure, runStudioTool } = await import('./agent-tool-runner');
+    const canvas = await runStudioTool(h.ctx, 'set_canvas', { preset: 'portrait' });
+    expect(canvas).toMatchObject({
+      ok: true,
+      data: { canvas: { width: 1080, height: 1920 }, changed: false },
+    });
+    expect(classifyStudioReviewFailure(new TypeError('Failed to fetch'), 'request')).toEqual({
+      code: 'review_network_error',
+      phase: 'request',
+      retryable: true,
+      detail: 'Failed to fetch',
+    });
+  });
+
   it('distinguishes ASR provider failure from genuine no-speech and exposes a useful tool error once', async () => {
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr poll HTTP 503: busy' })).toBe('failed');
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr returned no text' })).toBe('empty');

@@ -141,12 +141,12 @@ describe('MCP 协议处理', () => {
     expect(d4.importStock).toHaveBeenCalledWith(stockImport);
     expect(d4.callBridge).not.toHaveBeenCalled();
     const d5 = deps();
-    await handleMcpRequest({ id: 103, method: 'tools/call', params: { name: 'generate_speech', arguments: { text: '你好' } } }, d5);
+    await handleMcpRequest({ id: 103, method: 'tools/call', params: { name: 'generate_speech', arguments: { text: '你好', voiceId: 'system:voice-1' } } }, d5);
     await handleMcpRequest({ id: 104, method: 'tools/call', params: { name: 'lip_sync', arguments: { audioUrl: 'https://cdn.example/s.mp3', sourceImageUrl: 'https://cdn.example/p.jpg' } } }, d5);
     await handleMcpRequest({ id: 105, method: 'tools/call', params: { name: 'list_voices', arguments: {} } }, d5);
     await handleMcpRequest({ id: 106, method: 'tools/call', params: { name: 'clone_voice', arguments: { audioAssetId: 'up_1', name: 'Mine', consentConfirmed: true } } }, d5);
     await handleMcpRequest({ id: 107, method: 'tools/call', params: { name: 'delete_voice', arguments: { voiceId: 'voice_1' } } }, d5);
-    expect(d5.generateSpeech).toHaveBeenCalledWith({ text: '你好' });
+    expect(d5.generateSpeech).toHaveBeenCalledWith({ text: '你好', voiceId: 'system:voice-1' });
     expect(d5.lipSync).toHaveBeenCalledWith({ audioUrl: 'https://cdn.example/s.mp3', sourceImageUrl: 'https://cdn.example/p.jpg' });
     expect(d5.listVoices).toHaveBeenCalledWith({});
     expect(d5.cloneVoice).toHaveBeenCalledWith({ audioAssetId: 'up_1', name: 'Mine', consentConfirmed: true });

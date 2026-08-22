@@ -765,6 +765,7 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
   if (!items.length) return fail('items is required');
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
+  const unchangedPrimaryFillClipIds: string[] = [];
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Input;
     const clipId = string(item.clipId);
@@ -780,8 +781,19 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
     if (!found) return fail(`items[${index}] clip not found after move`);
     const commonPatch: ClipPatch = {
       ...(typeof item.enabled === 'boolean' ? { enabled: item.enabled } : {}),
-      ...(item.fit === 'contain' || item.fit === 'cover' ? { fit: item.fit as 'contain' | 'cover' } : {}),
     };
+    if (item.fit === 'contain' || item.fit === 'cover') {
+      if (found.clip.kind === 'narrative') {
+        if (item.fit === 'contain') {
+          return fail(`items[${index}] fit=contain is not supported for primary narrative clips; use box for canvas placement or set_shot_framing for source crop`);
+        }
+        // Primary narrative video is cover-filled by definition. Treat an explicit cover request as
+        // confirmation, not as an invalid media-only patch that aborts the whole batch.
+        unchangedPrimaryFillClipIds.push(found.clip.id);
+      } else {
+        commonPatch.fit = item.fit;
+      }
+    }
     if (item.box !== undefined) {
       const box = mediaBox(item.box);
       if (!box) return fail(`items[${index}] box must be a positive normalized rect inside the canvas`);
@@ -826,7 +838,11 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
       }
     }
   }
-  return mutation(next, `Updated ${items.length} clip${items.length === 1 ? '' : 's'}`, receipts);
+  const changedCount = receipts.filter((receipt) => receipt.affectedTrackIds.length > 0).length;
+  const summary = changedCount === 0 && unchangedPrimaryFillClipIds.length
+    ? `Primary video already fills the canvas for ${unchangedPrimaryFillClipIds.length} clip${unchangedPrimaryFillClipIds.length === 1 ? '' : 's'}`
+    : `Updated ${items.length} clip${items.length === 1 ? '' : 's'}`;
+  return mutation(next, summary, receipts, unchangedPrimaryFillClipIds.length ? { unchangedPrimaryFillClipIds } : undefined);
 }
 
 function setKeyframes(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {

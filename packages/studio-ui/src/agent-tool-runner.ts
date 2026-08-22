@@ -142,6 +142,17 @@ import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from 
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
 const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+
+export type StudioReviewFailurePhase = 'capture' | 'request' | 'response';
+
+export function classifyStudioReviewFailure(error: unknown, phase: StudioReviewFailurePhase) {
+  const detail = error instanceof Error ? error.message : String(error);
+  const network = error instanceof TypeError
+    && /failed to fetch|networkerror|network request failed|load failed|connection (?:closed|reset)/i.test(detail);
+  return network
+    ? { code: 'review_network_error', phase, retryable: true as const, detail }
+    : { code: 'review_failed', phase, retryable: false as const, detail };
+}
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 
 const IMAGE_INSPECTION_MAX_DIM = 1280;
@@ -1259,6 +1270,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 data: { repeatedAtSecs, limit: STUDIO_AGENT_EXECUTION_LIMITS.reviewsPerUnchangedMoment },
               };
             }
+            let reviewPhase: StudioReviewFailurePhase = 'capture';
             try {
               const candidates: {
                 atSec: number;
@@ -1330,7 +1342,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   })),
               };
               report(t('workbench.reviewJudgingN', { n: frames.length }));
+              reviewPhase = 'request';
               const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }), ...(signal ? { signal } : {}) });
+              reviewPhase = 'response';
               // scene = per-frame one-line description from the vision pass: issues alone can't answer
               // "what does this moment look like", which this tool also serves
               const j = (await rr.json().catch(() => ({}))) as {
@@ -1375,7 +1389,24 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             } catch (e) {
               // A user stop is not a review failure — rethrow with the localized stop message
               if (e instanceof DOMException && e.name === 'AbortError') throw abortErr();
-              return { ok: false, error: t('workbench.reviewFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
+              const failure = classifyStudioReviewFailure(e, reviewPhase);
+              if (failure.code === 'review_network_error') {
+                return {
+                  ok: false,
+                  error: t('tools.review_visuals.networkError'),
+                  data: {
+                    ...failure,
+                    hint: failure.phase === 'request'
+                      ? 'The composed frames were captured successfully. Retry review_visuals once; do not claim that local video bytes are missing.'
+                      : 'Retry review_visuals once. Do not infer missing media unless the failure phase is capture.',
+                  },
+                };
+              }
+              return {
+                ok: false,
+                error: t('workbench.reviewFailedMessage', { message: failure.detail }),
+                data: failure,
+              };
             } finally {
               clearToolProgress(toolId);
             }
@@ -1749,7 +1780,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const res = await fetch(`/api/studio/voices?${params}`, { ...(signal ? { signal } : {}) });
             const body = (await res.json().catch(() => ({}))) as { voices?: unknown[]; error?: string; detail?: string };
             if (!res.ok || !body.voices) return { ok: false, error: body.detail || body.error || t('workbench.voiceListFailed') };
-            return { ok: true, summary: t('workbench.voicesAvailable', { n: body.voices.length }), data: { voices: body.voices } };
+            const voices = body.voices.map((voice) => {
+              if (!voice || typeof voice !== 'object' || Array.isArray(voice)) return voice;
+              const { selected: _selected, ...candidate } = voice as Record<string, unknown>;
+              return candidate;
+            });
+            return { ok: true, summary: t('workbench.voicesAvailable', { n: voices.length }), data: { voices } };
           }
           case 'clone_voice': {
             report(t('workbench.cloningVoice'));
@@ -2398,7 +2434,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               : 'invalid canvas: use source / portrait / landscape / square or width+height (240..7680)' };
             const currentCanvas = documentRef.current.canvas;
             if (size.width === currentCanvas.width && size.height === currentCanvas.height && currentCanvas.configured) {
-              return { ok: false, error: 'canvas already has that size' };
+              return {
+                ok: true,
+                summary: t('tools.set_canvas.unchanged', size),
+                data: { canvas: size, changed: false },
+              };
             }
             const edit = applyCanvasDocumentEdit({
               projectId: ctx.projectId,

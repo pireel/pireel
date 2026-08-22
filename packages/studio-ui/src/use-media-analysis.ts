@@ -66,13 +66,29 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
     return dedup('asr', async () => {
       const current = documentRef.current;
       const targets = timelineTranscriptionTargets(current);
-      if (!targets.length) throw new Error(t('common.uploadVideoFirst'));
+      if (!targets.length) {
+        const silentAssetIds = [...new Set(current.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+          const assetId = 'assetId' in clip && typeof clip.assetId === 'string' ? clip.assetId : null;
+          if (!clip.enabled || !assetId) return [];
+          const asset = current.assets[assetId];
+          return asset?.kind === 'video' && asset.metadata.hasAudio === false ? [asset.id] : [];
+        })))];
+        if (!silentAssetIds.length) throw new Error(t('common.uploadVideoFirst'));
+        const transcripts = { ...current.semantics.transcripts };
+        for (const assetId of silentAssetIds) transcripts[assetId] = [];
+        const document = { ...current, semantics: { ...current.semantics, transcripts } };
+        if (current.semantics.primaryNarrativeAssetId && silentAssetIds.includes(current.semantics.primaryNarrativeAssetId)) {
+          asrRef.current = [];
+          setAsrSentences([]);
+        }
+        setDocument(document);
+        return [];
+      }
       report?.(t('common.transcribing'));
       const primaryAssetId = current.semantics.primaryNarrativeAssetId;
       const transcripts = { ...current.semantics.transcripts };
       let firstError: unknown;
       for (const target of targets) {
-        const existing = transcripts[target.assetId] as AsrSegment[] | undefined;
         const refreshThisAsset = force && target.assetId === primaryAssetId;
         if (Object.prototype.hasOwnProperty.call(transcripts, target.assetId) && !refreshThisAsset) continue;
         const asset = current.assets[target.assetId];
@@ -91,7 +107,8 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       const available = targets
         .map((target) => ({ target, segments: transcripts[target.assetId] as AsrSegment[] | undefined }))
         .filter((entry): entry is { target: typeof targets[number]; segments: AsrSegment[] } => !!entry.segments?.length);
-      if (!available.length) {
+      const resolved = targets.filter((target) => Object.prototype.hasOwnProperty.call(transcripts, target.assetId));
+      if (!resolved.length) {
         if (firstError instanceof Error) throw firstError;
         throw new Error(t('workbench.restoreVideoSourceBeforeCaptions'));
       }
@@ -118,7 +135,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
       setDocument(document);
       return main?.length
         ? main
-        : available.sort((left, right) => transcriptWordCount(right.segments) - transcriptWordCount(left.segments))[0]!.segments;
+        : available.sort((left, right) => transcriptWordCount(right.segments) - transcriptWordCount(left.segments))[0]?.segments ?? [];
     });
   }
   function stepAsr(report?: (text: string) => void): Promise<AsrSegment[]> {

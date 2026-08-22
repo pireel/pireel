@@ -6425,7 +6425,7 @@ export function HyperframesWorkbench({
   }, [audioOps, clearRuntimeAssetUrls, resetClipRuntime, restoreChatAfterTimelineFramePick, setSelectedId, setSelectedShotId]);
   const outputRuntime = useProjectOutputRuntime({
     projectId,
-    activeId: projectOutputs.outputs.active.id,
+    getActiveId: () => projectOutputs.outputsRef.current.active.id,
     switchTo: projectOutputs.switchTo,
     create: projectOutputs.create,
     listOutputIds: () =>
@@ -6590,15 +6590,31 @@ export function HyperframesWorkbench({
       ...localAssetIndexRef.current.filter((item) => item.sig !== entry.sig),
     ]);
   };
-  const listProjectOutputsForAgent = () =>
-    outputTabs.map((output, index) => ({
-      id: output.id,
-      position: index + 1,
-      title: output.title || t("workbench.untitledOutput"),
-      active: output.id === projectOutputs.outputs.active.id,
-      durationSec: output.durationSec,
-      ...(output.skill ? { skill: output.skill } : {}),
-    }));
+  const listProjectOutputsForAgent = () => {
+    const liveOutputs = projectOutputs.outputsRef.current;
+    const liveComposition = compRef.current;
+    return [
+      {
+        ...liveOutputs.active,
+        durationSec: totalDuration(liveComposition) || liveComposition.video?.durationSec || null,
+      },
+      ...liveOutputs.inactive.map((output) => ({
+        ...output,
+        durationSec:
+          editorDocumentRenderPlan(output.document).durationSec ||
+          output.videoDurationSec,
+      })),
+    ]
+      .sort((a, b) => a.order - b.order || a.createdAt - b.createdAt)
+      .map((output, index) => ({
+        id: output.id,
+        position: index + 1,
+        title: output.title || t("workbench.untitledOutput"),
+        active: output.id === liveOutputs.active.id,
+        durationSec: output.durationSec,
+        ...(output.skill ? { skill: output.skill } : {}),
+      }));
+  };
   const createProjectOutputForAgent = (title: string, skill?: string) => {
     const created = outputRuntime.createOutput(title, skill);
     return { id: created.id, title: created.title || title };
@@ -6608,16 +6624,17 @@ export function HyperframesWorkbench({
     return { id: duplicated.id, title: duplicated.title || title };
   };
   const renameProjectOutputForAgent = (id: string, title: string) => {
-    if (!outputTabs.some((output) => output.id === id)) return false;
+    if (!projectOutputs.resolve({ id }, false)) return false;
     projectOutputs.rename(id, title);
     return true;
   };
   const deleteProjectOutputForAgent = (id: string) =>
     outputRuntime.deleteOutput(id);
-  const switchProjectOutputForAgent = (id: string) =>
-    id === projectOutputs.outputs.active.id
-      ? Promise.resolve(true)
-      : outputRuntime.switchOutput(id);
+  const switchProjectOutputForAgent = async (id: string) => {
+    if (id === projectOutputs.outputsRef.current.active.id) return true;
+    const switched = await outputRuntime.switchOutput(id);
+    return switched && projectOutputs.outputsRef.current.active.id === id;
+  };
   const agentToolCtx: AgentToolCtx = {
     projectId,
     documentRef: editorDocumentRef,

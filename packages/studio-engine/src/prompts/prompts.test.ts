@@ -81,7 +81,16 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain(
       'Do not pre-solve it as a "top label", "bottom card", "CTA box"',
     );
-    expect(CHAT_IDENTITY).toContain("This is a hard pre-pilot checkpoint");
+    expect(CHAT_IDENTITY).toContain(
+      "approval of that proposal authorizes attaching the recommendation",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Issue independent read-only inspection calls together in the same model turn",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "one call per item when the tool accepts a batch",
+    );
+    expect(CHAT_IDENTITY).not.toContain("hard pre-pilot checkpoint");
     expect(mcpInstructions("test-version")).toContain(
       "Ask one concise question and wait when only the user can resolve that boundary",
     );
@@ -107,6 +116,12 @@ describe("静态提示词完整性", () => {
       "Prefer one strong proposition over keyword soup",
     );
     expect(mcpInstructions("test-version")).toContain(
+      "approval of that proposal authorizes attaching the recommendation",
+    );
+    expect(mcpInstructions("test-version")).toContain(
+      "Issue independent read-only inspection calls together",
+    );
+    expect(mcpInstructions("test-version")).not.toContain(
       "hard pre-pilot checkpoint",
     );
     expect(mcpInstructions("test-version")).toContain(
@@ -230,21 +245,21 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     );
     expect(system).toContain("No visual direction is attached");
     expect(system).toContain(
-      "A complete edit does not authorize automatic Frame selection",
+      "A complete edit does not authorize silent Frame selection",
     );
     expect(system).toContain("host's neutral visual-craft floor");
     expect(system).toContain("not permission to emit generic fixed cards");
     expect(system).toContain(
-      "user explicitly chooses one or delegates the choice",
+      "approves a whole-film proposal that names the exact recommendation",
     );
     expect(system).toContain(
-      "proactively offer one or two Frame candidates plus a direction-free choice",
+      "put it inside the whole-film proposal",
     );
     expect(system).toContain(
       "catalog previews are samples of a visual language",
     );
     expect(system).toContain(
-      "Recommend from stated visual intent, never from supposed Skill compatibility",
+      "Recommend from stated visual intent and footage evidence, never from supposed Skill compatibility",
     );
     expect(system).toContain("Do not use a hidden default");
     expect(system).not.toContain("choose the best-fitting frame");
@@ -593,13 +608,17 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(lipSync.kind).toBe("card");
     expect((speech.inputSchema as { required: string[] }).required).toEqual([
       "text",
+      "voiceId",
     ]);
+    expect(speech.description).toContain("Script approval and concrete voice selection are separate decisions");
     expect((lipSync.inputSchema as { required: string[] }).required).toEqual([
       "audioUrl",
     ]);
     expect(CHAT_IDENTITY).toContain(
       "VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY",
     );
+    expect(CHAT_IDENTITY).toContain("A stored/default voice is neither a recommendation nor approval");
+    expect(mcpInstructions("test-version")).toContain("Generated narration always has two explicit decisions");
     expect(CHAT_IDENTITY).toContain(
       "never look for or claim a monolithic digital-human workflow",
     );

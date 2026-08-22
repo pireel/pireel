@@ -854,7 +854,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔊',
     label: 'tools.list_voices.label',
     description:
-      "List available official and user-cloned voices, including stable voiceId, language, style, scene, readiness, and current default. Use language/query to avoid returning the entire catalog. Call this before generate_speech when the user asks for a specific voice or when you need to discover a cloned voice. It is server-direct and works with Studio closed.",
+      "List available official and user-cloned voice CANDIDATES, including stable voiceId, language, style, scene, and readiness. Use language/query to avoid returning the entire catalog. A user's stored default is preference metadata, never approval for this generation and never a recommendation. Before generate_speech, show a short relevant candidate set and obtain the user's explicit choice of the exact voice unless the user already named and approved one. It is server-direct and works with Studio closed.",
     inputSchema: obj(
       {
         language: { type: 'string', enum: ['zh', 'en'], description: 'Optional supported-language filter.' },
@@ -898,16 +898,16 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.generate_speech.label',
     description:
-      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; call read_script with the exact assetId only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
+      "Generate a reusable spoken-audio asset from EXACT approved text with an EXACT approved voiceId (hosted TTS; CHARGES the user's Pireel account). Script approval and concrete voice selection are separate decisions: do not call this after approving only a general voice requirement, and never infer consent from the user's stored default. This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; call read_script with the exact assetId only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
     inputSchema: obj(
       {
         text: { type: 'string', description: 'Exact text to speak (1–5000 characters).' },
-        voiceId: { type: 'string', description: 'Optional stable voiceId from list_voices. Omit for the user default.' },
+        voiceId: { type: 'string', description: 'Exact stable voiceId explicitly selected or confirmed by the user after list_voices.' },
         speed: { type: 'number', description: 'Speaking speed multiplier, 0.5–2.0 (default 1).' },
         instruction: { type: 'string', description: 'Optional natural-language delivery direction for emotion, dialect, role, or tone. Do not put replacement speech text here.' },
         name: { type: 'string', description: 'Optional asset label shown in the library.' },
       },
-      ['text'],
+      ['text', 'voiceId'],
     ),
   },
   {

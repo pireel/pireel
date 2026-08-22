@@ -702,7 +702,13 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         && size.height === currentCanvas.height
         && currentCanvas.configured
       ) {
-        return { result: { ok: false, error: 'canvas already has that size' } };
+        return {
+          result: {
+            ok: true,
+            summary: `Canvas already set to ${size.width}×${size.height}`,
+            data: { canvas: size, changed: false },
+          },
+        };
       }
       const edit = applyCanvasDocumentEdit({
         projectId: p.id,
