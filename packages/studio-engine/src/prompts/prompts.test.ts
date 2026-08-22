@@ -128,6 +128,11 @@ describe("静态提示词完整性", () => {
       ),
     ).toBe(false);
   });
+  it("回复语言只由用户输入决定，不跟随英文工具回执", () => {
+    expect(CHAT_IDENTITY).toContain("latest USER-AUTHORED message");
+    expect(CHAT_IDENTITY).toContain("Tool calls, tool receipts, transcript envelopes");
+    expect(CHAT_IDENTITY).toContain("must never switch the reply language during a tool loop");
+  });
   it("Chat 身份是剪辑专家，而不是被动助手或泛化导演", () => {
     expect(CHAT_IDENTITY).toContain("Studio's video editing expert");
     expect(CHAT_IDENTITY).toContain("professional editorial judgment");
@@ -316,7 +321,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "instead of inferring image contents from filenames or dimensions",
     );
   });
-  it("buildSituation 不带口播稿正文(稿子经 extract_asr 回执/read_script 一次性进信息流)", () => {
+  it("buildSituation 不带口播稿正文(稿子经 read_script 一次性进信息流)", () => {
     const s = buildSituation({
       composition: { durationSec: 10 },
       playheadSec: 1,
@@ -387,13 +392,15 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
   });
   it("read_script 工具在契约表里(插入片段的稿子靠它按需进上下文)", () => {
     expect(STUDIO_TOOLS.some((t) => t.id === "read_script")).toBe(true);
-    const asr = STUDIO_TOOLS.find((tool) => tool.id === "extract_asr")!;
-    const schema = asr.inputSchema as { properties: Record<string, unknown> };
+    const transcript = STUDIO_TOOLS.find((tool) => tool.id === "read_script")!;
+    expect(STUDIO_TOOLS.some((tool) => tool.id === "extract_asr")).toBe(false);
+    const schema = transcript.inputSchema as { properties: Record<string, unknown> };
     expect(schema.properties).toHaveProperty("localSig");
     expect(schema.properties).toHaveProperty("assetId");
     expect(schema.properties).toHaveProperty("clipId");
-    expect(asr.description).toContain("semantic text truth");
-    expect(asr.description).toContain("reference token, not an assetId");
+    expect(schema.properties).toHaveProperty("measuredTiming");
+    expect(transcript.description).toContain("semantic text truth");
+    expect(transcript.description).toContain("reference token, not an assetId");
     expect(CHAT_IDENTITY).toContain(
       "SEMANTIC truth, not automatically TIMING truth",
     );

@@ -137,7 +137,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "Drop local videos on the timeline — stage picture-in-picture does not support local video files yet",
   "workbench.ratioCustom": "Custom",
-  "workbench.ratioFollowSource": "Follow source",
+  "workbench.ratioFollowSource": "Auto",
   "workbench.followSourceUnavailable": "Add a video clip with known dimensions first",
   "workbench.couldNotGenerateCaptions":
     "Could not generate captions (the transcript may be empty)",
@@ -382,7 +382,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.noTranscriptShort": "No transcript yet — extract it first",
   "workbench.noTranscriptYetExtract":
     "No transcript yet — extract it first (Smart transcript cut / Captions panel), then sync",
-  "workbench.noTranscriptYetRun": "No transcript yet — run extract_asr first",
+  "workbench.noTranscriptYetRun": "No transcript yet — get it with read_script first",
   "workbench.noVideoYet": "No video yet",
   "workbench.openChat": "Open chat",
   "workbench.originalVideoReconnectedDraft":

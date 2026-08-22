@@ -48,7 +48,7 @@ export function stateDiscipline(snapshot: string, howToRefresh: string): string 
   return `STATE DISCIPLINE
 - ${howToRefresh}
 - Every successful composition mutation returns data.delta — the ACTUAL compact change (canvas, shots, blocks, captions, duration, audio/theme where relevant). Failed validation commits nothing and consumes no undo step. Between your own edits trust receipts for ids they mention instead of re-reading ${snapshot}.
-- The spoken transcript is NOT in ${snapshot}. It enters once — via read_script or an extract_asr receipt — and stays valid for the whole session: transcript times are SOURCE-file seconds, which never shift when the video is cut. Segments inserted from other source files each keep their own source clock.
+- The spoken transcript is NOT in ${snapshot}. It enters once via read_script, which returns stored text or transcribes missing speech, and stays valid for the whole session: transcript times are SOURCE-file seconds, which never shift when the video is cut. Segments inserted from other source files each keep their own source clock.
 - When the user rejects a change, undo it (one step per call) rather than editing back by hand.`;
 }
 

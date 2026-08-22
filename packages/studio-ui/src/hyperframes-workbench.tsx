@@ -7764,13 +7764,13 @@ export function HyperframesWorkbench({
                 {/* Canvas-ratio picker (bottom-right): the ratio is a project decision seeded by the first
               inserted source. Default media re-fits inside the new canvas; manually transformed media
               keeps its relative centre and is scaled uniformly, so source pixels never deform. */}
-                <div className="absolute bottom-2 right-2 z-20" data-cap-keep>
+                <div className="absolute bottom-2 right-2 z-[60]" data-cap-keep>
                   {ratioOpen && (
-                    <div className="border-line bg-panel absolute bottom-8 right-0 flex flex-col overflow-hidden rounded-md border shadow-lg">
+                    <div className="border-line bg-panel absolute bottom-8 right-0 flex w-[60px] flex-col overflow-hidden rounded-md border shadow-lg">
                       <button
                         type="button"
                         onClick={applySourceCanvasRatio}
-                        className={`px-3 py-1.5 text-left text-[11.5px] transition ${
+                        className={`whitespace-nowrap px-3 py-1.5 text-left text-[11.5px] transition ${
                           followsFirstSource
                             ? "bg-panel-2 text-ink font-medium"
                             : "text-ink-3 hover:bg-panel-2 hover:text-ink"
@@ -7783,7 +7783,7 @@ export function HyperframesWorkbench({
                           key={r.id}
                           type="button"
                           onClick={() => applyCanvasRatio(r.w, r.h)}
-                          className={`px-3 py-1.5 text-left text-[11.5px] transition ${
+                          className={`whitespace-nowrap px-3 py-1.5 text-left text-[11.5px] transition ${
                             currentRatioId === r.id
                               ? "bg-panel-2 text-ink font-medium"
                               : "text-ink-3 hover:bg-panel-2 hover:text-ink"
@@ -7798,7 +7798,7 @@ export function HyperframesWorkbench({
                     type="button"
                     onClick={() => setRatioOpen((v) => !v)}
                     title={t("workbench.canvasRatio")}
-                    className="border-line bg-panel/90 text-ink-2 hover:text-ink inline-flex h-[24px] items-center gap-1 rounded-md border px-2 text-[11px] backdrop-blur"
+                    className="border-line bg-panel/90 text-ink-2 hover:text-ink inline-flex h-[24px] w-[60px] items-center justify-center whitespace-nowrap rounded-md border px-2 text-[11px] backdrop-blur"
                   >
                     {followsFirstSource ? t("workbench.ratioFollowSource") : currentRatioId ?? t("workbench.ratioCustom")}
                   </button>

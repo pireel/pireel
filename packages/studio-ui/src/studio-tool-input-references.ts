@@ -46,7 +46,7 @@ export function normalizeStudioToolInputReferences(
 ): Record<string, unknown> {
   const sigByMentionId = new Map(localAssets.map((entry) => [localAssetMentionId(entry.sig), entry.sig]));
   const normalized = normalizeValue(input, undefined, sigByMentionId) as Record<string, unknown>;
-  if (toolId === 'extract_asr' || toolId === 'analyze_visual') {
+  if (toolId === 'read_script' || toolId === 'extract_asr' || toolId === 'analyze_visual') {
     const assetId = typeof normalized.assetId === 'string' ? normalized.assetId : '';
     const localSig = sigByMentionId.get(assetId);
     if (localSig) {

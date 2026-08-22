@@ -337,7 +337,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect((r.result.data as { transcript: string }).transcript).toMatch(/<\/spoken_transcript>$/);
     const r2 = runServerTool('read_script', {}, proj({ transcript: [] }));
     expect(r2.result.ok).toBe(false);
-    expect(r2.result.error).toContain('extract_asr');
+    expect(r2.result.error).toContain('call read_script again');
   });
   it('read_script:cue 拆分存储的转写走 desegment 漏斗——离线行号与浏览器(载入即合句)同口径', () => {
     const p = v2proj({

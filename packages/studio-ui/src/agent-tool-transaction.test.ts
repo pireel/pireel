@@ -104,7 +104,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'extract_asr', {});
+    const result = await runStudioTool(h.ctx, 'read_script', {});
     expect(result).toMatchObject({ ok: false, error: '提取口播稿失败,稍后再试' });
 
     const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
@@ -301,7 +301,7 @@ describe('Agent composition transaction boundary', () => {
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'extract_asr', { assetId: localAssetMentionId(sig) });
+    const result = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(sig) });
 
     expect(result).toMatchObject({
       ok: true,
@@ -334,7 +334,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const observed = await runStudioTool(h.ctx, 'extract_asr', { localSig: sig });
+    const observed = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
     expect(observed).toMatchObject({ ok: true, data: { speechDetected: false, defaultSourceAudio: 'muted' } });
 
     const registered = await runStudioTool(h.ctx, 'register_media', {
@@ -447,7 +447,11 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'extract_asr', { assetId: 'tts-audio' });
+    const cached = await runStudioTool(h.ctx, 'read_script', { assetId: 'tts-audio' });
+    expect(cached).toMatchObject({ ok: true, data: { assetId: 'tts-audio', transcript: expect.stringContaining('原始文稿') } });
+    expect(providerMocks.transcribe).not.toHaveBeenCalled();
+
+    const result = await runStudioTool(h.ctx, 'read_script', { assetId: 'tts-audio', measuredTiming: true });
 
     expect(result).toMatchObject({
       ok: true,
@@ -499,7 +503,7 @@ describe('Agent composition transaction boundary', () => {
     const before = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
     expect(before).toMatchObject({ ok: false, error: 'no transcript for the selected source' });
 
-    const result = await runStudioTool(h.ctx, 'extract_asr', { clipId: 'speaker-clip' });
+    const result = await runStudioTool(h.ctx, 'read_script', { clipId: 'speaker-clip' });
 
     expect(result, result.ok ? undefined : result.error).toMatchObject({
       ok: true,

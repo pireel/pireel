@@ -91,7 +91,7 @@ export function useAgentContext(deps: AgentContextDeps) {
 
   /** The situation at the moment a chat message is sent (composition snapshot / selection / playhead / pipeline; attached
    *  as message metadata). The narration script isn't here — it's anchored to source time and doesn't change with editing,
-   *  so it enters the feed once via the extract_asr receipt / read_script, no need to resend each round (prompt-cache friendly). */
+   *  so it enters the feed once via the read_script receipt, no need to resend each round (prompt-cache friendly). */
   const getChatBody = useCallback((): Record<string, unknown> => {
     const c = compRef.current;
     const document = documentRef.current;
@@ -205,7 +205,7 @@ export function useAgentContext(deps: AgentContextDeps) {
   }, []);
 
   /** Narration script → text fed to the agent: all main-source sentences + one section per insert source (each in its own
-   *  source-file seconds, annotated with the owning shot id). Machine-facing English; shared by the extract_asr receipt and read_script. */
+   *  source-file seconds, annotated with the owning shot id). Machine-facing English; returned by read_script. */
   const transcriptForAgent = (): string => {
     const rd = (x: number) => Math.round(x * 10) / 10;
     const copy = (s: AsrSegment) => s.captionText && s.captionText !== s.text
@@ -257,7 +257,7 @@ export function useAgentContext(deps: AgentContextDeps) {
       const asset = document.assets[assetId];
       const segs = document.semantics.transcripts[assetId];
       const head = `AUDIO NARRATION ${asset?.label ? `"${asset.label}" ` : ''}for clip(s) ${clipIds.map((id) => `@${id}`).join(', ')} (asset source seconds)`;
-      if (!segs) parts.push(`${head}: (no transcript — call extract_asr with assetId only when actual audio timing is needed)`);
+      if (!segs) parts.push(`${head}: (no transcript — call read_script with assetId when actual audio timing is needed)`);
       else if (!segs.length) parts.push(`${head}: (no speech detected)`);
       else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
     }

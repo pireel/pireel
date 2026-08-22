@@ -327,28 +327,19 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   /* ---------- media analysis (card · slow) ---------- */
   {
-    id: 'extract_asr',
-    kind: 'card',
-    busyText: 'tools.extract_asr.busy',
-    icon: '📝',
-    label: 'tools.extract_asr.label',
-    description:
-      'Transcribe actual spoken audio into measured timed sentences/words. With no input it analyzes the main video and inserted video sources. For an unplaced device-local video/audio returned by list_assets/search_assets or explicitly @-mentioned by the user, pass its exact localSig; the visible @asset_… token is a reference token, not an assetId. For any registered speech-bearing audio or video source, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth, not necessarily timing truth: reuse it directly for meaning and ordinary copy; call this only when the task needs real word timing, pauses, performed wording, karaoke/caption sync, beat-aware scenes, or another audio-derived fact. It does NOT add captions or cut clips. Cached main/registered sources are reused; unplaced local-source results are returned directly in the receipt.',
-    inputSchema: obj({
-      localSig: { type: 'string', description: 'Optional exact device-local video/audio sig. Use this for an unplaced local source; never pass its @asset_… reference token as assetId.' },
-      assetId: { type: 'string', description: 'Optional exact registered speech-bearing audio or video asset id to analyze.' },
-      clipId: { type: 'string', description: 'Optional exact placed speech-bearing audio or video clip id; resolves its asset automatically.' },
-    }, []),
-  },
-  {
     id: 'read_script',
-    kind: 'badge',
+    kind: 'card',
     busyText: 'tools.read_script.busy',
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Read the spoken transcript into your context: ordinary short/medium projects arrive in full; genuinely long transcripts are explicitly marked truncated and can be supplemented with search_media. It contains the main narration in SOURCE-video seconds (never shifted by cutting), each inserted clip's transcript (its own clock), and registered audio-only narration from either its exact supplied script or targeted ASR. Rows carry the CURRENT edit state — [REMOVED]/[partly cut] marks plus dead-air notes for ALL of it — inter-sentence gaps (\"+Xs gap after\"), mid-sentence stalls (\"Xs pause inside at a–bs\", with the exact source range) and the recording's pre/post-roll (\"dead air at the head/tail\") — each flipping to CUT once tightened — so re-reading after cuts shows what actually remains; trust the marks, never re-cut marked content, and read dead air from the notes instead of computing row arithmetic. Call for content-level requests when no transcript is in the conversation yet — an extract_asr result also carries it, don't call both. Main video narration requires extract_asr first; registered TTS/user scripts do not unless measured audio timing is needed.",
-    inputSchema: obj({}, []),
+      "Get the spoken transcript in one call. If the requested source already has a transcript, return it immediately; otherwise transcribe its actual audio and return measured timed sentences/words. With no input, get the main narration and inserted-source transcripts, transcribing only what is missing. For an unplaced device-local video/audio returned by list_assets/search_assets or explicitly @-mentioned by the user, pass its exact localSig; the visible @asset_… token is a reference token, not an assetId. For a registered speech-bearing audio/video source, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth and is returned without ASR unless measured timing, pauses, performed wording, karaoke/caption sync or another audio-derived fact requires transcription. Ordinary short/medium projects arrive in full; genuinely long transcripts are explicitly marked truncated and can be supplemented with search_media. Main rows use SOURCE-video seconds and carry CURRENT edit state, removed/partly-cut marks and dead-air notes. It does NOT add captions or cut clips.",
+    inputSchema: obj({
+      localSig: { type: 'string', description: 'Optional exact device-local video/audio sig for an unplaced local source; never pass its @asset_… reference token as assetId.' },
+      assetId: { type: 'string', description: 'Optional exact registered speech-bearing audio or video asset id to read or transcribe.' },
+      clipId: { type: 'string', description: 'Optional exact placed speech-bearing audio or video clip id; resolves its asset automatically.' },
+      measuredTiming: { type: 'boolean', description: 'Default false: reuse any stored transcript. Set true only when a supplied/TTS script exists but the task specifically needs measured performed-audio word timing, pauses or delivery.' },
+    }, []),
   },
   {
     id: 'list_words',
@@ -356,7 +347,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔤',
     label: 'tools.list_words.label',
     description:
-      'Resolve an ALREADY IDENTIFIED transcript passage into STABLE wordIds and source timestamps for exact text-based editing. This is an address resolver before delete_words, NOT a content-search tool: first reason over the read_script/extract_asr transcript, choose the relevant sentenceIndexes or source fromSec/toSec, then call this once with that narrow range. Never call it unfiltered to scan the whole transcript, and never invent or cache positional word indexes. Pass shotId only when the chosen passage belongs to an inserted clip. IDs survive timeline cuts because they address the source transcript, not edited positions.',
+      'Resolve an ALREADY IDENTIFIED transcript passage into STABLE wordIds and source timestamps for exact text-based editing. This is an address resolver before delete_words, NOT a content-search tool: first reason over the read_script transcript, choose the relevant sentenceIndexes or source fromSec/toSec, then call this once with that narrow range. Never call it unfiltered to scan the whole transcript, and never invent or cache positional word indexes. Pass shotId only when the chosen passage belongs to an inserted clip. IDs survive timeline cuts because they address the source transcript, not edited positions.',
     inputSchema: obj(
       {
         shotId: { type: 'string', description: "A shot id whose source transcript to list. Omit for main narration." },
@@ -561,7 +552,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'register_media', kind: 'badge', icon: '📎', label: 'tools.register_media.label',
     description:
-      'Register media identities in the active project manifest without placing clips. Use exact ids/urls/localSig values returned by list_assets, search_assets, generate_speech, or generation history. Device-local bytes remain on the device; add_clips/insert_clips prepare them transactionally before timeline mutation. For TTS, pass the returned asset fields unchanged, including transcriptText and durationSec, so semantic work and ordinary captions can start immediately; extract_asr remains available when the task genuinely needs measured audio timing. MCP local-file import remains import_media.',
+      'Register media identities in the active project manifest without placing clips. Use exact ids/urls/localSig values returned by list_assets, search_assets, generate_speech, or generation history. Device-local bytes remain on the device; add_clips/insert_clips prepare them transactionally before timeline mutation. For TTS, pass the returned asset fields unchanged, including transcriptText and durationSec, so semantic work and ordinary captions can start immediately; read_script reuses that text unless the task genuinely needs measured audio timing. MCP local-file import remains import_media.',
     inputSchema: obj({
       assets: {
         type: 'array', items: { type: 'object', additionalProperties: false, properties: {
@@ -907,7 +898,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.generate_speech.label',
     description:
-      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; use targeted extract_asr only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
+      "Generate a reusable spoken-audio asset from EXACT text (hosted TTS; CHARGES the user's Pireel account). This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; call read_script with the exact assetId only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
     inputSchema: obj(
       {
         text: { type: 'string', description: 'Exact text to speak (1–5000 characters).' },
@@ -947,7 +938,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔎',
     label: 'tools.search_media.label',
     description:
-      "Retrieve SOURCE-CLOCK video segments inside the CURRENT project when the needed evidence is NOT already visible in this conversation: the main video plus inserted video sources already attached to it. If a read_script/extract_asr transcript in the current context contains the requested spoken topic, reason over those numbered rows directly and do NOT call this tool. Use this bounded retrieval fallback for a cold/truncated transcript, several attached sources, or visual moments that require stored visual-analysis labels. It is not the user's general asset library and never searches the web. Results carry stable segmentIds, source ranges, and every surviving edited-timeline occurrence; compose later edits from atomic tools yourself. Coverage says which sources have transcript/visual evidence; if required evidence is missing, orchestrate extract_asr and/or analyze_visual first, then search again.",
+      "Retrieve SOURCE-CLOCK video segments inside the CURRENT project when the needed evidence is NOT already visible in this conversation: the main video plus inserted video sources already attached to it. If a read_script transcript in the current context contains the requested spoken topic, reason over those numbered rows directly and do NOT call this tool. Use this bounded retrieval fallback for a cold/truncated transcript, several attached sources, or visual moments that require stored visual-analysis labels. It is not the user's general asset library and never searches the web. Results carry stable segmentIds, source ranges, and every surviving edited-timeline occurrence; compose later edits from atomic tools yourself. Coverage says which sources have transcript/visual evidence; if required evidence is missing, call read_script for the missing sources and/or analyze_visual first, then search again.",
     inputSchema: obj(
       {
         query: { type: 'string', description: 'Natural-language description, phrase, object, scene, or spoken topic to find (max 200 characters).' },

@@ -123,7 +123,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.localVideoUseTrack":
     "本地视频请拖到时间轴插入;画布画中画暂不支持本地视频文件",
   "workbench.ratioCustom": "自定义",
-  "workbench.ratioFollowSource": "跟随素材",
+  "workbench.ratioFollowSource": "自适应",
   "workbench.followSourceUnavailable": "先添加一个有尺寸信息的视频片段",
   "workbench.couldNotGenerateCaptions": "没能生成字幕(口播稿可能是空的)",
   "workbench.couldNotGetSource": "取不到该片段的源文件,无法抠像",
@@ -336,7 +336,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.noTranscriptShort": "还没有口播稿——先提取口播稿",
   "workbench.noTranscriptYetExtract":
     "还没有口播稿——先提取口播(智能剪口播/字幕面板)再同步",
-  "workbench.noTranscriptYetRun": "还没有口播稿,先 extract_asr",
+  "workbench.noTranscriptYetRun": "还没有口播稿,先调用 read_script 获取",
   "workbench.noVideoYet": "还没有视频",
   "workbench.openChat": "打开对话",
   "workbench.originalVideoReconnectedDraft": "原视频已接回，草稿完整恢复",

@@ -8,7 +8,7 @@ describe('Studio tool input reference normalization', () => {
   const assets = [{ sig, label: '爆款视频', kind: 'video' as const, createdAt: 1 }];
 
   it('resolves a local @ token once at the tool boundary, including nested locators', () => {
-    expect(normalizeStudioToolInputReferences('extract_asr', {
+    expect(normalizeStudioToolInputReferences('read_script', {
       assetId: `@${token}`,
       refs: [`@${token}`, '@registered-image'],
       assets: [{ id: '@media-1', localSig: `@${token}` }],
