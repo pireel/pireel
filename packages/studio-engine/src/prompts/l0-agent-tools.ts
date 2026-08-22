@@ -333,11 +333,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📝',
     label: 'tools.extract_asr.label',
     description:
-      'Transcribe actual spoken audio into measured timed sentences/words. With no input it analyzes the main video and inserted video sources. For an unplaced device-local video/audio returned by list_assets/search_assets or explicitly @-mentioned by the user, pass its exact localSig; the visible @asset_… token is a reference token, not an assetId. For registered audio-only narration, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth, not necessarily timing truth: reuse it directly for meaning and ordinary copy; call this only when the task needs real word timing, pauses, performed wording, karaoke/caption sync, beat-aware scenes, or another audio-derived fact. It does NOT add captions or cut clips. Cached main/registered sources are reused; unplaced local-source results are returned directly in the receipt.',
+      'Transcribe actual spoken audio into measured timed sentences/words. With no input it analyzes the main video and inserted video sources. For an unplaced device-local video/audio returned by list_assets/search_assets or explicitly @-mentioned by the user, pass its exact localSig; the visible @asset_… token is a reference token, not an assetId. For any registered speech-bearing audio or video source, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth, not necessarily timing truth: reuse it directly for meaning and ordinary copy; call this only when the task needs real word timing, pauses, performed wording, karaoke/caption sync, beat-aware scenes, or another audio-derived fact. It does NOT add captions or cut clips. Cached main/registered sources are reused; unplaced local-source results are returned directly in the receipt.',
     inputSchema: obj({
       localSig: { type: 'string', description: 'Optional exact device-local video/audio sig. Use this for an unplaced local source; never pass its @asset_… reference token as assetId.' },
-      assetId: { type: 'string', description: 'Optional exact registered audio asset id to analyze.' },
-      clipId: { type: 'string', description: 'Optional exact placed audio clip id; resolves its asset automatically.' },
+      assetId: { type: 'string', description: 'Optional exact registered speech-bearing audio or video asset id to analyze.' },
+      clipId: { type: 'string', description: 'Optional exact placed speech-bearing audio or video clip id; resolves its asset automatically.' },
     }, []),
   },
   {

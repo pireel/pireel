@@ -449,7 +449,10 @@ describe('Agent composition transaction boundary', () => {
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'extract_asr', { assetId: 'tts-audio' });
 
-    expect(result).toMatchObject({ ok: true, data: { assetId: 'tts-audio', durationSec: 12.4, transcript: 'AUDIO NARRATION: actual timing' } });
+    expect(result).toMatchObject({
+      ok: true,
+      data: { assetId: 'tts-audio', durationSec: 12.4, transcript: expect.stringContaining('实际发音') },
+    });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }));
     expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true });
     expect(h.documentRef.current.semantics.transcripts['tts-audio']).toEqual([
@@ -462,6 +465,54 @@ describe('Agent composition transaction boundary', () => {
       id: 'narration-clip',
       durationFrames: 372,
       sourceOutSec: 12.4,
+    });
+  });
+
+  it('transcribes a targeted registered video clip after get_transcript reports no stored transcript', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: 'speaker-video', kind: 'video', url: 'https://cdn.example/speaker.mp4', durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'speaker-clip', assetId: 'speaker-video', role: 'primary', startSec: 0, durationSec: 18 }],
+    });
+    h.ctx.setDocument(placed.document!);
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.4, end: 2.1, text: '这是视频里的口播' }]);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['video'], { type: 'video/mp4' }), {
+      status: 200,
+      headers: { 'content-type': 'video/mp4' },
+    })));
+    Object.assign(h.ctx, {
+      resolveAssetUrl: (asset: { locator: { remoteUrl?: string } }) => asset.locator.remoteUrl,
+      videoFileRef: { current: null },
+      asrRef: { current: null },
+      setAsrSentences: vi.fn(),
+      clipAsrRef: { current: {} },
+      transcriptForAgent: () => 'VIDEO TRANSCRIPT: 这是视频里的口播',
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const before = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
+    expect(before).toMatchObject({ ok: false, error: 'no transcript for the selected source' });
+
+    const result = await runStudioTool(h.ctx, 'extract_asr', { clipId: 'speaker-clip' });
+
+    expect(result, result.ok ? undefined : result.error).toMatchObject({
+      ok: true,
+      data: { assetId: 'speaker-video', durationSec: 18, transcript: expect.stringContaining('这是视频里的口播') },
+    });
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/mp4' }));
+    expect(h.documentRef.current.semantics.transcripts['speaker-video']).toEqual([
+      { start: 0.4, end: 2.1, text: '这是视频里的口播' },
+    ]);
+    const stored = await runStudioTool(h.ctx, 'get_transcript', { clipId: 'speaker-clip' });
+    expect(stored).toMatchObject({
+      ok: true,
+      data: { transcripts: [{ assetId: 'speaker-video', segments: [{ text: '这是视频里的口播' }] }] },
     });
   });
 

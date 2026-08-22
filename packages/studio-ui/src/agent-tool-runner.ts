@@ -617,27 +617,30 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (targetAssetId) {
                 const asset = documentRef.current.assets[targetAssetId];
                 if (!asset) return { ok: false, error: `asset not found: ${targetAssetId}` };
-                if (asset.kind !== 'audio') return { ok: false, error: `targeted extract_asr currently requires an audio asset: ${targetAssetId}` };
+                if (asset.kind !== 'audio' && asset.kind !== 'video') {
+                  return { ok: false, error: `targeted extract_asr requires a speech-bearing audio or video asset: ${targetAssetId}` };
+                }
                 report(t('tools.extract_asr.busy'));
                 let file = asset.locator.localSig ? await loadLocalVideo(asset.locator.localSig) : null;
                 if (!file) {
                   const source = resolveAssetUrl(asset);
-                  if (!source) return { ok: false, error: `audio bytes unavailable: ${targetAssetId}` };
+                  if (!source) return { ok: false, error: `media bytes unavailable: ${targetAssetId}` };
+                  const isVideo = asset.kind === 'video';
                   try {
                     file = (await race(materializeRemoteMedia(source, {
-                      name: `${asset.label || targetAssetId}.mp3`,
-                      type: 'audio/mpeg',
+                      name: `${asset.label || targetAssetId}.${isVideo ? 'mp4' : 'mp3'}`,
+                      type: isVideo ? 'video/mp4' : 'audio/mpeg',
                       sig: asset.locator.localSig,
                       signal,
                     }))).file;
                   } catch (error) {
-                    return { ok: false, error: `audio fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+                    return { ok: false, error: `media fetch failed: ${error instanceof Error ? error.message : String(error)}` };
                   }
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
                 const segs = await race(studioProviders().transcriber.transcribe(file));
                 const current = documentRef.current;
-                setDocument({
+                const nextDocument = {
                   ...current,
                   ...(probe?.durationSec
                     ? {
@@ -660,15 +663,30 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     ...current.semantics,
                     transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
                   },
-                });
+                };
+                if (targetAssetId === current.semantics.primaryNarrativeAssetId) {
+                  asrRef.current = segs;
+                  setAsrSentences(segs);
+                }
+                setDocument(nextDocument);
                 if (!segs.length) return { ok: false, error: t('workbench.noSpeechDetectedTry') };
+                const rd = (value: number) => Math.round(value * 10) / 10;
+                const transcript = wrapAgentTranscript([
+                  `${asset.kind.toUpperCase()} TRANSCRIPT ${JSON.stringify(asset.label || targetAssetId)} (source-file seconds):`,
+                  ...segs.map((segment, index) => {
+                    const copy = segment.captionText && segment.captionText !== segment.text
+                      ? `${segment.captionText} 〈ASR: ${segment.text}〉`
+                      : segment.text;
+                    return `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${copy}`;
+                  }),
+                ].join('\n'));
                 return {
                   ok: true,
                   summary: t('workbench.transcribedNLines', { n: segs.length }),
                   data: {
                     assetId: targetAssetId,
                     ...(probe?.durationSec ? { durationSec: Math.round(probe.durationSec * 100) / 100 } : {}),
-                    transcript: transcriptForAgent(),
+                    transcript,
                   },
                 };
               }
