@@ -18,9 +18,30 @@ export type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-
 import type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-engine/visual-types';
 
 const MAX_VLM = 8; // VLM (paid) cost cap: segments are NOT dropped; only this many points are sampled to the VLM, other segments inherit semantics from the nearest
+const VLM_CONCURRENCY = 2; // Avoid bursting every sampled frame into the same pinned upstream at once.
 const CAPTION_RESERVE = 0.16; // fixed bottom 16% reserved for captions (don't detect original captions: the start often has none, and captions get added to the bottom in post)
 const DEFAULT_LABEL: VisualLabel = { content: 'talkinghead', person: 'center', safe: 'full', hasText: false, desc: '' };
 const geometryCache = new Map<string, VisualTimeline>();
+
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  requestedConcurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const concurrency = Math.max(1, Math.min(items.length, Math.floor(requestedConcurrency) || 1));
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const run = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index]!, index);
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, () => run()));
+  return results;
+}
 
 /* ---------- Visual-analysis cache (localStorage, keyed by file fingerprint; same clip doesn't rerun the VLM) ---------- */
 // v3: segments no longer dropped (full-clip coverage, no gaps) + framing direction set by dense geometry; new prefix invalidates the old 8-segment cache.
@@ -246,8 +267,10 @@ export async function analyzeVisual(
   const r = await prepareVisualAnalysis(file, durationSec, onProgress);
   if ('cached' in r) return r.cached;
   // Hosted semantics pass: send sampling frames to our own VLM (paid; the BYO path skips this step — the agent looks at the frames itself)
-  const labels = await Promise.all(
-    r.prep.frames.map(async (f): Promise<VisualLabel | null> => {
+  const labels = await mapWithConcurrency(
+    r.prep.frames,
+    VLM_CONCURRENCY,
+    async (f): Promise<VisualLabel | null> => {
       try {
         const resp = await fetch('/api/studio/vlm', {
           method: 'POST',
@@ -259,7 +282,7 @@ export async function analyzeVisual(
       } catch {
         return null;
       }
-    }),
+    },
   );
   return finishVisualAnalysis(r.prep, labels);
 }
