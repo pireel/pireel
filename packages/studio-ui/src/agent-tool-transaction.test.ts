@@ -149,6 +149,7 @@ describe('Agent composition transaction boundary', () => {
     expect(buildChatSystem(null)).toContain('Build one cross-media evidence map before approval');
     expect(buildChatSystem(null)).toContain('repetition used only to fill uncovered time is a planning failure');
     expect(buildChatSystem(null)).toContain('compare actual clip ownership and media coverage');
+    expect(buildChatSystem(null)).toContain('Scope, not the reversibility of each individual edit atom, decides whether this is whole-video work');
   });
 
   it('prepares every referenced device-local media asset before clips are committed', async () => {
@@ -762,7 +763,7 @@ describe('Agent composition transaction boundary', () => {
     expect(h.documentRef.current.timeline.tracks.find((track) => track.id === 'broll')).toBeTruthy();
   });
 
-  it('Chat add_block inserts an editable box instead of a boxless visual', async () => {
+  it('Chat add_block inserts an editable box and ignores a stray scene id when no Director Plan exists', async () => {
     const h = harness();
     Object.assign(h.ctx, {
       genIdsRef: { current: new Set<string>() },
@@ -780,7 +781,7 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'add_block', { instruction: 'show 42' });
+    const result = await runStudioTool(h.ctx, 'add_block', { instruction: 'show 42', sceneId: 'output-ma' });
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(h.compRef.current.blocks).toHaveLength(1);
     expect(h.compRef.current.blocks[0]).toMatchObject({

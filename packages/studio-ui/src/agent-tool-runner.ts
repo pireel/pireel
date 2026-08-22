@@ -2872,7 +2872,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const plannedPlacement = placementPercentToBox(input.placement, c.width, c.height);
               if (plannedPlacement.error) return { ok: false, error: plannedPlacement.error };
               const plannedBox = plannedPlacement.box;
-              const explicitSceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
+              const requestedSceneId = typeof input.sceneId === 'string' && input.sceneId.trim() ? input.sceneId.trim() : undefined;
+              const directorPlan = directorPlanFromDocument(documentRef.current);
+              // sceneId is an optional link into an existing Director Plan, never a free-form
+              // namespace. For a genuinely local edit without a plan, tolerate a model-supplied
+              // stray id and place by time instead; when a plan exists, keep strict validation.
+              const explicitSceneId = directorPlan ? requestedSceneId : undefined;
               const sceneContext = resolveDirectorSceneContext(documentRef.current, {
                 ...(explicitSceneId ? { sceneId: explicitSceneId } : {}),
                 startFrame: Math.round(at * documentRef.current.canvas.fps),
