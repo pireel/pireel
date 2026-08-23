@@ -39,6 +39,8 @@ export interface AssetSearchDocument {
   locator?: {
     url?: string;
     thumbUrl?: string;
+    assetId?: string;
+    contentSig?: string;
     sig?: string;
     component?: string;
     elementId?: string;

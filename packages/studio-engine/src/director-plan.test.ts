@@ -72,6 +72,18 @@ describe('Director Plan structure', () => {
     expect(isDirectorPlan(parsed.plan)).toBe(true);
   });
 
+  it('normalizes one evidence sentence into the scene evidence list', () => {
+    const parsed = directorPlanFromSeconds({
+      ...input,
+      scenes: [{ ...input.scenes[0], evidence: 'The product label is legible in the source footage.' }],
+    }, 30);
+
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.plan?.scenes[0]?.evidence).toEqual([
+      'The product label is legible in the source footage.',
+    ]);
+  });
+
   it('rejects overlapping intervals, duplicate ids, and unnamed custom families', () => {
     const broken = {
       ...input,

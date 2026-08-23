@@ -9,7 +9,9 @@ import {
   triggerFolderInput,
 } from './local-asset-folders';
 
-const entry = (sig: string, folderId?: string, path = sig): LocalAssetIndexEntry => ({
+const entry = (sig: string, folderId?: string, path = sig, assetId = `asset-${sig}`): LocalAssetIndexEntry => ({
+  assetId,
+  contentSig: sig,
   sig,
   label: sig,
   kind: 'image',
@@ -70,7 +72,7 @@ describe('local folder recovery', () => {
   it('retries unchanged registry entries that a cancelled hydration pass never linked', () => {
     const entries = [entry('loaded.png:1:1'), entry('still-pending.png:2:2')];
 
-    expect(pendingLocalAssetEntries(entries, new Set(['loaded.png:1:1'])).map((item) => item.sig)).toEqual([
+    expect(pendingLocalAssetEntries(entries, new Set(['asset-loaded.png:1:1'])).map((item) => item.sig)).toEqual([
       'still-pending.png:2:2',
     ]);
   });
@@ -79,7 +81,7 @@ describe('local folder recovery', () => {
     const original = entry('product.mov:20:3', 'folder-a', 'clips/product.mov');
     const renamed = renameLocalAssetEntry(
       [original, entry('other.mov:10:2')],
-      original.sig,
+      original.assetId,
       '  Product close-up and texture details  ',
     );
 
@@ -94,6 +96,13 @@ describe('local folder recovery', () => {
 
   it('rejects an empty semantic label', () => {
     const entries = [entry('product.mov:20:3')];
-    expect(renameLocalAssetEntry(entries, entries[0]!.sig, '   ')).toBe(entries);
+    expect(renameLocalAssetEntry(entries, entries[0]!.assetId, '   ')).toBe(entries);
+  });
+
+  it('keeps two logical imports even when their bytes have the same content signature', () => {
+    const fromA = entry('same.mp4:20:3', 'folder-a', 'same.mp4', 'asset-a');
+    const fromB = entry('same.mp4:20:3', 'folder-b', 'same.mp4', 'asset-b');
+
+    expect(reconcileLocalAssetRegistry([fromA], [fromA, fromB], true)).toEqual([fromA, fromB]);
   });
 });

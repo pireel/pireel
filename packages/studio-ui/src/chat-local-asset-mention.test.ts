@@ -7,8 +7,25 @@ import {
 } from './chat-local-asset-mention';
 
 describe('Studio local-asset @ mentions', () => {
+  it('accepts a sig-only legacy draft without crashing the refreshed workbench', () => {
+    const legacy = {
+      sig: 'legacy.mov:10:1',
+      label: 'legacy.mov',
+      kind: 'video' as const,
+      createdAt: 1,
+    } as unknown as Parameters<typeof localAssetMentionRef>[0];
+
+    expect(() => buildChatMentionElements([legacy], [])).not.toThrow();
+    expect(buildChatMentionElements([legacy], [])[0]?.localAsset).toMatchObject({
+      assetId: expect.stringMatching(/^local_/),
+      contentSig: legacy.sig,
+    });
+  });
+
   it('turns a local library entry into a stable picker candidate', () => {
     const entry = {
+      assetId: 'asset-product-demo',
+      contentSig: '产品 演示.mov:2048:1720000000000',
       sig: '产品 演示.mov:2048:1720000000000',
       label: '产品 演示.mov',
       kind: 'video' as const,
@@ -19,7 +36,11 @@ describe('Studio local-asset @ mentions', () => {
 
     expect(first).toEqual(second);
     expect(first.id).toMatch(/^asset_[a-z0-9]+$/);
-    expect(first.localAsset).toEqual({ sig: entry.sig, kind: 'video' });
+    expect(first.localAsset).toEqual({
+      assetId: entry.assetId,
+      contentSig: entry.contentSig,
+      kind: 'video',
+    });
   });
 
   it('includes local materials in the same roster consumed by the @ picker', () => {
@@ -30,7 +51,7 @@ describe('Studio local-asset @ mentions', () => {
       isShot: false,
     };
     const roster = buildChatMentionElements(
-      [{ sig: 'local.mov:10:1', label: 'local.mov', kind: 'video', createdAt: 1 }],
+      [{ assetId: 'local-asset', contentSig: 'local.mov:10:1', sig: 'local.mov:10:1', label: 'local.mov', kind: 'video', createdAt: 1 }],
       [outputElement],
     );
 
@@ -41,12 +62,16 @@ describe('Studio local-asset @ mentions', () => {
 
   it('maps only the picked pill back to its exact local signature', () => {
     const picked = localAssetMentionRef({
+      assetId: 'picked-asset',
+      contentSig: 'picked image.png:99:7',
       sig: 'picked image.png:99:7',
       label: 'picked image.png',
       kind: 'image',
       createdAt: 2,
     });
     const ignored = localAssetMentionRef({
+      assetId: 'ignored-asset',
+      contentSig: 'ignored.mp4:88:6',
       sig: 'ignored.mp4:88:6',
       label: 'ignored.mp4',
       kind: 'video',
@@ -58,9 +83,23 @@ describe('Studio local-asset @ mentions', () => {
       [picked, ignored],
     );
 
-    expect(context).toContain(`@${localAssetMentionId('picked image.png:99:7')}`);
-    expect(context).toContain('localSig="picked image.png:99:7"');
+    expect(context).toContain(`@${localAssetMentionId('picked-asset')}`);
+    expect(context).toContain('localAssetId="picked-asset"');
+    expect(context).toContain('contentSig="picked image.png:99:7"');
     expect(context).toContain('NOT a registered assetId');
     expect(context).not.toContain('ignored.mp4');
+  });
+
+  it('gives same-content imports different mention tokens', () => {
+    const first = localAssetMentionRef({
+      assetId: 'asset-a', contentSig: 'same.mp4:9:1', sig: 'same.mp4:9:1',
+      label: 'folder A', kind: 'video', createdAt: 2,
+    });
+    const second = localAssetMentionRef({
+      assetId: 'asset-b', contentSig: 'same.mp4:9:1', sig: 'same.mp4:9:1',
+      label: 'folder B', kind: 'video', createdAt: 1,
+    });
+
+    expect(first.id).not.toBe(second.id);
   });
 });

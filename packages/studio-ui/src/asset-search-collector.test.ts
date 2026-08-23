@@ -25,12 +25,17 @@ describe('collectAssetSearchDocuments scope boundary', () => {
   it('does not read cloud or official catalogs for a mine-only search', async () => {
     const documents = await collectAssetSearchDocuments(
       'p1',
-      [{ sig: 'poster:1:2', label: '活动海报.jpg', kind: 'image', createdAt: 2 }],
+      [{ assetId: 'poster-asset', contentSig: 'poster:1:2', sig: 'poster:1:2', label: '活动海报.jpg', kind: 'image', createdAt: 2 }],
       'mine',
     );
 
     expect(documents).toHaveLength(1);
-    expect(documents[0]).toMatchObject({ scope: 'mine', label: '活动海报.jpg', locator: { sig: 'poster:1:2' } });
+    expect(documents[0]).toMatchObject({
+      assetId: 'local:poster-asset',
+      scope: 'mine',
+      label: '活动海报.jpg',
+      locator: { assetId: 'poster-asset', contentSig: 'poster:1:2', sig: 'poster:1:2' },
+    });
     expect(fetch).not.toHaveBeenCalled();
     expect(deps.listStudioGens).not.toHaveBeenCalled();
     expect(deps.listElements).not.toHaveBeenCalled();

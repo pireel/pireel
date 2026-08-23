@@ -75,7 +75,7 @@ describe('one-shot persisted project migration', () => {
       },
       context: {
         plan: { version: 1 },
-        localAssets: [{ sig: 'photo.webp:42:7', label: 'photo.webp', kind: 'image', createdAt: 7 }],
+        localAssets: [{ assetId: 'photo-asset', contentSig: 'photo.webp:42:7', sig: 'photo.webp:42:7', label: 'photo.webp', kind: 'image', createdAt: 7 }],
         media: { clips: { 'photo.webp:42:7': { key: 'studio/media/photo' } } },
       },
     });

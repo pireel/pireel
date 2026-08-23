@@ -52,7 +52,7 @@ export async function collectAssetSearchDocuments(
   ]);
 
   const docs: AssetSearchDocument[] = (includeMine ? localAssets : []).map((entry) => ({
-    assetId: `local:${entry.sig}`,
+    assetId: `local:${entry.assetId}`,
     scope: 'mine',
     kind: entry.kind ?? 'video',
     origin: entry.folder ? 'local-folder' : 'local-file',
@@ -61,7 +61,7 @@ export async function collectAssetSearchDocuments(
     ...(validDims(entry.w, entry.h) ? { dimensions: validDims(entry.w, entry.h) } : {}),
     availability: 'metadata-only',
     ...(entry.folder ? { fields: { description: `${entry.folder.name} ${entry.folder.path}` } } : {}),
-    locator: { sig: entry.sig },
+    locator: { assetId: entry.assetId, contentSig: entry.contentSig, sig: entry.contentSig },
   }));
 
   for (const item of [...images, ...videos, ...audio]) {

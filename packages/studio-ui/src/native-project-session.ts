@@ -1,5 +1,10 @@
 import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import type { LocalAssetIndexEntry, StudioProjectContext, TranscriptSegment } from '@pireel/studio-engine/project-dto';
+import {
+  sanitizeProjectContext,
+  type LocalAssetIndexEntry,
+  type StudioProjectContext,
+  type TranscriptSegment,
+} from '@pireel/studio-engine/project-dto';
 
 export interface NativeProjectSessionMetadata {
   mainTranscript: TranscriptSegment[] | null;
@@ -47,6 +52,8 @@ export function nativeProjectSessionMetadata(
     // still used by this output it belongs to the project media directory regardless.
     if (sig && (asset.library || referencedAssetIds.has(asset.id))) {
       localAssets.push({
+        assetId: asset.id,
+        contentSig: sig,
         sig,
         label: asset.label ?? sig,
         kind: asset.kind,
@@ -83,28 +90,49 @@ export function nativeProjectSharedLocalAssets(
   activeDocument: EditorDocumentV2,
   context?: StudioProjectContext,
 ): LocalAssetIndexEntry[] {
-  const documents = [activeDocument, ...(context?.outputs?.inactive.map((output) => output.document) ?? [])];
+  // Local drafts created before logical asset ids existed can reach this merge before the server
+  // DTO boundary. Canonicalize here so refresh never leaks a sig-only entry into Chat/UI state.
+  const canonicalContext = sanitizeProjectContext(context);
+  const documents = [activeDocument, ...(canonicalContext.outputs?.inactive.map((output) => output.document) ?? [])];
   const merged = new Map<string, LocalAssetIndexEntry>(
-    (context?.localAssets ?? []).map((entry) => [entry.sig, entry]),
+    (canonicalContext.localAssets ?? []).map((entry) => [entry.assetId, entry]),
   );
+  const mergeMetadata = (
+    assetId: string,
+    previous: LocalAssetIndexEntry,
+    entry: LocalAssetIndexEntry,
+  ) => {
+    // The project-level directory owns logical identity and user edits such as semantic rename.
+    // Output documents may still carry an older asset id/filename until opened and saved; use
+    // them only to fill metadata the directory lacks.
+    merged.set(assetId, {
+      ...entry,
+      ...previous,
+      assetId,
+      kind: previous.kind ?? entry.kind,
+      w: previous.w ?? entry.w,
+      h: previous.h ?? entry.h,
+      folder: previous.folder ?? entry.folder,
+    });
+  };
   for (const document of documents) {
     for (const entry of nativeProjectLocalAssets(document)) {
-      const previous = merged.get(entry.sig);
-      if (!previous) {
-        merged.set(entry.sig, entry);
+      const exact = merged.get(entry.assetId);
+      if (exact) {
+        mergeMetadata(entry.assetId, exact, entry);
         continue;
       }
-      // The project-level directory owns user edits such as semantic rename. Output documents may
-      // still carry an older filename label until each output is opened and saved; never let one
-      // stale output overwrite the shared name while filling any metadata the directory lacks.
-      merged.set(entry.sig, {
-        ...entry,
-        ...previous,
-        kind: previous.kind ?? entry.kind,
-        w: previous.w ?? entry.w,
-        h: previous.h ?? entry.h,
-        folder: previous.folder ?? entry.folder,
-      });
+      const sameContent = [...merged.values()].filter(
+        (candidate) => candidate.contentSig === entry.contentSig,
+      );
+      if (sameContent.length === 1) {
+        mergeMetadata(sameContent[0]!.assetId, sameContent[0]!, entry);
+        continue;
+      }
+      // When multiple logical entries intentionally share bytes, an old document id cannot tell
+      // us which one it represents. The synced directory is authoritative; do not invent a third.
+      if (sameContent.length > 1) continue;
+      merged.set(entry.assetId, entry);
     }
   }
   return [...merged.values()].sort((left, right) => right.createdAt - left.createdAt);

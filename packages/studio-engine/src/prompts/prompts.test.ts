@@ -62,6 +62,8 @@ describe("静态提示词完整性", () => {
       "Before Approve, do not call set_director_plan, remove_silence",
     );
     expect(CHAT_IDENTITY).toContain("is NOT permission to make one output");
+    expect(CHAT_IDENTITY).toContain("each version means one independently editable output/deliverable");
+    expect(CHAT_IDENTITY).toContain("It never means candidate narration takes");
     expect(CHAT_IDENTITY).toContain("uniform slices, filename-order assembly");
     expect(CHAT_IDENTITY).toContain(
       "IMAGE GENERATION IS AN ART-DIRECTION DECISION",
@@ -90,6 +92,10 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain(
       "one call per item when the tool accepts a batch",
     );
+    expect(CHAT_IDENTITY).toContain("non-speech-or-noise");
+    expect(CHAT_IDENTITY).toContain("ask at most TWO short sentences");
+    expect(CHAT_IDENTITY).toContain("private deliberation out of visible text");
+    expect(CHAT_IDENTITY).toContain("ALWAYS emit a short structured recap");
     expect(CHAT_IDENTITY).not.toContain("hard pre-pilot checkpoint");
     expect(mcpInstructions("test-version")).toContain(
       "Ask one concise question and wait when only the user can resolve that boundary",
@@ -102,6 +108,9 @@ describe("静态提示词完整性", () => {
     );
     expect(mcpInstructions("test-version")).toContain(
       "requires an explicit output count, purpose and meaningful variation dimension",
+    );
+    expect(mcpInstructions("test-version")).toContain(
+      "N independently editable finished outputs",
     );
     expect(mcpInstructions("test-version")).toContain(
       "Uniform slices or filename-order assembly",
@@ -415,7 +424,8 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(schema.properties).toHaveProperty("clipId");
     expect(schema.properties).toHaveProperty("measuredTiming");
     expect(transcript.description).toContain("semantic text truth");
-    expect(transcript.description).toContain("reference token, not an assetId");
+    expect(transcript.description).toContain("pass its exact assetId");
+    expect(transcript.description).toContain("legacy compatibility locator");
     expect(CHAT_IDENTITY).toContain(
       "SEMANTIC truth, not automatically TIMING truth",
     );
@@ -666,7 +676,8 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(visualSchema.properties).toHaveProperty("assetId");
     expect(visualSchema.properties).toHaveProperty("clipId");
     const assets = STUDIO_TOOLS.find((tool) => tool.id === "list_assets")!;
-    expect(assets.description).toContain("placement tools prepare bytes transactionally");
+    expect(assets.description).toContain("logical identity used by Chat and placement");
+    expect(assets.description).toContain("Placement tools prepare bytes transactionally");
     expect(assets.description).toContain("every media kind");
   });
   it("批量切分带 framing 目的,稳定人物区间内由运行时拒绝冗余切点", () => {

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { durableFileSig, fileSig } from './media';
-import { loadLocalVideo, saveLocalVideo } from './local-media';
+import {
+  loadLocalAssetFile,
+  loadLocalVideo,
+  localAssetBindingKey,
+  saveLocalFolderHandle,
+  saveLocalHandle,
+  saveLocalVideo,
+} from './local-media';
 
 class MemoryFileHandle {
   readonly kind = 'file' as const;
@@ -50,9 +57,88 @@ class MemoryDirectoryHandle {
   }
 }
 
+function installMemoryIndexedDb(): void {
+  const values = new Map<IDBValidKey, unknown>();
+  const database = {
+    createObjectStore: vi.fn(),
+    close: vi.fn(),
+    transaction: () => {
+      const transaction = {
+        oncomplete: null as ((event: Event) => void) | null,
+        onerror: null as ((event: Event) => void) | null,
+        onabort: null as ((event: Event) => void) | null,
+        objectStore: () => ({
+          get: (key: IDBValidKey) => {
+            const request = { result: values.get(key) } as IDBRequest<unknown>;
+            queueMicrotask(() => transaction.oncomplete?.({} as Event));
+            return request;
+          },
+          put: (value: unknown, key: IDBValidKey) => {
+            values.set(key, value);
+            const request = { result: key } as IDBRequest<IDBValidKey>;
+            queueMicrotask(() => transaction.oncomplete?.({} as Event));
+            return request;
+          },
+          delete: (key: IDBValidKey) => {
+            values.delete(key);
+            const request = { result: undefined } as IDBRequest<undefined>;
+            queueMicrotask(() => transaction.oncomplete?.({} as Event));
+            return request;
+          },
+        }),
+      };
+      return transaction;
+    },
+  };
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      const request = {
+        result: database,
+        onupgradeneeded: null as ((event: Event) => void) | null,
+        onsuccess: null as ((event: Event) => void) | null,
+        onerror: null as ((event: Event) => void) | null,
+      };
+      queueMicrotask(() => {
+        request.onupgradeneeded?.({} as Event);
+        request.onsuccess?.({} as Event);
+      });
+      return request;
+    },
+  });
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe('local media persistence', () => {
+  it('keeps device bindings project- and asset-scoped while content signatures remain shareable', () => {
+    expect(localAssetBindingKey({ projectId: 'project-1', assetId: 'asset-a' }))
+      .not.toBe(localAssetBindingKey({ projectId: 'project-2', assetId: 'asset-a' }));
+    expect(localAssetBindingKey({ projectId: 'project-1', assetId: 'asset-a' }))
+      .not.toBe(localAssetBindingKey({ projectId: 'project-1', assetId: 'asset-b' }));
+  });
+
+  it('tries the selected project folder before a legacy same-signature handle', async () => {
+    installMemoryIndexedDb();
+    const legacyDirectory = new MemoryDirectoryHandle();
+    const selectedDirectory = new MemoryDirectoryHandle();
+    const legacy = new File(['AAAA'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
+    const selected = new File(['BBBB'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
+    const sig = fileSig(legacy);
+    legacyDirectory.files.set(legacy.name, legacy);
+    selectedDirectory.files.set(selected.name, selected);
+    const legacyHandle = await legacyDirectory.getFileHandle(legacy.name);
+
+    await saveLocalHandle(sig, legacyHandle as unknown as FileSystemFileHandle);
+    await saveLocalFolderHandle('folder-b', selectedDirectory as unknown as FileSystemDirectoryHandle);
+
+    const resolved = await loadLocalAssetFile('project-2', {
+      assetId: 'asset-b',
+      contentSig: sig,
+      folder: { id: 'folder-b', name: 'B', path: 'clip.mp4' },
+    });
+
+    expect(await resolved?.text()).toBe('BBBB');
+  });
   it('gives different content distinct durable identities even when file metadata is identical', async () => {
     const first = new File(['AAAA'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });
     const second = new File(['BBBB'], 'clip.mp4', { type: 'video/mp4', lastModified: 7 });

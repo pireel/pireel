@@ -1,6 +1,11 @@
 import type { UIMessage } from 'ai';
 import { describe, expect, it } from 'vitest';
-import { assistantMessageHasRenderableOutput, isRecoverableStudioChatError, sanitizeRestored } from './chat-thread-store';
+import {
+  assistantHasOpenOrInterruptedInteraction,
+  assistantMessageHasRenderableOutput,
+  isRecoverableStudioChatError,
+  sanitizeRestored,
+} from './chat-thread-store';
 
 const assistant = (parts: UIMessage['parts']): UIMessage => ({
   id: 'assistant-1',
@@ -30,6 +35,18 @@ describe('assistantMessageHasRenderableOutput', () => {
     expect(assistantMessageHasRenderableOutput(assistant([
       { type: 'tool-seek', toolCallId: 'tool-1', state: 'output-available', input: {}, output: {} },
     ] as UIMessage['parts']))).toBe(true);
+  });
+
+  it('recognizes an interaction boundary that must not be auto-retried', () => {
+    expect(assistantHasOpenOrInterruptedInteraction(assistant([
+      { type: 'tool-ask_user', toolCallId: 'ask-1', state: 'output-error', input: {}, errorText: 'interrupted' },
+    ] as UIMessage['parts']))).toBe(true);
+    expect(assistantHasOpenOrInterruptedInteraction(assistant([
+      { type: 'tool-request_approval', toolCallId: 'approval-1', state: 'input-available', input: {} },
+    ] as UIMessage['parts']))).toBe(true);
+    expect(assistantHasOpenOrInterruptedInteraction(assistant([
+      { type: 'tool-ask_user', toolCallId: 'ask-2', state: 'output-available', input: {}, output: { ok: true } },
+    ] as UIMessage['parts']))).toBe(false);
   });
 });
 

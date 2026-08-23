@@ -78,7 +78,7 @@ describe('native project document boundary', () => {
       projectId: 'project-1',
       document: native,
       plan: { version: 1 },
-      localAssets: [{ sig: 'clip.mp4:9:1', label: 'clip.mp4', kind: 'video', createdAt: 1 }],
+      localAssets: [{ assetId: 'clip-asset', contentSig: 'clip.mp4:9:1', sig: 'clip.mp4:9:1', label: 'clip.mp4', kind: 'video', createdAt: 1 }],
       cloudMedia: { clips: { 'clip.mp4:9:1': { key: 'studio/media/clip' } } },
     });
     expect(merged.timeline.tracks.find((track) => track.id === customTrack.id)).toEqual(customTrack);
@@ -107,6 +107,8 @@ describe('native project document boundary', () => {
       projectId: 'project-1',
       document,
       localAssets: [{
+        assetId: 'source-asset',
+        contentSig: 'source.mp4:20:3',
         sig: 'source.mp4:20:3',
         label: 'Founder explaining the pricing model',
         kind: 'video',

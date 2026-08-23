@@ -200,6 +200,7 @@ import {
 } from "./media";
 import {
   alignFileToSig,
+  loadLocalAssetFile,
   loadLocalFolderFile,
   loadLocalVideo,
   saveLocalVideo,
@@ -253,6 +254,7 @@ import {
   type StudioElementRef,
 } from "./studio-chat";
 import { buildChatMentionElements } from "./chat-local-asset-mention";
+import { resolveLocalAssetReference } from "./studio-tool-input-references";
 import { shouldCollapseChatForTimelineFramePick } from "./chat-timeline-frame-picker";
 import { ElementSourceEditor, type SourceDraft } from "./element-source-editor";
 import { useStableCallbacks } from "./use-stable-callbacks";
@@ -1394,7 +1396,7 @@ export function HyperframesWorkbench({
   const [localAssetIndexRev, setLocalAssetIndexRev] = useState(0);
   const setLocalAssetIndex = useCallback((entries: LocalAssetIndexEntry[]) => {
     const next = [
-      ...new Map(entries.map((entry) => [entry.sig, entry])).values(),
+      ...new Map(entries.map((entry) => [entry.assetId, entry])).values(),
     ].sort((a, b) => b.createdAt - a.createdAt);
     if (
       JSON.stringify(next) === JSON.stringify(localAssetIndexRef.current) &&
@@ -1420,7 +1422,7 @@ export function HyperframesWorkbench({
       const direct = await loadLocalVideo(sig);
       if (direct) return direct;
       const entry = localAssetIndexRef.current.find(
-        (item) => item.sig === sig && item.kind === "image",
+        (item) => item.contentSig === sig && item.kind === "image",
       );
       if (!entry?.folder) return null;
       const folder = await loadLocalFolderFile(
@@ -1445,8 +1447,9 @@ export function HyperframesWorkbench({
     localRuntimePreparingRef.current.clear();
     localRuntimeReadyAssetIdsRef.current.clear();
   }, [projectId]);
-  /** One device-local runtime contract for every media kind. The durable document keeps only sigs;
-   * this boundary restores/pins bytes and attaches session-only URLs without uploading anything. */
+  /** One device-local runtime contract for every media kind. The durable document keeps the
+   * logical asset id plus content sig; this boundary restores/pins device bindings and attaches
+   * session-only URLs without uploading anything. */
   const prepareLocalAssetRuntime = useCallback(
     (asset: EditorMediaAsset): Promise<
       | { ok: true; prepared: boolean }
@@ -1461,19 +1464,20 @@ export function HyperframesWorkbench({
       if (current) return current;
       const generation = localRuntimeGenerationRef.current;
       const task = (async () => {
-        const entry = localAssetIndexRef.current.find(
-          (item) =>
-            item.sig === sig &&
-            (item.kind ?? "video") === asset.kind,
+        const byLogicalId = resolveLocalAssetReference(asset.id, localAssetIndexRef.current);
+        const sameContent = localAssetIndexRef.current.filter(
+          (item) => item.contentSig === sig && (item.kind ?? "video") === asset.kind,
         );
-        const direct = await loadLocalVideo(sig);
-        const folder = !direct && entry?.folder
-          ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, sig)
-          : null;
-        const cloud = !direct && !folder?.file && asset.locator.cloudKey
+        const entry = byLogicalId && (byLogicalId.kind ?? "video") === asset.kind
+          ? byLogicalId
+          : sameContent.length === 1
+            ? sameContent[0]
+            : undefined;
+        const local = entry ? await loadLocalAssetFile(projectId, entry) : await loadLocalVideo(sig);
+        const cloud = !local && asset.locator.cloudKey
           ? await studioProviders().vault.fetch(sig)
           : null;
-        const file = direct ?? folder?.file ?? cloud ?? null;
+        const file = local ?? cloud ?? null;
         if (generation !== localRuntimeGenerationRef.current) {
           return { ok: false as const, error: 'media preparation was superseded by an output change' };
         }
@@ -1493,6 +1497,7 @@ export function HyperframesWorkbench({
         try {
           await saveLocalVideo(file, sig, undefined, {
             pinned: asset.kind === "image" || asset.kind === "audio",
+            ...(entry ? { binding: { projectId, assetId: entry.assetId } } : {}),
           });
         } catch {
           // The authorized File remains usable for this session even when the local cache is full.
@@ -1512,7 +1517,7 @@ export function HyperframesWorkbench({
       localRuntimePreparingRef.current.set(asset.id, task);
       return task;
     },
-    [rememberAssetUrl, resolveAssetUrl],
+    [projectId, rememberAssetUrl, resolveAssetUrl],
   );
   // Heal metadata-only clips from older agent runs as soon as this device can resolve their bytes.
   // Images already restore through postLocalImages; audio/video need a session URL before they can
@@ -4620,7 +4625,7 @@ export function HyperframesWorkbench({
   /** Keep a user-picked image on this device and persist only its stable identity in the project.
    * This is the browser-picker counterpart of the agent helper's register-local-assets path. */
   const preparePickedLocalImage = async (file: File): Promise<string> => {
-    const asset = await importLocalSource({ type: "browser", file });
+    const asset = await importLocalSource({ type: "browser", file }, projectId);
     if (asset.kind !== "image")
       throw new Error("selected file is not an image");
     let dims: { width?: number; height?: number } = {};
@@ -4633,13 +4638,13 @@ export function HyperframesWorkbench({
     }
     const entry = localAssetIndexEntry(asset, dims);
     const previous = localAssetIndexRef.current.find(
-      (item) => item.sig === entry.sig,
+      (item) => item.assetId === entry.assetId,
     );
     changeLocalAssetIndex([
       { ...entry, createdAt: previous?.createdAt ?? entry.createdAt },
-      ...localAssetIndexRef.current.filter((item) => item.sig !== entry.sig),
+      ...localAssetIndexRef.current.filter((item) => item.assetId !== entry.assetId),
     ]);
-    return localImageLocator(entry.sig);
+    return localImageLocator(entry.contentSig);
   };
   /** DOM surgery on the index-th <img> in a custom block's innerHtml (swap src / remove) — same DOMParser patch approach as setSlot's text edit, zero-LLM, instant. */
   const patchCustomImg = (
@@ -6366,12 +6371,14 @@ export function HyperframesWorkbench({
     clipStrips,
     resetRuntime: resetClipRuntime,
   } = useClipInsert({
+    projectId,
     comp,
     compRef,
     clipFilesRef,
     cloudMediaRef,
     clipAsrRef,
     documentRef: editorDocumentRef,
+    localAssetIndexRef,
     setDocument: setEditorDocument,
     rememberAssetUrl,
     setSelectedId,
@@ -6583,11 +6590,11 @@ export function HyperframesWorkbench({
     || (!!dominantScriptTrack && dominantScriptTrack.trackId !== editorDocument.semantics.primaryNarrativeTrackId);
   const registerLocalAsset = (entry: LocalAssetIndexEntry) => {
     const previous = localAssetIndexRef.current.find(
-      (item) => item.sig === entry.sig,
+      (item) => item.assetId === entry.assetId,
     );
     changeLocalAssetIndex([
       { ...entry, createdAt: previous?.createdAt ?? entry.createdAt },
-      ...localAssetIndexRef.current.filter((item) => item.sig !== entry.sig),
+      ...localAssetIndexRef.current.filter((item) => item.assetId !== entry.assetId),
     ]);
   };
   const listProjectOutputsForAgent = () => {

@@ -120,10 +120,10 @@ import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
-import { loadLocalFolderFile, loadLocalVideo, saveLocalVideo } from './local-media';
+import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
-import { normalizeStudioToolInputReferences } from './studio-tool-input-references';
+import { localAssetReference, normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
@@ -135,7 +135,7 @@ import { supplementalVisualMedia } from './visual-render-plan';
 import { captionTranscriptsByAsset } from './caption-transcript-bridge';
 import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
-import { detectSpeechSilenceCuts, resolveSpeechSilenceOptions } from './speech-silence';
+import { assessLocalSpeechAudio, detectSpeechSilenceCuts, resolveSpeechSilenceOptions } from './speech-silence';
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
@@ -460,6 +460,40 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         }
       }
       if (toolId === 'add_clips' || toolId === 'insert_clips') {
+        const referencedAssetIds = [
+          ...new Set(
+            (Array.isArray(input.clips) ? input.clips : [])
+              .map((item) => (item && typeof item === 'object' && typeof (item as { assetId?: unknown }).assetId === 'string'
+                ? (item as { assetId: string }).assetId.trim()
+                : ''))
+              .filter(Boolean),
+          ),
+        ];
+        // The project media directory is shared across outputs, while each output document keeps
+        // only the assets it has used. A model should be able to place an exact list_assets id in a
+        // newly-created output without first discovering that implementation detail through a
+        // failed add_clips + register_media retry. Materialize only the referenced identities; byte
+        // access is still checked below before any timeline mutation.
+        const missingLocalAssets = referencedAssetIds
+          .filter((assetId) => !documentRef.current.assets[assetId])
+          .map((assetId) => resolveLocalAssetReference(assetId, ctx.localAssetIndexRef?.current ?? []))
+          .filter((entry): entry is LocalAssetIndexEntry => !!entry);
+        if (missingLocalAssets.length) {
+          const hydrated = runAgentTimelineTool(documentRef.current, 'register_media', {
+            assets: missingLocalAssets.map((entry) => ({
+              id: entry.assetId,
+              kind: entry.kind ?? 'video',
+              label: entry.label,
+              localSig: entry.contentSig,
+              ...(entry.w ? { width: entry.w } : {}),
+              ...(entry.h ? { height: entry.h } : {}),
+            })),
+          });
+          if (!hydrated.ok || !hydrated.document) {
+            return { ok: false, error: hydrated.error ?? t('chatGen.executionFailed') };
+          }
+          setDocument(hydrated.document);
+        }
         const speechFree = speechFreeLocalSigs(documentRef);
         if (speechFree.size && Array.isArray(input.clips)) {
           input = {
@@ -475,15 +509,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }),
           };
         }
-        const referencedAssetIds = [
-          ...new Set(
-            (Array.isArray(input.clips) ? input.clips : [])
-              .map((item) => (item && typeof item === 'object' && typeof (item as { assetId?: unknown }).assetId === 'string'
-                ? (item as { assetId: string }).assetId.trim()
-                : ''))
-              .filter(Boolean),
-          ),
-        ];
         for (const assetId of referencedAssetIds) {
           const asset = documentRef.current.assets[assetId];
           if (!asset?.locator.localSig) continue;
@@ -551,13 +576,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'extract_asr':
           case 'read_script': {
             try {
-              const requestedLocalSigInput = typeof input.localSig === 'string'
-                ? input.localSig.trim().replace(/^local:/, '')
-                : '';
+              const requestedLocalReference = typeof input.localAssetId === 'string'
+                ? input.localAssetId.trim()
+                : typeof input.localSig === 'string'
+                  ? input.localSig.trim()
+                  : '';
               const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
               const requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
               const measuredTiming = input.measuredTiming === true;
-              const requestedLocalSig = requestedLocalSigInput;
               const rd = (value: number) => Math.round(value * 10) / 10;
               const formatDirectTranscript = (header: string, segments: readonly AsrSegment[]) => wrapAgentTranscript([
                 header,
@@ -569,7 +595,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }),
               ].join('\n'));
 
-              if (!requestedLocalSig && !requestedClipId && !requestedAssetId) {
+              if (!requestedLocalReference && !requestedClipId && !requestedAssetId) {
                 const current = documentRef.current;
                 const primaryAssetId = current.semantics.primaryNarrativeAssetId;
                 const primaryKnown = !!primaryAssetId
@@ -591,39 +617,84 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   };
                 }
               }
-              if (requestedLocalSig) {
-                const entry = ctx.localAssetIndexRef.current.find(
-                  (item) => item.sig === requestedLocalSig && ((item.kind ?? 'video') === 'video' || item.kind === 'audio'),
-                );
-                if (!entry) return { ok: false, error: `local audio/video not found: ${requestedLocalSig}` };
+              if (requestedLocalReference) {
+                const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
+                const entry = resolved && ((resolved.kind ?? 'video') === 'video' || resolved.kind === 'audio') ? resolved : null;
+                if (!entry) return { ok: false, error: `local audio/video not found or ambiguous: ${requestedLocalReference}` };
                 const localKind = entry.kind ?? 'video';
-                const direct = await loadLocalVideo(entry.sig);
-                const folder = !direct && entry.folder
-                  ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig)
-                  : null;
-                const file = direct ?? folder?.file ?? null;
+                const file = await loadLocalAssetFile(projectId, entry);
                 if (!file) {
                   return { ok: false, error: 'local media access is unavailable — ask the user to restore access, then retry' };
                 }
                 try {
-                  await saveLocalVideo(file, entry.sig, undefined, { pinned: localKind === 'audio' });
+                  await saveLocalVideo(file, entry.contentSig, undefined, {
+                    pinned: localKind === 'audio',
+                    binding: { projectId, assetId: entry.assetId },
+                  });
                 } catch {
                   // The authorized File remains usable for this ASR call even when the local cache is full.
                 }
                 report(t('tools.extract_asr.busy'));
                 const probe = await probeVideoFile(file).catch(() => null);
-                const segs = await race(studioProviders().transcriber.transcribe(file)).catch((error) => {
-                  if (isNoSpeechAsrResult(error)) return [];
-                  throw error;
-                });
                 const speechFree = speechFreeLocalSigs(documentRef);
-                if (!segs.length) {
-                  speechFree.add(entry.sig);
+                if (probe && !probe.hasAudio) {
+                  speechFree.add(entry.contentSig);
                   return {
                     ok: true,
                     summary: t('workbench.noSpeechDetected'),
                     data: {
-                      localSig: entry.sig,
+                      localAssetId: entry.assetId,
+                      contentSig: entry.contentSig,
+                      localSig: entry.contentSig,
+                      label: entry.label,
+                      kind: localKind,
+                      durationSec: Math.round(probe.durationSec * 100) / 100,
+                      hasAudio: false,
+                      speechDetected: false,
+                      audioAssessment: 'no-audio-track',
+                      defaultSourceAudio: 'muted',
+                      hint: 'The local container has no audio track. Do not request another transcript for this source.',
+                    },
+                  };
+                }
+                const localAudio = probe?.hasAudio
+                  ? await assessLocalSpeechAudio(file).catch(() => null)
+                  : null;
+                if (localAudio && !localAudio.speechLikely) {
+                  speechFree.add(entry.contentSig);
+                  return {
+                    ok: true,
+                    summary: t('workbench.noSpeechDetected'),
+                    data: {
+                      localAssetId: entry.assetId,
+                      contentSig: entry.contentSig,
+                      localSig: entry.contentSig,
+                      label: entry.label,
+                      kind: localKind,
+                      ...(probe?.durationSec ? { durationSec: Math.round(probe.durationSec * 100) / 100 } : {}),
+                      hasAudio: true,
+                      speechDetected: false,
+                      audioAssessment: localAudio.classification,
+                      audibleSec: localAudio.audibleSec,
+                      speechSec: localAudio.speechSec,
+                      defaultSourceAudio: 'muted',
+                      hint: 'Local PCM/VAD found no usable speech. Do not request another transcript; unmute later only when real product sound, music, or ambience is editorially useful.',
+                    },
+                  };
+                }
+                const segs = await race(studioProviders().transcriber.transcribe(file)).catch((error) => {
+                  if (isNoSpeechAsrResult(error)) return [];
+                  throw error;
+                });
+                if (!segs.length) {
+                  speechFree.add(entry.contentSig);
+                  return {
+                    ok: true,
+                    summary: t('workbench.noSpeechDetected'),
+                    data: {
+                      localAssetId: entry.assetId,
+                      contentSig: entry.contentSig,
+                      localSig: entry.contentSig,
                       label: entry.label,
                       kind: localKind,
                       speechDetected: false,
@@ -632,7 +703,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     },
                   };
                 }
-                speechFree.delete(entry.sig);
+                speechFree.delete(entry.contentSig);
                 const transcript = formatDirectTranscript(
                   `DEVICE-LOCAL ${localKind.toUpperCase()} TRANSCRIPT ${JSON.stringify(entry.label)} (source-file seconds):`,
                   segs,
@@ -641,7 +712,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ok: true,
                   summary: t('workbench.transcribedNLines', { n: segs.length }),
                   data: {
-                    localSig: entry.sig,
+                    localAssetId: entry.assetId,
+                    contentSig: entry.contentSig,
+                    localSig: entry.contentSig,
                     label: entry.label,
                     kind: localKind,
                     ...(probe?.durationSec ? { durationSec: Math.round(probe.durationSec * 100) / 100 } : {}),
@@ -857,7 +930,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ];
             });
             if (!sources.length) return { ok: false, error: 'local asset entries required' };
-            const session = await runLocalImportSession(sources);
+            const session = await runLocalImportSession(sources, projectId);
             const sourceBySig = new Map(sources.map((source) => [source.sig, source]));
             for (const asset of session.imported) {
               const source = sourceBySig.get(asset.sig);
@@ -878,37 +951,52 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'analyze_visual': {
             const geometryOnly = input.mode === 'geometry';
             const analyze = geometryOnly ? analyzeVisualGeometry : analyzeVisual;
-            const requestedLocalSig = typeof input.localSig === 'string' ? input.localSig.trim().replace(/^local:/, '') : '';
-            if (requestedLocalSig) {
-              const entry = ctx.localAssetIndexRef.current.find((item) => item.kind === 'video' && item.sig === requestedLocalSig);
-              if (!entry) return { ok: false, error: `local video not found: ${requestedLocalSig}` };
-              const direct = await loadLocalVideo(entry.sig);
-              const folder = !direct && entry.folder
-                ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig)
-                : null;
-              const file = direct ?? folder?.file ?? null;
+            const requestedLocalReference = typeof input.localAssetId === 'string'
+              ? input.localAssetId.trim()
+              : typeof input.localSig === 'string'
+                ? input.localSig.trim()
+                : '';
+            if (requestedLocalReference) {
+              const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
+              const entry = resolved?.kind === 'video' ? resolved : null;
+              if (!entry) return { ok: false, error: `local video not found or ambiguous: ${requestedLocalReference}` };
+              const file = await loadLocalAssetFile(projectId, entry);
               if (!file) return { ok: false, error: 'local video access is unavailable — ask the user to restore access, then retry' };
               try {
                 const probe = await probeVideoFile(file).catch(() => null);
                 const durationSec = probe?.durationSec;
-                if (!durationSec) return { ok: false, error: `video duration unavailable: ${requestedLocalSig}` };
+                if (!durationSec) return { ok: false, error: `video duration unavailable: ${entry.assetId}` };
                 const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
-                const vis = await race(analyze(file, durationSec, (done, count) => {
-                  const fraction = count > 0 ? done / count : 0;
-                  report(t('common.analyzingVisualsPctSec', {
-                    pct: Math.round(fraction * 85),
-                    sec: Math.max(1, Math.ceil((1 - fraction) * total * 0.13 + 2)),
-                  }), fraction * 0.85);
-                }).catch(() => null));
+                const [vis, localAudio] = await Promise.all([
+                  race(analyze(file, durationSec, (done, count) => {
+                    const fraction = count > 0 ? done / count : 0;
+                    report(t('common.analyzingVisualsPctSec', {
+                      pct: Math.round(fraction * 85),
+                      sec: Math.max(1, Math.ceil((1 - fraction) * total * 0.13 + 2)),
+                    }), fraction * 0.85);
+                  }).catch(() => null)),
+                  probe?.hasAudio ? assessLocalSpeechAudio(file).catch(() => null) : Promise.resolve(null),
+                ]);
                 return vis
                   ? {
                       ok: true,
                       summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
                       data: {
                         analysisMode: geometryOnly ? 'local-geometry' : 'semantic',
-                        localSig: requestedLocalSig,
+                        localAssetId: entry.assetId,
+                        contentSig: entry.contentSig,
+                        localSig: entry.contentSig,
                         label: entry.label,
                         durationSec,
+                        hasAudio: probe!.hasAudio,
+                        audioAssessment: localAudio?.classification ?? (probe!.hasAudio
+                          ? 'audio-track-present; local speech classification unavailable'
+                          : 'no-audio'),
+                        ...(localAudio ? {
+                          speechLikely: localAudio.speechLikely,
+                          audibleSec: localAudio.audibleSec,
+                          speechSec: localAudio.speechSec,
+                        } : {}),
                         ...(geometryOnly ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
                       },
                     }
@@ -1422,11 +1510,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               .sort((a, b) => b.createdAt - a.createdAt)
               .slice(0, limit)
               .map((entry) => ({
-                id: `local:${entry.sig}`,
+                id: localAssetReference(entry),
                 kind: entry.kind ?? 'video',
                 label: entry.label,
                 availability: 'metadata-only' as const,
-                locator: { sig: entry.sig },
+                locator: { assetId: entry.assetId, contentSig: entry.contentSig, sig: entry.contentSig },
                 ...(entry.w && entry.h ? { w: entry.w, h: entry.h } : {}),
               }));
             const fetchKind = (k: 'image' | 'video' | 'audio') =>
@@ -1471,7 +1559,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 assets,
                 project,
                 usageHint: scope === 'mine'
-                  ? 'Register the exact localSig when an asset will be placed; add_clips/insert_clips prepare device-local image, audio, and video bytes transactionally and fail without changing the timeline when access is unavailable. Inspect only when the editorial decision needs pixel, action, speech, or timing evidence. prepare_local_image remains for embedding a local image inside generated Motion Graphic HTML. Use insert_clip for a selected local-video span that belongs in the main narrative sequence. Never substitute cloud/official media without the user asking.'
+                  ? 'Use the exact local asset id when an asset will be placed; contentSig/localSig is only a compatibility and byte-validation field. add_clips/insert_clips prepare device-local image, audio, and video bytes transactionally and fail without changing the timeline when access is unavailable. Inspect only when the editorial decision needs pixel, action, speech, or timing evidence. Never substitute cloud/official media without the user asking.'
                   : 'Use returned urls only for an explicitly cloud-scoped request.',
               },
             };
@@ -1546,29 +1634,30 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             };
           }
           case 'prepare_local_image': {
-            const sig = typeof input.sig === 'string' ? input.sig : '';
-            const entry = ctx.localAssetIndexRef.current.find((item) => item.sig === sig);
-            if (!entry || entry.kind !== 'image') return { ok: false, error: 'local image not found — search the mine scope and use its exact sig' };
-            const direct = await loadLocalVideo(entry.sig);
-            const folder = !direct && entry.folder
-              ? await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig)
-              : null;
-            const file = direct ?? folder?.file ?? null;
+            const reference = typeof input.sig === 'string' ? input.sig : '';
+            const resolved = resolveLocalAssetReference(reference, ctx.localAssetIndexRef.current);
+            const entry = resolved?.kind === 'image' ? resolved : null;
+            if (!entry) return { ok: false, error: 'local image not found or ambiguous — search the mine scope and use its exact asset id' };
+            const file = await loadLocalAssetFile(projectId, entry);
             if (!file) {
               return { ok: false, error: 'local image access is unavailable — ask the user to click “restore access” on that exact local asset, then retry; do not use another image' };
             }
             // A readable native handle is not durable permission. Pin every explicitly prepared
             // image in OPFS, including the direct-handle path, so a refresh cannot leave a valid
             // timeline clip pointing at bytes the preview/export pipeline can no longer reach.
-            await saveLocalVideo(file, entry.sig, undefined, { pinned: true });
+            await saveLocalVideo(file, entry.contentSig, undefined, {
+              pinned: true,
+              binding: { projectId, assetId: entry.assetId },
+            });
             return {
               ok: true,
               summary: t('workbench.preparedLocalImage', { name: entry.label }),
               data: {
                 scope: 'mine',
-                assetId: `local:${entry.sig}`,
+                assetId: localAssetReference(entry),
+                contentSig: entry.contentSig,
                 label: entry.label,
-                url: localImageLocator(entry.sig),
+                url: localImageLocator(entry.contentSig),
                 urlKind: 'device-local',
                 privacy: 'The image bytes stay in this browser/device. The project stores only the local sig.',
               },
@@ -1587,18 +1676,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 if (stopped()) throw abortErr();
                 const ref = refs[index]!;
                 report(`Inspecting image ${index + 1}/${refs.length}…`, index / refs.length);
-                const localSig = ref.startsWith('local:') ? ref.slice('local:'.length) : ref;
-                const localEntry = ctx.localAssetIndexRef.current.find(
-                  (entry) => entry.kind === 'image' && entry.sig === localSig,
-                );
+                const matchedLocal = resolveLocalAssetReference(ref, ctx.localAssetIndexRef.current);
+                const localEntry = matchedLocal?.kind === 'image' ? matchedLocal : null;
                 let label = localEntry?.label || ref;
                 let blob: Blob | null = null;
                 if (localEntry) {
-                  const direct = await loadLocalVideo(localEntry.sig);
-                  const folder = !direct && localEntry.folder
-                    ? await loadLocalFolderFile(localEntry.folder.id, localEntry.folder.path, localEntry.sig)
-                    : null;
-                  blob = direct ?? folder?.file ?? null;
+                  blob = await loadLocalAssetFile(projectId, localEntry);
                 } else {
                   const asset = documentRef.current.assets[ref];
                   if (!asset || asset.kind !== 'image') {
@@ -2278,8 +2361,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const question = typeof input.question === 'string' ? input.question.slice(0, 500) : '';
             const options = (Array.isArray(input.options) ? (input.options as unknown[]) : [])
               .map((o) => {
-                const oo = o as { label?: unknown; description?: unknown };
-                return { label: String(oo?.label ?? '').slice(0, 80), description: typeof oo?.description === 'string' ? oo.description.slice(0, 200) : '' };
+                const oo = o as { label?: unknown; description?: unknown; value?: unknown; previewUrl?: unknown };
+                const previewUrl = typeof oo?.previewUrl === 'string' ? oo.previewUrl.trim().slice(0, 2_000) : '';
+                return {
+                  label: String(oo?.label ?? '').slice(0, 80),
+                  description: typeof oo?.description === 'string' ? oo.description.slice(0, 200) : '',
+                  value: typeof oo?.value === 'string' ? oo.value.trim().slice(0, 200) : '',
+                  previewUrl: /^(https:\/\/|\/voice-previews\/)/.test(previewUrl) ? previewUrl : '',
+                };
               })
               .filter((o) => o.label);
             if (surface !== 'chat') return { ok: false, error: 'ask_user is chat-surface only — ask in your own UI instead' };
@@ -2293,10 +2382,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const labels = new Set(options.map((o) => o.label));
             const chosen = selection.filter((s) => labels.has(s));
             if (!chosen.length) return { ok: false, error: t('workbench.askNoValidChoice') };
+            const selectedValues = chosen.flatMap((label) => {
+              const value = options.find((option) => option.label === label)?.value;
+              return value ? [value] : [];
+            });
             return {
               ok: true,
               summary: t('workbench.askAnswered', { answer: chosen.join(', ') }),
-              data: { selected: chosen, multiSelect: input.multiSelect === true },
+              data: { selected: chosen, ...(selectedValues.length ? { selectedValues } : {}), multiSelect: input.multiSelect === true },
             };
           }
           case 'request_approval': {

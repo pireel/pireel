@@ -105,6 +105,30 @@ describe('shared agent timeline atoms', () => {
     expect(placed.document!.timeline.tracks.find((track) => track.role === 'music')?.clips[0]).toMatchObject({ properties: { volumeDb: -24 } });
   });
 
+  it('rejects overlapping audible narration on parallel tracks while allowing music underneath', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'voice-a', kind: 'audio', url: 'https://cdn.example/voice-a.mp3', durationSec: 5 },
+      { id: 'voice-b', kind: 'audio', url: 'https://cdn.example/voice-b.mp3', durationSec: 5 },
+      { id: 'music', kind: 'audio', url: 'https://cdn.example/music.mp3', durationSec: 5 },
+    ] }).document!;
+    const first = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'voice-a-clip', assetId: 'voice-a', role: 'narration', startSec: 0 },
+      { id: 'music-clip', assetId: 'music', role: 'music', startSec: 0 },
+    ] });
+    expect(first.ok).toBe(true);
+    const createdTrack = runAgentTimelineTool(first.document!, 'manage_tracks', {
+      action: 'create', type: 'audio', role: 'narration', trackId: 'alternate-narration', name: 'Alternate narration',
+    });
+    const conflicted = runAgentTimelineTool(createdTrack.document!, 'add_clips', { clips: [
+      { id: 'voice-b-clip', assetId: 'voice-b', role: 'narration', trackId: 'alternate-narration', startSec: 1 },
+    ] });
+    expect(conflicted.ok).toBe(false);
+    expect(conflicted.error).toContain('Narration clips cannot overlap in one output');
+    expect(conflicted.document).toBeUndefined();
+    expect(createdTrack.document!.timeline.tracks.find((track) => track.id === 'alternate-narration')?.clips).toHaveLength(0);
+  });
+
   it('inherits probed dimensions when an alias registers the same local source', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [{

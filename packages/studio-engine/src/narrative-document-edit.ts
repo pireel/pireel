@@ -31,6 +31,10 @@ export interface AddNarrativeDocumentClipInput {
   configureCanvas?: boolean;
   mode?: 'ripple' | 'overwrite';
   sceneId?: string;
+  /** Preferred project-local library identity. Content-equal assets may still be distinct imports. */
+  assetId?: string;
+  assetLabel?: string;
+  assetLibrary?: EditorMediaAsset['library'];
 }
 
 export interface InsertNarrativeAssetRangeInput {
@@ -117,12 +121,16 @@ export function addNarrativeDocumentClip(input: AddNarrativeDocumentClipInput): 
     receipts.push(canvas.receipt);
   }
 
-  const reused = existingAsset(document, input.shot);
-  const assetId = reused?.id ?? uniqueId(`asset_video_${input.shot.id}`, new Set(Object.keys(document.assets)));
+  const preferred = input.assetId ? document.assets[input.assetId] : undefined;
+  const reused = preferred ?? (!input.assetId ? existingAsset(document, input.shot) : undefined);
+  const assetId = reused?.id
+    ?? (input.assetId && !document.assets[input.assetId]
+      ? input.assetId
+      : uniqueId(`asset_video_${input.shot.id}`, new Set(Object.keys(document.assets))));
   const asset: EditorMediaAsset | undefined = reused ? undefined : {
     id: assetId,
     kind: 'video',
-    label: input.shot.srcSig ?? 'Narrative source',
+    label: input.assetLabel ?? input.shot.srcSig ?? 'Narrative source',
     locator,
     metadata: {
       durationSec: input.shot.srcEnd,
@@ -130,6 +138,7 @@ export function addNarrativeDocumentClip(input: AddNarrativeDocumentClipInput): 
       ...(input.sourceHeight ? { height: input.sourceHeight } : {}),
       hasAudio: true,
     },
+    ...(input.assetLibrary ? { library: input.assetLibrary } : {}),
   };
   const clip: Omit<NarrativeTimelineClip, 'startFrame'> = {
     id: input.shot.id,

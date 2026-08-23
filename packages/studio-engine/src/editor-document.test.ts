@@ -215,7 +215,7 @@ describe('EditorDocument V2 migration', () => {
   it('folds local-library and cloud rendezvous metadata into one asset manifest', () => {
     const { document } = migrate(emptyComposition(), {
       context: {
-        localAssets: [{ sig: 'image-sig', label: 'cover.png', kind: 'image', w: 1200, h: 800, createdAt: 1 }],
+        localAssets: [{ assetId: 'cover-asset', contentSig: 'image-sig', sig: 'image-sig', label: 'cover.png', kind: 'image', w: 1200, h: 800, createdAt: 1 }],
         media: { clips: { 'image-sig': { key: 'r2/image' }, orphan: { key: 'r2/orphan' } } },
       },
     });

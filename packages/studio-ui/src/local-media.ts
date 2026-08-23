@@ -12,6 +12,7 @@
  */
 
 import { fileMatchesSig, fileNameFromSig, fileSig, rememberDurableFileSig } from './media';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 
 const DIR = 'local-videos';
 const MAX_FILES = 12; // Videos are large — keep only the most recent N (LRU by write time); beyond that, purge with their meta
@@ -37,6 +38,15 @@ interface PermDirectoryHandle extends FileSystemDirectoryHandle {
 const HANDLE_DB = 'studio-local-handles';
 const HANDLE_STORE = 'handles';
 const folderHandleKey = (folderId: string) => `folder:${folderId}`;
+
+export interface LocalAssetDeviceBinding {
+  projectId: string;
+  assetId: string;
+}
+
+/** Device-only binding key. Neither folder paths nor native handles cross the cloud boundary. */
+export const localAssetBindingKey = ({ projectId, assetId }: LocalAssetDeviceBinding): string =>
+  `asset:${projectId}:${assetId}`;
 
 function handleDb(): Promise<IDBDatabase | null> {
   return new Promise((res) => {
@@ -75,8 +85,12 @@ async function handleOp<T>(mode: IDBTransactionMode, op: (st: IDBObjectStore) =>
 }
 
 /** Register a picked file's native handle for this sig (the zero-copy backend). */
-export async function saveLocalHandle(sig: string, handle: FileSystemFileHandle): Promise<boolean> {
-  return (await handleOp('readwrite', (st) => st.put(handle, sig))) != null;
+export async function saveLocalHandle(
+  sig: string,
+  handle: FileSystemFileHandle,
+  binding?: LocalAssetDeviceBinding,
+): Promise<boolean> {
+  return (await handleOp('readwrite', (st) => st.put(handle, binding ? localAssetBindingKey(binding) : sig))) != null;
 }
 
 /** Persist one folder authorization separately from its files. Structured-cloned handles stay on
@@ -115,6 +129,7 @@ export async function loadLocalFolderFile(
   relativePath: string,
   sig: string,
   root?: FileSystemDirectoryHandle,
+  binding?: LocalAssetDeviceBinding,
 ): Promise<{ file: File; handle: FileSystemFileHandle } | null> {
   const parts = relativePath.split('/').filter(Boolean);
   if (!parts.length || parts.some((part) => part === '.' || part === '..')) return null;
@@ -127,15 +142,16 @@ export async function loadLocalFolderFile(
     const handle = await cursor.getFileHandle(parts[parts.length - 1]!);
     const file = await handle.getFile();
     if (!(await fileMatchesSig(file, sig))) return null;
-    await saveLocalHandle(sig, handle);
+    await saveLocalHandle(sig, handle, binding);
     return { file, handle };
   } catch {
     return null;
   }
 }
 
-async function loadFromHandle(sig: string): Promise<File | null> {
-  const h = (await handleOp('readonly', (st) => st.get(sig))) as PermHandle | null;
+async function loadFromHandle(sig: string, binding?: LocalAssetDeviceBinding): Promise<File | null> {
+  const key = binding ? localAssetBindingKey(binding) : sig;
+  const h = (await handleOp('readonly', (st) => st.get(key))) as PermHandle | null;
   if (!h) return null;
   try {
     let perm = (await h.queryPermission?.({ mode: 'read' })) ?? 'granted';
@@ -199,18 +215,19 @@ export async function saveLocalVideo(
   file: File,
   sig: string,
   handle?: FileSystemFileHandle,
-  options?: { pinned?: boolean; fallbackCopy?: boolean },
+  options?: { pinned?: boolean; fallbackCopy?: boolean; binding?: LocalAssetDeviceBinding },
 ): Promise<boolean> {
   file = alignFileToSig(file, sig); // stored meta must match the sig key, or later loads mint a different identity
   if (handle) {
     // A folder authorization can resolve every child zero-copy. Individual file handles also get
     // a bounded OPFS fallback so a reload stays seamless when an embedded browser drops permission.
-    const handleSaved = await saveLocalHandle(sig, handle);
+    const handleSaved = await saveLocalHandle(sig, handle, options?.binding);
     if (handleSaved && !options?.fallbackCopy) return true;
   }
   // A registered handle already covers this sig — bytes are reachable from disk, don't duplicate into OPFS.
   // Pinned folder-input and requested fallback copies must survive even if a stale handle exists.
-  if (!options?.pinned && !options?.fallbackCopy && (await handleOp('readonly', (st) => st.get(sig))) != null) return true;
+  const handleKey = options?.binding ? localAssetBindingKey(options.binding) : sig;
+  if (!options?.pinned && !options?.fallbackCopy && (await handleOp('readonly', (st) => st.get(handleKey))) != null) return true;
   const dir = await dirHandle();
   if (!dir) return false;
   try {
@@ -385,9 +402,7 @@ export async function saveLocalStream(
   }
 }
 
-export async function loadLocalVideo(sig: string): Promise<File | null> {
-  const fromHandle = await loadFromHandle(sig);
-  if (fromHandle) return fromHandle;
+async function loadFromOpfs(sig: string): Promise<File | null> {
   const dir = await dirHandle();
   if (!dir) return null;
   try {
@@ -420,6 +435,41 @@ export async function loadLocalVideo(sig: string): Promise<File | null> {
   } catch {
     return null;
   }
+}
+
+export async function loadLocalVideo(sig: string): Promise<File | null> {
+  const fromHandle = await loadFromHandle(sig);
+  if (fromHandle) return fromHandle;
+  return loadFromOpfs(sig);
+}
+
+/** Resolve one logical project asset. A project-scoped handle is authoritative on this device;
+ * folder metadata and shared content bytes are recovery lanes. The old global sig handle is tried
+ * last only as a validated byte cache, so it can no longer override a current project binding. */
+export async function loadLocalAssetFile(
+  projectId: string,
+  entry: Pick<LocalAssetIndexEntry, 'assetId' | 'contentSig' | 'folder'>,
+): Promise<File | null> {
+  const binding = { projectId, assetId: entry.assetId };
+  const bound = await loadFromHandle(entry.contentSig, binding);
+  if (bound) return bound;
+  if (entry.folder) {
+    const folder = await loadLocalFolderFile(
+      entry.folder.id,
+      entry.folder.path,
+      entry.contentSig,
+      undefined,
+      binding,
+    );
+    if (folder?.file) return folder.file;
+  }
+  const cached = await loadFromOpfs(entry.contentSig);
+  if (cached) return cached;
+  return loadFromHandle(entry.contentSig);
+}
+
+export async function deleteLocalAssetBinding(binding: LocalAssetDeviceBinding): Promise<void> {
+  await handleOp('readwrite', (store) => store.delete(localAssetBindingKey(binding)));
 }
 
 /** Rebuild a File so its identity (fileSig) MATCHES the sig it is stored/addressed under. Cloud-vault

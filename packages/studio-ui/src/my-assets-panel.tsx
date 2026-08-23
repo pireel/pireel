@@ -40,7 +40,11 @@ import {
   DialogTitle,
 } from '@pireel/ui/dialog';
 import type { Composition, MediaRef } from '@pireel/studio-engine/composition';
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import {
+  sanitizeProjectContext,
+  STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION,
+  type LocalAssetIndexEntry,
+} from '@pireel/studio-engine/project-dto';
 import {
   AssetCard,
   AssetCardMoreMenu,
@@ -56,6 +60,8 @@ import {
 import { audioCoverUrl, fileMatchesSig, fileNameFromSig } from './media';
 import {
   getLocalFolderHandle,
+  deleteLocalAssetBinding,
+  loadLocalAssetFile,
   loadLocalFolderFile,
   loadLocalVideo,
   requestLocalFolderAccess,
@@ -115,39 +121,8 @@ type RegEntry = LocalAssetIndexEntry;
 type AddEntry = Omit<BrowserLocalImportSource, 'type'>;
 const newFolderId = () => globalThis.crypto?.randomUUID?.() ?? `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const regKey = (pid: string) => `studio.localAssets.${pid}`;
-const normalizeReg = (value: unknown): RegEntry[] => {
-  if (!Array.isArray(value)) return [];
-  const out: RegEntry[] = [];
-  const seen = new Set<string>();
-  for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue;
-    const e = raw as Partial<RegEntry>;
-    if (typeof e.sig !== 'string' || !e.sig || seen.has(e.sig)) continue;
-    const kind = e.kind === 'image' || e.kind === 'audio' || e.kind === 'video' ? e.kind : undefined;
-    const rawFolder = e.folder;
-    const folder =
-      rawFolder &&
-      typeof rawFolder.id === 'string' &&
-      rawFolder.id &&
-      typeof rawFolder.name === 'string' &&
-      rawFolder.name &&
-      typeof rawFolder.path === 'string' &&
-      rawFolder.path
-        ? { id: rawFolder.id, name: rawFolder.name, path: rawFolder.path }
-        : undefined;
-    seen.add(e.sig);
-    out.push({
-      sig: e.sig,
-      label: typeof e.label === 'string' && e.label ? e.label : sigName(e.sig),
-      ...(kind ? { kind } : {}),
-      ...(typeof e.w === 'number' || e.w === null ? { w: e.w } : {}),
-      ...(typeof e.h === 'number' || e.h === null ? { h: e.h } : {}),
-      ...(folder ? { folder } : {}),
-      createdAt: typeof e.createdAt === 'number' && Number.isFinite(e.createdAt) ? e.createdAt : 0,
-    });
-  }
-  return out;
-};
+const normalizeReg = (value: unknown): RegEntry[] =>
+  sanitizeProjectContext({ schemaVersion: STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, localAssets: value }).localAssets ?? [];
 const sameReg = (a: RegEntry[], b: RegEntry[]) => JSON.stringify(a) === JSON.stringify(b);
 const readReg = (pid?: string): RegEntry[] => {
   if (!pid || typeof window === 'undefined') return [];
@@ -295,7 +270,7 @@ export function MyAssetsPanel({
   const [reg, setReg] = useState<RegEntry[]>(() => readReg(projectId));
   const [links, setLinks] = useState<ReadonlyMap<string, string>>(new Map());
   const linksRef = useRef<ReadonlyMap<string, string>>(new Map());
-  /** sig → embedded cover art object URL (audio only) — derived whenever the File is in hand. */
+  /** assetId → embedded cover art object URL (audio only) — derived whenever the File is in hand. */
   const [covers, setCovers] = useState<ReadonlyMap<string, string>>(new Map());
   const coversRef = useRef<ReadonlyMap<string, string>>(new Map());
   const objectUrlsAliveRef = useRef(true);
@@ -303,7 +278,7 @@ export function MyAssetsPanel({
   const [importing, setImporting] = useState(false);
   const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryItem | null>(null);
-  const [renaming, setRenaming] = useState<{ sig: string; label: string; kind: LocalKind } | null>(null);
+  const [renaming, setRenaming] = useState<{ assetId: string; contentSig: string; label: string; kind: LocalKind } | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [serviceManifestUrl, setServiceManifestUrl] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
@@ -355,18 +330,18 @@ export function MyAssetsPanel({
     if (registrySyncReady) onRegistryChange?.(next);
   };
 
-  const link = (sig: string, url: string) => {
+  const link = (assetId: string, url: string) => {
     if (!objectUrlsAliveRef.current) {
       URL.revokeObjectURL(url);
       return;
     }
-    const previous = linksRef.current.get(sig);
+    const previous = linksRef.current.get(assetId);
     if (previous && previous !== url) URL.revokeObjectURL(previous);
-    const next = new Map(linksRef.current).set(sig, url);
+    const next = new Map(linksRef.current).set(assetId, url);
     linksRef.current = next;
     setLinks(next);
   };
-  const noteCover = (sig: string, f: File, k: LocalKind) => {
+  const noteCover = (assetId: string, f: File, k: LocalKind) => {
     if (k !== 'audio') return;
     const generation = coverGenerationRef.current;
     void audioCoverUrl(f).then((url) => {
@@ -375,19 +350,19 @@ export function MyAssetsPanel({
         URL.revokeObjectURL(url);
         return;
       }
-      const previous = coversRef.current.get(sig);
+      const previous = coversRef.current.get(assetId);
       if (previous && previous !== url) URL.revokeObjectURL(previous);
-      const next = new Map(coversRef.current).set(sig, url);
+      const next = new Map(coversRef.current).set(assetId, url);
       coversRef.current = next;
       setCovers(next);
     });
   };
-  const unlink = (sig: string) => {
-    const url = linksRef.current.get(sig);
+  const unlink = (assetId: string) => {
+    const url = linksRef.current.get(assetId);
     if (!url) return;
     URL.revokeObjectURL(url);
     const next = new Map(linksRef.current);
-    next.delete(sig);
+    next.delete(assetId);
     linksRef.current = next;
     setLinks(next);
   };
@@ -427,14 +402,12 @@ export function MyAssetsPanel({
     }
     void (async () => {
       for (const e of pendingLocalAssetEntries(entries, new Set(linksRef.current.keys()))) {
-        const direct = await loadLocalVideo(e.sig);
-        const fromFolder = !direct && e.folder ? await loadLocalFolderFile(e.folder.id, e.folder.path, e.sig) : null;
-        const f = direct ?? fromFolder?.file ?? null;
+        const f = projectId ? await loadLocalAssetFile(projectId, e) : await loadLocalVideo(e.contentSig);
         if (dead) return;
         if (f) {
-          link(e.sig, URL.createObjectURL(f));
-          noteCover(e.sig, f, e.kind ?? 'video');
-          onLocalAssetAvailable?.({ sig: e.sig, kind: e.kind ?? 'video', file: f });
+          link(e.assetId, URL.createObjectURL(f));
+          noteCover(e.assetId, f, e.kind ?? 'video');
+          onLocalAssetAvailable?.({ sig: e.contentSig, kind: e.kind ?? 'video', file: f });
         }
       }
     })();
@@ -464,7 +437,7 @@ export function MyAssetsPanel({
   const trackCards = useMemo<TrackCard[]>(() => {
     const out: TrackCard[] = [];
     const semanticLabel = (sig: string | null | undefined, fallback: string) =>
-      (sig ? reg.find((entry) => entry.sig === sig)?.label : undefined) ?? fallback;
+      (sig ? reg.find((entry) => entry.contentSig === sig)?.label : undefined) ?? fallback;
     if (hasMainSource || (videoSig && (comp.shots ?? []).some((s) => !s.src))) {
       const url = mainSourceUrl ?? undefined;
       out.push({
@@ -523,6 +496,11 @@ export function MyAssetsPanel({
     for (const card of trackCards) if (card.it.sig) m.set(card.it.sig, card);
     return m;
   }, [trackCards]);
+  const registryCountByContent = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of reg) counts.set(entry.contentSig, (counts.get(entry.contentSig) ?? 0) + 1);
+    return counts;
+  }, [reg]);
   /** Imports, split by whether their bytes are reachable right now. THE IMPORT CARD REPRESENTS the
    *  asset even when it's on the track (an inserted image must stay an image card — the derived 5s
    *  still is an implementation detail); the matching track card is hidden instead. */
@@ -530,32 +508,35 @@ export function MyAssetsPanel({
     const live: LibraryItem[] = [];
     const restore: RegEntry[] = [];
     for (const e of reg) {
-      const trackCard = trackCardBySig.get(e.sig);
-      const url = links.get(e.sig) ?? (trackCard?.live ? trackCard.it.insertUrl : undefined);
+      const trackCard = registryCountByContent.get(e.contentSig) === 1
+        ? trackCardBySig.get(e.contentSig)
+        : undefined;
+      const url = links.get(e.assetId) ?? (trackCard?.live ? trackCard.it.insertUrl : undefined);
       if (url)
         live.push({
-          id: `import:${e.sig}`,
+          id: `import:${e.assetId}`,
           kind: e.kind ?? 'video',
           origin: 'upload',
           insertUrl: url,
-          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.sig) ?? null) : null),
+          thumbSrc: (e.kind ?? 'video') === 'image' ? url : (e.kind === 'audio' ? (covers.get(e.assetId) ?? null) : null),
           label: e.label,
           createdAt: e.createdAt,
           width: e.w ?? null,
           height: e.h ?? null,
           deletable: true,
-          sig: e.sig,
+          sig: e.contentSig,
+          localAssetId: e.assetId,
         });
       else restore.push(e);
     }
     return { liveImports: live, restoreCards: restore };
-  }, [reg, links, covers, trackCardBySig]);
+  }, [reg, links, covers, registryCountByContent, trackCardBySig]);
 
   const kindShows = (k: LocalKind) => kind === 'all' || kind === k;
   const hasAny = liveImports.length > 0 || trackCards.length > 0 || restoreCards.length > 0;
   const needle = query.trim().toLocaleLowerCase();
   const matchesQuery = (label: string) => !needle || label.toLocaleLowerCase().includes(needle);
-  const registrySigs = useMemo(() => new Set(reg.map((entry) => entry.sig)), [reg]);
+  const registrySigs = useMemo(() => new Set(reg.map((entry) => entry.contentSig)), [reg]);
   const folderRestoreGroups = useMemo(() => groupFolderRestoreEntries(restoreCards), [restoreCards]);
   const visibleImports = liveImports.filter((it) => kindShows(it.kind as LocalKind) && matchesQuery(it.label));
   const visibleTrackCards = kindShows('video')
@@ -574,18 +555,21 @@ export function MyAssetsPanel({
     if (!entries.length || importing) return;
     setImporting(true);
     try {
-      const session = await runLocalImportSession(entries.map((entry) => ({ type: 'browser' as const, ...entry })));
+      const session = await runLocalImportSession(
+        entries.map((entry) => ({ type: 'browser' as const, ...entry })),
+        projectId,
+      );
       if (session.rejected.length) toast.error(t('panels.localVideoOnly'));
       for (const asset of session.imported) {
         const url = URL.createObjectURL(asset.file);
         const dims = await mediaDims(url, asset.kind);
         updateReg((r) => [
           localAssetIndexEntry(asset, { width: dims?.w, height: dims?.h }),
-          ...r.filter((x) => x.sig !== asset.sig),
+          ...r.filter((x) => x.assetId !== asset.assetId),
         ]);
-        link(asset.sig, url);
-        noteCover(asset.sig, asset.file, asset.kind);
-        onLocalAssetAvailable?.({ sig: asset.sig, kind: asset.kind, file: asset.file });
+        link(asset.assetId, url);
+        noteCover(asset.assetId, asset.file, asset.kind);
+        onLocalAssetAvailable?.({ sig: asset.contentSig, kind: asset.kind, file: asset.file });
       }
     } finally {
       setImporting(false);
@@ -652,17 +636,26 @@ export function MyAssetsPanel({
   };
 
   const finishReconnect = async (e: RegEntry, f: File, handle?: FileSystemFileHandle) => {
-    if (!(await fileMatchesSig(f, e.sig))) {
+    if (!(await fileMatchesSig(f, e.contentSig))) {
       toast.error(t('workbench.checksumMismatch'));
       return false;
     }
-    const session = await runLocalImportSession([{ type: 'browser', file: f, handle, folder: e.folder }]);
+    const session = await runLocalImportSession([{
+      type: 'browser',
+      file: f,
+      handle,
+      folder: e.folder,
+      assetId: e.assetId,
+    }], projectId);
     const asset = session.imported[0];
     if (!asset) return false;
-    link(e.sig, URL.createObjectURL(asset.file));
-    noteCover(e.sig, asset.file, asset.kind);
-    onLocalAssetAvailable?.({ sig: e.sig, kind: asset.kind, file: asset.file });
-    if (trackSrcBySig.has(e.sig)) onReconnectSource?.(trackSrcBySig.get(e.sig) ?? null, e.sig);
+    link(e.assetId, URL.createObjectURL(asset.file));
+    noteCover(e.assetId, asset.file, asset.kind);
+    onLocalAssetAvailable?.({ sig: e.contentSig, kind: asset.kind, file: asset.file });
+    const sameContentCount = regRef.current.filter((entry) => entry.contentSig === e.contentSig).length;
+    if (sameContentCount === 1 && trackSrcBySig.has(e.contentSig)) {
+      onReconnectSource?.(trackSrcBySig.get(e.contentSig) ?? null, e.contentSig);
+    }
     return true;
   };
 
@@ -683,7 +676,7 @@ export function MyAssetsPanel({
       let restored = 0;
       for (const e of group.entries) {
         const file = e.folder ? byPath.get(e.folder.path) : undefined;
-        if (file && (await fileMatchesSig(file, e.sig)) && (await finishReconnect(e, file))) restored += 1;
+        if (file && (await fileMatchesSig(file, e.contentSig)) && (await finishReconnect(e, file))) restored += 1;
       }
       reportFolderRestore(restored, group.entries.length);
     } finally {
@@ -696,7 +689,13 @@ export function MyAssetsPanel({
     let restored = 0;
     for (const entry of group.entries) {
       if (!entry.folder) continue;
-      const found = await loadLocalFolderFile(entry.folder.id, entry.folder.path, entry.sig, dir);
+      const found = await loadLocalFolderFile(
+        entry.folder.id,
+        entry.folder.path,
+        entry.contentSig,
+        dir,
+        projectId ? { projectId, assetId: entry.assetId } : undefined,
+      );
       if (found && (await finishReconnect(entry, found.file, found.handle))) restored += 1;
     }
     return restored;
@@ -752,7 +751,7 @@ export function MyAssetsPanel({
   /** Click-to-restore (user gesture): existing handle/OPFS first; on a new browser, open a real file
    *  picker and verify the selected file against the cloud-synced sig before reconnecting it. */
   const reconnect = async (e: RegEntry) => {
-    const cached = await loadLocalVideo(e.sig);
+    const cached = projectId ? await loadLocalAssetFile(projectId, e) : await loadLocalVideo(e.contentSig);
     if (cached) {
       await finishReconnect(e, cached);
       return;
@@ -779,14 +778,15 @@ export function MyAssetsPanel({
   /** Remove this project's registry/link. OPFS and native-handle entries are shared recovery caches:
    * deleting them here can break another project that references the same local file, so lifecycle
    * pruning owns physical eviction instead. The original device file is never touched. */
-  const evict = (sig: string) => {
-    updateReg((r) => r.filter((x) => x.sig !== sig));
-    unlink(sig);
-    const u = coversRef.current.get(sig);
+  const evict = (entry: RegEntry) => {
+    updateReg((r) => r.filter((x) => x.assetId !== entry.assetId));
+    unlink(entry.assetId);
+    if (projectId) void deleteLocalAssetBinding({ projectId, assetId: entry.assetId });
+    const u = coversRef.current.get(entry.assetId);
     if (u) {
       URL.revokeObjectURL(u);
       const next = new Map(coversRef.current);
-      next.delete(sig);
+      next.delete(entry.assetId);
       coversRef.current = next;
       setCovers(next);
     }
@@ -794,10 +794,11 @@ export function MyAssetsPanel({
 
   const evictRestoreEntry = (entry: RegEntry) => {
     if (
-      trackSrcBySig.has(entry.sig) &&
-      onDeleteAsset?.(trackSrcBySig.get(entry.sig) ?? null, entry.sig) === false
+      regRef.current.filter((candidate) => candidate.contentSig === entry.contentSig).length === 1 &&
+      trackSrcBySig.has(entry.contentSig) &&
+      onDeleteAsset?.(trackSrcBySig.get(entry.contentSig) ?? null, entry.contentSig) === false
     ) return;
-    evict(entry.sig);
+    evict(entry);
   };
 
   /** Card delete: confirm, then track surgery for track members (src !== undefined; null = main —
@@ -811,23 +812,30 @@ export function MyAssetsPanel({
     });
     if (!ok) return;
     if (src !== undefined && onDeleteAsset?.(src, it.sig) === false) return;
-    if (it.sig) evict(it.sig);
+    const entry = it.localAssetId
+      ? regRef.current.find((candidate) => candidate.assetId === it.localAssetId)
+      : it.sig
+        ? regRef.current.find((candidate) => candidate.contentSig === it.sig)
+        : undefined;
+    if (entry) evict(entry);
     toast.success(t('panels.deleted'));
   };
 
-  const beginRename = (sig: string, label: string, kind: LocalKind) => {
-    setRenaming({ sig, label, kind });
+  const beginRename = (assetId: string, contentSig: string, label: string, kind: LocalKind) => {
+    setRenaming({ assetId, contentSig, label, kind });
     setRenameDraft(label);
   };
 
   const commitRename = () => {
     if (!renaming || !renameDraft.trim()) return;
     updateReg((entries) => {
-      if (entries.some((entry) => entry.sig === renaming.sig))
-        return renameLocalAssetEntry(entries, renaming.sig, renameDraft);
+      if (entries.some((entry) => entry.assetId === renaming.assetId))
+        return renameLocalAssetEntry(entries, renaming.assetId, renameDraft);
       return [
         {
-          sig: renaming.sig,
+          assetId: renaming.assetId,
+          contentSig: renaming.contentSig,
+          sig: renaming.contentSig,
           label: renameDraft.trim().slice(0, LOCAL_ASSET_LABEL_MAX_LENGTH),
           kind: renaming.kind,
           createdAt: Date.now(),
@@ -848,6 +856,7 @@ export function MyAssetsPanel({
     label: it.label,
     dims: dimsOf(it),
     sig: it.sig,
+    localAssetId: it.localAssetId,
   });
   /** Primary action by kind: audio → the music lane; image/video → main-track clip (still-frame for images). */
   const insertOf = (it: LibraryItem) => {
@@ -989,8 +998,15 @@ export function MyAssetsPanel({
                   playing={it.kind === 'audio' && audioPlaying === it.insertUrl}
                   onActivate={() => activate(it)}
                   onInsert={() => insertOf(it)}
-                  onRename={it.sig ? () => beginRename(it.sig!, it.label, it.kind as LocalKind) : undefined}
-                  onDelete={() => void doDelete(it, it.sig && trackSrcBySig.has(it.sig) ? trackSrcBySig.get(it.sig)! : undefined)}
+                  onRename={it.localAssetId && it.sig
+                    ? () => beginRename(it.localAssetId!, it.sig!, it.label, it.kind as LocalKind)
+                    : undefined}
+                  onDelete={() => void doDelete(
+                    it,
+                    it.sig && registryCountByContent.get(it.sig) === 1 && trackSrcBySig.has(it.sig)
+                      ? trackSrcBySig.get(it.sig)!
+                      : undefined,
+                  )}
                   dragProps={dragPropsFor(it, onDragAsset)}
                   insertLabel={it.kind === 'audio' ? t('panels.useAsBgm') : t('panels.insert')}
                 />
@@ -1002,7 +1018,12 @@ export function MyAssetsPanel({
                     item={c.it}
                     onActivate={() => activate(c.it)}
                     onInsert={() => insertOf(c.it)}
-                    onRename={c.it.sig ? () => beginRename(c.it.sig!, c.it.label, 'video') : undefined}
+                    onRename={c.it.sig && registryCountByContent.get(c.it.sig) === 1
+                      ? (() => {
+                          const entry = reg.find((candidate) => candidate.contentSig === c.it.sig);
+                          return entry ? () => beginRename(entry.assetId, entry.contentSig, c.it.label, 'video') : undefined;
+                        })()
+                      : undefined}
                     onDelete={() => void doDelete(c.it, c.src)}
                     dragProps={dragPropsFor(c.it, onDragAsset)}
                     insertLabel={t('panels.insert')}
@@ -1013,7 +1034,12 @@ export function MyAssetsPanel({
                     key={c.it.id}
                     label={c.it.label}
                     onRestore={() => onReconnectSource?.(c.src, c.it.sig)}
-                    onRename={c.it.sig ? () => beginRename(c.it.sig!, c.it.label, 'video') : undefined}
+                    onRename={c.it.sig && registryCountByContent.get(c.it.sig) === 1
+                      ? (() => {
+                          const entry = reg.find((candidate) => candidate.contentSig === c.it.sig);
+                          return entry ? () => beginRename(entry.assetId, entry.contentSig, c.it.label, 'video') : undefined;
+                        })()
+                      : undefined}
                     onDelete={() => void doDelete(c.it, c.src)}
                   />
                 ),
@@ -1031,11 +1057,11 @@ export function MyAssetsPanel({
             {/* Registry entries whose bytes need a re-grant gesture (or are gone): click restores access in place */}
             {visibleRestoreCards.map((e) => (
                 <RestoreTile
-                  key={`restore:${e.sig}`}
+                  key={`restore:${e.assetId}`}
                   label={e.label}
                   kind={e.kind ?? 'video'}
                   onRestore={() => void reconnect(e)}
-                  onRename={() => beginRename(e.sig, e.label, e.kind ?? 'video')}
+                  onRename={() => beginRename(e.assetId, e.contentSig, e.label, e.kind ?? 'video')}
                   onDelete={() => evictRestoreEntry(e)}
                 />
               ))}

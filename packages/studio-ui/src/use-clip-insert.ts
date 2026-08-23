@@ -25,9 +25,10 @@ import {
   shotId,
 } from '@pireel/studio-engine/composition';
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
+import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { type FilmstripFrame, extractFilmstrip, extractFilmstripFromUrl, fileSig } from './media';
-import { alignFileToSig, loadLocalVideo, saveLocalVideo } from './local-media';
+import { alignFileToSig, loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import {
   isDeviceLocalLibraryAsset,
@@ -43,6 +44,7 @@ interface InsertClipCoreOptions {
   placement?: 'nearest' | 'exact';
   mode?: TimelineInsertMode;
   sceneId?: string;
+  localAsset?: LocalAssetIndexEntry;
 }
 
 interface InsertLibraryClipOptions {
@@ -51,12 +53,14 @@ interface InsertLibraryClipOptions {
 }
 
 export interface ClipInsertDeps {
+  projectId: string;
   comp: Composition;
   compRef: MutableRefObject<Composition>;
   clipFilesRef: MutableRefObject<Map<string, File>>;
   cloudMediaRef: MutableRefObject<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>;
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
   documentRef: MutableRefObject<EditorDocumentV2>;
+  localAssetIndexRef: MutableRefObject<LocalAssetIndexEntry[]>;
   setDocument: (document: EditorDocumentV2) => void;
   rememberAssetUrl: (assetId: string, url: string) => void;
   onPrimarySource: (source: PrimaryNarrativeSourceRuntime) => void;
@@ -72,7 +76,7 @@ export interface ClipInsertDeps {
 
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
-    comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, setDocument,
+    projectId, comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, setDocument,
     rememberAssetUrl, onPrimarySource, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts,
     backupMediaToCloud, runTool,
     visualSources = [],
@@ -216,6 +220,14 @@ export function useClipInsert(deps: ClipInsertDeps) {
       ...(options.mode ? { mode: options.mode } : {}),
       ...(dims ? { sourceWidth: dims.width, sourceHeight: dims.height } : {}),
       ...(options.sceneId ? { sceneId: options.sceneId } : {}),
+      ...(options.localAsset ? {
+        assetId: options.localAsset.assetId,
+        assetLabel: options.localAsset.label,
+        assetLibrary: {
+          createdAt: options.localAsset.createdAt,
+          ...(options.localAsset.folder ? { folder: options.localAsset.folder } : {}),
+        },
+      } : {}),
     });
     if (!edit.ok || !edit.assetId) {
       if (newlyOwnedObjectUrl) URL.revokeObjectURL(url);
@@ -375,7 +387,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
    * images (instead of encoding a five-second video) and keeps embedded video audio attached to the
    * visual clip. The render/export plan already understands both forms. */
   const insertVisualCore = (input: {
-    asset: MediaRef & { label?: string; sig?: string | null; dims?: { w: number; h: number } };
+    asset: MediaRef & { label?: string; sig?: string | null; localAssetId?: string | null; dims?: { w: number; h: number } };
     url: string;
     file: File;
     durationSec: number;
@@ -389,11 +401,19 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const remoteUrl = !isDeviceLocalLibraryAsset(input.asset)
       ? input.asset.url
       : undefined;
-    const existing = Object.values(before.assets).find((asset) => asset.kind === input.asset.type && (
-      asset.locator.localSig === durableSig || (!!remoteUrl && asset.locator.remoteUrl === remoteUrl)
-    ));
+    const existing = input.asset.localAssetId
+      ? before.assets[input.asset.localAssetId]
+      : Object.values(before.assets).find((asset) => asset.kind === input.asset.type && (
+          asset.locator.localSig === durableSig || (!!remoteUrl && asset.locator.remoteUrl === remoteUrl)
+        ));
     const usedAssetIds = new Set(Object.keys(before.assets));
-    const assetId = existing?.id ?? uniqueDocumentId(`asset_${input.asset.type}_${shotId()}`, usedAssetIds);
+    const assetId = existing?.id
+      ?? (input.asset.localAssetId && !usedAssetIds.has(input.asset.localAssetId)
+        ? input.asset.localAssetId
+        : uniqueDocumentId(`asset_${input.asset.type}_${shotId()}`, usedAssetIds));
+    const localEntry = input.asset.localAssetId
+      ? localAssetIndexRef.current.find((entry) => entry.assetId === input.asset.localAssetId)
+      : undefined;
     const mediaAsset: EditorMediaAsset = existing ?? {
       id: assetId,
       kind: input.asset.type,
@@ -405,6 +425,12 @@ export function useClipInsert(deps: ClipInsertDeps) {
         ...(input.dimensions?.h ? { height: input.dimensions.h } : {}),
         ...(input.asset.type === 'video' ? { hasAudio: true } : {}),
       },
+      ...(localEntry ? {
+        library: {
+          createdAt: localEntry.createdAt,
+          ...(localEntry.folder ? { folder: localEntry.folder } : {}),
+        },
+      } : {}),
     };
     let document: EditorDocumentV2 = existing
       ? before
@@ -463,7 +489,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
       return '';
     }
     clipFilesRef.current.set(input.url, input.file);
-    void saveLocalVideo(input.file, durableSig).catch(() => {});
+    void saveLocalVideo(input.file, durableSig, undefined, localEntry ? {
+      binding: { projectId, assetId: localEntry.assetId },
+    } : undefined).catch(() => {});
     pushUndoSnapshot();
     rememberAssetUrl(assetId, input.url);
     setDocument(inserted.document);
@@ -475,7 +503,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
   };
 
   const insertLibraryVisualAt = async (
-    a: MediaRef & { label?: string; sig?: string | null; dims?: { w: number; h: number } },
+    a: MediaRef & { label?: string; sig?: string | null; localAssetId?: string | null; dims?: { w: number; h: number } },
     at: number,
     target: TimelineVisualDropTarget,
     mode: TimelineInsertMode,
@@ -485,6 +513,10 @@ export function useClipInsert(deps: ClipInsertDeps) {
     let file: File | null = null;
     const held = a.type === 'video' ? clipFilesRef.current.get(a.url) : undefined;
     if (held) file = held;
+    const localEntry = a.localAssetId
+      ? localAssetIndexRef.current.find((entry) => entry.assetId === a.localAssetId)
+      : undefined;
+    if (!file && localEntry) file = await loadLocalAssetFile(projectId, localEntry);
     if (!file && locatorSig) file = await loadLocalVideo(locatorSig);
     const local = isDeviceLocalLibraryAsset(a);
     if (!file && !local) {
@@ -526,9 +558,12 @@ export function useClipInsert(deps: ClipInsertDeps) {
    *  was cut" — what was cut back then was OS file drops; library assets have direct links and caching, so the experience holds).
    *  Bytes first via the asset direct link (CDN CORS is allowed), falling back to the /api/media/fetch same-origin proxy; then
    *  the same insertClipCore as local first-media insertion (local persistence/caption auto-follow reused). */
-  const insertLibraryClipAt = async (a: MediaRef & { label?: string; sig?: string | null; dims?: { w: number; h: number } }, at: number, options: InsertLibraryClipOptions = {}) => {
+  const insertLibraryClipAt = async (a: MediaRef & { label?: string; sig?: string | null; localAssetId?: string | null; dims?: { w: number; h: number } }, at: number, options: InsertLibraryClipOptions = {}) => {
     const locatorSig = localImageSigFromLibraryAsset(a);
     let effectiveSig = locatorSig ?? a.sig;
+    const localEntry = a.localAssetId
+      ? localAssetIndexRef.current.find((entry) => entry.assetId === a.localAssetId)
+      : undefined;
     const target = options.target ?? { kind: 'primary' as const };
     const mode = options.mode ?? 'ripple';
     setClipPending(at);
@@ -538,8 +573,8 @@ export function useClipInsert(deps: ClipInsertDeps) {
         return;
       }
       const coreOptions: InsertClipCoreOptions = options.target
-        ? { placement: 'exact', mode }
-        : {};
+        ? { placement: 'exact', mode, ...(localEntry ? { localAsset: localEntry } : {}) }
+        : { ...(localEntry ? { localAsset: localEntry } : {}) };
       // Source already loaded this session (panel card for an on-track clip): reuse the held File
       // outright — no fetch, no byte copy, and it works even if OPFS/handle lanes are cold.
       if (a.type === 'video') {
@@ -571,7 +606,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
       // Local asset with a sig: reuse the on-device file (native handle / OPFS) — zero-copy, original
       // identity kept (srcSig === panel sig), no fetch. Falls through to the byte-fetch lane on a miss.
       if (a.type === 'video' && a.sig) {
-        const f = await loadLocalVideo(a.sig);
+        const f = localEntry
+          ? await loadLocalAssetFile(projectId, localEntry)
+          : await loadLocalVideo(a.sig);
         if (f) {
           const url = createClipObjectUrl(f);
           if (!url) return;
@@ -620,7 +657,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
           toast.error(t('workbench.couldNotReadDuration'));
           return;
         }
-        void saveLocalVideo(f, fileSig(f)).catch(() => {});
+        void saveLocalVideo(f, fileSig(f), undefined, localEntry ? {
+          binding: { projectId, assetId: localEntry.assetId },
+        } : undefined).catch(() => {});
         insertClipCore(url, Math.round(meta.dur * 100) / 100, at, f, meta, effectiveSig, coreOptions);
       } else {
         const f = await stillClipFromImage(sourceFile, a.label);
@@ -635,7 +674,9 @@ export function useClipInsert(deps: ClipInsertDeps) {
           // phantom "5s video" card); the image bytes persist through the local handle/OPFS only,
           // and recovery re-derives the still clip from them.
           const img = alignFileToSig(sourceFile, effectiveSig);
-          void saveLocalVideo(img, effectiveSig).catch(() => {});
+          void saveLocalVideo(img, effectiveSig, undefined, localEntry ? {
+            binding: { projectId, assetId: localEntry.assetId },
+          } : undefined).catch(() => {});
           insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, effectiveSig, coreOptions);
         } else {
           void saveLocalVideo(f, fileSig(f)).catch(() => {});

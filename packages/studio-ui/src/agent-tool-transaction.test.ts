@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   type Composition,
@@ -12,15 +12,21 @@ import { buildChatSystem, buildHtmlSystem } from '@pireel/studio-engine/prompts'
 import type { AgentToolCtx } from './agent-tool-runner';
 import { classifyAsrResponse } from './media';
 import { localAssetMentionId } from './chat-local-asset-mention';
+import { resolveInteraction } from './interaction-store';
 
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
 const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
-const localMediaMocks = vi.hoisted(() => ({
-  loadLocalVideo: vi.fn(),
-  loadLocalFolderFile: vi.fn(),
-  saveLocalVideo: vi.fn(),
-}));
+const speechMocks = vi.hoisted(() => ({ assessLocalSpeechAudio: vi.fn() }));
+const localMediaMocks = vi.hoisted(() => {
+  const loadLocalVideo = vi.fn();
+  return {
+    loadLocalVideo,
+    loadLocalAssetFile: vi.fn(() => loadLocalVideo()),
+    loadLocalFolderFile: vi.fn(),
+    saveLocalVideo: vi.fn(),
+  };
+});
 vi.mock('@pireel/studio-engine/providers', () => ({
   studioProviders: () => ({ transcriber: { transcribe: providerMocks.transcribe } }),
 }));
@@ -33,9 +39,14 @@ vi.mock('./visual', async (importOriginal) => ({
   analyzeVisual: visualMocks.analyzeVisual,
   analyzeVisualGeometry: visualMocks.analyzeVisualGeometry,
 }));
+vi.mock('./speech-silence', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./speech-silence')>()),
+  assessLocalSpeechAudio: speechMocks.assessLocalSpeechAudio,
+}));
 vi.mock('./local-media', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./local-media')>()),
   loadLocalVideo: localMediaMocks.loadLocalVideo,
+  loadLocalAssetFile: localMediaMocks.loadLocalAssetFile,
   loadLocalFolderFile: localMediaMocks.loadLocalFolderFile,
   saveLocalVideo: localMediaMocks.saveLocalVideo,
 }));
@@ -59,6 +70,13 @@ const composition = (): Composition => ({
   shots: [{ id: 's1', srcStart: 0, srcEnd: 3, treatment: 'full' }],
 });
 
+const localEntry = (
+  assetId: string,
+  contentSig: string,
+  label: string,
+  kind: 'video' | 'image' | 'audio',
+) => ({ assetId, contentSig, sig: contentSig, label, kind, createdAt: 1 });
+
 function harness() {
   const compRef = { current: composition() };
   const documentRef = { current: compositionToEditorDocument({ projectId: 'test', composition: compRef.current }).document };
@@ -80,12 +98,21 @@ function harness() {
 }
 
 describe('Agent composition transaction boundary', () => {
+  beforeEach(() => {
+    speechMocks.assessLocalSpeechAudio.mockResolvedValue({
+      classification: 'speech-likely', hasAudio: true, audible: true, speechLikely: true,
+      audibleSec: 4, speechSec: 1, speechFraction: 0.25,
+    });
+  });
+
   afterEach(() => {
     providerMocks.transcribe.mockReset();
     mediaMocks.probeVideoFile.mockReset();
     visualMocks.analyzeVisual.mockReset();
     visualMocks.analyzeVisualGeometry.mockReset();
+    speechMocks.assessLocalSpeechAudio.mockReset();
     localMediaMocks.loadLocalVideo.mockReset();
+    localMediaMocks.loadLocalAssetFile.mockClear();
     localMediaMocks.loadLocalFolderFile.mockReset();
     localMediaMocks.saveLocalVideo.mockReset();
     vi.unstubAllGlobals();
@@ -121,6 +148,25 @@ describe('Agent composition transaction boundary', () => {
       phase: 'request',
       retryable: true,
       detail: 'Failed to fetch',
+    });
+  });
+
+  it('returns the stable value for an ask_user voice choice', async () => {
+    const h = harness();
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const pending = runStudioTool(h.ctx, 'ask_user', {
+      question: '选择声音',
+      options: [
+        { label: '带货女声', description: '直接、有活力', value: 'voice-commerce', previewUrl: '/voice-previews/commerce.mp3' },
+        { label: '温和男声', description: '克制、平稳', value: 'voice-warm', previewUrl: 'https://cdn.example/warm.mp3' },
+      ],
+    }, { surface: 'chat' });
+    await Promise.resolve();
+    resolveInteraction(['带货女声']);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      data: { selected: ['带货女声'], selectedValues: ['voice-commerce'], multiSelect: false },
     });
   });
 
@@ -193,6 +239,37 @@ describe('Agent composition transaction boundary', () => {
     ).toHaveLength(3);
   });
 
+  it('places a project-library asset in a fresh output without a separate register_media retry', async () => {
+    const h = harness();
+    const assetId = 'shared-product-video';
+    const sig = 'product.mp4:120:8';
+    const prepareLocalAssetRuntime = vi.fn().mockResolvedValue({ ok: true, prepared: true });
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '商品展示', 'video')] },
+      prepareLocalAssetRuntime,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'add_clips', {
+      clips: [{ assetId: `local:${assetId}`, startSec: 0, durationSec: 2, role: 'primary' }],
+    });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.assets[assetId]).toMatchObject({
+      id: assetId,
+      kind: 'video',
+      locator: { localSig: sig },
+    });
+    expect(prepareLocalAssetRuntime).toHaveBeenCalledWith(expect.objectContaining({ id: assetId }));
+    expect(
+      h.documentRef.current.timeline.tracks
+        .flatMap((track) => track.clips)
+        .some((clip) => 'assetId' in clip && clip.assetId === assetId),
+    ).toBe(true);
+  });
+
   it('does not mutate the timeline when device-local bytes cannot be restored', async () => {
     const h = harness();
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
@@ -229,7 +306,7 @@ describe('Agent composition transaction boundary', () => {
     expect(skill).toContain('picture-change contract');
     expect(skill).toContain('roughly every 5–10 seconds');
     expect(skill).toContain('never loop or stretch one short clip as wallpaper');
-    expect(skill).toContain('local image sig → `inspect_images`');
+    expect(skill).toContain('local image assetId → `inspect_images`');
 
     const componentSystem = buildHtmlSystem({ componentIds: [] });
     expect(componentSystem).toContain('participating in a video scene');
@@ -240,10 +317,12 @@ describe('Agent composition transaction boundary', () => {
   it('pins every explicitly prepared local image even when its native handle is currently readable', async () => {
     const h = harness();
     const sig = 'platform-data.jpg:12:7';
+    const assetId = 'asset-platform-data';
     const image = new File(['image-bytes'], 'platform-data.jpg', { type: 'image/jpeg', lastModified: 7 });
     localMediaMocks.loadLocalVideo.mockResolvedValue(image);
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '平台数据', kind: 'image', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '平台数据', 'image')] },
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
       t: (key: string) => key,
@@ -254,12 +333,16 @@ describe('Agent composition transaction boundary', () => {
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
     expect(localMediaMocks.loadLocalFolderFile).not.toHaveBeenCalled();
-    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig, undefined, { pinned: true });
+    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig, undefined, {
+      pinned: true,
+      binding: { projectId: 'test', assetId },
+    });
   });
 
   it('inspects local image pixels before timeline placement without uploading them to the media library', async () => {
     const h = harness();
     const sig = 'conversion-chart.png:18:9';
+    const assetId = 'asset-conversion-chart';
     const image = new File(['image-pixels'], 'conversion-chart.png', { type: 'image/png', lastModified: 9 });
     localMediaMocks.loadLocalVideo.mockResolvedValue(image);
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1600, height: 900, close: vi.fn() }));
@@ -276,20 +359,21 @@ describe('Agent composition transaction boundary', () => {
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetchMock);
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '转化率数据', kind: 'image', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '转化率数据', 'image')] },
       resolveAssetUrl: () => null,
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const mentionId = localAssetMentionId(sig);
+    const mentionId = localAssetMentionId(assetId);
     const result = await runStudioTool(h.ctx, 'inspect_images', { refs: [mentionId] });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
-        images: [{ ref: sig, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
+        images: [{ ref: `local:${assetId}`, label: '转化率数据', description: expect.stringContaining('12% to 31%') }],
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -301,11 +385,13 @@ describe('Agent composition transaction boundary', () => {
   it('stops image inspection while local pixels are still being prepared', async () => {
     const h = harness();
     const sig = 'slow-reference.png:18:9';
+    const assetId = 'asset-slow-reference';
     const image = new File(['image-pixels'], 'slow-reference.png', { type: 'image/png', lastModified: 9 });
     localMediaMocks.loadLocalVideo.mockResolvedValue(image);
     vi.stubGlobal('createImageBitmap', vi.fn(() => new Promise(() => {})));
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '慢速图片', kind: 'image', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '慢速图片', 'image')] },
       resolveAssetUrl: () => null,
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
@@ -313,7 +399,7 @@ describe('Agent composition transaction boundary', () => {
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const controller = new AbortController();
-    const pending = runStudioTool(h.ctx, 'inspect_images', { refs: [localAssetMentionId(sig)] }, { signal: controller.signal, surface: 'chat' });
+    const pending = runStudioTool(h.ctx, 'inspect_images', { refs: [localAssetMentionId(assetId)] }, { signal: controller.signal, surface: 'chat' });
 
     controller.abort();
 
@@ -323,19 +409,21 @@ describe('Agent composition transaction boundary', () => {
   it('transcribes an unplaced local video when a model mirrors its @ reference token into assetId', async () => {
     const h = harness();
     const sig = 'viral-reference.mp4:240:12';
+    const assetId = 'asset-viral-reference';
     const video = new File(['video-with-speech'], 'viral-reference.mp4', { type: 'video/mp4', lastModified: 12 });
     localMediaMocks.loadLocalVideo.mockResolvedValue(video);
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 30, width: 1080, height: 1920, hasAudio: true });
     providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 2.4, text: '先用结果抓住观众' }]);
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '爆款参考视频', kind: 'video', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '爆款参考视频', 'video')] },
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
     });
     const assetIdsBefore = Object.keys(h.documentRef.current.assets);
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(sig) });
+    const result = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(assetId) });
 
     expect(result).toMatchObject({
       ok: true,
@@ -348,7 +436,10 @@ describe('Agent composition transaction boundary', () => {
       },
     });
     expect(providerMocks.transcribe).toHaveBeenCalledWith(video);
-    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(video, sig, undefined, { pinned: false });
+    expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(video, sig, undefined, {
+      pinned: false,
+      binding: { projectId: 'test', assetId },
+    });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
   });
 
@@ -361,7 +452,8 @@ describe('Agent composition transaction boundary', () => {
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 6, width: 960, height: 1280, hasAudio: true });
     providerMocks.transcribe.mockRejectedValue(new Error('SUCCESS_WITH_NO_VALID_FRAGMENT'));
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '环境噪声素材', kind: 'video', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-noise-only', sig, '环境噪声素材', 'video')] },
       prepareLocalAssetRuntime: async () => ({ ok: true }),
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
@@ -394,7 +486,8 @@ describe('Agent composition transaction boundary', () => {
       segments: [{ start: 0, end: 18, label: { content: 'broll', person: 'none', safe: 'top', hasText: false, desc: 'Hands demonstrate the product.' } }],
     });
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '产品演示', kind: 'video', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-product-demo', sig, '产品演示', 'video')] },
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
     });
@@ -409,12 +502,68 @@ describe('Agent composition transaction boundary', () => {
         localSig: sig,
         label: '产品演示',
         durationSec: 18,
+        hasAudio: true,
+        audioAssessment: 'speech-likely',
+        speechLikely: true,
         sceneCutsSec: [6],
         segments: [{ description: 'Hands demonstrate the product.' }],
       },
     });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
     expect(Object.values(h.documentRef.current.assets).some((asset) => asset.locator.localSig === sig)).toBe(false);
+  });
+
+  it('uses the local audio-track probe before ASR for an unplaced silent video', async () => {
+    const h = harness();
+    const sig = 'silent-product.mp4:90:7';
+    const video = new File(['silent-video'], 'silent-product.mp4', { type: 'video/mp4', lastModified: 7 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 9, width: 960, height: 1280, hasAudio: false });
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-silent-product', sig, '静音商品素材', 'video')] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        localSig: sig,
+        hasAudio: false,
+        speechDetected: false,
+        audioAssessment: 'no-audio-track',
+      },
+    });
+    expect(providerMocks.transcribe).not.toHaveBeenCalled();
+  });
+
+  it('stops locally classified noise before cloud transcription', async () => {
+    const h = harness();
+    const sig = 'fan-noise.mp4:95:8';
+    const video = new File(['fan-noise'], 'fan-noise.mp4', { type: 'video/mp4', lastModified: 8 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 10, width: 960, height: 1280, hasAudio: true });
+    speechMocks.assessLocalSpeechAudio.mockResolvedValueOnce({
+      classification: 'non-speech-or-noise', hasAudio: true, audible: true, speechLikely: false,
+      audibleSec: 10, speechSec: 0, speechFraction: 0,
+    });
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-fan-noise', sig, '风扇噪音素材', 'video')] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'read_script', { localSig: sig });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { audioAssessment: 'non-speech-or-noise', speechDetected: false, defaultSourceAudio: 'muted' },
+    });
+    expect(providerMocks.transcribe).not.toHaveBeenCalled();
   });
 
   it('uses local geometry without semantic VLM output for framing-only analysis', async () => {
@@ -437,7 +586,8 @@ describe('Agent composition transaction boundary', () => {
       }],
     });
     Object.assign(h.ctx, {
-      localAssetIndexRef: { current: [{ sig, label: '口播原片', kind: 'video', createdAt: 1 }] },
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-speaker', sig, '口播原片', 'video')] },
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
     });

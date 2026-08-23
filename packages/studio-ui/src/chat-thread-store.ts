@@ -68,6 +68,22 @@ export function assistantMessageHasRenderableOutput(message: UIMessage): boolean
   });
 }
 
+/** An interaction boundary cannot be resumed safely without the user. Automatic stream recovery
+ * would just append another disabled copy of the same question/approval card. */
+export function assistantHasOpenOrInterruptedInteraction(message: UIMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant') return false;
+  return (message.parts ?? []).some((part) => {
+    const candidate = part as { type?: string; toolName?: string; state?: string };
+    const toolId = candidate.type === 'dynamic-tool'
+      ? candidate.toolName
+      : candidate.type?.startsWith('tool-')
+        ? candidate.type.slice('tool-'.length)
+        : '';
+    return (toolId === 'ask_user' || toolId === 'request_approval')
+      && candidate.state !== 'output-available';
+  });
+}
+
 /** Only transport/stream failures are safe to continue from live project state automatically. */
 export function isRecoverableStudioChatError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';

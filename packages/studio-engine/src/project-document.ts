@@ -121,9 +121,16 @@ export function applyEditorDocumentPersistenceMetadata(
       },
     };
   }
+  const localAssetCountsByContent = new Map<string, number>();
   for (const entry of input.localAssets ?? []) {
-    const existing = Object.values(assets).find((asset) => asset.locator.localSig === entry.sig);
-    const cloudKey = input.cloudMedia?.clips?.[entry.sig]?.key;
+    localAssetCountsByContent.set(entry.contentSig, (localAssetCountsByContent.get(entry.contentSig) ?? 0) + 1);
+  }
+  for (const entry of input.localAssets ?? []) {
+    const existing = assets[entry.assetId]
+      ?? (localAssetCountsByContent.get(entry.contentSig) === 1
+        ? Object.values(assets).find((asset) => asset.locator.localSig === entry.contentSig)
+        : undefined);
+    const cloudKey = input.cloudMedia?.clips?.[entry.contentSig]?.key;
     if (existing) {
       assets[existing.id] = {
         ...existing,
@@ -144,7 +151,7 @@ export function applyEditorDocumentPersistenceMetadata(
       continue;
     }
     const kind = entry.kind ?? 'video';
-    const stem = `asset_${kind}_${stableHash(`${input.projectId}\u0000${entry.sig}`)}`;
+    const stem = entry.assetId || `asset_${kind}_${stableHash(`${input.projectId}\u0000${entry.contentSig}`)}`;
     let id = stem;
     let suffix = 2;
     while (assets[id]) id = `${stem}_${suffix++}`;
@@ -152,7 +159,7 @@ export function applyEditorDocumentPersistenceMetadata(
       id,
       kind,
       label: entry.label,
-      locator: { localSig: entry.sig, ...(cloudKey ? { cloudKey } : {}) },
+      locator: { localSig: entry.contentSig, ...(cloudKey ? { cloudKey } : {}) },
       metadata: {
         ...(entry.w && entry.w > 0 ? { width: entry.w } : {}),
         ...(entry.h && entry.h > 0 ? { height: entry.h } : {}),

@@ -1,4 +1,7 @@
-import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
+import {
+  legacyLocalAssetId,
+  type LocalAssetIndexEntry,
+} from '@pireel/studio-engine/project-dto';
 import { localAssetMentionId } from './chat-local-asset-mention';
 
 const idShapedKey = (key: string) =>
@@ -10,29 +13,65 @@ const idShapedKey = (key: string) =>
 
 const stripAt = (value: string) => value.startsWith('@') ? value.slice(1) : value;
 
-/** Resolve one user-visible local @ token without confusing ordinary project asset ids with file
- * signatures. A real filename is allowed to begin with @; only an exact known mention id maps. */
-function localSigOf(value: string, sigByMentionId: ReadonlyMap<string, string>): string {
+export const localAssetReference = (entry: Pick<LocalAssetIndexEntry, 'assetId'>): string =>
+  `local:${entry.assetId}`;
+
+function canonicalLocalAsset(entry: LocalAssetIndexEntry): LocalAssetIndexEntry | null {
+  const legacy = entry as Partial<LocalAssetIndexEntry>;
+  const contentSig = legacy.contentSig || legacy.sig;
+  if (!contentSig) return null;
+  return {
+    ...entry,
+    assetId: legacy.assetId || legacyLocalAssetId(legacy),
+    contentSig,
+    sig: contentSig,
+  };
+}
+
+/** Resolve current asset ids, new mention tokens, and unambiguous legacy sig references. */
+export function resolveLocalAssetReference(
+  value: string,
+  localAssets: readonly LocalAssetIndexEntry[],
+): LocalAssetIndexEntry | null {
+  const assets = localAssets
+    .map(canonicalLocalAsset)
+    .filter((entry): entry is LocalAssetIndexEntry => !!entry);
   const trimmed = value.trim();
   const withoutScheme = trimmed.startsWith('local:') ? trimmed.slice('local:'.length) : trimmed;
-  return sigByMentionId.get(stripAt(withoutScheme)) ?? withoutScheme;
+  const bare = stripAt(withoutScheme);
+  const direct = assets.find((entry) => entry.assetId === bare || localAssetMentionId(entry.assetId) === bare);
+  if (direct) return direct;
+  const legacyMatches = assets.filter(
+    (entry) => entry.contentSig === withoutScheme || localAssetMentionId(entry.contentSig) === bare,
+  );
+  return legacyMatches.length === 1 ? legacyMatches[0]! : null;
+}
+
+function localReferenceOf(value: string, localAssets: readonly LocalAssetIndexEntry[]): string {
+  const resolved = resolveLocalAssetReference(value, localAssets);
+  return resolved ? localAssetReference(resolved) : value.trim();
 }
 
 function normalizeValue(
   value: unknown,
   key: string | undefined,
-  sigByMentionId: ReadonlyMap<string, string>,
+  localAssets: readonly LocalAssetIndexEntry[],
 ): unknown {
   if (typeof value === 'string') {
-    if (key === 'localSig' || key === 'sig' || key === 'refs') return localSigOf(value, sigByMentionId);
-    return key && idShapedKey(key) ? stripAt(value) : value;
+    if (key === 'localSig' || key === 'sig' || key === 'refs') return localReferenceOf(value, localAssets);
+    if (key && idShapedKey(key)) {
+      const stripped = stripAt(value);
+      const local = resolveLocalAssetReference(stripped, localAssets);
+      return local?.assetId ?? stripped;
+    }
+    return value;
   }
-  if (Array.isArray(value)) return value.map((item) => normalizeValue(item, key, sigByMentionId));
+  if (Array.isArray(value)) return value.map((item) => normalizeValue(item, key, localAssets));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
       childKey,
-      normalizeValue(childValue, childKey, sigByMentionId),
+      normalizeValue(childValue, childKey, localAssets),
     ]),
   );
 }
@@ -44,13 +83,26 @@ export function normalizeStudioToolInputReferences(
   input: Record<string, unknown>,
   localAssets: readonly LocalAssetIndexEntry[],
 ): Record<string, unknown> {
-  const sigByMentionId = new Map(localAssets.map((entry) => [localAssetMentionId(entry.sig), entry.sig]));
-  const normalized = normalizeValue(input, undefined, sigByMentionId) as Record<string, unknown>;
+  const normalized = normalizeValue(input, undefined, localAssets) as Record<string, unknown>;
+  if (toolId === 'register_media' && Array.isArray(normalized.assets)) {
+    normalized.assets = normalized.assets.map((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      const asset = value as Record<string, unknown>;
+      if (typeof asset.localSig !== 'string') return asset;
+      const local = resolveLocalAssetReference(asset.localSig, localAssets);
+      return local ? { ...asset, localSig: local.contentSig } : asset;
+    });
+  }
   if (toolId === 'read_script' || toolId === 'extract_asr' || toolId === 'analyze_visual') {
     const assetId = typeof normalized.assetId === 'string' ? normalized.assetId : '';
-    const localSig = sigByMentionId.get(assetId);
-    if (localSig) {
-      normalized.localSig = localSig;
+    const fromAssetId = resolveLocalAssetReference(assetId, localAssets);
+    const fromLocalSig = typeof normalized.localSig === 'string'
+      ? resolveLocalAssetReference(normalized.localSig, localAssets)
+      : null;
+    const localAsset = fromAssetId ?? fromLocalSig;
+    if (localAsset) {
+      normalized.localAssetId = localAsset.assetId;
+      delete normalized.localSig;
       delete normalized.assetId;
     }
   }

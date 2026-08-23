@@ -307,7 +307,11 @@ export function directorPlanFromSeconds(input: Record<string, unknown>, fps: num
       sceneFamily: sceneFamily as SceneFamily,
       ...(customFamily ? { customFamily } : {}),
       purpose: scene.purpose as string,
-      ...(scene.evidence !== undefined ? { evidence: scene.evidence as string[] } : {}),
+      ...(nonEmpty(scene.evidence)
+        ? { evidence: [scene.evidence] }
+        : Array.isArray(scene.evidence)
+          ? { evidence: scene.evidence }
+          : {}),
       treatmentId: scene.treatmentId as string,
       visualAnchor: scene.visualAnchor as string,
       visualTreatment: scene.visualTreatment as string,

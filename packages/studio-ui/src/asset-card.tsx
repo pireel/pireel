@@ -52,15 +52,17 @@ export interface LibraryItem {
   prompt?: string;
   /** Local assets only: fileSig — lets the timeline drop path reuse the on-device file (handle/OPFS) zero-copy. */
   sig?: string | null;
+  /** Logical project-local identity; unlike sig, distinct imports of identical bytes do not collide. */
+  localAssetId?: string | null;
 }
 
 /** Drag payload from the panel: image/video = MediaRef + dims; element = the element itself (seedId re-scoped on insert). */
 /** Image/video payload from the panel — same shape whether dragged out or click-inserted. */
-export type PanelMediaAsset = MediaRef & { label?: string; dims?: { w: number; h: number }; sig?: string | null };
+export type PanelMediaAsset = MediaRef & { label?: string; dims?: { w: number; h: number }; sig?: string | null; localAssetId?: string | null };
 
 export type PanelDragAsset =
   | PanelMediaAsset
-  | { type: 'audio'; url: string; label?: string; sig?: string | null }
+  | { type: 'audio'; url: string; label?: string; sig?: string | null; localAssetId?: string | null }
   | { type: 'element'; element: GenElementResult; prompt: string; label?: string };
 
 export const arOf = (it: LibraryItem): number | undefined =>
@@ -94,7 +96,7 @@ export function dragPropsFor(it: LibraryItem, onDragAsset?: (asset: PanelDragAss
       draggable: true,
       onDragStart: (e: React.DragEvent) => {
         e.dataTransfer.effectAllowed = 'copy';
-        onDragAsset?.({ type: 'audio', url: it.insertUrl!, label: it.label, sig: it.sig });
+        onDragAsset?.({ type: 'audio', url: it.insertUrl!, label: it.label, sig: it.sig, localAssetId: it.localAssetId });
       },
       onDragEnd: () => onDragAsset?.(null),
     };
@@ -103,7 +105,14 @@ export function dragPropsFor(it: LibraryItem, onDragAsset?: (asset: PanelDragAss
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
       e.dataTransfer.effectAllowed = 'copy';
-      onDragAsset?.({ type: it.kind as 'image' | 'video', url: it.insertUrl!, label: it.label, dims: dimsOf(it), sig: it.sig });
+      onDragAsset?.({
+        type: it.kind as 'image' | 'video',
+        url: it.insertUrl!,
+        label: it.label,
+        dims: dimsOf(it),
+        sig: it.sig,
+        localAssetId: it.localAssetId,
+      });
     },
     onDragEnd: () => onDragAsset?.(null),
   };

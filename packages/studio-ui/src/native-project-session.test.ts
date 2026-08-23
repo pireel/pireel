@@ -12,6 +12,22 @@ const sharedAsset = {
 };
 
 describe('project-level local asset directory', () => {
+  it('canonicalizes a sig-only local draft before it reaches refreshed UI state', () => {
+    const legacyContext = {
+      schemaVersion: 3,
+      localAssets: [{ sig: 'legacy.mp4:4:7', label: 'legacy.mp4', kind: 'video', createdAt: 7 }],
+    } as unknown as StudioProjectContext;
+
+    expect(nativeProjectSharedLocalAssets(emptyProjectDocument(), legacyContext)).toEqual([{
+      assetId: expect.stringMatching(/^local_/),
+      contentSig: 'legacy.mp4:4:7',
+      sig: 'legacy.mp4:4:7',
+      label: 'legacy.mp4',
+      kind: 'video',
+      createdAt: 7,
+    }]);
+  });
+
   it('adopts assets from inactive output snapshots when upgrading a pre-v3 project', () => {
     const active = emptyProjectDocument();
     const inactive = emptyProjectDocument();
@@ -33,7 +49,8 @@ describe('project-level local asset directory', () => {
     } as StudioProjectContext;
 
     expect(nativeProjectSharedLocalAssets(active, context)).toEqual([{
-      sig: 'shared.mp4:9:1', label: 'shared.mp4', kind: 'video', w: 1080, h: 1920, createdAt: 0,
+      assetId: 'shared-video', contentSig: 'shared.mp4:9:1', sig: 'shared.mp4:9:1',
+      label: 'shared.mp4', kind: 'video', w: 1080, h: 1920, createdAt: 0,
     }]);
   });
 
@@ -41,6 +58,66 @@ describe('project-level local asset directory', () => {
     const active = emptyProjectDocument();
     active.assets[sharedAsset.id] = sharedAsset;
     expect(nativeProjectSharedLocalAssets(active, { schemaVersion: 3, localAssets: [] })).toEqual([]);
+  });
+
+  it('does not duplicate a synced library entry when an older document used another asset id', () => {
+    const active = emptyProjectDocument();
+    active.assets['legacy-document-id'] = {
+      ...sharedAsset,
+      id: 'legacy-document-id',
+      library: { createdAt: 5 },
+    };
+    active.timeline.tracks[0]!.clips.push({
+      id: 'legacy-clip', kind: 'narrative', assetId: 'legacy-document-id',
+      startFrame: 0, durationFrames: 30, enabled: true,
+      sourceInSec: 0, sourceOutSec: 1, properties: { treatment: 'full' },
+    });
+    const synced = {
+      assetId: 'library-asset-id',
+      contentSig: sharedAsset.locator.localSig,
+      sig: sharedAsset.locator.localSig,
+      label: 'Synced semantic label',
+      kind: 'video' as const,
+      createdAt: 5,
+    };
+
+    expect(nativeProjectSharedLocalAssets(active, {
+      schemaVersion: 3,
+      localAssets: [synced],
+    })).toEqual([expect.objectContaining({
+      assetId: synced.assetId,
+      contentSig: synced.contentSig,
+      label: synced.label,
+      w: 1080,
+      h: 1920,
+    })]);
+  });
+
+  it('does not invent a third entry when identical content already has two logical assets', () => {
+    const active = emptyProjectDocument();
+    active.assets['legacy-document-id'] = {
+      ...sharedAsset,
+      id: 'legacy-document-id',
+      library: { createdAt: 5 },
+    };
+    active.timeline.tracks[0]!.clips.push({
+      id: 'legacy-clip', kind: 'narrative', assetId: 'legacy-document-id',
+      startFrame: 0, durationFrames: 30, enabled: true,
+      sourceInSec: 0, sourceOutSec: 1, properties: { treatment: 'full' },
+    });
+    const localAssets = ['asset-a', 'asset-b'].map((assetId, index) => ({
+      assetId,
+      contentSig: sharedAsset.locator.localSig,
+      sig: sharedAsset.locator.localSig,
+      label: `folder ${index === 0 ? 'A' : 'B'}`,
+      kind: 'video' as const,
+      createdAt: 5 - index,
+    }));
+
+    expect(nativeProjectSharedLocalAssets(active, {
+      schemaVersion: 3,
+      localAssets,
+    }).map((entry) => entry.assetId)).toEqual(['asset-a', 'asset-b']);
   });
 
   it('keeps the shared semantic name when an inactive output still has the old filename', () => {
@@ -60,6 +137,8 @@ describe('project-level local asset directory', () => {
       sourceInSec: 0, sourceOutSec: 1, properties: { treatment: 'full' },
     });
     const renamed = {
+      assetId: staleAsset.id,
+      contentSig: staleAsset.locator.localSig,
       sig: staleAsset.locator.localSig,
       label: 'Customer showing the mobile checkout flow',
       kind: 'video' as const,

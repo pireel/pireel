@@ -28,6 +28,7 @@ export interface BrowserLocalImportSource {
   file: File;
   handle?: FileSystemFileHandle;
   folder?: LocalFolderSource;
+  assetId?: string;
 }
 
 export interface SkillLoopbackImportSource {
@@ -37,6 +38,7 @@ export interface SkillLoopbackImportSource {
   filename: string;
   fallbackType?: string;
   folder?: LocalFolderSource;
+  assetId?: string;
 }
 
 export type LocalImportSource =
@@ -44,12 +46,22 @@ export type LocalImportSource =
   | SkillLoopbackImportSource;
 
 export interface ImportedLocalAsset {
+  assetId: string;
+  contentSig: string;
   file: File;
+  /** @deprecated schema-v3 compatibility mirror of contentSig. */
   sig: string;
   label: string;
   kind: LocalAssetKind;
   folder?: LocalFolderSource;
   source: LocalImportSource['type'];
+}
+
+export function newLocalAssetId(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return uuid
+    ? `local_${uuid}`
+    : `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
 /** The relay may tell the tab where to fetch, but it never grants general URL access. Keep this
@@ -136,8 +148,10 @@ async function materialize(
  * adapter-specific; classification, OPFS/handle persistence and index entry creation are shared. */
 export async function importLocalSource(
   source: LocalImportSource,
+  projectId?: string,
 ): Promise<ImportedLocalAsset> {
   const { file, sig, persisted } = await materialize(source);
+  const assetId = source.assetId || newLocalAssetId();
   const kind = localAssetKindOf(file);
   if (!kind) throw new Error(`unsupported local media: ${file.name}`);
   const handle = source.type === 'browser' ? source.handle : undefined;
@@ -151,12 +165,15 @@ export async function importLocalSource(
       // A single-file handle keeps a bounded fallback. Images keep one even when they came from a
       // folder handle so a hot reload does not turn a valid clip into an unresolved locator.
       fallbackCopy: kind === 'image' || Boolean(handle && !folder),
+      ...(projectId ? { binding: { projectId, assetId } } : {}),
     });
     if (!stored) {
       throw new Error('local media could not be persisted on this device');
     }
   }
   return {
+    assetId,
+    contentSig: sig,
     file,
     sig,
     label: file.name,
@@ -175,12 +192,13 @@ export interface LocalImportSessionResult {
  * spikes in embedded browsers. One bad file does not abort the rest of the import session. */
 export async function runLocalImportSession(
   sources: LocalImportSource[],
+  projectId?: string,
 ): Promise<LocalImportSessionResult> {
   const imported: ImportedLocalAsset[] = [];
   const rejected: LocalImportSessionResult['rejected'] = [];
   for (const source of sources) {
     try {
-      imported.push(await importLocalSource(source));
+      imported.push(await importLocalSource(source, projectId));
     } catch (error) {
       rejected.push({
         source,
@@ -196,6 +214,8 @@ export function localAssetIndexEntry(
   facts?: { width?: number | null; height?: number | null; createdAt?: number },
 ): LocalAssetIndexEntry {
   return {
+    assetId: asset.assetId,
+    contentSig: asset.contentSig,
     sig: asset.sig,
     label: asset.label,
     kind: asset.kind,

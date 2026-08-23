@@ -9,8 +9,8 @@
  * The click resolves the parked tool promise via the ask store; the agent continues with the answer.
  */
 
-import { useState } from 'react';
-import { Check } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, Pause, Play } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import { resolveInteraction, usePendingInteraction } from './interaction-store';
 import type { ToolPartLike } from './chat-tool-parts';
@@ -19,6 +19,8 @@ import { t } from './i18n';
 interface AskOption {
   label: string;
   description?: string;
+  value?: string;
+  previewUrl?: string;
 }
 
 export function AskUserCard({ part }: { part: ToolPartLike }) {
@@ -27,8 +29,14 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
   const options: AskOption[] = Array.isArray(input?.options)
     ? (input!.options as unknown[])
         .map((o) => {
-          const oo = o as { label?: unknown; description?: unknown };
-          return { label: String(oo?.label ?? ''), description: typeof oo?.description === 'string' ? oo.description : undefined };
+          const oo = o as { label?: unknown; description?: unknown; value?: unknown; previewUrl?: unknown };
+          const previewUrl = typeof oo?.previewUrl === 'string' ? oo.previewUrl.trim().slice(0, 2_000) : '';
+          return {
+            label: String(oo?.label ?? ''),
+            description: typeof oo?.description === 'string' ? oo.description : undefined,
+            value: typeof oo?.value === 'string' ? oo.value : undefined,
+            previewUrl: /^(https:\/\/|\/voice-previews\/)/.test(previewUrl) ? previewUrl : undefined,
+          };
         })
         .filter((o) => o.label)
     : [];
@@ -49,6 +57,34 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
   );
 
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [playingLabel, setPlayingLabel] = useState<string | null>(null);
+  const previewRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => {
+    previewRef.current?.pause();
+    previewRef.current = null;
+  }, []);
+
+  const togglePreview = (option: AskOption) => {
+    if (!option.previewUrl) return;
+    if (playingLabel === option.label) {
+      previewRef.current?.pause();
+      previewRef.current = null;
+      setPlayingLabel(null);
+      return;
+    }
+    previewRef.current?.pause();
+    const audio = new Audio(option.previewUrl);
+    previewRef.current = audio;
+    setPlayingLabel(option.label);
+    audio.addEventListener('ended', () => {
+      if (previewRef.current === audio) previewRef.current = null;
+      setPlayingLabel((current) => current === option.label ? null : current);
+    }, { once: true });
+    audio.play().catch(() => {
+      if (previewRef.current === audio) previewRef.current = null;
+      setPlayingLabel((current) => current === option.label ? null : current);
+    });
+  };
   const submit = (labels: string[]) => {
     if (!live || !labels.length) return;
     resolveInteraction(labels);
@@ -77,12 +113,9 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
           const isChosen = answered ? chosen.has(o.label) : multi ? picked.has(o.label) : false;
           const clickable = live;
           return (
-            <button
+            <div
               key={o.label}
-              type="button"
-              disabled={!clickable}
-              onClick={() => onChip(o.label)}
-              className={`flex w-full items-start gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${
+              className={`flex w-full items-stretch rounded-md border transition-colors ${
                 isChosen
                   ? 'border-accent bg-accent/10'
                   : clickable
@@ -90,14 +123,31 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
                     : 'border-line/60 opacity-60'
               }`}
             >
-              <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${isChosen ? 'border-accent bg-accent text-white' : 'border-line'}`}>
-                {isChosen && <Check size={10} strokeWidth={3} />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="text-ink block text-[12px] font-medium">{o.label}</span>
-                {o.description && <span className="text-ink-3 block text-[11px] leading-snug">{o.description}</span>}
-              </span>
-            </button>
+              <button
+                type="button"
+                disabled={!clickable}
+                onClick={() => onChip(o.label)}
+                className="flex min-w-0 flex-1 items-start gap-2 px-2.5 py-1.5 text-left"
+              >
+                <span className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${isChosen ? 'border-accent bg-accent text-white' : 'border-line'}`}>
+                  {isChosen && <Check size={10} strokeWidth={3} />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="text-ink block text-[12px] font-medium">{o.label}</span>
+                  {o.description && <span className="text-ink-3 block text-[11px] leading-snug">{o.description}</span>}
+                </span>
+              </button>
+              {o.previewUrl && (
+                <button
+                  type="button"
+                  onClick={() => togglePreview(o)}
+                  aria-label={playingLabel === o.label ? '暂停试听' : `试听 ${o.label}`}
+                  className="text-ink-3 hover:text-ink border-line/70 grid w-9 shrink-0 place-items-center border-l"
+                >
+                  {playingLabel === o.label ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+              )}
+            </div>
           );
         })}
       </div>

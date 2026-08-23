@@ -55,10 +55,60 @@ interface SpeechActivityAnalysis {
   frames: SpeechActivityFrame[];
 }
 
+export type LocalSpeechAudioClass = 'no-audio' | 'effectively-silent' | 'non-speech-or-noise' | 'speech-likely';
+
+export interface LocalSpeechAudioAssessment {
+  classification: LocalSpeechAudioClass;
+  hasAudio: boolean;
+  audible: boolean;
+  speechLikely: boolean;
+  audibleSec: number;
+  speechSec: number;
+  speechFraction: number;
+}
+
 const activityCache = new WeakMap<File, Promise<SpeechActivityAnalysis>>();
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const roundMs = (value: number) => Math.round(value * 1000) / 1000;
 const finiteOr = (value: number | undefined, fallback: number) => (Number.isFinite(value) ? value! : fallback);
+const AUDIBLE_RMS = 10 ** (-55 / 20);
+
+/** Summarize local PCM + RNNoise observations without uploading any bytes. This intentionally
+ * answers only whether useful speech is plausible; music, ambience and noise share one safe
+ * non-speech class because distinguishing those genres is not required before deciding on ASR. */
+export function summarizeLocalSpeechAudio(
+  frames: readonly SpeechActivityFrame[],
+  durationSec: number,
+): LocalSpeechAudioAssessment {
+  if (!frames.length || !Number.isFinite(durationSec) || durationSec <= 0) {
+    return {
+      classification: 'no-audio', hasAudio: false, audible: false, speechLikely: false,
+      audibleSec: 0, speechSec: 0, speechFraction: 0,
+    };
+  }
+  const audible = frames.filter((frame) => frame.rms > AUDIBLE_RMS);
+  const audibleSec = audible.reduce((total, frame) => total + Math.max(0, frame.toSec - frame.fromSec), 0);
+  if (audibleSec < Math.max(0.1, durationSec * 0.01)) {
+    return {
+      classification: 'effectively-silent', hasAudio: true, audible: false, speechLikely: false,
+      audibleSec: roundMs(audibleSec), speechSec: 0, speechFraction: 0,
+    };
+  }
+  const voiced = audible.filter((frame) => frame.voiceProbability >= SPEECH_REFERENCE_THRESHOLD);
+  const speechSec = voiced.reduce((total, frame) => total + Math.max(0, frame.toSec - frame.fromSec), 0);
+  const speechFraction = audibleSec > 0 ? speechSec / audibleSec : 0;
+  const minimumSpeechSec = Math.min(0.35, Math.max(0.15, durationSec * 0.02));
+  const speechLikely = speechSec >= minimumSpeechSec && speechFraction >= 0.03;
+  return {
+    classification: speechLikely ? 'speech-likely' : 'non-speech-or-noise',
+    hasAudio: true,
+    audible: true,
+    speechLikely,
+    audibleSec: roundMs(audibleSec),
+    speechSec: roundMs(speechSec),
+    speechFraction: Math.round(speechFraction * 1000) / 1000,
+  };
+}
 
 export function resolveSpeechSilenceOptions(options: SpeechSilenceOptions = {}): ResolvedSpeechSilenceOptions {
   return {
@@ -195,4 +245,16 @@ export async function detectSpeechSilenceCuts(file: File, options: SpeechSilence
   }
   const analysis = await pending;
   return planSpeechSilenceCuts(analysis.frames, analysis.durationSec, options);
+}
+
+/** Local pre-ASR gate. Decodes on-device and runs RNNoise VAD; no media leaves the browser. */
+export async function assessLocalSpeechAudio(file: File): Promise<LocalSpeechAudioAssessment> {
+  let pending = activityCache.get(file);
+  if (!pending) {
+    pending = analyzeSpeechActivity(file);
+    activityCache.set(file, pending);
+    void pending.catch(() => activityCache.delete(file));
+  }
+  const analysis = await pending;
+  return summarizeLocalSpeechAudio(analysis.frames, analysis.durationSec);
 }

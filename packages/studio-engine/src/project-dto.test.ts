@@ -10,6 +10,7 @@ import {
   mergeSaveIntoRow,
   rowToDto,
   rowToMeta,
+  sanitizeProjectContext,
   sanitizeSavePayload,
   type ProjectSavePayload,
 } from './project-dto';
@@ -136,7 +137,7 @@ describe('V2 incremental save wire', () => {
     const first = buildSaveWire(payload({ context: { schemaVersion: 3 } }), 3, null)!;
     const next = buildSaveWire(payload({ context: {
       schemaVersion: 3,
-      localAssets: [{ sig: 'clip.mp4:1:1', label: 'clip.mp4', createdAt: 1 }],
+      localAssets: [{ assetId: 'asset-1', contentSig: 'clip.mp4:1:1', sig: 'clip.mp4:1:1', label: 'clip.mp4', createdAt: 1 }],
     } }), 4, first.acked)!;
     expect(next.wire.context ?? next.wire.contextPatch).toBeDefined();
     expect(next.wire.document).toBeUndefined();
@@ -198,7 +199,53 @@ describe('save request boundary', () => {
       },
     })?.context).toEqual({
       schemaVersion: 3,
-      localAssets: [{ sig: 'shared.mp4:9:1', label: 'shared.mp4', kind: 'video', createdAt: 9 }],
+      localAssets: [{
+        assetId: expect.stringMatching(/^local_/),
+        contentSig: 'shared.mp4:9:1',
+        sig: 'shared.mp4:9:1',
+        label: 'shared.mp4',
+        kind: 'video',
+        createdAt: 9,
+      }],
+    });
+  });
+
+  it('keeps new logical asset ids distinct even when content signatures match', () => {
+    expect(sanitizeSavePayload({
+      context: {
+        schemaVersion: 3,
+        localAssets: [
+          { assetId: 'asset-a', contentSig: 'same.mp4:9:1', sig: 'same.mp4:9:1', label: 'from A', createdAt: 2 },
+          { assetId: 'asset-b', contentSig: 'same.mp4:9:1', sig: 'same.mp4:9:1', label: 'from B', createdAt: 1 },
+        ],
+      },
+    })?.context).toEqual({
+      schemaVersion: 3,
+      localAssets: [
+        { assetId: 'asset-a', contentSig: 'same.mp4:9:1', sig: 'same.mp4:9:1', label: 'from A', createdAt: 2 },
+        { assetId: 'asset-b', contentSig: 'same.mp4:9:1', sig: 'same.mp4:9:1', label: 'from B', createdAt: 1 },
+      ],
+    });
+  });
+
+  it('derives the same legacy asset id on every device and preserves the compatibility sig', () => {
+    const legacy = {
+      schemaVersion: 3,
+      localAssets: [{
+        sig: 'shared.mp4:9:1',
+        label: 'shared.mp4',
+        folder: { id: 'folder-a', name: 'A', path: 'clips/shared.mp4' },
+        createdAt: 9,
+      }],
+    };
+
+    const first = sanitizeProjectContext(legacy).localAssets?.[0];
+    const second = sanitizeProjectContext(structuredClone(legacy)).localAssets?.[0];
+    expect(first?.assetId).toMatch(/^local_/);
+    expect(second?.assetId).toBe(first?.assetId);
+    expect(first).toMatchObject({
+      contentSig: legacy.localAssets[0]!.sig,
+      sig: legacy.localAssets[0]!.sig,
     });
   });
 

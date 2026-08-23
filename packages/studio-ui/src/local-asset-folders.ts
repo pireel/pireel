@@ -13,13 +13,13 @@ export const LOCAL_ASSET_LABEL_MAX_LENGTH = 80;
  * sig and every recovery field untouched so rename never breaks local-byte access. */
 export function renameLocalAssetEntry(
   entries: LocalAssetIndexEntry[],
-  sig: string,
+  assetId: string,
   label: string,
 ): LocalAssetIndexEntry[] {
   const normalized = label.trim().slice(0, LOCAL_ASSET_LABEL_MAX_LENGTH);
   if (!normalized) return entries;
   return entries.map((entry) =>
-    entry.sig === sig ? { ...entry, label: normalized } : entry,
+    entry.assetId === assetId ? { ...entry, label: normalized } : entry,
   );
 }
 
@@ -32,11 +32,11 @@ export function reconcileLocalAssetRegistry(
   syncReady: boolean,
 ): LocalAssetIndexEntry[] {
   if (syncReady && cloud !== undefined) {
-    return [...new Map(cloud.map((entry) => [entry.sig, entry])).values()].sort((a, b) => b.createdAt - a.createdAt);
+    return [...new Map(cloud.map((entry) => [entry.assetId, entry])).values()].sort((a, b) => b.createdAt - a.createdAt);
   }
-  const bySig = new Map((cloud ?? []).map((entry) => [entry.sig, entry]));
-  for (const entry of local) bySig.set(entry.sig, entry);
-  return [...bySig.values()].sort((a, b) => b.createdAt - a.createdAt);
+  const byId = new Map((cloud ?? []).map((entry) => [entry.assetId, entry]));
+  for (const entry of local) byId.set(entry.assetId, entry);
+  return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** Folder pickers must start from the trusted click itself. Radix emits `onSelect` from a
@@ -55,8 +55,8 @@ export function triggerFolderInput(input: Pick<HTMLInputElement, 'click'> | null
 
 /** Registry presence is not hydration. A cancelled async pass must retry every entry that still
  * lacks a live object URL, even when the cloud/local registry contents themselves are unchanged. */
-export function pendingLocalAssetEntries<T extends { sig: string }>(entries: T[], linkedSigs: ReadonlySet<string>): T[] {
-  return entries.filter((entry) => !linkedSigs.has(entry.sig));
+export function pendingLocalAssetEntries<T extends { assetId: string }>(entries: T[], linkedAssetIds: ReadonlySet<string>): T[] {
+  return entries.filter((entry) => !linkedAssetIds.has(entry.assetId));
 }
 
 /** Folder imports retain one logical folder id in the cloud-safe index. When its local root

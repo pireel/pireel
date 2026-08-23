@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planSpeechSilenceCuts, resolveSpeechSilenceOptions, type SpeechActivityFrame } from './speech-silence';
+import { planSpeechSilenceCuts, resolveSpeechSilenceOptions, summarizeLocalSpeechAudio, type SpeechActivityFrame } from './speech-silence';
 
 function frames(...runs: { from: number; to: number; voiceProbability: number; rms: number }[]): SpeechActivityFrame[] {
   return runs.flatMap((run) => {
@@ -76,5 +76,25 @@ describe('speech silence planner', () => {
       minimumPauseSec: 0.5,
       speechPaddingSec: 0.15,
     });
+  });
+
+  it('classifies silent and noisy audio locally without mistaking it for speech', () => {
+    expect(summarizeLocalSpeechAudio([], 0)).toMatchObject({ classification: 'no-audio', speechLikely: false });
+    expect(summarizeLocalSpeechAudio(
+      frames({ from: 0, to: 2, voiceProbability: 0.01, rms: 0.0001 }),
+      2,
+    )).toMatchObject({ classification: 'effectively-silent', audible: false, speechLikely: false });
+    expect(summarizeLocalSpeechAudio(
+      frames({ from: 0, to: 2, voiceProbability: 0.04, rms: 0.12 }),
+      2,
+    )).toMatchObject({ classification: 'non-speech-or-noise', audible: true, speechLikely: false });
+  });
+
+  it('requires a meaningful local voiced span before allowing ASR', () => {
+    expect(summarizeLocalSpeechAudio(frames(
+      { from: 0, to: 1, voiceProbability: 0.04, rms: 0.08 },
+      { from: 1, to: 1.4, voiceProbability: 0.9, rms: 0.1 },
+      { from: 1.4, to: 3, voiceProbability: 0.03, rms: 0.07 },
+    ), 3)).toMatchObject({ classification: 'speech-likely', speechLikely: true, speechSec: 0.4 });
   });
 });

@@ -596,6 +596,30 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     receipts.push(inserted.receipt);
     created.push(placement.id);
   }
+  const audibleNarration = next.timeline.tracks.flatMap((track) => (
+    track.role !== 'narration' || track.muted
+      ? []
+      : track.clips.flatMap((clip) => (
+          clip.kind === 'audio' && clip.enabled && !clip.properties.muted
+            ? [{ trackId: track.id, clip }]
+            : []
+        ))
+  ));
+  for (let index = 0; index < audibleNarration.length; index += 1) {
+    const left = audibleNarration[index]!;
+    const leftEnd = left.clip.startFrame + left.clip.durationFrames;
+    const conflict = audibleNarration.slice(index + 1).find((right) => (
+      right.trackId !== left.trackId
+      && right.clip.startFrame < leftEnd
+      && right.clip.startFrame + right.clip.durationFrames > left.clip.startFrame
+    ));
+    if (conflict) {
+      return fail(
+        'Narration clips cannot overlap in one output. Replace or remove the current narration. If the user requested another finished version, create and switch to its independent output before placing that output\'s narration.',
+        { clipIds: [left.clip.id, conflict.clip.id], trackIds: [left.trackId, conflict.trackId] },
+      );
+    }
+  }
   const hasNarration = next.timeline.tracks.some((track) => track.role === 'narration' && track.clips.some((clip) => clip.kind === 'audio' && clip.enabled));
   if (hasNarration) {
     const musicUpdates = next.timeline.tracks

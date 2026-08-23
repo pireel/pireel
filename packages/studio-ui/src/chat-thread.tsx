@@ -52,6 +52,7 @@ import {
 } from "./chat-tool-parts";
 import { Composer, type ComposerHandle } from "./chat-composer";
 import {
+  assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
   isRecoverableStudioChatError,
 } from "./chat-thread-store";
@@ -419,13 +420,19 @@ export function ChatThread({
       !error ||
       userStoppedRef.current ||
       autoRecoveryAttemptedRef.current ||
-      !isRecoverableStudioChatError(error)
+      !isRecoverableStudioChatError(error) ||
+      assistantHasOpenOrInterruptedInteraction(
+        messagesRef.current[messagesRef.current.length - 1],
+      )
     ) return;
     const timer = setTimeout(() => {
       if (
         statusRef.current !== "error" ||
         userStoppedRef.current ||
-        autoRecoveryAttemptedRef.current
+        autoRecoveryAttemptedRef.current ||
+        assistantHasOpenOrInterruptedInteraction(
+          messagesRef.current[messagesRef.current.length - 1],
+        )
       ) return;
       autoRecoveryAttemptedRef.current = true;
       run(t("chatGen.continueAfterInterruptionPrompt"), {
