@@ -95,7 +95,7 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain("non-speech-or-noise");
     expect(CHAT_IDENTITY).toContain("analyze_visual with assessAudio=false");
     expect(CHAT_IDENTITY).toContain("Never pre-register it");
-    expect(CHAT_IDENTITY).toContain("goes straight to add_clips/insert_clips");
+    expect(CHAT_IDENTITY).toContain("goes directly to analyze_visual/read_script while still unplaced");
     expect(CHAT_IDENTITY).toContain("ask at most TWO short sentences");
     expect(CHAT_IDENTITY).toContain("private deliberation out of visible text");
     expect(CHAT_IDENTITY).toContain("ALWAYS emit a short structured recap");
@@ -694,10 +694,13 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(visualSchema.properties).toHaveProperty("assetId");
     expect(visualSchema.properties).toHaveProperty("clipId");
     const assets = STUDIO_TOOLS.find((tool) => tool.id === "list_assets")!;
-    expect(assets.description).toContain("complete logical reference used by Chat and placement");
-    expect(assets.description).toContain("directly to add_clips/insert_clips without register_media");
-    expect(assets.description).toContain("prepares bytes transactionally");
+    expect(assets.description).toContain("complete logical reference used by Chat, direct analysis/transcription, and placement");
+    expect(assets.description).toContain("directly to analyze_visual/read_script without registering or placing it first");
+    expect(assets.description).toContain("only when the requested edit actually needs it on the timeline");
+    expect(assets.description).toContain("resolves private byte locators on demand");
     expect(assets.description).toContain("every media kind");
+    expect(CHAT_IDENTITY).toContain("Project-library membership is sufficient for analyze_visual/read_script");
+    expect(CHAT_IDENTITY).toContain("placing it on the timeline is not an access-recovery step");
     const register = STUDIO_TOOLS.find((tool) => tool.id === "register_media")!;
     expect(register.description).toContain("id alone is sufficient");
     expect(register.description).toContain("never copy, print, or guess contentSig/localSig");

@@ -290,7 +290,11 @@ describe('Agent composition transaction boundary', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      data: { assets: [{ id: `local:${assetId}`, kind: 'video', label: '商品展示' }] },
+      data: {
+        assets: [{ id: `local:${assetId}`, kind: 'video', label: '商品展示' }],
+        placementRequiredForInspection: false,
+        usageHint: expect.stringContaining('analyze_visual/read_script while unplaced'),
+      },
     });
     expect(JSON.stringify((result as { data?: { assets?: unknown } }).data?.assets))
       .not.toMatch(/contentSig|localSig|private-folder|locator/);
@@ -492,6 +496,27 @@ describe('Agent composition transaction boundary', () => {
       pinned: false,
       binding: { projectId: 'test', assetId },
     });
+    expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
+  });
+
+  it('asks for access restoration instead of timeline placement when an unplaced local source is unavailable', async () => {
+    const h = harness();
+    const sig = 'offline-reference.mp4:240:12';
+    const assetId = 'asset-offline-reference';
+    localMediaMocks.loadLocalAssetFile.mockResolvedValueOnce(null);
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '离线参考视频', 'video')] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const assetIdsBefore = Object.keys(h.documentRef.current.assets);
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('restore access in Materials') });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('Do not place the asset on the timeline') });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
   });
 

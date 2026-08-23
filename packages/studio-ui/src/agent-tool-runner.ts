@@ -641,11 +641,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (requestedLocalReference) {
                 const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
                 const entry = resolved && ((resolved.kind ?? 'video') === 'video' || resolved.kind === 'audio') ? resolved : null;
-                if (!entry) return { ok: false, error: `local audio/video not found or ambiguous: ${requestedLocalReference}` };
+                if (!entry) return { ok: false, error: `project-library audio/video not found or ambiguous: ${requestedLocalReference}. Refresh list_assets and retry with its exact id; do not register or place the asset as a workaround` };
                 const localKind = entry.kind ?? 'video';
                 const file = await loadLocalAssetFile(projectId, entry);
                 if (!file) {
-                  return { ok: false, error: 'local media access is unavailable — ask the user to restore access, then retry' };
+                  return { ok: false, error: 'local media access is unavailable — ask the user to restore access in Materials, then retry. Do not place the asset on the timeline; placement cannot restore file access' };
                 }
                 try {
                   await saveLocalVideo(file, entry.contentSig, undefined, {
@@ -973,9 +973,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (requestedLocalReference) {
               const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
               const entry = resolved?.kind === 'video' ? resolved : null;
-              if (!entry) return { ok: false, error: `local video not found or ambiguous: ${requestedLocalReference}` };
+              if (!entry) return { ok: false, error: `project-library video not found or ambiguous: ${requestedLocalReference}. Refresh list_assets and retry with its exact id; do not register or place the asset as a workaround` };
               const file = await loadLocalAssetFile(projectId, entry);
-              if (!file) return { ok: false, error: 'local video access is unavailable — ask the user to restore access, then retry' };
+              if (!file) return { ok: false, error: 'local video access is unavailable — ask the user to restore access in Materials, then retry. Do not place the asset on the timeline; placement cannot restore file access' };
               try {
                 const probe = await probeVideoFile(file).catch(() => null);
                 const durationSec = probe?.durationSec;
@@ -1573,8 +1573,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 scope,
                 assets,
                 project,
+                placementRequiredForInspection: false,
                 usageHint: scope === 'mine'
-                  ? 'The returned id is the complete reference for this project-local asset. Pass it directly to add_clips/insert_clips; do not register it first or request a storage locator. Placement prepares device-local image, audio, and video bytes transactionally and fails without changing the timeline when access is unavailable. Inspect only when the editorial decision needs pixel, action, speech, or timing evidence. Never substitute cloud/official media without the user asking.'
+                  ? 'The returned id is the complete reference for this project-library asset. Pass it directly to analyze_visual/read_script while unplaced; do not register or place it merely to inspect or transcribe it. Use add_clips/insert_clips only when the edit actually needs timeline placement. Byte access is resolved on demand; when access is unavailable, ask the user to restore it in Materials. Never substitute cloud/official media without the user asking.'
                   : 'Use returned urls only for an explicitly cloud-scoped request.',
               },
             };
