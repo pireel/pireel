@@ -76,8 +76,8 @@ function normalizeValue(
   );
 }
 
-/** One normalization boundary for every chat/MCP tool call. Tools receive canonical project ids or
- * exact local sigs and never need their own @-pill compatibility branch. */
+/** One normalization boundary for every chat/MCP tool call. Tools receive canonical project ids;
+ * legacy local signatures are resolved here and never need their own @-pill compatibility branch. */
 export function normalizeStudioToolInputReferences(
   toolId: string,
   input: Record<string, unknown>,
@@ -88,9 +88,23 @@ export function normalizeStudioToolInputReferences(
     normalized.assets = normalized.assets.map((value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
       const asset = value as Record<string, unknown>;
-      if (typeof asset.localSig !== 'string') return asset;
-      const local = resolveLocalAssetReference(asset.localSig, localAssets);
-      return local ? { ...asset, localSig: local.contentSig } : asset;
+      const byId = typeof asset.id === 'string'
+        ? resolveLocalAssetReference(asset.id, localAssets)
+        : null;
+      const bySig = typeof asset.localSig === 'string'
+        ? resolveLocalAssetReference(asset.localSig, localAssets)
+        : null;
+      const local = byId ?? bySig;
+      if (!local) return asset;
+      return {
+        ...asset,
+        ...(byId ? { id: local.assetId } : {}),
+        kind: asset.kind ?? local.kind ?? 'video',
+        localSig: local.contentSig,
+        ...(asset.label === undefined && local.label ? { label: local.label } : {}),
+        ...(asset.width === undefined && local.w ? { width: local.w } : {}),
+        ...(asset.height === undefined && local.h ? { height: local.h } : {}),
+      };
     });
   }
   if (toolId === 'read_script' || toolId === 'extract_asr' || toolId === 'analyze_visual') {

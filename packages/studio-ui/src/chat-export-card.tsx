@@ -1,14 +1,11 @@
 'use client';
 
 /**
- * Export-settings card: a single integrated panel for the export_video tool while it is parked.
- * Resolution / frame-rate / format segmented controls; the user picks and hits Export, which
- * resolves the tool and starts the render. Resolution offers up to 4K (upscaling is allowed — the
- * vector overlay re-rasterizes crisply; the source video just scales). Defaults to the source's
- * native resolution. Once started (output-available) the card shows a static spec confirmation.
+ * One-click export card for export_video. The program derives resolution from the source,
+ * preserves the current canvas ratio, and defaults to 30fps MP4. Explicit user-requested specs
+ * may prefill/override that adaptive choice, but ordinary exports never ask the user to configure it.
  */
 
-import { useState } from 'react';
 import { Check } from 'lucide-react';
 import type { StudioToolResult } from '@pireel/studio-engine/prompts';
 import type { ExportRecommendations } from '@pireel/studio-engine/export-options';
@@ -16,41 +13,26 @@ import { resolveInteraction, usePendingInteraction } from './interaction-store';
 import type { ToolPartLike } from './chat-tool-parts';
 import { t } from './i18n';
 
-const RES_TIERS: { v: number; label: string }[] = [
-  { v: 720, label: '720p' },
-  { v: 1080, label: '1080p' },
-  { v: 1440, label: '2K' },
-  { v: 2160, label: '4K' },
-];
-const FPS_TIERS = [24, 30, 60] as const;
-const FORMATS = ['mp4', 'webm', 'mov'] as const;
-
-const TIERS = [2160, 1440, 1080, 720, 540];
-function nativeTier(shortSide: number): number {
-  return TIERS.find((v) => v <= shortSide) ?? 720;
+export interface AdaptiveExportSelection {
+  resolution: number;
+  fps: number;
+  format: 'mp4' | 'webm' | 'mov';
 }
 
-function Seg<T extends number | string>({ value, options, onChange, fmt }: { value: T; options: readonly { v: T; label: string }[]; onChange: (v: T) => void; fmt?: (v: T) => string }) {
-  return (
-    <div className="flex flex-wrap gap-1">
-      {options.map((o) => (
-        <button
-          key={String(o.v)}
-          type="button"
-          onClick={() => onChange(o.v)}
-          className={`rounded-md border px-2.5 py-0.5 text-[12px] tabular-nums transition-colors ${
-            o.v === value ? 'border-accent bg-accent/10 text-accent' : 'border-line text-ink-2 hover:border-accent/60'
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
+export function adaptiveExportSelection(
+  rec: ExportRecommendations,
+  explicit?: Partial<AdaptiveExportSelection>,
+): AdaptiveExportSelection {
+  const fallback = rec.options.find((option) => option.id === rec.defaultId) ?? rec.options[0];
+  return {
+    resolution: explicit?.resolution ?? fallback?.resolution ?? 1080,
+    fps: explicit?.fps ?? fallback?.fps ?? 30,
+    format: explicit?.format ?? fallback?.format ?? 'mp4',
+  };
 }
 
 export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
-  const rec = usePendingInteraction<ExportRecommendations & { prefill?: { resolution?: number; fps?: number; format?: 'mp4' | 'webm' | 'mov' } }>('export');
+  const rec = usePendingInteraction<ExportRecommendations & { explicit?: Partial<AdaptiveExportSelection> }>('export');
   const active = part.state === 'input-available' || part.state === 'input-streaming';
 
   // Started (output-available): static confirmation of the chosen specs
@@ -70,55 +52,33 @@ export function ExportSettingsCard({ part }: { part: ToolPartLike }) {
   }
   if (!active) return null;
 
-  // NEVER render null while awaiting: an invisible card + a parked turn reads as "no reply at all"
-  // (real incident). Before the resolver registers (or if the tool call was dropped by the stream),
-  // show the controls with Export disabled; key remounts the picker with the right default once the
-  // recommendations land. Model-passed specs arrive as prefill — defaults only, the user still clicks.
+  const selection = rec
+    ? adaptiveExportSelection(rec, rec.explicit)
+    : { resolution: 1080, fps: 30, format: 'mp4' as const };
+  // Never render null while awaiting: an invisible parked turn reads as no reply at all.
   return (
-    <Picker
-      key={rec ? 'ready' : 'wait'}
-      defaultRes={rec?.prefill?.resolution ?? (rec ? nativeTier(rec.source.shortSide) : 1080)}
-      defaultFps={rec?.prefill?.fps ?? 30}
-      defaultFormat={rec?.prefill?.format ?? 'mp4'}
-      ready={!!rec}
-    />
+    <AdaptiveExportPicker selection={selection} ready={!!rec} />
   );
 }
 
-function Picker({ defaultRes, defaultFps, defaultFormat, ready }: { defaultRes: number; defaultFps: number; defaultFormat: 'mp4' | 'webm' | 'mov'; ready: boolean }) {
-  const [res, setRes] = useState<number>(defaultRes);
-  const [fps, setFps] = useState<number>(defaultFps);
-  const [format, setFormat] = useState<'mp4' | 'webm' | 'mov'>(defaultFormat);
-
+export function AdaptiveExportPicker({ selection, ready }: { selection: AdaptiveExportSelection; ready: boolean }) {
+  const spec = `${selection.resolution}p · ${selection.fps}fps · ${selection.format.toUpperCase()}`;
   return (
     <div className="border-line bg-panel-2 w-full overflow-hidden rounded-md border">
-      <div className="text-ink-2 border-line/70 border-b px-2.5 py-1.5 text-[12px] font-medium">{t('workbench.exportSettings')}</div>
-      <div className="flex flex-col gap-2.5 p-2.5">
-        <label className="flex flex-col gap-1">
-          <span className="text-ink-4 text-[11px]">{t('workbench.exportResolution')}</span>
-          <Seg value={res} options={RES_TIERS} onChange={setRes} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-ink-4 text-[11px]">{t('workbench.exportFps')}</span>
-          <Seg value={fps} options={FPS_TIERS.map((v) => ({ v, label: `${v}fps` }))} onChange={setFps} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-ink-4 text-[11px]">{t('workbench.exportFormat')}</span>
-          <Seg value={format} options={FORMATS.map((v) => ({ v, label: v.toUpperCase() }))} onChange={(v) => setFormat(v as 'mp4' | 'webm' | 'mov')} />
-        </label>
-        <div className="flex items-center justify-between pt-0.5">
-          <span className="text-ink-4 text-[11px] tabular-nums">
-            {res}p · {fps}fps · {format.toUpperCase()}
-          </span>
-          <button
-            type="button"
-            disabled={!ready}
-            onClick={() => resolveInteraction({ resolution: res, fps, format })}
-            className="bg-ink text-bg rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
-          >
-            {t('workbench.exportStart')}
-          </button>
+      <div className="text-ink-2 border-line/70 border-b px-2.5 py-1.5 text-[12px] font-medium">{t('workbench.export')}</div>
+      <div className="flex items-center justify-between gap-3 p-2.5">
+        <div className="min-w-0">
+          <div className="text-ink-2 text-[12px]">{t('workbench.ratioFollowSource')}</div>
+          <div className="text-ink-4 mt-0.5 text-[11px] tabular-nums">{spec}</div>
         </div>
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() => resolveInteraction(selection)}
+          className="bg-ink text-bg shrink-0 rounded-md px-3 py-1 text-[12px] hover:opacity-90 disabled:opacity-30"
+        >
+          {t('workbench.exportStart')}
+        </button>
       </div>
     </div>
   );

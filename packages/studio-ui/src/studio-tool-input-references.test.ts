@@ -52,4 +52,30 @@ describe('Studio tool input reference normalization', () => {
       clips: [{ assetId, sceneId: 'scene-1' }],
     });
   });
+
+  it('hydrates a redundant local registration from its stable asset id', () => {
+    expect(normalizeStudioToolInputReferences('register_media', {
+      assets: [{ id: assetId }],
+    }, assets)).toEqual({
+      assets: [{
+        id: assetId,
+        kind: 'video',
+        localSig: sig,
+        label: '爆款视频',
+      }],
+    });
+  });
+
+  it('preserves an explicit alias id when a legacy registration supplies a local sig', () => {
+    expect(normalizeStudioToolInputReferences('register_media', {
+      assets: [{ id: 'legacy-alias', kind: 'video', localSig: sig }],
+    }, assets)).toEqual({
+      assets: [{
+        id: 'legacy-alias',
+        kind: 'video',
+        localSig: sig,
+        label: '爆款视频',
+      }],
+    });
+  });
 });

@@ -93,6 +93,9 @@ describe("静态提示词完整性", () => {
       "one call per item when the tool accepts a batch",
     );
     expect(CHAT_IDENTITY).toContain("non-speech-or-noise");
+    expect(CHAT_IDENTITY).toContain("analyze_visual with assessAudio=false");
+    expect(CHAT_IDENTITY).toContain("Never pre-register it");
+    expect(CHAT_IDENTITY).toContain("goes straight to add_clips/insert_clips");
     expect(CHAT_IDENTITY).toContain("ask at most TWO short sentences");
     expect(CHAT_IDENTITY).toContain("private deliberation out of visible text");
     expect(CHAT_IDENTITY).toContain("ALWAYS emit a short structured recap");
@@ -454,6 +457,20 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
   });
+  it("视频画布、生成和导出规格默认由程序自适应", () => {
+    expect(CHAT_IDENTITY).toContain(
+      "Never ask the user to choose canvas ratio, video-generation resolution, export resolution, fps, or format",
+    );
+    const generateVideo = STUDIO_TOOLS.find((tool) => tool.id === "generate_video")!;
+    expect(generateVideo.description).toContain("Never ask the user to choose them");
+    expect(generateVideo.description).toContain("runtime matches the active canvas");
+    const exportVideo = STUDIO_TOOLS.find((tool) => tool.id === "export_video")!;
+    expect(exportVideo.description).toContain("Never ask the user to choose resolution, fps, or format");
+    expect(exportVideo.description).toContain("has no settings chooser");
+    expect(mcpInstructions("test-version")).toContain(
+      "never ask for ratio, generation resolution, export resolution, fps, or format",
+    );
+  });
   it("完整创作允许导演按内容需要生图，并要求可执行的 Frame 提示词", () => {
     const generate = STUDIO_TOOLS.find((tool) => tool.id === "generate_image")!;
     expect(generate.description).toContain(
@@ -673,12 +690,29 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     const visualSchema = visual.inputSchema as {
       properties: Record<string, unknown>;
     };
+    expect(visualSchema.properties).toHaveProperty("assessAudio");
     expect(visualSchema.properties).toHaveProperty("assetId");
     expect(visualSchema.properties).toHaveProperty("clipId");
     const assets = STUDIO_TOOLS.find((tool) => tool.id === "list_assets")!;
-    expect(assets.description).toContain("logical identity used by Chat and placement");
-    expect(assets.description).toContain("Placement tools prepare bytes transactionally");
+    expect(assets.description).toContain("complete logical reference used by Chat and placement");
+    expect(assets.description).toContain("directly to add_clips/insert_clips without register_media");
+    expect(assets.description).toContain("prepares bytes transactionally");
     expect(assets.description).toContain("every media kind");
+    const register = STUDIO_TOOLS.find((tool) => tool.id === "register_media")!;
+    expect(register.description).toContain("id alone is sufficient");
+    expect(register.description).toContain("never copy, print, or guess contentSig/localSig");
+    const registerSchema = register.inputSchema as {
+      properties: { assets: { items: { required: string[] } } };
+    };
+    expect(registerSchema.properties.assets.items.required).toEqual(["id"]);
+    const prepareLocalImage = STUDIO_TOOLS.find((tool) => tool.id === "prepare_local_image")!;
+    expect(prepareLocalImage.description).toContain("pass its exact assetId");
+    const prepareLocalImageSchema = prepareLocalImage.inputSchema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(prepareLocalImageSchema.properties).toHaveProperty("assetId");
+    expect(prepareLocalImageSchema.required).toEqual(["assetId"]);
   });
   it("批量切分带 framing 目的,稳定人物区间内由运行时拒绝冗余切点", () => {
     const split = STUDIO_TOOLS.find((tool) => tool.id === "split_shot")!;

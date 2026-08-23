@@ -60,7 +60,7 @@ describe('Studio local-asset @ mentions', () => {
     expect(roster[1]).toBe(outputElement);
   });
 
-  it('maps only the picked pill back to its exact local signature', () => {
+  it('maps only the picked pill back to its stable asset id without exposing storage identity', () => {
     const picked = localAssetMentionRef({
       assetId: 'picked-asset',
       contentSig: 'picked image.png:99:7',
@@ -85,7 +85,8 @@ describe('Studio local-asset @ mentions', () => {
 
     expect(context).toContain(`@${localAssetMentionId('picked-asset')}`);
     expect(context).toContain('localAssetId="picked-asset"');
-    expect(context).toContain('contentSig="picked image.png:99:7"');
+    expect(context).not.toContain('contentSig');
+    expect(context).not.toContain('picked image.png:99:7');
     expect(context).toContain('NOT a registered assetId');
     expect(context).not.toContain('ignored.mp4');
   });

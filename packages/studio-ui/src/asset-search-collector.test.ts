@@ -34,8 +34,8 @@ describe('collectAssetSearchDocuments scope boundary', () => {
       assetId: 'local:poster-asset',
       scope: 'mine',
       label: '活动海报.jpg',
-      locator: { assetId: 'poster-asset', contentSig: 'poster:1:2', sig: 'poster:1:2' },
     });
+    expect(documents[0]).not.toHaveProperty('locator');
     expect(fetch).not.toHaveBeenCalled();
     expect(deps.listStudioGens).not.toHaveBeenCalled();
     expect(deps.listElements).not.toHaveBeenCalled();

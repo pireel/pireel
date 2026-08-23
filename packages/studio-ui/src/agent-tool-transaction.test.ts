@@ -118,6 +118,13 @@ describe('Agent composition transaction boundary', () => {
     vi.unstubAllGlobals();
   });
 
+  it('derives generated-video ratio and resolution from the active canvas', async () => {
+    const { adaptiveGeneratedVideoSpec } = await import('./agent-tool-runner');
+    expect(adaptiveGeneratedVideoSpec(1080, 1920)).toEqual({ aspectRatio: '9:16', resolution: '1080p' });
+    expect(adaptiveGeneratedVideoSpec(1280, 720)).toEqual({ aspectRatio: '16:9', resolution: '720p' });
+    expect(adaptiveGeneratedVideoSpec(640, 640)).toEqual({ aspectRatio: '1:1', resolution: '480p' });
+  });
+
   it('treats already-filled primary clips and an already-configured canvas as successful no-ops', async () => {
     const h = harness();
     h.documentRef.current = {
@@ -270,6 +277,48 @@ describe('Agent composition transaction boundary', () => {
     ).toBe(true);
   });
 
+  it('lists project-local assets without exposing device storage locators', async () => {
+    const h = harness();
+    const assetId = 'shared-product-video';
+    const sig = 'private-folder/product.mp4:120:8';
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '商品展示', 'video')] },
+      t: (key: string) => key,
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'list_assets', { scope: 'mine' });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { assets: [{ id: `local:${assetId}`, kind: 'video', label: '商品展示' }] },
+    });
+    expect(JSON.stringify((result as { data?: { assets?: unknown } }).data?.assets))
+      .not.toMatch(/contentSig|localSig|private-folder|locator/);
+  });
+
+  it('accepts an old redundant register_media call with only a project-local asset id', async () => {
+    const h = harness();
+    const assetId = 'shared-product-video';
+    const sig = 'product.mp4:120:8';
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '商品展示', 'video')] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'register_media', {
+      assets: [{ id: assetId }],
+    });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.assets[assetId]).toMatchObject({
+      id: assetId,
+      kind: 'video',
+      label: '商品展示',
+      locator: { localSig: sig },
+    });
+  });
+
   it('does not mutate the timeline when device-local bytes cannot be restored', async () => {
     const h = harness();
     const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
@@ -306,7 +355,7 @@ describe('Agent composition transaction boundary', () => {
     expect(skill).toContain('picture-change contract');
     expect(skill).toContain('roughly every 5–10 seconds');
     expect(skill).toContain('never loop or stretch one short clip as wallpaper');
-    expect(skill).toContain('local image assetId → `inspect_images`');
+    expect(skill).toContain('inspect local images with `inspect_images`, then place them by assetId');
 
     const componentSystem = buildHtmlSystem({ componentIds: [] });
     expect(componentSystem).toContain('participating in a video scene');
@@ -329,9 +378,12 @@ describe('Agent composition transaction boundary', () => {
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
-    const result = await runStudioTool(h.ctx, 'prepare_local_image', { sig });
+    const result = await runStudioTool(h.ctx, 'prepare_local_image', { assetId });
+    const legacyResult = await runStudioTool(h.ctx, 'prepare_local_image', { sig });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(legacyResult.ok, JSON.stringify(legacyResult)).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('contentSig');
     expect(localMediaMocks.loadLocalFolderFile).not.toHaveBeenCalled();
     expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(image, sig, undefined, {
       pinned: true,
@@ -428,7 +480,7 @@ describe('Agent composition transaction boundary', () => {
     expect(result).toMatchObject({
       ok: true,
       data: {
-        localSig: sig,
+        localAssetId: assetId,
         label: '爆款参考视频',
         kind: 'video',
         durationSec: 30,
@@ -499,7 +551,7 @@ describe('Agent composition transaction boundary', () => {
     expect(result).toMatchObject({
       ok: true,
       data: {
-        localSig: sig,
+        localAssetId: 'asset-product-demo',
         label: '产品演示',
         durationSec: 18,
         hasAudio: true,
@@ -511,6 +563,40 @@ describe('Agent composition transaction boundary', () => {
     });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
     expect(Object.values(h.documentRef.current.assets).some((asset) => asset.locator.localSig === sig)).toBe(false);
+  });
+
+  it('skips local speech assessment when a visual-only workflow will discard source audio', async () => {
+    const h = harness();
+    const sig = 'muted-ad-footage.mp4:120:14';
+    const video = new File(['video-bytes'], 'muted-ad-footage.mp4', { type: 'video/mp4', lastModified: 14 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 15, width: 1080, height: 1920, hasAudio: true });
+    visualMocks.analyzeVisual.mockResolvedValue({
+      cuts: [5],
+      segments: [{ start: 0, end: 15, label: { content: 'product', person: 'none', safe: 'top', hasText: false, desc: 'Product demonstration.' } }],
+    });
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-muted-ad', sig, '广告画面素材', 'video')] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'analyze_visual', {
+      assetId: 'asset-muted-ad',
+      assessAudio: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        localAssetId: 'asset-muted-ad',
+        hasAudio: true,
+        audioAssessment: 'skipped-source-audio',
+      },
+    });
+    expect(speechMocks.assessLocalSpeechAudio).not.toHaveBeenCalled();
+    expect(providerMocks.transcribe).not.toHaveBeenCalled();
   });
 
   it('uses the local audio-track probe before ASR for an unplaced silent video', async () => {
@@ -531,7 +617,7 @@ describe('Agent composition transaction boundary', () => {
     expect(result).toMatchObject({
       ok: true,
       data: {
-        localSig: sig,
+        localAssetId: 'asset-silent-product',
         hasAudio: false,
         speechDetected: false,
         audioAssessment: 'no-audio-track',

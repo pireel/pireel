@@ -61,7 +61,6 @@ export async function collectAssetSearchDocuments(
     ...(validDims(entry.w, entry.h) ? { dimensions: validDims(entry.w, entry.h) } : {}),
     availability: 'metadata-only',
     ...(entry.folder ? { fields: { description: `${entry.folder.name} ${entry.folder.path}` } } : {}),
-    locator: { assetId: entry.assetId, contentSig: entry.contentSig, sig: entry.contentSig },
   }));
 
   for (const item of [...images, ...videos, ...audio]) {

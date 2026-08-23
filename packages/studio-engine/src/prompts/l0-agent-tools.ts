@@ -367,9 +367,10 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.analyze_visual.label',
     description:
-      'Analyze one video. mode="geometry" is token-free and browser-local: scene cuts + MediaPipe subject/face tracks and representative empty regions. Use it when the decision is only crop, framing, placement or safe space. mode="semantic" (default) adds sparse hosted VLM content/text descriptions and is required when planning needs to know what the footage depicts, selecting evidence/B-roll, judging design, or building a complete edit. Never substitute geometry for semantic understanding merely to save tokens. For an unplaced device-local video, pass its exact assetId from list_assets/search_assets. Its result includes local PCM/RNNoise audioAssessment: no-audio, effectively-silent, and non-speech-or-noise must not be followed by transcript tools; only speech-likely may justify read_script, and only when existing spoken wording matters. Otherwise omit selectors when the project has one video or pass an exact registered assetId/clipId. Audio-led projects may analyze their B-roll video directly; it does not need to be promoted to the primary lane. Returns source-normalized subjectTracks already clustered locally; consume them directly and do not create cuts where the track remains stable. This does not review the rendered result; complete edits still require review_visuals.',
+      'Analyze one video. mode="geometry" is token-free and browser-local: scene cuts + MediaPipe subject/face tracks and representative empty regions. Use it when the decision is only crop, framing, placement or safe space. mode="semantic" (default) adds sparse hosted VLM content/text descriptions and is required when planning needs to know what the footage depicts, selecting evidence/B-roll, judging design, or building a complete edit. Never substitute geometry for semantic understanding merely to save tokens. For an unplaced device-local video, pass its exact assetId from list_assets/search_assets. Its result normally includes local PCM/RNNoise audioAssessment: no-audio, effectively-silent, and non-speech-or-noise must not be followed by transcript tools; only speech-likely may justify read_script, and only when existing spoken wording matters. Pass assessAudio=false when the workflow intentionally discards source audio, such as a narrated ad remix whose footage will be muted; this skips local speech classification and forbids transcript tools for that source. Otherwise omit selectors when the project has one video or pass an exact registered assetId/clipId. Audio-led projects may analyze their B-roll video directly; it does not need to be promoted to the primary lane. Returns source-normalized subjectTracks already clustered locally; consume them directly and do not create cuts where the track remains stable. This does not review the rendered result; complete edits still require review_visuals.',
     inputSchema: obj({
       mode: { type: 'string', enum: ['geometry', 'semantic'], description: 'geometry = local measurements only; semantic = measurements plus sparse hosted content understanding (default).' },
+      assessAudio: { type: 'boolean', description: 'false skips local source-speech classification when source audio is intentionally discarded; do not call transcript tools afterward.' },
       localSig: { type: 'string', description: 'Legacy compatibility only: an unambiguous device-local content signature.' },
       assetId: { type: 'string', description: 'Exact project-local asset id from list_assets/search_assets, or an exact registered video asset id.' },
       clipId: { type: 'string', description: 'Exact timeline clip id whose video asset should be analyzed.' },
@@ -552,7 +553,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'register_media', kind: 'badge', icon: '📎', label: 'tools.register_media.label',
     description:
-      'Register media identities in the active project manifest without placing clips. Preserve exact ids returned by list_assets/search_assets; for a device-local result use its assetId as id and its locator.sig only as the byte locator. Never replace the id with contentSig because identical imports can share bytes while remaining different project assets. Device-local bytes remain on the device; add_clips/insert_clips prepare them transactionally before timeline mutation. For TTS, pass the returned asset fields unchanged, including transcriptText and durationSec, so semantic work and ordinary captions can start immediately; read_script reuses that text unless the task genuinely needs measured audio timing. MCP local-file import remains import_media.',
+      'Register a NEW generated/remote media identity in the active output without placing it. Do NOT call this for a device-local result already returned by list_assets/search_assets: pass that exact assetId directly to add_clips/insert_clips and the runtime resolves its private byte locator automatically. If register_media is redundantly called with a known local asset id, id alone is sufficient and the runtime hydrates kind/local access; never copy, print, or guess contentSig/localSig. For generated/TTS media, pass the returned id, kind, url and metadata unchanged, including transcriptText and durationSec, so semantic work and ordinary captions can start immediately; read_script reuses that text unless the task genuinely needs measured audio timing. MCP local-file import remains import_media.',
     inputSchema: obj({
       assets: {
         type: 'array', items: { type: 'object', additionalProperties: false, properties: {
@@ -562,7 +563,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
           bpm: { type: 'number', description: 'Known/precomputed tempo for musical beat-grid operations.' }, beatOffsetSec: { type: 'number', description: 'Source-second position of beat zero.' },
           transcriptText: { type: 'string', description: 'Exact known spoken script, especially generate_speech input.' },
           transcript: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { start: { type: 'number' }, end: { type: 'number' }, text: { type: 'string' } }, required: ['start', 'end', 'text'] } },
-        }, required: ['id', 'kind'] },
+        }, required: ['id'] },
       },
     }, ['assets']),
   },
@@ -575,9 +576,9 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     id: 'inspect_images', kind: 'card', busyText: 'tools.inspect_images.busy', icon: '👁️', label: 'tools.inspect_images.label',
     chatOnly: true,
     description:
-      'Inspect the ACTUAL PIXELS of up to 8 still images before choosing, describing, or placing them. Pass exact local sigs / local:<sig> refs returned by list_assets/search_assets, or exact registered image asset ids from inspect_media. Returns one grounded visual description per image, including visible subject, composition, text/data and likely editorial use. Use this instead of inferring image contents from filenames or dimensions. This sends compressed inspection copies to the configured vision service but does not upload the source files to the media library.',
+      'Inspect the ACTUAL PIXELS of up to 8 still images before choosing, describing, or placing them. Pass exact project-local assetIds returned by list_assets/search_assets, or exact registered image asset ids from inspect_media. Returns one grounded visual description per image, including visible subject, composition, text/data and likely editorial use. Use this instead of inferring image contents from filenames or dimensions. This sends compressed inspection copies to the configured vision service but does not upload the source files to the media library.',
     inputSchema: obj({
-      refs: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' }, description: 'Exact local sig, local:<sig>, or registered image asset id. Maximum 8.' },
+      refs: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' }, description: 'Exact project-local or registered image asset id. Maximum 8.' },
     }, ['refs']),
   },
   {
@@ -743,7 +744,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🗂️',
     label: 'tools.list_assets.label',
     description:
-      "List one explicit user-asset scope (most recent first). `mine` = device-local index and is the least-privilege default; its exact asset id is the logical identity used by Chat and placement, while locator.contentSig/sig is only byte validation and legacy compatibility. Placement tools prepare bytes transactionally for every media kind. Inspect pixels, action, speech, or timing only when that evidence affects the editorial decision. Use prepare_local_image only when embedding a local image inside generated Motion Graphic HTML; use insert_clip for a selected local-video span in the main narrative sequence. `cloud` = uploaded assets with direct urls. Never switch scopes or substitute another asset unless the user asks. Also returns this project's video-source summary.",
+      "List one explicit user-asset scope (most recent first). `mine` = device-local index and is the least-privilege default; its exact asset id is the complete logical reference used by Chat and placement. Pass it directly to add_clips/insert_clips without register_media; the runtime resolves private byte locators and prepares bytes transactionally for every media kind. Never print, copy, or guess locator.contentSig/sig/localSig; those fields are private compatibility data, not model inputs. Inspect pixels, action, speech, or timing only when that evidence affects the editorial decision. Use prepare_local_image only when embedding a local image inside generated Motion Graphic HTML; use add_clips with role=primary for selected local video in the main narrative sequence, or insert_clips when it must open timeline time. `cloud` = uploaded assets with direct urls. Never switch scopes or substitute another asset unless the user asks. Also returns this project's video-source summary.",
     inputSchema: obj(
       {
         scope: { type: 'string', enum: ['mine', 'cloud'], description: 'Asset scope. Defaults to mine; use cloud only when the user explicitly refers to cloud/uploaded/generated material.' },
@@ -759,7 +760,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔍',
     label: 'tools.search_assets.label',
     description:
-      "Search one EXPLICIT ASSET LIBRARY scope by natural-language metadata: mine=device-local indexed files; cloud=uploads, this project's generation history, and saved Motion Graphics; official=curated stickers, BGM, and Motion Graphic presets; all=only when the user explicitly asks to search every library. Scope is a permission boundary: never retry or substitute from another scope. Device-local media stays metadata-only until the exact file is prepared; official semantic search uses only its precomputed index. Results carry stable ids plus locators (url/sig/component/template). This does NOT search inside videos or the web.",
+      "Search one EXPLICIT ASSET LIBRARY scope by natural-language metadata: mine=device-local indexed files; cloud=uploads, this project's generation history, and saved Motion Graphics; official=curated stickers, BGM, and Motion Graphic presets; all=only when the user explicitly asks to search every library. Scope is a permission boundary: never retry or substitute from another scope. Device-local results expose only stable project assetIds; their storage locators stay private and placement resolves them automatically. Cloud/official results carry the exact reusable url/component/template locator when needed. Official semantic search uses only its precomputed index. This does NOT search inside videos or the web.",
     inputSchema: obj(
       {
         query: { type: 'string', description: 'Natural-language asset description, name, category, mood, or use case (max 200 characters).' },
@@ -803,13 +804,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎬',
     label: 'tools.generate_video.label',
     description:
-      "Start ONE hosted video generation task (CHARGES the user's Pireel account). This is an atomic media operation: it returns an asynchronous creation id in the active project's generation history and does NOT insert the result into the edit. Compose it with get_generation_jobs, register_media, and add_clips across turns; do not poll repeatedly in the same turn.",
+      "Start ONE hosted video generation task (CHARGES the user's Pireel account). Omit aspectRatio and resolution for the ordinary path: the runtime matches the active canvas and chooses the nearest source-quality tier automatically. Never ask the user to choose them; pass either field only when the user explicitly supplied an exact spec. This is an atomic media operation: it returns an asynchronous creation id in the active project's generation history and does NOT insert the result into the edit. Compose it with get_generation_jobs, register_media, and add_clips across turns; do not poll repeatedly in the same turn.",
     inputSchema: obj({
       prompt: { type: 'string', description: 'Concrete motion, camera, subject, and style prompt.' },
       modelId: { type: 'string', description: 'Optional stable id from list_models; omit for the catalog default.' },
       durationSec: { type: 'number', description: 'Requested duration, clamped to 4–15 seconds.' },
-      aspectRatio: { type: 'string', enum: ['9:16', '16:9', '1:1'] },
-      resolution: { type: 'string', enum: ['480p', '720p', '1080p'] },
+      aspectRatio: { type: 'string', enum: ['9:16', '16:9', '1:1'], description: 'Explicit user override only; omit to follow the active canvas.' },
+      resolution: { type: 'string', enum: ['480p', '720p', '1080p'], description: 'Explicit user override only; omit for the adaptive source-quality tier.' },
       referenceImages: { type: 'array', items: { type: 'string' }, description: 'Up to 9 exact image URLs.' },
       referenceVideos: { type: 'array', items: { type: 'string' }, description: 'Up to 3 exact video URLs.' },
       referenceAudios: { type: 'array', items: { type: 'string' }, description: 'Up to 3 exact audio URLs.' },
@@ -844,8 +845,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     label: 'tools.prepare_local_image.label',
     chatOnly: true,
     description:
-      'Prepare ONE exact device-local image for durable use inside a generated Motion Graphic. Call only when the user explicitly asked to use that local image, and pass its exact asset id from list_assets/search_assets in the compatibility-named sig field. Listing metadata does NOT grant access to its bytes. The bytes remain on this device in OPFS; the project stores only a device-local locator, never an R2 URL. If local bytes need a user gesture, it fails with a restore-access instruction; never upload or replace it with another image.',
-    inputSchema: obj({ sig: { type: 'string', description: 'Exact project-local image asset id returned by list_assets/search_assets.' } }, ['sig']),
+      'Prepare ONE exact device-local image for durable use inside generated Motion Graphic HTML. Call only when the user explicitly asked to use that local image, and pass its exact assetId from list_assets/search_assets. Listing metadata does NOT grant access to its bytes. The bytes and private locator remain on this device, never in R2 or model-visible output. If local bytes need a user gesture, it fails with a restore-access instruction; never upload or replace it with another image. The sig field remains accepted only for old cached calls.',
+    inputSchema: obj({
+      assetId: { type: 'string', description: 'Exact project-local image asset id returned by list_assets/search_assets.' },
+      sig: { type: 'string', description: 'Legacy compatibility only; new calls use assetId.' },
+    }, ['assetId']),
   },
   /* ---------- reusable voice / portrait animation primitives ---------- */
   {
@@ -924,8 +928,8 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         sourceImageUrl: { type: 'string', description: 'Portrait/source image url. Mutually exclusive with sourceVideoUrl.' },
         sourceVideoUrl: { type: 'string', description: 'Source performance video url. Mutually exclusive with sourceImageUrl.' },
         durationSec: { type: 'number', description: 'Output duration, integer 4–15 seconds. Use generate_speech.estimatedDurationSec when available; default 10.' },
-        aspectRatio: { type: 'string', enum: ['9:16', '16:9', '1:1'], description: 'Output aspect ratio (default 9:16).' },
-        resolution: { type: 'string', enum: ['480p', '720p', '1080p'], description: 'Output resolution (default 480p; choose higher only when requested).' },
+        aspectRatio: { type: 'string', enum: ['9:16', '16:9', '1:1'], description: 'Explicit user override only; omit to follow the active canvas.' },
+        resolution: { type: 'string', enum: ['480p', '720p', '1080p'], description: 'Explicit user override only; omit for the adaptive source-quality tier.' },
         modelId: { type: 'string', description: 'Optional enabled video catalog model id. Omit to prefer the configured Seedance model.' },
         name: { type: 'string', description: 'Optional label for the pending generation.' },
       },
@@ -1447,13 +1451,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎞️',
     label: 'tools.export_video.label',
     description:
-      "Export the final video. In the studio chat this ALWAYS opens an inline export-settings card and completes when the user hits Export — any `resolution`/`fps`/`format` you pass merely prefills the card (there is no way to skip it; the user's click is the start signal). Calling via MCP instead (no chat card exists there): the first call returns recommendations in `data`; ask the user in your own UI, then call again with the chosen specs AND `confirmed:true`. Renders LOCALLY in the user's open studio tab (roughly realtime: a 3-min video takes ~3 min) and saves via the browser's download — nothing is uploaded; the tab must stay open until done. In the studio chat do NOT poll after starting (the UI shows live progress and the download lands automatically — end your turn; check track_export only if the user asks). Poll track_export every ~15s only when driving via MCP. Driving a headless/embedded browser yourself? Those often DISCARD downloads — run the export-sink helper first and pass its `sink_url` so the file is delivered to disk reliably.",
+      "Export the final video with adaptive source-quality settings. Never ask the user to choose resolution, fps, or format: the runtime preserves the current canvas, caps resolution to source quality, and uses 30fps MP4 by default. Pass an exact spec only when the user explicitly supplied it. In Studio chat, a compact one-click Export card starts the local render/download; it shows the adaptive spec but has no settings chooser. Via MCP, the call starts directly with adaptive or explicit settings. Rendering is local in the user's open Studio tab (roughly realtime: a 3-min video takes ~3 min), nothing is uploaded, and the tab must stay open. In chat do not poll after starting; use track_export only when the user asks. Via MCP poll about every 15s. Headless/embedded browsers often discard downloads, so run the export-sink helper first and pass its sink_url.",
     inputSchema: obj(
       {
-        resolution: { type: 'number', description: 'Output SHORT-SIDE pixels: 2160 (=4K) / 1440 (=2K) / 1080 / 720 / 540. Pass it whenever the user named a resolution ("export in 4K" → 2160) — it arrives preselected in the card.' },
-        fps: { type: 'number', description: '24/30/60. Pass it whenever the user named a frame rate — it arrives preselected in the card.' },
-        format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Container. Pass it whenever the user named a format — it arrives preselected in the card.' },
-        confirmed: { type: 'boolean', description: 'Set true to start the export at the source-quality default when the user does not want to pick resolution/fps/format. Any explicit resolution/fps/format also starts it.' },
+        resolution: { type: 'number', description: 'Explicit user override only. Output short-side pixels: 2160 / 1440 / 1080 / 720 / 540. Omit for adaptive source quality.' },
+        fps: { type: 'number', description: 'Explicit user override only: 24 / 30 / 60. Omit for adaptive 30fps.' },
+        format: { type: 'string', enum: ['mp4', 'webm', 'mov'], description: 'Explicit user override only. Omit for adaptive MP4.' },
+        confirmed: { type: 'boolean', description: 'Deprecated compatibility field; adaptive export no longer needs a settings confirmation handshake.' },
         sink_url: { type: 'string', description: 'Loopback receiver URL from the export-sink helper (scripts/export-sink.mjs) — the finished file is PUT there instead of a browser download. Use when driving a headless/embedded browser.' },
       },
       [],

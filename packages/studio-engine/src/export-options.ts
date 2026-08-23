@@ -1,7 +1,7 @@
 /**
  * Export option recommendations — resolution / fps / format tuned to the source footage and the
- * target distribution platform. The export tool returns these when the user hasn't chosen yet, so
- * the agent can ask (in chat, or in the external MCP client) instead of silently defaulting.
+ * target distribution platform. The export tool uses the source-quality option automatically;
+ * platform alternatives remain available to explicit manual/export-spec overrides.
  *
  * Pure + deterministic (no DOM, no clock): the editable canvas controls output aspect while
  * video.sourceWidth/sourceHeight, when available, cap recommendations to source resolution.
