@@ -84,6 +84,8 @@ export interface StudioShell {
     label?: string;
     Panel: ComponentType<StudioCuratedAssetsPanelProps>;
     AudioTemplateGallery?: ComponentType<StudioAudioTemplateGalleryProps>;
+    /** Host-owned poster lookup shared by Official Assets and generation-template cards. */
+    componentThumbnail?: (kind: 'kit' | 'template', id: string) => string | null;
   };
   /** Optional one-way migration for payloads created by host-owned templates or catalogs. */
   migrateProjectPayload?: (document: EditorDocumentV2, composition: Composition) => {

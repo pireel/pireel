@@ -3,11 +3,12 @@
 import { Blocks } from 'lucide-react';
 import { ElementTile, type LibraryItem } from '../asset-card';
 import { studioLocale, t } from '../i18n';
+import { useStudioShell } from '../shell-context';
 import { ELEMENT_TEMPLATES } from './element';
 import { artDirectedTemplateElement } from './element-presets';
 import { localizedTemplatePrompt, type GenTemplate } from './types';
 
-function templateItem(template: GenTemplate): LibraryItem | null {
+function templateItem(template: GenTemplate, thumbSrc?: string | null): LibraryItem | null {
   const prompt = localizedTemplatePrompt(template, studioLocale());
   const label = template.title ? t(template.title) : prompt;
   const element = artDirectedTemplateElement(template, label);
@@ -17,6 +18,7 @@ function templateItem(template: GenTemplate): LibraryItem | null {
     kind: 'element',
     origin: 'preset',
     category: template.category,
+    ...(thumbSrc ? { thumbSrc } : {}),
     label,
     element,
     prompt,
@@ -37,8 +39,10 @@ function TemplateVisual({ item }: { item: LibraryItem | null }) {
 
 /** Shared full-fidelity component preview used by generation cards, dialogs, and chat search. */
 export function ElementTemplatePreview({ id }: { id: string }) {
+  const shell = useStudioShell();
   const template = ELEMENT_TEMPLATES.find((candidate) => candidate.id === id);
-  return <TemplateVisual item={template ? templateItem(template) : null} />;
+  const thumbSrc = template ? shell.curatedAssets?.componentThumbnail?.('template', template.id) : null;
+  return <TemplateVisual item={template ? templateItem(template, thumbSrc) : null} />;
 }
 
 /** Generation keeps Remix semantics while rendering the same component that Official Assets inserts. */
@@ -52,9 +56,11 @@ export function ElementTemplateCard({
   /** Generation panel only: card body previews; the bottom-right action keeps Remix direct. */
   onPreview?: () => void;
 }) {
+  const shell = useStudioShell();
   const prompt = localizedTemplatePrompt(template, studioLocale());
   const label = template.title ? t(template.title) : prompt;
-  const item = templateItem(template);
+  const thumbSrc = shell.curatedAssets?.componentThumbnail?.('template', template.id);
+  const item = templateItem(template, thumbSrc);
 
   if (onPreview) {
     return (

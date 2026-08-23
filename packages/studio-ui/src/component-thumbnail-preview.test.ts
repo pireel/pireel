@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Block, Composition } from '@pireel/studio-engine/composition';
 import { ElementTile, type LibraryItem } from './asset-card';
 import { BlockPreviewFrame } from './block-preview-card';
+import { ELEMENT_TEMPLATES } from './gen-templates';
+import { ElementTemplateCard } from './gen-templates/element-card';
+import { StudioShellProvider, type StudioShell } from './shell-context';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -41,6 +44,29 @@ describe('component thumbnail previews', () => {
     const host = mount(createElement(ElementTile, { item, width: 120, height: 68 }));
 
     expect(host.querySelector('img')?.getAttribute('src')).toContain('metric-deadbeef0000.png');
+    expect(host.querySelector('iframe')).toBeNull();
+  });
+
+  it('reuses the official poster for generation template cards instead of mounting an iframe', () => {
+    const shell: StudioShell = {
+      curatedAssets: {
+        Panel: () => null,
+        componentThumbnail: (_kind, id) => `official/components/v1/template/${id}-deadbeef0000.png`,
+      },
+    };
+    const host = mount(
+      createElement(
+        StudioShellProvider,
+        { value: shell },
+        createElement(ElementTemplateCard, {
+          template: ELEMENT_TEMPLATES[0]!,
+          onUse: vi.fn(),
+          onPreview: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(host.querySelector('img')?.getAttribute('src')).toContain('el-big-number-deadbeef0000.png');
     expect(host.querySelector('iframe')).toBeNull();
   });
 
