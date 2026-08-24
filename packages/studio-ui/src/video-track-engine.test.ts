@@ -85,6 +85,43 @@ describe('VideoTrackEngine timeline-only clock', () => {
     expect(engine.isPlaying).toBe(false);
   });
 
+  it('retries the latest hover seek when an in-flight frame capture fails', async () => {
+    let rejectStaleCapture!: (reason?: unknown) => void;
+    const staleCapture = new Promise<ImageBitmap>((_resolve, reject) => {
+      rejectStaleCapture = reject;
+    });
+    const freshFrame = { width: 1080, height: 1920, close: vi.fn() } as unknown as ImageBitmap;
+    const createBitmap = vi.fn()
+      .mockImplementationOnce(() => staleCapture)
+      .mockResolvedValueOnce(freshFrame);
+    vi.stubGlobal('createImageBitmap', createBitmap);
+
+    const engine = new VideoTrackEngine();
+    engine.setSource('main', 'blob:hover-source');
+    engine.setSegments([{ key: 'main', elKey: 'main', srcStart: 0, srcEnd: 1 }]);
+    const video = document.querySelector('video')!;
+    Object.defineProperties(video, {
+      readyState: { configurable: true, value: 4 },
+      videoWidth: { configurable: true, value: 1080 },
+      videoHeight: { configurable: true, value: 1920 },
+    });
+    const onFrame = vi.fn();
+    const onBlank = vi.fn();
+    engine.onFrame = onFrame;
+    engine.onBlank = onBlank;
+
+    engine.seek(0.1); // starts an async frame capture
+    engine.seek(1); // hovering the segment end clears the canvas
+    engine.seek(0.5); // latest valid hover seek arrives while the old capture is still pending
+    rejectStaleCapture(new Error('video moved during capture'));
+
+    await vi.waitFor(() => expect(createBitmap).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(onFrame).toHaveBeenCalledOnce());
+    expect(onBlank).toHaveBeenCalledOnce();
+    expect(onFrame.mock.calls[0]?.[1]).toMatchObject({ t: 0.5, srcT: 0.5 });
+    engine.dispose();
+  });
+
   it('routes cross-origin lane audio through the authenticated same-origin media proxy', () => {
     expect(previewAudioSource('blob:local-audio')).toBe('blob:local-audio');
     expect(previewAudioSource('/audio/local.mp3')).toBe('/audio/local.mp3');

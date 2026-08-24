@@ -113,6 +113,10 @@ export class VideoTrackEngine {
   private raf = 0;
   private curIdx = -1; // active segment index (-1 = none)
   private bitmapInflight = false;
+  /** A seek/frame request arrived while createImageBitmap was busy. Keep one latest retry instead
+   *  of dropping it: hover scrubbing can invalidate the in-flight video frame, and without this
+   *  retry the iframe stays cleared until a reload or another lucky seek. */
+  private bitmapPending = false;
   /** Browser video frames may expose coded (pre-rotation) bitmap dimensions. Cache whether each
    *  resident decoder needs a display-oriented canvas normalization; the common path stays zero-copy. */
   private bitmapModes = new WeakMap<HTMLVideoElement, { width: number; height: number; normalize: boolean }>();
@@ -668,8 +672,21 @@ export class VideoTrackEngine {
     }
   }
 
+  private finishBitmapPush(): void {
+    this.bitmapInflight = false;
+    if (!this.bitmapPending) return;
+    this.bitmapPending = false;
+    this.pushFrame();
+  }
+
   private pushFrame(tOverride?: number): void {
-    if (this.bitmapInflight || this.curIdx < 0) return;
+    if (this.bitmapInflight) {
+      this.bitmapPending = true;
+      return;
+    }
+    if (this.curIdx < 0) return;
+    const requestGen = this.seekGen;
+    const requestIdx = this.curIdx;
     const seg = this.segs[this.curIdx];
     if (!seg) return;
     const el = this.els.get(seg.key);
@@ -688,7 +705,11 @@ export class VideoTrackEngine {
       this.bitmapInflight = true;
       createImageBitmap(bake.frames[idx]!).then(
         (bmp) => {
-          this.bitmapInflight = false;
+          if (requestGen !== this.seekGen || requestIdx !== this.curIdx) {
+            bmp.close();
+            this.finishBitmapPush();
+            return;
+          }
           this.lastPush = { key: bkey, srcT: idx };
           this.onFrame?.(
             bmp,
@@ -703,9 +724,10 @@ export class VideoTrackEngine {
             },
             null,
           );
+          this.finishBitmapPush();
         },
         () => {
-          this.bitmapInflight = false;
+          this.finishBitmapPush();
         },
       );
       return;
@@ -716,7 +738,12 @@ export class VideoTrackEngine {
     this.bitmapInflight = true;
     Promise.all([this.displayBitmap(el), ghostReady ? this.displayBitmap(g!).catch(() => null) : Promise.resolve(null)]).then(
       ([bmp, bmp2]) => {
-        this.bitmapInflight = false;
+        if (requestGen !== this.seekGen || requestIdx !== this.curIdx) {
+          bmp.close();
+          bmp2?.close();
+          this.finishBitmapPush();
+          return;
+        }
         this.lastPush = { key: seg.key, srcT };
         const other = w ? this.segs[t < w.cut ? w.iB : w.iA] : null;
         this.onFrame?.(
@@ -734,9 +761,10 @@ export class VideoTrackEngine {
           },
           bmp2,
         );
+        this.finishBitmapPush();
       },
       () => {
-        this.bitmapInflight = false;
+        this.finishBitmapPush();
       },
     );
   }
@@ -782,6 +810,7 @@ export class VideoTrackEngine {
 
   /** Paused seek: park the active element, push one frame after seeked. */
   seek(t: number): void {
+    const gen = ++this.seekGen;
     this.tEdited = Math.max(0, Math.min(this.total, t));
     this.tSmooth = this.tEdited;
     const i = this.playableAt(this.tEdited);
@@ -799,7 +828,6 @@ export class VideoTrackEngine {
     if (!el) return;
     this.syncGhost(this.tEdited); // scrub into a transition window: ghost seeks along (no play while paused)
     this.syncAudioClips(this.tEdited, this.playing, true); // park the clips at the new position (aligned resume)
-    const gen = ++this.seekGen;
     const push = () => {
       if (gen !== this.seekGen) return;
       this.lastPush = null; // the seek frame must push (same-frame dedup would block a re-push on an in-place seek)
