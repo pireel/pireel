@@ -285,8 +285,8 @@ export interface AgentToolCtx {
   /** Make a durable device-local asset playable/renderable in this browser session. Timeline
    * placement calls this before committing, so a metadata-only registration can never report a
    * successful clip while its bytes are still unavailable. */
-  prepareLocalAssetRuntime: (asset: EditorMediaAsset) => Promise<
-    | { ok: true; prepared: boolean }
+  prepareLocalAssetRuntime: (asset: EditorMediaAsset, options?: { asPrimary?: boolean }) => Promise<
+    | { ok: true; prepared: boolean; file?: File }
     | { ok: false; error: string }
   >;
   setDocument: (document: EditorDocumentV2, runtimeComposition?: Composition) => void;
@@ -325,8 +325,15 @@ export interface AgentToolCtx {
   setAsrSentences: (segs: AsrSegment[] | null) => void;
   clipAsrRef: MutableRefObject<Record<string, AsrSegment[]>>;
   setClipAsr: (v: Record<string, AsrSegment[]>) => void;
+  /** Session cache for project-library speech inspected before timeline placement. Promoting that
+   * asset to primary must adopt this transcript instead of asking the provider a second time. */
+  localTranscriptCacheRef: MutableRefObject<Map<string, AsrSegment[]>>;
   currentVideo: () => { url: string; durationSec: number; width: number; height: number } | null;
-  pickVideoFile: (file: File, opts?: { asSig?: string }) => Promise<void>;
+  pickVideoFile: (file: File, opts?: {
+    asSig?: string;
+    reconnect?: boolean;
+    successFeedback?: 'default' | 'silent';
+  }) => Promise<void>;
   /** Unified metadata index writer: browser picker and Skill loopback imports share the same cards,
    * cloud sync, deletion and recovery guidance. File bytes never ride this callback. */
   registerLocalAsset: (entry: LocalAssetIndexEntry) => void;
@@ -384,7 +391,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
     setSelectedId, setSelectedShotId, selectedIdRef, applyT, tRef, playStopAtRef,
     playingRef, setPlaying, seekBlockSettled, postPreview, pushUndoSnapshot, undoStackRef, redoStackRef, genIdsRef,
-    markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, currentVideo, pickVideoFile, registerLocalAsset,
+    markGenerating, videoFileRef, clipFilesRef, asrRef, setAsrSentences, clipAsrRef, setClipAsr, localTranscriptCacheRef, currentVideo, pickVideoFile, registerLocalAsset,
     ensureClipTranscripts, transcriptForAgent, stepAsr, stepVisual, visualRef, visualBriefRef,
     applyVisualResult, composeBlockChecked,
     noteOf, setCutTransition, resizeCutTransition, audioMount, audioPatch, audioRemove, audioRemoveMany, audioSplit, setDenoise,
@@ -393,8 +400,24 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
   } = ctx;
       // Chat pills are references, not storage ids. Normalize every top-level/nested tool argument
       // once here so individual tools never grow their own @ token / localSig compatibility rules.
-      input = normalizeStudioToolInputReferences(toolId, input, ctx.localAssetIndexRef?.current ?? []);
+      const localAssetIndex = ctx.localAssetIndexRef?.current ?? [];
+      const registeredAssetIdByLocalAssetId = new Map<string, string>();
+      for (const asset of Object.values(documentRef.current.assets)) {
+        const local = resolveLocalAssetReference(asset.id, localAssetIndex)
+          ?? (asset.locator.localSig ? resolveLocalAssetReference(asset.locator.localSig, localAssetIndex) : null);
+        if (local) registeredAssetIdByLocalAssetId.set(local.assetId, asset.id);
+      }
+      input = normalizeStudioToolInputReferences(toolId, input, localAssetIndex, registeredAssetIdByLocalAssetId);
       const c = compRef.current;
+      /** Resolve local bytes by canonical project asset identity first. The legacy sig cache stays
+       * as a fallback for projects created before project-scoped asset bindings existed. */
+      const loadProjectAssetFile = async (asset: EditorMediaAsset): Promise<File | null> => {
+        if (!asset.locator.localSig) return null;
+        const entry = resolveLocalAssetReference(asset.id, localAssetIndex)
+          ?? resolveLocalAssetReference(asset.locator.localSig, localAssetIndex);
+        return (entry ? await loadLocalAssetFile(projectId, entry) : null)
+          ?? await loadLocalVideo(asset.locator.localSig);
+      };
       const motionBeats = (startSec: number, durationSec: number) => {
         const native = spokenTimelineBeats(documentRef.current, startSec, durationSec);
         return native.length
@@ -409,6 +432,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         ...(typeof input.position === 'number' ? { position: input.position } : {}),
       });
       const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
+      const primaryRuntimesToMount = new Map<string, { file: File; sig: string }>();
       // Cooperative stop (chat stop button): long tools honor the signal at SAFE boundaries only —
       // atomic mutations always land whole. Shared dedup'd pipelines (ASR / visual analysis) are
       // never cancelled: race() just stops WAITING for them, they keep running in the background
@@ -533,13 +557,75 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         for (const assetId of referencedAssetIds) {
           const asset = documentRef.current.assets[assetId];
           if (!asset?.locator.localSig) continue;
-          const ready = await prepareLocalAssetRuntime(asset);
+          const placedAsPrimary = asset.kind === 'video' && (Array.isArray(input.clips) ? input.clips : []).some((value: unknown) =>
+            !!value && typeof value === 'object' && !Array.isArray(value)
+            && (value as Record<string, unknown>).assetId === assetId
+            && (value as Record<string, unknown>).role === 'primary');
+          const inspectedTranscript = localTranscriptCacheRef.current.get(asset.id)
+            ?? localTranscriptCacheRef.current.get(asset.locator.localSig);
+          if (
+            inspectedTranscript
+            && !Object.prototype.hasOwnProperty.call(documentRef.current.semantics.transcripts, assetId)
+          ) {
+            const current = documentRef.current;
+            setDocument({
+              ...current,
+              semantics: {
+                ...current.semantics,
+                transcripts: {
+                  ...current.semantics.transcripts,
+                  [assetId]: inspectedTranscript,
+                },
+              },
+            });
+          }
+          if (placedAsPrimary && inspectedTranscript?.length) {
+            asrRef.current = inspectedTranscript;
+            setAsrSentences(inspectedTranscript);
+          }
+          const ready = await prepareLocalAssetRuntime(asset, { asPrimary: placedAsPrimary });
           if (!ready.ok) {
             return {
               ok: false,
               error: ready.error,
               data: { assetId, availability: 'metadata-only' },
             };
+          }
+          const implicitDuration = Array.isArray(input.clips) && input.clips.some((value) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+            const row = value as Record<string, unknown>;
+            return row.assetId === assetId
+              && !Number.isFinite(Number(row.durationSec))
+              && !Number.isFinite(Number(row.sourceOutSec));
+          });
+          if ((implicitDuration || placedAsPrimary) && (asset.kind === 'video' || asset.kind === 'audio')) {
+            const file = ready.file ?? await loadProjectAssetFile(asset);
+            const probe = file ? await probeVideoFile(file).catch(() => null) : null;
+            if (probe?.durationSec) {
+              const current = documentRef.current;
+              const currentAsset = current.assets[assetId]!;
+              setDocument({
+                ...current,
+                assets: {
+                  ...current.assets,
+                  [assetId]: {
+                    ...currentAsset,
+                    metadata: {
+                      ...currentAsset.metadata,
+                      durationSec: probe.durationSec,
+                      ...(probe.width > 0 ? { width: probe.width } : {}),
+                      ...(probe.height > 0 ? { height: probe.height } : {}),
+                      hasAudio: probe.hasAudio,
+                    },
+                  },
+                },
+              });
+              if (placedAsPrimary && file) primaryRuntimesToMount.set(assetId, { file, sig: asset.locator.localSig });
+            } else if (!asset.metadata.durationSec) {
+              return { ok: false, error: `media duration unavailable: ${assetId}` };
+            } else if (placedAsPrimary && file) {
+              primaryRuntimesToMount.set(assetId, { file, sig: asset.locator.localSig });
+            }
           }
         }
       }
@@ -548,7 +634,22 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         if (AGENT_TIMELINE_TOOL_IDS.has(toolId)) {
           const outcome = runAgentTimelineTool(documentRef.current, toolId, input);
           if (outcome.ok && outcome.document && outcome.document !== documentRef.current) setDocument(outcome.document);
-          return { ok: outcome.ok, ...(outcome.summary ? { summary: outcome.summary } : {}), ...(outcome.error ? { error: outcome.error } : {}), ...(outcome.data !== undefined ? { data: outcome.data } : {}) };
+          if (outcome.ok && primaryRuntimesToMount.size) {
+            const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const primaryAsset = primaryAssetId ? documentRef.current.assets[primaryAssetId] : undefined;
+            const primaryRuntime = primaryAssetId ? primaryRuntimesToMount.get(primaryAssetId) : undefined;
+            if (primaryRuntime && primaryAsset?.locator.localSig === primaryRuntime.sig) {
+              await pickVideoFile(primaryRuntime.file, {
+                asSig: primaryRuntime.sig,
+                reconnect: true,
+                successFeedback: 'silent',
+              });
+            }
+          }
+          const summary = outcome.summary
+            ? (surface === 'chat' ? t(`tools.${toolId}.label`) : outcome.summary)
+            : undefined;
+          return { ok: outcome.ok, ...(summary ? { summary } : {}), ...(outcome.error ? { error: outcome.error } : {}), ...(outcome.data !== undefined ? { data: outcome.data } : {}) };
         }
         switch (toolId) {
           case 'list_outputs': {
@@ -719,6 +820,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   };
                 }
                 speechFree.delete(entry.contentSig);
+                localTranscriptCacheRef.current.set(entry.assetId, segs);
+                localTranscriptCacheRef.current.set(entry.contentSig, segs);
                 const transcript = formatDirectTranscript(
                   `DEVICE-LOCAL ${localKind.toUpperCase()} TRANSCRIPT ${JSON.stringify(entry.label)} (source-file seconds):`,
                   segs,
@@ -767,7 +870,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   };
                 }
                 report(t('tools.extract_asr.busy'));
-                let file = asset.locator.localSig ? await loadLocalVideo(asset.locator.localSig) : null;
+                let file = await loadProjectAssetFile(asset);
                 if (!file) {
                   const source = resolveAssetUrl(asset);
                   if (!source) return { ok: false, error: `media bytes unavailable: ${targetAssetId}` };
@@ -786,6 +889,21 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const probe = await probeVideoFile(file).catch(() => null);
                 const segs = await race(studioProviders().transcriber.transcribe(file));
                 const current = documentRef.current;
+                const primaryClipsForAsset = current.timeline.tracks
+                  .filter((track) => track.role === 'primaryNarrative')
+                  .flatMap((track) => track.clips)
+                  .filter((clip) => clip.kind === 'narrative' && clip.assetId === targetAssetId);
+                const legacyPrimaryClip = primaryClipsForAsset.length === 1 ? primaryClipsForAsset[0] : undefined;
+                const legacyFiveSecondPlaceholder = targetAssetId === current.semantics.primaryNarrativeAssetId
+                  && !current.assets[targetAssetId]?.metadata.durationSec
+                  && !!probe?.durationSec
+                  && !!legacyPrimaryClip
+                  && 'sourceInSec' in legacyPrimaryClip
+                  && legacyPrimaryClip.startFrame === 0
+                  && legacyPrimaryClip.sourceInSec === 0
+                  && typeof legacyPrimaryClip.sourceOutSec === 'number'
+                  && Math.abs(legacyPrimaryClip.sourceOutSec - 5) < 0.001
+                  && legacyPrimaryClip.durationFrames === Math.round(current.canvas.fps * 5);
                 const nextDocument = {
                   ...current,
                   ...(probe?.durationSec
@@ -805,12 +923,32 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         },
                       }
                     : {}),
+                  ...(legacyFiveSecondPlaceholder && probe?.durationSec
+                    ? {
+                        timeline: {
+                          ...current.timeline,
+                          tracks: current.timeline.tracks.map((track) => track.role === 'primaryNarrative'
+                            ? {
+                                ...track,
+                                clips: track.clips.map((clip) => clip.kind === 'narrative' && clip.assetId === targetAssetId
+                                  ? {
+                                      ...clip,
+                                      durationFrames: Math.max(1, Math.round(probe.durationSec * current.canvas.fps)),
+                                      sourceOutSec: probe.durationSec,
+                                    }
+                                  : clip),
+                              }
+                            : track),
+                        },
+                      }
+                    : {}),
                   semantics: {
                     ...current.semantics,
                     transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
                   },
                 };
                 if (targetAssetId === current.semantics.primaryNarrativeAssetId) {
+                  videoFileRef.current = file;
                   asrRef.current = segs;
                   setAsrSentences(segs);
                 }
@@ -855,11 +993,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'list_words': {
-            if (!asrRef.current?.length && typeof input.shotId !== 'string') return { ok: false, error: t('workbench.noTranscriptYetRun') };
+            const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const storedPrimary = primaryAssetId
+              ? documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined
+              : undefined;
+            const mainTranscript = asrRef.current?.length ? asrRef.current : storedPrimary;
+            if (!mainTranscript?.length && typeof input.shotId !== 'string') return { ok: false, error: t('workbench.noTranscriptYetRun') };
+            if (!asrRef.current?.length && storedPrimary?.length) {
+              asrRef.current = storedPrimary;
+              setAsrSentences(storedPrimary);
+            }
             if (typeof input.shotId === 'string') await ensureClipTranscripts();
             const transcriptDocument = syncCaptionTranscripts(
               documentRef.current,
-              asrRef.current,
+              mainTranscript ?? null,
               captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
             );
             if (transcriptDocument !== documentRef.current) setDocument(transcriptDocument);
@@ -872,7 +1019,13 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ...(typeof input.limit === 'number' && Number.isInteger(input.limit) ? { limit: input.limit } : {}),
             });
             if ('error' in listed) return { ok: false, error: listed.error };
-            return { ok: true, summary: `Listed ${listed.words.length} transcript words`, data: listed };
+            return {
+              ok: true,
+              summary: surface === 'chat'
+                ? t('tools.list_words.label')
+                : `Listed ${listed.words.length} transcript words`,
+              data: listed,
+            };
           }
           case 'load_local_source': {
             // Agent local-import adapter: permission/materialization differs from a browser picker,
@@ -1075,7 +1228,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               } else {
                 const source = resolveAssetUrl(targetAsset);
                 let file = source ? clipFilesRef.current.get(source) ?? null : null;
-                if (!file && targetAsset.locator.localSig) file = await loadLocalVideo(targetAsset.locator.localSig);
+                if (!file) file = await loadProjectAssetFile(targetAsset);
                 if (!file && source) {
                   try {
                     file = (await race(materializeRemoteMedia(source, {
@@ -2269,8 +2422,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
             const assetId = documentRef.current.semantics.primaryNarrativeAssetId;
-            const file = videoFileRef.current;
+            const primaryAsset = assetId ? documentRef.current.assets[assetId] : undefined;
+            const file = (primaryAsset?.kind === 'video' ? await loadProjectAssetFile(primaryAsset) : null)
+              ?? videoFileRef.current;
             if (!assetId || !file) return { ok: false, error: t('common.localSourceVideoMissing') };
+            videoFileRef.current = file;
             const settings = resolveSpeechSilenceOptions({
               minimumPauseSec: Number(input.minimumPauseSec),
               speechPaddingSec: Number(input.speechPaddingSec),
@@ -3192,9 +3348,22 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   return { ...result, data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), delta } };
 }
 
-export function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
-  if (QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)) return runStudioToolInner(ctx, toolId, input, opts);
-  return runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
+  const result = QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
+    ? await runStudioToolInner(ctx, toolId, input, opts)
+    : await runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
+  if (
+    opts?.surface === 'chat'
+    && result.ok
+    && result.summary
+    && t('chatGen.done') === '完成'
+    && /[A-Za-z]{2,}/.test(result.summary)
+  ) {
+    const key = `tools.${toolId}.label`;
+    const label = t(key);
+    return { ...result, summary: label === key ? t('chatGen.done') : label };
+  }
+  return result;
 }
 
   /** External-agent-only bridge operations (MCP-only, invisible to the internal chat) — the browser half of the BYO-brain contract:

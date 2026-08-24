@@ -347,7 +347,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔤',
     label: 'tools.list_words.label',
     description:
-      'Resolve an ALREADY IDENTIFIED transcript passage into STABLE wordIds and source timestamps for exact text-based editing. This is an address resolver before delete_words, NOT a content-search tool: first reason over the read_script transcript, choose the relevant sentenceIndexes or source fromSec/toSec, then call this once with that narrow range. Never call it unfiltered to scan the whole transcript, and never invent or cache positional word indexes. Pass shotId only when the chosen passage belongs to an inserted clip. IDs survive timeline cuts because they address the source transcript, not edited positions.',
+      'Resolve an ALREADY IDENTIFIED transcript passage into STABLE wordIds and source timestamps for exact text-based editing. This is an address resolver before delete_words, NOT a content-search tool: first reason over the read_script transcript, choose the relevant sentenceIndexes or source fromSec/toSec, then call this exactly once with that narrow range. sentenceIndexes accepts every chosen non-contiguous row in one array; NEVER issue several list_words calls in parallel or one call per sentence. Never call it unfiltered to scan the whole transcript, and never invent or cache positional word indexes. Pass shotId only when the chosen passage belongs to an inserted clip. IDs survive timeline cuts because they address the source transcript, not edited positions.',
     inputSchema: obj(
       {
         shotId: { type: 'string', description: "A shot id whose source transcript to list. Omit for main narration." },

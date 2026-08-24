@@ -207,6 +207,12 @@ import {
 } from "./local-media";
 import { materializeRemoteMedia } from "./remote-media";
 import {
+  activatePrimarySourceDecoder,
+  resolvePrimaryLocalSig,
+  shouldReconnectPrimarySource,
+  sourceRuntimeIsLive,
+} from "./local-source-runtime";
+import {
   importLocalSource,
   localAssetIndexEntry,
 } from "./local-import-session";
@@ -513,6 +519,7 @@ export function HyperframesWorkbench({
     [renderPlan],
   );
   const primaryAsset = primaryNarrativeAsset(editorDocument);
+  const primarySourceUrl = primaryAsset ? (resolveAssetUrl(primaryAsset) ?? null) : null;
   const primaryAssetDurationSec = primaryAsset?.metadata.durationSec ?? null;
   const disabledClipIds = useMemo(
     () =>
@@ -1246,6 +1253,10 @@ export function HyperframesWorkbench({
   asrRef.current = asrSentences;
   const clipAsrRef = useRef<Record<string, AsrSegment[]>>({});
   clipAsrRef.current = clipAsr;
+  const localTranscriptCacheRef = useRef<Map<string, AsrSegment[]>>(new Map());
+  useEffect(() => {
+    localTranscriptCacheRef.current.clear();
+  }, [projectId]);
   const visualRef = useRef<VisualTimeline | null>(null);
   visualRef.current = visual;
   // BYO visual analysis (visual_brief/submit_visual): the prepared-brief intermediate state awaiting the agent's labels
@@ -1437,28 +1448,36 @@ export function HyperframesWorkbench({
     [],
   );
   const localRuntimePreparingRef = useRef<Map<string, Promise<
-    | { ok: true; prepared: boolean }
+    | { ok: true; prepared: boolean; file?: File }
     | { ok: false; error: string }
   >>>(new Map());
   const localRuntimeReadyAssetIdsRef = useRef<Set<string>>(new Set());
+  const localRuntimeFilesRef = useRef<Map<string, File>>(new Map());
   const localRuntimeGenerationRef = useRef(0);
   useEffect(() => {
     localRuntimeGenerationRef.current += 1;
     localRuntimePreparingRef.current.clear();
     localRuntimeReadyAssetIdsRef.current.clear();
+    localRuntimeFilesRef.current.clear();
   }, [projectId]);
   /** One device-local runtime contract for every media kind. The durable document keeps the
    * logical asset id plus content sig; this boundary restores/pins device bindings and attaches
    * session-only URLs without uploading anything. */
   const prepareLocalAssetRuntime = useCallback(
-    (asset: EditorMediaAsset): Promise<
-      | { ok: true; prepared: boolean }
+    (asset: EditorMediaAsset, options?: { asPrimary?: boolean }): Promise<
+      | { ok: true; prepared: boolean; file?: File }
       | { ok: false; error: string }
     > => {
       const sig = asset.locator.localSig;
       if (!sig) return Promise.resolve({ ok: true, prepared: false });
       if (localRuntimeReadyAssetIdsRef.current.has(asset.id)) {
-        return Promise.resolve({ ok: true, prepared: false });
+        return Promise.resolve({
+          ok: true,
+          prepared: false,
+          ...(localRuntimeFilesRef.current.get(asset.id)
+            ? { file: localRuntimeFilesRef.current.get(asset.id) }
+            : {}),
+        });
       }
       const current = localRuntimePreparingRef.current.get(asset.id);
       if (current) return current;
@@ -1502,15 +1521,27 @@ export function HyperframesWorkbench({
         } catch {
           // The authorized File remains usable for this session even when the local cache is full.
         }
+        // The Materials panel may have already rendered a restore card before this tool-driven
+        // recovery completed. Publish a new registry identity so its byte-resolution effect retries
+        // immediately instead of waiting for a remount or project refresh.
+        localAssetIndexRef.current = [...localAssetIndexRef.current];
+        setLocalAssetIndexRev((value) => value + 1);
+        localRuntimeFilesRef.current.set(asset.id, file);
         if (asset.kind === "image") {
           localRuntimeReadyAssetIdsRef.current.add(asset.id);
-          return { ok: true as const, prepared: true };
+          return { ok: true as const, prepared: true, file };
+        }
+        if (options?.asPrimary && asset.kind === "video") {
+          // The primary decoder owns its object URL and filmstrip. Do not mount the same file as a
+          // generic clip first; pickVideoFile will attach it atomically after timeline placement.
+          localRuntimeReadyAssetIdsRef.current.add(asset.id);
+          return { ok: true as const, prepared: true, file };
         }
         const url = URL.createObjectURL(file);
         clipFilesRef.current.set(url, file);
         rememberAssetUrl(asset.id, url);
         localRuntimeReadyAssetIdsRef.current.add(asset.id);
-        return { ok: true as const, prepared: true };
+        return { ok: true as const, prepared: true, file };
       })().finally(() => {
         localRuntimePreparingRef.current.delete(asset.id);
       });
@@ -1537,15 +1568,25 @@ export function HyperframesWorkbench({
         (asset): asset is EditorMediaAsset =>
           !!asset?.locator.localSig &&
           asset.kind !== "image" &&
-          asset.id !== editorDocument.semantics.primaryNarrativeAssetId &&
-          !localRuntimeReadyAssetIdsRef.current.has(asset.id),
+          (asset.id === editorDocument.semantics.primaryNarrativeAssetId
+            ? !videoFileRef.current
+            : !localRuntimeReadyAssetIdsRef.current.has(asset.id)),
       );
     if (!missing.length) return () => { cancelled = true; };
     void (async () => {
       let prepared = false;
       for (const asset of missing) {
-        const result = await prepareLocalAssetRuntime(asset);
+        const isPrimary = asset.id === editorDocument.semantics.primaryNarrativeAssetId;
+        const result = await prepareLocalAssetRuntime(asset, { asPrimary: isPrimary });
         prepared ||= result.ok && result.prepared;
+        if (result.ok && isPrimary && result.file && asset.locator.localSig) {
+          await pickVideoFile(result.file, {
+            asSig: asset.locator.localSig,
+            reconnect: true,
+            successFeedback: "silent",
+          });
+          prepared = true;
+        }
         if (!result.ok) {
           console.warn(
             `[studio] local ${asset.kind} runtime restore failed for ${asset.id}: ${result.error}`,
@@ -3810,7 +3851,13 @@ export function HyperframesWorkbench({
     if (objectUrlRef.current && objectUrlRef.current !== source.url)
       URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = source.url;
-    setVideoFile(source.file);
+    activatePrimarySourceDecoder<File>({
+      source: source.file,
+      sourceRef: videoFileRef,
+      engine: videoEngineRef.current,
+      atSec: tRef.current,
+      publish: (file) => setVideoFile(file),
+    });
     videoSigRef.current = source.sig;
 
     const gen = ++filmstripGenRef.current;
@@ -3876,8 +3923,17 @@ export function HyperframesWorkbench({
       // transcript, and wiping here would leave the captions/script panels empty while the timeline
       // showed captions — the products belong to this very video, keep them (user hit this).
       // reconnect: per-asset restore of the main source mid-session — same preserve semantics as a draft reconnect
-      const sameVideoRestore =
-        !!(pr && pr.videoSig && sig === pr.videoSig) || !!opts?.reconnect;
+      const currentPrimaryId =
+        editorDocumentRef.current.semantics.primaryNarrativeAssetId;
+      const currentPrimarySig = currentPrimaryId
+        ? editorDocumentRef.current.assets[currentPrimaryId]?.locator.localSig
+        : null;
+      const sameVideoRestore = shouldReconnectPrimarySource({
+        candidateSig: sig,
+        explicitReconnect: opts?.reconnect,
+        pendingVideoSig: pr?.videoSig,
+        assetLocalSig: currentPrimarySig,
+      });
       const successNotices = videoPickSuccessNotices(sameVideoRestore, opts);
       if (!sameVideoRestore) {
         setAsrSentences(null);
@@ -5721,9 +5777,11 @@ export function HyperframesWorkbench({
   const srcLive = (src: string) => {
     const asset = primaryNarrativeAsset(editorDocumentRef.current);
     const mainUrl = asset ? resolveAssetUrl(asset) : undefined;
-    return src === mainUrl
-      ? !!videoFileRef.current
-      : !src.startsWith("blob:") || clipFilesRef.current.has(src);
+    return sourceRuntimeIsLive(src, {
+      primarySourceUrl: mainUrl,
+      primaryFileLoaded: !!videoFileRef.current,
+      runtimeFileUrls: clipFilesRef.current,
+    });
   };
   /** Per-asset reconnect (user gesture): handle/OPFS first (may prompt for permission), then the R2
    *  vault, then a manual re-pick verified against the sig. src = null targets the main source. */
@@ -6678,6 +6736,7 @@ export function HyperframesWorkbench({
     setAsrSentences,
     clipAsrRef,
     setClipAsr,
+    localTranscriptCacheRef,
     currentVideo,
     pickVideoFile,
     registerLocalAsset,
@@ -6714,14 +6773,32 @@ export function HyperframesWorkbench({
     frameCatalogRef,
     chatRef,
   };
+  const persistToolMutation = async (
+    pending: Promise<StudioToolResult>,
+  ): Promise<StudioToolResult> => {
+    const result = await pending;
+    const data = result.data && typeof result.data === "object"
+      ? (result.data as Record<string, unknown>)
+      : null;
+    if (!result.ok || !data?.delta) return result;
+    // A successful tool receipt is allowed to drive the assistant's "done" response. Push the
+    // matching document revision now instead of leaving it in the generic 1.2s UI debounce tail;
+    // otherwise a refresh/window takeover can persist the chat while losing the timeline edit.
+    const queue = cloudSaveQueueRef.current;
+    if (queue) {
+      queue.markDirty();
+      await queue.flush();
+    }
+    return result;
+  };
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
     opts?: { signal?: AbortSignal; surface?: "chat" | "bridge" },
-  ) => runAgentStudioTool(agentToolCtx, toolId, input, opts);
+  ) => persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   const runExternalTool = (tool: string, input: Record<string, unknown>) =>
-    runAgentExternalTool(agentToolCtx, tool, input);
+    persistToolMutation(runAgentExternalTool(agentToolCtx, tool, input));
 
   // External agent bridge (Codex/Claude Code/any MCP client via /api/studio/mcp → StudioBridge DO → this tab):
   // the exact same execution surface as the internal chat + BYO-only operations; get_state returns the same situation snapshot as chat.
@@ -7407,7 +7484,7 @@ export function HyperframesWorkbench({
       if (mainSig && wantsMain) {
         void loadLocalVideo(mainSig).then(async (f) => {
           if (f && pendingRestoreRef.current === d) {
-            void pickVideoFile(f, { asSig: mainSig });
+            void pickVideoFile(f, { asSig: mainSig, reconnect: true });
             return;
           }
           if (f) return;
@@ -7416,7 +7493,7 @@ export function HyperframesWorkbench({
             toast.info(t("workbench.retrievingVideoFromCloud"));
             const cf = await studioProviders().vault.fetch(mainSig);
             if (cf && pendingRestoreRef.current === d) {
-              void pickVideoFile(cf, { asSig: mainSig });
+              void pickVideoFile(cf, { asSig: mainSig, reconnect: true });
               return;
             }
           }
@@ -9326,15 +9403,12 @@ export function HyperframesWorkbench({
                     localAssetIndexSyncReady={localAssetIndexSyncReady}
                     onLocalAssetIndexChange={changeLocalAssetIndex}
                     onLocalAssetAvailable={acceptLocalAssetFile}
-                    videoSig={
-                      videoSigRef.current ??
-                      (videoFile ? fileSig(videoFile) : null)
-                    }
-                    mainSourceUrl={
-                      primaryAsset
-                        ? (resolveAssetUrl(primaryAsset) ?? null)
-                        : null
-                    }
+                    videoSig={resolvePrimaryLocalSig({
+                      sessionSig: videoSigRef.current,
+                      assetLocalSig: primaryAsset?.locator.localSig,
+                      loadedFileSig: videoFile ? fileSig(videoFile) : null,
+                    })}
+                    mainSourceUrl={primarySourceUrl}
                     hasMainSource={Boolean(primaryAsset)}
                     onDeleteAsset={deleteAssetSource}
                     isSrcLive={srcLive}
@@ -10283,7 +10357,13 @@ export function HyperframesWorkbench({
             selectedBlockIds={selectedBlockIds}
             filmstrip={filmstrip}
             clipStrips={clipStrips}
-            mainLive={!!videoFile}
+            mainLive={primarySourceUrl
+              ? sourceRuntimeIsLive(primarySourceUrl, {
+                  primarySourceUrl,
+                  primaryFileLoaded: !!videoFileRef.current,
+                  runtimeFileUrls: clipFilesRef.current,
+                })
+              : !!videoFile}
             srcLive={srcLive}
             pps={pps}
             snapEnabled={timelineSnapEnabled}

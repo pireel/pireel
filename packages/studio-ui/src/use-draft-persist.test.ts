@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyComposition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
-import { createProject, migrateLegacyDraft, renameProject, serverSaveProject } from './use-draft-persist';
+import { sanitizeProjectContext } from '@pireel/studio-engine/project-dto';
+import {
+  cacheProjectLocally,
+  createProject,
+  migrateLegacyDraft,
+  renameProject,
+  serverSaveProject,
+} from './use-draft-persist';
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -88,5 +95,117 @@ describe('local project document persistence', () => {
     expect(requestBody).toMatchObject({ documentSchemaVersion: 2, document: { version: 2 } });
     expect(requestBody).not.toHaveProperty('comp');
     expect(requestBody).not.toHaveProperty('context');
+  });
+
+  it('does not write the unchanged cloud snapshot back after project hydration', async () => {
+    const id = createProject(emptyComposition(), 'Hydrated');
+    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
+    const context = sanitizeProjectContext(null);
+    cacheProjectLocally({
+      id,
+      title: 'Hydrated',
+      document: stored.document,
+      context,
+      videoSig: null,
+      videoDurationSec: null,
+      coverThumb: null,
+      version: 7,
+      updatedAt: Date.now(),
+    });
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const result = await serverSaveProject(id, {
+      // Matches the workbench payload: title is intentionally omitted because this save is not a
+      // rename. Omission must mean "preserve", not hash as null and create a metadata-only PUT.
+      document: stored.document,
+      context,
+      videoSig: null,
+      videoDurationSec: null,
+      coverThumb: null,
+    });
+
+    expect(result).toBe('ok');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not turn an untouched stale timeline into a local edit after a 409 rebase', async () => {
+    const id = createProject(emptyComposition(), 'Conflict-safe');
+    const stored = JSON.parse(storage.getItem(`studio:draft:${id}`)!) as { document: EditorDocumentV2 };
+    const baselineContext = sanitizeProjectContext(null);
+    cacheProjectLocally({
+      id,
+      title: 'Conflict-safe',
+      document: stored.document,
+      context: baselineContext,
+      videoSig: null,
+      videoDurationSec: null,
+      coverThumb: null,
+      version: 3,
+      updatedAt: Date.now(),
+    });
+    const remoteDocument = structuredClone(stored.document);
+    remoteDocument.canvas = { ...remoteDocument.canvas, width: remoteDocument.canvas.width + 1 };
+    const changedContext = sanitizeProjectContext({
+      schemaVersion: 3,
+      localAssets: [{
+        assetId: 'asset-1',
+        contentSig: 'teacher.mov:1:1',
+        sig: 'teacher.mov:1:1',
+        label: 'teacher.mov',
+        createdAt: 1,
+      }],
+    });
+    const requestBodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requestBodies.push(body);
+      if (requestBodies.length === 1) {
+        return new Response(JSON.stringify({
+          error: 'version_conflict',
+          project: {
+            id,
+            title: 'Conflict-safe',
+            document: remoteDocument,
+            context: baselineContext,
+            videoSig: null,
+            videoDurationSec: null,
+            coverThumb: null,
+            version: 4,
+            updatedAt: Date.now(),
+          },
+        }), { status: 409, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        project: {
+          id,
+          title: 'Conflict-safe',
+          document: remoteDocument,
+          context: changedContext,
+          videoSig: null,
+          videoDurationSec: null,
+          coverThumb: null,
+          version: 5,
+          updatedAt: Date.now(),
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const payload = {
+      document: stored.document,
+      context: changedContext,
+      videoSig: null,
+      videoDurationSec: null,
+      coverThumb: null,
+    };
+    await expect(serverSaveProject(id, payload)).resolves.toBe('conflict');
+    await expect(serverSaveProject(id, payload)).resolves.toBe('ok');
+
+    expect(requestBodies).toHaveLength(2);
+    expect(requestBodies[0]).not.toHaveProperty('document');
+    expect(requestBodies[0]).not.toHaveProperty('documentPatch');
+    expect(requestBodies[1]).not.toHaveProperty('document');
+    expect(requestBodies[1]).not.toHaveProperty('documentPatch');
+    expect(requestBodies[1].context ?? requestBodies[1].contextPatch).toBeDefined();
   });
 });

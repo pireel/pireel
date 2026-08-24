@@ -82,6 +82,7 @@ export function normalizeStudioToolInputReferences(
   toolId: string,
   input: Record<string, unknown>,
   localAssets: readonly LocalAssetIndexEntry[],
+  registeredAssetIdByLocalAssetId: ReadonlyMap<string, string> = new Map(),
 ): Record<string, unknown> {
   const normalized = normalizeValue(input, undefined, localAssets) as Record<string, unknown>;
   if (toolId === 'register_media' && Array.isArray(normalized.assets)) {
@@ -115,9 +116,11 @@ export function normalizeStudioToolInputReferences(
       : null;
     const localAsset = fromAssetId ?? fromLocalSig;
     if (localAsset) {
-      normalized.localAssetId = localAsset.assetId;
+      const registeredAssetId = registeredAssetIdByLocalAssetId.get(localAsset.assetId);
+      if (registeredAssetId) normalized.assetId = registeredAssetId;
+      else normalized.localAssetId = localAsset.assetId;
       delete normalized.localSig;
-      delete normalized.assetId;
+      if (!registeredAssetId) delete normalized.assetId;
     }
   }
   return normalized;

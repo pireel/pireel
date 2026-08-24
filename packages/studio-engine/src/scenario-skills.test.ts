@@ -20,6 +20,9 @@ describe('Studio scenario skill registry', () => {
     expect(OSS_STUDIO_DEFAULT_SKILL_ID).toBe('talking-head-edit');
     expect(ossStudioScenarioSkillRegistry.list().map((skill) => skill.id)).toEqual(['talking-head-edit']);
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('Protect the source of truth');
+    expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('For conservative speech cleanup across the full recording');
+    expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('without a whole-film proposal, approval, Director');
+    expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('With several plausible spoken sources');
     expect(ossStudioScenarioSkillCatalog('zh')[0]?.title).toBe('口播剪辑');
     expect(ossStudioScenarioSkillCatalog('en')[0]?.title).toBe('Talking-head edit');
   });

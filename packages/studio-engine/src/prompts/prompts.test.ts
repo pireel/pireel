@@ -59,7 +59,23 @@ describe("静态提示词完整性", () => {
       "The approval card is not a fixed editing-plan form",
     );
     expect(CHAT_IDENTITY).toContain(
-      "Before Approve, do not call set_director_plan, remove_silence",
+      "Outside that cleanup exception, before Approve do not call set_director_plan, remove_silence",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "CONSERVATIVE SPEECH CLEANUP IS A DIRECT EXECUTION SCOPE",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Run it without request_approval, set_director_plan, set_scene_designs, full visual analysis",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Do not block cleanup by asking whether the user wants visual enhancement",
+    );
+    expect(CHAT_IDENTITY).toContain("EMPTY OUTPUT SOURCE RESOLUTION");
+    expect(CHAT_IDENTITY).toContain(
+      "With exactly one compatible video or spoken-audio candidate",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "With several plausible candidates, never add all or choose from filenames",
     );
     expect(CHAT_IDENTITY).toContain("is NOT permission to make one output");
     expect(CHAT_IDENTITY).toContain("each version means one independently editable output/deliverable");
@@ -368,6 +384,16 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "All unqualified edits and @ element references target this active output",
     );
   });
+  it("buildSituation 区分空轨与未切分的单条主视频", () => {
+    const empty = buildSituation({ composition: { durationSec: 0, shots: [] } });
+    expect(empty).toContain("Video shots: (none; the active output is empty)");
+    expect(empty).toContain("call list_assets before concluding that no source exists");
+    expect(empty).not.toContain("single full clip");
+
+    const unsplit = buildSituation({ composition: { durationSec: 10, shots: [] } });
+    expect(unsplit).toContain("Video shots: (single full clip");
+    expect(unsplit).not.toContain("the active output is empty");
+  });
   it("buildSituation 只携带 Director Plan 索引，完整 Markdown 按需读取", () => {
     const s = buildSituation({
       composition: { durationSec: 10 },
@@ -445,6 +471,8 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     ]) {
       expect(STUDIO_TOOLS.some((t) => t.id === id)).toBe(true);
     }
+    expect(STUDIO_TOOLS.find((tool) => tool.id === "list_words")?.description)
+      .toContain("NEVER issue several list_words calls in parallel");
   });
   it("全局 P0 编辑原语在 Chat/MCP 同一契约表里", () => {
     for (const id of [

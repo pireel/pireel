@@ -53,6 +53,14 @@ describe('Studio tool input reference normalization', () => {
     });
   });
 
+  it('keeps a placed local asset on the canonical project path for analysis tools', () => {
+    expect(normalizeStudioToolInputReferences('read_script', {
+      assetId: `local:${assetId}`,
+    }, assets, new Map([[assetId, assetId]]))).toEqual({
+      assetId,
+    });
+  });
+
   it('hydrates a redundant local registration from its stable asset id', () => {
     expect(normalizeStudioToolInputReferences('register_media', {
       assets: [{ id: assetId }],

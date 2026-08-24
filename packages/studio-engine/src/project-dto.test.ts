@@ -124,6 +124,20 @@ describe('V2 incremental save wire', () => {
     expect(buildSaveWire(payload(), 4, first.acked)).toBeNull();
   });
 
+  it('preserves an acknowledged title when a normal workbench save omits title', () => {
+    const current = payload();
+    const acked = ackedFromDto({
+      document: current.document!,
+      context: sanitizeProjectContext(null),
+      coverThumb: current.coverThumb,
+      title: 'Hydrated project',
+      videoSig: current.videoSig,
+      videoDurationSec: current.videoDurationSec,
+    });
+
+    expect(buildSaveWire(current, 7, acked)).toBeNull();
+  });
+
   it('keeps document absent for context-only saves', () => {
     const contextOnly = payload({ document: undefined, context: { schemaVersion: 3 } });
     const first = buildSaveWire(contextOnly, null, null)!;

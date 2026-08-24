@@ -17,7 +17,10 @@ import { resolveInteraction } from './interaction-store';
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
 const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
-const speechMocks = vi.hoisted(() => ({ assessLocalSpeechAudio: vi.fn() }));
+const speechMocks = vi.hoisted(() => ({
+  assessLocalSpeechAudio: vi.fn(),
+  detectSpeechSilenceCuts: vi.fn(),
+}));
 const localMediaMocks = vi.hoisted(() => {
   const loadLocalVideo = vi.fn();
   return {
@@ -42,6 +45,7 @@ vi.mock('./visual', async (importOriginal) => ({
 vi.mock('./speech-silence', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./speech-silence')>()),
   assessLocalSpeechAudio: speechMocks.assessLocalSpeechAudio,
+  detectSpeechSilenceCuts: speechMocks.detectSpeechSilenceCuts,
 }));
 vi.mock('./local-media', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./local-media')>()),
@@ -89,7 +93,17 @@ function harness() {
     compRef.current = runtimeComposition ?? projectDocumentToComposition(document);
   };
   return {
-    ctx: { compRef, documentRef, undoStackRef, redoStackRef, asrRef, clipAsrRef, setDocument } as unknown as AgentToolCtx,
+    ctx: {
+      compRef,
+      documentRef,
+      undoStackRef,
+      redoStackRef,
+      asrRef,
+      clipAsrRef,
+      localTranscriptCacheRef: { current: new Map() },
+      setDocument,
+      pickVideoFile: async () => {},
+    } as unknown as AgentToolCtx,
     compRef,
     documentRef,
     undoStackRef,
@@ -111,8 +125,10 @@ describe('Agent composition transaction boundary', () => {
     visualMocks.analyzeVisual.mockReset();
     visualMocks.analyzeVisualGeometry.mockReset();
     speechMocks.assessLocalSpeechAudio.mockReset();
+    speechMocks.detectSpeechSilenceCuts.mockReset();
     localMediaMocks.loadLocalVideo.mockReset();
-    localMediaMocks.loadLocalAssetFile.mockClear();
+    localMediaMocks.loadLocalAssetFile.mockReset();
+    localMediaMocks.loadLocalAssetFile.mockImplementation(() => localMediaMocks.loadLocalVideo());
     localMediaMocks.loadLocalFolderFile.mockReset();
     localMediaMocks.saveLocalVideo.mockReset();
     vi.unstubAllGlobals();
@@ -197,7 +213,7 @@ describe('Agent composition transaction boundary', () => {
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
     expect(execute).toContain('After Approve, run `remove_silence` first');
     expect(execute).toContain('do not retry it in the same user request');
-    expect(buildChatSystem(null)).toContain('Before Approve, do not call set_director_plan, remove_silence');
+    expect(buildChatSystem(null)).toContain('run remove_silence first when dead-air cleanup is in scope');
     expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
     expect(buildChatSystem(null)).toContain('Build one cross-media evidence map before approval');
     expect(buildChatSystem(null)).toContain('repetition used only to fill uncovered time is a planning failure');
@@ -248,33 +264,90 @@ describe('Agent composition transaction boundary', () => {
 
   it('places a project-library asset in a fresh output without a separate register_media retry', async () => {
     const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const assetId = 'shared-product-video';
     const sig = 'product.mp4:120:8';
-    const prepareLocalAssetRuntime = vi.fn().mockResolvedValue({ ok: true, prepared: true });
+    const video = new File(['full-source-video'], 'product.mp4', { type: 'video/mp4', lastModified: 8 });
+    localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 121.5, width: 1080, height: 1920, hasAudio: true });
+    const prepareLocalAssetRuntime = vi.fn().mockResolvedValue({ ok: true, prepared: true, file: video });
+    const pickVideoFile = vi.fn().mockResolvedValue(undefined);
     Object.assign(h.ctx, {
       localAssetIndexRef: { current: [localEntry(assetId, sig, '商品展示', 'video')] },
       prepareLocalAssetRuntime,
+      pickVideoFile,
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
     });
     if (!('XMLSerializer' in globalThis)) Object.assign(globalThis, { XMLSerializer: class { serializeToString() { return ''; } } });
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'add_clips', {
-      clips: [{ assetId: `local:${assetId}`, startSec: 0, durationSec: 2, role: 'primary' }],
-    });
+      clips: [{ assetId: `local:${assetId}`, startSec: 0, role: 'primary' }],
+    }, { surface: 'chat' });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.summary).toBe('添加片段');
     expect(h.documentRef.current.assets[assetId]).toMatchObject({
       id: assetId,
       kind: 'video',
       locator: { localSig: sig },
+      metadata: { durationSec: 121.5, width: 1080, height: 1920, hasAudio: true },
     });
-    expect(prepareLocalAssetRuntime).toHaveBeenCalledWith(expect.objectContaining({ id: assetId }));
-    expect(
-      h.documentRef.current.timeline.tracks
-        .flatMap((track) => track.clips)
-        .some((clip) => 'assetId' in clip && clip.assetId === assetId),
-    ).toBe(true);
+    expect(h.documentRef.current.canvas).toMatchObject({ width: 1080, height: 1920, configured: true });
+    expect(prepareLocalAssetRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ id: assetId }),
+      { asPrimary: true },
+    );
+    expect(pickVideoFile).toHaveBeenCalledWith(video, {
+      asSig: sig,
+      reconnect: true,
+      successFeedback: 'silent',
+    });
+    expect(h.documentRef.current.timeline.tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => 'assetId' in clip && clip.assetId === assetId))
+      .toMatchObject({ durationFrames: 3645, sourceOutSec: 121.5 });
+  });
+
+  it('mounts the first primary source when several videos are placed together', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
+    const second = new File(['second'], 'second.mov', { type: 'video/quicktime', lastModified: 2 });
+    mediaMocks.probeVideoFile
+      .mockResolvedValueOnce({ durationSec: 4, width: 1080, height: 1920, hasAudio: true })
+      .mockResolvedValueOnce({ durationSec: 4, width: 1920, height: 1080, hasAudio: true });
+    const pickVideoFile = vi.fn().mockResolvedValue(undefined);
+    Object.assign(h.ctx, {
+      localAssetIndexRef: {
+        current: [
+          localEntry('first-video', 'first:sig', '第一段', 'video'),
+          localEntry('second-video', 'second:sig', '第二段', 'video'),
+        ],
+      },
+      prepareLocalAssetRuntime: vi.fn(async (asset: { id: string }) => ({
+        ok: true,
+        prepared: true,
+        file: asset.id === 'first-video' ? first : second,
+      })),
+      pickVideoFile,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'add_clips', {
+      clips: [
+        { assetId: 'local:first-video', role: 'primary', startSec: 0 },
+        { assetId: 'local:second-video', role: 'primary', startSec: 4 },
+      ],
+    });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.semantics.primaryNarrativeAssetId).toBe('first-video');
+    expect(h.documentRef.current.canvas).toMatchObject({ width: 1080, height: 1920 });
+    expect(pickVideoFile).toHaveBeenCalledTimes(1);
+    expect(pickVideoFile).toHaveBeenCalledWith(first, expect.objectContaining({ asSig: 'first:sig' }));
   });
 
   it('lists project-local assets without exposing device storage locators', async () => {
@@ -496,7 +569,167 @@ describe('Agent composition transaction boundary', () => {
       pinned: false,
       binding: { projectId: 'test', assetId },
     });
+    expect(h.ctx.localTranscriptCacheRef.current.get(assetId)).toEqual([
+      { start: 0.2, end: 2.4, text: '先用结果抓住观众' },
+    ]);
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
+  });
+
+  it('reuses an unplaced local transcript after that asset becomes the primary source', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
+    const assetId = 'asset-promoted-speaker';
+    const sig = 'promoted-speaker.mp4:240:12';
+    const video = new File(['video-with-speech'], 'promoted-speaker.mp4', { type: 'video/mp4', lastModified: 12 });
+    const transcript = [{
+      start: 0.2,
+      end: 2.4,
+      text: '先用结果抓住观众',
+      words: [{ start: 0.2, end: 0.6, text: '先' }],
+    }];
+    localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 30, width: 1080, height: 1920, hasAudio: true });
+    providerMocks.transcribe.mockResolvedValue(transcript);
+    const setAsrSentences = vi.fn();
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '待晋升口播', 'video')] },
+      prepareLocalAssetRuntime: vi.fn().mockResolvedValue({ ok: true, prepared: true, file: video }),
+      pickVideoFile: vi.fn().mockResolvedValue(undefined),
+      setAsrSentences,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const read = await runStudioTool(h.ctx, 'read_script', { assetId: localAssetMentionId(assetId) });
+    expect(read.ok, JSON.stringify(read)).toBe(true);
+    const placed = await runStudioTool(h.ctx, 'add_clips', {
+      clips: [{ assetId: localAssetMentionId(assetId), role: 'primary', startSec: 0 }],
+    });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const words = await runStudioTool(h.ctx, 'list_words', { sentenceIndexes: [0] }, { surface: 'chat' });
+
+    expect(words).toMatchObject({ ok: true, summary: '定位精确词语' });
+    expect((words.data as { words: unknown[] }).words).toHaveLength(1);
+    expect(providerMocks.transcribe).toHaveBeenCalledTimes(1);
+    expect(h.ctx.asrRef.current).toEqual(transcript);
+    expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual(transcript);
+    expect(setAsrSentences).toHaveBeenCalledWith(transcript);
+  });
+
+  it('persists transcript state when a placed local video is referenced with its list_assets id', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const assetId = 'asset-placed-speaker';
+    const sig = 'placed-speaker.mp4:240:12';
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: assetId, kind: 'video', localSig: sig, durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'placed-speaker-clip', assetId, role: 'primary', startSec: 0, durationSec: 18 }],
+    });
+    h.ctx.setDocument(placed.document!);
+    const video = new File(['video-with-speech'], 'placed-speaker.mp4', { type: 'video/mp4', lastModified: 12 });
+    localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 18, width: 1080, height: 1920, hasAudio: true });
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 2.4, text: '这段口播必须写回项目' }]);
+    const setAsrSentences = vi.fn();
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '已放置口播', 'video')] },
+      videoFileRef: { current: null },
+      setAsrSentences,
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { assetId, transcript: expect.stringContaining('这段口播必须写回项目') },
+    });
+    expect(localMediaMocks.loadLocalAssetFile).toHaveBeenCalledWith('test', expect.objectContaining({ assetId }));
+    expect(h.documentRef.current.semantics.transcripts[assetId]).toEqual([
+      { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
+    ]);
+    expect(h.ctx.asrRef.current).toEqual([
+      { start: 0.2, end: 2.4, text: '这段口播必须写回项目' },
+    ]);
+    expect(setAsrSentences).toHaveBeenCalled();
+  });
+
+  it('lazily heals the exact legacy five-second primary placeholder after probing the real source', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const assetId = 'asset-legacy-placeholder';
+    const sig = 'legacy-placeholder.mp4:240:12';
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: assetId, kind: 'video', localSig: sig }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'legacy-placeholder-clip', assetId, role: 'primary', startSec: 0 }],
+    });
+    h.ctx.setDocument(placed.document!);
+    expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips)[0])
+      .toMatchObject({ durationFrames: 150, sourceOutSec: 5 });
+    const video = new File(['legacy-video'], 'legacy-placeholder.mp4', { type: 'video/mp4', lastModified: 12 });
+    localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 121.5, width: 1080, height: 1920, hasAudio: true });
+    providerMocks.transcribe.mockResolvedValue([{ start: 0.2, end: 2.4, text: '恢复旧项目的完整口播' }]);
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '旧项目口播', 'video')] },
+      videoFileRef: { current: null },
+      setAsrSentences: vi.fn(),
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'read_script', { assetId: `local:${assetId}` });
+
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(h.documentRef.current.timeline.tracks.flatMap((track) => track.clips)[0])
+      .toMatchObject({ durationFrames: 3645, sourceOutSec: 121.5 });
+    expect(h.documentRef.current.assets[assetId]?.metadata.durationSec).toBe(121.5);
+  });
+
+  it('removes silence from a placed local primary asset without relying on the legacy main-file ref', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const assetId = 'asset-local-primary';
+    const sig = 'local-primary.mp4:240:12';
+    const registered = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [{ id: assetId, kind: 'video', localSig: sig, durationSec: 18, width: 1080, height: 1920, hasAudio: true }],
+    });
+    const placed = runAgentTimelineTool(registered.document!, 'add_clips', {
+      clips: [{ id: 'local-primary-clip', assetId, role: 'primary', startSec: 0, durationSec: 18 }],
+    });
+    h.ctx.setDocument(placed.document!);
+    const video = new File(['video-with-pauses'], 'local-primary.mp4', { type: 'video/mp4', lastModified: 12 });
+    localMediaMocks.loadLocalAssetFile.mockResolvedValue(video);
+    speechMocks.detectSpeechSilenceCuts.mockResolvedValue([{ fromSec: 4, toSec: 6 }]);
+    const videoFileRef = { current: null as File | null };
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry(assetId, sig, '本地口播原片', 'video')] },
+      videoFileRef,
+      setSelectedShotId: vi.fn(),
+      applyT: vi.fn(),
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    const result = await runStudioTool(h.ctx, 'remove_silence', {});
+
+    expect(result).toMatchObject({ ok: true, data: { removedTotalSec: 2 } });
+    expect(localMediaMocks.loadLocalAssetFile).toHaveBeenCalledWith('test', expect.objectContaining({ assetId }));
+    expect(speechMocks.detectSpeechSilenceCuts).toHaveBeenCalledWith(video, expect.any(Object));
+    expect(videoFileRef.current).toBe(video);
   });
 
   it('asks for access restoration instead of timeline placement when an unplaced local source is unavailable', async () => {

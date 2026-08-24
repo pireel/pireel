@@ -27,6 +27,7 @@ import type { TranscriptSegment } from './project-dto';
 import { directorPlanFromDocument } from './director-plan-artifact';
 import { directorPlanToMarkdown } from './director-plan-markdown';
 import { sceneDesignsFromDocument, sceneDesignsToMarkdown } from './scene-design';
+import { canvasSizeFollowingFirstVideo } from './editing-primitives';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'get_timeline',
@@ -544,6 +545,10 @@ export function resizeVisualTimelineClip(
 function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   const items = Array.isArray(input.clips) ? input.clips : [];
   if (!items.length) return fail('clips is required');
+  const hadVideoPlacement = document.timeline.tracks.some((track) => track.clips.some((clip) => {
+    if (clip.kind !== 'narrative' && clip.kind !== 'media') return false;
+    return document.assets[clip.assetId]?.kind === 'video';
+  }));
   const used = new Set(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
@@ -595,6 +600,19 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     }
     receipts.push(inserted.receipt);
     created.push(placement.id);
+  }
+  if (!hadVideoPlacement && !document.canvas.configured) {
+    const sourceCanvas = canvasSizeFollowingFirstVideo(next);
+    if (sourceCanvas) {
+      next = {
+        ...next,
+        canvas: {
+          ...next.canvas,
+          ...sourceCanvas,
+          configured: true,
+        },
+      };
+    }
   }
   const audibleNarration = next.timeline.tracks.flatMap((track) => (
     track.role !== 'narration' || track.muted

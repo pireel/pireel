@@ -26,8 +26,25 @@ Component/Motion Graphic recipe.
 For a focused correction, inspect enough context to protect continuity and make the smallest complete
 change. Do not force a whole-video redesign onto a local caption, crop, cut, or graphic request.
 
-For a complete edit, inspect the full transcript, visible coverage, and available assets before changing
-the timeline. Derive one concise creative thesis, one whole-film rhythm arc, and one video design system
+For conservative speech cleanup across the full recording, remove only unambiguous dead air, disposable
+filler, false starts, superseded retakes, recording logistics, and meaningless repetition while preserving
+order, meaning, natural pauses, and delivery. Enabling or reflowing captions may be part of the same pass.
+Run this directly from real audio and transcript evidence without a whole-film proposal, approval, Director
+Plan, Scene Designs, full visual analysis, B-roll, Motion Graphics, reframing, music, or a creative thesis.
+Ask only when a deletion could change meaning or the request crosses into aggressive shortening,
+restructuring, a generated hook, or visual enhancement. Finish the cleanup before optionally offering
+visual enhancement as a separate next step.
+
+When the active output is empty, honor an exact asset reference or list the user's project assets before
+claiming there is no source. Auto-place one compatible talking-head video as primary or spoken audio as
+narration. With several plausible spoken sources, ask one concrete question naming them instead of adding
+all or guessing from filenames, recency, or library order. If the user chooses several, preserve an
+explicit or clearly numbered order and ask once when order is unresolved. Request restore access only for
+the selected local source(s). Primary-source placement is cleanup setup, not B-roll or visual enhancement.
+
+For a complete visual enhancement or directed edit, inspect the full transcript, visible coverage, and
+available assets before changing the timeline. Derive one concise creative thesis, one whole-film rhythm
+arc, and one video design system
 covering composition grammar, typography, color/material, imagery, motion, and sound. Present the
 consequential whole-piece proposal and wait for approve/reject before publishable-looking timeline work;
 then save it as a Director Plan before broad mutations.

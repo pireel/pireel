@@ -190,7 +190,13 @@ export interface SectionHashes {
 
 /** Diff baseline from the last successful save: values (JSON-clean, the base for patch diffs) + hashes (quick changed-or-not check). */
 export interface AckedSections {
-  values: { document: EditorDocumentV2; context: StudioProjectContext };
+  values: {
+    document: EditorDocumentV2;
+    context: StudioProjectContext;
+    /** Last server-acknowledged title. ProjectSavePayload.title is optional, where omission means
+     * preserve — it must not be hashed as null or hydration emits a fake metadata change. */
+    title?: string;
+  };
   hashes: SectionHashes;
 }
 
@@ -213,6 +219,7 @@ export function ackedFromDto(p: {
     values: {
       document: JSON.parse(documentCanon) as EditorDocumentV2,
       context: JSON.parse(contextCanon) as StudioProjectContext,
+      title: p.title,
     },
     hashes: {
       document: hashSection(documentCanon),
@@ -269,13 +276,18 @@ export function buildSaveWire(
   const documentCanon = document ? canonicalJson(document) : null;
   const context = p.context ? sanitizeProjectContext(p.context) : null;
   const contextCanon = context ? canonicalJson(context) : null;
+  // `title` is a patch field: absent means keep the acknowledged value. Hashing an omitted title
+  // as null made every real workbench hydration (whose payload intentionally omits title) look
+  // like a metadata edit, issuing a no-op PUT that advanced the cloud version and could race the
+  // first timeline mutation.
+  const effectiveTitle = p.title !== undefined ? p.title : acked?.values.title;
   const hashes: SectionHashes = {
     document: documentCanon != null ? hashSection(documentCanon) : (acked?.hashes.document ?? hashSection(canonicalJson(emptyProjectDocument()))),
     context: contextCanon != null
       ? hashSection(contextCanon)
       : (acked?.hashes.context ?? hashSection(canonicalJson(sanitizeProjectContext(null)))),
     coverThumb: hashSection(p.coverThumb ?? ''),
-    meta: metaHashOf(p.title, p.videoSig, p.videoDurationSec),
+    meta: metaHashOf(effectiveTitle, p.videoSig, p.videoDurationSec),
   };
   // JSON-clean current values (parsed from the canonical string: incidentally drops undefined, so diff is structurally comparable to the baseline)
   const values: AckedSections['values'] = {
@@ -283,6 +295,7 @@ export function buildSaveWire(
     context: contextCanon != null
       ? (JSON.parse(contextCanon) as StudioProjectContext)
       : (acked?.values.context ?? sanitizeProjectContext(null)),
+    ...(effectiveTitle !== undefined ? { title: effectiveTitle } : {}),
   };
   const wire: ProjectSaveWire = { documentSchemaVersion: 2, baseVersion };
   const w = wire as unknown as Record<string, unknown>;
