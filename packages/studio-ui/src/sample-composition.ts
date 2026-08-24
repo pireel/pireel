@@ -309,6 +309,19 @@ export const PREVIEW_RUNTIME = `
   //    or an already-applied scale, so it's repeatable and idempotent. *Apply in place once measured* (don't wait for the parent to push back — under double
   //    buffering the parent's push-back target may be the other buffer, dropping the scale on a timing miss → fonts overflow unclamped); the parent only records it into Block.fitScale for export.
   function fpost(m) { m.source = 'hf'; try { parent.postMessage(m, '*'); } catch (e) {} }
+  // hf:pickAt is handled in this control-runtime closure, before the edit bridge below is created.
+  // Keep its DOM walk local too: reaching for the edit bridge's closestComp/post helpers crosses an
+  // IIFE boundary and throws, which previously made selected native media swallow component clicks.
+  function closestSelectableComp(el) {
+    while (el && el !== document.body) {
+      if (el.getAttribute) {
+        var id = el.getAttribute('data-composition-id');
+        if (id && id !== 'root' && id !== 'vid' && !el.hasAttribute('data-hf-visual-clip')) return el;
+      }
+      el = el.parentNode;
+    }
+    return null;
+  }
   // a box block is two-layer (container = crop window + [data-hf-content] content layer): autofit measures/applies on the content layer —
   // the container is overflow:hidden and its transform may be used by the enter animation, so the content layer is the true layout frame
   function fitTarget(el) { return el.querySelector('[data-hf-content]') || el; }
@@ -383,10 +396,10 @@ export const PREVIEW_RUNTIME = `
         var py = Math.max(0, Math.min(1, d.y)) * window.innerHeight;
         var pe = document.elementFromPoint(px, py);
         var pv = pe && pe.closest ? pe.closest('[data-hf-visual-clip]') : null;
-        if (pv) post({ type: 'selectVisual', clipId: pv.getAttribute('data-hf-visual-clip') });
+        if (pv) fpost({ type: 'selectVisual', clipId: pv.getAttribute('data-hf-visual-clip') });
         else {
-          var pc = closestComp(pe);
-          post({ type: 'select', blockId: pc ? pc.getAttribute('data-composition-id') : null });
+          var pc = closestSelectableComp(pe);
+          fpost({ type: 'select', blockId: pc ? pc.getAttribute('data-composition-id') : null });
         }
       } catch (err) {}
     }
