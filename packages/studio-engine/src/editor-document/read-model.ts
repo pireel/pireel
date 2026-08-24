@@ -24,6 +24,17 @@ export interface NarrativeTimelineRange {
   sourceToSec: number;
 }
 
+export interface NarrativeSourceRangeOptions {
+  /**
+   * Snap a mapped semantic passage to a nearby native clip edge. This absorbs the short speech
+   * guard left by an earlier dead-air cut instead of turning it into a standalone flash shot.
+   * Exact word and raw timeline edits should leave this unset.
+  */
+  clipEdgeSnapSec?: number;
+  /** Source-clock speech that must not be swallowed while snapping an adjacent semantic cut. */
+  protectedSourceRanges?: readonly { fromSec: number; toSec: number }[];
+}
+
 export function primaryNarrativeClips(document: EditorDocumentV2): NarrativeTimelineClip[] {
   return (primaryNarrativeTrack(document)?.clips ?? [])
     .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative')
@@ -97,8 +108,18 @@ export function narrativeTimelineRangesForAssetSourceRange(
   assetId: string,
   sourceFromSec: number,
   sourceToSec: number,
+  options: NarrativeSourceRangeOptions = {},
 ): NarrativeTimelineRange[] {
   if (!assetId || !Number.isFinite(sourceFromSec) || !Number.isFinite(sourceToSec) || sourceToSec <= sourceFromSec) return [];
+  const clipEdgeSnapSec = Number.isFinite(options.clipEdgeSnapSec)
+    ? Math.max(0, options.clipEdgeSnapSec ?? 0)
+    : 0;
+  const overlapsProtectedSpeech = (fromSec: number, toSec: number): boolean => (
+    toSec - fromSec > 0.001
+    && (options.protectedSourceRanges ?? []).some((range) => (
+      range.fromSec < toSec - 0.001 && range.toSec > fromSec + 0.001
+    ))
+  );
   return primaryNarrativeClips(document).flatMap((clip) => {
     if (clip.assetId !== assetId) return [];
     const sourceFrom = Math.max(sourceFromSec, clip.sourceInSec);
@@ -108,11 +129,18 @@ export function narrativeTimelineRangesForAssetSourceRange(
     if (sourceDuration <= 0) return [];
     const timelineStart = clip.startFrame / document.canvas.fps;
     const timelineDuration = clip.durationFrames / document.canvas.fps;
+    const timelineEnd = timelineStart + timelineDuration;
+    const mappedFrom = timelineStart + ((sourceFrom - clip.sourceInSec) / sourceDuration) * timelineDuration;
+    const mappedTo = timelineStart + ((sourceTo - clip.sourceInSec) / sourceDuration) * timelineDuration;
+    const snapFrom = mappedFrom - timelineStart <= clipEdgeSnapSec + 1e-6
+      && !overlapsProtectedSpeech(clip.sourceInSec, sourceFrom);
+    const snapTo = timelineEnd - mappedTo <= clipEdgeSnapSec + 1e-6
+      && !overlapsProtectedSpeech(sourceTo, clip.sourceOutSec);
     return [{
       clipId: clip.id,
       assetId,
-      fromSec: timelineStart + ((sourceFrom - clip.sourceInSec) / sourceDuration) * timelineDuration,
-      toSec: timelineStart + ((sourceTo - clip.sourceInSec) / sourceDuration) * timelineDuration,
+      fromSec: snapFrom ? timelineStart : mappedFrom,
+      toSec: snapTo ? timelineEnd : mappedTo,
       sourceFromSec: sourceFrom,
       sourceToSec: sourceTo,
     }];

@@ -1,7 +1,8 @@
 import { joinWords, wordsFromText } from '../caption-fx';
 import type { AsrSegment, TranscriptWord } from '../build-blocks';
 import type { EditorDocumentV2 } from './types';
-import { narrativeTimelineRangesForAssetSourceRange, primaryNarrativeClips } from './read-model';
+import { planNarrationCuts } from './narration-cut-planner';
+import { primaryNarrativeClips } from './read-model';
 
 export interface DocumentAddressedWord extends TranscriptWord {
   id: string;
@@ -113,10 +114,11 @@ export function documentWordRanges(words: readonly DocumentAddressedWord[]): Doc
 }
 
 export function documentWordRangesToTimeline(document: EditorDocumentV2, ranges: readonly DocumentWordRange[]) {
-  return ranges.flatMap((range) => narrativeTimelineRangesForAssetSourceRange(
-    document,
-    range.assetId,
-    range.sourceFromSec,
-    range.sourceToSec,
-  ).map((mapped) => ({ ...range, ...mapped }))).sort((left, right) => right.fromSec - left.fromSec);
+  return ranges.flatMap((range) => planNarrationCuts(document, {
+    assetId: range.assetId,
+    sourceRanges: [{ fromSec: range.sourceFromSec, toSec: range.sourceToSec }],
+    transcriptProtection: 'outside-candidates',
+    clipEdgeSnapSec: 0.5,
+  }).timelineRanges.map((mapped) => ({ ...range, ...mapped })))
+    .sort((left, right) => right.fromSec - left.fromSec);
 }

@@ -18,6 +18,7 @@ export * from './commands/index';
 export * from './caption-transcript-sync';
 export * from './frozen-block-vars';
 export * from './legacy-projection';
+export * from './narration-cut-planner';
 export * from './prune-empty-tracks';
 export * from './prune-unused-assets';
 export * from './read-model';

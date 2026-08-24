@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   applyEditorCommand,
   applyNarrationSplitCommands,
+  documentWordRanges,
+  documentWordRangesToTimeline,
   emptyEditorDocumentV2,
+  listDocumentAddressedWords,
   narrativeTimelineRangesForAssetSourceRange,
   narrativeTrimRangeAtTimelineSecond,
+  planNarrationCuts,
   type EditorDocumentV2,
 } from './editor-document';
 
@@ -28,6 +32,133 @@ describe('V2 clip split commands', () => {
     expect(narrativeTrimRangeAtTimelineSecond(document, 1, 'left')).toBeNull();
     expect(narrativeTimelineRangesForAssetSourceRange(document, 'main', 2, 5)).toMatchObject([
       { clipId: 'talk', fromSec: 3.5, toSec: 6.5, sourceFromSec: 2, sourceToSec: 5 },
+    ]);
+  });
+
+  it('snaps semantic passage cuts to a nearby clip edge so speech padding cannot become a flash shot', () => {
+    const document = documentWithGap();
+    document.timeline.tracks[0]!.clips = [{
+      id: 'retake', kind: 'narrative', assetId: 'main', startFrame: 90, durationFrames: 153,
+      sourceInSec: 67.3, sourceOutSec: 72.4, properties: { treatment: 'full' }, enabled: true,
+    }];
+
+    expect(narrativeTimelineRangesForAssetSourceRange(
+      document,
+      'main',
+      67.484,
+      68.284,
+      { clipEdgeSnapSec: 0.5 },
+    )).toMatchObject([{
+      clipId: 'retake',
+      fromSec: 3,
+      sourceFromSec: 67.484,
+      sourceToSec: 68.284,
+    }]);
+
+    expect(narrativeTimelineRangesForAssetSourceRange(
+      document,
+      'main',
+      67.484,
+      68.284,
+      { clipEdgeSnapSec: 0.5, protectedSourceRanges: [{ fromSec: 67.32, toSec: 67.46 }] },
+    )[0]!.fromSec).toBeCloseTo(3.184, 3);
+  });
+
+  it('absorbs a delete-word edge sliver unless another transcript word occupies it', () => {
+    const document = documentWithGap();
+    document.timeline.tracks[0]!.clips = [{
+      id: 'tail', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 99,
+      sourceInSec: 116.7, sourceOutSec: 120, properties: { treatment: 'full' }, enabled: true,
+    }];
+    document.semantics.transcripts.main = [{
+      start: 116.812,
+      end: 117.372,
+      text: '呃感谢',
+      words: [
+        { text: '呃', start: 116.812, end: 116.972 },
+        { text: '感谢', start: 117.052, end: 117.372 },
+      ],
+    }];
+    const listed = listDocumentAddressedWords(document);
+    expect('error' in listed).toBe(false);
+    if ('error' in listed) return;
+    const filler = listed.words.find((word) => word.text === '呃')!;
+    expect(documentWordRangesToTimeline(document, documentWordRanges([filler]))[0]!.fromSec).toBe(0);
+
+    document.semantics.transcripts.main[0] = {
+      start: 116.72,
+      end: 117.372,
+      text: '好呃感谢',
+      words: [
+        { text: '好', start: 116.72, end: 116.79 },
+        { text: '呃', start: 116.812, end: 116.972 },
+        { text: '感谢', start: 117.052, end: 117.372 },
+      ],
+    };
+    const protectedListed = listDocumentAddressedWords(document);
+    expect('error' in protectedListed).toBe(false);
+    if ('error' in protectedListed) return;
+    const protectedFiller = protectedListed.words.find((word) => word.text === '呃')!;
+    expect(documentWordRangesToTimeline(document, documentWordRanges([protectedFiller]))[0]!.fromSec)
+      .toBeCloseTo(0.112, 3);
+  });
+
+  it('plans transcript-protected silence cleanup through one normalized cut policy', () => {
+    const document = documentWithGap();
+    document.timeline.tracks[0]!.clips = [{
+      id: 'pause', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 240,
+      sourceInSec: 39, sourceOutSec: 47, properties: { treatment: 'full' }, enabled: true,
+    }];
+    document.semantics.transcripts.main = [
+      { start: 39, end: 40.252, text: '还有一个包包', words: [{ text: '包包', start: 39.9, end: 40.252 }] },
+      { start: 45.644, end: 46.2, text: '一个水杯', words: [{ text: '水杯', start: 45.644, end: 46.2 }] },
+    ];
+    const sourceRanges = [
+      { fromSec: 40.252, toSec: 42.5 },
+      { fromSec: 42.874, toSec: 44.4 },
+      { fromSec: 44.741, toSec: 45.644 },
+    ];
+
+    const bridged = planNarrationCuts(document, {
+      assetId: 'main',
+      sourceRanges,
+      transcriptProtection: 'all',
+      bridgeSpeechlessIslandSec: 0.5,
+    });
+    expect(bridged.sourceRanges).toEqual([{ fromSec: 40.252, toSec: 45.644 }]);
+    expect(bridged.timelineRanges[0]!.fromSec).toBeCloseTo(1.252, 3);
+    expect(bridged.timelineRanges[0]!.toSec).toBeCloseTo(6.644, 3);
+
+    const withSpeech = planNarrationCuts(document, {
+      assetId: 'main',
+      sourceRanges,
+      transcriptProtection: 'all',
+      bridgeSpeechlessIslandSec: 0.5,
+      transcriptSegments: [{
+        start: 42.6,
+        end: 42.8,
+        text: '好',
+        words: [{ text: '好', start: 42.6, end: 42.8 }],
+      }],
+    });
+    expect(withSpeech.sourceRanges).toEqual([
+      { fromSec: 40.252, toSec: 42.5 },
+      { fromSec: 42.874, toSec: 45.644 },
+    ]);
+
+    expect(planNarrationCuts(document, {
+      assetId: 'main',
+      sourceRanges: [{ fromSec: 42.5, toSec: 44.4 }],
+      transcriptProtection: 'all',
+      transcriptSegments: [{
+        start: 43,
+        end: 43.2,
+        text: '对',
+        words: [{ text: '对', start: 43, end: 43.2 }],
+      }],
+    }).sourceRanges).toEqual([
+      { fromSec: 42.5, toSec: 43 },
+      { fromSec: 43.2, toSec: 44.4 },
     ]);
   });
 

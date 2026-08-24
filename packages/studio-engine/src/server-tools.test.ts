@@ -504,6 +504,33 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(delta).toBeTruthy();
     expect(delta!.durationSec).toEqual([20, 15]);
   });
+  it('cut_narration:整删一句时吸收紧邻的语音保护片,不留下闪现分镜', () => {
+    const p = v2proj({ transcript: [{
+      start: 7.484,
+      end: 8.284,
+      text: '这是一个贺卡',
+      words: [{ text: '这是一个贺卡', start: 7.484, end: 8.284 }],
+    }] });
+    const primaryTrack = p.document!.timeline.tracks.find((track) => (
+      track.id === p.document!.semantics.primaryNarrativeTrackId
+    ))!;
+    const assetId = p.document!.semantics.primaryNarrativeAssetId!;
+    primaryTrack.clips = [{
+      id: 'retake', kind: 'narrative', assetId, startFrame: 0, durationFrames: 153,
+      sourceInSec: 7.3, sourceOutSec: 12.4, properties: { treatment: 'full' }, enabled: true,
+    }];
+
+    const cut = runServerTool('cut_narration', {
+      // read_script exposes rounded source seconds; the word clock is slightly more precise.
+      ranges: [{ fromSec: 7.5, toSec: 8.3 }],
+    }, p);
+
+    expect(cut.result.ok).toBe(true);
+    expect(cut.comp!.shots).toHaveLength(1);
+    expect(cut.comp!.shots![0]!.srcStart).toBeCloseTo(8.3, 2);
+    expect(cut.comp!.shots![0]!.srcEnd).toBeCloseTo(12.4, 2);
+    expect(cut.comp!.shots!.some((shot) => shot.srcEnd - shot.srcStart <= 0.5)).toBe(false);
+  });
   it('cut_range:V2 命令同步涟漪原生 B-roll 轨，锁轨时整笔拒绝', () => {
     const p = v2proj();
     p.document!.assets.broll = { id: 'broll', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 2 } };

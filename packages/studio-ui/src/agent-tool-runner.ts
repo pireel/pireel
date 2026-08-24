@@ -36,7 +36,7 @@ import {
   applyOverlayDocumentEdits,
   applyNarrationSplitCommands,
   normalizeNarrationSplitPoints,
-  narrativeTimelineRangesForAssetSourceRange,
+  planNarrationCuts,
   applyShotFramingInput,
   applyVideoClipSettingsPatches,
   applyMediaCropInput,
@@ -135,7 +135,11 @@ import { supplementalVisualMedia } from './visual-render-plan';
 import { captionTranscriptsByAsset } from './caption-transcript-bridge';
 import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
-import { assessLocalSpeechAudio, detectSpeechSilenceCuts, resolveSpeechSilenceOptions } from './speech-silence';
+import {
+  assessLocalSpeechAudio,
+  detectSpeechSilenceCuts,
+  resolveSpeechSilenceOptions,
+} from './speech-silence';
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
@@ -2431,16 +2435,17 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               minimumPauseSec: Number(input.minimumPauseSec),
               speechPaddingSec: Number(input.speechPaddingSec),
             });
-            const sourceRanges = await race(detectSpeechSilenceCuts(file, settings));
-            const edited = sourceRanges
-              .flatMap((range) => narrativeTimelineRangesForAssetSourceRange(
-                documentRef.current,
-                assetId,
-                range.fromSec,
-                range.toSec,
-              ).map((mapped) => ({ from: mapped.fromSec, to: mapped.toSec })))
-              .filter((range) => range.to - range.from > 0.05)
-              .sort((left, right) => right.from - left.from);
+            const detectedRanges = await race(detectSpeechSilenceCuts(file, settings));
+            const transcriptRows = asrRef.current ?? [];
+            const plan = planNarrationCuts(documentRef.current, {
+              assetId,
+              sourceRanges: detectedRanges,
+              transcriptSegments: transcriptRows,
+              transcriptProtection: 'all',
+              bridgeSpeechlessIslandSec: 0.5,
+            });
+            const sourceRanges = plan.sourceRanges;
+            const edited = plan.timelineRanges.map((range) => ({ from: range.fromSec, to: range.toSec }));
             if (!edited.length) {
               return {
                 ok: true,
@@ -2477,8 +2482,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
             // Transcript snippet per cut (words fully inside the source range): the receipt list names WHAT
             // each cut removed — a range with no words is dead air, and the list says so instead of quoting air.
+            const transcriptRows = asrRef.current ?? [];
+            const words = transcriptRows.flatMap((s) => s.words ?? []);
             const snippetOf = (from: number, to: number): string | undefined => {
-              const words = (asrRef.current ?? []).flatMap((s) => s.words ?? []);
               const inside = words.filter((w) => w.start >= from - 0.02 && w.end <= to + 0.02).map((w) => w.text.trim());
               if (!inside.length) return undefined;
               const joined = inside.join('');
@@ -2486,15 +2492,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             };
             const assetId = documentRef.current.semantics.primaryNarrativeAssetId;
             if (!assetId) return { ok: false, error: t('workbench.noVideoYet') };
-            const edited = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
-              .flatMap((range) => narrativeTimelineRangesForAssetSourceRange(documentRef.current, assetId, range.from, range.to)
-                .map((mapped) => ({
-                  from: mapped.fromSec,
-                  to: mapped.toSec,
-                  text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec),
-                })))
-              .filter((r) => r.to - r.from > 0.05)
-              .sort((a, b) => b.from - a.from);
+            const tightened = Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges;
+            const plan = planNarrationCuts(documentRef.current, {
+              assetId,
+              sourceRanges: tightened.map((range) => ({ fromSec: range.from, toSec: range.to })),
+              transcriptSegments: transcriptRows,
+              transcriptProtection: 'outside-candidates',
+              clipEdgeSnapSec: 0.5,
+            });
+            const edited = plan.timelineRanges.map((mapped) => ({
+              from: mapped.fromSec,
+              to: mapped.toSec,
+              text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec),
+            }));
             if (!edited.length) return { ok: false, error: t('workbench.rangesEmptyInvalidThose') };
             const seams: CutSeamEntry[] = edited.map((range) => ({
               at: range.from,

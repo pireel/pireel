@@ -30,14 +30,14 @@ export function ossStudioScenarioSkillCatalog(locale: string): readonly OssStudi
     return [{
       id: talkingHead.id,
       title: '口播剪辑',
-      summary: '围绕讲话含义统筹剪辑、节奏、字幕、证据、图形与声音。',
+      summary: '剪掉无效停顿、口头禅、重复、口误和废弃重录，保留自然语气并整理字幕；需要时再做构图、B-roll、动态图形和声音增强。',
       icon: '🎙️',
     }];
   }
   return [{
     id: talkingHead.id,
     title: 'Talking-head edit',
-    summary: 'Shape spoken meaning through editing, pacing, captions, evidence, graphics, and sound.',
+    summary: 'Remove dead air, filler, repeats, mistakes, and discarded retakes while preserving natural delivery and captions; add reframing, B-roll, Motion Graphics, and sound only when needed.',
     icon: '🎙️',
   }];
 }

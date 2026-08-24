@@ -23,8 +23,11 @@ describe('Studio scenario skill registry', () => {
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('For conservative speech cleanup across the full recording');
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('without a whole-film proposal, approval, Director');
     expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.markdown).toContain('With several plausible spoken sources');
+    expect(ossStudioScenarioSkillRegistry.get('talking-head-edit')?.description).toContain('remove dead air, filler words, false starts, repeated lines, and discarded retakes');
     expect(ossStudioScenarioSkillCatalog('zh')[0]?.title).toBe('口播剪辑');
+    expect(ossStudioScenarioSkillCatalog('zh')[0]?.summary).toBe('剪掉无效停顿、口头禅、重复、口误和废弃重录，保留自然语气并整理字幕；需要时再做构图、B-roll、动态图形和声音增强。');
     expect(ossStudioScenarioSkillCatalog('en')[0]?.title).toBe('Talking-head edit');
+    expect(ossStudioScenarioSkillCatalog('en')[0]?.summary).toContain('add reframing, B-roll, Motion Graphics, and sound only when needed');
   });
 
   it('loads arbitrary host-defined Markdown playbooks and rejects duplicates', () => {

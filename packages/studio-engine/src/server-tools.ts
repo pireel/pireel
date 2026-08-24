@@ -78,7 +78,7 @@ import {
   getCaptionPreset,
   hasPrimaryNarrativeClips,
   narrativeClipTimelineRange,
-  narrativeTimelineRangesForAssetSourceRange,
+  planNarrationCuts,
   narrativeTrimRangeAtTimelineSecond,
   primaryNarrativeClips,
   listDocumentAddressedWords,
@@ -1080,7 +1080,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           })
           .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
         // Transcript snippet per cut: the receipt list names what each cut removed (no words = dead air)
-        const words = mainTranscriptOf(p).flatMap((s) => s.words ?? []);
+        const transcriptRows = mainTranscriptOf(p);
+        const words = transcriptRows.flatMap((s) => s.words ?? []);
         const snippetOf = (from: number, to: number): string | undefined => {
           const inside = words.filter((w) => w.start >= from - 0.02 && w.end <= to + 0.02).map((w) => w.text.trim());
           if (!inside.length) return undefined;
@@ -1089,11 +1090,19 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         };
         const assetId = p.document.semantics.primaryNarrativeAssetId;
         if (!assetId) return { result: { ok: false, error: 'primary narrative asset is missing' } };
-        ranges = (Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges)
-          .flatMap((r) => narrativeTimelineRangesForAssetSourceRange(p.document!, assetId, r.from, r.to)
-            .map((mapped) => ({ from: mapped.fromSec, to: mapped.toSec, text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec) })))
-          .filter((range) => range.to - range.from > 0.05)
-          .sort((a, b) => b.from - a.from);
+        const tightened = Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges;
+        const plan = planNarrationCuts(p.document, {
+          assetId,
+          sourceRanges: tightened.map((range) => ({ fromSec: range.from, toSec: range.to })),
+          transcriptSegments: transcriptRows,
+          transcriptProtection: 'outside-candidates',
+          clipEdgeSnapSec: 0.5,
+        });
+        ranges = plan.timelineRanges.map((mapped) => ({
+          from: mapped.fromSec,
+          to: mapped.toSec,
+          text: snippetOf(mapped.sourceFromSec, mapped.sourceToSec),
+        }));
       } else {
         const from = Number(input.fromSec);
         const to = Number(input.toSec);

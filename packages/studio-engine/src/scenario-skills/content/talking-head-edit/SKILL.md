@@ -1,6 +1,6 @@
 ---
 name: talking-head-edit
-description: Edit interviews, lessons, commentary, podcasts, and direct-to-camera recordings when spoken meaning is the narrative spine. Use for whole-video polish, speech cleanup, pacing, captions, reframing, evidence, explanatory graphics, sound, or a focused revision to a speech-led video.
+description: Edit interviews, lessons, commentary, podcasts, and direct-to-camera recordings built around speech. Use it to remove dead air, filler words, false starts, repeated lines, and discarded retakes while preserving natural delivery and keeping captions aligned. When the user asks for visual enhancement, also use it for reframing, B-roll, Motion Graphics, music, and sound design.
 ---
 
 # Talking-head edit
