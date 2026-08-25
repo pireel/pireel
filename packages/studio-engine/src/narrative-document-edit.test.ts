@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument } from './project-document';
-import { addNarrativeDocumentClip, moveNarrativeDocumentClip, moveNarrativeDocumentClipToVisualTrack, reorderNarrativeDocumentClips } from './narrative-document-edit';
+import {
+  addNarrativeDocumentClip,
+  insertNarrativeAssetRange,
+  moveNarrativeDocumentClip,
+  moveNarrativeDocumentClipToVisualTrack,
+  reorderNarrativeDocumentClips,
+} from './narrative-document-edit';
 
 function emptyDocument() {
   return compositionToEditorDocument({ projectId: 'narrative-structure', composition: emptyComposition() }).document;
@@ -52,6 +58,49 @@ describe('native narrative structure edits', () => {
       { id: 'b', startFrame: 30, durationFrames: 90 },
       { id: 'a', startFrame: 150, durationFrames: 60 },
     ]);
+  });
+
+  it('restores a chat-cut source gap into one continuous native clip', () => {
+    const document = emptyDocument();
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/video.mp4' }, metadata: { durationSec: 10 },
+    };
+    document.semantics.primaryNarrativeAssetId = 'video';
+    const track = document.timeline.tracks.find((candidate) => candidate.role === 'primaryNarrative')!;
+    track.clips = [
+      { id: 'talk', kind: 'narrative', assetId: 'video', startFrame: 0, durationFrames: 60, enabled: true, sourceInSec: 0, sourceOutSec: 2, properties: { treatment: 'full' } },
+      { id: 'talk~split-90', kind: 'narrative', assetId: 'video', startFrame: 60, durationFrames: 210, enabled: true, sourceInSec: 3, sourceOutSec: 10, properties: { treatment: 'full' } },
+    ];
+    document.semantics.scenes = [{ id: 'scene', clipIds: ['talk', 'talk~split-90'] }];
+    document.timeline.tracks.push({
+      id: 'graphics', type: 'graphics', role: 'graphics', muted: false, hidden: false, locked: false,
+      syncLocked: true, stackOrder: 2, clips: [{
+        id: 'label', kind: 'graphic', startFrame: 75, durationFrames: 30, enabled: true,
+        anchor: { type: 'clip', clipId: 'talk~split-90', offsetFrames: 15 },
+        block: { templateId: 'custom', slots: {} },
+      }],
+    });
+
+    const restored = insertNarrativeAssetRange({
+      document,
+      assetId: 'video',
+      clipId: 'restored-word',
+      atSec: 2,
+      sourceInSec: 2,
+      sourceOutSec: 3,
+      properties: { treatment: 'full' },
+      coalesceAdjacent: true,
+    });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.document.timeline.tracks.find((candidate) => candidate.id === track.id)?.clips).toMatchObject([{
+      id: 'talk', startFrame: 0, durationFrames: 300, sourceInSec: 0, sourceOutSec: 10,
+    }]);
+    expect(restored.document.semantics.scenes[0]?.clipIds).toEqual(['talk']);
+    expect(restored.document.timeline.tracks.find((candidate) => candidate.id === 'graphics')?.clips[0]).toMatchObject({
+      startFrame: 105,
+      anchor: { type: 'clip', clipId: 'talk', offsetFrames: 105 },
+    });
   });
 
   it('moves a primary clip to exact time and overwrites only the primary destination', () => {

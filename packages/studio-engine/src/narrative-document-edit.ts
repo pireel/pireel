@@ -1,6 +1,7 @@
 /** Native primary-narrative insertion and ordering transactions. */
 
 import type { VideoShot } from './composition-core';
+import { atomicMediaFramingFromTreatment } from './composition-core';
 import {
   applyEditorCommand,
   isVisualEditorTrack,
@@ -45,6 +46,10 @@ export interface InsertNarrativeAssetRangeInput {
   sourceInSec: number;
   sourceOutSec: number;
   properties: NarrativeProperties;
+  box?: NarrativeTimelineClip['box'];
+  mediaFraming?: NarrativeTimelineClip['mediaFraming'];
+  /** Restore-only: fold the inserted source gap back into compatible source-contiguous neighbours. */
+  coalesceAdjacent?: boolean;
 }
 
 export interface MoveNarrativeDocumentClipInput {
@@ -87,6 +92,126 @@ function existingAsset(document: EditorDocumentV2, shot: VideoShot): EditorMedia
     (shot.srcSig && asset.locator.localSig === shot.srcSig)
     || (shot.src && !/^(?:blob|data):/i.test(shot.src) && asset.locator.remoteUrl === shot.src)
   ));
+}
+
+function presentationKey(clip: NarrativeTimelineClip): string {
+  const { transIn: _boundaryTransition, ...properties } = clip.properties;
+  const mediaFraming = clip.mediaFraming ?? atomicMediaFramingFromTreatment(
+    clip.properties.treatment ?? 'full',
+    clip.properties.treatSize,
+    clip.properties.treatCrop,
+    clip.properties.preciseFraming,
+  );
+  return JSON.stringify({
+    enabled: clip.enabled,
+    linkGroupId: clip.linkGroupId,
+    box: clip.box,
+    mediaFraming,
+    properties,
+  });
+}
+
+function coalesceRestoredNarrativeClip(
+  document: EditorDocumentV2,
+  insertedClipId: string,
+): { document: EditorDocumentV2; clipId: string; removedClipIds: string[] } {
+  const trackIndex = document.timeline.tracks.findIndex((track) => track.id === document.semantics.primaryNarrativeTrackId);
+  if (trackIndex < 0) return { document, clipId: insertedClipId, removedClipIds: [] };
+  const track = document.timeline.tracks[trackIndex]!;
+  let clips = track.clips
+    .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative')
+    .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id));
+  if (!clips.some((clip) => clip.id === insertedClipId)) return { document, clipId: insertedClipId, removedClipIds: [] };
+  let activeId = insertedClipId;
+  const replacements = new Map<string, { clipId: string; offsetFrames: number }>();
+  const canMerge = (left: NarrativeTimelineClip, right: NarrativeTimelineClip): boolean => (
+    left.startFrame + left.durationFrames === right.startFrame
+    && left.assetId === right.assetId
+    && Math.abs(left.sourceOutSec - right.sourceInSec) < 0.03
+    && presentationKey(left) === presentationKey(right)
+  );
+  const mergeAt = (index: number) => {
+    const left = clips[index]!;
+    const right = clips[index + 1]!;
+    const merged: NarrativeTimelineClip = {
+      ...left,
+      durationFrames: left.durationFrames + right.durationFrames,
+      sourceOutSec: right.sourceOutSec,
+    };
+    replacements.set(right.id, { clipId: left.id, offsetFrames: right.startFrame - left.startFrame });
+    if (activeId === right.id) activeId = left.id;
+    clips = [...clips.slice(0, index), merged, ...clips.slice(index + 2)];
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const activeIndex = clips.findIndex((clip) => clip.id === activeId);
+    if (activeIndex > 0 && canMerge(clips[activeIndex - 1]!, clips[activeIndex]!)) {
+      mergeAt(activeIndex - 1);
+      changed = true;
+      continue;
+    }
+    if (activeIndex >= 0 && activeIndex < clips.length - 1 && canMerge(clips[activeIndex]!, clips[activeIndex + 1]!)) {
+      mergeAt(activeIndex);
+      changed = true;
+    }
+  }
+  if (!replacements.size) return { document, clipId: insertedClipId, removedClipIds: [] };
+  const resolveReplacement = (clipId: string): { clipId: string; offsetFrames: number } => {
+    let resolvedId = clipId;
+    let offsetFrames = 0;
+    const seen = new Set<string>();
+    while (replacements.has(resolvedId) && !seen.has(resolvedId)) {
+      seen.add(resolvedId);
+      const replacement = replacements.get(resolvedId)!;
+      resolvedId = replacement.clipId;
+      offsetFrames += replacement.offsetFrames;
+    }
+    return { clipId: resolvedId, offsetFrames };
+  };
+  const tracks = document.timeline.tracks.map((candidate, index) => {
+    if (index === trackIndex) return { ...candidate, clips };
+    return {
+      ...candidate,
+      clips: candidate.clips.map((clip) => {
+        if (!('anchor' in clip) || clip.anchor.type !== 'clip') return clip;
+        const replacement = resolveReplacement(clip.anchor.clipId);
+        if (replacement.clipId === clip.anchor.clipId) return clip;
+        return {
+          ...clip,
+          anchor: {
+            ...clip.anchor,
+            clipId: replacement.clipId,
+            offsetFrames: clip.anchor.offsetFrames + replacement.offsetFrames,
+          },
+        };
+      }),
+    };
+  });
+  const scenes = document.semantics.scenes.map((scene) => {
+    const clipIds: string[] = [];
+    for (const id of scene.clipIds) {
+      const resolved = resolveReplacement(id).clipId;
+      if (!clipIds.includes(resolved)) clipIds.push(resolved);
+    }
+    return clipIds.length === scene.clipIds.length && clipIds.every((id, index) => id === scene.clipIds[index])
+      ? scene
+      : { ...scene, clipIds };
+  });
+  const captionSource = document.semantics.managedCaptionSource;
+  const managedCaptionSource = captionSource?.mode === 'clip'
+    ? { ...captionSource, clipId: resolveReplacement(captionSource.clipId).clipId }
+    : captionSource;
+  const next: EditorDocumentV2 = {
+    ...document,
+    timeline: { ...document.timeline, tracks },
+    semantics: { ...document.semantics, scenes, ...(managedCaptionSource ? { managedCaptionSource } : {}) },
+  };
+  return {
+    document: next,
+    clipId: resolveReplacement(activeId).clipId,
+    removedClipIds: [...replacements.keys()],
+  };
 }
 
 function narrativeProperties(shot: VideoShot): NarrativeTimelineClip['properties'] {
@@ -190,13 +315,29 @@ export function insertNarrativeAssetRange(input: InsertNarrativeAssetRangeInput)
       enabled: true,
       sourceInSec: input.sourceInSec,
       sourceOutSec: input.sourceOutSec,
+      ...(input.box ? { box: input.box } : {}),
+      ...(input.mediaFraming ? { mediaFraming: input.mediaFraming } : {}),
       properties: input.properties,
     },
   });
   if (!inserted.ok) return { ok: false, document: input.document, error: inserted.error };
-  const captions = applyEditorCommand(inserted.document, { type: 'captions.relay' });
+  const coalesced = input.coalesceAdjacent
+    ? coalesceRestoredNarrativeClip(inserted.document, input.clipId)
+    : { document: inserted.document, clipId: input.clipId, removedClipIds: [] };
+  const issue = validateEditorDocumentV2(coalesced.document).find((candidate) => candidate.severity === 'error');
+  if (issue) return failure(input.document, 'invalid-command', issue.message, issue.path);
+  const captions = applyEditorCommand(coalesced.document, { type: 'captions.relay' });
   if (!captions.ok) return { ok: false, document: input.document, error: captions.error };
-  return { ok: true, document: captions.document, receipts: [inserted.receipt, captions.receipt], clipId: input.clipId, assetId: input.assetId };
+  return {
+    ok: true,
+    document: captions.document,
+    receipts: [{
+      ...inserted.receipt,
+      removedClipIds: [...new Set([...inserted.receipt.removedClipIds, ...coalesced.removedClipIds])],
+    }, captions.receipt],
+    clipId: coalesced.clipId,
+    assetId: input.assetId,
+  };
 }
 
 /** Reorder stable narrative identities and relay managed captions atomically. */

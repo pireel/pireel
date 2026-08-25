@@ -12,6 +12,7 @@ import { toast } from '@pireel/ui/toast';
 import {
   type Composition,
   type EditorDocumentV2,
+  type NarrativeTimelineClip,
   type VideoShot,
   applyEditorCommand,
   applyCaptionDocumentEdit,
@@ -180,7 +181,9 @@ export function useScriptCut(deps: ScriptCutDeps) {
       if (src && !before.some(inSrc)) continue;
       const sourceShot = src ? before.find((candidate) => candidate.src === src) : before.find((candidate) => !candidate.src);
       const sourceClip = sourceShot
-        ? document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === sourceShot.id && clip.kind === 'narrative')
+        ? document.timeline.tracks.flatMap((track) => track.clips).find((clip): clip is NarrativeTimelineClip => (
+          clip.id === sourceShot.id && clip.kind === 'narrative'
+        ))
         : undefined;
       const assetId = sourceClip?.kind === 'narrative' ? sourceClip.assetId : src == null ? document.semantics.primaryNarrativeAssetId : undefined;
       if (!assetId) continue;
@@ -207,6 +210,14 @@ export function useScriptCut(deps: ScriptCutDeps) {
       ))) {
         const at = spans.find((span) => span.clip.id === inserted.id)?.editedStart;
         if (at == null) continue;
+        const primaryTrack = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+        const adjacent = primaryTrack?.clips
+          .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative' && clip.assetId === assetId)
+          .find((clip) => Math.abs(clip.sourceOutSec - inserted.srcStart) < 0.03)
+          ?? primaryTrack?.clips
+            .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative' && clip.assetId === assetId)
+            .find((clip) => Math.abs(clip.sourceInSec - inserted.srcEnd) < 0.03);
+        const presentation = adjacent ?? sourceClip;
         const edit = insertNarrativeAssetRange({
           document,
           assetId,
@@ -214,7 +225,10 @@ export function useScriptCut(deps: ScriptCutDeps) {
           atSec: at,
           sourceInSec: inserted.srcStart,
           sourceOutSec: inserted.srcEnd,
-          properties: { treatment: 'full' },
+          properties: presentation?.properties ?? { treatment: 'full' },
+          ...(presentation?.box ? { box: presentation.box } : {}),
+          ...(presentation?.mediaFraming ? { mediaFraming: presentation.mediaFraming } : {}),
+          coalesceAdjacent: true,
         });
         if (!edit.ok) {
           toast.error(editorErrorMessage(edit.error));
