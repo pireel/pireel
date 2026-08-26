@@ -17,7 +17,7 @@ import {
   isCaptionsOn,
   isSentenceCaption,
   resolveCaptionStyle,
-  primaryNarrativeAsset,
+  primaryNarrativeClips,
   totalDuration,
 } from '@pireel/studio-engine/composition';
 import { narrationRowMarks, spans as clipSpans } from '@pireel/studio-engine/trim';
@@ -138,8 +138,7 @@ export function useAgentContext(deps: AgentContextDeps) {
           durationSec: b.durationSec,
           ...(b.box ? { box: b.box } : {}),
         })),
-        // Each shot carries its final-cut span (the addressing clock for cut_range/split/trim/add_block) + an insert-source short tag
-        // (same insert source = same letter, so two different external clips are distinguishable; the main source isn't tagged) — fixes "the agent cuts using source seconds as if they were final-cut seconds"
+        // Every shot carries its final-cut span plus a short tag for its own source clock.
         shots: (() => {
           const tag = new Map<string, string>();
           for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
@@ -196,16 +195,12 @@ export function useAgentContext(deps: AgentContextDeps) {
             },
           }
         : {}),
-      // Main-video byte-mount state: the project should have a video (has shots / has sig) but bytes aren't ready → tell the agent explicitly
-      // (a handoff-just-opened tab is often in the OPFS miss → cloud fetch window; the data plane is complete)
-      ...((videoSigRef.current || (c.shots ?? []).length) && !videoFileRef.current ? { videoBytesReady: false } : {}),
       // Credits guardrail: boolean visibility only (never the balance number). null = unknown (no backend / fetch failed) → line omitted
       ...(canGenerateRef.current != null ? { canGenerate: canGenerateRef.current } : {}),
     };
   }, []);
 
-  /** Narration script → text fed to the agent: all main-source sentences + one section per insert source (each in its own
-   *  source-file seconds, annotated with the owning shot id). Machine-facing English; returned by read_script. */
+  /** Narrative scripts grouped by equal-standing source, each in its own source-file clock. */
   const transcriptForAgent = (): string => {
     const rd = (x: number) => Math.round(x * 10) / 10;
     const copy = (s: AsrSegment) => s.captionText && s.captionText !== s.text
@@ -213,38 +208,28 @@ export function useAgentContext(deps: AgentContextDeps) {
       : s.text;
     const row = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${copy(s)}`;
     const parts: string[] = [];
-    const main = asrRef.current ?? [];
-    // Derived CURRENT truth, not the source table: rows carry their edit state (removed/partly cut,
-    // dead-air notes with tightened status) so a post-cut re-read shows what the editor shows.
-    const marks = narrationRowMarks(
-      main,
-      compRef.current.shots ?? [],
-      (c: { src?: string }) => !c.src,
-      primaryNarrativeAsset(documentRef.current)?.metadata.durationSec,
-    );
-    const mainRow = (s: AsrSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${copy(s)}${marks.rows[i]!.gapNote}`;
-    const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
-    if (main.length || primaryNarrativeAsset(documentRef.current)) {
-      parts.push(
-        `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,
-      );
-    }
     const bySrc = new Map<string, string[]>();
     for (const s of compRef.current.shots ?? []) {
       if (!s.src) continue;
       bySrc.set(s.src, [...(bySrc.get(s.src) ?? []), s.id]);
     }
+    const document = documentRef.current;
+    const assetIdByClipId = new Map(primaryNarrativeClips(document).map((clip) => [clip.id, clip.assetId]));
     for (const [src, ids] of bySrc) {
-      const segs = clipAsrRef.current[src];
-      const head = `INSERTED CLIP for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its OWN source seconds; does not map to the narration clock)`;
+      const assetId = ids.map((id) => assetIdByClipId.get(id)).find(Boolean);
+      const segs = clipAsrRef.current[src] ?? (assetId ? document.semantics.transcripts[assetId] as AsrSegment[] | undefined : undefined);
+      const sourceShots = (compRef.current.shots ?? []).filter((shot) => ids.includes(shot.id));
+      const marks = narrationRowMarks(segs ?? [], sourceShots, () => true, assetId ? document.assets[assetId]?.metadata.durationSec : undefined);
+      const markedRow = (segment: AsrSegment, index: number) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${marks.rows[index]!.prefix}${copy(segment)}${marks.rows[index]!.gapNote}`;
+      const lines = [...(marks.head ? [`  ${marks.head}`] : []), ...(segs ?? []).map(markedRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
+      const head = `NARRATIVE SOURCE for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its own source seconds)`;
       if (!segs) parts.push(`${head}: (no transcript — transcription unavailable for this clip)`);
       else if (!segs.length) parts.push(`${head}: (no speech detected)`);
-      else parts.push(`${head}:\n${segs.map(row).join('\n')}`);
+      else parts.push(`${head}:\n${lines.join('\n')}`);
     }
     // Generated/imported narration may be an audio-only lane. Its exact script is stored on the
     // canonical asset at registration time; a later targeted ASR replaces those estimated rows
     // with measured audio timing. Expose either form through the same read_script surface.
-    const document = documentRef.current;
     const audioByAsset = new Map<string, string[]>();
     for (const track of document.timeline.tracks) {
       if (track.type !== 'audio') continue;

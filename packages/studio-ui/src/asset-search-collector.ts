@@ -15,6 +15,8 @@ interface MaterialItem {
   kind: 'image' | 'video' | 'audio';
   width: number | null;
   height: number | null;
+  description?: string | null;
+  source_url?: string | null;
   created_at: number;
 }
 
@@ -72,6 +74,7 @@ export async function collectAssetSearchDocuments(
       label: item.label || item.id,
       createdAt: item.created_at,
       ...(validDims(item.width, item.height) ? { dimensions: validDims(item.width, item.height) } : {}),
+      ...((item.description || item.source_url) ? { fields: { ...(item.description ? { description: item.description } : {}), ...(item.source_url ? { source: item.source_url } : {}) } } : {}),
       availability: 'ready',
       locator: { url: imageThumb(item.url, 'original'), ...(item.thumb_url ? { thumbUrl: item.thumb_url } : {}) },
     });

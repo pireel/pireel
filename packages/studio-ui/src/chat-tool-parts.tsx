@@ -210,6 +210,12 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   if (id === 'ask_user') return <div key={key}><AskUserCard part={part} /></div>;
   // request_approval: model-authored proposal, host-owned generic Reject / Approve boundary
   if (id === 'request_approval') return <div key={key}><ApprovalCard part={part} /></div>;
+  // Charge-bearing Foley/TTS tools park on the same host-owned approval channel after quoting.
+  // While active, render the parked payload rather than an invisible generic busy card.
+  if ((id === 'generate_foley' || id === 'generate_speech')
+    && (part.state === 'input-available' || part.state === 'input-streaming')) {
+    return <div key={key}><ApprovalCard part={part} /></div>;
+  }
   // export_video: parks on a one-click card with adaptive specs, then shows the started confirmation
   if (id === 'export_video' && part.state !== 'output-error') return <div key={key}><ExportSettingsCard part={part} /></div>;
   // Narration cuts get their own receipt: a per-cut list with click-to-seek, not one collapsed line

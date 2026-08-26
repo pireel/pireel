@@ -62,10 +62,10 @@ describe('project media segment search', () => {
   });
 
   it('finds Chinese transcript meaning by local n-grams and returns source + edited clocks', () => {
-    const out = searchProjectMedia(project(), { query: '产品验证', scope: 'main' });
+    const out = searchProjectMedia(project(), { query: '产品验证', scope: 'narrative' });
     if ('error' in out) throw new Error(out.error);
     expect(out.results[0]).toMatchObject({
-      assetId: 'p1:main',
+      assetId: 'p1:source_legacy',
       sourceStartSec: 8,
       sourceEndSec: 13,
       transcript: '然后验证产品是否真正解决问题。',
@@ -75,7 +75,7 @@ describe('project media segment search', () => {
   });
 
   it('uses deterministic visual aliases without sending frames to a cloud model', () => {
-    const out = searchProjectMedia(project(), { query: '产品界面图表', scope: 'main' });
+    const out = searchProjectMedia(project(), { query: '产品界面图表', scope: 'narrative' });
     if ('error' in out) throw new Error(out.error);
     expect(out.results[0]!.visual?.join(' ')).toContain('screen');
     expect(out.results[0]!.matchedSignals).toContain('visual');
@@ -83,10 +83,10 @@ describe('project media segment search', () => {
   });
 
   it('narrows to an inserted source by scope or shot and keeps ids stable across timeline edits', () => {
-    const scoped = searchProjectMedia(project(), { query: '咖啡', scope: 'inserted' });
+    const scoped = searchProjectMedia(project(), { query: '咖啡', scope: 'narrative' });
     const byShot = searchProjectMedia(project(), { query: '咖啡', shotId: 'b1' });
     if ('error' in scoped || 'error' in byShot) throw new Error('unexpected search error');
-    expect(scoped.results[0]!.source).toMatchObject({ kind: 'inserted', shotIds: ['b1'] });
+    expect(scoped.results[0]!.source).toMatchObject({ kind: 'narrative', shotIds: ['b1'] });
     expect(byShot.results[0]!.segmentId).toBe(scoped.results[0]!.segmentId);
 
     const edited = project([
@@ -94,7 +94,7 @@ describe('project media segment search', () => {
       { id: 'new-clip', src: 'blob:clip-session-2', srcSig: 'clip-stable-sig', srcStart: 0, srcEnd: 7, treatment: 'full' },
     ]);
     edited.clipTranscripts = { 'blob:clip-session-2': project().clipTranscripts['blob:clip-session']! };
-    const after = searchProjectMedia(edited, { query: '咖啡', scope: 'inserted' });
+    const after = searchProjectMedia(edited, { query: '咖啡', scope: 'narrative' });
     if ('error' in after) throw new Error(after.error);
     expect(after.results[0]!.segmentId).toBe(scoped.results[0]!.segmentId);
     expect(after.results[0]!.source.shotIds).toEqual(['new-clip']);
@@ -116,7 +116,7 @@ describe('project media segment search', () => {
   it('rejects invalid queries and unknown shot filters explicitly', () => {
     expect(searchProjectMedia(project(), { query: '' })).toEqual({ error: 'query is required' });
     expect(searchProjectMedia(project(), { query: 'x', shotId: 'missing' })).toEqual({ error: 'shot not found' });
-    const weak = searchProjectMedia(project(), { query: '咖房', scope: 'inserted' });
+    const weak = searchProjectMedia(project(), { query: '咖房', scope: 'narrative' });
     if ('error' in weak) throw new Error(weak.error);
     expect(weak.results).toEqual([]); // one shared character is not a semantic match
   });

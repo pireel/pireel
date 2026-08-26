@@ -160,7 +160,7 @@ export function MediaAnimPanel({
   const exit = anim.exit ?? 'none';
   const dur = anim.dur ?? 0.5;
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div data-block-selection-keep className="flex h-full min-h-0 w-full flex-col">
       {/* Title/close live in the popover header; only a one-line note remains here */}
       <div className="border-line text-ink-4 border-b px-3 py-1.5 text-[10.5px]">{t('panels.appliesSelectedImageVideo')}</div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3 text-[11.5px]">

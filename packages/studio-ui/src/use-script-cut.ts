@@ -21,6 +21,7 @@ import {
   shotId,
   timelineSpeechRangesForAsset,
   timelineTranscriptionTargets,
+  firstNarrativeAssetId,
 } from '@pireel/studio-engine/composition';
 import { removeSrcRanges, restoreSrcRange, spans as clipSpans } from '@pireel/studio-engine/trim';
 import { wordsFromText } from '@pireel/studio-engine/caption-fx';
@@ -185,7 +186,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
           clip.id === sourceShot.id && clip.kind === 'narrative'
         ))
         : undefined;
-      const assetId = sourceClip?.kind === 'narrative' ? sourceClip.assetId : src == null ? document.semantics.primaryNarrativeAssetId : undefined;
+      const assetId = sourceClip?.kind === 'narrative' ? sourceClip.assetId : src == null ? firstNarrativeAssetId(document) : undefined;
       if (!assetId) continue;
       const generated: VideoShot[] = [];
       shots = restoreSrcRange(
@@ -315,7 +316,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
       toast.error(editorErrorMessage(captions.error));
       return;
     }
-    if (assetId === current.semantics.primaryNarrativeAssetId) {
+    if (assetId === firstNarrativeAssetId(current)) {
       asrRef.current = nextSegments;
       setAsrSentences(nextSegments);
     }

@@ -180,7 +180,7 @@ describe('Agent composition transaction boundary', () => {
     const pending = runStudioTool(h.ctx, 'ask_user', {
       question: '选择声音',
       options: [
-        { label: '带货女声', description: '直接、有活力', value: 'voice-commerce', previewUrl: '/voice-previews/commerce.mp3' },
+        { label: '带货女声', description: '直接、有活力', value: 'voice-commerce', previewUrl: '/api/studio/voice-preview?voiceId=system%3Acommerce' },
         { label: '温和男声', description: '克制、平稳', value: 'voice-warm', previewUrl: 'https://cdn.example/warm.mp3' },
       ],
     }, { surface: 'chat' });
@@ -191,6 +191,99 @@ describe('Agent composition transaction boundary', () => {
       ok: true,
       data: { selected: ['带货女声'], selectedValues: ['voice-commerce'], multiSelect: false },
     });
+  });
+
+  it('does not upload, generate, or charge when the exact Foley batch is rejected', async () => {
+    const h = harness();
+    Object.assign(h.ctx, { localAssetIndexRef: { current: [] } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({
+      ok: true,
+      quote: { totalCredits: 2, items: [{ durationSec: 7, credits: 2 }] },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const pending = runStudioTool(h.ctx, 'generate_foley', {
+      items: [{
+        sourceUrl: 'https://cdn.example/unboxing.mp4',
+        sourceInSec: 2,
+        sourceOutSec: 9,
+        prompt: 'Close cardboard flap opening, paper friction, one seal release',
+        name: 'Cardboard unboxing close',
+        eventType: 'unboxing',
+        material: 'cardboard',
+      }],
+    }, { surface: 'chat' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveInteraction('rejected');
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      data: { decision: 'rejected' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/studio/foley', expect.objectContaining({
+      body: JSON.stringify({ action: 'quote', durations: [7] }),
+    }));
+  });
+
+  it('does not generate or charge speech when the exact script and voice card is rejected', async () => {
+    const h = harness();
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({
+      ok: true,
+      quote: { credits: 1, charCount: 8, estimatedDurationSec: 2.5, textLengthTier: 'short' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const pending = runStudioTool(h.ctx, 'generate_speech', {
+      text: '现在就试试看。',
+      voiceId: 'system:zh_female_vv_uranus_bigtts',
+      instruction: '自然、直接，不要播音腔',
+    }, { surface: 'chat' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveInteraction('rejected');
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      data: { decision: 'rejected' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('/api/studio/speech', expect.objectContaining({
+      body: expect.stringContaining('"action":"quote"'),
+    }));
+  });
+
+  it('generates speech only after the exact charge card is approved', async () => {
+    const h = harness();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        quote: { credits: 1, charCount: 8, estimatedDurationSec: 2.5, textLengthTier: 'short' },
+      }))
+      .mockResolvedValueOnce(Response.json({
+        ok: true,
+        asset: {
+          id: 'speech-1', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
+          model: 'seed-tts-2.0', voiceId: 'system:zh_female_vv_uranus_bigtts', voiceLabel: 'Vivi 2.0',
+          transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const pending = runStudioTool(h.ctx, 'generate_speech', {
+      text: '现在就试试看。',
+      voiceId: 'system:zh_female_vv_uranus_bigtts',
+    }, { surface: 'chat' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveInteraction('approved');
+
+    await expect(pending).resolves.toMatchObject({
+      ok: true,
+      data: { asset: { id: 'speech-1' }, voiceLabel: 'Vivi 2.0' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      body: expect.not.stringContaining('"action":"quote"'),
+    }));
   });
 
   it('distinguishes ASR provider failure from genuine no-speech and exposes a useful tool error once', async () => {
@@ -296,20 +389,16 @@ describe('Agent composition transaction boundary', () => {
     expect(h.documentRef.current.canvas).toMatchObject({ width: 1080, height: 1920, configured: true });
     expect(prepareLocalAssetRuntime).toHaveBeenCalledWith(
       expect.objectContaining({ id: assetId }),
-      { asPrimary: true },
+      { asPrimary: false },
     );
-    expect(pickVideoFile).toHaveBeenCalledWith(video, {
-      asSig: sig,
-      reconnect: true,
-      successFeedback: 'silent',
-    });
+    expect(pickVideoFile).not.toHaveBeenCalled();
     expect(h.documentRef.current.timeline.tracks
       .flatMap((track) => track.clips)
       .find((clip) => 'assetId' in clip && clip.assetId === assetId))
       .toMatchObject({ durationFrames: 3645, sourceOutSec: 121.5 });
   });
 
-  it('mounts the first primary source when several videos are placed together', async () => {
+  it('mounts every montage source as a peer when several videos are placed together', async () => {
     const h = harness();
     h.ctx.setDocument(emptyEditorDocumentV2({ width: 1920, height: 1080, fps: 30 }));
     const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
@@ -318,6 +407,14 @@ describe('Agent composition transaction boundary', () => {
       .mockResolvedValueOnce({ durationSec: 4, width: 1080, height: 1920, hasAudio: true })
       .mockResolvedValueOnce({ durationSec: 4, width: 1920, height: 1080, hasAudio: true });
     const pickVideoFile = vi.fn().mockResolvedValue(undefined);
+    const prepareLocalAssetRuntime = vi.fn(async (
+      asset: { id: string },
+      _options?: { asPrimary?: boolean },
+    ) => ({
+      ok: true,
+      prepared: true,
+      file: asset.id === 'first-video' ? first : second,
+    }));
     Object.assign(h.ctx, {
       localAssetIndexRef: {
         current: [
@@ -325,16 +422,12 @@ describe('Agent composition transaction boundary', () => {
           localEntry('second-video', 'second:sig', '第二段', 'video'),
         ],
       },
-      prepareLocalAssetRuntime: vi.fn(async (asset: { id: string }) => ({
-        ok: true,
-        prepared: true,
-        file: asset.id === 'first-video' ? first : second,
-      })),
+      prepareLocalAssetRuntime,
       pickVideoFile,
       genIdsRef: { current: new Set<string>() },
       pushUndoSnapshot: () => {},
     });
-    const { runStudioTool } = await import('./agent-tool-runner');
+    const { runStudioTool, unplannedReviewAtSecs } = await import('./agent-tool-runner');
 
     const result = await runStudioTool(h.ctx, 'add_clips', {
       clips: [
@@ -344,10 +437,18 @@ describe('Agent composition transaction boundary', () => {
     });
 
     expect(result.ok, JSON.stringify(result)).toBe(true);
-    expect(h.documentRef.current.semantics.primaryNarrativeAssetId).toBe('first-video');
+    expect(h.documentRef.current.semantics).not.toHaveProperty('primaryNarrativeAssetId');
     expect(h.documentRef.current.canvas).toMatchObject({ width: 1080, height: 1920 });
-    expect(pickVideoFile).toHaveBeenCalledTimes(1);
-    expect(pickVideoFile).toHaveBeenCalledWith(first, expect.objectContaining({ asSig: 'first:sig' }));
+    expect(prepareLocalAssetRuntime.mock.calls.map(([asset, options]) => [asset.id, options])).toEqual([
+      ['first-video', { asPrimary: false }],
+      ['second-video', { asPrimary: false }],
+    ]);
+    expect(pickVideoFile).not.toHaveBeenCalled();
+    const withText = runAgentTimelineTool(h.documentRef.current, 'add_texts', {
+      items: [{ id: 'hook', text: '轻花字', startSec: 0.2, durationSec: 3.6 }],
+    });
+    expect(withText.ok).toBe(true);
+    expect(unplannedReviewAtSecs(withText.document!)).toEqual([2, 6]);
   });
 
   it('lists project-local assets without exposing device storage locators', async () => {

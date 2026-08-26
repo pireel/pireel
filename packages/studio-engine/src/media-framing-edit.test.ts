@@ -6,7 +6,6 @@ function documentWithMedia() {
   const document = emptyEditorDocumentV2({ fps: 30 });
   document.assets.main = { id: 'main', kind: 'video', locator: { remoteUrl: 'https://cdn.test/main.mp4' }, metadata: { durationSec: 3 } };
   document.assets.broll = { id: 'broll', kind: 'image', locator: { remoteUrl: 'https://cdn.test/b.jpg' }, metadata: {} };
-  document.semantics.primaryNarrativeAssetId = 'main';
   document.timeline.tracks[0]!.clips.push({
     id: 'narrative', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 90,
     enabled: true, sourceInSec: 0, sourceOutSec: 3,

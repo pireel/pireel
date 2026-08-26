@@ -245,6 +245,7 @@ export interface BlockPatchPair {
   geom: boolean; // box/contentBox/scale/rotation → hf:boxSize/hf:rotate
   timing: boolean; // startSec/durationSec → hf:blockTiming (runtime reads data-start dynamically per frame, changing the attribute takes effect immediately)
   style: boolean; // bg/border/radius/opacity → hf:blockStyle (shares blockBgCss with assemble, identical output)
+  mediaTimeline: boolean; // media slots.anim only → replace the GSAP timeline, never the image/video DOM node
   slots: boolean; // slots changed → parent re-assembles the block and swaps the node in via hf:blockAdd (echo of an iframe text edit skips even that)
   kitProps: boolean; // kit block props → parent re-renders the one block's content via hf:blockHtml
   replace: boolean; // templateId swap → full node replace via hf:blockAdd
@@ -258,6 +259,13 @@ const PATCH_GEOM = new Set(['box', 'contentBox', 'scale', 'rotation']);
 const PATCH_TIMING = new Set(['startSec', 'durationSec']);
 const PATCH_STYLE = new Set(['bg', 'border', 'radius', 'opacity']);
 const PATCH_IGNORE = new Set(['fitScale', 'label']); // not in the preview doc (fitScale goes through hf:fit separately; label only on the timeline)
+
+function mediaAnimationOnlyChange(a: Block, b: Block): boolean {
+  if (a.templateId !== 'media' || b.templateId !== 'media') return false;
+  const { anim: aAnim, ...aSlots } = a.slots;
+  const { anim: bAnim, ...bSlots } = b.slots;
+  return !previewDataEqual(aAnim, bAnim) && previewDataEqual(aSlots, bSlots);
+}
 
 /** Only block-level changes that can be patched in place (geometry/time-window/appearance/slots echo) + pure deletes: return a patch list;
  *  any other change (new block / track swap / template swap / caption re-lay / comp-level field…) returns null and goes to a full doc rebuild.
@@ -290,7 +298,7 @@ export function blockPatchableChange(a: Composition | null, b: Composition): Blo
     last = i;
     const x = ba[i]!;
     if (x === y) continue;
-    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, slots: false, kitProps: false, replace: false };
+    const p: BlockPatchPair = { a: x, b: y, geom: false, timing: false, style: false, mediaTimeline: false, slots: false, kitProps: false, replace: false };
     const ks = new Set([...Object.keys(x), ...Object.keys(y)]);
     for (const k of ks) {
       const xv = (x as unknown as Record<string, unknown>)[k];
@@ -304,13 +312,15 @@ export function blockPatchableChange(a: Composition | null, b: Composition): Blo
       else if (k === 'templateId') p.replace = true;
       else if (k === 'slots') {
         // Kit blocks derive HTML from slots.props — content-only re-render (hf:blockHtml);
-        // any other slots change re-assembles the whole node (hf:blockAdd replace)
+        // media animation changes only replace the GSAP timeline; any other slots change
+        // re-assembles the whole node (hf:blockAdd replace)
         if (y.templateId.startsWith('kit:')) p.kitProps = true;
+        else if (mediaAnimationOnlyChange(x, y)) p.mediaTimeline = true;
         else p.slots = true;
       }
       else return null;
     }
-    if (p.geom || p.timing || p.style || p.slots || p.kitProps || p.replace) pairs.push(p);
+    if (p.geom || p.timing || p.style || p.mediaTimeline || p.slots || p.kitProps || p.replace) pairs.push(p);
   }
   // A blocks-array update that only changes ignored metadata (fitScale/label) is still a valid
   // no-op patch. Returning null would incorrectly fall through to a full double-buffer rebuild —

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
-import type { EditorDocumentV2 } from './editor-document';
+import { firstNarrativeAssetId, type EditorDocumentV2 } from './editor-document';
 import {
   applyEditorDocumentPersistenceMetadata,
   compositionToEditorDocument,
@@ -100,7 +100,7 @@ describe('native project document boundary', () => {
       },
       videoSig: 'source.mp4:20:3',
     }).document;
-    const assetId = document.semantics.primaryNarrativeAssetId!;
+    const assetId = firstNarrativeAssetId(document)!;
     document.assets[assetId] = { ...document.assets[assetId]!, label: 'source.mp4' };
 
     const merged = applyEditorDocumentPersistenceMetadata({

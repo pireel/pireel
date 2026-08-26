@@ -278,7 +278,7 @@ export function spokenTimelineBeats(
 function priorSourceKeys(document: EditorDocumentV2, clips: readonly TimelineClip[]): Map<string, string> {
   const keys = new Map<string, string>();
   for (const clip of clips) {
-    if (clip.kind !== 'caption' || !clip.sourceRef || clip.sourceRef.assetId === document.semantics.primaryNarrativeAssetId) continue;
+    if (clip.kind !== 'caption' || !clip.sourceRef) continue;
     const ref = clip.block.slots.ref as { src?: unknown } | undefined;
     if (typeof ref?.src === 'string' && ref.src && !keys.has(clip.sourceRef.assetId)) keys.set(clip.sourceRef.assetId, ref.src);
   }
@@ -338,16 +338,14 @@ export function relayManagedCaptionTrack(
     });
   }
 
-  const primaryAssetId = document.semantics.primaryNarrativeAssetId;
+  const firstSpeechAssetId = speechClips[0]?.assetId;
   const sourceKeys = priorSourceKeys(document, track.clips);
   const assetBySourceKey = new Map<string, string>();
   const mapped = speechClips.flatMap((clip) => {
     const assetId = clip.assetId;
     const segments = document.semantics.transcripts[assetId] ?? [];
-    const sourceKey = assetId === primaryAssetId
-      ? null
-      : sourceKeys.get(assetId) ?? document.assets[assetId]?.locator.remoteUrl ?? `blob:pireel-offline/${assetId}`;
-    if (sourceKey) assetBySourceKey.set(sourceKey, assetId);
+    const sourceKey = sourceKeys.get(assetId) ?? document.assets[assetId]?.locator.remoteUrl ?? `blob:pireel-offline/${assetId}`;
+    assetBySourceKey.set(sourceKey, assetId);
     const range = sourceRange(clip, document.canvas.fps);
     return (segments as AsrSegment[]).flatMap((segment, segmentIndex) => {
       const sourceWords = (segment.words ?? []).map((word, wordIndex) => ({ ...word, si: wordIndex }));
@@ -362,7 +360,9 @@ export function relayManagedCaptionTrack(
     });
   }).sort((left, right) => left.start - right.start);
   const sourceSegment = (ref: CueRef): AsrSegment | undefined => {
-    const assetId = ref.src ? assetBySourceKey.get(ref.src) : primaryAssetId;
+    // Missing ref.src can only come from an older caption block. Resolve it by current lane order
+    // once; newly relayed blocks always carry their source key.
+    const assetId = ref.src ? assetBySourceKey.get(ref.src) : firstSpeechAssetId;
     return assetId ? document.semantics.transcripts[assetId]?.[ref.seg] as AsrSegment | undefined : undefined;
   };
   const cues = displayCuesFromMappedSegs(mapped, sourceSegment, {
@@ -375,14 +375,25 @@ export function relayManagedCaptionTrack(
   const usedIds = new Set(document.timeline.tracks
     .filter((candidate) => candidate.id !== trackId)
     .flatMap((candidate) => candidate.clips.map((clip) => clip.id)));
+  const reusedPreviousIds = new Set<string>();
   const clips: CaptionTimelineClip[] = blocks.map((block, index) => {
     const ref = block.slots.ref as CueRef | undefined;
-    const assetId = ref?.src ? assetBySourceKey.get(ref.src) : primaryAssetId;
+    const assetId = ref?.src ? assetBySourceKey.get(ref.src) : firstSpeechAssetId;
     const sourceRef: CaptionSourceRef | undefined = ref && assetId
       ? { assetId, segmentIndex: ref.seg, wordStart: ref.w0, wordEnd: ref.w1 }
       : undefined;
-    const id = uniqueClipId(block.id || `caption_${index + 1}`, usedIds);
-    const previous = existingById.get(id);
+    const legacyId = ref ? `capd_main_${ref.seg}_${ref.w0}` : undefined;
+    const previousByGeneratedId = existingById.get(block.id) ?? (legacyId ? existingById.get(legacyId) : undefined);
+    const previous = previousByGeneratedId?.kind === 'caption'
+      && (!previousByGeneratedId.sourceRef || sameSourceRef(previousByGeneratedId.sourceRef, sourceRef))
+      ? previousByGeneratedId
+      : track.clips.find((clip) => (
+          clip.kind === 'caption'
+          && !reusedPreviousIds.has(clip.id)
+          && sameSourceRef(clip.sourceRef, sourceRef)
+        ));
+    if (previous) reusedPreviousIds.add(previous.id);
+    const id = uniqueClipId(previous?.id || block.id || `caption_${index + 1}`, usedIds);
     const timingOverride = previous?.kind === 'caption'
       && sameSourceRef(previous.sourceRef, sourceRef)
       ? previous.timingOverride

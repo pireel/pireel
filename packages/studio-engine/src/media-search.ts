@@ -15,7 +15,7 @@ import type { VisualLabel, VisualTimeline } from './visual-types';
 
 export const MEDIA_SEARCH_INDEX_VERSION = 1;
 
-export type MediaSearchScope = 'all' | 'main' | 'inserted';
+export type MediaSearchScope = 'all' | 'narrative';
 
 export interface MediaSearchQuery {
   query: string;
@@ -30,7 +30,7 @@ export interface MediaSearchProject {
   shots: VideoShot[];
   mainTranscript: AsrSegment[];
   clipTranscripts: Record<string, AsrSegment[]>;
-  /** Today visual analysis describes the main source only. */
+  /** Legacy visual analysis may describe only the first source in lane order. */
   visualTimeline?: VisualTimeline | null;
 }
 
@@ -47,7 +47,7 @@ export interface MediaSearchResult {
   segmentId: string;
   assetId: string;
   source: {
-    kind: 'main' | 'inserted';
+    kind: 'narrative';
     token: string;
     shotIds: string[];
   };
@@ -70,7 +70,7 @@ export interface MediaSearchResponse {
   results: MediaSearchResult[];
   coverage: {
     assetId: string;
-    source: { kind: 'main' | 'inserted'; token: string; shotIds: string[] };
+    source: { kind: 'narrative'; token: string; shotIds: string[] };
     transcriptSegments: number;
     visualSegments: number;
   }[];
@@ -105,15 +105,19 @@ export function mediaSearchTranscriptsFromDocument(
       .map((clip) => [clip.id, clip.assetId] as const),
   );
   const clipTranscripts: Record<string, AsrSegment[]> = {};
+  let compatibilityMainTranscript: AsrSegment[] = [];
   for (const shot of shots) {
-    if (!shot.src) continue;
     const assetId = assetIdByClipId.get(shot.id);
     const segments = assetId ? asAsr(document.semantics.transcripts[assetId]) : [];
-    if (segments.length) clipTranscripts[shot.src] = segments;
+    if (!segments.length) continue;
+    if (shot.src) clipTranscripts[shot.src] = segments;
+    // A caller may still hold the pre-normalization Composition snapshot where the former first
+    // source had no src. Preserve that transcript in the legacy return slot for this one adapter;
+    // canonical peer projections give every source its own src and take the branch above.
+    else if (!compatibilityMainTranscript.length) compatibilityMainTranscript = segments;
   }
-  const primaryAssetId = document.semantics.primaryNarrativeAssetId;
   return {
-    mainTranscript: primaryAssetId ? asAsr(document.semantics.transcripts[primaryAssetId]) : [],
+    mainTranscript: compatibilityMainTranscript,
     clipTranscripts,
   };
 }
@@ -121,7 +125,7 @@ export function mediaSearchTranscriptsFromDocument(
 interface SourceDescriptor {
   source: string | null;
   token: string;
-  kind: 'main' | 'inserted';
+  kind: 'narrative';
   shotIds: string[];
   transcript: AsrSegment[];
   visual: VisualTimeline['segments'];
@@ -153,9 +157,9 @@ const hashToken = (value: string): string => {
 };
 
 function sourceToken(shots: VideoShot[], source: string | null): string {
-  if (source == null) return 'main';
+  if (source == null) return 'source_legacy';
   const shot = shots.find((item) => item.src === source);
-  return `clip_${hashToken(shot?.srcSig || source)}`;
+  return `source_${hashToken(shot?.srcSig || source)}`;
 }
 
 function segmentId(source: SourceDescriptor, start: number, end: number): string {
@@ -240,24 +244,25 @@ function descriptors(project: MediaSearchProject, query: MediaSearchQuery): Sour
     if (!shot.src) continue;
     bySource.set(shot.src, [...(bySource.get(shot.src) ?? []), shot]);
   }
-  const all: SourceDescriptor[] = [
-    {
-      source: null,
-      token: 'main',
-      kind: 'main',
-      shotIds: project.shots.filter((shot) => !shot.src).map((shot) => shot.id),
-      transcript: project.mainTranscript,
-      visual: project.visualTimeline?.segments ?? [],
-    },
-    ...[...bySource.entries()].map(([source, shots]): SourceDescriptor => ({
+  const all: SourceDescriptor[] = [...bySource.entries()].map(([source, shots], index): SourceDescriptor => ({
       source,
       token: sourceToken(project.shots, source),
-      kind: 'inserted',
+      kind: 'narrative',
       shotIds: shots.map((shot) => shot.id),
       transcript: project.clipTranscripts[source] ?? [],
-      visual: [],
-    })),
-  ];
+      visual: index === 0 ? project.visualTimeline?.segments ?? [] : [],
+    }));
+  // Read-only compatibility for a pre-normalization caller. Canonical V2 projections never enter
+  // this branch because every narrative shot carries src.
+  const legacyShotIds = project.shots.filter((shot) => !shot.src).map((shot) => shot.id);
+  if (legacyShotIds.length || project.mainTranscript.length) all.unshift({
+    source: null,
+    token: 'source_legacy',
+    kind: 'narrative',
+    shotIds: legacyShotIds,
+    transcript: project.mainTranscript,
+    visual: project.visualTimeline?.segments ?? [],
+  });
   if (query.shotId) {
     const shot = project.shots.find((item) => item.id === query.shotId);
     if (!shot) return { error: 'shot not found' };
@@ -389,7 +394,7 @@ export function searchProjectMedia(
   const rawQuery = typeof query.query === 'string' ? query.query.trim() : '';
   if (!rawQuery) return { error: 'query is required' };
   if (rawQuery.length > 200) return { error: 'query is too long (max 200 characters)' };
-  const scope = query.scope === 'main' || query.scope === 'inserted' ? query.scope : 'all';
+  const scope = query.scope === 'narrative' ? query.scope : 'all';
   const selected = descriptors(project, { ...query, scope });
   if ('error' in selected) return selected;
   const candidates = buildCandidates(selected);

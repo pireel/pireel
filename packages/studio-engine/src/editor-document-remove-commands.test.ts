@@ -32,7 +32,6 @@ function graphic(id: string, anchorId: string, locked = false): { clip: GraphicT
 function testDocument(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
   document.assets.video = { id: 'video', kind: 'video', locator: { localSig: 'sig' }, metadata: { durationSec: 4 } };
-  document.semantics.primaryNarrativeAssetId = 'video';
   return document;
 }
 

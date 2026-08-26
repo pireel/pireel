@@ -3,6 +3,7 @@ import { emptyComposition } from './composition-core';
 import { addNarrativeDocumentClip } from './narrative-document-edit';
 import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
 import { moveVisualDocumentClip } from './visual-document-edit';
+import { firstNarrativeAssetId } from './editor-document';
 
 function emptyDocument() {
   return compositionToEditorDocument({ projectId: 'visual-move', composition: emptyComposition() }).document;
@@ -34,7 +35,6 @@ describe('NLE-style visual document moves', () => {
   it('preserves canvas placement when a video moves between primary and ordinary visual lanes', () => {
     const document = emptyDocument();
     document.assets.video = { id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/video.mp4' }, metadata: { durationSec: 3 } };
-    document.semantics.primaryNarrativeAssetId = 'video';
     document.timeline.tracks[0]!.clips = [{
       id: 'placed', kind: 'narrative', assetId: 'video', startFrame: 0, durationFrames: 90,
       sourceInSec: 0, sourceOutSec: 3, box: { x: 0.1, y: 0.2, w: 0.6, h: 0.6 },
@@ -83,7 +83,7 @@ describe('NLE-style visual document moves', () => {
     });
     expect(first.ok).toBe(true);
     if (!first.ok) return;
-    const assetId = first.document.semantics.primaryNarrativeAssetId!;
+    const assetId = firstNarrativeAssetId(first.document)!;
     const out = moveVisualDocumentClip({
       document: first.document,
       clipId: 'primary',
@@ -95,7 +95,7 @@ describe('NLE-style visual document moves', () => {
     const back = moveVisualDocumentClip({ document: out.document, clipId: 'primary', atSec: 0, target: { kind: 'primary' } });
     expect(back.ok).toBe(true);
     if (!back.ok) return;
-    expect(back.document.semantics.primaryNarrativeAssetId).toBe(assetId);
+    expect(firstNarrativeAssetId(back.document)).toBe(assetId);
     expect(back.document.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips[0]).toMatchObject({
       id: 'primary', assetId, kind: 'narrative',
     });
@@ -103,10 +103,9 @@ describe('NLE-style visual document moves', () => {
       resolveAssetUrl: (asset) => asset.id === assetId ? 'blob:primary-runtime' : undefined,
     });
     expect(projected).toMatchObject({
-      video: { url: 'blob:primary-runtime' },
-      shots: [{ id: 'primary', srcStart: 0, srcEnd: 3 }],
+      video: null,
+      shots: [{ id: 'primary', src: 'blob:primary-runtime', srcStart: 0, srcEnd: 3 }],
     });
-    expect(projected.shots?.[0]?.src).toBeUndefined();
   });
 
   it('uses overwrite semantics on the destination visual lane and removes an emptied source lane', () => {

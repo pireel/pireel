@@ -41,6 +41,29 @@ export interface BoxDragDeps {
   setBlockRotation: (id: string, deg: number) => void;
 }
 
+export function scalesProportionallyOnCanvas(block: Block): boolean {
+  const kind = blockKind(block);
+  return kind === 'custom' || kind === 'media';
+}
+
+export function snapCanvasRotation(degrees: number, shiftKey: boolean): number {
+  if (shiftKey) return Math.round(degrees / 15) * 15;
+  const cardinal = [-180, -90, 0, 90, 180].find((angle) => Math.abs(degrees - angle) <= 3);
+  return cardinal ?? degrees;
+}
+
+export function visualCornerScaleFactor(
+  box: { w: number; h: number },
+  dx: number,
+  dy: number,
+  sgnX: 1 | -1,
+  sgnY: 1 | -1,
+): number {
+  const widthRatio = Math.max(0.05, (box.w + sgnX * dx) / box.w);
+  const heightRatio = Math.max(0.05, (box.h + sgnY * dy) / box.h);
+  return Math.sqrt(widthRatio * heightRatio);
+}
+
 export function useBoxDrag(deps: BoxDragDeps) {
   const {
     fit, compRef, genIdsRef, stageBoxRef, rotateOverlayRef, rotateLabelRef, dragCursorRef,
@@ -108,13 +131,16 @@ export function useBoxDrag(deps: BoxDragDeps) {
   /** Corner-handle scale: the diagonal corner is anchored, the process writes directly in the iframe via hf:boxSize (zero React re-render), one commit on release.
    *  - custom (component) blocks: **box locks aspect ratio** (per user: corners = inner container keeps its ratio). Content
    *    isn't transform-scaled — the inner container's real size follows the box via the %-binding from insert, and font size adjusts automatically with the container via cq units;
-   *  - others (media, etc.): free scaling, no locked ratio, content reflows to fill (original behavior). */
+   *  - media blocks: corners preserve the image/video ratio; side handles remain available when an
+   *    intentional one-axis resize is wanted;
+   *  - ordinary title/stat/list blocks: free box resize, so text and structured content can reflow. */
   const scaleDrag = (e: React.PointerEvent, blk: Block, sgnX: 1 | -1, sgnY: 1 | -1) => {
     if (!blk.box) return;
     const box0 = blk.box;
     const kf = fit || 1;
     const c = compRef.current;
-    const uniform = blockKind(blk) === 'custom';
+    const uniform = scalesProportionallyOnCanvas(blk);
+    const visualObject = blockKind(blk) === 'media';
     let g = { ...box0 };
     startPointerDrag(e, {
       onStart: () => {
@@ -126,10 +152,12 @@ export function useBoxDrag(deps: BoxDragDeps) {
         const dy = py / (c.height * kf);
         g = { ...box0 };
         if (uniform) {
-          // Horizontal-driven proportional scale: k = new width/old width, height follows ×k (diagonal anchored)
-          const w = Math.max(0.04, sgnX > 0 ? box0.w + dx : box0.w - dx);
-          const k = w / box0.w;
-          g.w = w;
+          // Image/video blocks respond to both pointer axes, matching the perceived diagonal
+          // gesture. Custom Components retain their established horizontal-only
+          // resize contract because their authored layout may intentionally reflow internally.
+          const widthRatio = Math.max(0.05, (box0.w + sgnX * dx) / box0.w);
+          const k = visualObject ? visualCornerScaleFactor(box0, dx, dy, sgnX, sgnY) : widthRatio;
+          g.w = Math.max(0.04, box0.w * k);
           g.h = Math.max(0.03, box0.h * k);
           if (sgnX < 0) g.x = box0.x + box0.w - g.w;
           if (sgnY < 0) g.y = box0.y + box0.h - g.h;
@@ -307,7 +335,9 @@ export function useBoxDrag(deps: BoxDragDeps) {
       onFrame: (_dx, _dy, ev) => {
         const a = Math.atan2(ev.clientY - cy, ev.clientX - cx);
         let d = base + ((a - a0) * 180) / Math.PI;
-        if (ev.shiftKey) d = Math.round(d / 15) * 15;
+        // Magnetic cardinal angles make "straight again" and 90° labels achievable without
+        // pixel-perfect pointer work. Shift switches to the familiar 15° stepped mode.
+        d = snapCanvasRotation(d, ev.shiftKey);
         d = Math.round(d);
         while (d > 180) d -= 360;
         while (d < -180) d += 360;

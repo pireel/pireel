@@ -1,5 +1,6 @@
 import type { AsrSegment } from '../build-blocks';
 import type { EditorDocumentV2, NarrativeTimelineClip } from './types';
+import { firstNarrativeAssetId } from './read-model';
 
 function sameTranscript(left: readonly AsrSegment[] | undefined, right: readonly AsrSegment[]): boolean {
   return left === right || JSON.stringify(left ?? []) === JSON.stringify(right);
@@ -47,7 +48,9 @@ export function syncCaptionTranscripts(
 
   let changed = false;
   const transcripts = { ...document.semantics.transcripts };
-  const mainAssetId = document.semantics.primaryNarrativeAssetId;
+  // `mainTranscript` is a legacy browser DTO field. Lane order supplies its one-time import target;
+  // the canonical document stores the result only under that clip's asset id.
+  const mainAssetId = firstNarrativeAssetId(document);
   if (mainAssetId && mainTranscript?.length) {
     const merged = withDocumentLayout(transcripts[mainAssetId] as AsrSegment[] | undefined, mainTranscript);
     if (!sameTranscript(transcripts[mainAssetId], merged)) {

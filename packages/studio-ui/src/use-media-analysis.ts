@@ -12,6 +12,7 @@
 import { useRef, type MutableRefObject } from 'react';
 import {
   applyEditorCommand,
+  firstNarrativeAssetId,
   timelineTranscriptionTargets,
   type EditorDocumentV2,
   type EditorMediaAsset,
@@ -77,7 +78,7 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         const transcripts = { ...current.semantics.transcripts };
         for (const assetId of silentAssetIds) transcripts[assetId] = [];
         const document = { ...current, semantics: { ...current.semantics, transcripts } };
-        if (current.semantics.primaryNarrativeAssetId && silentAssetIds.includes(current.semantics.primaryNarrativeAssetId)) {
+        if (firstNarrativeAssetId(current) && silentAssetIds.includes(firstNarrativeAssetId(current)!)) {
           asrRef.current = [];
           setAsrSentences([]);
         }
@@ -85,16 +86,16 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         return [];
       }
       report?.(t('common.transcribing'));
-      const primaryAssetId = current.semantics.primaryNarrativeAssetId;
+      const firstAssetId = firstNarrativeAssetId(current);
       const transcripts = { ...current.semantics.transcripts };
       let firstError: unknown;
       for (const target of targets) {
-        const refreshThisAsset = force && target.assetId === primaryAssetId;
+        const refreshThisAsset = force;
         if (Object.prototype.hasOwnProperty.call(transcripts, target.assetId) && !refreshThisAsset) continue;
         const asset = current.assets[target.assetId];
         if (!asset) continue;
         try {
-          const file = target.assetId === primaryAssetId && videoFileRef.current
+          const file = target.assetId === firstAssetId && videoFileRef.current
             ? videoFileRef.current
             : await speechFileForAsset(asset);
           if (!file) continue;
@@ -124,9 +125,9 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
         ...latest,
         semantics: { ...latest.semantics, transcripts: mergedTranscripts },
       };
-      const latestPrimaryAssetId = latest.semantics.primaryNarrativeAssetId;
-      const main = latestPrimaryAssetId
-        ? mergedTranscripts[latestPrimaryAssetId] as AsrSegment[] | undefined
+      const latestFirstAssetId = firstNarrativeAssetId(latest);
+      const main = latestFirstAssetId
+        ? mergedTranscripts[latestFirstAssetId] as AsrSegment[] | undefined
         : undefined;
       if (main?.length) {
         asrRef.current = main;

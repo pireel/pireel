@@ -55,7 +55,6 @@ function documentWithCaptions(): EditorDocumentV2 {
   document.assets['main-asset'] = {
     id: 'main-asset', kind: 'video', locator: { localSig: 'main-sig' }, metadata: { durationSec: 6 },
   };
-  document.semantics.primaryNarrativeAssetId = 'main-asset';
   document.semantics.transcripts['main-asset'] = transcript;
   document.timeline.tracks[0]!.clips = [
     narrative(),
@@ -196,9 +195,9 @@ describe('EditorDocument V2 managed caption command', () => {
     expect(track).toMatchObject({ muted: true, hidden: true, stackOrder: 8 });
     expect(track.clips).toMatchObject([
       { id: 'capd_main_0_0', startFrame: 0, durationFrames: 39, enabled: false, sourceRef: { assetId: 'main-asset' } },
-      { id: 'capd_main_0_1', startFrame: 120, durationFrames: 24, enabled: true, sourceRef: { assetId: 'main-asset' } },
+      { id: 'capd_emainasset_0_1', startFrame: 120, durationFrames: 24, enabled: true, sourceRef: { assetId: 'main-asset' } },
     ]);
-    expect(result.receipt).toMatchObject({ affectedTrackIds: ['managed-captions'], createdClipIds: ['capd_main_0_1'] });
+    expect(result.receipt).toMatchObject({ affectedTrackIds: ['managed-captions'], createdClipIds: ['capd_emainasset_0_1'] });
   });
 
   it('clears stale managed captions when the primary lane is deliberately empty', () => {

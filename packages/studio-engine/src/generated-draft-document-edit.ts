@@ -3,6 +3,7 @@
 import type { Composition } from './composition-core';
 import {
   applyEditorCommand,
+  firstNarrativeAssetId,
   type EditorCommandError,
   type EditorDocumentV2,
   type EditorMediaAsset,
@@ -85,9 +86,10 @@ export function applyGeneratedDraftDocument(input: GeneratedDraftDocumentEditInp
 
   const currentClipById = new Map(original.timeline.tracks.flatMap((track) => track.clips.map((clip) => [clip.id, clip] as const)));
   const assetMap = new Map<string, string>();
-  const importedPrimaryAssetId = imported.semantics.primaryNarrativeAssetId;
-  if (importedPrimaryAssetId && original.semantics.primaryNarrativeAssetId) {
-    assetMap.set(importedPrimaryAssetId, original.semantics.primaryNarrativeAssetId);
+  const importedFirstAssetId = firstNarrativeAssetId(imported);
+  const originalFirstAssetId = firstNarrativeAssetId(original);
+  if (importedFirstAssetId && originalFirstAssetId) {
+    assetMap.set(importedFirstAssetId, originalFirstAssetId);
   }
   for (const track of imported.timeline.tracks) {
     for (const clip of track.clips) {
@@ -143,9 +145,6 @@ export function applyGeneratedDraftDocument(input: GeneratedDraftDocumentEditInp
     const targetId = assetMap.get(incomingId);
     if (targetId) transcripts[targetId] = transcript;
   }
-  const primaryNarrativeAssetId = importedPrimaryAssetId
-    ? assetMap.get(importedPrimaryAssetId)
-    : original.semantics.primaryNarrativeAssetId;
   let next: EditorDocumentV2 = {
     ...original,
     canvas: { ...imported.canvas, fps: original.canvas.fps },
@@ -155,7 +154,6 @@ export function applyGeneratedDraftDocument(input: GeneratedDraftDocumentEditInp
     semantics: {
       ...original.semantics,
       primaryNarrativeTrackId: currentPrimary.id,
-      ...(primaryNarrativeAssetId ? { primaryNarrativeAssetId } : {}),
       transcripts,
       scenes: imported.semantics.scenes,
       ...(input.plan !== undefined ? { plan: input.plan } : {}),

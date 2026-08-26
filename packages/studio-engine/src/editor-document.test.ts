@@ -5,6 +5,7 @@ import {
   EDITOR_DOCUMENT_VERSION,
   editorTimelineTotalFrames,
   emptyEditorDocumentV2,
+  firstNarrativeAssetId,
   primaryNarrativeTrack,
   projectV2ToLegacyComposition,
   validateEditorDocumentV2,
@@ -50,7 +51,7 @@ describe('EditorDocument V2 migration', () => {
       sourceInSec: 0,
       sourceOutSec: 10,
     });
-    const asset = document.assets[document.semantics.primaryNarrativeAssetId!]!;
+    const asset = document.assets[firstNarrativeAssetId(document)!]!;
     expect(asset).toMatchObject({
       kind: 'video',
       locator: { localSig: 'main-sig', remoteUrl: 'blob:main' },
@@ -59,8 +60,8 @@ describe('EditorDocument V2 migration', () => {
     expect(issues).toEqual([]);
 
     const projected = projectV2ToLegacyComposition(document);
-    expect(projected.video).toEqual(mainVideo);
-    expect(projected.shots).toEqual([{ id: 'main', srcStart: 0, srcEnd: 10, treatment: 'full' }]);
+    expect(projected.video).toBeNull();
+    expect(projected.shots).toEqual([{ id: 'main', src: 'blob:main', srcSig: 'main-sig', srcStart: 0, srcEnd: 10, treatment: 'full' }]);
   });
 
   it('recovers an uncut persisted source from DTO metadata after the runtime video object was stripped', () => {
@@ -70,14 +71,15 @@ describe('EditorDocument V2 migration', () => {
       videoDurationSec: 8,
       context: { media: { video: { sig: 'persisted-main', key: 'r2/main' } } },
     });
-    const asset = document.assets[document.semantics.primaryNarrativeAssetId!]!;
+    const asset = Object.values(document.assets)[0]!;
     expect(asset.locator).toEqual({ localSig: 'persisted-main', cloudKey: 'r2/main' });
     expect(document.timeline.tracks[0]!.clips[0]).toMatchObject({ durationFrames: 240, sourceOutSec: 8 });
   });
 
   it('keeps the source in the manifest but does not resurrect it when shots is explicitly empty', () => {
     const { document } = migrate(emptyComposition(), { videoSig: 'deleted-main', videoDurationSec: 10 });
-    expect(document.semantics.primaryNarrativeAssetId).toBeDefined();
+    expect(document.semantics).not.toHaveProperty('primaryNarrativeAssetId');
+    expect(Object.values(document.assets)).toHaveLength(1);
     expect(document.timeline.tracks[0]!.clips).toEqual([]);
   });
 

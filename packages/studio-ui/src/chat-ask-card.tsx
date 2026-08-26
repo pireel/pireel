@@ -35,7 +35,7 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
             label: String(oo?.label ?? ''),
             description: typeof oo?.description === 'string' ? oo.description : undefined,
             value: typeof oo?.value === 'string' ? oo.value : undefined,
-            previewUrl: /^(https:\/\/|\/voice-previews\/)/.test(previewUrl) ? previewUrl : undefined,
+            previewUrl: /^(https:\/\/|\/voice-previews\/|\/api\/studio\/voice-preview(?:\?|$))/.test(previewUrl) ? previewUrl : undefined,
           };
         })
         .filter((o) => o.label)

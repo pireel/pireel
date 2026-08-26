@@ -4,7 +4,6 @@ import { applyEditorCommand, emptyEditorDocumentV2, type EditorDocumentV2 } from
 function documentWithPartner(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
   document.assets.main = { id: 'main', kind: 'video', locator: { localSig: 'main' }, metadata: { durationSec: 10 } };
-  document.semantics.primaryNarrativeAssetId = 'main';
   document.timeline.tracks[0]!.clips = [{
     id: 'talk', kind: 'narrative', assetId: 'main', startFrame: 45, durationFrames: 300,
     sourceInSec: 0, sourceOutSec: 10, enabled: true,

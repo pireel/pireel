@@ -380,7 +380,6 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
     timeline: { tracks },
     semantics: {
       primaryNarrativeTrackId: primaryTrackId,
-      ...(mainAssetId ? { primaryNarrativeAssetId: mainAssetId } : {}),
       ...(managedCaptionTrackId ? { managedCaptionTrackId } : {}),
       transcripts,
       scenes: [],

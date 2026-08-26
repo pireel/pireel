@@ -22,6 +22,7 @@ import {
   type NarrativeTimelineClip,
   type TimelineClip,
   type TimelineClipPlacement,
+  normalizePeerNarrativeSources,
 } from './editor-document';
 import type { TranscriptSegment } from './project-dto';
 import { directorPlanFromDocument } from './director-plan-artifact';
@@ -155,7 +156,6 @@ export function agentTimelineSnapshot(document: EditorDocumentV2) {
     assets: Object.values(document.assets),
     semantics: {
       primaryNarrativeTrackId: document.semantics.primaryNarrativeTrackId,
-      primaryNarrativeAssetId: document.semantics.primaryNarrativeAssetId,
       managedCaptionTrackId: document.semantics.managedCaptionTrackId,
       managedCaptionSource: document.semantics.managedCaptionSource ?? { mode: 'auto' },
       transcriptAssetIds: Object.entries(document.semantics.transcripts).filter(([, segments]) => segments.length).map(([assetId]) => assetId),
@@ -543,6 +543,7 @@ export function resizeVisualTimelineClip(
 }
 
 function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
+  document = normalizePeerNarrativeSources(document);
   const items = Array.isArray(input.clips) ? input.clips : [];
   if (!items.length) return fail('clips is required');
   const hadVideoPlacement = document.timeline.tracks.some((track) => track.clips.some((clip) => {
@@ -583,21 +584,6 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     });
     if (!inserted.ok) return fail(inserted.error.message, inserted.error);
     next = inserted.document;
-    if (ensured.track.role === 'primaryNarrative') {
-      const firstPrimary = ensured.track.id === inserted.document.semantics.primaryNarrativeTrackId
-        ? inserted.document.timeline.tracks
-            .find((track) => track.id === ensured.track.id)
-            ?.clips
-            .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative')
-            .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id))[0]
-        : undefined;
-      if (firstPrimary) {
-        next = {
-          ...next,
-          semantics: { ...next.semantics, primaryNarrativeAssetId: firstPrimary.assetId },
-        };
-      }
-    }
     receipts.push(inserted.receipt);
     created.push(placement.id);
   }
@@ -1046,9 +1032,12 @@ function getTranscript(document: EditorDocumentV2, input: Input): AgentTimelineO
     for (const clip of track.clips) if ('assetId' in clip && clip.assetId && document.semantics.transcripts[clip.assetId]?.length) ids.add(clip.assetId);
   }
   if (!ids.size) {
-    const primary = document.semantics.primaryNarrativeAssetId;
-    if (primary && document.semantics.transcripts[primary]?.length) ids.add(primary);
-    else for (const [id, segments] of Object.entries(document.semantics.transcripts)) if (segments.length) ids.add(id);
+    for (const clip of document.timeline.tracks
+      .find((track) => track.id === document.semantics.primaryNarrativeTrackId)
+      ?.clips ?? []) {
+      if (clip.kind === 'narrative' && document.semantics.transcripts[clip.assetId]?.length) ids.add(clip.assetId);
+    }
+    if (!ids.size) for (const [id, segments] of Object.entries(document.semantics.transcripts)) if (segments.length) ids.add(id);
   }
   const transcripts = [...ids].map((id) => ({
     assetId: id,

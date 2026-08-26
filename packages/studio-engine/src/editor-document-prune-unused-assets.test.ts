@@ -8,7 +8,6 @@ function documentWithMainAsset() {
     id: 'main', kind: 'video', locator: { localSig: 'main.mp4:2:1' }, metadata: { durationSec: 2 },
     library: { createdAt: 1 },
   };
-  document.semantics.primaryNarrativeAssetId = 'main';
   document.semantics.transcripts.main = [{ start: 0, end: 2, text: 'hello' }];
   return document;
 }
@@ -20,7 +19,7 @@ describe('prune unused editor assets', () => {
 
     expect(result.removedAssetIds).toEqual(['main']);
     expect(result.document.assets).toEqual({});
-    expect(result.document.semantics.primaryNarrativeAssetId).toBeUndefined();
+    expect(result.document.semantics).not.toHaveProperty('primaryNarrativeAssetId');
     expect(result.document.semantics.transcripts).toEqual({});
   });
 

@@ -59,7 +59,7 @@ describe("静态提示词完整性", () => {
       "The approval card is not a fixed editing-plan form",
     );
     expect(CHAT_IDENTITY).toContain(
-      "Outside that cleanup exception, before Approve do not call set_director_plan, remove_silence",
+      "Outside those direct-execution scopes, before Approve do not call set_director_plan, remove_silence",
     );
     expect(CHAT_IDENTITY).toContain(
       "CONSERVATIVE SPEECH CLEANUP IS A DIRECT EXECUTION SCOPE",
@@ -69,6 +69,12 @@ describe("静态提示词完整性", () => {
     );
     expect(CHAT_IDENTITY).toContain(
       "Do not block cleanup by asking whether the user wants visual enhancement",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "ORDINARY SHORT-AD REMIX IS ALSO A DIRECT EXECUTION SCOPE",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Run it without request_approval, set_director_plan, set_scene_designs, sceneId bookkeeping, or a Frame recommendation",
     );
     expect(CHAT_IDENTITY).toContain("EMPTY OUTPUT SOURCE RESOLUTION");
     expect(CHAT_IDENTITY).toContain(
@@ -90,6 +96,13 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain(
       "The active Frame governs HOW a generated image should look",
     );
+    expect(CHAT_IDENTITY).toContain("AD DISPLAY TYPE USES THE SAME MOTION GRAPHIC SYSTEM");
+    expect(CHAT_IDENTITY).toContain("NO-VOICEOVER ADS STILL USE AN INDEPENDENT SCREEN-COPY TRACK");
+    expect(CHAT_IDENTITY).toContain("The absence of speech or a transcript is never a reason to omit designed ad copy");
+    expect(CHAT_IDENTITY).toContain("actual shot cuts, visible action peaks, evidence holds, and music beats");
+    expect(CHAT_IDENTITY).toContain("not a new timeline object, Director Plan, caption layer, or approval artifact");
+    expect(CHAT_IDENTITY).toContain("not a separate native text-sticker object");
+    expect(CHAT_IDENTITY).toContain("whole-object rotation, proportional scale, and position belong to the Motion card's canvas controls");
     expect(CHAT_IDENTITY).toContain(
       "exact subject and physical action/relation",
     );
@@ -170,6 +183,20 @@ describe("静态提示词完整性", () => {
         ["analyze_narration", "lay_out", "add_graphics"].includes(tool.id),
       ),
     ).toBe(false);
+  });
+
+  it("广告花字复用 Motion Graphic，原生文字只保留普通标题能力", () => {
+    const addTexts = STUDIO_TOOLS.find((tool) => tool.id === "add_texts");
+    const updateText = STUDIO_TOOLS.find((tool) => tool.id === "update_text");
+    expect(addTexts?.description).toContain("ordinary title/subtitle text Components");
+    expect(updateText?.description).toContain("main text, subtitle, start, and duration");
+    const schema = JSON.stringify(addTexts?.inputSchema);
+    expect(schema).not.toContain('"outline-pop"');
+    expect(schema).not.toContain('"textRole"');
+    expect(schema).not.toContain('"rotationDeg"');
+    expect(BLOCK_SYSTEM).toContain("LIGHTWEIGHT AD TYPOGRAPHY");
+    expect(BLOCK_SYSTEM).toContain("not a separate text-sticker system");
+    expect(BLOCK_SYSTEM).toContain("rotation belong to the Motion card's canvas transform controls");
   });
   it("回复语言只由用户输入决定，不跟随英文工具回执", () => {
     expect(CHAT_IDENTITY).toContain("latest USER-AUTHORED message");
@@ -265,6 +292,12 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(system).toContain("talking-head-edit");
     expect(system).toContain("short-video-ad-remix");
     expect(system).not.toContain("<studio_skill id=");
+  });
+  it("生成配音在准确文案和音色确认后仍经过最终费用批准", () => {
+    const system = buildChatSystem(null);
+    expect(system).toContain("exact script, voice and current credit charge in its own final approval card");
+    const speech = STUDIO_TOOLS.find((tool) => tool.id === "generate_speech");
+    expect(speech?.description).toContain("rejection generates nothing and charges nothing");
   });
   it("未选 Frame 时不隐式适配，完整创意任务会主动提供可跳过的选择", () => {
     const system = buildChatSystem(
@@ -384,14 +417,14 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "All unqualified edits and @ element references target this active output",
     );
   });
-  it("buildSituation 区分空轨与未切分的单条主视频", () => {
+  it("buildSituation 不再把空主轨解释成隐式主视频", () => {
     const empty = buildSituation({ composition: { durationSec: 0, shots: [] } });
-    expect(empty).toContain("Video shots: (none; the active output is empty)");
+    expect(empty).toContain("Narrative-lane shots: (none; the active output is empty)");
     expect(empty).toContain("call list_assets before concluding that no source exists");
     expect(empty).not.toContain("single full clip");
 
     const unsplit = buildSituation({ composition: { durationSec: 10, shots: [] } });
-    expect(unsplit).toContain("Video shots: (single full clip");
+    expect(unsplit).toContain("Narrative-lane shots: (none; the current duration comes from other tracks)");
     expect(unsplit).not.toContain("the active output is empty");
   });
   it("buildSituation 只携带 Director Plan 索引，完整 Markdown 按需读取", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
-import { emptyEditorDocumentV2 } from './editor-document';
+import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
 import { resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
 import { withDirectorPlanInSemantics } from './director-plan-artifact';
 import { withSceneDesignsInSemantics } from './scene-design';
@@ -196,7 +196,7 @@ describe('shared agent timeline atoms', () => {
     });
   });
 
-  it('places an assembled video sequence on the semantic primary lane when role=primary', () => {
+  it('places an assembled video sequence as peer sources on the ordered narrative lane', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', {
       assets: [
@@ -218,8 +218,32 @@ describe('shared agent timeline atoms', () => {
       { id: 'hook-clip', kind: 'narrative', assetId: 'hook', startFrame: 0, durationFrames: 90 },
       { id: 'proof-clip', kind: 'narrative', assetId: 'proof', startFrame: 90, durationFrames: 150 },
     ]);
-    expect(placed.document!.semantics.primaryNarrativeAssetId).toBe('hook');
+    expect(placed.document!.semantics).not.toHaveProperty('primaryNarrativeAssetId');
     expect(placed.document!.timeline.tracks.filter((track) => track.role === 'broll')).toHaveLength(0);
+    const projected = projectV2ToLegacyComposition(placed.document!);
+    expect(projected.video).toBeNull();
+    expect(projected.shots).toMatchObject([
+      { id: 'hook-clip', src: 'https://cdn.example/hook.mp4' },
+      { id: 'proof-clip', src: 'https://cdn.example/proof.mp4' },
+    ]);
+    const oldHierarchicalRow = {
+      ...placed.document!,
+      semantics: { ...placed.document!.semantics, primaryNarrativeAssetId: 'hook' },
+    };
+    expect(parseEditorDocumentV2(oldHierarchicalRow)!.semantics).not.toHaveProperty('primaryNarrativeAssetId');
+    expect(projectV2ToLegacyComposition(oldHierarchicalRow)).toMatchObject({
+      video: null,
+      shots: [
+        { id: 'hook-clip', src: 'https://cdn.example/hook.mp4' },
+        { id: 'proof-clip', src: 'https://cdn.example/proof.mp4' },
+      ],
+    });
+
+    const continued = runAgentTimelineTool(placed.document!, 'add_clips', {
+      clips: [{ id: 'hook-return', role: 'primary', assetId: 'hook', startSec: 8, durationSec: 2 }],
+    });
+    expect(continued.ok).toBe(true);
+    expect(continued.document!.semantics).not.toHaveProperty('primaryNarrativeAssetId');
   });
 
   it('rejects a non-video asset on the primary narrative lane', () => {
@@ -392,7 +416,6 @@ describe('shared agent timeline atoms', () => {
   it('exposes primary-video canvas placement through the shared live/offline/MCP atom', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     document.assets.main = { id: 'main', kind: 'video', locator: { remoteUrl: 'https://cdn.example/main.mp4' }, metadata: { durationSec: 3 } };
-    document.semantics.primaryNarrativeAssetId = 'main';
     document.timeline.tracks[0]!.clips = [{
       id: 'shot', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 90,
       sourceInSec: 0, sourceOutSec: 3, properties: { treatment: 'punch-in' }, enabled: true,
@@ -410,7 +433,6 @@ describe('shared agent timeline atoms', () => {
   it('retimes video picture and source audio together while keeping source ranges fixed', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     document.assets.main = { id: 'main', kind: 'video', locator: { remoteUrl: 'https://cdn.example/main.mp4' }, metadata: { durationSec: 6, hasAudio: true } };
-    document.semantics.primaryNarrativeAssetId = 'main';
     document.timeline.tracks[0]!.clips = [
       {
         id: 'shot-1', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 120,

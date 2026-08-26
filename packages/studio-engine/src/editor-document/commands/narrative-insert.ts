@@ -53,10 +53,7 @@ export function insertNarrativeClip(
     includeLinked: true,
   });
   if (!inserted.ok) return { ...inserted, document };
-  let semantics = {
-    ...inserted.document.semantics,
-    ...(inserted.document.semantics.primaryNarrativeAssetId ? {} : { primaryNarrativeAssetId: clip.assetId }),
-  };
+  let semantics = inserted.document.semantics;
   const directorPlan = directorPlanFromDocument(document);
   if (mode === 'ripple' && directorPlan) {
     const adjusted = directorPlanAfterRippleInsertion(

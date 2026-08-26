@@ -219,6 +219,31 @@ describe('blockPatchableChange', () => {
     expect(patch?.pairs[0]).toMatchObject({ a: { id: 'kit1' }, b: { id: 'kit1' }, kitProps: true });
   });
 
+  it('classifies a media animation edit as a timeline-only patch', () => {
+    const media = {
+      id: 'sticker',
+      templateId: 'media',
+      slots: { media: { type: 'image', url: 'https://example.com/sticker.png' } },
+      startSec: 0,
+      durationSec: 2,
+      trackIndex: 2,
+      box: { x: 0.2, y: 0.2, w: 0.4, h: 0.4 },
+    };
+    const before = { ...base(), blocks: [media] };
+    const after = {
+      ...before,
+      blocks: [{ ...media, slots: { ...media.slots, anim: { enter: 'scale', exit: 'fade', dur: 0.5 } } }],
+    };
+
+    expect(blockPatchableChange(before, after)?.pairs[0]).toMatchObject({
+      a: { id: 'sticker' },
+      b: { id: 'sticker' },
+      mediaTimeline: true,
+      slots: false,
+      replace: false,
+    });
+  });
+
   it('keeps existing-node replacements in place on layered canvases', () => {
     const a = {
       ...base(),

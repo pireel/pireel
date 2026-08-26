@@ -15,7 +15,6 @@ import {
 function documentWithGap(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
   document.assets.main = { id: 'main', kind: 'video', locator: { localSig: 'main-sig' }, metadata: { durationSec: 10 } };
-  document.semantics.primaryNarrativeAssetId = 'main';
   document.semantics.scenes = [{ id: 'scene', clipIds: ['talk'] }];
   document.timeline.tracks[0]!.clips = [{
     id: 'talk', kind: 'narrative', assetId: 'main', startFrame: 45, durationFrames: 300,

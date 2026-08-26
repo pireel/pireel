@@ -39,6 +39,18 @@ describe('preview runtime', () => {
     expect(pickAt).toContain("fpost({ type: 'select'");
   });
 
+  it('hot-swaps media motion timelines without replacing the media node or killing timeline-owned tweens', () => {
+    const controlRuntime = [...PREVIEW_RUNTIME.matchAll(/<script>([\s\S]*?)<\/script>/g)][0]![1]!;
+    const preview = controlRuntime.slice(
+      controlRuntime.indexOf("d.type === 'hf:animPreview'"),
+      controlRuntime.indexOf("d.type === 'hf:capStyle'"),
+    );
+
+    expect(controlRuntime).toContain("d.type === 'hf:blockTimeline'");
+    expect(controlRuntime).toContain('animPreviewTweens[d.id]');
+    expect(preview).not.toContain('killTweensOf(apT)');
+  });
+
   it('forwards a selected-media click to the overlaid component hit inside the iframe', async () => {
     // @ts-expect-error jsdom is a test-only runtime dependency without declarations in this workspace.
     const { JSDOM } = await import('jsdom');

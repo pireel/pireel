@@ -53,8 +53,8 @@ export function listDocumentAddressedWords(
   const clips = primaryNarrativeClips(document);
   const assetId = query.shotId
     ? clips.find((clip) => clip.id === query.shotId)?.assetId
-    : document.semantics.primaryNarrativeAssetId;
-  if (!assetId) return { error: query.shotId ? 'shot not found' : 'primary narrative asset not found' };
+    : clips[0]?.assetId;
+  if (!assetId) return { error: query.shotId ? 'shot not found' : 'narrative source not found' };
   const segments = (document.semantics.transcripts[assetId] ?? []) as AsrSegment[];
   const sentenceSet = query.sentenceIndexes?.length ? new Set(query.sentenceIndexes) : null;
   const from = Number.isFinite(query.fromSec) ? query.fromSec! : -Infinity;

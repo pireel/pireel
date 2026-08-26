@@ -201,8 +201,6 @@ export interface SemanticScene {
 
 export interface EditorSemanticState {
   primaryNarrativeTrackId: TrackId;
-  /** The original talking-head source. Inserted/B-roll sources have their own asset ids. */
-  primaryNarrativeAssetId?: AssetId;
   managedCaptionTrackId?: TrackId;
   /** Persisted caption source selection. `auto` prefers visual speech, then narration audio. */
   managedCaptionSource?:

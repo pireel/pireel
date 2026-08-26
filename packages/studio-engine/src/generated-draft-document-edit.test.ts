@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { applyGeneratedDraftDocument } from './generated-draft-document-edit';
 import { compositionToEditorDocument } from './project-document';
+import { firstNarrativeAssetId } from './editor-document';
 
 function baseDocument() {
   const composition = {
@@ -15,7 +16,7 @@ function baseDocument() {
 describe('applyGeneratedDraftDocument', () => {
   it('replaces generated domains while retaining native lanes and primary asset identity', () => {
     const base = baseDocument();
-    const primaryAssetId = base.semantics.primaryNarrativeAssetId!;
+    const primaryAssetId = firstNarrativeAssetId(base)!;
     const document = {
       ...base,
       timeline: {

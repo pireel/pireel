@@ -204,6 +204,7 @@ export const PREVIEW_RUNTIME = `
   // ⚠️ clearProps may only name properties the animation touches: 'all' would also wipe *author-written inline styles*
   //   (renderMedia's .hf-media and style="…" inside LLM blocks all suffer; observed: images collapse to natural size).
   var FOCUS_CLEAR = 'opacity,visibility,transform,clipPath,filter';
+  var animPreviewTweens = {};
 
   function play(t) {
     timelinePlaying = true;
@@ -427,19 +428,27 @@ export const PREVIEW_RUNTIME = `
           var AP_OUT = { fade: { autoAlpha: 0 }, slide: { autoAlpha: 0, x: 60 }, rise: { autoAlpha: 0, y: -60 }, scale: { autoAlpha: 0, scale: 0.8 } };
           var apV = (d.phase === 'out' ? AP_OUT : AP_IN)[d.effect];
           var apD = Math.max(0.15, Math.min(Number(d.dur) || 0.5, 2));
-          window.gsap.killTweensOf(apT);
+          var apPrev = animPreviewTweens[d.id];
+          if (apPrev && apPrev.kill) {
+            apPrev.kill();
+            delete animPreviewTweens[d.id];
+            window.gsap.set(apT, { clearProps: FOCUS_CLEAR });
+            var apPrevTl = tlOf(d.id);
+            if (apPrevTl && apPrevTl.render) apPrevTl.render(Math.max(0, Math.min(lastSeekT - num(apHost, 'data-start', 0), apPrevTl.duration())), true, true);
+          }
           // after playing, clear the temp inline styles, then force the block's timeline to render back to the real state at the current time (selecting already moved
           // the playhead to the settle time, so the real state is visible; render with force so equal values aren't short-circuited by GSAP)
           var apEnd = function () {
             try {
+              delete animPreviewTweens[d.id];
               window.gsap.set(apT, { clearProps: FOCUS_CLEAR });
               var apTl = tlOf(d.id);
               if (apHost && apTl && apTl.render) apTl.render(Math.max(0, Math.min(lastSeekT - num(apHost, 'data-start', 0), apTl.duration())), true, true);
             } catch (e2) {}
           };
           if (!apV) apEnd();
-          else if (d.phase === 'out') window.gsap.fromTo(apT, { autoAlpha: 1, x: 0, y: 0, scale: 1 }, Object.assign({ duration: apD, ease: 'power2.in', onComplete: apEnd }, apV));
-          else window.gsap.from(apT, Object.assign({ duration: apD, ease: 'power2.out', onComplete: apEnd }, apV));
+          else if (d.phase === 'out') animPreviewTweens[d.id] = window.gsap.fromTo(apT, { autoAlpha: 1, x: 0, y: 0, scale: 1 }, Object.assign({ duration: apD, ease: 'power2.in', overwrite: false, onComplete: apEnd }, apV));
+          else animPreviewTweens[d.id] = window.gsap.from(apT, Object.assign({ duration: apD, ease: 'power2.out', overwrite: false, onComplete: apEnd }, apV));
         }
       } catch (err) {}
     }
@@ -590,6 +599,24 @@ export const PREVIEW_RUNTIME = `
             seekTimelines(lastSeekT);
           } catch (e3) { console.warn('[hf] blockAdd', d.blockId, e3); }
         }
+      } catch (err) {}
+    }
+    else if (d.type === 'hf:blockTimeline' && d.blockId) {
+      // Media Motion edits change only GSAP instructions. Replacing the image/video node here
+      // interrupts the one-shot card preview and needlessly reloads media, so hot-swap its timeline.
+      try {
+        var btId = String(d.blockId);
+        var btPreview = animPreviewTweens[btId];
+        if (btPreview && btPreview.kill) btPreview.kill();
+        delete animPreviewTweens[btId];
+        if (window.__timelines && window.__timelines[btId]) {
+          try { window.__timelines[btId].kill(); } catch (e1) {}
+          delete window.__timelines[btId];
+        }
+        var btTl = gsap.timeline({ paused: true });
+        try { new Function('tl', String(d.timelineBody || ''))(btTl); } catch (e2) { console.warn('[hf] blockTimeline', btId, e2); }
+        window.__timelines[btId] = btTl;
+        seekTimelines(lastSeekT);
       } catch (err) {}
     }
     else if (d.type === 'hf:setVars' && typeof d.css === 'string') {

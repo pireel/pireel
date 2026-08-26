@@ -18,11 +18,14 @@ type ApprovalDecision = 'approved' | 'rejected';
 
 export function ApprovalCard({ part }: { part: ToolPartLike }) {
   const input = part.input as { title?: unknown; content?: unknown } | undefined;
-  const title = typeof input?.title === 'string' ? input.title.trim() : '';
-  const content = typeof input?.content === 'string' ? input.content.trim() : '';
   const errored = part.state === 'output-error';
   const active = part.state === 'input-available' || part.state === 'input-streaming';
-  const pendingInteraction = usePendingInteraction('approval');
+  const pendingInteraction = usePendingInteraction<{ title?: unknown; content?: unknown }>('approval');
+  const source = active && pendingInteraction ? pendingInteraction : input;
+  const title = typeof source?.title === 'string' ? source.title.trim() : '';
+  const content = typeof source?.content === 'string' && source.content.trim()
+    ? source.content.trim()
+    : active ? t('workbench.preparingApproval') : '';
   const live = active && pendingInteraction !== null;
   const out = part.output as StudioToolResult | undefined;
   const rawDecision = (out?.data as { decision?: unknown } | undefined)?.decision;

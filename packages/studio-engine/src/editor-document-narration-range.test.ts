@@ -10,7 +10,6 @@ function documentWithNarration(): EditorDocumentV2 {
   const document = emptyEditorDocumentV2({ fps: 30 });
   document.assets.main = { id: 'main', kind: 'video', locator: { localSig: 'main-sig' }, metadata: { durationSec: 10 } };
   document.assets.broll = { id: 'broll', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 4 } };
-  document.semantics.primaryNarrativeAssetId = 'main';
   const clip: NarrativeTimelineClip = {
     id: 'talk', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 300,
     sourceInSec: 0, sourceOutSec: 10, properties: { treatment: 'full' }, enabled: true,

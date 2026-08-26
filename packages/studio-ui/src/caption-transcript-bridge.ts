@@ -55,8 +55,5 @@ export function captionTranscriptsFromDocument(
     const segments = assetId ? document.semantics.transcripts[assetId] : undefined;
     if (segments) clips[shot.src] = segments as AsrSegment[];
   }
-  const main = document.semantics.primaryNarrativeAssetId
-    ? document.semantics.transcripts[document.semantics.primaryNarrativeAssetId] as AsrSegment[] | undefined
-    : undefined;
-  return { main: main ?? null, clips };
+  return { main: null, clips };
 }

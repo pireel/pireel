@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument } from './project-document';
+import { firstNarrativeAssetId } from './editor-document';
 import {
   addNarrativeDocumentClip,
   insertNarrativeAssetRange,
@@ -25,7 +26,7 @@ describe('native narrative structure edits', () => {
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     expect(first.document.canvas).toMatchObject({ width: 1920, height: 1080, configured: true });
-    expect(first.document.semantics.primaryNarrativeAssetId).toBe(first.assetId);
+    expect(firstNarrativeAssetId(first.document)).toBe(first.assetId);
     expect(first.document.assets[first.assetId!].locator).toEqual({ localSig: 'first.mp4:10:1' });
 
     const second = addNarrativeDocumentClip({
@@ -65,7 +66,6 @@ describe('native narrative structure edits', () => {
     document.assets.video = {
       id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/video.mp4' }, metadata: { durationSec: 10 },
     };
-    document.semantics.primaryNarrativeAssetId = 'video';
     const track = document.timeline.tracks.find((candidate) => candidate.role === 'primaryNarrative')!;
     track.clips = [
       { id: 'talk', kind: 'narrative', assetId: 'video', startFrame: 0, durationFrames: 60, enabled: true, sourceInSec: 0, sourceOutSec: 2, properties: { treatment: 'full' } },

@@ -77,6 +77,7 @@ import {
   freezeBlockVars,
   getCaptionPreset,
   hasPrimaryNarrativeClips,
+  firstNarrativeAssetId,
   narrativeClipTimelineRange,
   planNarrationCuts,
   narrativeTrimRangeAtTimelineSecond,
@@ -213,15 +214,15 @@ const r1 = (x: number) => Math.round(x * 10) / 10;
 // the short-lived cue-split extraction scheme merge back to sentences, so offline read_script / cut ranges / captions
 // see the SAME rows as the browser. Idempotent — sentence transcripts pass through by reference.
 const asAsr = (segs: TranscriptSegment[] | undefined): AsrSegment[] => desegmentCues((segs ?? []) as AsrSegment[]);
-const mainTranscriptOf = (project: ServerToolProject): AsrSegment[] => {
-  const assetId = project.document.semantics.primaryNarrativeAssetId;
+const firstNarrativeTranscriptOf = (project: ServerToolProject): AsrSegment[] => {
+  const assetId = firstNarrativeAssetId(project.document);
   return assetId ? asAsr(project.document.semantics.transcripts[assetId]) : [];
 };
 
 /** Temporary runtime projection for prompt helpers that still label inserted sources by render URL. */
 const projectedClipTranscripts = (project: ServerToolProject): Record<string, AsrSegment[]> => {
   const assetIdByClipId = new Map(primaryNarrativeClips(project.document).map((clip) => [clip.id, clip.assetId]));
-  return Object.fromEntries((project.comp.shots ?? []).flatMap((shot) => {
+  return Object.fromEntries((projectDocumentToComposition(project.document).shots ?? []).flatMap((shot) => {
     const assetId = assetIdByClipId.get(shot.id);
     const segments = assetId ? project.document.semantics.transcripts[assetId] : undefined;
     return shot.src && segments?.length ? [[shot.src, asAsr(segments)] as const] : [];
@@ -229,7 +230,7 @@ const projectedClipTranscripts = (project: ServerToolProject): Record<string, As
 };
 
 function shotsOf(p: ServerToolProject): VideoShot[] {
-  return p.comp.shots ?? [];
+  return projectDocumentToComposition(p.document).shots ?? [];
 }
 
 type NativeNarrativePatchResult =
@@ -255,7 +256,7 @@ function applyNativeNarrativePatches(
 
 /** Offline situation snapshot: same shape as the browser's getChatBody (shared buildSituation), prefixed with the offline notice. */
 function offlineState(p: ServerToolProject): string {
-  const c = p.comp;
+  const c = projectDocumentToComposition(p.document);
   const outputs = normalizeProjectOutputs(p.context.outputs);
   const activePosition = [...projectOutputPositionMap(outputs)].find(([, id]) => id === outputs.active.id)?.[0] ?? 1;
   const tag = new Map<string, string>();
@@ -352,27 +353,24 @@ function offlineTranscript(p: ServerToolProject): string {
   const copy = (s: TranscriptSegment) => s.captionText && s.captionText !== s.text
     ? `${s.captionText} 〈ASR: ${s.text}〉`
     : s.text;
-  const row = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${copy(s)}`;
   const parts: string[] = [];
-  // Same derived-current-truth marks as the browser transcript — the two surfaces must tell one story
-  const main = mainTranscriptOf(p);
-  const primaryAssetId = p.document.semantics.primaryNarrativeAssetId;
-  const marks = narrationRowMarks(main, p.comp.shots ?? [], (c: { src?: string }) => !c.src, primaryAssetId ? p.document.assets[primaryAssetId]?.metadata.durationSec : undefined);
-  const mainRow = (s: TranscriptSegment, i: number) => `  ${i}. [${rd(s.start)}–${rd(s.end)}s] ${marks.rows[i]!.prefix}${copy(s)}${marks.rows[i]!.gapNote}`;
-  const mainLines = [...(marks.head ? [`  ${marks.head}`] : []), ...main.map(mainRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
-  parts.push(
-    `MAIN NARRATION (source-video seconds — never shift when the video is cut; shot src in→out uses the same clock. Rows carry CURRENT edit state: [REMOVED]/[partly cut] content is already gone — don't re-cut it. Dead-air notes cover ALL kinds: "+Xs gap after" (between sentences), "Xs pause inside at a–bs" (mid-sentence stalls, with their exact source range) and "dead air at the head/tail" (the recording's pre/post-roll) — cut any of them with cut_narration exactly like gaps. Read dead air from these notes instead of computing it, and skip any note already marked CUT):\n${mainLines.join('\n')}`,
-  );
   const bySrc = new Map<string, string[]>();
-  for (const s of p.comp.shots ?? []) {
+  const composition = projectDocumentToComposition(p.document);
+  for (const s of composition.shots ?? []) {
     if (!s.src) continue;
     bySrc.set(s.src, [...(bySrc.get(s.src) ?? []), s.id]);
   }
   const clipSegs = projectedClipTranscripts(p);
+  const assetIdByClipId = new Map(primaryNarrativeClips(p.document).map((clip) => [clip.id, clip.assetId]));
   for (const [src, ids] of bySrc) {
-    const segs = clipSegs[src];
-    const head = `INSERTED CLIP for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its OWN source seconds)`;
-    parts.push(segs?.length ? `${head}:\n${segs.map(row).join('\n')}` : `${head}: (no transcript stored)`);
+    const segs = clipSegs[src] ?? [];
+    const assetId = ids.map((id) => assetIdByClipId.get(id)).find(Boolean);
+    const sourceShots = (composition.shots ?? []).filter((shot) => ids.includes(shot.id));
+    const marks = narrationRowMarks(segs, sourceShots, () => true, assetId ? p.document.assets[assetId]?.metadata.durationSec : undefined);
+    const markedRow = (segment: TranscriptSegment, index: number) => `  ${index}. [${rd(segment.start)}–${rd(segment.end)}s] ${marks.rows[index]!.prefix}${copy(segment)}${marks.rows[index]!.gapNote}`;
+    const lines = [...(marks.head ? [`  ${marks.head}`] : []), ...segs.map(markedRow), ...(marks.tail ? [`  ${marks.tail}`] : [])];
+    const head = `NARRATIVE SOURCE for shot(s) ${ids.map((x) => `@${x}`).join(', ')} (its own source seconds)`;
+    parts.push(segs.length ? `${head}:\n${lines.join('\n')}` : `${head}: (no transcript stored)`);
   }
   const out = parts.join('\n');
   return wrapAgentTranscript(out);
@@ -425,14 +423,14 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       };
     }
     // Every successful composition mutation reports its actual compact diff, not just cutting tools.
-    const delta = compReceiptDelta(p.comp, next);
+    const delta = compReceiptDelta(projectDocumentToComposition(p.document), next);
     if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
   }
   return out;
 }
 
 function runServerToolInner(tool: string, input: Record<string, unknown>, p: ServerToolProject): ServerToolOutcome {
-  const c = p.comp;
+  const c = projectDocumentToComposition(p.document);
   const findBlock = (id: unknown) => c.blocks.find((b) => b.id === id);
   const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
 
@@ -487,7 +485,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         {
           output: outputs.active,
           active: true,
-          durationSec: totalDuration(p.comp),
+          durationSec: totalDuration(c),
         },
         ...outputs.inactive.map((output) => ({
           output,
@@ -519,7 +517,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         },
         {
           query: typeof input.query === 'string' ? input.query : '',
-          scope: input.scope === 'main' || input.scope === 'inserted' ? input.scope : 'all',
+          scope: input.scope === 'narrative' ? input.scope : 'all',
           ...(typeof input.shotId === 'string' ? { shotId: input.shotId } : {}),
           ...(typeof input.limit === 'number' ? { limit: input.limit } : {}),
         },
@@ -1080,7 +1078,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           })
           .filter((r) => Number.isFinite(r.from) && Number.isFinite(r.to) && r.to - r.from > 0.05);
         // Transcript snippet per cut: the receipt list names what each cut removed (no words = dead air)
-        const transcriptRows = mainTranscriptOf(p);
+        const transcriptRows = firstNarrativeTranscriptOf(p);
         const words = transcriptRows.flatMap((s) => s.words ?? []);
         const snippetOf = (from: number, to: number): string | undefined => {
           const inside = words.filter((w) => w.start >= from - 0.02 && w.end <= to + 0.02).map((w) => w.text.trim());
@@ -1088,8 +1086,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
           const joined = inside.join('');
           return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
         };
-        const assetId = p.document.semantics.primaryNarrativeAssetId;
-        if (!assetId) return { result: { ok: false, error: 'primary narrative asset is missing' } };
+        const assetId = firstNarrativeAssetId(p.document);
+        if (!assetId) return { result: { ok: false, error: 'narrative source is missing' } };
         const tightened = Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges;
         const plan = planNarrationCuts(p.document, {
           assetId,
@@ -1247,8 +1245,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
       const assetId = shotIdIn
         ? primaryNarrativeClips(p.document).find((clip) => clip.id === shotIdIn)?.assetId
-        : p.document.semantics.primaryNarrativeAssetId;
-      if (!assetId) return { result: { ok: false, error: shotIdIn ? 'shot not found' : 'primary narrative asset not found' } };
+        : firstNarrativeAssetId(p.document);
+      if (!assetId) return { result: { ok: false, error: shotIdIn ? 'shot not found' : 'narrative source not found' } };
       const segments = p.document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
       if (!segments?.length) return { result: { ok: false, error: shotIdIn ? 'this clip has no transcript' : 'no transcript in the cloud project — open the studio tab and call read_script first' } };
       const bad = items.filter((item) => item.index >= segments.length);
@@ -1309,8 +1307,8 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
         const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
         const assetId = shotIdIn
           ? primaryNarrativeClips(document).find((clip) => clip.id === shotIdIn)?.assetId
-          : document.semantics.primaryNarrativeAssetId;
-        if (!assetId) return { result: { ok: false, error: shotIdIn ? 'shot not found' : 'primary narrative asset not found' } };
+          : firstNarrativeAssetId(document);
+        if (!assetId) return { result: { ok: false, error: shotIdIn ? 'shot not found' : 'narrative source not found' } };
         const segs = document.semantics.transcripts[assetId] as AsrSegment[] | undefined;
         if (!segs?.length) return { result: { ok: false, error: shotIdIn ? 'this clip has no transcript' : 'no transcript in the cloud project — open the studio tab and call read_script first' } };
         const bad = items.filter((it) => it.index >= segs.length);
@@ -1444,7 +1442,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       };
     }
     case 'compose_context': {
-      const mainTranscript = mainTranscriptOf(p);
+      const mainTranscript: AsrSegment[] = [];
       const clipTranscripts = projectedClipTranscripts(p);
       const placements = editorDocumentRenderPlan(p.document).narrative.map((entry) => ({
         shotId: entry.clipId,

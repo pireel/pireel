@@ -333,7 +333,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '📖',
     label: 'tools.read_script.label',
     description:
-      "Get the spoken transcript in one call. If the requested source already has a transcript, return it immediately; otherwise transcribe its actual audio and return measured timed sentences/words. With no input, get the main narration and inserted-source transcripts, transcribing only what is missing. For an unplaced device-local video/audio returned by list_assets/search_assets, first honor analyze_visual's local PCM/RNNoise audioAssessment: never call this for no-audio, effectively-silent, or non-speech-or-noise; call it for speech-likely only when existing spoken wording matters. Pass its exact assetId directly: project-library membership is enough, and the asset must NOT be registered or placed on the timeline first. If byte access is unavailable, ask the user to restore access in Materials rather than placing the asset. An explicit @asset_… pill may also be passed in assetId and is resolved to that project-local asset. contentSig/localSig is a legacy compatibility locator and can be ambiguous when identical files were imported more than once. For a registered speech-bearing audio/video source, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth and is returned without ASR unless measured timing, pauses, performed wording, karaoke/caption sync or another audio-derived fact requires transcription. Ordinary short/medium projects arrive in full; genuinely long transcripts are explicitly marked truncated and can be supplemented with search_media. Main rows use SOURCE-video seconds and carry CURRENT edit state, removed/partly-cut marks and dead-air notes. It does NOT add captions, register media, place assets, or cut clips.",
+      "Get spoken transcripts grouped by equal-standing source. If the requested source already has a transcript, return it immediately; otherwise transcribe its actual audio and return measured timed sentences/words. With no input, get every transcript-bearing narrative/audio source and transcribe only what is missing. For an unplaced device-local video/audio returned by list_assets/search_assets, first honor analyze_visual's local PCM/RNNoise audioAssessment: never call this for no-audio, effectively-silent, or non-speech-or-noise; call it for speech-likely only when existing spoken wording matters. Pass its exact assetId directly: project-library membership is enough, and the asset must NOT be registered or placed on the timeline first. If byte access is unavailable, ask the user to restore access in Materials rather than placing the asset. An explicit @asset_… pill may also be passed in assetId and is resolved to that project-local asset. contentSig/localSig is a legacy compatibility locator and can be ambiguous when identical files were imported more than once. For a registered speech-bearing audio/video source, pass its exact assetId or placed clipId. A known TTS/user script is semantic text truth and is returned without ASR unless measured timing, pauses, performed wording, karaoke/caption sync or another audio-derived fact requires transcription. Ordinary short/medium projects arrive in full; genuinely long transcripts are explicitly marked truncated and can be supplemented with search_media. Every section uses that source's own clock and carries CURRENT edit state. It does NOT add captions, register media, place assets, or cut clips.",
     inputSchema: obj({
       localSig: { type: 'string', description: 'Legacy compatibility only: an unambiguous device-local content signature.' },
       assetId: { type: 'string', description: 'Exact project-local asset id from list_assets/search_assets (or its @asset_… token), or a registered speech-bearing asset id.' },
@@ -830,6 +830,37 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     }, ['prompt']),
   },
   {
+    id: 'generate_foley',
+    kind: 'card',
+    busyText: 'tools.generate_foley.busy',
+    icon: '🔉',
+    label: 'tools.generate_foley.label',
+    chatOnly: true,
+    description:
+      'Generate a BATCH of picture-synchronous Foley/SFX assets with MMAudio V2. This tool owns the charge gate: it first shows the exact event list, uploaded source spans, total generated seconds, and current maximum credit charge, then waits for user approval. Reject means no source upload, generation, or charge. Search/reuse existing audio first; call only for real gaps after picture order is stable. Each approved item uploads only its exact source span, generates sound, extracts an independent AAC track in the browser, saves it to the cross-project audio library with reuse metadata, and returns registration fields. It does NOT place anything; register_media then add_clips with role=sfx. Never use it for narration or background music.',
+    inputSchema: obj({
+      items: {
+        type: 'array', minItems: 1, maxItems: 8,
+        items: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            sourceAssetId: { type: 'string', description: 'Exact device-local or registered video asset id. Preferred over sourceUrl.' },
+            sourceUrl: { type: 'string', description: 'Exact owned/public source video URL when no project asset id exists.' },
+            sourceInSec: { type: 'number', description: 'Inclusive source start in seconds.' },
+            sourceOutSec: { type: 'number', description: 'Exclusive source end in seconds; span must be 1–30 seconds.' },
+            prompt: { type: 'string', description: 'Only audible events grounded in the span: action, material, intensity, perspective, room, and timing. Do not request speech or music.' },
+            negativePrompt: { type: 'string', description: 'Optional sounds to exclude, usually speech, music, ambience, or unrelated impacts.' },
+            name: { type: 'string', description: 'Short reusable library label, e.g. Cardboard box opening — close.' },
+            eventType: { type: 'string', description: 'Searchable action family such as unboxing, pour, click, tear, or impact.' },
+            material: { type: 'string', description: 'Searchable material/object, e.g. cardboard, water, plastic seal, glass.' },
+            reusePolicy: { type: 'string', enum: ['generic', 'timing-compatible', 'exact-shot-only'], description: 'How safely this sound may be reused. Default timing-compatible.' },
+          },
+          required: ['sourceInSec', 'sourceOutSec', 'prompt'],
+        },
+      },
+    }, ['items']),
+  },
+  {
     id: 'get_generation_jobs',
     kind: 'badge',
     icon: '⏳',
@@ -858,7 +889,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔊',
     label: 'tools.list_voices.label',
     description:
-      "List available official and user-cloned voice CANDIDATES, including stable voiceId, sampleUrl, language, style, scene, and readiness. Use language/query to avoid returning the entire catalog. A user's stored default is preference metadata, never approval for this generation and never a recommendation. Before generate_speech, show a short relevant candidate set with ask_user: copy each exact voiceId into option.value and exact sampleUrl into option.previewUrl so the card can play the sample and return an unambiguous id. Obtain the user's explicit choice unless the user already named and approved one. It is server-direct and works with Studio closed.",
+      "List available official and user-cloned voice CANDIDATES, including stable voiceId, language, style, scene, readiness, and sampleUrl when a matching audition exists. Use language/query to avoid returning the entire catalog. A user's stored default is preference metadata, never approval for this generation and never a recommendation. Before generate_speech, show a short relevant candidate set with ask_user: copy each exact voiceId into option.value; copy sampleUrl into option.previewUrl only when the result includes it. Obtain the user's explicit choice unless the user already named and approved one. It is server-direct and works with Studio closed.",
     inputSchema: obj(
       {
         language: { type: 'string', enum: ['zh', 'en'], description: 'Optional supported-language filter.' },
@@ -902,7 +933,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.generate_speech.label',
     description:
-      "Generate a reusable spoken-audio asset from EXACT approved text with an EXACT approved voiceId (hosted TTS; CHARGES the user's Pireel account). Script approval and concrete voice selection are separate decisions: do not call this after approving only a general voice requirement, and never infer consent from the user's stored default. This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; call read_script with the exact assetId only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
+      "Generate a reusable spoken-audio asset from EXACT approved text with an EXACT approved voiceId (hosted TTS; CHARGES the user's Pireel account). Script approval and concrete voice selection are separate decisions: do not call this after approving only a general voice requirement, and never infer consent from the user's stored default. The tool shows the exact script, voice, delivery settings and current credit charge in a final approval card; rejection generates nothing and charges nothing. This atomic operation returns an audio asset plus transcriptText and initial durationSec and does NOT place it. To use it as timeline narration: pass the returned asset fields unchanged to register_media, then add_clips with role=narration; NEVER use set_bgm for spoken narration. The script is enough for meaning; call read_script with the exact assetId only when real performed-audio timing is required. For a speaking portrait/video, pass the returned url to lip_sync. Keep user wording verbatim unless rewriting was explicitly requested.",
     inputSchema: obj(
       {
         text: { type: 'string', description: 'Exact text to speak (1–5000 characters).' },
@@ -942,11 +973,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔎',
     label: 'tools.search_media.label',
     description:
-      "Retrieve SOURCE-CLOCK video segments inside the CURRENT project when the needed evidence is NOT already visible in this conversation: the main video plus inserted video sources already attached to it. If a read_script transcript in the current context contains the requested spoken topic, reason over those numbered rows directly and do NOT call this tool. Use this bounded retrieval fallback for a cold/truncated transcript, several attached sources, or visual moments that require stored visual-analysis labels. It is not the user's general asset library and never searches the web. Results carry stable segmentIds, source ranges, and every surviving edited-timeline occurrence; compose later edits from atomic tools yourself. Coverage says which sources have transcript/visual evidence; if required evidence is missing, call read_script for the missing sources and/or analyze_visual first, then search again.",
+      "Retrieve SOURCE-CLOCK segments from equal-standing narrative-lane sources in the CURRENT project when the needed evidence is not already visible in this conversation. If a read_script transcript in the current context contains the requested spoken topic, reason over those numbered rows directly and do not call this tool. Use this bounded retrieval fallback for a cold/truncated transcript, several attached sources, or visual moments that require stored visual-analysis labels. It is not the user's general asset library and never searches the web. Results carry stable segmentIds, source ranges, and every surviving edited-timeline occurrence; compose later edits from atomic tools yourself. Coverage says which sources have transcript/visual evidence; if required evidence is missing, call read_script for the missing sources and/or analyze_visual first, then search again.",
     inputSchema: obj(
       {
         query: { type: 'string', description: 'Natural-language description, phrase, object, scene, or spoken topic to find (max 200 characters).' },
-        scope: { type: 'string', enum: ['all', 'main', 'inserted'], description: 'Search all project video sources (default), only the main video, or only inserted sources.' },
+        scope: { type: 'string', enum: ['all', 'narrative'], description: 'Search all project media evidence (default) or only equal-standing narrative-lane sources.' },
         shotId: { type: 'string', description: 'Optional: narrow to the source that owns this shot id.' },
         limit: { type: 'number', description: 'Maximum distinct source segments to return (default 8, max 20).' },
       },

@@ -25,7 +25,6 @@ function testDocument(): EditorDocumentV2 {
     locator: { localSig: 'audio-sig' },
     metadata: { durationSec: 20 },
   };
-  document.semantics.primaryNarrativeAssetId = 'video';
   return document;
 }
 

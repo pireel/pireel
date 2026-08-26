@@ -26,7 +26,6 @@ describe('clip.retime', () => {
     document.assets.voice = {
       id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.wav' }, metadata: { durationSec: 2 },
     };
-    document.semantics.primaryNarrativeAssetId = 'video';
     document.timeline.tracks[0]!.clips = [
       narrative('first', 0, 120, 0, 4),
       narrative('second', 120, 60, 4, 6),

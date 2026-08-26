@@ -4,6 +4,7 @@ import { applyCaptionDocumentEdit, resizeManagedCaptionTiming } from './caption-
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { emptyComposition } from './composition-core';
 import { compositionToEditorDocument, projectDocumentToComposition } from './project-document';
+import { firstNarrativeAssetId } from './editor-document';
 
 const transcript: AsrSegment[] = [{
   start: 0,
@@ -48,7 +49,7 @@ describe('native caption lifecycle transaction', () => {
     const captionTrack = result.document.timeline.tracks.find((track) => track.id === result.document.semantics.managedCaptionTrackId)!;
     expect(captionTrack).toMatchObject({ type: 'caption', role: 'managedCaptions', locked: false });
     expect(captionTrack.clips.length).toBeGreaterThan(0);
-    expect(result.document.semantics.transcripts[result.document.semantics.primaryNarrativeAssetId!]![0]!.cueLayout).toEqual(['0:3']);
+    expect(result.document.semantics.transcripts[firstNarrativeAssetId(result.document)!]![0]!.cueLayout).toEqual(['0:3']);
     expect(result.document.appearance.captionStyle).toMatchObject({ on: true, preset: 'ln-clean', yPct: 82, scale: 1.2 });
     expect(result.document.appearance.captionStyle).not.toHaveProperty('color');
     expect(result.document.appearance.captionStyle).not.toHaveProperty('bg');
@@ -80,7 +81,7 @@ describe('native caption lifecycle transaction', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const segment = result.document.semantics.transcripts[result.document.semantics.primaryNarrativeAssetId!]![0]!;
+    const segment = result.document.semantics.transcripts[firstNarrativeAssetId(result.document)!]![0]!;
     expect(segment.captionText).toBe('ONE two three four');
     expect(segment.cueLayout!.length).toBeGreaterThan(1);
     expect(Object.keys(segment.cueTexts ?? {})).toEqual([segment.cueLayout![0]]);
@@ -92,7 +93,7 @@ describe('native caption lifecycle transaction', () => {
     });
     expect(enabled.ok).toBe(true);
     if (!enabled.ok) return;
-    const assetId = enabled.document.semantics.primaryNarrativeAssetId!;
+    const assetId = firstNarrativeAssetId(enabled.document)!;
     delete enabled.document.semantics.transcripts[assetId]![0]!.cueLayout;
     const track = enabled.document.timeline.tracks.find((candidate) => candidate.id === enabled.document.semantics.managedCaptionTrackId)!;
     const before = track.clips.map((clip) => clip.kind === 'caption' ? clip.sourceRef : undefined);
@@ -146,7 +147,7 @@ describe('native caption lifecycle transaction', () => {
     expect(words[0]!.start).toBeCloseTo(1.5);
     expect(words.at(-1)!.end).toBeGreaterThan(3.7);
     expect(words.at(-1)!.end).toBeLessThan(4);
-    expect(relaid.document.semantics.transcripts[relaid.document.semantics.primaryNarrativeAssetId!]![0]!.words).toEqual(transcript[0]!.words);
+    expect(relaid.document.semantics.transcripts[firstNarrativeAssetId(relaid.document)!]![0]!.words).toEqual(transcript[0]!.words);
   });
 
   it('turns captions off without deleting their lane or remembered style', () => {

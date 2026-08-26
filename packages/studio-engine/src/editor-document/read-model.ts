@@ -45,9 +45,15 @@ export function hasPrimaryNarrativeClips(document: EditorDocumentV2): boolean {
   return primaryNarrativeClips(document).length > 0;
 }
 
-export function primaryNarrativeAsset(document: EditorDocumentV2): EditorMediaAsset | undefined {
-  const assetId = document.semantics.primaryNarrativeAssetId;
+/** First source by narrative-lane order. This is an ordering convenience, never a privileged asset. */
+export function firstNarrativeAsset(document: EditorDocumentV2): EditorMediaAsset | undefined {
+  const assetId = primaryNarrativeClips(document)[0]?.assetId;
   return assetId ? document.assets[assetId] : undefined;
+}
+
+/** First source id by narrative-lane order. Prefer an explicit clip/asset selection for edits. */
+export function firstNarrativeAssetId(document: EditorDocumentV2): string | undefined {
+  return primaryNarrativeClips(document)[0]?.assetId;
 }
 
 /** Resolve a real timeline second against native clip placement, preserving leading/middle gaps. */

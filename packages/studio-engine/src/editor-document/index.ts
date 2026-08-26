@@ -24,6 +24,7 @@ export * from './prune-unused-assets';
 export * from './read-model';
 export * from './transcript-address';
 export * from './render-plan';
+export * from './source-peer-normalization';
 export * from './time';
 export * from './track-compatibility';
 export * from './types';

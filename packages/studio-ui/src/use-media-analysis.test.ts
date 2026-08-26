@@ -40,7 +40,6 @@ describe('media analysis transcript outcomes', () => {
       locator: { localSig: 'silent.mp4:12:1' },
       metadata: { durationSec: 5, width: 1920, height: 1080, hasAudio: true },
     };
-    initial.semantics.primaryNarrativeAssetId = 'main';
     initial.timeline.tracks[0]!.clips = [{
       id: 'main-clip',
       kind: 'narrative',
@@ -88,7 +87,6 @@ describe('media analysis transcript outcomes', () => {
       locator: { localSig: 'silent.mp4:12:1' },
       metadata: { durationSec: 5, width: 1920, height: 1080, hasAudio: false },
     };
-    initial.semantics.primaryNarrativeAssetId = 'main';
     initial.timeline.tracks[0]!.clips = [{
       id: 'main-clip',
       kind: 'narrative',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editorDocumentRenderPlan, emptyComposition, localImageLocator } from '@pireel/studio-engine/composition';
+import { editorDocumentRenderPlan, emptyComposition, firstNarrativeAssetId, localImageLocator } from '@pireel/studio-engine/composition';
 import {
   applyCommandToLiveProject,
   applyDocumentToLiveProject,
@@ -28,7 +28,8 @@ describe('canonical live project document', () => {
     expect(Object.values(snapshot.assets)[0]!.locator).toEqual({ localSig: 'main.mp4:42:7' });
     applyCommandToLiveProject(session, { type: 'canvas.patch', patch: { width: 720, height: 1920 } });
     applyDocumentToLiveProject(session, snapshot);
-    expect(session.state.composition.video?.url).toBe('blob:runtime-main');
+    expect(session.state.composition.video).toBeNull();
+    expect(session.state.composition.shots?.[0]?.src).toBe('blob:runtime-main');
     expect(JSON.stringify(snapshot)).not.toContain('blob:runtime-main');
   });
 
@@ -112,9 +113,10 @@ describe('canonical live project document', () => {
     });
     expect(result.ok).toBe(true);
     expect(session.state.document.timeline.tracks.map((track) => track.id)).not.toContain('track_broll');
-    const mainAsset = session.state.document.assets[session.state.document.semantics.primaryNarrativeAssetId!];
+    const mainAsset = session.state.document.assets[firstNarrativeAssetId(session.state.document)!];
     expect(resolveLiveAssetUrl(session, mainAsset!)).toBe('blob:runtime-main');
-    expect(session.state.composition.video?.url).toBe('blob:runtime-main');
+    expect(session.state.composition.video).toBeNull();
+    expect(session.state.composition.shots?.[0]?.src).toBe('blob:runtime-main');
     const canvas = applyCommandToLiveProject(session, { type: 'canvas.patch', patch: { width: 720, height: 1920 } });
     expect(canvas.ok).toBe(true);
     expect(session.state.document.timeline.tracks.map((track) => track.id)).not.toContain('track_broll');

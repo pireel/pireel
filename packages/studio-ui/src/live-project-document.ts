@@ -15,6 +15,7 @@ import {
   type EditorMediaAsset,
   applyEditorDocumentPersistenceMetadata,
   freezeEditorDocumentBlockVars,
+  firstNarrativeAssetId,
   localImageLocator,
   prepareEditorDocumentForPersistence,
   pruneEmptyNonPrimaryTracks,
@@ -84,7 +85,9 @@ export function rememberCompositionRuntimeUrls(
   const remember = (assetId: string | undefined, url: string | undefined) => {
     if (assetId && url && !isCompatibilityPlaceholder(url)) into.set(assetId, url);
   };
-  remember(document.semantics.primaryNarrativeAssetId, composition.video?.url);
+  // Legacy Composition imports may still carry their first source in `video`. Convert that
+  // runtime URL to the first clip's asset once; canonical projections never write `video` again.
+  remember(firstNarrativeAssetId(document), composition.video?.url);
   const clipAssets = assetClipIdMap(document);
   for (const shot of composition.shots ?? []) remember(clipAssets.get(shot.id), shot.src);
   for (const block of composition.blocks ?? []) {

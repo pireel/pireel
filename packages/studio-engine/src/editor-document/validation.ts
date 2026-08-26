@@ -1,5 +1,6 @@
 import { isFinitePositive } from './time';
 import { normalizeEditorDocumentArtifacts } from '../director-plan-artifact';
+import { normalizePeerNarrativeSources } from './source-peer-normalization';
 import {
   EDITOR_DOCUMENT_VERSION,
   type EditorDocumentIssue,
@@ -134,7 +135,6 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
   const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
   if (!primary) push('error', 'missing-primary-track', 'semantics.primaryNarrativeTrackId', 'Primary narrative track does not exist.');
   else if (primary.role !== 'primaryNarrative' || primary.type !== 'visual') push('error', 'invalid-primary-track', 'semantics.primaryNarrativeTrackId', 'Primary narrative must reference a visual track with the primaryNarrative role.');
-  if (document.semantics.primaryNarrativeAssetId && !document.assets[document.semantics.primaryNarrativeAssetId]) push('error', 'missing-primary-asset', 'semantics.primaryNarrativeAssetId', 'Primary narrative asset does not exist.');
   if (document.semantics.managedCaptionTrackId) {
     const captions = document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId);
     if (!captions || captions.role !== 'managedCaptions' || captions.type !== 'caption') push('error', 'invalid-caption-track', 'semantics.managedCaptionTrackId', 'Managed caption track reference is invalid.');
@@ -171,7 +171,7 @@ export function validateEditorDocumentV2(document: EditorDocumentV2): EditorDocu
 /** Decode the stable editor envelope, then canonicalize optional artifacts independently. */
 export function parseEditorDocumentV2(value: unknown): EditorDocumentV2 | null {
   if (!isEditorDocumentV2(value)) return null;
-  return normalizeEditorDocumentArtifacts(value).document;
+  return normalizePeerNarrativeSources(normalizeEditorDocumentArtifacts(value).document);
 }
 
 export function editorTimelineTotalFrames(document: EditorDocumentV2): number {

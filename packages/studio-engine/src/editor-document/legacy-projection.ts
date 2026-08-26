@@ -1,37 +1,27 @@
 import type { AudioClip } from '../audio-tracks';
-import type { Block, Composition, StudioVideo, VideoShot } from '../composition-core';
-import { isFinitePositive, timelineFramesToSeconds } from './time';
+import type { Block, Composition, VideoShot } from '../composition-core';
+import { timelineFramesToSeconds } from './time';
 import type {
   EditorDocumentV2,
   EditorMediaAsset,
   LegacyProjectionOptions,
   NarrativeTimelineClip,
 } from './types';
+import { normalizePeerNarrativeSources } from './source-peer-normalization';
 
 function projectedAssetUrl(asset: EditorMediaAsset, options?: LegacyProjectionOptions, offlineFallback = true): string | undefined {
   return options?.resolveAssetUrl?.(asset)
     ?? asset.locator.remoteUrl
     // Preserve source identity in the V1 compatibility view while bytes are offline. Existing
     // recovery code treats blob URLs as unavailable and replaces them from localSig/cloudKey.
-    ?? (offlineFallback && (asset.locator.localSig || asset.locator.cloudKey) ? `blob:pireel-offline/${asset.id}` : undefined);
+    ?? (offlineFallback ? `blob:pireel-offline/${asset.id}` : undefined);
 }
 
 /** Temporary V2 -> V1 read adapter. It intentionally cannot represent visual gaps or overlapping narrative clips. */
 export function projectV2ToLegacyComposition(document: EditorDocumentV2, options?: LegacyProjectionOptions): Composition {
+  document = normalizePeerNarrativeSources(document);
   const fps = document.canvas.fps;
   const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-  const mainAssetId = document.semantics.primaryNarrativeAssetId;
-  const mainAsset = mainAssetId ? document.assets[mainAssetId] : undefined;
-  const mainUrl = mainAsset ? projectedAssetUrl(mainAsset, options, false) : undefined;
-  const mainDuration = mainAsset?.metadata.durationSec;
-  const video: StudioVideo | null = mainAsset && mainUrl && isFinitePositive(mainDuration)
-    ? {
-        url: mainUrl,
-        durationSec: mainDuration,
-        ...(mainAsset.metadata.width ? { sourceWidth: mainAsset.metadata.width } : {}),
-        ...(mainAsset.metadata.height ? { sourceHeight: mainAsset.metadata.height } : {}),
-      }
-    : null;
 
   const shots: VideoShot[] = (primary?.clips ?? [])
     .filter((clip): clip is NarrativeTimelineClip => clip.kind === 'narrative')
@@ -45,8 +35,8 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
         srcEnd: clip.sourceOutSec,
         ...clip.properties,
         ...(clip.mediaFraming ? { mediaFraming: clip.mediaFraming } : {}),
-        ...(clip.assetId !== mainAssetId && src ? { src } : {}),
-        ...(clip.assetId !== mainAssetId && asset.locator.localSig ? { srcSig: asset.locator.localSig } : {}),
+        ...(src ? { src } : {}),
+        ...(asset.locator.localSig ? { srcSig: asset.locator.localSig } : {}),
       };
     });
 
@@ -91,7 +81,9 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
     width: document.canvas.width,
     height: document.canvas.height,
     theme: document.appearance.theme,
-    video,
+    // V1 compatibility keeps the property shape, but V2 has no privileged video source. Every
+    // narrative shot resolves its own source above.
+    video: null,
     blocks,
     shots,
     ...(document.appearance.palette ? { palette: document.appearance.palette } : {}),

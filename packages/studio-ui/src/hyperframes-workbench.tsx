@@ -120,7 +120,8 @@ import {
   narrativeClipTimelineRange,
   narrativeTrimRangeAtTimelineSecond,
   newBlock,
-  primaryNarrativeAsset,
+  firstNarrativeAsset,
+  firstNarrativeAssetId,
   primaryNarrativeClips,
   pruneUnusedEditorAssets,
   projectDocumentToComposition,
@@ -207,9 +208,7 @@ import {
 } from "./local-media";
 import { materializeRemoteMedia } from "./remote-media";
 import {
-  activatePrimarySourceDecoder,
-  resolvePrimaryLocalSig,
-  shouldReconnectPrimarySource,
+  shouldReconnectNarrativeSource,
   sourceRuntimeIsLive,
 } from "./local-source-runtime";
 import {
@@ -429,10 +428,10 @@ function customCaptionStyle(
   };
 }
 
-const primaryNarrativeDurationSec = (
+const firstNarrativeDurationSec = (
   document: EditorDocumentV2,
 ): number | null => {
-  const assetId = document.semantics.primaryNarrativeAssetId;
+  const assetId = firstNarrativeAssetId(document);
   return assetId
     ? (document.assets[assetId]?.metadata.durationSec ?? null)
     : null;
@@ -518,9 +517,8 @@ export function HyperframesWorkbench({
     () => supplementalVisualMedia(renderPlan),
     [renderPlan],
   );
-  const primaryAsset = primaryNarrativeAsset(editorDocument);
-  const primarySourceUrl = primaryAsset ? (resolveAssetUrl(primaryAsset) ?? null) : null;
-  const primaryAssetDurationSec = primaryAsset?.metadata.durationSec ?? null;
+  const firstAsset = firstNarrativeAsset(editorDocument);
+  const firstAssetDurationSec = firstAsset?.metadata.durationSec ?? null;
   const disabledClipIds = useMemo(
     () =>
       new Set(
@@ -583,10 +581,6 @@ export function HyperframesWorkbench({
                                 ...(entry.asset.metadata.durationSec != null
                                   ? { sourceDurationSec: entry.asset.metadata.durationSec }
                                   : {}),
-                                ...(entry.asset.id ===
-                                editorDocument.semantics.primaryNarrativeAssetId
-                                  ? { usePrimaryFilmstrip: true }
-                                  : {}),
                                 enabled: entry.clip.enabled,
                               },
                             ]
@@ -599,7 +593,6 @@ export function HyperframesWorkbench({
           : [],
       ),
     [
-      editorDocument.semantics.primaryNarrativeAssetId,
       localImagePreviewUrls,
       renderPlan,
     ],
@@ -759,6 +752,9 @@ export function HyperframesWorkbench({
   // slots-only commit of that block can skip the rebuild (rebuilding is wasted echo and flickers once). Record the
   // block id, consumed when the patch classifier hits
   const iframeEditEchoRef = useRef<Set<string>>(new Set());
+  // Motion-card clicks already replace the active block timeline before playing the one-shot
+  // preview. The ensuing V2 projection must not apply the same patch again and interrupt it.
+  const mediaTimelineEchoRef = useRef<Map<string, string>>(new Map());
   // Back-buffer swap pending: in-place patches only hit the **active** doc; if applied while a swap is pending they'd
   // be clobbered by the incoming generation — inside this window the patch path steps aside and falls back to a full
   // doc rebuild (rebuild composes the latest comp, always correct)
@@ -1286,7 +1282,7 @@ export function HyperframesWorkbench({
     if (
       videoSigRef.current &&
       !videoFile &&
-      !primaryNarrativeAsset(editorDocument)
+      !firstNarrativeAsset(editorDocument)
     )
       videoSigRef.current = null;
   }, [editorDocument, videoFile]);
@@ -1531,12 +1527,6 @@ export function HyperframesWorkbench({
           localRuntimeReadyAssetIdsRef.current.add(asset.id);
           return { ok: true as const, prepared: true, file };
         }
-        if (options?.asPrimary && asset.kind === "video") {
-          // The primary decoder owns its object URL and filmstrip. Do not mount the same file as a
-          // generic clip first; pickVideoFile will attach it atomically after timeline placement.
-          localRuntimeReadyAssetIdsRef.current.add(asset.id);
-          return { ok: true as const, prepared: true, file };
-        }
         const url = URL.createObjectURL(file);
         clipFilesRef.current.set(url, file);
         rememberAssetUrl(asset.id, url);
@@ -1568,25 +1558,14 @@ export function HyperframesWorkbench({
         (asset): asset is EditorMediaAsset =>
           !!asset?.locator.localSig &&
           asset.kind !== "image" &&
-          (asset.id === editorDocument.semantics.primaryNarrativeAssetId
-            ? !videoFileRef.current
-            : !localRuntimeReadyAssetIdsRef.current.has(asset.id)),
+          !localRuntimeReadyAssetIdsRef.current.has(asset.id),
       );
     if (!missing.length) return () => { cancelled = true; };
     void (async () => {
       let prepared = false;
       for (const asset of missing) {
-        const isPrimary = asset.id === editorDocument.semantics.primaryNarrativeAssetId;
-        const result = await prepareLocalAssetRuntime(asset, { asPrimary: isPrimary });
+        const result = await prepareLocalAssetRuntime(asset, { asPrimary: false });
         prepared ||= result.ok && result.prepared;
-        if (result.ok && isPrimary && result.file && asset.locator.localSig) {
-          await pickVideoFile(result.file, {
-            asSig: asset.locator.localSig,
-            reconnect: true,
-            successFeedback: "silent",
-          });
-          prepared = true;
-        }
         if (!result.ok) {
           console.warn(
             `[studio] local ${asset.kind} runtime restore failed for ${asset.id}: ${result.error}`,
@@ -1620,7 +1599,7 @@ export function HyperframesWorkbench({
       ? { localAssets: localAssetIndexRef.current }
       : {}),
     videoSig: videoSigRef.current,
-    videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
+    videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
   };
   /** Silently back up a source video to R2 (content-addressed, dup = instant); on success record the index and trigger a cloud sync. */
   const backupMediaToCloud = (
@@ -1688,11 +1667,6 @@ export function HyperframesWorkbench({
   const [exportOpts, setExportOpts] =
     useState<ExportRenderOpts>(DEFAULT_RENDER_OPTS);
 
-  // Engine source sync: swap source whenever the main video File changes (the resident element only swaps src, the decode session doesn't churn with doc rebuilds)
-  useEffect(() => {
-    videoEngineRef.current?.setSource("main", videoFile ?? null);
-    if (videoFile) videoEngineRef.current?.seek(tRef.current);
-  }, [videoFile]);
   // Timeline duration is independent from the video segment table: an empty primary track may
   // still contain graphics/audio, and those regions need a real parent-side playback clock.
   useEffect(() => {
@@ -1702,8 +1676,8 @@ export function HyperframesWorkbench({
   useEffect(() => {
     const eng = videoEngineRef.current;
     if (!eng) return;
-    // Equal-footing: real shots always feed the engine, main source or not (a clips-only comp must
-    // render); the implicit whole-video single clip is only for a loaded main with no cuts yet.
+    // Every narrative shot carries its own source. The lane engine keeps one resident decoder per
+    // source URL and never creates a privileged "main" decoder.
     const shotsById = new Map(
       videoTrackShots(comp).map((shot) => [shot.id, shot]),
     );
@@ -1736,8 +1710,8 @@ export function HyperframesWorkbench({
               Math.abs(entry.endSec - entries[i + 1]!.entry.startSec) > 1e-3),
         );
         return {
-          key: s.src ?? "main",
-          elKey: s.src ? `clip_${s.id}` : "main",
+          key: s.src!,
+          elKey: `clip_${s.id}`,
           srcStart: s.srcStart,
           srcEnd: s.srcEnd,
           timelineStart: entry.startSec,
@@ -2327,7 +2301,22 @@ export function HyperframesWorkbench({
             for (const r of patchable.removed)
               postPreview({ type: "hf:remove", id: r.id });
             for (const p of patchable.pairs) {
-              if (p.replace || (p.slots && !echo.has(p.b.id)))
+              if (p.mediaTimeline) {
+                const pb = pblockOf(p.b.id);
+                if (pb) {
+                  const timelineBody = renderBlock(pb).timelineBody;
+                  if (mediaTimelineEchoRef.current.get(p.b.id) === timelineBody)
+                    mediaTimelineEchoRef.current.delete(p.b.id);
+                  else {
+                    mediaTimelineEchoRef.current.delete(p.b.id);
+                    postPreview({
+                      type: "hf:blockTimeline",
+                      blockId: pb.id,
+                      timelineBody,
+                    });
+                  }
+                }
+              } else if (p.replace || (p.slots && !echo.has(p.b.id)))
                 sendNode(p.b.id, false);
               else if (p.slots) echo.delete(p.b.id);
               if (p.geom) {
@@ -2554,7 +2543,7 @@ export function HyperframesWorkbench({
       // sandboxed iframe. A parent-created blob URL is unreadable from that opaque origin, so hand the
       // File across and let the preview runtime create an iframe-owned URL for each visual node.
       const document = editorDocumentRef.current;
-      const primaryAssetId = document.semantics.primaryNarrativeAssetId;
+      const primaryAssetId = firstNarrativeAssetId(document);
       const primaryAsset = primaryAssetId
         ? document.assets[primaryAssetId]
         : undefined;
@@ -2718,7 +2707,7 @@ export function HyperframesWorkbench({
       videoSig:
         videoSigRef.current ??
         (videoFileRef.current ? fileSig(videoFileRef.current) : null),
-      videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
+      videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
       coverThumb: currentCoverThumb(),
     }),
     [persistableDocument],
@@ -3066,28 +3055,42 @@ export function HyperframesWorkbench({
   const setBlockAnim = (
     bid: string,
     patch: Partial<{ enter: string; exit: string; dur: number }>,
-  ) =>
-    (() => {
-      const block = compRef.current.blocks.find(
-        (candidate) => candidate.id === bid,
-      );
-      if (block)
-        patchOverlays([
-          {
-            clipId: bid,
-            block: {
-              slots: {
-                ...block.slots,
-                anim: {
-                  enter: "fade",
-                  ...((block.slots.anim ?? {}) as object),
-                  ...patch,
-                },
-              },
-            },
+  ) => {
+    const block = compRef.current.blocks.find(
+      (candidate) => candidate.id === bid,
+    );
+    if (!block) return null;
+    const anim = {
+      enter: "fade",
+      ...((block.slots.anim ?? {}) as object),
+      ...patch,
+    } as { enter?: string; exit?: string; dur?: number };
+    const nextBlock = {
+      ...block,
+      slots: { ...block.slots, anim },
+    };
+    if (
+      !patchOverlays([
+        {
+          clipId: bid,
+          block: {
+            slots: nextBlock.slots,
           },
-        ]);
-    })();
+        },
+      ])
+    )
+      return null;
+    // Install the persisted timeline before the one-shot preview. This keeps the media node
+    // alive and prevents the zero-delay composition patch from replacing it mid-animation.
+    const timelineBody = renderBlock(nextBlock).timelineBody;
+    postPreview({
+      type: "hf:blockTimeline",
+      blockId: bid,
+      timelineBody,
+    });
+    mediaTimelineEchoRef.current.set(bid, timelineBody);
+    return anim;
+  };
   /** Push the draft live to the stage (the editor already passed the hard-lint error gate). */
   const handleCodeDraft = (id: string, draft: SourceDraft) => {
     if (genIdsRef.current.has(id)) return;
@@ -3842,43 +3845,19 @@ export function HyperframesWorkbench({
   }, [playing, beginPlayback, postPreview]);
 
   /* ---------- Pick a local video (no upload, blob preview) + ASR ---------- */
-  function activatePrimarySourceRuntime(source: {
+  function activateNarrativeSourceRuntime(source: {
     file: File;
     url: string;
     sig: string;
     durationSec: number;
   }) {
-    if (objectUrlRef.current && objectUrlRef.current !== source.url)
-      URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = source.url;
-    activatePrimarySourceDecoder<File>({
-      source: source.file,
-      sourceRef: videoFileRef,
-      engine: videoEngineRef.current,
-      atSec: tRef.current,
-      publish: (file) => setVideoFile(file),
-    });
+    clipFilesRef.current.set(source.url, source.file);
+    // Retained only as a legacy panel cache for the last file picked by the user. Playback and
+    // source identity are driven exclusively by clip asset URLs.
+    videoFileRef.current = source.file;
+    setVideoFile(source.file);
     videoSigRef.current = source.sig;
-
-    const gen = ++filmstripGenRef.current;
-    setFilmstrip((previous) => {
-      previous.forEach((frame) => URL.revokeObjectURL(frame.url));
-      return [];
-    });
-    void extractFilmstrip(
-      source.file,
-      source.durationSec,
-      Math.min(600, Math.max(8, Math.round(source.durationSec))),
-      (frame) => {
-        if (filmstripGenRef.current !== gen) {
-          URL.revokeObjectURL(frame.url);
-          return;
-        }
-        setFilmstrip((previous) =>
-          [...previous, frame].sort((left, right) => left.t - right.t),
-        );
-      },
-    ).catch(() => {});
   }
 
   /** opts.asSig: a cloud-fetched File has a changed name/mtime so fileSig won't match the original sig — substitute the
@@ -3902,7 +3881,7 @@ export function HyperframesWorkbench({
         !hasVideoTrackContent(compRef.current) &&
         hasTimelineContent(compRef.current);
       const url = URL.createObjectURL(file);
-      activatePrimarySourceRuntime({
+      activateNarrativeSourceRuntime({
         file,
         url,
         sig,
@@ -3924,11 +3903,11 @@ export function HyperframesWorkbench({
       // showed captions — the products belong to this very video, keep them (user hit this).
       // reconnect: per-asset restore of the main source mid-session — same preserve semantics as a draft reconnect
       const currentPrimaryId =
-        editorDocumentRef.current.semantics.primaryNarrativeAssetId;
+        firstNarrativeAssetId(editorDocumentRef.current);
       const currentPrimarySig = currentPrimaryId
         ? editorDocumentRef.current.assets[currentPrimaryId]?.locator.localSig
         : null;
-      const sameVideoRestore = shouldReconnectPrimarySource({
+      const sameVideoRestore = shouldReconnectNarrativeSource({
         candidateSig: sig,
         explicitReconnect: opts?.reconnect,
         pendingVideoSig: pr?.videoSig,
@@ -3948,7 +3927,7 @@ export function HyperframesWorkbench({
         // Reconnect only the source bytes. The draft's canvas may have been deliberately changed
         // (set_canvas); restoring the source dimensions here used to silently erase that edit.
         const assetId =
-          editorDocumentRef.current.semantics.primaryNarrativeAssetId;
+          firstNarrativeAssetId(editorDocumentRef.current);
         if (assetId) rememberAssetUrl(assetId, url);
         setEditorDocument(editorDocumentRef.current);
         if (successNotices.reconnected)
@@ -4015,7 +3994,7 @@ export function HyperframesWorkbench({
   function currentVideo() {
     const c = compRef.current;
     const document = editorDocumentRef.current;
-    const asset = primaryNarrativeAsset(document);
+    const asset = firstNarrativeAsset(document);
     const durationSec = asset?.metadata.durationSec;
     const url = asset ? resolveAssetUrl(asset) : null;
     return url && durationSec
@@ -4026,7 +4005,7 @@ export function HyperframesWorkbench({
   const speechFileForAsset = useCallback(
     async (asset: EditorMediaAsset): Promise<File | null> => {
       if (
-        asset.id === editorDocumentRef.current.semantics.primaryNarrativeAssetId &&
+        asset.id === firstNarrativeAssetId(editorDocumentRef.current) &&
         videoFileRef.current
       ) {
         return videoFileRef.current;
@@ -4076,14 +4055,14 @@ export function HyperframesWorkbench({
 
   // Debug hook: clear the visual-analysis cache + rerun (same video returns cache instantly by default; use this to re-measure analysis)
   async function rerunVisual() {
-    if (!videoFile || !primaryAssetDurationSec) {
+    if (!videoFile || !firstAssetDurationSec) {
       toast.error(t("common.uploadVideoFirst"));
       return;
     }
     clearVisualCache(videoSigRef.current ?? fileSig(videoFile));
     setVisual(null);
     toast.success(t("workbench.cacheClearedReanalyzingVideo"));
-    const vis = await analyzeVisual(videoFile, primaryAssetDurationSec).catch(
+    const vis = await analyzeVisual(videoFile, firstAssetDurationSec).catch(
       () => null,
     );
     setVisual(vis);
@@ -5707,9 +5686,9 @@ export function HyperframesWorkbench({
           : [],
       ),
     );
-    if (isMain && editorDocumentRef.current.semantics.primaryNarrativeAssetId) {
+    if (isMain && firstNarrativeAssetId(editorDocumentRef.current)) {
       deletedAssetIds.add(
-        editorDocumentRef.current.semantics.primaryNarrativeAssetId,
+        firstNarrativeAssetId(editorDocumentRef.current)!,
       );
     }
     const firstStart = spans.length ? spans[spans.length - 1]!.editedStart : 0;
@@ -5775,11 +5754,7 @@ export function HyperframesWorkbench({
    *  File; local clips = the held File map; remote URLs count as live (fetchable). Drives the panel's
    *  restore-card variant and the timeline's missing-source strip. */
   const srcLive = (src: string) => {
-    const asset = primaryNarrativeAsset(editorDocumentRef.current);
-    const mainUrl = asset ? resolveAssetUrl(asset) : undefined;
     return sourceRuntimeIsLive(src, {
-      primarySourceUrl: mainUrl,
-      primaryFileLoaded: !!videoFileRef.current,
       runtimeFileUrls: clipFilesRef.current,
     });
   };
@@ -6093,7 +6068,7 @@ export function HyperframesWorkbench({
     ): Promise<{ key: string; file: File; upTo: number } | null> => {
       if (!s.src) {
         const f = videoFileRef.current;
-        const dur = primaryNarrativeDurationSec(editorDocumentRef.current);
+        const dur = firstNarrativeDurationSec(editorDocumentRef.current);
         return f && dur ? { key: "main", file: f, upTo: dur } : null;
       }
       let f = clipFilesRef.current.get(s.src) ?? null;
@@ -6440,7 +6415,6 @@ export function HyperframesWorkbench({
     setDocument: setEditorDocument,
     rememberAssetUrl,
     setSelectedId,
-    onPrimarySource: activatePrimarySourceRuntime,
     setSelectedShotId,
     applyT,
     pushUndoSnapshot,
@@ -6883,7 +6857,7 @@ export function HyperframesWorkbench({
                 : {}),
             },
             videoSig: videoSigRef.current,
-            videoDurationSec: primaryNarrativeDurationSec(
+            videoDurationSec: firstNarrativeDurationSec(
               editorDocumentRef.current,
             ),
             coverThumb: currentCoverThumb(),
@@ -6905,7 +6879,7 @@ export function HyperframesWorkbench({
       videoSig:
         videoSigRef.current ??
         (videoFileRef.current ? fileSig(videoFileRef.current) : null),
-      videoDurationSec: primaryNarrativeDurationSec(editorDocumentRef.current),
+      videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
       coverThumb: currentCoverThumb(),
     };
   }
@@ -7092,7 +7066,7 @@ export function HyperframesWorkbench({
       const runtimeUrl =
         resolveAssetUrl(sourceAsset) ??
         (sourceAsset.id ===
-        editorDocumentRef.current.semantics.primaryNarrativeAssetId
+        firstNarrativeAssetId(editorDocumentRef.current)
           ? (objectUrlRef.current ?? undefined)
           : undefined);
       if (runtimeUrl) rememberAssetUrl(sourceAsset.id, runtimeUrl);
@@ -7470,7 +7444,7 @@ export function HyperframesWorkbench({
       // Keep the sig anchor even before (or without) the bytes: autosave reads videoSigRef, and
       // writing videoSig:null to the cloud row while the media is missing would destroy the
       // reconnect anchor — editing captions/blocks in the missing-media state must not do that.
-      const primaryId = restoredDocument.semantics.primaryNarrativeAssetId;
+      const primaryId = firstNarrativeAssetId(restoredDocument);
       const mainSig =
         (primaryId
           ? restoredDocument.assets[primaryId]?.locator.localSig
@@ -9403,13 +9377,9 @@ export function HyperframesWorkbench({
                     localAssetIndexSyncReady={localAssetIndexSyncReady}
                     onLocalAssetIndexChange={changeLocalAssetIndex}
                     onLocalAssetAvailable={acceptLocalAssetFile}
-                    videoSig={resolvePrimaryLocalSig({
-                      sessionSig: videoSigRef.current,
-                      assetLocalSig: primaryAsset?.locator.localSig,
-                      loadedFileSig: videoFile ? fileSig(videoFile) : null,
-                    })}
-                    mainSourceUrl={primarySourceUrl}
-                    hasMainSource={Boolean(primaryAsset)}
+                    videoSig={null}
+                    mainSourceUrl={null}
+                    hasMainSource={false}
                     onDeleteAsset={deleteAssetSource}
                     isSrcLive={srcLive}
                     onReconnectSource={(src, sig) =>
@@ -9459,7 +9429,7 @@ export function HyperframesWorkbench({
                         sentences={asrSentences}
                         clipSentences={clipAsr}
                         shots={ensureShots(comp)}
-                        videoDurationSec={primaryAssetDurationSec ?? 0}
+                        videoDurationSec={firstAssetDurationSec ?? 0}
                         extracting={asrBusy}
                         onExtract={() => void extractForScript()}
                         onSeek={(sec) => {
@@ -9602,7 +9572,7 @@ export function HyperframesWorkbench({
                           sentences={asrSentences}
                           clipSentences={clipAsr}
                           shots={ensureShots(comp)}
-                          videoDurationSec={primaryAssetDurationSec ?? 0}
+                          videoDurationSec={firstAssetDurationSec ?? 0}
                           extracting={asrBusy}
                           onExtract={() => void extractForScript()}
                           onSeek={(sec) => {
@@ -9758,18 +9728,10 @@ export function HyperframesWorkbench({
                               }
                             }
                             onChange={(patch) => {
-                              setBlockAnim(b.id, patch);
+                              const merged = setBlockAnim(b.id, patch);
+                              if (!merged) return;
                               // Click a card to play it once (hf:animPreview runs the tween directly in the active doc, no debounced rebuild);
                               // changing duration replays the current entry so you feel the speed change instantly
-                              const merged = {
-                                enter: "fade",
-                                ...((b.slots.anim ?? {}) as {
-                                  enter?: string;
-                                  exit?: string;
-                                  dur?: number;
-                                }),
-                                ...patch,
-                              };
                               if (patch.enter !== undefined)
                                 postPreview({
                                   type: "hf:animPreview",
@@ -10357,13 +10319,7 @@ export function HyperframesWorkbench({
             selectedBlockIds={selectedBlockIds}
             filmstrip={filmstrip}
             clipStrips={clipStrips}
-            mainLive={primarySourceUrl
-              ? sourceRuntimeIsLive(primarySourceUrl, {
-                  primarySourceUrl,
-                  primaryFileLoaded: !!videoFileRef.current,
-                  runtimeFileUrls: clipFilesRef.current,
-                })
-              : !!videoFile}
+            mainLive
             srcLive={srcLive}
             pps={pps}
             snapEnabled={timelineSnapEnabled}
@@ -10411,7 +10367,7 @@ export function HyperframesWorkbench({
                 <button
                   type="button"
                   onClick={() => void rerunVisual()}
-                  disabled={!videoFile || !primaryAssetDurationSec}
+                  disabled={!videoFile || !firstAssetDurationSec}
                   className="border-line text-ink-3 hover:text-ink hover:bg-panel-2 rounded border px-2 py-0.5 text-[11px] disabled:opacity-40"
                 >
                   {t("workbench.clearCacheRerunVisual")}

@@ -37,7 +37,7 @@ import {
 import { normalizeDims } from './workbench-utils';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
-import { registerNarrativeSourceRuntime, type PrimaryNarrativeSourceRuntime } from './clip-source-runtime';
+import { registerNarrativeSourceRuntime } from './clip-source-runtime';
 import type { TimelineInsertMode, TimelineMediaDropTarget, TimelineVisualDropTarget } from './timeline-asset-drop';
 
 interface InsertClipCoreOptions {
@@ -63,7 +63,6 @@ export interface ClipInsertDeps {
   localAssetIndexRef: MutableRefObject<LocalAssetIndexEntry[]>;
   setDocument: (document: EditorDocumentV2) => void;
   rememberAssetUrl: (assetId: string, url: string) => void;
-  onPrimarySource: (source: PrimaryNarrativeSourceRuntime) => void;
   setSelectedId: (id: string | null) => void;
   setSelectedShotId: (id: string | null) => void;
   applyT: (v: number) => void;
@@ -77,7 +76,7 @@ export interface ClipInsertDeps {
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
     projectId, comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, setDocument,
-    rememberAssetUrl, onPrimarySource, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts,
+    rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts,
     backupMediaToCloud, runTool,
     visualSources = [],
   } = deps;
@@ -236,10 +235,8 @@ export function useClipInsert(deps: ClipInsertDeps) {
     }
     if (file && sg) {
       registerNarrativeSourceRuntime({
-        documentBeforeInsert,
         source: { file, url, sig: sg, durationSec: clipDur },
         clipFiles: clipFilesRef.current,
-        onPrimarySource,
       });
     }
     // srcSigOverride = the source already has a LOCAL identity (including image → 5s derived still):

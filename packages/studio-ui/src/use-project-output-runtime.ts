@@ -3,7 +3,6 @@
 import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import type { Composition, EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import type { StudioProjectOutputSnapshot } from '@pireel/studio-engine/project-outputs';
-import { loadLocalVideo } from './local-media';
 import type { StudioDraft } from './use-draft-persist';
 import { outputSwitchVideoPickOptions, type VideoPickOptions } from './video-pick-feedback';
 
@@ -62,21 +61,9 @@ export function useProjectOutputRuntime(deps: {
         deps.pendingRestoreRef.current = draft;
 
         const shots = composition.shots ?? [];
-        const wantsMain = shots.some((shot) => !shot.src) || (!shots.length && target.videoDurationSec != null);
-        const primaryId = target.document.semantics.primaryNarrativeAssetId;
-        const mainAsset = primaryId ? target.document.assets[primaryId] : undefined;
-        const mainSig = mainAsset?.locator.localSig ?? target.videoSig;
-        if (wantsMain && mainSig) {
-          deps.videoSigRef.current = mainSig;
-          let file = previousSig === mainSig && previousFile ? previousFile : await loadLocalVideo(mainSig);
-          if (!file && deps.fetchCloudMedia) file = await deps.fetchCloudMedia(mainSig, mainAsset?.locator.cloudKey);
-          if (file) await deps.pickVideoFile(file, outputSwitchVideoPickOptions(mainSig));
-          else deps.setVideoFile(null);
-        } else {
-          deps.pendingRestoreRef.current = null;
-          deps.videoSigRef.current = null;
-          deps.setVideoFile(null);
-        }
+        deps.pendingRestoreRef.current = null;
+        deps.videoSigRef.current = null;
+        deps.setVideoFile(null);
         await deps.recoverLocalClips(shots);
         return true;
       } finally {

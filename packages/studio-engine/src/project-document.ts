@@ -7,6 +7,8 @@ import type { Composition } from './composition-core';
 import {
   emptyEditorDocumentV2,
   projectV2ToLegacyComposition,
+  firstNarrativeAssetId,
+  normalizePeerNarrativeSources,
   syncCaptionTranscripts,
   type EditorDocumentV2,
   type LegacyProjectionOptions,
@@ -105,7 +107,9 @@ export function applyEditorDocumentPersistenceMetadata(
         : {}),
     },
   }]));
-  const mainId = input.document.semantics.primaryNarrativeAssetId;
+  // These fields exist only on the legacy persistence DTO. Apply them to the first clip in lane
+  // order during import, without storing a privileged source identity in the document.
+  const mainId = firstNarrativeAssetId(input.document);
   if (mainId && assets[mainId]) {
     const main = assets[mainId]!;
     assets[mainId] = {
@@ -188,7 +192,8 @@ export function applyEditorDocumentPersistenceMetadata(
   if (input.plan !== undefined && document.semantics.plan !== input.plan) {
     document = { ...document, semantics: { ...document.semantics, plan: input.plan } };
   }
-  return prepareEditorDocumentForPersistence(document);
+  // Fold legacy DTO metadata, then strip any historical source hierarchy from loaded JSON.
+  return normalizePeerNarrativeSources(prepareEditorDocumentForPersistence(document));
 }
 
 export function projectDocumentToComposition(

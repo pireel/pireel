@@ -41,4 +41,27 @@ describe('collectAssetSearchDocuments scope boundary', () => {
     expect(deps.listElements).not.toHaveBeenCalled();
     expect(deps.loadElementEntries).not.toHaveBeenCalled();
   });
+
+  it('indexes reusable Foley metadata from the cross-project audio library', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => Response.json({
+      items: url.includes('kind=audio') ? [{
+        id: 'up_foley', url: 'uploads/u1/box.m4a', thumb_url: null,
+        label: 'Cardboard unboxing close', kind: 'audio', width: null, height: null,
+        description: 'MMAudio V2 Foley · event=unboxing · material=cardboard · reuse=timing-compatible',
+        source_url: 'https://cdn.example/mmaudio-result.mp4', created_at: 10,
+      }] : [],
+    })));
+    deps.listStudioGens.mockResolvedValue([]);
+    deps.listElements.mockResolvedValue([]);
+    deps.loadElementEntries.mockReturnValue([]);
+
+    const documents = await collectAssetSearchDocuments('p1', [], 'cloud');
+    expect(documents.find((item) => item.assetId === 'up_foley')).toMatchObject({
+      kind: 'audio',
+      fields: {
+        description: expect.stringContaining('material=cardboard'),
+        source: 'https://cdn.example/mmaudio-result.mp4',
+      },
+    });
+  });
 });

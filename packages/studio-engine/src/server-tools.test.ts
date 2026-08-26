@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Composition, applyEditorDocumentPersistenceMetadata, cutTransitions, compositionToEditorDocument, videoFrameTimelineBody } from './composition';
+import { type Composition, applyEditorDocumentPersistenceMetadata, cutTransitions, compositionToEditorDocument, firstNarrativeAssetId, videoFrameTimelineBody } from './composition';
 import { STUDIO_PROJECT_CONTEXT_SCHEMA_VERSION, type TranscriptSegment } from './project-dto';
 import { SERVER_EXECUTABLE_TOOLS, type ServerToolProject, runServerTool } from './server-tools';
 
@@ -353,14 +353,14 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(t2).not.toContain('[0–2s]'); // cue 粒度行不外泄
   });
   it('search_media:标签页关闭时仍按稳定源时间检索云端转写,且不产生落库改动', () => {
-    const r = runServerTool('search_media', { query: '第二句话', scope: 'main' }, proj());
+    const r = runServerTool('search_media', { query: '第二句话', scope: 'narrative' }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.comp).toBeUndefined();
     expect(r.document).toBeUndefined();
     const data = r.result.data as { indexVersion: number; results: { segmentId: string; sourceStartSec: number; sourceEndSec: number; transcript: string }[] };
     expect(data.indexVersion).toBe(1);
     expect(data.results[0]).toMatchObject({ sourceStartSec: 5, sourceEndSec: 12, transcript: '第二句话' });
-    expect(data.results[0]!.segmentId).toMatch(/^media_main_/);
+    expect(data.results[0]!.segmentId).toMatch(/^media_source_/);
     expect(SERVER_EXECUTABLE_TOOLS.has('search_media')).toBe(true);
   });
   it('move_block/delete_block:改动经 comp 返回(路由落库),原 comp 不被原地改', () => {
@@ -374,12 +374,15 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
   });
   it('place_block:画面定位经共享纯函数,回执带 zone 与 box;无 box 组件拒绝', () => {
     const p = proj();
-    p.comp.blocks[0]!.box = { x: 0.4, y: 0.4, w: 0.3, h: 0.2 };
+    const blockClip = p.document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'b1');
+    expect(blockClip?.kind).toBe('graphic');
+    if (!blockClip || blockClip.kind !== 'graphic') return;
+    blockClip.block = { ...blockClip.block, box: { x: 0.4, y: 0.4, w: 0.3, h: 0.2 } };
     const r = runServerTool('place_block', { blockId: 'b1', anchor: 'top-right' }, p);
     expect(r.result.ok).toBe(true);
     expect(r.result.summary).toContain('top-right');
     expect(r.comp!.blocks[0]!.box).toEqual({ x: 0.67, y: 0.03, w: 0.3, h: 0.2 });
-    expect(p.comp.blocks[0]!.box!.x).toBe(0.4); // 入参不可变
+    expect(blockClip.block.box!.x).toBe(0.4); // 入参不可变
     const r2 = runServerTool('place_block', { blockId: 'b1', dyPct: 10 }, proj());
     expect(r2.result.ok).toBe(false);
     expect(r2.result.error).toContain('no screen box');
@@ -514,7 +517,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const primaryTrack = p.document!.timeline.tracks.find((track) => (
       track.id === p.document!.semantics.primaryNarrativeTrackId
     ))!;
-    const assetId = p.document!.semantics.primaryNarrativeAssetId!;
+    const assetId = firstNarrativeAssetId(p.document!)!;
     primaryTrack.clips = [{
       id: 'retake', kind: 'narrative', assetId, startFrame: 0, durationFrames: 153,
       sourceInSec: 7.3, sourceOutSec: 12.4, properties: { treatment: 'full' }, enabled: true,
@@ -650,7 +653,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
       items: [{ index: 0, text: 'First sentence' }], lang: 'en',
     }, { ...p, comp: enabled.comp!, document: enabled.document! });
     expect(translated.result.ok).toBe(true);
-    const mainAssetId = translated.document!.semantics.primaryNarrativeAssetId!;
+    const mainAssetId = firstNarrativeAssetId(translated.document!)!;
     expect(translated.document!.semantics.transcripts[mainAssetId]![0]).toMatchObject({ sub: 'First sentence', subLang: 'en' });
     expect(translated.document!.timeline.tracks.find((track) => track.id === captionTrackId)!.clips.some((clip) => (
       clip.kind === 'caption' && clip.block.slots.sub === 'First sentence'
@@ -852,7 +855,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r = runServerTool('set_caption_translations', { items: [{ index: 0, text: 'First line' }, { index: 2, text: 'Third line' }] }, proj());
     expect(r.result.ok).toBe(true);
     expect(r.result.summary).toContain('set_captions');
-    const primaryAssetId = r.document!.semantics.primaryNarrativeAssetId!;
+    const primaryAssetId = firstNarrativeAssetId(r.document!)!;
     expect(r.document!.semantics.transcripts[primaryAssetId]![0]!.sub).toBe('First line');
     expect(r.document!.semantics.transcripts[primaryAssetId]![1]!.sub).toBeUndefined();
     expect(r.document).toBeTruthy();
@@ -866,13 +869,13 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r2.comp!.blocks.some((b) => b.templateId === 'caption')).toBe(true);
     // 带词范围 = 逐 cue 译文,落 cueSubs
     const r3 = runServerTool('set_caption_translations', { items: [{ index: 1, w0: 0, w1: 2, text: 'Second line cue' }] }, proj());
-    expect(r3.document!.semantics.transcripts[r3.document!.semantics.primaryNarrativeAssetId!]![1]!.cueSubs).toEqual({ '0:2': 'Second line cue' });
+    expect(r3.document!.semantics.transcripts[firstNarrativeAssetId(r3.document!)!]![1]!.cueSubs).toEqual({ '0:2': 'Second line cue' });
     // 越界给行数;clear 连 cueSubs 一起清
     const r4 = runServerTool('set_caption_translations', { items: [{ index: 9, text: 'x' }] }, proj());
     expect(r4.result.ok).toBe(false);
     expect(r4.result.error).toContain('3 lines');
     const r5 = runServerTool('set_caption_translations', { clear: true }, p2);
-    expect(r5.document!.semantics.transcripts[r5.document!.semantics.primaryNarrativeAssetId!]![0]!.sub).toBeUndefined();
+    expect(r5.document!.semantics.transcripts[firstNarrativeAssetId(r5.document!)!]![0]!.sub).toBeUndefined();
   });
   it('apply_block:同一套 parse+lint;compose_context 占位带 suggested_instruction', () => {
     const raw = '加一张卡\n```html\n<div id="nb" style="font-size:36px">OK</div>\n```\n```js\ntl.to("#nb", { opacity: 1, duration: 0.3 });\n```';

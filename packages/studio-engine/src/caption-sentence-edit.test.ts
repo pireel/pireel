@@ -4,7 +4,6 @@ import { resolveCaptionSentenceEdits } from './caption-sentence-edit';
 
 function documentWithCues() {
   const document = emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 });
-  document.semantics.primaryNarrativeAssetId = 'asset-main';
   document.semantics.managedCaptionTrackId = 'captions';
   const cue = (id: string, startFrame: number, wordStart: number, wordEnd: number): CaptionTimelineClip => ({
     id,

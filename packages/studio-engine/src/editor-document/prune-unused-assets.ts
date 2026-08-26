@@ -35,9 +35,6 @@ export function pruneUnusedEditorAssets(
     Object.entries(document.semantics.transcripts).filter(([assetId]) => !removable.has(assetId)),
   );
   const semantics = { ...document.semantics, transcripts };
-  if (semantics.primaryNarrativeAssetId && removable.has(semantics.primaryNarrativeAssetId)) {
-    delete semantics.primaryNarrativeAssetId;
-  }
 
   return {
     document: { ...document, assets, semantics },

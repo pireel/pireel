@@ -20,18 +20,16 @@ export function nativeProjectSessionMetadata(
   document: EditorDocumentV2,
   composition?: Composition,
 ): NativeProjectSessionMetadata {
-  const primaryAssetId = document.semantics.primaryNarrativeAssetId;
-  const primaryAsset = primaryAssetId ? document.assets[primaryAssetId] : undefined;
-  const mainTranscript = primaryAssetId && document.semantics.transcripts[primaryAssetId]?.length
-    ? document.semantics.transcripts[primaryAssetId]!
-    : null;
+  // The legacy DTO retains a `mainTranscript` slot, but canonical V2 addresses every transcript
+  // by the source URL/asset behind its narrative clip.
+  const mainTranscript = null;
   const primaryTrack = document.timeline.tracks.find(
     (track) => track.id === document.semantics.primaryNarrativeTrackId,
   );
   const sourceByClipId = new Map((composition?.shots ?? []).map((shot) => [shot.id, shot.src] as const));
   const clipTranscripts: Record<string, TranscriptSegment[]> = {};
   for (const clip of primaryTrack?.clips ?? []) {
-    if (clip.kind !== 'narrative' || clip.assetId === primaryAssetId) continue;
+    if (clip.kind !== 'narrative') continue;
     const segments = document.semantics.transcripts[clip.assetId];
     if (!segments?.length) continue;
     clipTranscripts[sourceByClipId.get(clip.id) ?? clip.assetId] = segments;
@@ -47,7 +45,7 @@ export function nativeProjectSessionMetadata(
   for (const asset of Object.values(document.assets)) {
     const sig = asset.locator.localSig;
     const key = asset.locator.cloudKey;
-    if (sig && key && asset.id !== primaryAssetId) cloudClips[sig] = { key };
+    if (sig && key) cloudClips[sig] = { key };
     // A pre-v3 document may not have library metadata on imported footage. If a local source is
     // still used by this output it belongs to the project media directory regardless.
     if (sig && (asset.library || referencedAssetIds.has(asset.id))) {
@@ -69,9 +67,6 @@ export function nativeProjectSessionMetadata(
     mainTranscript,
     clipTranscripts,
     cloudMedia: {
-      ...(primaryAsset?.locator.localSig && primaryAsset.locator.cloudKey
-        ? { video: { sig: primaryAsset.locator.localSig, key: primaryAsset.locator.cloudKey } }
-        : {}),
       ...(Object.keys(cloudClips).length ? { clips: cloudClips } : {}),
     },
     localAssets: localAssets.sort((left, right) => right.createdAt - left.createdAt),

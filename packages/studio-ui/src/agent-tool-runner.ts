@@ -51,6 +51,7 @@ import {
   freeTrack,
   getCaptionPreset,
   hasPrimaryNarrativeClips,
+  firstNarrativeAssetId,
   isCaptionsOn,
   isSentenceCaption,
   placementFramingNotes,
@@ -145,7 +146,7 @@ import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
 
 export type StudioReviewFailurePhase = 'capture' | 'request' | 'response';
 
@@ -272,6 +273,26 @@ function canonicalRenderTimeline(
       visualMediaClips,
     })}`,
   };
+}
+
+/** Direct-execution edits intentionally have no Director Plan. Give review_visuals one bounded,
+ * deterministic whole-timeline fallback instead of failing an otherwise valid empty-input review.
+ * Midpoints cover every visible native clip once; dense edits are sampled evenly to the same cap
+ * as planned Scene review. */
+export function unplannedReviewAtSecs(document: EditorDocumentV2, maxMoments = 18): number[] {
+  const limit = Math.min(18, Math.max(1, Math.round(maxMoments)));
+  const fps = document.canvas.fps;
+  const candidates = document.timeline.tracks
+    .filter((track) => !track.hidden)
+    .flatMap((track) => track.clips)
+    .filter((clip) => clip.enabled && clip.kind !== 'audio')
+    .map((clip) => Math.round(((clip.startFrame + clip.durationFrames / 2) / fps) * 100) / 100)
+    .sort((left, right) => left - right);
+  const unique = [...new Set(candidates)];
+  if (unique.length <= limit) return unique;
+  return Array.from({ length: limit }, (_, index) => unique[
+    Math.min(unique.length - 1, Math.floor(((index + 0.5) * unique.length) / limit))
+  ]!);
 }
 
 /** Progress reporter fed to pipeline steps: pushes friendly text (and optional 0–1 fraction) to the tool's chat card. */
@@ -436,7 +457,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         ...(typeof input.position === 'number' ? { position: input.position } : {}),
       });
       const bname = (b: Block) => b.label?.slice(0, 10) || blockKind(b);
-      const primaryRuntimesToMount = new Map<string, { file: File; sig: string }>();
       // Cooperative stop (chat stop button): long tools honor the signal at SAFE boundaries only —
       // atomic mutations always land whole. Shared dedup'd pipelines (ASR / visual analysis) are
       // never cancelled: race() just stops WAITING for them, they keep running in the background
@@ -561,10 +581,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         for (const assetId of referencedAssetIds) {
           const asset = documentRef.current.assets[assetId];
           if (!asset?.locator.localSig) continue;
-          const placedAsPrimary = asset.kind === 'video' && (Array.isArray(input.clips) ? input.clips : []).some((value: unknown) =>
-            !!value && typeof value === 'object' && !Array.isArray(value)
-            && (value as Record<string, unknown>).assetId === assetId
-            && (value as Record<string, unknown>).role === 'primary');
           const inspectedTranscript = localTranscriptCacheRef.current.get(asset.id)
             ?? localTranscriptCacheRef.current.get(asset.locator.localSig);
           if (
@@ -583,11 +599,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               },
             });
           }
-          if (placedAsPrimary && inspectedTranscript?.length) {
-            asrRef.current = inspectedTranscript;
-            setAsrSentences(inspectedTranscript);
-          }
-          const ready = await prepareLocalAssetRuntime(asset, { asPrimary: placedAsPrimary });
+          const ready = await prepareLocalAssetRuntime(asset, { asPrimary: false });
           if (!ready.ok) {
             return {
               ok: false,
@@ -602,7 +614,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               && !Number.isFinite(Number(row.durationSec))
               && !Number.isFinite(Number(row.sourceOutSec));
           });
-          if ((implicitDuration || placedAsPrimary) && (asset.kind === 'video' || asset.kind === 'audio')) {
+          if (implicitDuration && (asset.kind === 'video' || asset.kind === 'audio')) {
             const file = ready.file ?? await loadProjectAssetFile(asset);
             const probe = file ? await probeVideoFile(file).catch(() => null) : null;
             if (probe?.durationSec) {
@@ -624,11 +636,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   },
                 },
               });
-              if (placedAsPrimary && file) primaryRuntimesToMount.set(assetId, { file, sig: asset.locator.localSig });
             } else if (!asset.metadata.durationSec) {
               return { ok: false, error: `media duration unavailable: ${assetId}` };
-            } else if (placedAsPrimary && file) {
-              primaryRuntimesToMount.set(assetId, { file, sig: asset.locator.localSig });
             }
           }
         }
@@ -638,18 +647,6 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
         if (AGENT_TIMELINE_TOOL_IDS.has(toolId)) {
           const outcome = runAgentTimelineTool(documentRef.current, toolId, input);
           if (outcome.ok && outcome.document && outcome.document !== documentRef.current) setDocument(outcome.document);
-          if (outcome.ok && primaryRuntimesToMount.size) {
-            const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
-            const primaryAsset = primaryAssetId ? documentRef.current.assets[primaryAssetId] : undefined;
-            const primaryRuntime = primaryAssetId ? primaryRuntimesToMount.get(primaryAssetId) : undefined;
-            if (primaryRuntime && primaryAsset?.locator.localSig === primaryRuntime.sig) {
-              await pickVideoFile(primaryRuntime.file, {
-                asSig: primaryRuntime.sig,
-                reconnect: true,
-                successFeedback: 'silent',
-              });
-            }
-          }
           const summary = outcome.summary
             ? (surface === 'chat' ? t(`tools.${toolId}.label`) : outcome.summary)
             : undefined;
@@ -723,7 +720,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
 
               if (!requestedLocalReference && !requestedClipId && !requestedAssetId) {
                 const current = documentRef.current;
-                const primaryAssetId = current.semantics.primaryNarrativeAssetId;
+                const primaryAssetId = firstNarrativeAssetId(current);
                 const primaryKnown = !!primaryAssetId
                   && Object.prototype.hasOwnProperty.call(current.semantics.transcripts, primaryAssetId);
                 const hasStoredTranscript = Object.values(current.semantics.transcripts).some((segments) => segments.length > 0);
@@ -898,7 +895,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   .flatMap((track) => track.clips)
                   .filter((clip) => clip.kind === 'narrative' && clip.assetId === targetAssetId);
                 const legacyPrimaryClip = primaryClipsForAsset.length === 1 ? primaryClipsForAsset[0] : undefined;
-                const legacyFiveSecondPlaceholder = targetAssetId === current.semantics.primaryNarrativeAssetId
+                const legacyFiveSecondPlaceholder = targetAssetId === firstNarrativeAssetId(current)
                   && !current.assets[targetAssetId]?.metadata.durationSec
                   && !!probe?.durationSec
                   && !!legacyPrimaryClip
@@ -951,7 +948,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     transcripts: { ...current.semantics.transcripts, [targetAssetId]: segs },
                   },
                 };
-                if (targetAssetId === current.semantics.primaryNarrativeAssetId) {
+                if (targetAssetId === firstNarrativeAssetId(current)) {
                   videoFileRef.current = file;
                   asrRef.current = segs;
                   setAsrSentences(segs);
@@ -997,7 +994,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'list_words': {
-            const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const primaryAssetId = firstNarrativeAssetId(documentRef.current);
             const storedPrimary = primaryAssetId
               ? documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined
               : undefined;
@@ -1187,7 +1184,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               : undefined;
             const clipAssetId = requestedClip && 'assetId' in requestedClip ? requestedClip.assetId : undefined;
             if (requestedClipId && !clipAssetId) return { ok: false, error: `clip not found or has no media asset: ${requestedClipId}` };
-            const primaryAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const primaryAssetId = firstNarrativeAssetId(documentRef.current);
             const videoAssets = Object.values(documentRef.current.assets)
               .filter((asset): asset is EditorMediaAsset => asset.kind === 'video');
             const uniqueVideoSources = new Map<string, EditorMediaAsset>();
@@ -1499,6 +1496,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               : [];
             const planned = planSceneVisualReview(documentRef.current, { ...(sceneIds.length ? { sceneIds } : {}), maxMoments: 18 });
             const plannedByScene = new Map(planned.map((moment) => [moment.sceneId, moment]));
+            const fallbackMoments = !atsIn.length && !sceneIds.length && !planned.length
+              ? unplannedReviewAtSecs(documentRef.current)
+              : [];
             const requestedMoments = atsIn.length
               ? atsIn.map((atSec) => {
                   const scene = sceneAtSecond(documentRef.current, atSec);
@@ -1511,7 +1511,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     expected: plannedMoment?.expected ?? `semanticScene: ${scene?.id ?? '(unplanned)'}; reviewPhase: scene; frameId: ${c.frameId ?? '(themeless)'}`,
                   };
                 })
-              : planned;
+              : planned.length
+                ? planned
+                : fallbackMoments.map((atSec) => ({
+                    atSec,
+                    sceneId: '',
+                    sceneLabel: 'Unplanned timeline moment',
+                    phase: 'scene' as SceneVisualReviewPhase,
+                    expected: `unplanned timeline review; frameId: ${c.frameId ?? '(themeless)'}`,
+                  }));
             if (!requestedMoments.length) return { ok: false, error: t('workbench.reviewNeedsAtSecs') };
             const renderTimeline = canonicalRenderTimeline(c, documentRef.current, resolveAssetUrl);
             const dur = renderTimeline.durationSec;
@@ -1712,7 +1720,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             // Project-scoped sources: main video + inserted clips (same letter tags as the state snapshot)
             const tag = new Map<string, string>();
             for (const s of c.shots ?? []) if (s.src && !tag.has(s.src)) tag.set(s.src, String.fromCharCode(65 + tag.size));
-            const mainAssetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const mainAssetId = firstNarrativeAssetId(documentRef.current);
             const mainDurationSec = mainAssetId
               ? documentRef.current.assets[mainAssetId]?.metadata.durationSec
               : undefined;
@@ -2019,6 +2027,181 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               clearToolProgress(toolId);
             }
           }
+          case 'generate_foley': {
+            if (surface !== 'chat') return { ok: false, error: 'generate_foley requires the in-Studio approval card; open Studio and run it in Chat' };
+            try {
+            const rawItems = Array.isArray(input.items) ? input.items.slice(0, 8) : [];
+            const items = rawItems.flatMap((value, index) => {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+              const row = value as Record<string, unknown>;
+              const sourceInSec = Number(row.sourceInSec);
+              const sourceOutSec = Number(row.sourceOutSec);
+              const prompt = typeof row.prompt === 'string' ? row.prompt.trim().slice(0, 800) : '';
+              const sourceAssetId = typeof row.sourceAssetId === 'string' ? row.sourceAssetId.trim() : '';
+              const sourceUrl = typeof row.sourceUrl === 'string' ? row.sourceUrl.trim() : '';
+              if (!Number.isFinite(sourceInSec) || !Number.isFinite(sourceOutSec) || sourceInSec < 0 || sourceOutSec <= sourceInSec || !prompt || (!sourceAssetId && !sourceUrl)) return [];
+              const durationSec = Math.round((sourceOutSec - sourceInSec) * 100) / 100;
+              if (durationSec < 1 || durationSec > 30) return [];
+              const eventType = typeof row.eventType === 'string' && row.eventType.trim() ? row.eventType.trim().slice(0, 80) : 'product-action';
+              const material = typeof row.material === 'string' ? row.material.trim().slice(0, 80) : '';
+              const reusePolicy = row.reusePolicy === 'generic' || row.reusePolicy === 'exact-shot-only' ? row.reusePolicy : 'timing-compatible';
+              return [{
+                index, sourceInSec, sourceOutSec, durationSec, generationDurationSec: Math.ceil(durationSec), prompt, sourceAssetId, sourceUrl,
+                negativePrompt: typeof row.negativePrompt === 'string' ? row.negativePrompt.trim().slice(0, 500) : '',
+                name: typeof row.name === 'string' && row.name.trim() ? row.name.trim().slice(0, 120) : `${eventType}${material ? ` · ${material}` : ''}`,
+                eventType, material, reusePolicy,
+              }];
+            });
+            if (!items.length || items.length !== rawItems.length) {
+              return { ok: false, error: 'Each Foley item needs an exact source asset/url, a 1–30 second source range, and a grounded prompt.' };
+            }
+
+            report('Calculating the Foley batch charge…');
+            const quoteRes = await fetch('/api/studio/foley', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'quote', durations: items.map((item) => item.durationSec) }),
+              ...(signal ? { signal } : {}),
+            });
+            const quoteBody = (await quoteRes.json().catch(() => ({}))) as { quote?: { totalCredits?: number; items?: Array<{ durationSec: number; credits: number }> }; error?: string; detail?: string };
+            if (!quoteRes.ok || !quoteBody.quote || typeof quoteBody.quote.totalCredits !== 'number') {
+              return { ok: false, error: quoteBody.detail || quoteBody.error || 'Foley price unavailable' };
+            }
+            const totalSec = items.reduce((sum, item) => sum + item.generationDurationSec, 0);
+            const lines = items.map((item, index) => {
+              const credits = quoteBody.quote?.items?.[index]?.credits;
+              return `${index + 1}. ${item.name} — source ${item.sourceInSec.toFixed(2)}–${item.sourceOutSec.toFixed(2)}s (${item.durationSec.toFixed(2)}s), generate ${item.generationDurationSec}s${typeof credits === 'number' ? `, ${credits} credits` : ''}\n   Sound: ${item.prompt}`;
+            });
+            const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
+              'approval',
+              {
+                title: `Generate ${items.length} Foley sound${items.length === 1 ? '' : 's'}?`,
+                content: `${lines.join('\n\n')}\n\nOnly these source spans will be uploaded for MMAudio V2. Total billable generated audio: ${totalSec}s. Maximum charge now: ${quoteBody.quote.totalCredits} Pireel credits. Generated AAC tracks will be saved to your reusable cross-project audio library.`,
+              },
+              { signal },
+            );
+            if (decision == null) throw abortErr();
+            if (decision !== 'approved') return { ok: true, summary: 'Foley generation rejected; nothing uploaded or charged', data: { decision: 'rejected' } };
+
+            const { extractAudio, renderTimeline } = await import('@pireel/studio-engine/video-edit');
+            const spaceId = await getStudioSpaceId(projectId);
+            const registrations: Array<Record<string, unknown>> = [];
+            const failures: Array<{ index: number; name: string; error: string }> = [];
+            for (let index = 0; index < items.length; index += 1) {
+              const item = items[index]!;
+              try {
+                report(`Preparing approved source span ${index + 1}/${items.length}…`, index / items.length);
+                let file: File | null = null;
+                let sourceLabel = item.sourceAssetId || item.sourceUrl;
+                if (item.sourceAssetId) {
+                  const local = resolveLocalAssetReference(item.sourceAssetId, localAssetIndex);
+                  if (local) {
+                    sourceLabel = local.label;
+                    file = await loadLocalAssetFile(projectId, local) ?? await loadLocalVideo(local.contentSig);
+                  } else {
+                    const asset = documentRef.current.assets[item.sourceAssetId];
+                    if (!asset || asset.kind !== 'video') throw new Error(`source video not found: ${item.sourceAssetId}`);
+                    sourceLabel = asset.label || asset.id;
+                    file = asset.locator.localSig ? await loadProjectAssetFile(asset) : null;
+                    const remote = !file ? resolveAssetUrl(asset) : null;
+                    if (!file && remote) file = (await materializeRemoteMedia(remote, { name: sourceLabel, type: 'video/mp4', signal })).file;
+                  }
+                } else if (item.sourceUrl) {
+                  file = (await materializeRemoteMedia(item.sourceUrl, { name: item.name, type: 'video/mp4', signal })).file;
+                }
+                if (!file) throw new Error(`source bytes unavailable: ${sourceLabel}`);
+                const probe = await probeVideoFile(file);
+                if (item.sourceOutSec > probe.durationSec + 0.05) throw new Error(`sourceOutSec exceeds ${probe.durationSec.toFixed(2)}s source duration`);
+                const trimmed = await renderTimeline(
+                  (clipId) => clipId === 'source' ? file! : undefined,
+                  [{
+                    dur: item.durationSec,
+                    video: { clipId: 'source', start: item.sourceInSec, end: item.sourceOutSec },
+                    // An absent audio source deliberately produces a silent reference video. MMAudio
+                    // hears no original track and must synthesize only the requested picture event.
+                    audio: { clipId: 'silent', start: 0, end: item.durationSec },
+                  }],
+                  { width: probe.width || 1080, height: probe.height || 1920 },
+                );
+                const sourceUpload = await studioProviders().uploads.upload(trimmed, {
+                  contentType: 'video/mp4', filename: `foley-source-${index + 1}.mp4`,
+                });
+
+                report(`Generating Foley ${index + 1}/${items.length}…`, (index + 0.35) / items.length);
+                const generatedRes = await fetch('/api/studio/foley', {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    video_url: sourceUpload.url,
+                    prompt: item.prompt,
+                    ...(item.negativePrompt ? { negative_prompt: item.negativePrompt } : {}),
+                    duration_sec: item.generationDurationSec,
+                    max_credits: quoteBody.quote.items?.[index]?.credits,
+                    space_id: spaceId,
+                  }),
+                  ...(signal ? { signal } : {}),
+                });
+                const generatedBody = (await generatedRes.json().catch(() => ({}))) as {
+                  asset?: { id: string; sourceVideoKey: string; sourceVideoUrl: string; durationSec: number; model: string };
+                  error?: string; detail?: string;
+                };
+                if (!generatedRes.ok || !generatedBody.asset) throw new Error(generatedBody.detail || generatedBody.error || 'MMAudio generation failed');
+
+                report(`Extracting and indexing Foley ${index + 1}/${items.length}…`, (index + 0.75) / items.length);
+                const generatedFile = (await materializeRemoteMedia(generatedBody.asset.sourceVideoUrl, {
+                  name: `${item.name}.mp4`, type: 'video/mp4', signal,
+                })).file;
+                const audio = await extractAudio(generatedFile);
+                const audioUpload = await studioProviders().uploads.upload(audio, {
+                  contentType: 'audio/mp4', filename: `${item.name}.m4a`,
+                });
+                const description = [
+                  'MMAudio V2 Foley', `event=${item.eventType}`, item.material ? `material=${item.material}` : '',
+                  `reuse=${item.reusePolicy}`, `duration=${item.durationSec.toFixed(2)}s`, `source=${sourceLabel}`,
+                  `prompt=${item.prompt}`,
+                ].filter(Boolean).join(' · ');
+                const registerRes = await fetch('/api/studio/media', {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    action: 'register-audio-asset', key: audioUpload.key, label: item.name,
+                    description, source_url: generatedBody.asset.sourceVideoUrl,
+                  }),
+                  ...(signal ? { signal } : {}),
+                });
+                const registered = (await registerRes.json().catch(() => ({}))) as { ok?: boolean; id?: string; key?: string; url?: string | null; error?: string };
+                if (!registerRes.ok || !registered.ok || !registered.id || !registered.key || !registered.url) throw new Error(registered.error || 'Foley library registration failed');
+                await fetch('/api/studio/foley', {
+                  method: 'POST', headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    action: 'finalize', creationId: generatedBody.asset.id, audioKey: registered.key, assetId: registered.id,
+                    eventType: item.eventType, material: item.material, reusePolicy: item.reusePolicy,
+                  }),
+                  ...(signal ? { signal } : {}),
+                }).catch(() => undefined);
+                registrations.push({
+                  id: registered.id, kind: 'audio', url: registered.url, label: item.name,
+                  durationSec: generatedBody.asset.durationSec, pictureDurationSec: item.durationSec, description,
+                  tags: ['foley', 'mmaudio-v2', item.eventType, ...(item.material ? [item.material] : []), `reuse:${item.reusePolicy}`],
+                  collection: 'Foley / Product sounds', creationId: generatedBody.asset.id,
+                  eventType: item.eventType, material: item.material, reusePolicy: item.reusePolicy,
+                });
+              } catch (error) {
+                if (stopped()) throw abortErr();
+                failures.push({ index: item.index, name: item.name, error: error instanceof Error ? error.message : String(error) });
+              }
+            }
+            if (!registrations.length) return { ok: false, error: failures[0]?.error || 'Foley generation failed', data: { failures } };
+            return {
+              ok: true,
+              summary: `Generated and indexed ${registrations.length} Foley sound${registrations.length === 1 ? '' : 's'}${failures.length ? `; ${failures.length} failed` : ''}`,
+              data: {
+                assets: registrations,
+                ...(failures.length ? { failures } : {}),
+                next: 'Pass each returned asset unchanged to register_media, then add_clips with role=sfx at the matching picture event. Use set_clip_properties for frame-accurate start, trim, level, and short fades.',
+              },
+            };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
           case 'get_generation_jobs': {
             const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === 'string' && !!id).slice(0, 30) : [];
             if (ids.length) {
@@ -2087,12 +2270,54 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.voiceDeleted') };
           }
           case 'generate_speech': {
-            report(t('workbench.generatingSpeech'));
+            if (surface !== 'chat') return { ok: false, error: 'generate_speech requires the in-Studio approval card; open Studio and run it in Chat' };
+            const text = typeof input.text === 'string' ? input.text.trim() : '';
+            const voiceId = typeof input.voiceId === 'string' ? input.voiceId.trim() : '';
+            if (!text || !voiceId) return { ok: false, error: 'generate_speech requires exact text and voiceId' };
             try {
+              report(t('workbench.calculatingSpeechCharge'));
+              const quoteRes = await fetch('/api/studio/speech', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ action: 'quote', ...input, text, voiceId }),
+                ...(signal ? { signal } : {}),
+              });
+              const quoteBody = (await quoteRes.json().catch(() => ({}))) as {
+                quote?: { credits?: number; charCount?: number; estimatedDurationSec?: number; textLengthTier?: string };
+                error?: string;
+                detail?: string;
+              };
+              if (!quoteRes.ok || !quoteBody.quote || typeof quoteBody.quote.credits !== 'number') {
+                return { ok: false, error: quoteBody.detail || quoteBody.error || t('workbench.speechQuoteFailed') };
+              }
+              const speed = Number(input.speed);
+              const instruction = typeof input.instruction === 'string' ? input.instruction.trim() : '';
+              const settings = [
+                t('workbench.speechApprovalVoice', { voice: voiceId }),
+                Number.isFinite(speed) && speed > 0 ? t('workbench.speechApprovalSpeed', { speed }) : '',
+                instruction ? t('workbench.speechApprovalDelivery', { instruction }) : '',
+              ].filter(Boolean).join('\n');
+              const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
+                'approval',
+                {
+                  title: t('workbench.speechApprovalTitle'),
+                  content: `${settings}\n\n${t('workbench.speechApprovalScript')}\n${text}\n\n${t('workbench.speechApprovalEstimate', {
+                    duration: quoteBody.quote.estimatedDurationSec ?? '?',
+                    chars: quoteBody.quote.charCount ?? [...text].length,
+                    credits: quoteBody.quote.credits,
+                  })}`,
+                },
+                { signal },
+              );
+              if (decision == null) throw abortErr();
+              if (decision !== 'approved') {
+                return { ok: true, summary: t('workbench.speechRejected'), data: { decision: 'rejected' } };
+              }
+              report(t('workbench.generatingSpeech'));
               const res = await fetch('/api/studio/speech', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(input),
+                body: JSON.stringify({ ...input, text, voiceId }),
                 ...(signal ? { signal } : {}),
               });
               const body = (await res.json().catch(() => ({}))) as {
@@ -2161,7 +2386,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
           }
           case 'search_media': {
-            const scope = input.scope === 'main' || input.scope === 'inserted' ? input.scope : 'all';
+            const scope = input.scope === 'narrative' ? input.scope : 'all';
             const shots = ensureShots(c);
             const result = searchProjectMedia(
               {
@@ -2316,7 +2541,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const targetNarrativeClip = shotIdIn ? primaryTrack?.clips.find((clip) => clip.id === shotIdIn) : undefined;
             const assetId = shotIdIn
               ? (targetNarrativeClip?.kind === 'narrative' ? targetNarrativeClip.assetId : undefined)
-              : documentRef.current.semantics.primaryNarrativeAssetId;
+              : firstNarrativeAssetId(documentRef.current);
             if (!assetId) return { ok: false, error: shotIdIn ? t('workbench.shotIdNotInsertClip') : t('workbench.noTranscriptYetRun') };
             const resolved = resolveCaptionSentenceEdits(documentRef.current, assetId, items);
             if (!resolved.ok) return { ok: false, error: resolved.error };
@@ -2425,7 +2650,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'remove_silence': {
             if (!hasPrimaryNarrativeClips(documentRef.current)) return { ok: false, error: t('workbench.noVideoYet') };
-            const assetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const assetId = firstNarrativeAssetId(documentRef.current);
             const primaryAsset = assetId ? documentRef.current.assets[assetId] : undefined;
             const file = (primaryAsset?.kind === 'video' ? await loadProjectAssetFile(primaryAsset) : null)
               ?? videoFileRef.current;
@@ -2490,7 +2715,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const joined = inside.join('');
               return joined.length > 16 ? `${joined.slice(0, 16)}…` : joined;
             };
-            const assetId = documentRef.current.semantics.primaryNarrativeAssetId;
+            const assetId = firstNarrativeAssetId(documentRef.current);
             if (!assetId) return { ok: false, error: t('workbench.noVideoYet') };
             const tightened = Number.isFinite(kg) && kg > 0 ? tightenCutRanges(srcRanges, kg) : srcRanges;
             const plan = planNarrationCuts(documentRef.current, {
@@ -2567,7 +2792,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   label: String(oo?.label ?? '').slice(0, 80),
                   description: typeof oo?.description === 'string' ? oo.description.slice(0, 200) : '',
                   value: typeof oo?.value === 'string' ? oo.value.trim().slice(0, 200) : '',
-                  previewUrl: /^(https:\/\/|\/voice-previews\/)/.test(previewUrl) ? previewUrl : '',
+                  previewUrl: /^(https:\/\/|\/voice-previews\/|\/api\/studio\/voice-preview(?:\?|$))/.test(previewUrl) ? previewUrl : '',
                 };
               })
               .filter((o) => o.label);

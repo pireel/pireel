@@ -11,7 +11,6 @@ function documentWithNarrative() {
     locator: { localSig: 'main-sig' },
     metadata: { durationSec: 8 },
   };
-  document.semantics.primaryNarrativeAssetId = 'main';
   document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!.clips = [{
     id: 'shot-1',
     kind: 'narrative',

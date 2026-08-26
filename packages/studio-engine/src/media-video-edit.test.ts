@@ -13,7 +13,6 @@ function documentWithVideoLanes() {
   document.assets.still = {
     id: 'still', kind: 'image', locator: { remoteUrl: 'https://cdn.test/still.jpg' }, metadata: {},
   };
-  document.semantics.primaryNarrativeAssetId = 'primary';
   document.timeline.tracks[0]!.clips.push({
     id: 'story', kind: 'narrative', assetId: 'primary', startFrame: 0, durationFrames: 120,
     enabled: true, sourceInSec: 0, sourceOutSec: 4, properties: { treatment: 'full' },

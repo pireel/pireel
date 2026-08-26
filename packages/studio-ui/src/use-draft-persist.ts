@@ -19,7 +19,7 @@ import {
   hasTimelineContent,
   parseEditorDocumentV2,
   compositionToEditorDocument,
-  primaryNarrativeAsset,
+  firstNarrativeAsset,
   projectDocumentToComposition,
 } from '@pireel/studio-engine/composition';
 import {
@@ -492,7 +492,7 @@ export function useDraftAutosave(
         // the last timeline video was removed. Only callers without a cover ref inherit the
         // previous draft value.
         const cover = coverThumbRef ? coverThumbRef.current : prev?.coverThumb;
-        const videoDurationSec = primaryNarrativeAsset(document)?.metadata.durationSec ?? prev?.videoDurationSec ?? null;
+        const videoDurationSec = firstNarrativeAsset(document)?.metadata.durationSec ?? prev?.videoDurationSec ?? null;
         const draft: StudioDraft = {
           id: projectId,
           ...(prev?.title ? { title: prev.title } : {}),
