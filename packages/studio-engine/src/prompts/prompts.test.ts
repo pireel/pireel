@@ -210,7 +210,9 @@ describe("静态提示词完整性", () => {
     expect(BLOCK_SYSTEM).toContain("not a separate text-sticker system");
     expect(BLOCK_SYSTEM).toContain("rotation belong to the Motion card's canvas transform controls");
   });
-  it("回复语言只由用户输入决定，不跟随英文工具回执", () => {
+  it("回复语言优先跟随用户输入，无法判断时才用宿主 locale，不跟随英文工具回执", () => {
+    expect(CHAT_IDENTITY).toContain("host-supplied <reply_language> block");
+    expect(CHAT_IDENTITY).toContain("uses the selected Studio locale only when that input has no reliable language signal");
     expect(CHAT_IDENTITY).toContain("latest USER-AUTHORED message");
     expect(CHAT_IDENTITY).toContain("Tool calls, tool receipts, transcript envelopes");
     expect(CHAT_IDENTITY).toContain("must never switch the reply language during a tool loop");

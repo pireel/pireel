@@ -57,9 +57,10 @@ import {
   isRecoverableStudioChatError,
 } from "./chat-thread-store";
 import { scopeSituationToThread } from "./chat-thread-context";
-import { t } from "./i18n";
+import { studioLocale, t } from "./i18n";
 import type { StudioScenarioSkillOption } from "./shell-context";
 import { localAssetMentionContext } from "./chat-local-asset-mention";
+import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
 import type {
   AttachedFrame,
   ProgressHandle,
@@ -122,6 +123,9 @@ export function ChatThread({
   const toolAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
   const autoRecoveryAttemptedRef = useRef(false);
+  const timelineFrameInspectionRef = useRef<AbortController | null>(null);
+  const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
+  useEffect(() => () => timelineFrameInspectionRef.current?.abort(), []);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
   const composerRef = useRef<ComposerHandle | null>(null);
@@ -149,6 +153,7 @@ export function ChatThread({
       new DefaultChatTransport({
         api: studioProviders().chatEndpoint ?? "/api/studio/chat",
         body: () => ({
+          locale: studioLocale().toLowerCase().startsWith("zh") ? "zh" : "en",
           ...(frameRef.current ? { frameId: frameRef.current.id } : {}),
           ...(frameRef.current?.customVisualStyle
             ? { customVisualStyle: frameRef.current.customVisualStyle }
@@ -332,10 +337,10 @@ export function ChatThread({
   }, [skillId]);
 
   const run = useCallback(
-    (
+    async (
       draft: string | StudioChatDraftPart[],
       options: { preserveAutoRecoveryAttempt?: boolean } = {},
-    ) => {
+    ): Promise<boolean> => {
       const draftParts: StudioChatDraftPart[] =
         typeof draft === "string"
           ? [{ type: "text", text: draft.trim() }]
@@ -344,25 +349,35 @@ export function ChatThread({
         (part) => part.type === "timeline-frame" || part.text.trim().length > 0,
       );
       if (!hasContent || status === "streaming" || status === "submitted")
-        return;
+        return false;
       if (!options.preserveAutoRecoveryAttempt)
         autoRecoveryAttemptedRef.current = false;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
-      const timelineFrames = draftParts
+      const attachedTimelineFrames = draftParts
         .filter(
           (
             part,
           ): part is Extract<StudioChatDraftPart, { type: "timeline-frame" }> =>
             part.type === "timeline-frame",
         )
-        .map(({ frame }) => ({
-          id: frame.id,
-          atSec: frame.atSec,
-          fps: frame.fps,
-          width: frame.width,
-          height: frame.height,
-        }));
+        .map(({ frame }) => frame);
+      let timelineFrames: Awaited<ReturnType<typeof inspectTimelineFrameEvidence>> = [];
+      if (attachedTimelineFrames.length) {
+        const ctrl = new AbortController();
+        timelineFrameInspectionRef.current = ctrl;
+        setTimelineFrameInspectionError(false);
+        try {
+          timelineFrames = await inspectTimelineFrameEvidence(attachedTimelineFrames, { signal: ctrl.signal });
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            setTimelineFrameInspectionError(true);
+          }
+          return false;
+        } finally {
+          if (timelineFrameInspectionRef.current === ctrl) timelineFrameInspectionRef.current = null;
+        }
+      }
       const localAssetContext = localAssetMentionContext(
         draftParts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
         elements,
@@ -398,6 +413,7 @@ export function ChatThread({
               },
         ),
       });
+      return true;
     },
     [elements, sendMessage, status],
   );
@@ -446,6 +462,7 @@ export function ChatThread({
   // Order matters: flag first so neither the SDK tail check nor our safety net restarts the turn.
   const handleStop = useCallback(() => {
     userStoppedRef.current = true;
+    timelineFrameInspectionRef.current?.abort();
     toolAbortRef.current?.abort();
     void stop();
   }, [stop]);
@@ -851,6 +868,14 @@ export function ChatThread({
                   {t("chatGen.continueFromCurrentState")}
                 </button>
               )}
+            </div>
+          )}
+          {timelineFrameInspectionError && status !== "error" && (
+            <div className="border-destructive/30 bg-destructive/5 text-ink-2 mx-3 mb-2 flex items-center gap-2 rounded-md border px-2.5 py-2 text-[11px]">
+              <X size={12} className="shrink-0 text-destructive" />
+              <span className="min-w-0 flex-1 truncate text-destructive">
+                {t("chatGen.timelineFrameInspectionFailed")}
+              </span>
             </div>
           )}
         </ConversationContent>

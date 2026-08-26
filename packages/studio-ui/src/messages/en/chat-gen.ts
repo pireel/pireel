@@ -167,6 +167,7 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.timelineFrameTag': '{time}',
   'chatGen.timelineFrameCapturing': 'Capturing…',
   'chatGen.timelineFrameCaptureFailed': 'This frame could not be read',
+  'chatGen.timelineFrameInspectionFailed': 'Frame analysis failed, so the message was not sent. Try again.',
   'chatGen.cancelTimelineFramePick': 'Exit frame picker',
   'chatGen.pickFrameOnTimeline': 'Pick a frame on the timeline',
   'chatGen.prevComponent': 'Previous Motion Graphic',

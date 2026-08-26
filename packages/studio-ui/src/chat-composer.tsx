@@ -97,7 +97,7 @@ export function Composer({
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
   onTimelineFramePickActiveChange?: StudioChatProps["onTimelineFramePickActiveChange"];
-  onSubmit: (parts: StudioChatDraftPart[]) => void;
+  onSubmit: (parts: StudioChatDraftPart[]) => boolean | Promise<boolean>;
   onStop: () => void;
   methodsRef: React.MutableRefObject<ComposerHandle | null>;
 }) {
@@ -109,9 +109,10 @@ export function Composer({
   );
   const [empty, setEmpty] = useState(true);
   const [timelineFrameCount, setTimelineFrameCount] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customStyle, saveCustomStyle] = useCustomFrameStyle();
-  const isBusy = status === "streaming" || status === "submitted";
+  const isBusy = submitting || status === "streaming" || status === "submitted";
 
   function recomputeEmpty() {
     const el = editorRef.current;
@@ -219,7 +220,7 @@ export function Composer({
     setEmpty(true);
   }
 
-  function fireSubmit() {
+  async function fireSubmit() {
     if (isBusy) return;
     if (hasLoadingTimelineFrame()) {
       return;
@@ -243,8 +244,12 @@ export function Composer({
       (part) => part.type !== "text" || part.text.length > 0,
     );
     if (!final.length) return;
-    onSubmit(final);
-    clear();
+    setSubmitting(true);
+    try {
+      if (await onSubmit(final)) clear();
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   /** Remove a trigger and its live filter text (`/口播`) after a command-menu selection. */
@@ -538,7 +543,7 @@ export function Composer({
       return;
     }
     e.preventDefault();
-    fireSubmit();
+    void fireSubmit();
   }
 
   return (
@@ -645,7 +650,7 @@ export function Composer({
               type="button"
               className="bg-ink text-bg inline-flex h-7 w-7 items-center justify-center rounded-md transition-opacity hover:opacity-85 disabled:pointer-events-none disabled:opacity-25"
               disabled={empty || timelineFramePickBusy}
-              onClick={fireSubmit}
+              onClick={() => void fireSubmit()}
               title={t("chatGen.sendEnter")}
             >
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />

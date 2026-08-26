@@ -167,6 +167,7 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.timelineFrameTag': '{time}',
   'chatGen.timelineFrameCapturing': '正在截取…',
   'chatGen.timelineFrameCaptureFailed': '这一帧暂时无法读取',
+  'chatGen.timelineFrameInspectionFailed': '画面分析失败，截帧没有发送；请重试。',
   'chatGen.cancelTimelineFramePick': '退出画面取帧',
   'chatGen.pickFrameOnTimeline': '在时间线上点选画面',
   'chatGen.prevComponent': '上一个动态图形',
