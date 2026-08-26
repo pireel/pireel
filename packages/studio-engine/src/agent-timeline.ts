@@ -1,6 +1,6 @@
 /** Shared pure Agent timeline executor. Live UI, offline server, and MCP all call this contract. */
 
-import { applyAudioDocumentEdits } from './audio-document-edit';
+import { applyAudioDocumentEdits, ensureFreeAudioDocumentTrack } from './audio-document-edit';
 import { applyOverlayDocumentEdits } from './overlay-document-edit';
 import { insertOverlayDocumentClip } from './overlay-track-edit';
 import { titleBlock } from './block-factory';
@@ -326,11 +326,23 @@ function ensureTrack(
   const desired = expectedTrack(asset, string(item.role));
   const roleTracks = document.timeline.tracks.filter((track) => track.type === desired.type && track.role === desired.role);
   // A caller that omits trackId has not identified anything it intends to replace. Keep overlapping
-  // visual evidence/backgrounds on parallel lanes; an exact trackId remains the explicit overwrite
-  // escape hatch. Audio retains its semantic single-lane behavior.
+  // visual evidence/backgrounds and synchronous SFX on parallel free lanes; an exact trackId remains
+  // the explicit overwrite escape hatch. Narration and music retain their semantic single-lane behavior.
+  if (placement && desired.type === 'audio' && desired.role === 'sfx') {
+    const allocated = ensureFreeAudioDocumentTrack({
+      document,
+      role: 'sfx',
+      startFrame: placement.startFrame,
+      durationFrames: placement.durationFrames,
+      syncLocked: true,
+    });
+    if (!allocated.ok) return fail(allocated.error.message, allocated.error);
+    return { document: allocated.document, track: allocated.track, receipts: allocated.receipts };
+  }
+  const useFreeLane = !!placement && desired.type === 'visual' && desired.role !== 'primaryNarrative';
   const existing = desired.role === 'primaryNarrative'
     ? roleTracks[0]
-    : desired.type === 'visual' && placement
+    : useFreeLane
     ? roleTracks.find((track) => track.clips.every((clip) => (
         clip.startFrame + clip.durationFrames <= placement.startFrame
         || clip.startFrame >= placement.startFrame + placement.durationFrames
@@ -566,7 +578,7 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
       next,
       asset,
       item,
-      mode === 'overwrite' && asset.kind !== 'audio'
+      mode === 'overwrite'
         ? { startFrame: atFrame, durationFrames: placement.durationFrames }
         : undefined,
     );

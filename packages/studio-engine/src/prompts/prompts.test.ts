@@ -76,6 +76,18 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain(
       "Run it without request_approval, set_director_plan, set_scene_designs, sceneId bookkeeping, or a Frame recommendation",
     );
+    expect(CHAT_IDENTITY).toContain(
+      "every selected span with one coherent visible physical action as a Foley candidate by default",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "CALL one generate_foley batch so its exact event approval card is actually shown",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Initial analyze_visual with assessAudio=false is not evidence that an action needs no sound",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "the collision allocator reuses a free SFX lane and creates parallel SFX lanes only for overlapping events",
+    );
     expect(CHAT_IDENTITY).toContain("EMPTY OUTPUT SOURCE RESOLUTION");
     expect(CHAT_IDENTITY).toContain(
       "With exactly one compatible video or spoken-audio candidate",

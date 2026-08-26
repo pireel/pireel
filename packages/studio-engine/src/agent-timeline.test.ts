@@ -129,6 +129,28 @@ describe('shared agent timeline atoms', () => {
     expect(createdTrack.document!.timeline.tracks.find((track) => track.id === 'alternate-narration')?.clips).toHaveLength(0);
   });
 
+  it('keeps overlapping SFX on separate free audio lanes and reuses a lane after the collision ends', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'sfx-open', kind: 'audio', url: 'https://cdn.example/open.m4a', durationSec: 3 },
+      { id: 'sfx-pour', kind: 'audio', url: 'https://cdn.example/pour.m4a', durationSec: 3 },
+      { id: 'sfx-settle', kind: 'audio', url: 'https://cdn.example/settle.m4a', durationSec: 1 },
+    ] }).document!;
+
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'open', assetId: 'sfx-open', role: 'sfx', startSec: 0 },
+      { id: 'pour', assetId: 'sfx-pour', role: 'sfx', startSec: 1 },
+      { id: 'settle', assetId: 'sfx-settle', role: 'sfx', startSec: 3 },
+    ] });
+
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const tracks = placed.document!.timeline.tracks.filter((track) => track.role === 'sfx');
+    expect(tracks).toHaveLength(2);
+    expect(tracks.find((track) => track.clips.some((clip) => clip.id === 'open'))?.clips.map((clip) => clip.id)).toEqual(['open', 'settle']);
+    expect(tracks.find((track) => track.clips.some((clip) => clip.id === 'pour'))?.clips.map((clip) => clip.id)).toEqual(['pour']);
+    expect((placed.data as { overwrittenClipIds?: string[] }).overwrittenClipIds).toBeUndefined();
+  });
+
   it('inherits probed dimensions when an alias registers the same local source', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [{

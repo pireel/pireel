@@ -2056,7 +2056,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               return { ok: false, error: 'Each Foley item needs an exact source asset/url, a 1–30 second source range, and a grounded prompt.' };
             }
 
-            report('Calculating the Foley batch charge…');
+            report('Preparing the Foley batch…');
             const quoteRes = await fetch('/api/studio/foley', {
               method: 'POST', headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ action: 'quote', durations: items.map((item) => item.durationSec) }),
@@ -2064,23 +2064,22 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             });
             const quoteBody = (await quoteRes.json().catch(() => ({}))) as { quote?: { totalCredits?: number; items?: Array<{ durationSec: number; credits: number }> }; error?: string; detail?: string };
             if (!quoteRes.ok || !quoteBody.quote || typeof quoteBody.quote.totalCredits !== 'number') {
-              return { ok: false, error: quoteBody.detail || quoteBody.error || 'Foley price unavailable' };
+              return { ok: false, error: quoteBody.detail || quoteBody.error || 'Foley approval unavailable' };
             }
             const totalSec = items.reduce((sum, item) => sum + item.generationDurationSec, 0);
-            const lines = items.map((item, index) => {
-              const credits = quoteBody.quote?.items?.[index]?.credits;
-              return `${index + 1}. ${item.name} — source ${item.sourceInSec.toFixed(2)}–${item.sourceOutSec.toFixed(2)}s (${item.durationSec.toFixed(2)}s), generate ${item.generationDurationSec}s${typeof credits === 'number' ? `, ${credits} credits` : ''}\n   Sound: ${item.prompt}`;
-            });
+            const lines = items.map((item, index) =>
+              `${index + 1}. ${item.name} — source ${item.sourceInSec.toFixed(2)}–${item.sourceOutSec.toFixed(2)}s (${item.durationSec.toFixed(2)}s), generate ${item.generationDurationSec}s\n   Sound: ${item.prompt}`,
+            );
             const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
               'approval',
               {
                 title: `Generate ${items.length} Foley sound${items.length === 1 ? '' : 's'}?`,
-                content: `${lines.join('\n\n')}\n\nOnly these source spans will be uploaded for MMAudio V2. Total billable generated audio: ${totalSec}s. Maximum charge now: ${quoteBody.quote.totalCredits} Pireel credits. Generated AAC tracks will be saved to your reusable cross-project audio library.`,
+                content: `${lines.join('\n\n')}\n\nOnly these source spans will be uploaded for MMAudio V2. Total generated audio: ${totalSec}s. Generated AAC tracks will be saved to your reusable cross-project audio library.`,
               },
               { signal },
             );
             if (decision == null) throw abortErr();
-            if (decision !== 'approved') return { ok: true, summary: 'Foley generation rejected; nothing uploaded or charged', data: { decision: 'rejected' } };
+            if (decision !== 'approved') return { ok: true, summary: 'Foley generation rejected; nothing uploaded or generated', data: { decision: 'rejected' } };
 
             const { extractAudio, renderTimeline } = await import('@pireel/studio-engine/video-edit');
             const spaceId = await getStudioSpaceId(projectId);
@@ -2195,7 +2194,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               data: {
                 assets: registrations,
                 ...(failures.length ? { failures } : {}),
-                next: 'Pass each returned asset unchanged to register_media, then add_clips with role=sfx at the matching picture event. Use set_clip_properties for frame-accurate start, trim, level, and short fades.',
+                next: 'Pass each returned asset unchanged to register_media, then place every matching event in one add_clips batch with role=sfx and no trackId. The runtime preserves overlaps on parallel free SFX lanes. Use set_clip_properties for frame-accurate start, trim, level, and short fades.',
               },
             };
             } finally {

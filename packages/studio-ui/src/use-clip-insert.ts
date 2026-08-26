@@ -445,6 +445,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
       trackId = uniqueDocumentId(`track_visual_${shotId()}`, new Set(document.timeline.tracks.map((track) => track.id)));
       const insertedTrack = applyEditorCommand(document, {
         type: 'track.insert',
+        index: input.target.slot,
         track: {
           id: trackId,
           type: 'visual',

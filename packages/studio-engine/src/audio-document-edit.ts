@@ -18,6 +18,8 @@ import {
   type EditorCommandReceipt,
   type EditorDocumentV2,
   type EditorMediaAsset,
+  type EditorTrack,
+  type EditorTrackRole,
 } from './editor-document';
 
 type AudioPropertyPatch = Partial<Pick<AudioClip,
@@ -35,6 +37,7 @@ export type AddAudioDocumentClipResult = AudioDocumentEditResult & {
 };
 
 export type SplitAudioDocumentClipResult = AudioDocumentEditResult & { newClipId?: string };
+export type MoveAudioDocumentClipResult = AudioDocumentEditResult & { trackId?: string };
 
 export interface AddAudioDocumentClipInput {
   document: EditorDocumentV2;
@@ -46,6 +49,34 @@ export interface AudioDocumentPatchInput {
   document: EditorDocumentV2;
   updates: readonly { clipId: string; patch: AudioPropertyPatch }[];
 }
+
+export interface MoveAudioDocumentClipInput {
+  document: EditorDocumentV2;
+  clipId: string;
+  startSec: number;
+  toTrackId?: string;
+  /** Document-array position for a collision lane or an explicitly requested new lane. */
+  newTrackIndex?: number;
+  /** A row-gap drop creates a lane even when the source lane itself is free. */
+  forceNewTrack?: boolean;
+}
+
+export interface EnsureFreeAudioDocumentTrackInput {
+  document: EditorDocumentV2;
+  startFrame: number;
+  durationFrames: number;
+  preferredTrackId?: string;
+  role?: EditorTrackRole;
+  excludeClipIds?: readonly string[];
+  name?: string;
+  syncLocked?: boolean;
+  newTrackIndex?: number;
+  forceNewTrack?: boolean;
+}
+
+export type EnsureFreeAudioDocumentTrackResult =
+  | { ok: true; document: EditorDocumentV2; track: EditorTrack; receipts: EditorCommandReceipt[] }
+  | { ok: false; document: EditorDocumentV2; error: EditorCommandError };
 
 function failure(
   document: EditorDocumentV2,
@@ -78,8 +109,87 @@ function uniqueId(base: string, used: ReadonlySet<string>): string {
   return id;
 }
 
-function audioLaneId(document: EditorDocumentV2): string {
-  return uniqueId('track_audio_1', new Set(document.timeline.tracks.map((track) => track.id)));
+function audioTrackName(role: EditorTrackRole | undefined, ordinal: number): string {
+  if (role === 'music') return ordinal === 1 ? 'Music' : `Music ${ordinal}`;
+  if (role === 'sfx') return ordinal === 1 ? 'SFX' : `SFX ${ordinal}`;
+  if (role === 'narration') return ordinal === 1 ? 'Narration' : `Narration ${ordinal}`;
+  return `Audio ${ordinal}`;
+}
+
+/** Select an existing non-colliding audio lane, or insert a parallel lane when every candidate overlaps. */
+export function ensureFreeAudioDocumentTrack(
+  input: EnsureFreeAudioDocumentTrackInput,
+): EnsureFreeAudioDocumentTrackResult {
+  if (!Number.isInteger(input.startFrame) || input.startFrame < 0) {
+    return failure(input.document, 'invalid-range', 'Audio start must be a non-negative frame.', { path: 'startFrame' });
+  }
+  if (!Number.isInteger(input.durationFrames) || input.durationFrames <= 0) {
+    return failure(input.document, 'invalid-range', 'Audio duration must be a positive frame count.', { path: 'durationFrames' });
+  }
+  if (
+    input.newTrackIndex != null
+    && (!Number.isInteger(input.newTrackIndex)
+      || input.newTrackIndex < 0
+      || input.newTrackIndex > input.document.timeline.tracks.length)
+  ) {
+    return failure(input.document, 'invalid-range', 'Audio track insertion index is outside the timeline.', { path: 'newTrackIndex' });
+  }
+  if (input.forceNewTrack && input.newTrackIndex == null) {
+    return failure(input.document, 'invalid-command', 'A forced audio lane requires an insertion index.', { path: 'newTrackIndex' });
+  }
+  const preferred = input.preferredTrackId
+    ? input.document.timeline.tracks.find((track) => track.id === input.preferredTrackId)
+    : undefined;
+  if (input.preferredTrackId && (!preferred || preferred.type !== 'audio')) {
+    return failure(
+      input.document,
+      preferred ? 'invalid-command' : 'track-not-found',
+      `Audio track does not exist: ${input.preferredTrackId}`,
+      { trackIds: [input.preferredTrackId] },
+    );
+  }
+  const role = preferred?.role ?? input.role;
+  const excluded = new Set(input.excludeClipIds ?? []);
+  const endFrame = input.startFrame + input.durationFrames;
+  const isFree = (track: EditorTrack) => !track.locked && track.clips.every((clip) => (
+    excluded.has(clip.id)
+    || clip.startFrame + clip.durationFrames <= input.startFrame
+    || clip.startFrame >= endFrame
+  ));
+  const peers = input.document.timeline.tracks.filter((track) => (
+    track.type === 'audio' && track.role === role
+  ));
+  const candidates = input.forceNewTrack
+    ? []
+    : input.newTrackIndex != null && preferred
+      ? [preferred]
+      : preferred
+        ? [preferred, ...peers.filter((track) => track.id !== preferred.id)]
+        : peers;
+  const existing = candidates.find(isFree);
+  if (existing) return { ok: true, document: input.document, track: existing, receipts: [] };
+
+  const ordinal = peers.length + 1;
+  const id = uniqueId(role === 'music' ? 'track_audio_1' : `track_${role ?? 'audio'}`, new Set(input.document.timeline.tracks.map((track) => track.id)));
+  const inserted = applyEditorCommand(input.document, {
+    type: 'track.insert',
+    track: {
+      id,
+      type: 'audio',
+      ...(role ? { role } : {}),
+      name: input.name ?? audioTrackName(role, ordinal),
+      syncLocked: input.syncLocked ?? preferred?.syncLocked ?? role !== 'music',
+      stackOrder: preferred?.stackOrder ?? 0,
+    },
+    ...(input.newTrackIndex != null ? { index: input.newTrackIndex } : {}),
+  });
+  if (!inserted.ok) return { ok: false, document: input.document, error: inserted.error };
+  return {
+    ok: true,
+    document: inserted.document,
+    track: inserted.document.timeline.tracks.find((track) => track.id === id)!,
+    receipts: [inserted.receipt],
+  };
 }
 
 function assetIdFor(document: EditorDocumentV2, clipId: string): string {
@@ -142,24 +252,6 @@ export function addAudioDocumentClip(input: AddAudioDocumentClipInput): AddAudio
 
   let document = input.document;
   const receipts: EditorCommandReceipt[] = [];
-  let track = input.toTrackId
-    ? document.timeline.tracks.find((candidate) => candidate.id === input.toTrackId)
-    : document.timeline.tracks.find((candidate) => candidate.type === 'audio' && candidate.role === 'music')
-      ?? document.timeline.tracks.find((candidate) => candidate.type === 'audio');
-  if (input.toTrackId && (!track || track.type !== 'audio')) {
-    return failure(input.document, track ? 'invalid-command' : 'track-not-found', `Audio track does not exist: ${input.toTrackId}`, { trackIds: [input.toTrackId] });
-  }
-  if (!track) {
-    const trackId = audioLaneId(document);
-    const insertedTrack = applyEditorCommand(document, {
-      type: 'track.insert',
-      track: { id: trackId, type: 'audio', role: 'music', name: 'Audio 1', syncLocked: true, stackOrder: 0 },
-    });
-    if (!insertedTrack.ok) return { ok: false, document: input.document, error: insertedTrack.error };
-    document = insertedTrack.document;
-    receipts.push(insertedTrack.receipt);
-    track = document.timeline.tracks.find((candidate) => candidate.id === trackId)!;
-  }
 
   const reused = existingAsset(document, normalized);
   const assetId = reused?.id ?? assetIdFor(document, normalized.id);
@@ -182,15 +274,86 @@ export function addAudioDocumentClip(input: AddAudioDocumentClipInput): AddAudio
     properties: propertiesOf(normalized),
     anchor: { type: 'timeline' },
   };
-  const inserted = applyEditorCommand(document, { type: 'audio.insert', trackId: track.id, clip, ...(asset ? { asset } : {}) });
+  const preferred = input.toTrackId
+    ?? document.timeline.tracks.find((candidate) => candidate.type === 'audio' && candidate.role === 'music')?.id
+    ?? document.timeline.tracks.find((candidate) => candidate.type === 'audio')?.id;
+  const allocated = ensureFreeAudioDocumentTrack({
+    document,
+    startFrame: clip.startFrame,
+    durationFrames: clip.durationFrames,
+    ...(preferred ? { preferredTrackId: preferred } : { role: 'music' as const }),
+    syncLocked: true,
+  });
+  if (!allocated.ok) return { ok: false, document: input.document, error: allocated.error };
+  document = allocated.document;
+  receipts.push(...allocated.receipts);
+  const inserted = applyEditorCommand(document, { type: 'audio.insert', trackId: allocated.track.id, clip, ...(asset ? { asset } : {}) });
   if (!inserted.ok) return { ok: false, document: input.document, error: inserted.error };
   return {
     ok: true,
     document: inserted.document,
     receipts: [...receipts, inserted.receipt],
     clipId: clip.id,
-    trackId: track.id,
+    trackId: allocated.track.id,
     assetId,
+  };
+}
+
+/** Move an audio clip through collision-aware lane allocation, creating a parallel lane when needed. */
+export function moveAudioDocumentClip(input: MoveAudioDocumentClipInput): MoveAudioDocumentClipResult {
+  if (!Number.isFinite(input.startSec) || input.startSec < 0) {
+    return failure(input.document, 'invalid-range', 'Audio move time must be non-negative and finite.', { path: 'startSec' });
+  }
+  const found = nativeAudioClip(input.document, input.clipId);
+  if (!found) return failure(input.document, 'clip-not-found', `Audio clip does not exist: ${input.clipId}`, { path: 'clipId' });
+  const sourceTrack = input.document.timeline.tracks.find((track) => track.id === found.trackId)!;
+  const preferredTrackId = input.toTrackId ?? sourceTrack.id;
+  const preferred = input.document.timeline.tracks.find((track) => track.id === preferredTrackId);
+  if (!preferred || preferred.type !== 'audio') {
+    return failure(
+      input.document,
+      preferred ? 'invalid-command' : 'track-not-found',
+      `Audio track does not exist: ${preferredTrackId}`,
+      { trackIds: [preferredTrackId] },
+    );
+  }
+  const startFrame = secondsToTimelineFrames(input.startSec, input.document.canvas.fps);
+  const allocated = ensureFreeAudioDocumentTrack({
+    document: input.document,
+    startFrame,
+    durationFrames: found.clip.durationFrames,
+    preferredTrackId,
+    excludeClipIds: [found.clip.id],
+    name: preferred.name,
+    syncLocked: preferred.syncLocked,
+    ...(input.newTrackIndex != null ? { newTrackIndex: input.newTrackIndex } : {}),
+    ...(input.forceNewTrack ? { forceNewTrack: true } : {}),
+  });
+  if (!allocated.ok) return { ok: false, document: input.document, error: allocated.error };
+  const moved = applyEditorCommand(allocated.document, {
+    type: 'clip.move',
+    trackId: sourceTrack.id,
+    clipId: found.clip.id,
+    startFrame,
+    toTrackId: allocated.track.id,
+    includeLinked: false,
+  });
+  if (!moved.ok) return { ok: false, document: input.document, error: moved.error };
+  let document = moved.document;
+  const receipts = [...allocated.receipts, moved.receipt];
+  const emptiedSource = allocated.track.id !== sourceTrack.id
+    && document.timeline.tracks.find((track) => track.id === sourceTrack.id)?.clips.length === 0;
+  if (emptiedSource) {
+    const removed = applyEditorCommand(document, { type: 'track.remove', trackId: sourceTrack.id });
+    if (!removed.ok) return { ok: false, document: input.document, error: removed.error };
+    document = removed.document;
+    receipts.push(removed.receipt);
+  }
+  return {
+    ok: true,
+    document,
+    receipts,
+    trackId: allocated.track.id,
   };
 }
 

@@ -4,6 +4,7 @@ import {
   emptyEditorDocumentV2,
   validateEditorDocumentV2,
   type EditorDocumentV2,
+  type AudioTimelineClip,
   type GraphicTimelineClip,
   type MediaTimelineClip,
 } from './editor-document';
@@ -30,6 +31,21 @@ function graphicClip(id: string, anchor: GraphicTimelineClip['anchor'] = { type:
     enabled: true,
     block: { templateId: 'custom', slots: {} },
     anchor,
+  };
+}
+
+function audioClip(id: string): AudioTimelineClip {
+  return {
+    id,
+    kind: 'audio',
+    assetId: 'asset-audio',
+    startFrame: 0,
+    durationFrames: 30,
+    sourceInSec: 0,
+    sourceOutSec: 1,
+    enabled: true,
+    properties: {},
+    anchor: { type: 'timeline' },
   };
 }
 
@@ -211,5 +227,54 @@ describe('EditorDocument V2 track commands', () => {
     });
     expect(rejected).toMatchObject({ ok: false, error: { code: 'invalid-command', path: 'toTrackId' } });
     expect(rejected.document).toBe(inserted.document);
+  });
+
+  it('moves an audio clip in time and between native audio tracks as one transaction', () => {
+    const document = documentWithAsset();
+    document.assets['asset-audio'] = {
+      id: 'asset-audio',
+      kind: 'audio',
+      locator: { localSig: 'audio-sig' },
+      metadata: { durationSec: 10 },
+    };
+    document.timeline.tracks.push({
+      id: 'foley-1',
+      type: 'audio',
+      role: 'sfx',
+      muted: false,
+      hidden: false,
+      locked: false,
+      syncLocked: false,
+      stackOrder: 0,
+      clips: [audioClip('foley')],
+    }, {
+      id: 'foley-2',
+      type: 'audio',
+      role: 'sfx',
+      muted: false,
+      hidden: false,
+      locked: false,
+      syncLocked: false,
+      stackOrder: 0,
+      clips: [],
+    });
+
+    const moved = applyEditorCommand(document, {
+      type: 'clip.move',
+      trackId: 'foley-1',
+      clipId: 'foley',
+      startFrame: 45,
+      toTrackId: 'foley-2',
+      includeLinked: false,
+    });
+
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.document.timeline.tracks.find((track) => track.id === 'foley-1')?.clips).toEqual([]);
+    expect(moved.document.timeline.tracks.find((track) => track.id === 'foley-2')?.clips).toMatchObject([
+      { id: 'foley', startFrame: 45 },
+    ]);
+    expect(moved.receipt.affectedTrackIds).toEqual(expect.arrayContaining(['foley-1', 'foley-2']));
+    expect(validateEditorDocumentV2(moved.document)).toEqual([]);
   });
 });

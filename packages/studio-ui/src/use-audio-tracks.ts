@@ -36,6 +36,7 @@ import { materializeRemoteMedia } from './remote-media';
 import { t } from './i18n';
 import { editorErrorMessage } from './editor-error';
 import { supplementalVisualAudioSpecs } from './visual-render-plan';
+import { audioExportPayload } from './audio-export-payload';
 
 export interface AudioTracksDeps {
   projectId: string;
@@ -374,15 +375,12 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.shots, videoFile]);
 
-  /** Export payload (bytes per usable clip); clips with missing bytes are skipped (panel shows them). */
-  const audioForExport = (): { clip: AudioClip; file: File }[] | null => {
-    const out: { clip: AudioClip; file: File }[] = [];
-    for (const clip of renderAudioTracksRef.current ?? compRef.current.audioTracks ?? []) {
-      const f = clip.sig ? audioFilesRef.current.get(clip.sig) : undefined;
-      if (f) out.push({ clip, file: f });
-    }
-    return out.length ? out : null;
-  };
+  /** Export payload (bytes per audible clip). Remote clips are materialized on demand because the
+   * preview can stream their URL while the offline export mixer requires an actual File. */
+  const audioForExport = () => audioExportPayload(
+    renderAudioTracksRef.current ?? compRef.current.audioTracks ?? [],
+    audioFilesRef.current,
+  );
 
   /** Hosted music generation. Returns the project-history id + stored url; placing it on the lane
    *  remains a separate explicit action, exactly like a generated image. */

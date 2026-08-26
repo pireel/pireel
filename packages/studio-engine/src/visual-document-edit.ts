@@ -20,7 +20,7 @@ import { validateEditorDocumentV2 } from './editor-document/validation';
 export type VisualDocumentMoveTarget =
   | { kind: 'primary' }
   | { kind: 'visual'; trackId: string }
-  | { kind: 'visual-new'; id: string; name?: string; stackOrder: number };
+  | { kind: 'visual-new'; id: string; name?: string; stackOrder: number; index?: number };
 
 export interface MoveVisualDocumentClipInput {
   document: EditorDocumentV2;
@@ -141,6 +141,7 @@ export function moveVisualDocumentClip(input: MoveVisualDocumentClipInput): Move
   } else {
     const inserted = applyEditorCommand(document, {
       type: 'track.insert',
+      ...(input.target.index != null ? { index: input.target.index } : {}),
       track: {
         id: input.target.id,
         type: 'visual',

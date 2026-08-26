@@ -58,6 +58,8 @@ function audioKneeX(fadeSec: number, edge: 'in' | 'out', widthPx: number, spanSe
 
 
 export interface AudioLaneProps {
+  /** Native document track identity; absent only for the legacy single-lane fallback. */
+  trackId?: string;
   clips: AudioClip[];
   disabledIds?: ReadonlySet<string>;
   /** Timeline duration (s) and scale (px per second). */
@@ -71,7 +73,11 @@ export interface AudioLaneProps {
   peaks?: Map<string, Float32Array>;
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
-  onMove?: (id: string, startSec: number) => void;
+  /** Resolve a vertical pointer to an existing audio row or an exact document insertion gap. */
+  resolveMoveTarget?: (clientY: number) => AudioLaneMoveTarget | null;
+  /** Report only vertical-target changes so the parent can paint the same insertion target. */
+  onMoveTargetChange?: (target: AudioLaneMoveTarget | null) => void;
+  onMove?: (id: string, startSec: number, target?: AudioLaneMoveTarget) => void;
   onTrim?: (id: string, patch: { startSec?: number; inSec?: number; outSec?: number }) => void;
   onFade?: (id: string, edge: 'in' | 'out', sec: number) => void;
   /** Toggle one clip without touching its level or the containing track's mute state. */
@@ -87,10 +93,18 @@ export interface AudioLaneProps {
   drag: (e: React.PointerEvent, onMove: (clientX: number, clientY: number) => void, onUp?: (moved: boolean) => void) => void;
 }
 
-function AudioLaneImpl({ clips, disabledIds, dur, surfaceDur = dur, pps, top, peaks, selectedId, onSelect, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, endSecAt = secAt, onEndResizePreview, snap, drag }: AudioLaneProps) {
+export type AudioLaneMoveTarget =
+  | { kind: 'track'; trackId: string; newTrackIndex: number; top: number }
+  | { kind: 'new-track'; newTrackIndex: number; lineTop: number; top: number };
+
+function AudioLaneImpl({ trackId, clips, disabledIds, dur, surfaceDur = dur, pps, top, peaks, selectedId, onSelect, resolveMoveTarget, onMoveTargetChange, onMove, onTrim, onFade, onToggleMute, onOpenPanel, secAt, endSecAt = secAt, onEndResizePreview, snap, drag }: AudioLaneProps) {
   /** Live gesture value (this component's whole reason to exist): the clip under the pointer renders
    *  from base + patch, and the commit lands once on release. */
-  const [audioDrag, setAudioDrag] = useState<{ id: string; patch: Partial<AudioClip> } | null>(null);
+  const [audioDrag, setAudioDrag] = useState<{
+    id: string;
+    patch: Partial<AudioClip>;
+    offsetY?: number;
+  } | null>(null);
   const px = useCallback((s: number) => s * pps, [pps]);
   /** One static path per clip, rebuilt only when its peaks or its level change. */
   const waves = useMemo(() => {
@@ -143,7 +157,14 @@ function AudioLaneImpl({ clips, disabledIds, dur, surfaceDur = dur, pps, top, pe
             className={`group/aud text-ink absolute top-0.5 cursor-grab overflow-hidden border active:cursor-grabbing ${TIMELINE_ITEM_RADIUS} ${disabledIds?.has(clip.id) ? 'opacity-45 grayscale ' : ''}${
               selected ? 'border-accent ring-accent/40 z-10 ring-1' : 'border-accent/40'
             }`}
-            style={{ left: px(w.start), width, height: CHIP_H }}
+            style={{
+              left: px(w.start),
+              width,
+              height: CHIP_H,
+              transform: audioDrag?.id === base.id && audioDrag.offsetY
+                ? `translateY(${audioDrag.offsetY}px)`
+                : undefined,
+            }}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -156,18 +177,36 @@ function AudioLaneImpl({ clips, disabledIds, dur, surfaceDur = dur, pps, top, pe
               e.stopPropagation();
               const grab = secAt(e.clientX) - w.start;
               let at = w.start;
+              let moveTarget: AudioLaneMoveTarget | undefined;
+              let previewTargetKey = '';
               drag(
                 e,
-                (cx) => {
+                (cx, cy) => {
                   let ns = Math.max(0, Math.min(Math.max(0, dur - 0.2), snap(secAt(cx) - grab, [w.start, w.end])));
                   if (ns < 0.15) ns = 0; // snap to the head
                   at = ns;
-                  setAudioDrag({ id: base.id, patch: { startSec: ns } });
+                  const target = resolveMoveTarget?.(cy);
+                  moveTarget = target ?? undefined;
+                  const targetKey = target?.kind === 'track'
+                    ? `track:${target.trackId}`
+                    : target
+                      ? `new:${target.newTrackIndex}`
+                      : '';
+                  if (targetKey !== previewTargetKey) {
+                    previewTargetKey = targetKey;
+                    onMoveTargetChange?.(target ?? null);
+                  }
+                  setAudioDrag({
+                    id: base.id,
+                    patch: { startSec: ns },
+                    offsetY: target ? target.top - top : 0,
+                  });
                 },
                 (moved) => {
                   setAudioDrag(null);
+                  onMoveTargetChange?.(null);
                   onSelect?.(base.id);
-                  if (moved) onMove?.(base.id, at);
+                  if (moved) onMove?.(base.id, at, moveTarget);
                   else onOpenPanel?.();
                 },
               );

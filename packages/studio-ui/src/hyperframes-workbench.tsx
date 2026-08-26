@@ -90,6 +90,7 @@ import {
   applyNarrationDocumentEdit,
   applyMediaVideoSettingsPatch,
   addNarrativeDocumentClip,
+  moveAudioDocumentClip,
   moveVisualDocumentClip,
   applyOverlayDocumentEdits,
   removeNarrationClipsWithoutRipple,
@@ -532,67 +533,61 @@ export function HyperframesWorkbench({
   );
   const timelineTrackStates = useMemo<TimelineTrackState[]>(
     () =>
-      renderPlan.tracks.flatMap((track) =>
-        (track.type === "visual" &&
-          track.id !== renderPlan.primaryNarrativeTrackId) ||
-        track.type === "graphics" ||
-        track.type === "caption" ||
-        track.type === "audio"
-          ? [
-              {
-                trackId: track.id,
-                type: track.type,
-                ...(track.role ? { role: track.role } : {}),
-                stackOrder: track.stackOrder,
-                hidden: track.hidden,
-                muted: track.muted,
-                ranges: track.clips.map((entry) => ({
-                  clipId: entry.clipId,
-                  startSec: entry.startSec,
-                  endSec: entry.endSec,
-                })),
-                ...(track.type !== "audio"
-                  ? {
-                      clips: track.clips.flatMap((entry) =>
-                        entry.clip.kind === "media" &&
-                        (entry.asset?.kind === "image" ||
-                          entry.asset?.kind === "video")
-                          ? [
-                              {
-                                clipId: entry.clipId,
-                                startSec: entry.startSec,
-                                endSec: entry.endSec,
-                                kind: entry.asset.kind,
-                                ...(entry.asset.label
-                                  ? { label: entry.asset.label }
-                                  : {}),
-                                ...(() => {
-                                  const source =
-                                    entry.asset.kind === "image" &&
-                                    entry.asset.locator.localSig
-                                      ? localImagePreviewUrls.get(
-                                          entry.asset.locator.localSig,
-                                        )
-                                      : entry.resolvedSource;
-                                  return source ? { source } : {};
-                                })(),
-                                sourceInSec: entry.clip.sourceInSec,
-                                sourceOutSec: entry.clip.sourceOutSec,
-                                ...(entry.asset.metadata.durationSec != null
-                                  ? { sourceDurationSec: entry.asset.metadata.durationSec }
-                                  : {}),
-                                enabled: entry.clip.enabled,
-                              },
-                            ]
-                          : [],
-                      ),
-                    }
-                  : {}),
-              },
-            ]
-          : [],
-      ),
+      renderPlan.tracks.map((track) => ({
+        trackId: track.id,
+        timelineIndex: editorDocument.timeline.tracks.findIndex(
+          (candidate) => candidate.id === track.id,
+        ),
+        type: track.type,
+        ...(track.role ? { role: track.role } : {}),
+        stackOrder: track.stackOrder,
+        hidden: track.hidden,
+        muted: track.muted,
+        ranges: track.clips.map((entry) => ({
+          clipId: entry.clipId,
+          startSec: entry.startSec,
+          endSec: entry.endSec,
+        })),
+        ...(track.type !== "audio"
+          ? {
+              clips: track.clips.flatMap((entry) =>
+                entry.clip.kind === "media" &&
+                (entry.asset?.kind === "image" ||
+                  entry.asset?.kind === "video")
+                  ? [
+                      {
+                        clipId: entry.clipId,
+                        startSec: entry.startSec,
+                        endSec: entry.endSec,
+                        kind: entry.asset.kind,
+                        ...(entry.asset.label
+                          ? { label: entry.asset.label }
+                          : {}),
+                        ...(() => {
+                          const source =
+                            entry.asset.kind === "image" &&
+                            entry.asset.locator.localSig
+                              ? localImagePreviewUrls.get(
+                                  entry.asset.locator.localSig,
+                                )
+                              : entry.resolvedSource;
+                          return source ? { source } : {};
+                        })(),
+                        sourceInSec: entry.clip.sourceInSec,
+                        sourceOutSec: entry.clip.sourceOutSec,
+                        ...(entry.asset.metadata.durationSec != null
+                          ? { sourceDurationSec: entry.asset.metadata.durationSec }
+                          : {}),
+                        enabled: entry.clip.enabled,
+                      },
+                    ]
+                  : [],
+              ),
+            }
+          : {}),
+      })),
     [
+      editorDocument.timeline.tracks,
       localImagePreviewUrls,
       renderPlan,
     ],
@@ -1626,7 +1621,7 @@ export function HyperframesWorkbench({
   };
   /** Export-time audio/denoise payload getters; filled by useBgm/useDenoise below (hook order: they need consts defined later). */
   const audioExportRef = useRef<
-    (() => { clip: AudioClip; file: File }[] | null) | null
+    (() => Promise<{ clip: AudioClip; file: File }[] | null>) | null
   >(null);
   const denoiseExportRef = useRef<(() => Map<string, File> | null) | null>(
     null,
@@ -7098,6 +7093,7 @@ export function HyperframesWorkbench({
               id: `track_visual_${blockId("lane")}`,
               name: "Visual media",
               stackOrder: target.stackOrder,
+              index: target.slot,
             }
           : target.kind === "primary"
             ? { kind: "primary" }
@@ -7232,17 +7228,17 @@ export function HyperframesWorkbench({
       pushUndoSnapshot();
       setEditorDocument(edit.document);
     },
-    /** Dragging into a row gap creates a first-class lane between its native stack neighbors. */
-    onMoveBlockNewTrack: (id: string, slot: number, startSec: number) => {
+    /** Dragging into any row boundary creates a graphics lane at that exact document position. */
+    onMoveBlockNewTrack: (id: string, newTrackIndex: number, startSec: number) => {
       if (genLockToast(id)) return;
-      const graphics = editorDocumentRef.current.timeline.tracks
-        .filter(
-          (track) => track.type !== "audio" && track.role !== "primaryNarrative",
-        )
-        .sort((left, right) => right.stackOrder - left.stackOrder);
-      const insertAt = Math.max(0, Math.min(graphics.length, slot));
-      const above = graphics[insertAt - 1]?.stackOrder;
-      const below = graphics[insertAt]?.stackOrder;
+      const tracks = editorDocumentRef.current.timeline.tracks;
+      const insertAt = Math.max(0, Math.min(tracks.length, newTrackIndex));
+      const isVisualLayer = (track: (typeof tracks)[number]) =>
+        track.type !== "audio" && track.role !== "primaryNarrative";
+      const above = [...tracks.slice(0, insertAt)]
+        .reverse()
+        .find(isVisualLayer)?.stackOrder;
+      const below = tracks.slice(insertAt).find(isVisualLayer)?.stackOrder;
       const stackOrder =
         above == null
           ? (below ?? 1) + 1
@@ -7258,6 +7254,7 @@ export function HyperframesWorkbench({
           id: `track_graphics_${blockId("lane")}`,
           name: "Graphics",
           stackOrder,
+          index: insertAt,
         },
         startSec,
       });
@@ -7303,10 +7300,24 @@ export function HyperframesWorkbench({
           sig: a.sig,
         });
     },
-    // Direct-manipulation lane drags commit on every move and stay OUT of the undo stack —
-    // same convention as element move/resize (a snapshot per pointer frame would flood it).
-    onMoveAudio: (id: string, startSec: number) =>
-      audioOps.patchClip(id, { startSec }),
+    // Audio uses the same native clip.move transaction as other timeline media. The pointer gesture
+    // commits once on release; the shared audio edit also allocates a parallel lane on collision.
+    onMoveAudio: (id, startSec, target) => {
+      const edit = moveAudioDocumentClip({
+        document: editorDocumentRef.current,
+        clipId: id,
+        startSec,
+        ...(target?.kind === "track" ? { toTrackId: target.trackId } : {}),
+        ...(target ? { newTrackIndex: target.newTrackIndex } : {}),
+        ...(target?.kind === "new-track" ? { forceNewTrack: true } : {}),
+      });
+      if (!edit.ok) {
+        toast.error(editorErrorMessage(edit.error));
+        return;
+      }
+      pushUndoSnapshot();
+      setEditorDocument(edit.document);
+    },
     onTrimAudio: (
       id: string,
       patch: { startSec?: number; inSec?: number; outSec?: number },
@@ -7361,28 +7372,50 @@ export function HyperframesWorkbench({
     onReorderTracks: (
       topToBottom: Array<{ trackId?: string; stackOrder: number }>,
     ) => {
-      const graphics = editorDocumentRef.current.timeline.tracks.filter(
-        (track) => track.type !== "audio" && track.role !== "primaryNarrative",
+      const current = editorDocumentRef.current;
+      const tracks = current.timeline.tracks;
+      const targetIds = topToBottom.flatMap((target) =>
+        target.trackId ? [target.trackId] : [],
       );
-      const used = new Set<string>();
-      const ids = topToBottom.flatMap((target) => {
-        const track = target.trackId
-          ? graphics.find((candidate) => candidate.id === target.trackId)
-          : graphics.find(
-              (candidate) =>
-                candidate.stackOrder === target.stackOrder && !used.has(candidate.id),
-            );
-        if (!track) return [];
-        used.add(track.id);
-        return [track.id];
-      });
-      const edit = reorderOverlayDocumentTracks(editorDocumentRef.current, ids);
-      if (!edit.ok) {
-        toast.error(editorErrorMessage(edit.error));
+      if (
+        targetIds.length !== tracks.length ||
+        new Set(targetIds).size !== tracks.length ||
+        targetIds.some((id) => !tracks.some((track) => track.id === id))
+      ) {
+        toast.error("Track reorder must contain every timeline track exactly once.");
         return;
       }
+
+      // Presentation order is independent from visual compositing. Preserve the visual lanes'
+      // top-to-bottom meaning through stackOrder, then move every native row (audio included) into
+      // the user's requested timeline order.
+      const visualIds = targetIds.filter((id) => {
+        const track = tracks.find((candidate) => candidate.id === id);
+        return track?.type !== "audio" && track?.role !== "primaryNarrative";
+      });
+      const visualEdit = reorderOverlayDocumentTracks(current, visualIds);
+      if (!visualEdit.ok) {
+        toast.error(editorErrorMessage(visualEdit.error));
+        return;
+      }
+
+      let next = visualEdit.document;
+      for (const [toIndex, trackId] of targetIds.entries()) {
+        if (next.timeline.tracks[toIndex]?.id === trackId) continue;
+        const moved = applyEditorCommand(next, {
+          type: "track.move",
+          trackId,
+          toIndex,
+        });
+        if (!moved.ok) {
+          toast.error(editorErrorMessage(moved.error));
+          return;
+        }
+        next = moved.document;
+      }
+
       pushUndoSnapshot();
-      setEditorDocument(edit.document);
+      setEditorDocument(next);
     },
   });
 

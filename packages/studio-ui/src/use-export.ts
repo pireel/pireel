@@ -16,7 +16,6 @@
 import { useRef, useState, type MutableRefObject } from 'react';
 import { toast } from '@pireel/ui/toast';
 import {
-  type AudioClip,
   type Composition,
   type EditorDocumentV2,
   type EditorMediaAsset,
@@ -30,6 +29,7 @@ import { t } from './i18n';
 import { compositionRenderView } from './composition-render-view';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
+import type { AudioExportEntry } from './audio-export-payload';
 
 /** presign's hard cap (413 past it); intercept early to give a human message. */
 const MAX_PUBLISH_BYTES = 200 * 1024 * 1024;
@@ -84,8 +84,8 @@ export function useStudioExport(deps: {
   videoFileRef: MutableRefObject<File | null>;
   /** Local insert-clip File table (key = blob URL); used by client compositing to fetch insert clips. */
   clipFilesRef?: MutableRefObject<Map<string, File>>;
-  /** Audio-clip payload getter (clip + bytes per usable track); null result = export without audio tracks. */
-  audioExportRef?: MutableRefObject<(() => { clip: AudioClip; file: File }[] | null) | null>;
+  /** Audio-clip payload getter. It resolves every audible track to bytes before compositing. */
+  audioExportRef?: MutableRefObject<(() => Promise<AudioExportEntry[] | null>) | null>;
   /** Denoise substitution getter (source key → baked blended audio); null = original audio. */
   denoiseExportRef?: MutableRefObject<(() => Map<string, File> | null) | null>;
 }) {
@@ -107,11 +107,13 @@ export function useStudioExport(deps: {
     document: EditorDocumentV2,
     plan: ReturnType<typeof editorDocumentRenderPlan>,
     opts: ExportRenderOpts,
+    audio: AudioExportEntry[] | null,
   ): string => {
     const resolvedSources = plan.tracks.flatMap((track) => track.clips.flatMap((entry) => (
       entry.resolvedSource ? [[entry.clipId, entry.resolvedSource]] : []
     )));
-    return `${videoFileRef.current ? fileSig(videoFileRef.current) : ''}|${JSON.stringify(opts)}|${JSON.stringify(document)}|${JSON.stringify(resolvedSources)}`;
+    const audioFiles = audio?.map((entry) => [entry.clip.id, fileSig(entry.file)]) ?? [];
+    return `${videoFileRef.current ? fileSig(videoFileRef.current) : ''}|${JSON.stringify(audioFiles)}|${JSON.stringify(opts)}|${JSON.stringify(document)}|${JSON.stringify(resolvedSources)}`;
   };
 
   /** WebCodecs is always required; main-source bytes are required only when a surviving clip
@@ -131,6 +133,7 @@ export function useStudioExport(deps: {
     plan: ReturnType<typeof editorDocumentRenderPlan>,
     key: string,
     opts: ExportRenderOpts,
+    audio: AudioExportEntry[] | null,
   ): Promise<Blob> => {
     const cached = lastExportRef.current;
     if (cached && cached.key === key && cached.blob) return cached.blob;
@@ -144,7 +147,7 @@ export function useStudioExport(deps: {
       timelineDurationSec: plan.durationSec,
       videoFile: videoFileRef.current,
       clipFiles: clipFilesRef?.current ?? new Map(),
-      audio: audioExportRef?.current?.() ?? null,
+      audio,
       denoise: denoiseExportRef?.current?.() ?? null,
       render: opts,
       onProgress: (done, total) => setExportPct(Math.round((done / total) * 100)),
@@ -173,18 +176,19 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return { ok: false, error: noExportReason(c, plan) };
     }
-    const key = exportKey(document, plan, opts);
     const name = filenameFor(opts);
-    if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
-      toast.success(t('common.downloadedPreviousExport'));
-      const delivery = await deliverBlob(lastExportRef.current.blob, name, sinkUrl);
-      return { ok: true, filename: name, ...delivery };
-    }
     setExporting(true);
     setExportPct(0);
     exportCancelRef.current = false;
     try {
-      const blob = await renderBlob(c, plan, key, opts);
+      const audio = await (audioExportRef?.current?.() ?? Promise.resolve(null));
+      const key = exportKey(document, plan, opts, audio);
+      if (lastExportRef.current?.key === key && lastExportRef.current.blob) {
+        toast.success(t('common.downloadedPreviousExport'));
+        const delivery = await deliverBlob(lastExportRef.current.blob, name, sinkUrl);
+        return { ok: true, filename: name, ...delivery };
+      }
+      const blob = await renderBlob(c, plan, key, opts, audio);
       const delivery = await deliverBlob(blob, name, sinkUrl);
       toast.success(delivery.delivered === 'local_sink' ? t('common.exportCompleteDelivered') : t('common.exportCompleteDownloadStarted'));
       return { ok: true, filename: name, ...delivery };
@@ -216,17 +220,18 @@ export function useStudioExport(deps: {
       toast.error(noExportReason(c, plan));
       return null;
     }
-    const key = exportKey(document, plan, opts);
-    if (uploadedExportRef.current?.key === key) {
-      // Same content already uploaded: reuse the direct link
-      setPublishUrl(uploadedExportRef.current.url);
-      return uploadedExportRef.current.url;
-    }
     setPublishing(true);
     setExportPct(0);
     exportCancelRef.current = false;
     try {
-      const blob = await renderBlob(c, plan, key, opts);
+      const audio = await (audioExportRef?.current?.() ?? Promise.resolve(null));
+      const key = exportKey(document, plan, opts, audio);
+      if (uploadedExportRef.current?.key === key) {
+        // Same content already uploaded: reuse the direct link
+        setPublishUrl(uploadedExportRef.current.url);
+        return uploadedExportRef.current.url;
+      }
+      const blob = await renderBlob(c, plan, key, opts, audio);
       if (blob.size > MAX_PUBLISH_BYTES) {
         toast.error(t('common.exportTooLargeToPublish'));
         return null;

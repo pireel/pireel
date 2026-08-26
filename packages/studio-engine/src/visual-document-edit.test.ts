@@ -10,6 +10,47 @@ function emptyDocument() {
 }
 
 describe('NLE-style visual document moves', () => {
+  it('inserts a new visual lane at the requested document gap between audio tracks', () => {
+    const first = addNarrativeDocumentClip({
+      document: emptyDocument(), mode: 'overwrite', atSec: 0,
+      shot: { id: 'primary', src: 'https://cdn.test/primary.mp4', srcStart: 0, srcEnd: 3, treatment: 'full' },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    first.document.assets.audio = {
+      id: 'audio', kind: 'audio', locator: { remoteUrl: 'https://cdn.test/audio.wav' }, metadata: { durationSec: 1 },
+    };
+    first.document.timeline.tracks.push({
+      id: 'audio-1', type: 'audio', role: 'sfx', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 0, clips: [{
+        id: 'audio-clip-1', kind: 'audio', assetId: 'audio', startFrame: 0, durationFrames: 30,
+        sourceInSec: 0, sourceOutSec: 1, enabled: true, properties: {}, anchor: { type: 'timeline' },
+      }],
+    }, {
+      id: 'audio-2', type: 'audio', role: 'sfx', muted: false, hidden: false, locked: false,
+      syncLocked: false, stackOrder: 0, clips: [{
+        id: 'audio-clip-2', kind: 'audio', assetId: 'audio', startFrame: 0, durationFrames: 30,
+        sourceInSec: 0, sourceOutSec: 1, enabled: true, properties: {}, anchor: { type: 'timeline' },
+      }],
+    });
+
+    const result = moveVisualDocumentClip({
+      document: first.document,
+      clipId: 'primary',
+      atSec: 0,
+      target: { kind: 'visual-new', id: 'visual-between-audio', stackOrder: 2, index: 2 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.map((track) => track.id)).toEqual([
+      first.document.semantics.primaryNarrativeTrackId,
+      'audio-1',
+      'visual-between-audio',
+      'audio-2',
+    ]);
+  });
+
   it('moves primary video to a new visual lane and prunes the overwritten destination range', () => {
     const first = addNarrativeDocumentClip({
       document: emptyDocument(), mode: 'overwrite', atSec: 0,
