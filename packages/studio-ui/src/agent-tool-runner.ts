@@ -2221,7 +2221,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'list_voices': {
             const params = new URLSearchParams({ refresh: 'true', limit: String(Math.min(100, Math.max(1, Number(input.limit) || 20))) });
-            if (input.language === 'zh' || input.language === 'en') params.set('language', input.language);
+            if (typeof input.language === 'string' && /^[a-z]{2,3}$/.test(input.language)) params.set('language', input.language);
             if (typeof input.query === 'string' && input.query.trim()) params.set('query', input.query.trim().slice(0, 100));
             const res = await fetch(`/api/studio/voices?${params}`, { ...(signal ? { signal } : {}) });
             const body = (await res.json().catch(() => ({}))) as { voices?: unknown[]; error?: string; detail?: string };

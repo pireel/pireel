@@ -372,18 +372,25 @@ export function AssetCard({
 export function AssetCardMoreMenu({
   onRename,
   onDelete,
+  optionsLabel,
+  renameLabel,
+  deleteLabel,
 }: {
   onRename?: () => void;
   onDelete?: () => void;
+  optionsLabel?: string;
+  renameLabel?: string;
+  deleteLabel?: string;
 }) {
   if (!onRename && !onDelete) return null;
+  const resolvedOptionsLabel = optionsLabel ?? t('panels.assetOptions');
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          title={t('panels.assetOptions')}
-          aria-label={t('panels.assetOptions')}
+          title={resolvedOptionsLabel}
+          aria-label={resolvedOptionsLabel}
           onClick={(event) => event.stopPropagation()}
           className="absolute right-1 top-1 inline-flex h-5 w-5 items-center justify-center rounded bg-black/55 text-white/90 opacity-0 transition-opacity hover:bg-black/75 hover:text-white focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/80 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
         >
@@ -394,13 +401,13 @@ export function AssetCardMoreMenu({
         {onRename ? (
           <DropdownMenuItem onSelect={onRename} className="text-[11px]">
             <Pencil size={12} />
-            {t('panels.renameAsset')}
+            {renameLabel ?? t('panels.renameAsset')}
           </DropdownMenuItem>
         ) : null}
         {onDelete ? (
           <DropdownMenuItem onSelect={onDelete} variant="destructive" className="text-[11px]">
             <Trash2 size={12} />
-            {t('panels.deleteAsset')}
+            {deleteLabel ?? t('panels.deleteAsset')}
           </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>

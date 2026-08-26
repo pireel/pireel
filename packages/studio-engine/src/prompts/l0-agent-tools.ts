@@ -892,7 +892,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       "List available official and user-cloned voice CANDIDATES, including stable voiceId, language, style, scene, readiness, and sampleUrl when a matching audition exists. Use language/query to avoid returning the entire catalog. A user's stored default is preference metadata, never approval for this generation and never a recommendation. Before generate_speech, show a short relevant candidate set with ask_user: copy each exact voiceId into option.value; copy sampleUrl into option.previewUrl only when the result includes it. Obtain the user's explicit choice unless the user already named and approved one. It is server-direct and works with Studio closed.",
     inputSchema: obj(
       {
-        language: { type: 'string', enum: ['zh', 'en'], description: 'Optional supported-language filter.' },
+        language: { type: 'string', enum: ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id', 'ru', 'fr', 'it', 'de', 'nl', 'ar', 'tr', 'uk', 'vi'], description: 'Optional supported-language filter.' },
         query: { type: 'string', description: 'Optional name, vocal trait, or use-case search, such as 新闻播报 or warm.' },
         limit: { type: 'number', description: 'Maximum results, default 20 and maximum 100.' },
       },
@@ -911,7 +911,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
       {
         audioAssetId: { type: 'string', description: 'Owned audio asset id from list_assets/search_assets.' },
         name: { type: 'string', description: 'User-facing name for this voice.' },
-        language: { type: 'string', enum: ['zh', 'en', 'fr', 'de', 'ja', 'ko', 'ru', 'pt', 'th', 'id', 'vi', 'it', 'es', 'ms', 'fil', 'ar'], description: 'Language spoken in the sample (default zh).' },
+        language: { type: 'string', enum: ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id', 'ru', 'fr', 'it', 'de', 'nl', 'ar', 'tr', 'uk', 'vi'], description: 'Language spoken in the sample (default zh).' },
         consentConfirmed: { type: 'boolean', description: 'Must be true only after explicit user confirmation of ownership/permission.' },
         preprocess: { type: 'boolean', description: 'Enable denoise/enhancement for a noisy sample; leave false for a clean recording.' },
       },

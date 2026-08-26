@@ -236,7 +236,7 @@ describe('Agent composition transaction boundary', () => {
     const { runStudioTool } = await import('./agent-tool-runner');
     const pending = runStudioTool(h.ctx, 'generate_speech', {
       text: '现在就试试看。',
-      voiceId: 'system:zh_female_vv_uranus_bigtts',
+      voiceId: 'system:Chinese (Mandarin)_Reliable_Executive',
       instruction: '自然、直接，不要播音腔',
     }, { surface: 'chat' });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -263,7 +263,7 @@ describe('Agent composition transaction boundary', () => {
         ok: true,
         asset: {
           id: 'speech-1', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
-          model: 'seed-tts-2.0', voiceId: 'system:zh_female_vv_uranus_bigtts', voiceLabel: 'Vivi 2.0',
+          model: 'speech-2.8-hd', voiceId: 'system:Chinese (Mandarin)_Reliable_Executive', voiceLabel: 'Reliable Executive',
           transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
         },
       }));
@@ -271,14 +271,14 @@ describe('Agent composition transaction boundary', () => {
     const { runStudioTool } = await import('./agent-tool-runner');
     const pending = runStudioTool(h.ctx, 'generate_speech', {
       text: '现在就试试看。',
-      voiceId: 'system:zh_female_vv_uranus_bigtts',
+      voiceId: 'system:Chinese (Mandarin)_Reliable_Executive',
     }, { surface: 'chat' });
     await new Promise((resolve) => setTimeout(resolve, 0));
     resolveInteraction('approved');
 
     await expect(pending).resolves.toMatchObject({
       ok: true,
-      data: { asset: { id: 'speech-1' }, voiceLabel: 'Vivi 2.0' },
+      data: { asset: { id: 'speech-1' }, voiceLabel: 'Reliable Executive' },
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
