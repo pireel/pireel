@@ -34,6 +34,7 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     getGenerationJobs: vi.fn(async () => ({ ok: true, summary: '2 generation jobs', data: { jobs: [] } })),
     listVoices: vi.fn(async () => ({ ok: true, summary: '2 voices', data: { voices: [] } })),
     cloneVoice: vi.fn(async () => ({ ok: true, summary: 'voice created', data: { voice: { id: 'voice_1' } } })),
+    designVoice: vi.fn(async () => ({ ok: true, summary: 'voice designed', data: { voice: { id: 'voice_2' } } })),
     deleteVoice: vi.fn(async () => ({ ok: true, summary: 'voice deleted' })),
     generateSpeech: vi.fn(async () => ({ ok: true, summary: 'speech', data: { asset: { url: 'https://cdn.example/s.mp3' } } })),
     lipSync: vi.fn(async () => ({ ok: true, summary: 'lip sync', data: { creationId: 'c1', status: 'pending' } })),
@@ -64,6 +65,17 @@ describe('MCP 工具面', () => {
   it('read_frame 的 MCP 版带必填 frame_id(内部 chat 版靠会话挂载态,MCP 没有会话)', () => {
     const t = buildMcpTools().find((t) => t.name === 'read_frame')!;
     expect((t.inputSchema as { required?: string[] }).required).toContain('frame_id');
+  });
+  it('自定义音色三件套暴露给 MCP，并明确价格发现与审批边界', () => {
+    const tools = buildMcpTools();
+    const clone = tools.find((tool) => tool.name === 'clone_voice')!;
+    const design = tools.find((tool) => tool.name === 'design_voice')!;
+    const speech = tools.find((tool) => tool.name === 'generate_speech')!;
+    expect(clone.description).toContain('customVoiceAccess.cloneCredits');
+    expect(design.description).toContain('customVoiceAccess.designCredits');
+    expect(design.description).toContain('explicit approval');
+    expect((design.inputSchema as { required?: string[] }).required).toContain('prompt');
+    expect(speech.description).toContain('exact approved text');
   });
   it('description 不引用 MCP 语境里不存在的机制(frame 目录经 list_frames,不在 system)', () => {
     const t = buildMcpTools().find((t) => t.name === 'attach_frame')!;
@@ -120,7 +132,7 @@ describe('MCP 协议处理', () => {
     expect(d.readEditingGuide).toHaveBeenCalled();
     expect(d.readFrame).toHaveBeenCalledWith('f1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);
@@ -145,11 +157,13 @@ describe('MCP 协议处理', () => {
     await handleMcpRequest({ id: 104, method: 'tools/call', params: { name: 'lip_sync', arguments: { audioUrl: 'https://cdn.example/s.mp3', sourceImageUrl: 'https://cdn.example/p.jpg' } } }, d5);
     await handleMcpRequest({ id: 105, method: 'tools/call', params: { name: 'list_voices', arguments: {} } }, d5);
     await handleMcpRequest({ id: 106, method: 'tools/call', params: { name: 'clone_voice', arguments: { audioAssetId: 'up_1', name: 'Mine', consentConfirmed: true } } }, d5);
-    await handleMcpRequest({ id: 107, method: 'tools/call', params: { name: 'delete_voice', arguments: { voiceId: 'voice_1' } } }, d5);
+    await handleMcpRequest({ id: 107, method: 'tools/call', params: { name: 'design_voice', arguments: { prompt: 'Warm, credible English narrator', language: 'en' } } }, d5);
+    await handleMcpRequest({ id: 1071, method: 'tools/call', params: { name: 'delete_voice', arguments: { voiceId: 'voice_1' } } }, d5);
     expect(d5.generateSpeech).toHaveBeenCalledWith({ text: '你好', voiceId: 'system:voice-1' });
     expect(d5.lipSync).toHaveBeenCalledWith({ audioUrl: 'https://cdn.example/s.mp3', sourceImageUrl: 'https://cdn.example/p.jpg' });
     expect(d5.listVoices).toHaveBeenCalledWith({});
     expect(d5.cloneVoice).toHaveBeenCalledWith({ audioAssetId: 'up_1', name: 'Mine', consentConfirmed: true });
+    expect(d5.designVoice).toHaveBeenCalledWith({ prompt: 'Warm, credible English narrator', language: 'en' });
     expect(d5.deleteVoice).toHaveBeenCalledWith({ voiceId: 'voice_1' });
     expect(d5.callBridge).not.toHaveBeenCalled();
     const d6 = deps();

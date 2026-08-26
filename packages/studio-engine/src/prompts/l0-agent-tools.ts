@@ -889,7 +889,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🔊',
     label: 'tools.list_voices.label',
     description:
-      "List available official and user-cloned voice CANDIDATES, including stable voiceId, language, style, scene, readiness, and sampleUrl when a matching audition exists. Use language/query to avoid returning the entire catalog. A user's stored default is preference metadata, never approval for this generation and never a recommendation. Before generate_speech, show a short relevant candidate set with ask_user: copy each exact voiceId into option.value; copy sampleUrl into option.previewUrl only when the result includes it. Obtain the user's explicit choice unless the user already named and approved one. It is server-direct and works with Studio closed.",
+      "List available official and user-created voice CANDIDATES, including stable voiceId, source (designed or cloned), language, style, scene, readiness, and sampleUrl when a matching audition exists. The result also includes customVoiceAccess with membership eligibility and the current clone/design credit price. Use language/query to avoid returning the entire catalog. A user's stored default is preference metadata, never approval for this generation and never a recommendation. Before generate_speech, show a short relevant candidate set with ask_user: copy each exact voiceId into option.value; copy sampleUrl into option.previewUrl only when the result includes it. Obtain the user's explicit choice unless the user already named and approved one. It is server-direct and works with Studio closed.",
     inputSchema: obj(
       {
         language: { type: 'string', enum: ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id', 'ru', 'fr', 'it', 'de', 'nl', 'ar', 'tr', 'uk', 'vi'], description: 'Optional supported-language filter.' },
@@ -906,7 +906,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🧬',
     label: 'tools.clone_voice.label',
     description:
-      "Create one reusable cloned voice from an audio asset already owned by the user. This is an atomic voice-asset operation and does not generate speech or video. SAFETY: call it only after the user explicitly confirms they own the voice or have permission to clone it; never infer consent. Pass the exact audioAssetId returned by list_assets/search_assets, not a guessed URL. A clean 3–30 second MP3/M4A/WAV sample works best. Deployment may be asynchronous; use list_voices later to check readiness.",
+      "Create one reusable cloned voice from an audio asset already owned by the user (CHARGES the user's Pireel account). This is an atomic voice-asset operation and does not generate speech or video. Before calling, use list_voices to read the exact current cloneCredits price and obtain explicit approval for that charge. SAFETY: also require the user to explicitly confirm they own the voice or have permission to clone it; never infer consent. Pass the exact audioAssetId returned by list_assets/search_assets, not a guessed URL. A clean 3–30 second MP3/M4A/WAV sample works best. Deployment may be asynchronous; use list_voices later to check readiness.",
     inputSchema: obj(
       {
         audioAssetId: { type: 'string', description: 'Owned audio asset id from list_assets/search_assets.' },
@@ -919,12 +919,29 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     ),
   },
   {
+    id: 'design_voice',
+    kind: 'card',
+    busyText: 'tools.design_voice.busy',
+    icon: '✨',
+    label: 'tools.design_voice.label',
+    description:
+      "Create one reusable custom voice from an exact text description (CHARGES the user's Pireel account). This is an atomic voice-asset operation and does not generate the user's narration. Before calling, use list_voices to read the exact current designCredits price, show the final voice description/language, and obtain explicit approval for that charge. Do not silently turn a general narration request into voice design: use an official or existing custom voice unless the user explicitly asks for a new voice or approves this concrete design.",
+    inputSchema: obj(
+      {
+        prompt: { type: 'string', description: 'Exact approved voice description, 1–200 characters: language, age impression, vocal texture, delivery style, and intended use.' },
+        name: { type: 'string', description: 'Optional user-facing name. Omit to derive a short name from the prompt.' },
+        language: { type: 'string', enum: ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id', 'ru', 'fr', 'it', 'de', 'nl', 'ar', 'tr', 'uk', 'vi'], description: 'Language for the generated audition (default zh).' },
+      },
+      ['prompt'],
+    ),
+  },
+  {
     id: 'delete_voice',
     kind: 'badge',
     icon: '🗑️',
     label: 'tools.delete_voice.label',
-    description: 'Permanently delete one user-cloned voice by its stable voiceId. System voices cannot be deleted. Ask for confirmation before deleting unless the same user message explicitly requested it.',
-    inputSchema: obj({ voiceId: { type: 'string', description: 'Cloned voiceId returned by list_voices.' } }, ['voiceId']),
+    description: 'Permanently delete one user-created voice by its stable voiceId. System voices cannot be deleted. Ask for confirmation before deleting unless the same user message explicitly requested it.',
+    inputSchema: obj({ voiceId: { type: 'string', description: 'Custom voiceId returned by list_voices.' } }, ['voiceId']),
   },
   {
     id: 'generate_speech',

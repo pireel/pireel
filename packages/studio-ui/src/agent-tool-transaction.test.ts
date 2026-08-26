@@ -286,6 +286,40 @@ describe('Agent composition transaction boundary', () => {
     }));
   });
 
+  it('routes designed voices through the shared voice API', async () => {
+    const h = harness();
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({
+      ok: true,
+      voice: {
+        id: 'voice-designed-1',
+        label: 'Warm narrator',
+        source: 'designed',
+        language: 'en',
+        status: 'ready',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { runStudioTool } = await import('./agent-tool-runner');
+
+    await expect(runStudioTool(h.ctx, 'design_voice', {
+      prompt: 'Warm, credible English narrator',
+      language: 'en',
+      name: 'Warm narrator',
+    }, { surface: 'chat' })).resolves.toMatchObject({
+      ok: true,
+      data: { voice: { id: 'voice-designed-1', source: 'designed' } },
+    });
+    expect(fetchMock).toHaveBeenCalledWith('/api/studio/voices', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'design',
+        prompt: 'Warm, credible English narrator',
+        language: 'en',
+        name: 'Warm narrator',
+      }),
+    }));
+  });
+
   it('distinguishes ASR provider failure from genuine no-speech and exposes a useful tool error once', async () => {
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr poll HTTP 503: busy' })).toBe('failed');
     expect(classifyAsrResponse({ asr_ok: false, detail: 'dashscope_asr returned no text' })).toBe('empty');

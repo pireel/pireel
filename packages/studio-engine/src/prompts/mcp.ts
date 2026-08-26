@@ -112,6 +112,10 @@ export const MCP_DESCRIPTION_OVERRIDES: Record<string, string> = {
   edit_block: `${CREDITS_WARNING}: get_block → compose_block_brief {blockId} → generate → apply_block {blockId}.] Fallback: rewrite ONE block's content/styling/animation by instruction via Pireel's LLM.`,
   analyze_visual:
     "Analyze footage with the minimum quality-preserving perception path. mode=geometry is browser-local and token-free for scene cuts, subject/face tracks and safe regions; use it only for crop, framing, placement or empty-space questions. mode=semantic adds Pireel's hosted vision model and CHARGES the account; use it when the edit must know what footage depicts or which evidence/action carries the Scene. External agents may instead use visual_brief → inspect the frames themselves → submit_visual. Never replace needed semantic/design judgment with geometry merely to save tokens.",
+  clone_voice:
+    "[CHARGES the user's Pireel account.] Create one reusable cloned voice from an owned audio asset. First call list_voices, surface its exact customVoiceAccess.cloneCredits price in the external host, and wait for explicit approval of both the charge and ownership/permission consent. Server-direct: works with Studio closed.",
+  design_voice:
+    "[CHARGES the user's Pireel account.] Create one reusable custom voice from an exact approved text description and language. First call list_voices, surface its exact customVoiceAccess.designCredits price in the external host, and wait for explicit approval. Do not design a new voice merely because narration was requested. Server-direct: works with Studio closed.",
   generate_speech:
     "[CHARGES the user's Pireel account.] Generate a reusable spoken-audio asset from exact approved text and an explicit approved stable voiceId from list_voices. Never fall back to or infer approval from the stored default. Server-direct: works with Studio closed. Returns an audio url; compose it with lip_sync or another atomic action yourself.",
   lip_sync:

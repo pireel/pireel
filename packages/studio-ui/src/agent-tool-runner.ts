@@ -146,7 +146,7 @@ import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
 
 export type StudioReviewFailurePhase = 'capture' | 'request' | 'response';
 
@@ -2224,14 +2224,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (typeof input.language === 'string' && /^[a-z]{2,3}$/.test(input.language)) params.set('language', input.language);
             if (typeof input.query === 'string' && input.query.trim()) params.set('query', input.query.trim().slice(0, 100));
             const res = await fetch(`/api/studio/voices?${params}`, { ...(signal ? { signal } : {}) });
-            const body = (await res.json().catch(() => ({}))) as { voices?: unknown[]; error?: string; detail?: string };
+            const body = (await res.json().catch(() => ({}))) as { voices?: unknown[]; customVoiceAccess?: unknown; error?: string; detail?: string };
             if (!res.ok || !body.voices) return { ok: false, error: body.detail || body.error || t('workbench.voiceListFailed') };
             const voices = body.voices.map((voice) => {
               if (!voice || typeof voice !== 'object' || Array.isArray(voice)) return voice;
               const { selected: _selected, ...candidate } = voice as Record<string, unknown>;
               return candidate;
             });
-            return { ok: true, summary: t('workbench.voicesAvailable', { n: voices.length }), data: { voices } };
+            return { ok: true, summary: t('workbench.voicesAvailable', { n: voices.length }), data: { voices, customVoiceAccess: body.customVoiceAccess } };
           }
           case 'clone_voice': {
             report(t('workbench.cloningVoice'));
@@ -2252,6 +2252,30 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ok: true,
                 summary: body.voice.status === 'ready' ? t('workbench.voiceReady', { name: body.voice.label }) : t('workbench.voiceDeploying', { name: body.voice.label }),
                 data: { voice: body.voice, next: body.voice.status === 'ready' ? 'Use this voiceId with generate_speech.' : 'Call list_voices later before using it.' },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
+          case 'design_voice': {
+            report(t('workbench.designingVoice'));
+            try {
+              const res = await fetch('/api/studio/voices', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ action: 'design', ...input }),
+                ...(signal ? { signal } : {}),
+              });
+              const body = (await res.json().catch(() => ({}))) as {
+                voice?: { id: string; label: string; status: 'ready' | 'deploying' | 'failed'; [key: string]: unknown };
+                error?: string;
+                detail?: string;
+              };
+              if (!res.ok || !body.voice) return { ok: false, error: body.detail || body.error || t('workbench.voiceDesignFailed') };
+              return {
+                ok: true,
+                summary: t('workbench.voiceReady', { name: body.voice.label }),
+                data: { voice: body.voice, next: 'Use this voiceId with generate_speech after the user approves the exact script.' },
               };
             } finally {
               clearToolProgress(toolId);
