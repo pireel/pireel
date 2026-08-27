@@ -149,7 +149,9 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
 
 function SkillMark({ option, compact = false }: { option: SkillOption; compact?: boolean }) {
   if (option.action === 'market') return <ScenarioSkillIcon icon="market" size={compact ? 14 : 18} />;
-  if (option.icon) return <ScenarioSkillIcon icon={option.icon} size={compact ? 16 : 22} />;
+  if (option.icon || option.market) {
+    return <ScenarioSkillIcon icon={option.icon ?? 'skill-director'} size={compact ? 16 : 22} />;
+  }
   return <SkillGlyph id={option.id as StudioScenarioSkillId} compact={compact} />;
 }
 
