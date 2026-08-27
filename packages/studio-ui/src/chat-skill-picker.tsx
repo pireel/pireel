@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Store, Trash2 } from 'lucide-react';
+import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Trash2 } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { toast } from '@pireel/ui/toast';
@@ -10,12 +10,14 @@ import {
   type StudioScenarioSkillId,
 } from '@pireel/studio-engine/scenario-skills';
 import type { StudioScenarioSkillOption, StudioSkillMarketMetadata } from './shell-context';
+import { ScenarioSkillIcon } from './scenario-skill-icon';
 import { t } from './i18n';
 
 interface SkillOption {
   id: string;
   label: string;
   summary: string;
+  icon?: string;
   custom?: boolean;
   market?: StudioSkillMarketMetadata;
   action?: 'market';
@@ -146,7 +148,8 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
 }
 
 function SkillMark({ option, compact = false }: { option: SkillOption; compact?: boolean }) {
-  if (option.action === 'market') return <Store size={compact ? 14 : 18} aria-hidden />;
+  if (option.action === 'market') return <ScenarioSkillIcon icon="market" size={compact ? 14 : 18} />;
+  if (option.icon) return <ScenarioSkillIcon icon={option.icon} size={compact ? 16 : 22} />;
   return <SkillGlyph id={option.id as StudioScenarioSkillId} compact={compact} />;
 }
 
@@ -281,6 +284,7 @@ export function ChatSkillPicker({
         id: skill.id,
         label: skill.title,
         summary: skill.summary,
+        icon: skill.icon,
         custom: skill.custom,
         market: skill.market,
       })),
