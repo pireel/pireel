@@ -40,6 +40,8 @@ export interface StudioScenarioSkillOption {
   id: string;
   title: string;
   summary: string;
+  /** Editable first message filled into an empty composer when this Skill is selected. */
+  defaultPrompt?: string | null;
   /** Compact picker mark; presentation only, never included in the model prompt. */
   icon?: string;
   /** Optional editable opening prompts shown in an empty chat. Picking one activates this Skill. */

@@ -56,6 +56,8 @@ export interface ComposerHandle {
   insertText(text: string): void;
   /** Replace the whole box with text and focus (used by quick prompts): tapping different prompts swaps, doesn't concatenate. */
   setText(text: string): void;
+  /** Apply a Skill's suggested first message without overwriting user-authored draft content. */
+  applySkillPrompt(prompt: string | null): void;
   /** Enter the host-owned Create Skill mode without sending; the user reviews/edits and submits. */
   beginCreateSkill(input: { label: string; prompt: string }): void;
   /** Leave the active Meta Skill mode, preserving any ordinary text the user typed. */
@@ -118,6 +120,7 @@ export function Composer({
   const editorRef = useRef<HTMLDivElement>(null);
   const refPopoverRef = useRef<TriggerPopoverHandle>(null);
   const savedSelectionRef = useRef<Range | null>(null);
+  const suggestedSkillPromptRef = useRef<string | null>(null);
   const timelineFramesRef = useRef<Map<string, AttachedTimelineFrame | null>>(
     new Map(),
   );
@@ -240,8 +243,53 @@ export function Composer({
     timelineFramesRef.current.clear();
     hideTimelineFrameHoverPreview();
     savedSelectionRef.current = null;
+    suggestedSkillPromptRef.current = null;
     setTimelineFrameCount(0);
     setEmpty(true);
+  }
+
+  function replaceEditorText(text: string) {
+    const root = editorRef.current;
+    if (!root) return;
+    root.replaceChildren();
+    if (text) root.appendChild(document.createTextNode(`${text} `));
+    focusEditorAtEnd(root);
+  }
+
+  function focusEditorAtEnd(root: HTMLElement) {
+    recomputeEmpty();
+    root.focus();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(root);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedSelectionRef.current = range.cloneRange();
+  }
+
+  function ordinaryDraftText(root: HTMLElement): string {
+    const draft = root.cloneNode(true) as HTMLElement;
+    draft
+      .querySelectorAll("[data-ref-id], [data-timeline-frame-id], [data-studio-action]")
+      .forEach((node) => node.remove());
+    return (draft.textContent ?? "").trim();
+  }
+
+  function replaceSuggestedSkillPrompt(root: HTMLElement, text: string) {
+    // The workbench may have inserted one automatic current-selection pill. It is
+    // context, not user-authored copy, so keep it while replacing only the suggestion.
+    const automaticPills = Array.from(
+      root.querySelectorAll<HTMLElement>("[data-ref-id][data-auto]"),
+    );
+    root.replaceChildren();
+    for (const pill of automaticPills) {
+      root.appendChild(pill);
+      root.appendChild(document.createTextNode(" "));
+    }
+    if (text) root.appendChild(document.createTextNode(`${text} `));
+    focusEditorAtEnd(root);
   }
 
   async function fireSubmit() {
@@ -518,25 +566,33 @@ export function Composer({
         recomputeEmpty();
       },
       setText: (text: string) => {
+        suggestedSkillPromptRef.current = null;
+        replaceEditorText(text);
+      },
+      applySkillPrompt: (prompt: string | null) => {
         const root = editorRef.current;
         if (!root) return;
-        root.innerHTML = "";
-        root.appendChild(document.createTextNode(`${text} `));
-        recomputeEmpty();
-        root.focus();
-        const sel = window.getSelection();
-        if (sel) {
-          const range = document.createRange();
-          range.selectNodeContents(root);
-          range.collapse(false);
-          sel.removeAllRanges();
-          sel.addRange(range);
+        const currentText = ordinaryDraftText(root);
+        const previousPrompt = suggestedSkillPromptRef.current;
+        const hasStructuredDraft = !!root.querySelector(
+          "[data-ref-id]:not([data-auto]), [data-timeline-frame-id], [data-studio-action]",
+        );
+        const canReplace =
+          !hasStructuredDraft &&
+          (!currentText || (!!previousPrompt && currentText === previousPrompt));
+        if (!canReplace) {
+          suggestedSkillPromptRef.current = null;
+          return;
         }
+        const nextPrompt = prompt?.trim() || "";
+        suggestedSkillPromptRef.current = nextPrompt || null;
+        replaceSuggestedSkillPrompt(root, nextPrompt);
       },
       beginCreateSkill: ({ label, prompt }) => {
         const root = editorRef.current;
         if (!root) return;
         root.innerHTML = "";
+        suggestedSkillPromptRef.current = null;
         root.appendChild(makeStudioActionPill(label));
         root.appendChild(document.createTextNode(` ${prompt} `));
         setStudioActionActive(true);

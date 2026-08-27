@@ -60,6 +60,53 @@ function renderComposer(
 }
 
 describe('Composer timeline-frame tags', () => {
+  it('fills and safely replaces an untouched Skill prompt without auto-submitting', () => {
+    const { host, methodsRef, onSubmit } = renderComposer();
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+
+    act(() => methodsRef.current!.applySkillPrompt('先用当前素材剪一条大女主短片。'));
+    expect(editor.textContent?.trim()).toBe('先用当前素材剪一条大女主短片。');
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    act(() => methodsRef.current!.applySkillPrompt('改成一条产品故事短片。'));
+    expect(editor.textContent?.trim()).toBe('改成一条产品故事短片。');
+
+    act(() => methodsRef.current!.applySkillPrompt(null));
+    expect(editor.textContent).toBe('');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite text the user changed after a Skill prompt was filled', () => {
+    const { host, methodsRef } = renderComposer();
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+
+    act(() => methodsRef.current!.applySkillPrompt('先剪一条短片。'));
+    act(() => {
+      editor.textContent = '先剪一条短片，但只用酒店素材。';
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    act(() => methodsRef.current!.applySkillPrompt('换成另一种剪法。'));
+
+    expect(editor.textContent).toBe('先剪一条短片，但只用酒店素材。');
+  });
+
+  it('keeps the automatic canvas-selection pill when filling a Skill prompt', () => {
+    const element = {
+      id: 'shot-a',
+      label: '镜头 A',
+      kind: 'shot',
+      isShot: true,
+    };
+    const { host, methodsRef } = renderComposer([element]);
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+
+    act(() => methodsRef.current!.insertElementPill(element));
+    act(() => methodsRef.current!.applySkillPrompt('优化这个镜头并完成整条短片。'));
+
+    expect(editor.querySelector('[data-ref-id="shot-a"][data-auto]')).not.toBeNull();
+    expect(editor.textContent).toContain('优化这个镜头并完成整条短片。');
+  });
+
   it('enters Create Skill as an editable tag and waits for manual submit', async () => {
     const { host, methodsRef, onSubmit } = renderComposer();
     const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;

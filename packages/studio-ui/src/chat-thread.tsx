@@ -564,7 +564,11 @@ export function ChatThread({
   const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
     applySkill(nextSkillId);
     setActiveStarterId(null);
-  }, [applySkill]);
+    const defaultPrompt = nextSkillId === STUDIO_AUTO_SKILL_ID
+      ? null
+      : scenarioSkills.find((skill) => skill.id === nextSkillId)?.defaultPrompt ?? null;
+    composerRef.current?.applySkillPrompt(defaultPrompt);
+  }, [applySkill, scenarioSkills]);
 
   // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(
