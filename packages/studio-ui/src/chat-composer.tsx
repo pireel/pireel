@@ -6,6 +6,10 @@ import { useImperativeHandle, useRef, useState } from "react";
 import { AtSign, ArrowUp, Square, Palette } from "lucide-react";
 import type { ChatStatus } from "ai";
 import {
+  STUDIO_CREATE_SKILL_ACTION,
+  type StudioMetaAction,
+} from "@pireel/studio-engine/skill-actions";
+import {
   TriggerPopover,
   type TriggerPopoverHandle,
   type TriggerPopoverPickContext,
@@ -51,6 +55,10 @@ export interface ComposerHandle {
   insertText(text: string): void;
   /** Replace the whole box with text and focus (used by quick prompts): tapping different prompts swaps, doesn't concatenate. */
   setText(text: string): void;
+  /** Enter the host-owned Create Skill mode without sending; the user reviews/edits and submits. */
+  beginCreateSkill(input: { label: string; prompt: string }): void;
+  /** Leave the active Meta Skill mode, preserving any ordinary text the user typed. */
+  clearStudioAction(): void;
   /** Focus only (cursor to end), don't touch content (used by the component floating bar's "AI edit"). */
   focusInput(): void;
   beginTimelineFrameCapture(frame: PendingTimelineFrame): void;
@@ -99,7 +107,10 @@ export function Composer({
   timelineFramePickBusy: boolean;
   timelineFramePickAvailable: boolean;
   onTimelineFramePickActiveChange?: StudioChatProps["onTimelineFramePickActiveChange"];
-  onSubmit: (parts: StudioChatDraftPart[]) => boolean | Promise<boolean>;
+  onSubmit: (
+    parts: StudioChatDraftPart[],
+    options?: { studioAction?: StudioMetaAction },
+  ) => boolean | Promise<boolean>;
   onStop: () => void;
   methodsRef: React.MutableRefObject<ComposerHandle | null>;
 }) {
@@ -111,6 +122,7 @@ export function Composer({
   );
   const [empty, setEmpty] = useState(true);
   const [timelineFrameCount, setTimelineFrameCount] = useState(0);
+  const [studioActionActive, setStudioActionActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customStyle, saveCustomStyle] = useCustomFrameStyle();
@@ -119,7 +131,9 @@ export function Composer({
   function recomputeEmpty() {
     const el = editorRef.current;
     if (!el) return;
-    const isEmpty = (el.textContent ?? "").length === 0;
+    const visibleDraft = el.cloneNode(true) as HTMLElement;
+    visibleDraft.querySelectorAll("[data-studio-action]").forEach((node) => node.remove());
+    const isEmpty = (visibleDraft.textContent ?? "").length === 0;
     if (
       isEmpty &&
       (el.innerHTML === "<br>" || el.innerHTML === "<div><br></div>")
@@ -154,6 +168,7 @@ export function Composer({
         return;
       }
       if (!(node instanceof HTMLElement)) return;
+      if (node.dataset.studioAction) return;
       if (node.dataset.timelineFrameId) {
         const timelineFrame = timelineFramesRef.current.get(
           node.dataset.timelineFrameId,
@@ -212,7 +227,13 @@ export function Composer({
   function clear() {
     const el = editorRef.current;
     if (el) {
-      el.innerHTML = "";
+      const actionPill = el.querySelector<HTMLElement>("[data-studio-action]");
+      if (actionPill) {
+        actionPill.remove();
+        el.replaceChildren(actionPill, document.createTextNode(" "));
+      } else {
+        el.innerHTML = "";
+      }
       el.focus();
     }
     timelineFramesRef.current.clear();
@@ -246,9 +267,13 @@ export function Composer({
       (part) => part.type !== "text" || part.text.length > 0,
     );
     if (!final.length) return;
+    const studioAction = currentStudioAction();
     setSubmitting(true);
     try {
-      if (await onSubmit(final)) clear();
+      const accepted = studioAction
+        ? await onSubmit(final, { studioAction })
+        : await onSubmit(final);
+      if (accepted) clear();
     } finally {
       setSubmitting(false);
     }
@@ -363,6 +388,40 @@ export function Composer({
     recomputeEmpty();
   }
 
+  function currentStudioAction(): StudioMetaAction | null {
+    return editorRef.current?.querySelector(
+      `[data-studio-action="${STUDIO_CREATE_SKILL_ACTION}"]`,
+    )
+      ? STUDIO_CREATE_SKILL_ACTION
+      : null;
+  }
+
+  function clearStudioAction() {
+    const pill = editorRef.current?.querySelector<HTMLElement>("[data-studio-action]");
+    if (pill) removePillNode(pill);
+    setStudioActionActive(false);
+  }
+
+  function makeStudioActionPill(label: string): HTMLSpanElement {
+    const pill = document.createElement("span");
+    pill.contentEditable = "false";
+    pill.dataset.studioAction = STUDIO_CREATE_SKILL_ACTION;
+    pill.className = `${CHAT_PILL_CLASS} border-ink/15 bg-ink text-bg`;
+    pill.title = label;
+
+    const icon = document.createElement("span");
+    icon.className = `${CHAT_PILL_ICON_CLASS} bg-bg/10 text-bg`;
+    icon.textContent = "✦";
+    pill.appendChild(icon);
+
+    const text = document.createElement("span");
+    text.className = CHAT_PILL_LABEL_CLASS;
+    text.textContent = label;
+    pill.appendChild(text);
+    appendChatPillRemoveIcon(pill, t("chatGen.skill.create.remove"), clearStudioAction);
+    return pill;
+  }
+
   function makeEditableElementPill(el: StudioElementRef, auto = false) {
     const pill = makeElementPill(el, {
       auto,
@@ -473,6 +532,26 @@ export function Composer({
           sel.addRange(range);
         }
       },
+      beginCreateSkill: ({ label, prompt }) => {
+        const root = editorRef.current;
+        if (!root) return;
+        root.innerHTML = "";
+        root.appendChild(makeStudioActionPill(label));
+        root.appendChild(document.createTextNode(` ${prompt} `));
+        setStudioActionActive(true);
+        recomputeEmpty();
+        root.focus();
+        const selection = window.getSelection();
+        if (selection) {
+          const range = document.createRange();
+          range.selectNodeContents(root);
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          savedSelectionRef.current = range.cloneRange();
+        }
+      },
+      clearStudioAction,
       insertText: (text: string) => {
         const root = editorRef.current;
         if (!root) return;
@@ -553,8 +632,10 @@ export function Composer({
       <div className="border-line bg-panel-2 focus-within:border-ink-4 relative rounded-md border transition-colors">
         <div className="relative">
           {empty && (
-            <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
-              {placeholder}
+            <div className={`text-ink-4 pointer-events-none absolute top-2.5 text-[13px] ${studioActionActive ? "left-[116px]" : "left-3"}`}>
+              {studioActionActive
+                ? t("chatGen.skill.create.followupPlaceholder")
+                : placeholder}
             </div>
           )}
           <div

@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { IntlProvider } from 'use-intl/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { STUDIO_AUTO_SKILL_ID } from '@pireel/studio-engine/scenario-skills';
+import { STUDIO_CREATE_SKILL_ACTION } from '@pireel/studio-engine/skill-actions';
 import { Composer, type ComposerHandle } from './chat-composer';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -59,6 +60,47 @@ function renderComposer(
 }
 
 describe('Composer timeline-frame tags', () => {
+  it('enters Create Skill as an editable tag and waits for manual submit', async () => {
+    const { host, methodsRef, onSubmit } = renderComposer();
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+
+    act(() => methodsRef.current!.beginCreateSkill({
+      label: '创建 Skill',
+      prompt: '提炼这次对话，保留关键判断。',
+    }));
+
+    const tag = editor.querySelector<HTMLElement>('[data-studio-action="create-skill"]')!;
+    expect(tag).not.toBeNull();
+    expect(tag.classList).toContain('sc-pill');
+    expect(editor.textContent).toContain('提炼这次对话，保留关键判断。');
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      [{ type: 'text', text: '提炼这次对话，保留关键判断。' }],
+      { studioAction: STUDIO_CREATE_SKILL_ACTION },
+    );
+  });
+
+  it('keeps Create Skill active for follow-up answers until explicitly cleared', async () => {
+    const { host, methodsRef, onSubmit } = renderComposer();
+    onSubmit.mockResolvedValue(true);
+    const editor = host.querySelector<HTMLElement>('[contenteditable="true"]')!;
+    act(() => methodsRef.current!.beginCreateSkill({ label: '创建 Skill', prompt: '先生成草稿。' }));
+
+    await act(async () => {
+      editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(editor.querySelector('[data-studio-action="create-skill"]')).not.toBeNull();
+    expect(editor.textContent).toBe('✦创建 Skill ');
+
+    act(() => methodsRef.current!.clearStudioAction());
+    expect(editor.querySelector('[data-studio-action]')).toBeNull();
+  });
+
   it('inserts an @ mention where the trigger was typed in the middle of text', () => {
     vi.useFakeTimers();
     const { host } = renderComposer([

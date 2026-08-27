@@ -43,6 +43,9 @@ import {
 } from "@pireel/studio-engine/skill-actions";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
+  CHAT_PILL_CLASS,
+  CHAT_PILL_ICON_CLASS,
+  CHAT_PILL_LABEL_CLASS,
   mid,
   PiAvatar,
   ThinkingDots,
@@ -302,6 +305,7 @@ export function ChatThread({
     }
     if (!createdSkillId || refreshedCreatedSkillRef.current === createdSkillId) return;
     refreshedCreatedSkillRef.current = createdSkillId;
+    composerRef.current?.clearStudioAction();
     void onRefreshScenarioSkills().catch((error) => {
       console.error("[studio] custom Skill refresh failed", error);
     });
@@ -484,10 +488,11 @@ export function ChatThread({
   );
 
   const createScenarioSkill = useCallback(() => {
-    void run(t("chatGen.skill.create.prompt"), {
-      studioAction: STUDIO_CREATE_SKILL_ACTION,
+    composerRef.current?.beginCreateSkill({
+      label: t("chatGen.skill.create.title"),
+      prompt: t("chatGen.skill.create.prompt"),
     });
-  }, [run]);
+  }, []);
 
   // Client-side tools may already have committed durable edits before a provider/network stream
   // drops. Retry exactly once as a NEW user turn against the current project snapshot; never replay
@@ -798,6 +803,13 @@ export function ChatThread({
                           return m.role === "user" ? (
                             <MessageContent key={key}>
                               <div className="text-[13px] leading-relaxed">
+                                {idx === parts.findIndex((candidate) => candidate.type === "text")
+                                  && (m.metadata as { studioAction?: unknown } | undefined)?.studioAction === STUDIO_CREATE_SKILL_ACTION && (
+                                  <span className={`${CHAT_PILL_CLASS} mr-1.5 border-ink/15 bg-ink text-bg`}>
+                                    <span className={`${CHAT_PILL_ICON_CLASS} bg-bg/10 text-bg`}>✦</span>
+                                    <span className={CHAT_PILL_LABEL_CLASS}>{t("chatGen.skill.create.title")}</span>
+                                  </span>
+                                )}
                                 {renderTextWithElementPills(text, elements)}
                               </div>
                             </MessageContent>
