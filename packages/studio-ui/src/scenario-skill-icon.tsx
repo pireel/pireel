@@ -1,4 +1,4 @@
-import type { SVGProps } from 'react';
+import { useId, type SVGProps } from 'react';
 
 export const STUDIO_SKILL_ICON_KEYS = [
   'skill-director',
@@ -29,6 +29,7 @@ export function ScenarioSkillIcon({
   icon?: string | null;
   size?: number;
 }) {
+  const customIconClipId = useId();
   const common = {
     width: size,
     height: size,
@@ -41,6 +42,28 @@ export function ScenarioSkillIcon({
     'aria-hidden': true,
     ...props,
   };
+
+  if (icon && /^(https?:\/\/|data:image\/|blob:|\/)/.test(icon)) {
+    return (
+      <svg {...common}>
+        <defs>
+          <clipPath id={customIconClipId}>
+            <rect x="1" y="1" width="22" height="22" rx="5" />
+          </clipPath>
+        </defs>
+        <image
+          href={icon}
+          x="1"
+          y="1"
+          width="22"
+          height="22"
+          preserveAspectRatio="xMidYMid slice"
+          clipPath={`url(#${customIconClipId})`}
+        />
+        <rect x="1" y="1" width="22" height="22" rx="5" opacity=".14" />
+      </svg>
+    );
+  }
 
   switch (icon) {
     case 'market':
