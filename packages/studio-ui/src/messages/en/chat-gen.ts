@@ -11,6 +11,8 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.skill.import.invalid': 'Invalid Skill: include name, description, and a complete Markdown body',
   'chatGen.skill.import.failed': 'Could not import the Skill. Try again.',
   'chatGen.skill.import.success': 'Imported “{title}”',
+  'chatGen.skill.market.title': 'Open Skill Market',
+  'chatGen.skill.market.summary': 'Discover, create and manage your Skills',
   'chatGen.skill.delete': 'Delete custom Skill',
   'chatGen.skill.deleteConfirm': 'Delete “{title}”? This cannot be undone.',
   'chatGen.skill.deleted': 'Custom Skill deleted',

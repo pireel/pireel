@@ -77,7 +77,7 @@ export function ChatThread({
   initialFrame,
   initialSkillId,
   scenarioSkills,
-  onImportScenarioSkill,
+  onOpenSkillMarket,
   onDeleteScenarioSkill,
   frames,
   onFrameApplied,
@@ -97,7 +97,7 @@ export function ChatThread({
   initialFrame: AttachedFrame | null;
   initialSkillId: StudioScenarioSkillId;
   scenarioSkills: readonly StudioScenarioSkillOption[];
-  onImportScenarioSkill?: (file: File) => Promise<StudioScenarioSkillOption>;
+  onOpenSkillMarket?: () => void;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
   frames: FrameCatalogItem[];
   onFrameApplied?: (frame: AttachedFrame | null) => void;
@@ -897,7 +897,7 @@ export function ChatThread({
           elements={elements}
           skillId={skillId}
           scenarioSkills={scenarioSkills}
-          onImportScenarioSkill={onImportScenarioSkill}
+          onOpenSkillMarket={onOpenSkillMarket}
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
           frame={frame}

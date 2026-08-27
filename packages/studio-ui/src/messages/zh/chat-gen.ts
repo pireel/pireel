@@ -11,6 +11,8 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.skill.import.invalid': 'Skill 格式无效：需要 name、description 和完整的 Markdown 正文',
   'chatGen.skill.import.failed': 'Skill 导入失败，请重试',
   'chatGen.skill.import.success': '已导入「{title}」',
+  'chatGen.skill.market.title': '打开 Skill 市场',
+  'chatGen.skill.market.summary': '发现、创建和管理你的 Skill',
   'chatGen.skill.delete': '删除自定义 Skill',
   'chatGen.skill.deleteConfirm': '删除「{title}」？此操作无法撤销。',
   'chatGen.skill.deleted': '已删除自定义 Skill',

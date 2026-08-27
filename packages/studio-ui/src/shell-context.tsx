@@ -59,7 +59,7 @@ export interface StudioScenarioSkillStarter {
 
 export interface StudioCustomScenarioSkillManager {
   list(): Promise<readonly StudioScenarioSkillOption[]>;
-  importMarkdown(file: File): Promise<StudioScenarioSkillOption>;
+  openMarket(): void;
   delete(id: string): Promise<void>;
 }
 
@@ -91,7 +91,7 @@ export interface StudioShell {
   };
   /** Host-owned expert catalog. Omitted means the editor runs with no selectable Skill. */
   scenarioSkills?: readonly StudioScenarioSkillOption[];
-  /** Optional host-owned persistence for account-scoped Markdown Skills. */
+  /** Optional host-owned persistence and market navigation for account-scoped Skills. */
   customScenarioSkills?: StudioCustomScenarioSkillManager;
   /** Initial Skill for a fresh hosted conversation; omit to start without a Skill. */
   defaultScenarioSkillId?: string;

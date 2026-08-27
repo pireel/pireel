@@ -241,20 +241,6 @@ export const StudioChat = memo(
       }
     }, [customScenarioSkillsReady, initialThreads, scenarioSkills]);
 
-    const importScenarioSkill = useCallback(
-      async (file: File) => {
-        if (!customScenarioSkillManager)
-          throw new Error("skill_import_unavailable");
-        const imported = await customScenarioSkillManager.importMarkdown(file);
-        setCustomScenarioSkills((current) => [
-          imported,
-          ...current.filter((skill) => skill.id !== imported.id),
-        ]);
-        return imported;
-      },
-      [customScenarioSkillManager],
-    );
-
     const deleteScenarioSkill = useCallback(
       async (id: string) => {
         if (!customScenarioSkillManager)
@@ -416,9 +402,7 @@ export const StudioChat = memo(
           initialFrame={active?.frame ?? null}
           initialSkillId={active?.skillId ?? defaultSkillId}
           scenarioSkills={scenarioSkills}
-          onImportScenarioSkill={
-            customScenarioSkillManager ? importScenarioSkill : undefined
-          }
+          onOpenSkillMarket={customScenarioSkillManager?.openMarket}
           onDeleteScenarioSkill={
             customScenarioSkillManager ? deleteScenarioSkill : undefined
           }

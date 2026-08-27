@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Store, Trash2 } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { toast } from '@pireel/ui/toast';
@@ -18,10 +18,10 @@ interface SkillOption {
   summary: string;
   custom?: boolean;
   market?: StudioSkillMarketMetadata;
-  action?: 'import';
+  action?: 'market';
 }
 
-const IMPORT_MARKDOWN_ID = '__import_markdown_skill__';
+const OPEN_SKILL_MARKET_ID = '__open_skill_market__';
 
 function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compact?: boolean }) {
   const size = compact ? 16 : 22;
@@ -146,17 +146,8 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
 }
 
 function SkillMark({ option, compact = false }: { option: SkillOption; compact?: boolean }) {
-  if (option.action === 'import') return <Upload size={compact ? 14 : 18} aria-hidden />;
+  if (option.action === 'market') return <Store size={compact ? 14 : 18} aria-hidden />;
   return <SkillGlyph id={option.id as StudioScenarioSkillId} compact={compact} />;
-}
-
-function importErrorMessage(error: unknown): string {
-  const code = error instanceof Error ? error.message : 'skill_request_failed';
-  if (code === 'invalid_skill_file_type') return t('chatGen.skill.import.onlyMarkdown');
-  if (code === 'body_too_large' || code === 'skill_too_many_lines') return t('chatGen.skill.import.tooLarge');
-  if (code === 'user_skill_limit_reached') return t('chatGen.skill.import.limitReached');
-  if (code === 'invalid_skill_text' || code === 'invalid_skill_markdown') return t('chatGen.skill.import.invalid');
-  return t('chatGen.skill.import.failed');
 }
 
 function detailSourceLabel(source: StudioSkillMarketMetadata['source']): string {
@@ -262,7 +253,7 @@ export function ChatSkillPicker({
   skills,
   disabled,
   onChange,
-  onImportMarkdown,
+  onOpenSkillMarket,
   onDeleteCustom,
   onTriggerPick,
 }: {
@@ -271,14 +262,12 @@ export function ChatSkillPicker({
   skills: readonly StudioScenarioSkillOption[];
   disabled?: boolean;
   onChange: (id: StudioScenarioSkillId) => void;
-  onImportMarkdown?: (file: File) => Promise<StudioScenarioSkillOption>;
+  onOpenSkillMarket?: () => void;
   onDeleteCustom?: (id: string) => Promise<void>;
   /** Remove the `/query` token when the picker was opened from the composer. */
   onTriggerPick?: () => void;
 }) {
   const popoverRef = useRef<TriggerPopoverHandle>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [importing, setImporting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillOption | null>(null);
   const selectableOptions = useMemo<SkillOption[]>(
@@ -300,17 +289,17 @@ export function ChatSkillPicker({
   );
   const options = useMemo<SkillOption[]>(() => [
     ...selectableOptions,
-    ...(onImportMarkdown ? [{
-      id: IMPORT_MARKDOWN_ID,
-      label: t('chatGen.skill.import.title'),
-      summary: t('chatGen.skill.import.summary'),
-      action: 'import' as const,
+    ...(onOpenSkillMarket ? [{
+      id: OPEN_SKILL_MARKET_ID,
+      label: t('chatGen.skill.market.title'),
+      summary: t('chatGen.skill.market.summary'),
+      action: 'market' as const,
     }] : []),
-  ], [selectableOptions, onImportMarkdown]);
+  ], [selectableOptions, onOpenSkillMarket]);
   const selected = selectableOptions.find((item) => item.id === skillId) ?? selectableOptions[0]!;
 
   // No host catalog means there is nothing useful to choose: keep the empty Skill state visually quiet.
-  if (selectableOptions.length === 1 && !onImportMarkdown) return null;
+  if (selectableOptions.length === 1 && !onOpenSkillMarket) return null;
 
   return (
     <>
@@ -330,28 +319,6 @@ export function ChatSkillPicker({
         <span className="truncate">{selected.label}</span>
       </button>
 
-      {onImportMarkdown && (
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".md,text/markdown"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = '';
-            if (!file || importing) return;
-            setImporting(true);
-            void onImportMarkdown(file)
-              .then((skill) => {
-                onChange(skill.id);
-                toast.success(t('chatGen.skill.import.success', { title: skill.title }));
-              })
-              .catch((error) => toast.error(importErrorMessage(error)))
-              .finally(() => setImporting(false));
-          }}
-        />
-      )}
-
       <TriggerPopover<SkillOption>
         ref={popoverRef}
         trigger="/"
@@ -365,26 +332,25 @@ export function ChatSkillPicker({
         className="w-[330px]"
         onPick={(item, context) => {
           if (context.source === 'trigger') onTriggerPick?.();
-          if (item.action === 'import') {
-            fileInputRef.current?.click();
+          if (item.action === 'market') {
+            onOpenSkillMarket?.();
             return;
           }
           onChange(item.id as StudioScenarioSkillId);
         }}
         renderItem={(item, { active, pick, setActive }) => {
-          if (item.action === 'import') {
+          if (item.action === 'market') {
             return (
               <button
                 type="button"
                 data-active={active || undefined}
-                disabled={importing}
                 onMouseEnter={setActive}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={pick}
                 className={`border-line mt-1 flex w-full items-start gap-2.5 border-t px-2.5 pb-2 pt-3 text-left disabled:opacity-50 ${active ? 'bg-panel-2' : ''}`}
               >
                 <span className="text-ink-3 grid h-8 w-8 shrink-0 place-items-center">
-                  {importing ? <Loader2 size={17} className="animate-spin" /> : <SkillMark option={item} />}
+                  <SkillMark option={item} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="text-ink truncate text-[12.5px] font-medium">{item.label}</span>
