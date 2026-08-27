@@ -37,6 +37,10 @@ import {
   type StudioScenarioSkillId,
 } from "@pireel/studio-engine/scenario-skills";
 import { studioProviders } from "@pireel/studio-engine/providers";
+import {
+  STUDIO_CREATE_SKILL_ACTION,
+  latestStudioMetaAction,
+} from "@pireel/studio-engine/skill-actions";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   mid,
@@ -382,7 +386,10 @@ export function ChatThread({
   const run = useCallback(
     async (
       draft: string | StudioChatDraftPart[],
-      options: { preserveAutoRecoveryAttempt?: boolean } = {},
+      options: {
+        preserveAutoRecoveryAttempt?: boolean;
+        studioAction?: typeof STUDIO_CREATE_SKILL_ACTION;
+      } = {},
     ): Promise<boolean> => {
       const draftParts: StudioChatDraftPart[] =
         typeof draft === "string"
@@ -442,6 +449,7 @@ export function ChatThread({
           .filter(Boolean)
           .join("\n"),
         ...(timelineFrames.length ? { timelineFrames } : {}),
+        ...(options.studioAction ? { studioAction: options.studioAction } : {}),
       };
       void sendMessage({
         metadata,
@@ -466,12 +474,19 @@ export function ChatThread({
   // duplicate edits or immediately hit the old turn's ceiling. Resume as a NEW user turn instead:
   // that gives the server a fresh composition snapshot and resets both execution counters.
   const continueFromCurrentState = useCallback(
-    () => run(t("chatGen.continueAfterInterruptionPrompt")),
+    () => {
+      const studioAction = latestStudioMetaAction(messagesRef.current);
+      return run(t("chatGen.continueAfterInterruptionPrompt"), {
+        ...(studioAction ? { studioAction } : {}),
+      });
+    },
     [run],
   );
 
   const createScenarioSkill = useCallback(() => {
-    void run(t("chatGen.skill.create.prompt"));
+    void run(t("chatGen.skill.create.prompt"), {
+      studioAction: STUDIO_CREATE_SKILL_ACTION,
+    });
   }, [run]);
 
   // Client-side tools may already have committed durable edits before a provider/network stream
@@ -498,8 +513,10 @@ export function ChatThread({
         )
       ) return;
       autoRecoveryAttemptedRef.current = true;
+      const studioAction = latestStudioMetaAction(messagesRef.current);
       run(t("chatGen.continueAfterInterruptionPrompt"), {
         preserveAutoRecoveryAttempt: true,
+        ...(studioAction ? { studioAction } : {}),
       });
     }, 650);
     return () => clearTimeout(timer);
