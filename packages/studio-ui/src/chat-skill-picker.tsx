@@ -248,13 +248,6 @@ function SkillMarketDetailDialog({
               <p className="text-ink-2 mt-2 text-[13px] leading-6">{market.description}</p>
             </section>
 
-            <div className="border-line bg-panel-2 mt-5 flex items-start gap-2.5 rounded-lg border px-3.5 py-3">
-              <ShieldCheck size={14} className="text-ink-3 mt-0.5 shrink-0" />
-              <p className="text-ink-3 text-[11.5px] leading-relaxed">
-                {t('chatGen.skill.detail.playbookHidden')}
-              </p>
-            </div>
-
             <p className="text-ink-4 mt-3 truncate font-mono text-[10px]">{market.listingId}</p>
           </div>
         </DialogContent>

@@ -31,7 +31,6 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.skill.detail.publishedAt': '发布时间',
   'chatGen.skill.detail.updatedAt': '更新时间',
   'chatGen.skill.detail.description': 'Skill 介绍',
-  'chatGen.skill.detail.playbookHidden': '这里只展示技能市场的发布信息。Skill 的具体指令不会在详情中公开。',
   'chatGen.abstractFluid': '抽象流体',
   'chatGen.aiEdit': 'AI 改',
   'chatGen.cutRowLocate': '点击定位到这处剪切',

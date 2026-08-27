@@ -31,7 +31,6 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.skill.detail.publishedAt': 'Published',
   'chatGen.skill.detail.updatedAt': 'Updated',
   'chatGen.skill.detail.description': 'About this Skill',
-  'chatGen.skill.detail.playbookHidden': 'This view only shows the Skill Market listing. The Skill’s actual instructions are not exposed here.',
   'chatGen.abstractFluid': 'Abstract fluid',
   'chatGen.aiEdit': 'AI edit',
   'chatGen.cutRowLocate': 'Click to locate this cut',
