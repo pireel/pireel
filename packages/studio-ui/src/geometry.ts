@@ -19,7 +19,7 @@
 // always dynamic-import, keep them out of the /studio initial bundle. Type imports don't enter the bundle.
 import type { FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { GRID_H, GRID_W, type FrameGeom, type NRect, type SafeZone, safeZoneForRange } from '@pireel/studio-engine/geometry-math';
-import type { FrameQualityObservation } from '@pireel/studio-engine/visual-quality';
+import { frameStabilityScore, type FrameMotionVector, type FrameQualityObservation } from '@pireel/studio-engine/visual-quality';
 import { t } from './i18n';
 
 export type { NRect, FrameGeom, SafeZone } from '@pireel/studio-engine/geometry-math';
@@ -150,7 +150,8 @@ function measureFrameQuality(
   qualityCanvas: HTMLCanvasElement,
   qualityCtx: CanvasRenderingContext2D,
   previousLuma: Float32Array | null,
-): { sharpness: number; exposure: number; stability: number; luma: Float32Array } {
+  previousMotion: FrameMotionVector | null,
+): { sharpness: number; exposure: number; stability: number; luma: Float32Array; motion: FrameMotionVector | null } {
   qualityCtx.drawImage(canvas, 0, 0, qualityCanvas.width, qualityCanvas.height);
   const rgba = qualityCtx.getImageData(0, 0, qualityCanvas.width, qualityCanvas.height).data;
   const width = qualityCanvas.width;
@@ -189,6 +190,7 @@ function measureFrameQuality(
   const exposure = clamp01(center * 0.58 + contrast * 0.42 - (clipped / Math.max(1, luma.length)) * 1.5);
 
   let stability = 1;
+  let motion: FrameMotionVector | null = null;
   if (previousLuma && previousLuma.length === luma.length) {
     let bestDx = 0;
     let bestDy = 0;
@@ -211,10 +213,12 @@ function measureFrameQuality(
         }
       }
     }
-    const translation = Math.hypot(bestDx, bestDy);
-    stability = clamp01(Math.exp(-translation / 1.8) * (1 - Math.max(0, bestError - 0.2) * 0.8));
+    motion = { dx: bestDx, dy: bestDy };
+    // Smooth pans/tracking shots keep a consistent motion vector. Handheld shake reverses or
+    // changes direction abruptly, so temporal consistency carries more weight than raw movement.
+    stability = frameStabilityScore(motion, previousMotion, bestError);
   }
-  return { sharpness, exposure, stability, luma };
+  return { sharpness, exposure, stability, luma, motion };
 }
 
 /**
@@ -319,6 +323,7 @@ export async function analyzeGeometryAndQuality(
     const out: FrameGeom[] = [];
     const quality: FrameQualityObservation[] = [];
     let previousLuma: Float32Array | null = null;
+    let previousMotion: FrameMotionVector | null = null;
     const total = stamps.length;
     let done = 0;
     for await (const sample of sink.samplesAtTimestamps(stamps.map((s) => s + t0))) {
@@ -326,8 +331,9 @@ export async function analyzeGeometryAndQuality(
       const t = sample.timestamp - t0;
       sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, cw, ch);
       sample.close();
-      const measured = measureFrameQuality(canvas, qualityCanvas, qualityCtx, previousLuma);
+      const measured = measureFrameQuality(canvas, qualityCanvas, qualityCtx, previousLuma, previousMotion);
       previousLuma = measured.luma;
+      previousMotion = measured.motion;
       if (mp) {
         const inferred = inferFrame(mp, canvas, cw, ch);
         out.push({ t, ...inferred });
@@ -355,6 +361,75 @@ export async function analyzeGeometryAndQuality(
     _note = t('common.geometryPassErrorMsg', { msg: e instanceof Error ? e.message : String(e) });
     console.warn('[studio/geometry]', _note);
     return { frames: null, quality: [] };
+  } finally {
+    await input.dispose();
+  }
+}
+
+/** Fast second-pass quality scan over an explicit shortlist. It decodes only the requested low-res
+ * frames and skips MediaPipe, keeping the refinement bounded independently of source duration. */
+export async function analyzeQualityAtTimes(
+  file: File,
+  requestedTimes: readonly number[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<FrameQualityObservation[]> {
+  const stamps = [...new Set(requestedTimes
+    .filter((time) => Number.isFinite(time) && time >= 0)
+    .map((time) => Math.round(time * 1_000) / 1_000))]
+    .sort((a, b) => a - b);
+  if (!stamps.length) return [];
+  const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return [];
+    const vw = track.displayWidth || 720;
+    const vh = track.displayHeight || 1280;
+    const decodeScale = Math.min(1, 128 / Math.max(vw, vh));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(8, Math.round(vw * decodeScale));
+    canvas.height = Math.max(8, Math.round(vh * decodeScale));
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return [];
+    const qualityScale = Math.min(1, QUALITY_LONG_EDGE / Math.max(canvas.width, canvas.height));
+    const qualityCanvas = document.createElement('canvas');
+    qualityCanvas.width = Math.max(8, Math.round(canvas.width * qualityScale));
+    qualityCanvas.height = Math.max(8, Math.round(canvas.height * qualityScale));
+    const qualityCtx = qualityCanvas.getContext('2d', { willReadFrequently: true });
+    if (!qualityCtx) return [];
+    const t0 = Math.max(0, await input.getFirstTimestamp());
+    const sink = new VideoSampleSink(track);
+    const quality: FrameQualityObservation[] = [];
+    let previousLuma: Float32Array | null = null;
+    let previousMotion: FrameMotionVector | null = null;
+    let previousTime: number | null = null;
+    let done = 0;
+    for await (const sample of sink.samplesAtTimestamps(stamps.map((stamp) => stamp + t0))) {
+      if (!sample) continue;
+      const timeSec = sample.timestamp - t0;
+      if (previousTime != null && timeSec - previousTime > 0.5) {
+        previousLuma = null;
+        previousMotion = null;
+      }
+      sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, canvas.width, canvas.height);
+      sample.close();
+      const measured = measureFrameQuality(canvas, qualityCanvas, qualityCtx, previousLuma, previousMotion);
+      quality.push({
+        timeSec,
+        sharpness: measured.sharpness,
+        exposure: measured.exposure,
+        stability: measured.stability,
+      });
+      previousLuma = measured.luma;
+      previousMotion = measured.motion;
+      previousTime = timeSec;
+      done += 1;
+      onProgress?.(done, stamps.length);
+    }
+    return quality;
+  } catch (error) {
+    console.warn('[studio/geometry] fine quality scan failed:', error instanceof Error ? error.message : String(error));
+    return [];
   } finally {
     await input.dispose();
   }

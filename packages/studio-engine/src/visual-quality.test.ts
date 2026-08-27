@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildVisualQualityWindows, type FrameQualityObservation } from './visual-quality';
+import {
+  buildVisualQualityWindows,
+  fineQualitySampleTimes,
+  frameStabilityScore,
+  type FrameQualityObservation,
+} from './visual-quality';
 
 const sample = (timeSec: number, quality: number, subjectPresence = 1): FrameQualityObservation => ({
   timeSec,
@@ -10,14 +15,16 @@ const sample = (timeSec: number, quality: number, subjectPresence = 1): FrameQua
 });
 
 describe('buildVisualQualityWindows', () => {
-  it('ranks sustained clean ranges above a good midpoint with bad edge frames', () => {
+  it('keeps the sustained clean range and rejects the pretty midpoint with bad edges', () => {
     const observations = [
       sample(0, 0.2), sample(0.5, 0.95), sample(1, 0.95), sample(1.5, 0.2),
       sample(2, 0.82), sample(2.5, 0.84), sample(3, 0.83), sample(3.5, 0.82),
     ];
     const windows = buildVisualQualityWindows(observations, 4, [], { maxWindows: 2 });
+    expect(windows).toHaveLength(1);
     expect(windows[0]).toMatchObject({ rank: 1, startSec: 1.75, endSec: 3.25, score: 82 });
-    expect(windows[0]!.score).toBeGreaterThan(windows[1]!.score);
+    expect(windows[0]!.edgeScore).toBeGreaterThanOrEqual(80);
+    expect(windows[0]!.hardFailureFraction).toBe(0);
   });
 
   it('never returns a candidate that crosses a real scene cut', () => {
@@ -33,5 +40,47 @@ describe('buildVisualQualityWindows', () => {
     expect(absent.score).toBe(present.score);
     expect(absent.subjectPresence).toBe(0);
     expect(present.subjectPresence).toBe(1);
+  });
+
+  it('returns no candidate when the whole source is below the absolute quality floor', () => {
+    const observations = Array.from({ length: 12 }, (_, index) => sample(index * 0.25, 0.4));
+    expect(buildVisualQualityWindows(observations, 3)).toEqual([]);
+    expect(buildVisualQualityWindows(observations, 3, [], { enforceThresholds: false }).length).toBeGreaterThan(0);
+  });
+
+  it('rejects a range containing even one severe failure after dense refinement', () => {
+    const observations = Array.from({ length: 13 }, (_, index) => sample(index / 6, index === 6 ? 0.05 : 0.85));
+    expect(buildVisualQualityWindows(observations, 2.1)).toEqual([]);
+  });
+
+  it('rejects a hidden single-metric failure even when the composite average is high', () => {
+    const observations = Array.from({ length: 10 }, (_, index): FrameQualityObservation => ({
+      timeSec: index * 0.2,
+      sharpness: 0.15,
+      exposure: 0.95,
+      stability: 0.95,
+      subjectPresence: 1,
+    }));
+    expect(buildVisualQualityWindows(observations, 2)).toEqual([]);
+  });
+
+  it('builds a bounded fine-scan plan across distant coarse candidates', () => {
+    const windows = [
+      { startSec: 1, endSec: 4 },
+      { startSec: 40, endSec: 43 },
+      { startSec: 80, endSec: 83 },
+    ];
+    const stamps = fineQualitySampleTimes(windows, 100, { fps: 8, paddingSec: 0.25, maxFrames: 24 });
+    expect(stamps.length).toBeLessThanOrEqual(24);
+    expect(stamps.some((stamp) => stamp < 4.3)).toBe(true);
+    expect(stamps.some((stamp) => stamp > 39.7 && stamp < 43.3)).toBe(true);
+    expect(stamps.some((stamp) => stamp > 79.7)).toBe(true);
+  });
+
+  it('scores a consistent tracking move above direction-reversing shake', () => {
+    const pan = frameStabilityScore({ dx: 3, dy: 0 }, { dx: 3, dy: 0 }, 0.08);
+    const shake = frameStabilityScore({ dx: -3, dy: 0 }, { dx: 3, dy: 0 }, 0.08);
+    expect(pan).toBeGreaterThan(0.75);
+    expect(shake).toBeLessThan(0.25);
   });
 });

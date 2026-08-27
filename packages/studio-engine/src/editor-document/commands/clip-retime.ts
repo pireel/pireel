@@ -11,8 +11,10 @@ export interface RetimeEditorClipOptions {
   trackId: string;
   clipId: string;
   durationFrames: number;
-  /** Move clips beginning after this clip's old out-point by the duration delta. */
+  /** Move later clips by the duration delta. Defaults to the clip's old out-point. */
   ripple?: boolean;
+  /** Override the ripple boundary when duration was added at the source head rather than the tail. */
+  rippleFromFrame?: number;
 }
 
 function retimedMediaKeyframes(clip: MediaTimelineClip, durationFrames: number): MediaTimelineClip['keyframes'] {
@@ -32,14 +34,17 @@ function withDuration(clip: TimelineClip, durationFrames: number): TimelineClip 
 /**
  * Change a video clip's timeline duration while keeping its source interval fixed. Preview and
  * export derive playback speed from source duration / timeline duration, so no duplicate speed
- * state is persisted. Optional ripple only moves clips that begin at/after the old out-point;
- * material already overlapping the retimed clip is deliberately left untouched.
+ * state is persisted. Optional ripple moves clips beginning at/after the selected ripple boundary;
+ * material already overlapping that boundary is deliberately left untouched.
  */
 export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEditorClipOptions): EditorCommandResult {
   const issue = validateEditorDocumentV2(document).find((candidate) => candidate.severity === 'error');
   if (issue) return commandFailure(document, 'invalid-document', issue.message, { path: issue.path });
   if (!Number.isInteger(options.durationFrames) || options.durationFrames <= 0) {
     return commandFailure(document, 'invalid-range', 'Retimed duration must be a positive integral frame count.', { path: 'durationFrames' });
+  }
+  if (options.rippleFromFrame != null && (!Number.isInteger(options.rippleFromFrame) || options.rippleFromFrame < 0)) {
+    return commandFailure(document, 'invalid-range', 'Ripple boundary must be a non-negative integral frame.', { path: 'rippleFromFrame' });
   }
   const track = document.timeline.tracks.find((candidate) => candidate.id === options.trackId);
   if (!track) return commandFailure(document, 'track-not-found', `Track does not exist: ${options.trackId}`, { trackIds: [options.trackId] });
@@ -54,11 +59,12 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
 
   const ripple = options.ripple === true;
   const oldEndFrame = target.startFrame + target.durationFrames;
+  const rippleFromFrame = options.rippleFromFrame ?? oldEndFrame;
   const deltaFrames = options.durationFrames - target.durationFrames;
   const affectedTrackIds = new Set<string>([track.id]);
   if (ripple) {
     for (const candidate of document.timeline.tracks) {
-      if (candidate.syncLocked && candidate.clips.some((clip) => clip.startFrame >= oldEndFrame)) affectedTrackIds.add(candidate.id);
+      if (candidate.syncLocked && candidate.clips.some((clip) => clip.startFrame >= rippleFromFrame)) affectedTrackIds.add(candidate.id);
     }
   }
   const lockedTrackIds = document.timeline.tracks
@@ -73,7 +79,7 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
     if (!affectedTrackIds.has(candidate.id)) return candidate;
     const clips = candidate.clips.map((clip) => {
       if (clip.id === target.id) return withDuration(clip, options.durationFrames);
-      if (!ripple || clip.startFrame < oldEndFrame) return clip;
+      if (!ripple || clip.startFrame < rippleFromFrame) return clip;
       shiftedClipIds.push(clip.id);
       return { ...clip, startFrame: clip.startFrame + deltaFrames };
     }).sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id));
@@ -91,13 +97,13 @@ export function retimeEditorClip(document: EditorDocumentV2, options: RetimeEdit
         ?? directorPlan.scenes.find((scene) => (
           target.startFrame >= scene.startFrame && target.startFrame < scene.startFrame + scene.durationFrames
         ))?.id;
-      const adjusted = directorPlanAfterRippleInsertion(directorPlan, oldEndFrame, deltaFrames, sceneId);
+      const adjusted = directorPlanAfterRippleInsertion(directorPlan, rippleFromFrame, deltaFrames, sceneId);
       if (!adjusted.ok) return commandFailure(document, 'invalid-command', adjusted.error, { path: 'semantics.artifacts.directorPlan' });
       semantics = withAdjustedDirectorPlan(semantics, adjusted.plan);
     } else {
       semantics = withAdjustedDirectorPlan(
         semantics,
-        directorPlanAfterRippleRemoval(directorPlan, oldEndFrame + deltaFrames, oldEndFrame),
+        directorPlanAfterRippleRemoval(directorPlan, rippleFromFrame + deltaFrames, rippleFromFrame),
       );
     }
   }

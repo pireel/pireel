@@ -127,6 +127,7 @@ import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { localAssetReference, normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
+import { reviewEditorialCandidates } from './editorial-review';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
@@ -1118,8 +1119,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           }
           case 'analyze_visual': {
             const geometryOnly = input.mode === 'geometry';
+            const editorialReview = input.mode === 'editorial';
+            const reviewBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
+            if (editorialReview && !reviewBrief) return { ok: false, error: 'analyze_visual mode="editorial" requires a concrete brief describing the desired visible qualities and editorial roles' };
+            const maxReviewCandidates = Math.max(1, Math.min(6, Math.floor(Number(input.maxCandidates) || 6)));
             const assessSourceAudio = input.assessAudio !== false;
-            const analyze = geometryOnly ? analyzeVisualGeometry : analyzeVisual;
+            const analyze = geometryOnly || editorialReview ? analyzeVisualGeometry : analyzeVisual;
             const requestedLocalReference = typeof input.localAssetId === 'string'
               ? input.localAssetId.trim()
               : typeof input.localSig === 'string'
@@ -1148,12 +1153,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     ? assessLocalSpeechAudio(file).catch(() => null)
                     : Promise.resolve(null),
                 ]);
+                const reviewed = editorialReview && vis
+                  ? await race(reviewEditorialCandidates(file, vis.qualityWindows ?? [], reviewBrief, {
+                      maxCandidates: maxReviewCandidates,
+                      ...(signal ? { signal } : {}),
+                    }))
+                  : null;
                 return vis
                   ? {
                       ok: true,
                       summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
                       data: {
-                        analysisMode: geometryOnly ? 'local-geometry' : 'semantic',
+                        analysisMode: geometryOnly ? 'local-geometry' : editorialReview ? 'editorial-candidates' : 'semantic',
                         localAssetId: entry.assetId,
                         label: entry.label,
                         durationSec,
@@ -1168,7 +1179,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                           audibleSec: localAudio.audibleSec,
                           speechSec: localAudio.speechSec,
                         } : {}),
-                        ...(geometryOnly ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
+                        ...(geometryOnly || editorialReview ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
+                        ...(reviewed ? {
+                          editorialBrief: reviewed.brief,
+                          editorialCandidates: reviewed.candidates,
+                          instruction: 'Choose strong candidates by role fit and comparative rank. Never edit in rejected or unreviewed candidates; inspect the chosen source boundaries again after placement.',
+                        } : {}),
                       },
                     }
                   : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
@@ -1216,9 +1232,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             try {
               const useMountedPrimary = targetAssetId === primaryAssetId && !!videoFileRef.current && !!currentVideo();
               let vis: VisualTimeline | null;
+              let sourceFile: File | null = null;
+              let sourceDurationSec = 0;
               if (useMountedPrimary) {
                 const mounted = currentVideo()!;
+                sourceFile = videoFileRef.current!;
+                sourceDurationSec = mounted.durationSec;
                 vis = geometryOnly
+                  || editorialReview
                   ? await race(analyzeVisualGeometry(videoFileRef.current!, mounted.durationSec, (done, count) => {
                       const fraction = count > 0 ? done / count : 0;
                       report(t('common.analyzingVisualsPctSec', {
@@ -1247,6 +1268,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const probe = await probeVideoFile(file).catch(() => null);
                 const durationSec = probe?.durationSec || targetAsset.metadata.durationSec;
                 if (!durationSec) return { ok: false, error: `video duration unavailable: ${targetAssetId}` };
+                sourceFile = file;
+                sourceDurationSec = durationSec;
                 const total = Math.min(180, Math.max(1, Math.floor(durationSec * 2)));
                 vis = await race(analyze(file, durationSec, (done, count) => {
                   const fraction = count > 0 ? done / count : 0;
@@ -1275,14 +1298,25 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   });
                 }
               }
+              const reviewed = editorialReview && vis && sourceFile && sourceDurationSec > 0
+                ? await race(reviewEditorialCandidates(sourceFile, vis.qualityWindows ?? [], reviewBrief, {
+                    maxCandidates: maxReviewCandidates,
+                    ...(signal ? { signal } : {}),
+                  }))
+                : null;
               return vis
                 ? {
                     ok: true,
                     summary: t('workbench.visualAnalysisDoneSegs', { segs: vis.segments.length, cuts: vis.cuts.length }),
                     data: {
-                      analysisMode: geometryOnly ? 'local-geometry' : 'semantic',
+                      analysisMode: geometryOnly ? 'local-geometry' : editorialReview ? 'editorial-candidates' : 'semantic',
                       assetId: targetAssetId,
-                      ...(geometryOnly ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
+                      ...(geometryOnly || editorialReview ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
+                      ...(reviewed ? {
+                        editorialBrief: reviewed.brief,
+                        editorialCandidates: reviewed.candidates,
+                        instruction: 'Choose strong candidates by role fit and comparative rank. Never edit in rejected or unreviewed candidates; inspect the chosen source boundaries again after placement.',
+                      } : {}),
                     },
                   }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };

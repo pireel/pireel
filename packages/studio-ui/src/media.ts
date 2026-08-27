@@ -201,6 +201,105 @@ const filmstripTimestamps = (durationSec: number, count: number): number[] => {
   return Array.from({ length: n }, (_, i) => Math.min(durationSec - 0.05, ((i + 0.5) / n) * durationSec));
 };
 
+export interface FilmstripSourceRange {
+  startSec: number;
+  endSec: number;
+}
+
+export function filmstripSourceRangeForTimelineWindow(
+  timelineStartSec: number,
+  timelineEndSec: number,
+  sourceInSec: number,
+  sourceOutSec: number,
+  visibleStartSec: number,
+  visibleEndSec: number,
+): FilmstripSourceRange | null {
+  if (timelineEndSec <= visibleStartSec || timelineStartSec >= visibleEndSec) return null;
+  const timelineDurationSec = timelineEndSec - timelineStartSec;
+  const sourceDurationSec = sourceOutSec - sourceInSec;
+  if (timelineDurationSec <= 0 || sourceDurationSec <= 0) return null;
+  const overlapStartSec = Math.max(timelineStartSec, visibleStartSec);
+  const overlapEndSec = Math.min(timelineEndSec, visibleEndSec);
+  const sourceRate = sourceDurationSec / timelineDurationSec;
+  return {
+    startSec: sourceInSec + (overlapStartSec - timelineStartSec) * sourceRate,
+    endSec: sourceInSec + (overlapEndSec - timelineStartSec) * sourceRate,
+  };
+}
+
+/** Stable, source-clock thumbnail demand for the ranges that survive the edit. The grid is anchored
+ * to source time so trimming a clip inside one bucket does not schedule a whole new filmstrip. */
+export function filmstripTimestampsForRanges(
+  ranges: readonly FilmstripSourceRange[],
+  maxCount = 60,
+): number[] {
+  const normalized = ranges
+    .filter((range) => Number.isFinite(range.startSec) && Number.isFinite(range.endSec) && range.endSec > range.startSec)
+    .map((range) => ({ startSec: Math.max(0, range.startSec), endSec: Math.max(0, range.endSec) }))
+    .filter((range) => range.endSec > range.startSec)
+    .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec);
+  const merged: FilmstripSourceRange[] = [];
+  for (const range of normalized) {
+    const previous = merged.at(-1);
+    if (previous && range.startSec <= previous.endSec + 0.001) {
+      previous.endSec = Math.max(previous.endSec, range.endSec);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+  if (!merged.length || maxCount <= 0) return [];
+  const usedDurationSec = merged.reduce((sum, range) => sum + range.endSec - range.startSec, 0);
+  const stepSec = Math.max(1, Math.ceil(usedDurationSec / Math.max(1, maxCount)));
+  const timestamps: number[] = [];
+  for (const range of merged) {
+    const firstBucket = Math.floor(range.startSec / stepSec);
+    const lastBucket = Math.ceil(range.endSec / stepSec) - 1;
+    for (let bucket = firstBucket; bucket <= lastBucket; bucket++) {
+      const midpoint = (bucket + 0.5) * stepSec;
+      timestamps.push(Math.max(range.startSec, Math.min(range.endSec - 0.001, midpoint)));
+    }
+  }
+  const unique = [...new Set(timestamps.map((timestamp) => Math.round(timestamp * 1_000) / 1_000))];
+  if (unique.length <= maxCount) return unique;
+  return Array.from({ length: maxCount }, (_, index) => unique[Math.floor(index * unique.length / maxCount)]!);
+}
+
+export async function extractFilmstripAtTimestamps(
+  file: File,
+  timestamps: readonly number[],
+  onFrame?: (frame: FilmstripFrame) => void,
+): Promise<FilmstripFrame[]> {
+  const frames: FilmstripFrame[] = [];
+  await extractThumbnails(file, [...timestamps], {
+    width: 96,
+    quality: 0.6,
+    onThumb: (thumbnail) => {
+      const frame = { t: thumbnail.timestamp, url: thumbnail.url };
+      frames.push(frame);
+      onFrame?.(frame);
+    },
+  });
+  return frames.sort((left, right) => left.t - right.t);
+}
+
+export async function extractFilmstripFromUrlAtTimestamps(
+  url: string,
+  timestamps: readonly number[],
+  onFrame?: (frame: FilmstripFrame) => void,
+): Promise<FilmstripFrame[]> {
+  const frames: FilmstripFrame[] = [];
+  await extractThumbnailsFromUrl(url, [...timestamps], {
+    width: 96,
+    quality: 0.6,
+    onThumb: (thumbnail) => {
+      const frame = { t: thumbnail.timestamp, url: thumbnail.url };
+      frames.push(frame);
+      onFrame?.(frame);
+    },
+  });
+  return frames.sort((left, right) => left.t - right.t);
+}
+
 /**
  * Sample evenly-spaced filmstrip frames to back the timeline video track (local decode, no upload).
  * count controls density; onFrame is an incremental callback so the filmstrip appears as it decodes.
@@ -213,18 +312,7 @@ export async function extractFilmstrip(
 ): Promise<FilmstripFrame[]> {
   const dur = durationSec > 0 ? durationSec : 0;
   if (dur <= 0) return [];
-  const stamps = filmstripTimestamps(dur, count);
-  const frames: FilmstripFrame[] = [];
-  await extractThumbnails(file, stamps, {
-    width: 96,
-    quality: 0.6,
-    onThumb: (th) => {
-      const f = { t: th.timestamp, url: th.url };
-      frames.push(f);
-      onFrame?.(f);
-    },
-  });
-  return frames.sort((a, b) => a.t - b.t);
+  return extractFilmstripAtTimestamps(file, filmstripTimestamps(dur, count), onFrame);
 }
 
 /** Remote counterpart: MediaBunny's UrlSource requests only the container index and sample
@@ -237,17 +325,7 @@ export async function extractFilmstripFromUrl(
 ): Promise<FilmstripFrame[]> {
   const dur = durationSec > 0 ? durationSec : 0;
   if (dur <= 0) return [];
-  const frames: FilmstripFrame[] = [];
-  await extractThumbnailsFromUrl(url, filmstripTimestamps(dur, count), {
-    width: 96,
-    quality: 0.6,
-    onThumb: (thumbnail) => {
-      const frame = { t: thumbnail.timestamp, url: thumbnail.url };
-      frames.push(frame);
-      onFrame?.(frame);
-    },
-  });
-  return frames.sort((a, b) => a.t - b.t);
+  return extractFilmstripFromUrlAtTimestamps(url, filmstripTimestamps(dur, count), onFrame);
 }
 
 /** Upload the full source clip only at export time, returning an https URL the render service can fetch. */

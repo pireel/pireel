@@ -18,7 +18,7 @@ describe('visualTimelineForAgent', () => {
           },
         },
       ],
-      qualityWindows: [{ rank: 1, startSec: 1, endSec: 3, score: 88, sharpness: 0.9, exposure: 0.8, stability: 0.85, subjectPresence: 1, sampleCount: 5 }],
+      qualityWindows: [{ rank: 1, startSec: 1, endSec: 3, score: 88, sharpness: 0.9, exposure: 0.8, stability: 0.85, subjectPresence: 1, sampleCount: 5, worstFrameScore: 82, edgeScore: 84, hardFailureFraction: 0 }],
     };
 
     expect(visualTimelineForAgent(timeline)).toEqual({
@@ -51,7 +51,7 @@ describe('visualTimelineForAgent', () => {
           description: 'Speaker at a desk',
         },
       ],
-      qualityWindows: [{ rank: 1, startSec: 1, endSec: 3, score: 88, sharpness: 0.9, exposure: 0.8, stability: 0.85, subjectPresence: 1, sampleCount: 5 }],
+      qualityWindows: [{ rank: 1, startSec: 1, endSec: 3, score: 88, sharpness: 0.9, exposure: 0.8, stability: 0.85, subjectPresence: 1, sampleCount: 5, worstFrameScore: 82, edgeScore: 84, hardFailureFraction: 0 }],
     });
   });
 
@@ -73,7 +73,7 @@ describe('visualTimelineForAgent', () => {
   it('returns local geometry without exposing placeholder semantic labels', () => {
     const timeline: VisualTimeline = {
       cuts: [3.25],
-      qualityWindows: [{ rank: 1, startSec: 0, endSec: 2, score: 90, sharpness: 0.9, exposure: 0.9, stability: 0.9, subjectPresence: 1, sampleCount: 4 }],
+      qualityWindows: [{ rank: 1, startSec: 0, endSec: 2, score: 90, sharpness: 0.9, exposure: 0.9, stability: 0.9, subjectPresence: 1, sampleCount: 4, worstFrameScore: 88, edgeScore: 89, hardFailureFraction: 0 }],
       segments: [{
         start: 0,
         end: 6,

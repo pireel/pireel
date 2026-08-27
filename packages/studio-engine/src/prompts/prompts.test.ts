@@ -834,6 +834,16 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(analyze.description).toContain("qualityWindows");
     expect(analyze.description).toContain("sharpness/exposure/stability");
     expect(analyze.description).toContain("only sceneCutsSec are real cut points");
+    expect(analyze.description).toContain("coarse-to-fine");
+    expect(analyze.description).toContain("must never be treated as permission to force-select");
+    expect(analyze.description).toContain("entry/middle/exit");
+    expect(analyze.description).toContain("editorialCandidates");
+    const schema = analyze.inputSchema as {
+      properties: { mode: { enum: string[] }; brief: unknown; maxCandidates: unknown };
+    };
+    expect(schema.properties.mode.enum).toContain("editorial");
+    expect(schema.properties).toHaveProperty("brief");
+    expect(schema.properties).toHaveProperty("maxCandidates");
   });
   it("已放置素材可按源时间精确重取区间", () => {
     const patchClip = STUDIO_TOOLS.find((tool) => tool.id === "set_clip_properties")!;

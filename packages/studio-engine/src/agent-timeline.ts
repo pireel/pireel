@@ -8,6 +8,7 @@ import {
   applyEditorCommand,
   editorTimelineTotalFrames,
   positiveDurationFrames,
+  retimeEditorClip,
   secondsToTimelineFrames,
   timelineFramesToSeconds,
   type AudioTimelineClip,
@@ -79,6 +80,10 @@ function mutation(document: EditorDocumentV2, summary: string, receipts: EditorC
 function sec(value: unknown, fallback = 0): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function frameDeltaSec(frames: number, fps: number): number {
+  return Number.isFinite(frames) && Number.isFinite(fps) && fps > 0 ? frames / fps : 0;
 }
 
 function string(value: unknown): string | undefined {
@@ -526,7 +531,7 @@ export function resizeVisualTimelineClip(
       : 0;
     newStartFrame = Math.max(previousEndFrame, sourceFloorFrame, Math.min(requestedFrame, oldEndFrame - minFrames));
     if (asset.kind === 'video' && sourceRate > 0) {
-      sourceInSec = Math.max(0, sourceInSec + timelineFramesToSeconds(newStartFrame - oldStartFrame, fps) * sourceRate);
+      sourceInSec = Math.max(0, sourceInSec + frameDeltaSec(newStartFrame - oldStartFrame, fps) * sourceRate);
     }
   } else {
     const sourceCeilingFrame = asset.kind === 'video' && sourceRate > 0 && asset.metadata.durationSec != null
@@ -534,7 +539,7 @@ export function resizeVisualTimelineClip(
       : Number.POSITIVE_INFINITY;
     newEndFrame = Math.min(nextStartFrame, sourceCeilingFrame, Math.max(requestedFrame, oldStartFrame + minFrames));
     if (asset.kind === 'video' && sourceRate > 0) {
-      sourceOutSec += timelineFramesToSeconds(newEndFrame - oldEndFrame, fps) * sourceRate;
+      sourceOutSec += frameDeltaSec(newEndFrame - oldEndFrame, fps) * sourceRate;
       if (asset.metadata.durationSec != null) sourceOutSec = Math.min(asset.metadata.durationSec, sourceOutSec);
     }
   }
@@ -558,6 +563,138 @@ export function resizeVisualTimelineClip(
     : track);
   const next = { ...document, timeline: { ...document.timeline, tracks } };
   return mutation(next, `Resized visual clip to ${timelineFramesToSeconds(newDurationFrames, fps)}s`, [], {
+    clipId,
+    startSec: timelineFramesToSeconds(newStartFrame, fps),
+    endSec: timelineFramesToSeconds(newEndFrame, fps),
+    durationSec: timelineFramesToSeconds(newDurationFrames, fps),
+    sourceInSec,
+    sourceOutSec,
+  });
+}
+
+/** Trim/extend one primary narrative clip from its own edge. Edge extensions on a packed primary
+ * track ripple later sync-locked material so source handles can be restored without overlap. A
+ * transition attached to the changed cut is cleared because it no longer describes the boundary. */
+export function resizeNarrativeTimelineClip(
+  document: EditorDocumentV2,
+  clipId: string,
+  edge: VisualTimelineResizeEdge,
+  atSec: number,
+): AgentTimelineOutcome {
+  if (!Number.isFinite(atSec)) return fail('narrative clip resize time must be finite');
+  const found = locatedClip(document, clipId);
+  if (!found || found.clip.kind !== 'narrative' || found.track.id !== document.semantics.primaryNarrativeTrackId) {
+    return fail(`primary narrative clip not found: ${clipId}`);
+  }
+  if (found.track.locked) return fail(`track is locked: ${found.track.id}`);
+  const asset = document.assets[found.clip.assetId];
+  if (!asset || asset.kind !== 'video') return fail(`narrative video asset not found: ${found.clip.assetId}`);
+
+  const fps = document.canvas.fps;
+  const minFrames = positiveDurationFrames(0.2, fps);
+  const oldStartFrame = found.clip.startFrame;
+  const oldEndFrame = oldStartFrame + found.clip.durationFrames;
+  const siblings = found.track.clips
+    .filter((clip): clip is NarrativeTimelineClip => clip.id !== clipId && clip.kind === 'narrative')
+    .sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id));
+  const previousEndFrame = siblings
+    .filter((clip) => clip.startFrame + clip.durationFrames <= oldStartFrame)
+    .reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0);
+  // A packed clip at timeline zero still has a usable source head. Its left-handle pointer can be
+  // negative even though the committed timeline remains non-negative, so preserve that signed delta.
+  const requestedFrame = edge === 'left' ? Math.round(atSec * fps) : secondsToTimelineFrames(Math.max(0, atSec), fps);
+  const sourceRate = (found.clip.sourceOutSec - found.clip.sourceInSec)
+    / timelineFramesToSeconds(found.clip.durationFrames, fps);
+
+  let newStartFrame = oldStartFrame;
+  let newEndFrame = oldEndFrame;
+  let sourceInSec = found.clip.sourceInSec;
+  let sourceOutSec = found.clip.sourceOutSec;
+  let rippleHeadExtension = false;
+  if (edge === 'left') {
+    const sourceFloorFrame = sourceRate > 0
+      ? oldStartFrame - secondsToTimelineFrames(sourceInSec / sourceRate, fps)
+      : oldStartFrame;
+    rippleHeadExtension = requestedFrame < oldStartFrame && previousEndFrame === oldStartFrame;
+    if (rippleHeadExtension) {
+      const requestedSourceEdgeFrame = Math.max(sourceFloorFrame, requestedFrame);
+      newEndFrame = oldEndFrame + oldStartFrame - requestedSourceEdgeFrame;
+      if (sourceRate > 0) {
+        sourceInSec = Math.max(0, sourceInSec + frameDeltaSec(requestedSourceEdgeFrame - oldStartFrame, fps) * sourceRate);
+      }
+    } else {
+      newStartFrame = Math.max(previousEndFrame, sourceFloorFrame, Math.min(requestedFrame, oldEndFrame - minFrames));
+      if (sourceRate > 0) {
+        sourceInSec = Math.max(0, sourceInSec + frameDeltaSec(newStartFrame - oldStartFrame, fps) * sourceRate);
+      }
+    }
+  } else {
+    const sourceCeilingFrame = sourceRate > 0 && asset.metadata.durationSec != null
+      ? oldEndFrame + secondsToTimelineFrames(Math.max(0, asset.metadata.durationSec - sourceOutSec) / sourceRate, fps)
+      : Number.POSITIVE_INFINITY;
+    newEndFrame = Math.min(sourceCeilingFrame, Math.max(requestedFrame, oldStartFrame + minFrames));
+    if (sourceRate > 0) {
+      sourceOutSec += frameDeltaSec(newEndFrame - oldEndFrame, fps) * sourceRate;
+      if (asset.metadata.durationSec != null) sourceOutSec = Math.min(asset.metadata.durationSec, sourceOutSec);
+    }
+  }
+  const newDurationFrames = newEndFrame - newStartFrame;
+  if (newStartFrame === oldStartFrame && newDurationFrames === found.clip.durationFrames) {
+    return mutation(document, 'Narrative clip duration unchanged', [], {
+      clipId, startSec: timelineFramesToSeconds(oldStartFrame, fps), endSec: timelineFramesToSeconds(oldEndFrame, fps),
+    });
+  }
+
+  let baseDocument = document;
+  const receipts: EditorCommandReceipt[] = [];
+  if (edge === 'right' || rippleHeadExtension) {
+    const retimed = rippleHeadExtension
+      ? retimeEditorClip(document, {
+          trackId: found.track.id,
+          clipId,
+          durationFrames: newDurationFrames,
+          ripple: true,
+          rippleFromFrame: oldStartFrame,
+        })
+      : applyEditorCommand(document, {
+          type: 'clip.retime',
+          trackId: found.track.id,
+          clipId,
+          durationFrames: newDurationFrames,
+          ripple: true,
+        });
+    if (!retimed.ok) return fail(retimed.error.message, retimed.error);
+    baseDocument = retimed.document;
+    receipts.push(retimed.receipt);
+  }
+  const baseFound = locatedClip(baseDocument, clipId);
+  if (!baseFound || baseFound.clip.kind !== 'narrative') return fail(`primary narrative clip not found after resize: ${clipId}`);
+  const resized: NarrativeTimelineClip = {
+    ...baseFound.clip,
+    startFrame: newStartFrame,
+    durationFrames: newDurationFrames,
+    sourceInSec,
+    sourceOutSec,
+    ...(edge === 'left'
+      ? { properties: (() => {
+          const { transIn: _removed, ...properties } = found.clip.properties;
+          return properties;
+        })() }
+      : {}),
+  };
+  const tracks = baseDocument.timeline.tracks.map((track) => track.id === found.track.id
+    ? {
+        ...track,
+        clips: track.clips.map((clip) => {
+          if (clip.id === clipId) return resized;
+          if (edge !== 'right' || clip.kind !== 'narrative' || clip.properties.transIn?.prevId !== clipId) return clip;
+          const { transIn: _removed, ...properties } = clip.properties;
+          return { ...clip, properties };
+        }).sort((left, right) => left.startFrame - right.startFrame || left.id.localeCompare(right.id)),
+      }
+    : track);
+  const next = { ...baseDocument, timeline: { ...baseDocument.timeline, tracks } };
+  return mutation(next, `Resized narrative clip to ${timelineFramesToSeconds(newDurationFrames, fps)}s`, receipts, {
     clipId,
     startSec: timelineFramesToSeconds(newStartFrame, fps),
     endSec: timelineFramesToSeconds(newEndFrame, fps),

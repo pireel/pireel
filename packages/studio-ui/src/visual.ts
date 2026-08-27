@@ -10,10 +10,10 @@
 
 import { detectScenes } from '@pireel/studio-engine/video-edit/scene-detection';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
-import { type NRect, type SafeZone, analyzeGeometryAndQuality, analyzeGeometryRange, geomNote, safeZoneForRange } from './geometry';
+import { type NRect, type SafeZone, analyzeGeometryAndQuality, analyzeGeometryRange, analyzeQualityAtTimes, geomNote, safeZoneForRange } from './geometry';
 import { type DerivedPalette, extractPalette } from './palette';
 import { fileSig } from './media';
-import { buildVisualQualityWindows, type VisualQualityWindow } from '@pireel/studio-engine/visual-quality';
+import { buildVisualQualityWindows, fineQualitySampleTimes, type VisualQualityWindow } from '@pireel/studio-engine/visual-quality';
 
 // Data contracts live in the engine package (analysis impl stays here): layoutFromPlan etc. consume these shapes
 export type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-engine/visual-types';
@@ -47,8 +47,8 @@ export async function mapWithConcurrency<T, R>(
 }
 
 /* ---------- Visual-analysis cache (localStorage, keyed by file fingerprint; same clip doesn't rerun the VLM) ---------- */
-// v4: local technical-quality windows + long-take semantic subdivisions; old caches lack both and must be refreshed.
-const VPREFIX = 'pinshot:studio:visual:v4:';
+// v5: quality windows now require a bounded fine scan plus absolute rejection diagnostics.
+const VPREFIX = 'pinshot:studio:visual:v5:';
 export function getCachedVisual(sig: string): VisualTimeline | null {
   if (!sig || typeof localStorage === 'undefined') return null;
   try {
@@ -191,10 +191,34 @@ export async function prepareVisualAnalysis(
   const palettePromise = extractPalette(thumbs); // reuse the same batch of thumbnail frames to sample the palette
   // The geometry pass (MediaPipe, per-frame) is the long pole; progress tracks it
   const [local, palette] = await Promise.all([
-    analyzeGeometryAndQuality(file, durationSec, onProgress).catch(() => ({ frames: null, quality: [] })),
+    analyzeGeometryAndQuality(file, durationSec, (done, total) => {
+      onProgress?.((total > 0 ? done / total : 0) * 0.72, 1);
+    }).catch(() => ({ frames: null, quality: [] })),
     palettePromise,
   ]);
-  const qualityWindows = buildVisualQualityWindows(local.quality, durationSec, cuts);
+  // Coarse observations only locate promising neighborhoods. They deliberately bypass absolute
+  // thresholds because sparse samples can land on a transient blink/blur and hide a clean nearby span.
+  const coarseWindows = buildVisualQualityWindows(local.quality, durationSec, cuts, {
+    maxWindows: 12,
+    enforceThresholds: false,
+  });
+  const fineTimes = fineQualitySampleTimes(coarseWindows, durationSec, {
+    fps: 6,
+    paddingSec: 0.25,
+    maxFrames: 180,
+  });
+  const fineQuality = fineTimes.length
+    ? await analyzeQualityAtTimes(file, fineTimes, (done, total) => {
+        onProgress?.(0.72 + (total > 0 ? done / total : 0) * 0.28, 1);
+      }).catch(() => [])
+    : [];
+  // The final list always uses absolute gates. If refinement failed, strict coarse results are safer
+  // than returning the relaxed shortlist or forcing a "best of bad" candidate.
+  const qualityWindows = buildVisualQualityWindows(
+    fineQuality.length ? fineQuality : local.quality,
+    durationSec,
+    cuts,
+  );
   const frames = await Promise.all(
     thumbs.map(async (th) => {
       const img = await blobToBase64(th.blob);

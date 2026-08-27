@@ -147,6 +147,7 @@ import {
   mediaFramingTransformVars,
   normalizeAtomicMediaFraming,
   resolveShotMediaFraming,
+  resizeNarrativeTimelineClip,
   resizeVisualTimelineClip,
   supplementalVisualStateAt,
   DIRECTIONAL_TRANSITIONS,
@@ -200,6 +201,7 @@ import {
 } from "@pireel/studio-engine/graphics-layout";
 import {
   type FilmstripFrame,
+  type FilmstripSourceRange,
   durableFileSig,
   extractFilmstrip,
   fileSig,
@@ -934,6 +936,7 @@ export function HyperframesWorkbench({
   /** Insert-source transcripts (key = shot.src, sentence times = that source file's own timeline). All sources transcribed when opening the captions / smart-cut panels. */
   const [clipAsr, setClipAsr] = useState<Record<string, AsrSegment[]>>({});
   const [filmstrip, setFilmstrip] = useState<FilmstripFrame[]>([]);
+  const [timelineFilmstripDemand, setTimelineFilmstripDemand] = useState<Record<string, FilmstripSourceRange[]>>({});
   useEffect(() => {
     let cancelled = false;
     migrateLegacyDraft();
@@ -6502,7 +6505,6 @@ export function HyperframesWorkbench({
     resetRuntime: resetClipRuntime,
   } = useClipInsert({
     projectId,
-    comp,
     compRef,
     clipFilesRef,
     cloudMediaRef,
@@ -6518,7 +6520,7 @@ export function HyperframesWorkbench({
     ensureClipTranscripts,
     backupMediaToCloud,
     runTool: (toolId, input) => runToolRef.current(toolId, input),
-    visualSources: supplementalVisuals,
+    filmstripDemand: timelineFilmstripDemand,
   });
   const resetForOutputChange = useCallback(() => {
     setPlaying(false);
@@ -7231,6 +7233,26 @@ export function HyperframesWorkbench({
     selectVisualClip(clipId);
   };
 
+  const commitNarrativeClipResize = (
+    clipId: string,
+    edge: "left" | "right",
+    atSec: number,
+  ) => {
+    const edit = resizeNarrativeTimelineClip(
+      editorDocumentRef.current,
+      clipId,
+      edge,
+      atSec,
+    );
+    if (!edit.ok || !edit.document) {
+      toast.error(edit.error || t("editorError.operationFailed"));
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(edit.document);
+    setSelectedShotId(clipId);
+  };
+
   const timelineCbs = useStableCallbacks({
     onPps: setPps,
     onSeek: (v: number) => {
@@ -7282,6 +7304,7 @@ export function HyperframesWorkbench({
     onSelectShot: selectShot,
     onBoxSelectShots: selectShotsBox,
     onMoveShot: commitVisualClipMove,
+    onResizeShot: commitNarrativeClipResize,
     onSelectVisualClip: selectVisualClip,
     onDeselectAll: () => {
       setSelectedVisualClipId(null);
@@ -10486,6 +10509,7 @@ export function HyperframesWorkbench({
             selectedBlockIds={selectedBlockIds}
             filmstrip={filmstrip}
             clipStrips={clipStrips}
+            onFilmstripDemandChange={setTimelineFilmstripDemand}
             mainLive
             srcLive={srcLive}
             pps={pps}

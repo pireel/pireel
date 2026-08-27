@@ -22,6 +22,46 @@ export interface VisualQualityWindow {
   stability: number;
   subjectPresence?: number;
   sampleCount: number;
+  /** Weakest locally observed technical frame in [0, 100]. */
+  worstFrameScore: number;
+  /** Conservative entry/exit score in [0, 100]. */
+  edgeScore: number;
+  /** Fraction of samples with at least one severe technical failure. */
+  hardFailureFraction: number;
+}
+
+export interface VisualQualityPolicy {
+  minScore: number;
+  minSharpness: number;
+  minExposure: number;
+  minStability: number;
+  minEdgeScore: number;
+  maxHardFailureFraction: number;
+}
+
+export const DEFAULT_VISUAL_QUALITY_POLICY: VisualQualityPolicy = {
+  minScore: 48,
+  minSharpness: 0.22,
+  minExposure: 0.25,
+  minStability: 0.16,
+  minEdgeScore: 42,
+  maxHardFailureFraction: 0,
+};
+
+export interface FrameMotionVector { dx: number; dy: number }
+
+export function frameStabilityScore(
+  current: FrameMotionVector,
+  previous: FrameMotionVector | null,
+  photometricError: number,
+): number {
+  const translation = Math.hypot(current.dx, current.dy);
+  const translationScore = Math.exp(-Math.max(0, translation - 0.75) / 2.5);
+  const consistencyScore = previous
+    ? Math.exp(-Math.hypot(current.dx - previous.dx, current.dy - previous.dy) / 1.5)
+    : translationScore;
+  const photometricScore = 1 - Math.max(0, photometricError - 0.2) * 0.8;
+  return clamp01((consistencyScore * 0.68 + translationScore * 0.32) * photometricScore);
 }
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -48,6 +88,13 @@ function candidateFor(samples: FrameQualityObservation[], startSec: number, endS
   ));
   const conservative = quantile(technical, 0.2);
   const score = Math.round(clamp01(conservative * 0.62 + average(technical) * 0.38) * 100);
+  const edgeCount = Math.max(1, Math.ceil(samples.length * 0.2));
+  const edgeTechnical = [...technical.slice(0, edgeCount), ...technical.slice(-edgeCount)];
+  const hardFailures = samples.filter((sample) => (
+    clamp01(sample.sharpness) < 0.12
+    || clamp01(sample.exposure) < 0.14
+    || clamp01(sample.stability) < 0.1
+  )).length;
   const metric = (values: number[]) => {
     // Report a conservative blend too: a clean midpoint must not conceal a bad entry or exit.
     return round3(quantile(values, 0.2) * 0.6 + average(values) * 0.4);
@@ -63,7 +110,53 @@ function candidateFor(samples: FrameQualityObservation[], startSec: number, endS
       subjectPresence: metric(samples.flatMap((sample) => sample.subjectPresence == null ? [] : [clamp01(sample.subjectPresence)])),
     } : {}),
     sampleCount: samples.length,
+    worstFrameScore: Math.round(quantile(technical, 0) * 100),
+    edgeScore: Math.round(quantile(edgeTechnical, 0.2) * 100),
+    hardFailureFraction: round3(hardFailures / Math.max(1, samples.length)),
   };
+}
+
+function passesPolicy(candidate: Candidate, policy: VisualQualityPolicy): boolean {
+  return candidate.score >= policy.minScore
+    && candidate.sharpness >= policy.minSharpness
+    && candidate.exposure >= policy.minExposure
+    && candidate.stability >= policy.minStability
+    && candidate.edgeScore >= policy.minEdgeScore
+    && candidate.hardFailureFraction <= policy.maxHardFailureFraction;
+}
+
+export function fineQualitySampleTimes(
+  windows: readonly Pick<VisualQualityWindow, 'startSec' | 'endSec'>[],
+  durationSec: number,
+  options: { fps?: number; paddingSec?: number; maxFrames?: number } = {},
+): number[] {
+  if (!windows.length || durationSec <= 0) return [];
+  const fps = Math.max(2, Math.min(12, options.fps ?? 6));
+  const padding = Math.max(0, Math.min(1, options.paddingSec ?? 0.25));
+  const maxFrames = Math.max(12, Math.min(360, Math.floor(options.maxFrames ?? 180)));
+  const ranges = windows
+    .map((window) => ({
+      start: Math.max(0, Math.min(durationSec, window.startSec - padding)),
+      end: Math.max(0, Math.min(durationSec, window.endSec + padding)),
+    }))
+    .filter((range) => range.end > range.start)
+    .sort((a, b) => a.start - b.start);
+  const merged: { start: number; end: number }[] = [];
+  for (const range of ranges) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.start <= previous.end + 1 / fps) previous.end = Math.max(previous.end, range.end);
+    else merged.push({ ...range });
+  }
+  const stamps = merged.flatMap((range) => {
+    const span = range.end - range.start;
+    const count = Math.max(3, Math.ceil(span * fps) + 1);
+    return Array.from({ length: count }, (_, index) => round3(range.start + (span * index) / (count - 1)));
+  });
+  if (stamps.length <= maxFrames) return [...new Set(stamps)];
+  return Array.from({ length: maxFrames }, (_, index) => {
+    const sourceIndex = Math.round((index * (stamps.length - 1)) / Math.max(1, maxFrames - 1));
+    return stamps[sourceIndex]!;
+  }).filter((stamp, index, all) => index === 0 || stamp !== all[index - 1]);
 }
 
 /**
@@ -75,7 +168,13 @@ export function buildVisualQualityWindows(
   observations: readonly FrameQualityObservation[],
   durationSec: number,
   sceneCutsSec: readonly number[] = [],
-  options: { minDurationSec?: number; maxDurationSec?: number; maxWindows?: number } = {},
+  options: {
+    minDurationSec?: number;
+    maxDurationSec?: number;
+    maxWindows?: number;
+    enforceThresholds?: boolean;
+    policy?: Partial<VisualQualityPolicy>;
+  } = {},
 ): VisualQualityWindow[] {
   const samples = observations
     .filter((sample) => Number.isFinite(sample.timeSec) && sample.timeSec >= 0 && sample.timeSec <= durationSec + 0.1)
@@ -92,6 +191,7 @@ export function buildVisualQualityWindows(
   const minDuration = Math.max(0.6, options.minDurationSec ?? 1.2);
   const maxDuration = Math.max(minDuration, options.maxDurationSec ?? 3.2);
   const maxWindows = Math.max(1, Math.floor(options.maxWindows ?? 12));
+  const policy: VisualQualityPolicy = { ...DEFAULT_VISUAL_QUALITY_POLICY, ...options.policy };
   const cuts = sceneCutsSec
     .filter((cut) => Number.isFinite(cut) && cut > 0 && cut < durationSec)
     .sort((a, b) => a - b);
@@ -119,7 +219,9 @@ export function buildVisualQualityWindows(
         const span = rangeEnd - rangeStart;
         if (span > maxDuration + 0.05) break;
         if (span < minDuration - 0.05 && !(boundaryEnd - boundaryStart < minDuration && start === 0 && end === local.length - 1)) continue;
-        candidates.push(candidateFor(local.slice(start, end + 1), rangeStart, rangeEnd));
+        const candidate = candidateFor(local.slice(start, end + 1), rangeStart, rangeEnd);
+        if (options.enforceThresholds !== false && !passesPolicy(candidate, policy)) continue;
+        candidates.push(candidate);
       }
     }
   }

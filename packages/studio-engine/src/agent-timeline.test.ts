@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
-import { resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
+import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
 import { withDirectorPlanInSemantics } from './director-plan-artifact';
 import { withSceneDesignsInSemantics } from './scene-design';
 
@@ -428,6 +428,75 @@ describe('shared agent timeline atoms', () => {
       sourceInSec: 0,
       sourceOutSec: 5,
     });
+  });
+
+  it('extends a primary clip by rippling later clips and clears the changed cut transition', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'first-video', kind: 'video', url: 'https://cdn.example/first.mp4', durationSec: 20 },
+        { id: 'second-video', kind: 'video', url: 'https://cdn.example/second.mp4', durationSec: 20 },
+      ],
+    }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'first', role: 'primary', assetId: 'first-video', startSec: 0, durationSec: 5 },
+        { id: 'second', role: 'primary', assetId: 'second-video', startSec: 5, durationSec: 5 },
+      ],
+    }).document!;
+    const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)!;
+    primary.clips = primary.clips.map((clip) => clip.id === 'second' && clip.kind === 'narrative'
+      ? { ...clip, properties: { ...clip.properties, transIn: { prevId: 'first', effect: 'fade', durationSec: 1 } } }
+      : clip);
+
+    const extendedTail = resizeNarrativeTimelineClip(document, 'first', 'right', 6);
+    expect(extendedTail.ok).toBe(true);
+    expect(extendedTail.document!.timeline.tracks.find((track) => track.id === primary.id)?.clips).toMatchObject([
+      { id: 'first', startFrame: 0, durationFrames: 180, sourceInSec: 0, sourceOutSec: 6 },
+      { id: 'second', startFrame: 180, durationFrames: 150, properties: { treatment: 'full' } },
+    ]);
+    expect((extendedTail.document!.timeline.tracks.find((track) => track.id === primary.id)?.clips[1] as { properties: object }).properties)
+      .not.toHaveProperty('transIn');
+
+    const trimmedHead = resizeNarrativeTimelineClip(extendedTail.document!, 'second', 'left', 7);
+    expect(trimmedHead.document!.timeline.tracks.find((track) => track.id === primary.id)?.clips[1]).toMatchObject({
+      id: 'second', startFrame: 210, durationFrames: 120, sourceInSec: 1, sourceOutSec: 5,
+    });
+  });
+
+  it('restores a packed primary clip from its trimmed source head and ripples later clips', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [
+        { id: 'first-video', kind: 'video', url: 'https://cdn.example/first.mp4', durationSec: 20 },
+        { id: 'middle-video', kind: 'video', url: 'https://cdn.example/middle.mp4', durationSec: 20 },
+        { id: 'last-video', kind: 'video', url: 'https://cdn.example/last.mp4', durationSec: 20 },
+      ],
+    }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'first', role: 'primary', assetId: 'first-video', startSec: 0, durationSec: 5, sourceInSec: 5, sourceOutSec: 10 },
+        { id: 'middle', role: 'primary', assetId: 'middle-video', startSec: 5, durationSec: 5, sourceInSec: 5, sourceOutSec: 10 },
+        { id: 'last', role: 'primary', assetId: 'last-video', startSec: 10, durationSec: 5 },
+      ],
+    }).document!;
+
+    const extendedHead = resizeNarrativeTimelineClip(document, 'middle', 'left', 4);
+
+    expect(extendedHead.ok).toBe(true);
+    expect(extendedHead.document!.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)?.clips).toMatchObject([
+      { id: 'first', startFrame: 0, durationFrames: 150 },
+      { id: 'middle', startFrame: 150, durationFrames: 180, sourceInSec: 4, sourceOutSec: 10 },
+      { id: 'last', startFrame: 330, durationFrames: 150 },
+    ]);
+
+    const firstAtZero = resizeNarrativeTimelineClip(document, 'first', 'left', -1);
+    expect(firstAtZero.ok).toBe(true);
+    expect(firstAtZero.document!.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)?.clips).toMatchObject([
+      { id: 'first', startFrame: 0, durationFrames: 180, sourceInSec: 4, sourceOutSec: 10 },
+      { id: 'middle', startFrame: 180, durationFrames: 150 },
+      { id: 'last', startFrame: 330, durationFrames: 150 },
+    ]);
   });
 
   it('links and moves typed clips through one shared command path', () => {

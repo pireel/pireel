@@ -18,6 +18,7 @@ import { resolveInteraction } from './interaction-store';
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
 const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
+const editorialReviewMocks = vi.hoisted(() => ({ reviewEditorialCandidates: vi.fn() }));
 const speechMocks = vi.hoisted(() => ({
   assessLocalSpeechAudio: vi.fn(),
   detectSpeechSilenceCuts: vi.fn(),
@@ -42,6 +43,9 @@ vi.mock('./visual', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./visual')>()),
   analyzeVisual: visualMocks.analyzeVisual,
   analyzeVisualGeometry: visualMocks.analyzeVisualGeometry,
+}));
+vi.mock('./editorial-review', () => ({
+  reviewEditorialCandidates: editorialReviewMocks.reviewEditorialCandidates,
 }));
 vi.mock('./speech-silence', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./speech-silence')>()),
@@ -125,6 +129,7 @@ describe('Agent composition transaction boundary', () => {
     mediaMocks.probeVideoFile.mockReset();
     visualMocks.analyzeVisual.mockReset();
     visualMocks.analyzeVisualGeometry.mockReset();
+    editorialReviewMocks.reviewEditorialCandidates.mockReset();
     speechMocks.assessLocalSpeechAudio.mockReset();
     speechMocks.detectSpeechSilenceCuts.mockReset();
     localMediaMocks.loadLocalVideo.mockReset();
@@ -1085,6 +1090,69 @@ describe('Agent composition transaction boundary', () => {
     expect((result as { data?: Record<string, unknown> }).data).not.toHaveProperty('segments');
     expect(visualMocks.analyzeVisualGeometry).toHaveBeenCalled();
     expect(visualMocks.analyzeVisual).not.toHaveBeenCalled();
+  });
+
+  it('compares temporal candidates under an explicit editorial brief', async () => {
+    const h = harness();
+    const sig = 'female-lead.mp4:160:8';
+    const video = new File(['video-bytes'], 'female-lead.mp4', { type: 'video/mp4', lastModified: 8 });
+    localMediaMocks.loadLocalVideo.mockResolvedValue(video);
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 20, width: 1080, height: 1920, hasAudio: true });
+    visualMocks.analyzeVisualGeometry.mockResolvedValue({
+      cuts: [],
+      segments: [{ start: 0, end: 20, label: { content: 'broll', person: 'center', safe: 'top', hasText: false, desc: '' } }],
+      qualityWindows: [{
+        rank: 1, startSec: 4, endSec: 6, score: 88, sharpness: 0.9, exposure: 0.86, stability: 0.87, sampleCount: 4,
+        worstFrameScore: 84, edgeScore: 86, hardFailureFraction: 0,
+      }],
+    });
+    editorialReviewMocks.reviewEditorialCandidates.mockResolvedValue({
+      brief: 'Confident, restrained female-lead footage; compare hook and ending suitability.',
+      candidates: [{
+        candidateId: 'candidate-1', startSec: 4, endSec: 6, rank: 1, verdict: 'strong', score: 92,
+        action: 'walks forward and settles her gaze', rationale: 'complete confident action',
+        roleFit: [{ role: 'hook', score: 94 }], issues: [],
+      }],
+    });
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [localEntry('asset-female-lead', sig, '人物素材', 'video')] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'analyze_visual', {
+      assetId: 'asset-female-lead',
+      mode: 'editorial',
+      brief: 'Confident, restrained female-lead footage; compare hook and ending suitability.',
+      maxCandidates: 4,
+      assessAudio: false,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        analysisMode: 'editorial-candidates',
+        editorialCandidates: [{ candidateId: 'candidate-1', verdict: 'strong', roleFit: [{ role: 'hook' }] }],
+      },
+    });
+    expect(editorialReviewMocks.reviewEditorialCandidates).toHaveBeenCalledWith(
+      video,
+      expect.arrayContaining([expect.objectContaining({ startSec: 4, endSec: 6 })]),
+      expect.stringContaining('Confident'),
+      expect.objectContaining({ maxCandidates: 4 }),
+    );
+    expect(visualMocks.analyzeVisual).not.toHaveBeenCalled();
+  });
+
+  it('requires a concrete brief for editorial candidate review', async () => {
+    const h = harness();
+    Object.assign(h.ctx, { projectId: 'test', genIdsRef: { current: new Set<string>() }, pushUndoSnapshot: () => {} });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'analyze_visual', { mode: 'editorial' });
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('requires a concrete brief') });
+    expect(visualMocks.analyzeVisualGeometry).not.toHaveBeenCalled();
+    expect(editorialReviewMocks.reviewEditorialCandidates).not.toHaveBeenCalled();
   });
 
   it('transcribes a targeted registered audio asset without requiring a main video', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyEditorDocumentV2 } from '../create';
 import type { AudioTimelineClip, NarrativeTimelineClip } from '../types';
 import { applyEditorCommand } from './dispatcher';
+import { retimeEditorClip } from './clip-retime';
 
 function narrative(id: string, startFrame: number, durationFrames: number, sourceInSec: number, sourceOutSec: number): NarrativeTimelineClip {
   return {
@@ -52,6 +53,47 @@ describe('clip.retime', () => {
     ]);
     expect(result.document.timeline.tracks[1]!.clips[0]).toMatchObject({ id: 'voice-clip', startFrame: 60 });
     expect(result.receipt.shiftedClipIds).toEqual(expect.arrayContaining(['second', 'voice-clip']));
+  });
+
+  it('can ripple from a packed clip head when restored source frames are inserted there', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.video = {
+      id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.example/video.mp4' }, metadata: { durationSec: 10 },
+    };
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { remoteUrl: 'https://cdn.example/voice.wav' }, metadata: { durationSec: 2 },
+    };
+    document.timeline.tracks[0]!.clips = [
+      narrative('first', 0, 120, 0, 4),
+      narrative('middle', 120, 60, 4, 6),
+      narrative('last', 180, 60, 6, 8),
+    ];
+    document.timeline.tracks.push({
+      id: 'voice-track', type: 'audio', role: 'narration', muted: false, hidden: false,
+      locked: false, syncLocked: true, stackOrder: 0,
+      clips: [{
+        id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 120, durationFrames: 60,
+        sourceInSec: 0, sourceOutSec: 2, properties: {}, anchor: { type: 'timeline' }, enabled: true,
+      }],
+    });
+
+    const result = retimeEditorClip(document, {
+      trackId: document.semantics.primaryNarrativeTrackId,
+      clipId: 'middle',
+      durationFrames: 90,
+      ripple: true,
+      rippleFromFrame: 120,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks[0]!.clips).toMatchObject([
+      { id: 'first', startFrame: 0, durationFrames: 120 },
+      { id: 'middle', startFrame: 120, durationFrames: 90 },
+      { id: 'last', startFrame: 210, durationFrames: 60 },
+    ]);
+    expect(result.document.timeline.tracks[1]!.clips[0]).toMatchObject({ id: 'voice-clip', startFrame: 150 });
+    expect(result.receipt.shiftedClipIds).toEqual(expect.arrayContaining(['last', 'voice-clip']));
   });
 
   it('scales clip-local visual keyframe timing without rippling an overlay-video lane by default', () => {

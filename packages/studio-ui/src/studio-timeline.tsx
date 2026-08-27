@@ -35,7 +35,11 @@ import { KIND_META } from './kind-meta';
 import { blockDisplayTitle } from './block-display-title';
 import { t } from './i18n';
 import { playhead } from './playhead';
-import type { FilmstripFrame } from './media';
+import {
+  type FilmstripFrame,
+  type FilmstripSourceRange,
+  filmstripSourceRangeForTimelineWindow,
+} from './media';
 import {
   CAP_LANE,
   EDGE_PAD,
@@ -170,6 +174,8 @@ interface StudioTimelineProps {
   onBoxSelectShots: (ids: string[]) => void;
   /** Move a primary clip in time or onto another visual lane. The destination uses overwrite semantics. */
   onMoveShot?: (id: string, startSec: number, target: TimelineMediaDropTarget) => void;
+  /** Trim/extend a primary clip from either edge; packed-edge extensions ripple the magnetic main track. */
+  onResizeShot?: (id: string, edge: 'left' | 'right', atSec: number) => void;
   /** Move a block across physical tracks. trackId is canonical; stackOrder is retained only for legacy hosts. */
   onMoveBlockTrack?: (id: string, target: TimelineBlockTrackTarget, startSec: number) => void;
   /** Drag a block into any native row boundary and create a graphics track at that document index. */
@@ -234,6 +240,8 @@ interface StudioTimelineProps {
   onOpenMusicPanel?: () => void;
   /** Filmstrips for externally inserted clips (shotId -> frames, t = the clip's own source time). */
   clipStrips?: Record<string, FilmstripFrame[]>;
+  /** Visible timeline window translated into source-clock thumbnail demand. */
+  onFilmstripDemandChange?: (demand: Record<string, FilmstripSourceRange[]>) => void;
   /** Per-asset missing-source UI: is the main source's File loaded this session? Default true (hosts without the signal). */
   mainLive?: boolean;
   /** Per-asset missing-source UI: are this clip source's bytes reachable? Default live. */
@@ -326,6 +334,7 @@ function StudioTimelineImpl({
   onSelectShot,
   onBoxSelectShots,
   onMoveShot,
+  onResizeShot,
   onMoveBlockTrack,
   onMoveBlockNewTrack,
   onSelectBlock,
@@ -366,6 +375,7 @@ function StudioTimelineImpl({
   onResizeTransition,
   clipPendingAt,
   clipStrips,
+  onFilmstripDemandChange,
   mainLive = true,
   srcLive,
 }: StudioTimelineProps) {
@@ -436,6 +446,11 @@ function StudioTimelineImpl({
   } | null>(null);
   const [audioDropTarget, setAudioDropTarget] = useState<AudioLaneMoveTarget | null>(null);
   const [trDrag, setTrDrag] = useState<{ cut: number; half: number } | null>(null); // live half-width while dragging a transition handle (symmetric)
+  const [shotResize, setShotResize] = useState<{
+    shotId: string;
+    edge: 'left' | 'right';
+    atSec: number;
+  } | null>(null);
   const [captionResize, setCaptionResize] = useState<{
     id: string;
     startSec: number;
@@ -450,6 +465,7 @@ function StudioTimelineImpl({
   const [marquee, setMarquee] = useState<{ l: number; r: number } | null>(null); // scene-track marquee rectangle (content px)
   const laneRef = useRef<HTMLDivElement | null>(null); // scene-track DOM (content-coordinate base, moves with scroll)
   const marqueeDraggedRef = useRef(false); // whether this pointer-down became a marquee drag (used to suppress the subsequent shot click)
+  const shotResizeMovedRef = useRef(false); // suppress the click synthesized after a main-clip edge trim
   const [blockMarquee, setBlockMarquee] = useState<{ l: number; r: number; t: number; b: number } | null>(null); // element-track marquee rectangle (tracksRef px, includes y for cross-track)
   const tracksRef = useRef<HTMLDivElement | null>(null); // track background area DOM (coordinate base for block marquee)
   const blockMarqueeDraggedRef = useRef(false); // whether the block marquee became a drag (suppress the subsequent block click)
@@ -458,6 +474,7 @@ function StudioTimelineImpl({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ startSec: 0, endSec: 30 });
+  const filmstripDemandKeyRef = useRef('');
   const draggingRef = useRef(false); // while dragging: let hover-seek yield (avoid double seek)
   const framePickConsumedRef = useRef(false); // suppress the click synthesized after a capture-phase frame pick
   const hoverRaf = useRef(0); // hover rAF coalescing
@@ -519,6 +536,41 @@ function StudioTimelineImpl({
     observer.observe(el);
     return () => observer.disconnect();
   }, [updateVisibleRange]);
+  useEffect(() => {
+    if (!onFilmstripDemandChange) return;
+    const demand: Record<string, FilmstripSourceRange[]> = {};
+    const addVisibleSourceRange = (
+      source: string | undefined,
+      timelineStartSec: number,
+      timelineEndSec: number,
+      sourceInSec: number,
+      sourceOutSec: number,
+    ) => {
+      if (!source) return;
+      const range = filmstripSourceRangeForTimelineWindow(
+        timelineStartSec,
+        timelineEndSec,
+        sourceInSec,
+        sourceOutSec,
+        visibleRange.startSec,
+        visibleRange.endSec,
+      );
+      if (range) (demand[source] ??= []).push(range);
+    };
+    for (const span of sceneSpans) {
+      addVisibleSourceRange(span.shot.src, span.start, span.end, span.shot.srcStart, span.shot.srcEnd);
+    }
+    for (const track of trackStates ?? []) {
+      for (const clip of track.clips ?? []) {
+        if (clip.kind !== 'video' || clip.usePrimaryFilmstrip) continue;
+        addVisibleSourceRange(clip.source, clip.startSec, clip.endSec, clip.sourceInSec, clip.sourceOutSec);
+      }
+    }
+    const key = JSON.stringify(demand);
+    if (key === filmstripDemandKeyRef.current) return;
+    filmstripDemandKeyRef.current = key;
+    onFilmstripDemandChange(demand);
+  }, [onFilmstripDemandChange, sceneSpans, trackStates, visibleRange]);
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
@@ -1714,7 +1766,29 @@ function StudioTimelineImpl({
                   {sceneSpans.map(({ shot, start, end }, i) => {
                     const sel = selectedShotIds.has(shot.id);
                     const enabled = placementEnabled.get(shot.id) ?? true;
-                    const shotLen = end - start;
+                    const liveResize = shotResize?.shotId === shot.id ? shotResize : null;
+                    const sourceRate = (shot.srcEnd - shot.srcStart) / Math.max(0.001, end - start);
+                    const sourceFloor = sourceRate > 0 ? start - shot.srcStart / sourceRate : start;
+                    const previousEnd = sceneSpans[i - 1]?.end ?? 0;
+                    const packedAtStart = Math.abs(previousEnd - start) < 0.001;
+                    const liveHeadRipple = liveResize?.edge === 'left' && packedAtStart && liveResize.atSec < start;
+                    const displayStart = liveResize?.edge === 'left'
+                      ? liveHeadRipple
+                        ? start
+                        : Math.max(0, sourceFloor, previousEnd, Math.min(liveResize.atSec, end - 0.2))
+                      : start;
+                    const displayEnd = liveHeadRipple
+                      ? end + start - liveResize.atSec
+                      : liveResize?.edge === 'right'
+                        ? Math.max(start + 0.2, liveResize.atSec)
+                        : end;
+                    const displaySourceStart = liveResize?.edge === 'left'
+                      ? shot.srcStart + (liveResize.atSec - start) * sourceRate
+                      : shot.srcStart;
+                    const displaySourceEnd = liveResize?.edge === 'right'
+                      ? shot.srcEnd + (displayEnd - end) * sourceRate
+                      : shot.srcEnd;
+                    const shotLen = displayEnd - displayStart;
                     const gapR = i < sceneSpans.length - 1 ? SHOT_GAP : 0; // hairline gap off the right edge, left edge stays time-accurate
                     const w = Math.max(8, x(shotLen) - gapR);
                     const dragged = shotDrag?.from === i;
@@ -1729,6 +1803,10 @@ function StudioTimelineImpl({
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (shotResizeMovedRef.current) {
+                              shotResizeMovedRef.current = false;
+                              return;
+                            }
                             if (shotDragMovedRef.current) {
                               shotDragMovedRef.current = false; // this is the tail of a clip drag, not a click
                               return;
@@ -1744,10 +1822,10 @@ function StudioTimelineImpl({
                           onDoubleClick={(e) => e.stopPropagation()}
                           aria-label={t('panels.sceneNShotName', { n: i + 1, name: t(TREATMENT_NAME[shot.treatment] ?? shot.treatment) })}
                           aria-disabled={!enabled}
-                          className={`bg-ink/10 absolute overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${!enabled ? 'opacity-45 grayscale ' : ''}${
+                          className={`group/shot bg-ink/10 absolute overflow-hidden text-left ${TIMELINE_ITEM_RADIUS} ${!enabled ? 'opacity-45 grayscale ' : ''}${
                             dragged ? 'opacity-30 ring-1 ring-white/10' : sel ? 'transition ring-2 ring-accent/70' : 'transition ring-1 ring-white/10 hover:ring-accent/40'
                           }`}
-                          style={{ left: x(start), width: w, top: SCENE_PAD_T, height: H0 - SCENE_PAD_T - SCENE_PAD_B }}
+                          style={{ left: x(displayStart), width: w, top: SCENE_PAD_T, height: H0 - SCENE_PAD_T - SCENE_PAD_B }}
                         >
                           {/* Filmstrip (clipped inside the card: rounded corners / hairline gaps from the card's overflow-hidden).
                               Externally inserted clip: the main filmstrip is the main video's frames, so pasting it would be wrong — lay down its own extracted frames
@@ -1759,7 +1837,7 @@ function StudioTimelineImpl({
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 if (end < visibleRange.startSec || start > visibleRange.endSec) return null;
-                                return visibleStripTiles(strip, shot.srcStart, shot.srcEnd, tileDur, pps, start, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
+                                return visibleStripTiles(strip, displaySourceStart, displaySourceEnd, tileDur, pps, displayStart, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
                                   <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                                 ));
                               })()}
@@ -1770,7 +1848,7 @@ function StudioTimelineImpl({
                             </div>
                           ) : (
                             <>
-                              {end >= visibleRange.startSec && start <= visibleRange.endSec && visibleStripTiles(filmstrip ?? [], shot.srcStart, shot.srcEnd, tileDur, pps, start, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
+                              {displayEnd >= visibleRange.startSec && displayStart <= visibleRange.endSec && visibleStripTiles(filmstrip ?? [], displaySourceStart, displaySourceEnd, tileDur, pps, displayStart, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
                                 <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
                               ))}
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
@@ -1801,6 +1879,51 @@ function StudioTimelineImpl({
                           })()}
                           {/* Index number */}
                           <span className="absolute left-1 top-1 rounded bg-black/55 px-1 text-[9px] font-semibold leading-[14px] text-white">{i + 1}</span>
+                          {(['left', 'right'] as const).map((edge) => (
+                            <span
+                              key={edge}
+                              role="none"
+                              data-shot-trim-edge={edge}
+                              onPointerDown={(event) => {
+                                event.stopPropagation();
+                                if (!onResizeShot || event.button !== 0) return;
+                                onSelectShot(shot.id, false);
+                                let latest = edge === 'left' ? start : end;
+                                setShotResize({ shotId: shot.id, edge, atSec: latest });
+                                setEndResizeSec(end);
+                                drag(
+                                  event,
+                                  (clientX) => {
+                                    const requested = snap(edge === 'left'
+                                      ? rawSecAt(clientX)
+                                      : timelinePointerSecond(rawSecAt(clientX), dur, true));
+                                    latest = edge === 'left'
+                                      ? Math.max(
+                                          packedAtStart ? sourceFloor : Math.max(0, sourceFloor, previousEnd),
+                                          Math.min(requested, end - 0.2),
+                                        )
+                                      : Math.max(start + 0.2, requested);
+                                    setShotResize({ shotId: shot.id, edge, atSec: latest });
+                                    setEndResizeSec(edge === 'left' && packedAtStart && latest < start
+                                      ? end + start - latest
+                                      : edge === 'right'
+                                        ? latest
+                                        : end);
+                                    setGuide(latest);
+                                  },
+                                  (moved) => {
+                                    setShotResize(null);
+                                    setEndResizeSec(null);
+                                    if (moved) {
+                                      shotResizeMovedRef.current = true;
+                                      onResizeShot(shot.id, edge, latest);
+                                    }
+                                  },
+                                );
+                              }}
+                              className={`absolute inset-y-0 z-20 w-2 cursor-ew-resize transition-colors ${edge === 'left' ? `left-0 ${TIMELINE_ITEM_EDGE_RADIUS.left}` : `right-0 ${TIMELINE_ITEM_EDGE_RADIUS.right}`} ${sel ? 'bg-white/55' : 'bg-white/0 group-hover/shot:bg-white/55'}`}
+                            />
+                          ))}
                         </button>
                       </div>
                     );
@@ -1833,8 +1956,8 @@ function StudioTimelineImpl({
                                 e.stopPropagation();
                                 onOpenTransition(end, e.currentTarget.getBoundingClientRect());
                               }}
-                              className={`absolute top-3 bottom-2 z-30 flex w-3.5 -translate-x-1/2 cursor-pointer items-center justify-center bg-black/40 text-white/75 transition hover:bg-black/65 hover:text-white ${TIMELINE_ITEM_RADIUS}`}
-                              style={{ left: x(end) }}
+                              className="absolute z-30 flex h-5 w-5 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full bg-black/55 text-white/75 shadow-sm transition hover:bg-black/75 hover:text-white"
+                              style={{ left: x(end), top: SCENE_PAD_T + 3 }}
                             >
                               <ArrowLeftRight size={10} />
                             </button>
@@ -1861,14 +1984,15 @@ function StudioTimelineImpl({
                                 },
                               );
                             }}
-                            className="bg-accent absolute top-0 bottom-0 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
+                            className="bg-accent pointer-events-auto absolute top-0 bottom-0 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
                             style={side < 0 ? { left: -3 } : { right: -3 }}
                           />
                         );
                         return (
                           <div
                             key={`tr-${i}`}
-                            className="absolute top-3 bottom-2 z-30"
+                            data-transition-region
+                            className="pointer-events-none absolute top-3 bottom-2 z-30"
                             style={{ left: x(end - half), width: Math.max(10, x(half * 2)) }}
                             onMouseEnter={(e) => {
                               if (draggingRef.current) return; // don't grab hover-scrub while dragging
@@ -1887,9 +2011,9 @@ function StudioTimelineImpl({
                                 e.stopPropagation();
                                 onOpenTransition(end, e.currentTarget.getBoundingClientRect());
                               }}
-                              className={`bg-accent/30 ring-accent/70 hover:bg-accent/40 absolute inset-0 flex cursor-pointer items-center justify-center ring-1 transition ${TIMELINE_ITEM_RADIUS}`}
+                              className={`bg-accent/30 ring-accent/70 pointer-events-none absolute inset-0 ring-1 ${TIMELINE_ITEM_RADIUS}`}
                             >
-                              <span className="bg-accent flex h-4 w-4 items-center justify-center rounded-full text-white shadow">
+                              <span className="bg-accent pointer-events-auto absolute left-1/2 top-1/2 flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-white shadow transition hover:brightness-110">
                                 <ArrowLeftRight size={9} />
                               </span>
                             </button>

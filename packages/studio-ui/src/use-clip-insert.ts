@@ -27,7 +27,14 @@ import {
 import type { AsrSegment } from '@pireel/studio-engine/build-blocks';
 import type { LocalAssetIndexEntry } from '@pireel/studio-engine/project-dto';
 import { studioProviders } from '@pireel/studio-engine/providers';
-import { type FilmstripFrame, extractFilmstrip, extractFilmstripFromUrl, fileSig } from './media';
+import {
+  type FilmstripFrame,
+  type FilmstripSourceRange,
+  extractFilmstripAtTimestamps,
+  extractFilmstripFromUrlAtTimestamps,
+  fileSig,
+  filmstripTimestampsForRanges,
+} from './media';
 import { alignFileToSig, loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import {
@@ -54,7 +61,6 @@ interface InsertLibraryClipOptions {
 
 export interface ClipInsertDeps {
   projectId: string;
-  comp: Composition;
   compRef: MutableRefObject<Composition>;
   clipFilesRef: MutableRefObject<Map<string, File>>;
   cloudMediaRef: MutableRefObject<{ video?: { sig: string; key: string }; clips?: Record<string, { key: string }> }>;
@@ -70,15 +76,15 @@ export interface ClipInsertDeps {
   ensureClipTranscripts: () => Promise<void>;
   backupMediaToCloud: (file: File, sig: string, kind: 'video' | 'clip') => void;
   runTool: (toolId: string, input: Record<string, unknown>) => Promise<unknown>;
-  visualSources?: readonly { kind: 'image' | 'video'; source: string; sourceOutSec: number }[];
+  filmstripDemand?: Readonly<Record<string, readonly FilmstripSourceRange[]>>;
 }
 
 export function useClipInsert(deps: ClipInsertDeps) {
   const {
-    projectId, comp, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, setDocument,
+    projectId, compRef, clipFilesRef, cloudMediaRef, clipAsrRef, documentRef, localAssetIndexRef, setDocument,
     rememberAssetUrl, setSelectedId, setSelectedShotId, applyT, pushUndoSnapshot, ensureClipTranscripts,
     backupMediaToCloud, runTool,
-    visualSources = [],
+    filmstripDemand = {},
   } = deps;
   const videoMetaOf = async (url: string): Promise<{ dur: number; w: number; h: number } | null> => {
     for (let i = 0; i < 3; i++) {
@@ -122,7 +128,7 @@ export function useClipInsert(deps: ClipInsertDeps) {
   clipStripsRef.current = clipStrips;
   const clipStripAliveRef = useRef(true);
   const clipStripGenerationRef = useRef(0);
-  const clipStripReqRef = useRef<Set<string>>(new Set()); // sources already requested (incl. in progress), prevents duplicate extraction
+  const clipStripReqRef = useRef<Map<string, Set<number>>>(new Map()); // source-time buckets already requested (incl. in progress)
   useEffect(() => {
     const requests = clipStripReqRef.current;
     clipStripAliveRef.current = true;
@@ -149,42 +155,58 @@ export function useClipInsert(deps: ClipInsertDeps) {
   const createClipObjectUrl = (file: Blob): string | null =>
     clipStripAliveRef.current ? URL.createObjectURL(file) : null;
   useEffect(() => {
-    const bySrc = new Map<string, number>(); // src → the maximum source time covered
-    for (const s of comp.shots ?? []) if (s.src) bySrc.set(s.src, Math.max(bySrc.get(s.src) ?? 0, s.srcEnd));
-    for (const visual of visualSources) {
-      if (visual.kind === 'video') bySrc.set(visual.source, Math.max(bySrc.get(visual.source) ?? 0, visual.sourceOutSec));
-    }
-    for (const [src, maxEnd] of bySrc) {
-      if (clipStripReqRef.current.has(src)) continue;
-      clipStripReqRef.current.add(src);
-      const upTo = Math.max(0.5, maxEnd);
+    for (const [src, ranges] of Object.entries(filmstripDemand)) {
+      const requested = clipStripReqRef.current.get(src) ?? new Set<number>();
+      clipStripReqRef.current.set(src, requested);
+      const missingTimestamps = filmstripTimestampsForRanges(ranges).filter((timestamp) => !requested.has(timestamp));
+      if (!missingTimestamps.length) continue;
+      missingTimestamps.forEach((timestamp) => requested.add(timestamp));
       const generation = clipStripGenerationRef.current;
       void (async () => {
+        let firstFrame: FilmstripFrame | null = null;
+        const showFirstFrame = (frame: FilmstripFrame) => {
+          if (firstFrame || !clipStripAliveRef.current || generation !== clipStripGenerationRef.current) return;
+          firstFrame = frame;
+          setClipStrips((current) => ({
+            ...current,
+            [src]: [...(current[src] ?? []), frame].sort((left, right) => left.t - right.t),
+          }));
+        };
         try {
-          const onFrame = (fr: FilmstripFrame) => {
-            if (!clipStripAliveRef.current || generation !== clipStripGenerationRef.current) {
-              URL.revokeObjectURL(fr.url);
-              return;
-            }
-            setClipStrips((m) => ({ ...m, [src]: [...(m[src] ?? []), fr].sort((a, b) => a.t - b.t) }));
-          };
+          let frames: FilmstripFrame[];
           if (src.startsWith('blob:')) {
             const lf = clipFilesRef.current.get(src); // local mode: the File is already at hand, zero download
             if (!lf) {
-              clipStripReqRef.current.delete(src); // File not in place yet (restoring): undo the placeholder, retry once src is revived
+              missingTimestamps.forEach((timestamp) => requested.delete(timestamp));
               return;
             }
-            await extractFilmstrip(lf, upTo, Math.min(60, Math.max(4, Math.round(upTo))), onFrame);
+            frames = await extractFilmstripAtTimestamps(lf, missingTimestamps, showFirstFrame);
           } else {
             const proxyUrl = `/api/media/fetch?url=${encodeURIComponent(src)}`;
-            await extractFilmstripFromUrl(proxyUrl, upTo, Math.min(60, Math.max(4, Math.round(upTo))), onFrame);
+            frames = await extractFilmstripFromUrlAtTimestamps(proxyUrl, missingTimestamps, showFirstFrame);
+          }
+          if (!clipStripAliveRef.current || generation !== clipStripGenerationRef.current) {
+            frames.forEach((frame) => URL.revokeObjectURL(frame.url));
+            return;
+          }
+          // Paint one decoded frame immediately so the track does not sit on the blue fallback, then
+          // append the rest in one update. This preserves fast feedback without repainting per frame.
+          const remainingFrames = firstFrame ? frames.filter((frame) => frame !== firstFrame) : frames;
+          if (remainingFrames.length) {
+            setClipStrips((current) => ({
+              ...current,
+              [src]: [...(current[src] ?? []), ...remainingFrames].sort((left, right) => left.t - right.t),
+            }));
           }
         } catch (e) {
+          missingTimestamps.forEach((timestamp) => {
+            if (!firstFrame || Math.abs(timestamp - firstFrame.t) > 0.01) requested.delete(timestamp);
+          });
           console.warn('[studio] clip filmstrip failed', e);
         }
       })();
     }
-  }, [clipFilesRef, comp.shots, visualSources]);
+  }, [clipFilesRef, filmstripDemand]);
   /** Nearest explicit V2 boundary, including leading/inter-clip gaps. */
   const nearestShotBound = (document: EditorDocumentV2, t: number) => {
     let at = 0;
