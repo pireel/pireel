@@ -60,7 +60,6 @@ export interface StudioScenarioSkillStarter {
 export interface StudioCustomScenarioSkillManager {
   list(): Promise<readonly StudioScenarioSkillOption[]>;
   openMarket(): void;
-  openCreate(): void;
   delete(id: string): Promise<void>;
 }
 

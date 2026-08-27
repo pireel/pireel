@@ -178,6 +178,11 @@ export const StudioChat = memo(
     const [customScenarioSkillsReady, setCustomScenarioSkillsReady] = useState(
       !customScenarioSkillManager,
     );
+    const refreshCustomScenarioSkills = useCallback(async () => {
+      if (!customScenarioSkillManager) return;
+      const skills = await customScenarioSkillManager.list();
+      setCustomScenarioSkills(skills);
+    }, [customScenarioSkillManager]);
     const scenarioSkills = useMemo(() => {
       const host = shell.scenarioSkills ?? [];
       const hostIds = new Set(host.map((skill) => skill.id));
@@ -403,7 +408,9 @@ export const StudioChat = memo(
           initialSkillId={active?.skillId ?? defaultSkillId}
           scenarioSkills={scenarioSkills}
           onOpenSkillMarket={customScenarioSkillManager?.openMarket}
-          onCreateScenarioSkill={customScenarioSkillManager?.openCreate}
+          onRefreshScenarioSkills={
+            customScenarioSkillManager ? refreshCustomScenarioSkills : undefined
+          }
           onDeleteScenarioSkill={
             customScenarioSkillManager ? deleteScenarioSkill : undefined
           }

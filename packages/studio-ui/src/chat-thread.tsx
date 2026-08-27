@@ -78,7 +78,7 @@ export function ChatThread({
   initialSkillId,
   scenarioSkills,
   onOpenSkillMarket,
-  onCreateScenarioSkill,
+  onRefreshScenarioSkills,
   onDeleteScenarioSkill,
   frames,
   onFrameApplied,
@@ -99,7 +99,7 @@ export function ChatThread({
   initialSkillId: StudioScenarioSkillId;
   scenarioSkills: readonly StudioScenarioSkillOption[];
   onOpenSkillMarket?: () => void;
-  onCreateScenarioSkill?: () => void;
+  onRefreshScenarioSkills?: () => Promise<void>;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
   frames: FrameCatalogItem[];
   onFrameApplied?: (frame: AttachedFrame | null) => void;
@@ -269,6 +269,39 @@ export function ChatThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === "streaming" || status === "submitted";
+
+  const refreshedCreatedSkillRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status !== "ready" || !onRefreshScenarioSkills) return;
+    let createdSkillId: string | null = null;
+    for (let messageIndex = messages.length - 1; messageIndex >= 0 && !createdSkillId; messageIndex -= 1) {
+      const message = messages[messageIndex]!;
+      for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = message.parts[partIndex] as {
+          type?: string;
+          toolName?: string;
+          state?: string;
+          output?: unknown;
+        };
+        const toolId = part.type === "dynamic-tool"
+          ? part.toolName
+          : part.type?.startsWith("tool-")
+            ? part.type.slice(5)
+            : undefined;
+        if (toolId !== "save_user_skill" || part.state !== "output-available") continue;
+        const output = part.output as { ok?: unknown; skill_id?: unknown } | undefined;
+        if (output?.ok === true && typeof output.skill_id === "string") {
+          createdSkillId = output.skill_id;
+          break;
+        }
+      }
+    }
+    if (!createdSkillId || refreshedCreatedSkillRef.current === createdSkillId) return;
+    refreshedCreatedSkillRef.current = createdSkillId;
+    void onRefreshScenarioSkills().catch((error) => {
+      console.error("[studio] custom Skill refresh failed", error);
+    });
+  }, [messages, onRefreshScenarioSkills, status]);
   // Safety net for a dropped continuation: the SDK is supposed to fire the follow-up request from
   // inside addToolOutput (sendAutomaticallyWhen), but that trigger can be missed — observed in the
   // wild: tool output landed, status idle, and no request ever went out, so the turn died on the
@@ -436,6 +469,10 @@ export function ChatThread({
     () => run(t("chatGen.continueAfterInterruptionPrompt")),
     [run],
   );
+
+  const createScenarioSkill = useCallback(() => {
+    void run(t("chatGen.skill.create.prompt"));
+  }, [run]);
 
   // Client-side tools may already have committed durable edits before a provider/network stream
   // drops. Retry exactly once as a NEW user turn against the current project snapshot; never replay
@@ -900,7 +937,7 @@ export function ChatThread({
           skillId={skillId}
           scenarioSkills={scenarioSkills}
           onOpenSkillMarket={onOpenSkillMarket}
-          onCreateScenarioSkill={onCreateScenarioSkill}
+          onCreateScenarioSkill={onRefreshScenarioSkills ? createScenarioSkill : undefined}
           onDeleteScenarioSkill={onDeleteScenarioSkill}
           onPickSkill={pickSkill}
           frame={frame}
