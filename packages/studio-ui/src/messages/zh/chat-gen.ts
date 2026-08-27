@@ -15,7 +15,6 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.skill.create.summary': '把当前对话和编辑方法提炼成可复用 Skill',
   'chatGen.skill.create.prompt': '请把这次对话和编辑过程提炼成一个可复用 Skill，保留关键判断、操作方法和验收标准。',
   'chatGen.skill.create.remove': '取消创建 Skill',
-  'chatGen.skill.create.followupPlaceholder': '继续补充或回答创建 Skill 所需的信息…',
   'chatGen.skill.market.title': '从 Skill 市场添加',
   'chatGen.skill.market.summary': '发现并添加官方或社区 Skill',
   'chatGen.skill.delete': '删除自定义 Skill',

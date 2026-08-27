@@ -632,11 +632,9 @@ export function Composer({
     <>
       <div className="border-line bg-panel-2 focus-within:border-ink-4 relative rounded-md border transition-colors">
         <div className="relative">
-          {empty && (
-            <div className={`text-ink-4 pointer-events-none absolute top-2.5 text-[13px] ${studioActionActive ? "left-[116px]" : "left-3"}`}>
-              {studioActionActive
-                ? t("chatGen.skill.create.followupPlaceholder")
-                : placeholder}
+          {empty && !studioActionActive && (
+            <div className="text-ink-4 pointer-events-none absolute left-3 top-2.5 text-[13px]">
+              {placeholder}
             </div>
           )}
           <div

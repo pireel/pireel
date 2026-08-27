@@ -15,7 +15,6 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.skill.create.summary': 'Distill this conversation and editing method into a reusable Skill',
   'chatGen.skill.create.prompt': 'Turn this conversation and editing process into a reusable Skill, preserving the key judgment, operating method, and verification criteria.',
   'chatGen.skill.create.remove': 'Cancel creating Skill',
-  'chatGen.skill.create.followupPlaceholder': 'Add details or answer what is needed to create this Skill…',
   'chatGen.skill.market.title': 'Add from Skill Market',
   'chatGen.skill.market.summary': 'Discover and add official or community Skills',
   'chatGen.skill.delete': 'Delete custom Skill',
