@@ -34,6 +34,15 @@ export interface MoveOverlayDocumentClipInput extends OverlayTrackTarget {
   startSec?: number;
 }
 
+export interface RetimeOverlayDocumentClipInput {
+  document: EditorDocumentV2;
+  clipId: string;
+  startSec?: number;
+  durationSec?: number;
+  /** Agent timing edits default to lane compaction; direct canvas gestures keep using the lower-level APIs. */
+  compact?: boolean;
+}
+
 export interface DuplicateOverlayDocumentClipInput extends OverlayTrackTarget {
   document: EditorDocumentV2;
   clipId: string;
@@ -256,6 +265,37 @@ export function moveOverlayDocumentClip(input: MoveOverlayDocumentClipInput): Ov
   });
   if (!moved.ok) return { ok: false, document: input.document, error: moved.error };
   return { ok: true, document: moved.document, receipts: [...target.receipts, ...cleared.receipts, moved.receipt] };
+}
+
+/** Retime an overlay and then move it to the lowest existing free graphics lane. This is deliberately
+ * opt-in at the command surface: agent-authored timing repairs should not leave sparse track towers,
+ * while a user's direct vertical track drag remains an explicit layer choice. */
+export function retimeOverlayDocumentClip(input: RetimeOverlayDocumentClipInput): OverlayDocumentEditResult {
+  const edited = applyOverlayDocumentEdits({
+    document: input.document,
+    updates: [{
+      clipId: input.clipId,
+      ...(input.startSec != null ? { startSec: input.startSec } : {}),
+      ...(input.durationSec != null ? { durationSec: input.durationSec } : {}),
+    }],
+  });
+  if (!edited.ok || input.compact === false) return edited;
+
+  const sourceTrack = edited.document.timeline.tracks.find((track) => track.clips.some((clip) => clip.id === input.clipId));
+  const sourceClip = sourceTrack?.clips.find((clip) => clip.id === input.clipId);
+  if (!sourceTrack || !sourceClip || sourceClip.kind !== 'graphic' || sourceTrack.type !== 'graphics') return edited;
+  const start = sourceClip.startFrame;
+  const end = start + sourceClip.durationFrames;
+  const target = edited.document.timeline.tracks
+    .filter((track) => track.type === 'graphics' && !track.locked && track.stackOrder >= 2 && track.stackOrder < sourceTrack.stackOrder)
+    .sort((left, right) => left.stackOrder - right.stackOrder)
+    .find((track) => !track.clips.some((clip) => clip.id !== input.clipId
+      && clip.startFrame < end && clip.startFrame + clip.durationFrames > start));
+  if (!target) return edited;
+
+  const moved = moveOverlayDocumentClip({ document: edited.document, clipId: input.clipId, toTrackId: target.id });
+  if (!moved.ok) return { ok: false, document: input.document, error: moved.error };
+  return { ok: true, document: moved.document, receipts: [...edited.receipts, ...moved.receipts] };
 }
 
 /** Duplicate an overlay to an existing or newly-created lane as one publish transaction. */

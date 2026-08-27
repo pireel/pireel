@@ -9,6 +9,17 @@
 
 import type { KitChoice } from '@pireel/studio-engine/compose';
 
+/** Safe, structured failure for generated markup that still violates hard static checks after repair. */
+export class GeneratedBlockValidationError extends Error {
+  readonly issues: string[];
+
+  constructor(message: string, issues: string[]) {
+    super(message);
+    this.name = 'GeneratedBlockValidationError';
+    this.issues = issues;
+  }
+}
+
 /** Which contract to generate against. Explicit at every call site: whether a moment gets a
  *  component or hand-written markup is a product decision, never an inferred default. */
 export interface ComposeMode {

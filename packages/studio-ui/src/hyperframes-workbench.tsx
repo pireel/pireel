@@ -52,6 +52,7 @@ import {
   Captions,
   Power,
   Magnet,
+  Type,
 } from "lucide-react";
 import {
   Tooltip,
@@ -160,6 +161,10 @@ import {
   treatmentVacancyBox,
   type MediaTimelineClip,
   canvasSizeFollowingFirstVideo,
+  type DisplayTextAnimationId,
+  type DisplayTextPresetId,
+  displayTextPreset,
+  titleBlock,
 } from "@pireel/studio-engine/composition";
 import { getTheme, themeVarsCss } from "@pireel/studio-engine/theme";
 import {
@@ -174,6 +179,7 @@ import {
 import {
   type ComposeMode,
   type ComposedBlock,
+  GeneratedBlockValidationError,
   composedBlockFields,
   kitChoiceOf,
 } from "./compose-result";
@@ -291,6 +297,7 @@ import {
   type ExportRenderOpts,
   captureCompositionFrame,
 } from "./client-export";
+import { DisplayTextPanel, type DisplayTextPatch } from "./display-text-panel";
 import {
   Dialog,
   DialogContent,
@@ -981,9 +988,16 @@ export function HyperframesWorkbench({
     setLocateSignal((n) => n + 1);
   };
   const [libTab, setLibTab] = useState<
-    "assets" | "frames" | "script" | "captions" | "audio" | "gen" | "avatar"
+    "assets" | "frames" | "script" | "captions" | "audio" | "text" | "gen" | "avatar"
   >("assets"); // rail primary-nav tab (themes hidden)
   const [libCollapsed, setLibCollapsed] = useState(false); // asset rail collapsed (narrow strip + expand button; content hidden but state kept)
+  const selectedDisplayTextBlock = useMemo(
+    () => selectedId
+      ? comp.blocks.find((block) => block.id === selectedId && block.templateId === "title") ?? null
+      : null,
+    [comp.blocks, selectedId],
+  );
+  const selectedDisplayTextBlockId = selectedDisplayTextBlock?.id ?? null;
   // Asset rail geometry: the expanded content width is drag-resizable and persists. Collapsing
   // keeps the primary-nav strip docked so navigation and the expand control stay in one place.
   const [railW, setRailW] = useState(() => {
@@ -2912,6 +2926,15 @@ export function HyperframesWorkbench({
     floatWinRef.current = next;
     setFloatWinRaw(next);
   };
+  useEffect(() => {
+    if (!selectedDisplayTextBlockId) return;
+    setFloatWin(null);
+    setLibTab("text");
+    setLibCollapsed(false);
+    // Re-open only when the selected text block changes; setFloatWin intentionally owns
+    // contextual-panel settlement but is not stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDisplayTextBlockId]);
   // The source-editor entry is removed (per user 2026-07-17; edit components via "AI edit"/chat). The panel machinery
   // (FloatKind 'code'/ElementSourceEditor/draft settlement) is kept; to restore the entry later: set the baseline
   // codeOrigRef + setCodeBlockId(id) + setFloatWin('code'), and pin the playhead to a stable frame.
@@ -4232,10 +4255,11 @@ export function HyperframesWorkbench({
         });
         const hard = issues.filter((i) => HARD_LINT_CODES.has(i.code));
         if (hard.length)
-          throw new Error(
+          throw new GeneratedBlockValidationError(
             t("workbench.generatedBlockFailedChecks", {
               message: hard[0]!.message,
             }),
+            hard.map((issue) => issue.message),
           );
         if (issues.length)
           console.warn("[studio] block lint soft issues", seed.id, issues);
@@ -5149,6 +5173,64 @@ export function HyperframesWorkbench({
     toast.success(
       t("workbench.insertedLabel", { label: t(b.label ?? templateId) }),
     );
+  };
+
+  /** Persistent UI text entry: insert a deterministic native text clip at the playhead, select it,
+   * and hand off to the same Text panel used by Agent-created titles. */
+  const insertDisplayText = (preset: DisplayTextPresetId = "clean") => {
+    const startSec = Math.max(0, Math.round(tRef.current * 10) / 10);
+    const durationSec = 3;
+    const presetDefinition = displayTextPreset(preset);
+    const block = titleBlock({
+      text: t("displayText.defaultText"),
+      startSec,
+      durationSec,
+      preset,
+      animation: presetDefinition.defaultAnimation,
+      color: "#FFFFFF",
+      accentColor: "#FFD24D",
+      trackIndex: freeTrack(compRef.current.blocks, startSec, durationSec, 2),
+    });
+    block.box = { x: 0.1, y: 0.36, w: 0.8, h: 0.22 };
+    const inserted = insertOverlayDocumentClip({
+      document: editorDocumentRef.current,
+      block,
+    });
+    if (!inserted.ok) {
+      toast.error(editorErrorMessage(inserted.error));
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(inserted.document);
+    setSelectedShotId(null);
+    setSelectedId(block.id);
+    setFloatWin(null);
+    setLibTab("text");
+    setLibCollapsed(false);
+    if (!playing) applyT(Math.max(0, startSec + 0.01));
+  };
+
+  const patchDisplayText = (patch: DisplayTextPatch) => {
+    if (!selectedDisplayTextBlock) return;
+    const slots = { ...selectedDisplayTextBlock.slots, ...patch };
+    const edit = applyOverlayDocumentEdits({
+      document: editorDocumentRef.current,
+      updates: [{
+        clipId: selectedDisplayTextBlock.id,
+        block: {
+          slots,
+          ...(typeof patch.text === "string"
+            ? { label: patch.text.trim() || t("displayText.defaultText") }
+            : {}),
+        },
+      }],
+    });
+    if (!edit.ok) {
+      toast.error(editorErrorMessage(edit.error));
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(edit.document);
   };
   /** Generated video → set as the main video. The CDN has no CORS headers, so fetch bytes through the /api/media/fetch same-origin proxy.
    *  Swapping the main video = a new project (pickVideoFile clears shots/blocks) — confirm first if there's content. */
@@ -9566,6 +9648,16 @@ export function HyperframesWorkbench({
                     </div>
                   </div>
                 )}
+                {!floatWin && libTab === "text" && (
+                  <DisplayTextPanel
+                    block={selectedDisplayTextBlock}
+                    onAdd={insertDisplayText}
+                    onPatch={patchDisplayText}
+                    onPreset={(preset: DisplayTextPresetId, animation: DisplayTextAnimationId) =>
+                      patchDisplayText({ preset, animation })
+                    }
+                  />
+                )}
                 {!floatWin && libTab === "gen" && (
                   <div className="flex min-h-0 flex-1 flex-col">
                     <div className="bg-panel flex h-8 shrink-0 items-center gap-1 px-2.5">
@@ -9868,6 +9960,7 @@ export function HyperframesWorkbench({
                         icon: Captions,
                         label: "panels.captions",
                       },
+                      { v: "text", icon: Type, label: "displayText.title" },
                       { v: "audio", icon: Music, label: "panels.music" },
                       { v: "gen", icon: Sparkles, label: "common.generate" },
                       {
@@ -9881,6 +9974,7 @@ export function HyperframesWorkbench({
                         | "assets"
                         | "script"
                         | "captions"
+                        | "text"
                         | "audio"
                         | "gen"
                         | "avatar";
@@ -9987,6 +10081,19 @@ export function HyperframesWorkbench({
                 <TooltipContent>{t("workbench.redoShortcut")}</TooltipContent>
               </Tooltip>
               <div className="bg-line mx-0.5 h-4 w-px shrink-0" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => insertDisplayText("clean")}
+                    aria-label={t("displayText.add")}
+                    className="text-ink-3 hover:text-ink hover:bg-panel-2 flex h-7 min-w-7 items-center justify-center rounded px-1.5 font-serif text-[15px] font-bold"
+                  >
+                    T
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t("displayText.addAtPlayhead")}</TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

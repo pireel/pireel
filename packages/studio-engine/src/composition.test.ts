@@ -7,6 +7,7 @@ import {
   captionBlock,
   emptyComposition,
   freeTrack,
+  localDisplayTextFontId,
   hasTimelineContent,
   isSentenceCaption,
   placementFramingNotes,
@@ -106,6 +107,56 @@ describe('assembleHtml', () => {
     expect(html).toContain('top:10%');
     expect(html).toContain('width:40%');
     expect(html).toContain('height:50%');
+  });
+
+  it('原生花字预设渲染确定性的样式与命名动画，不生成 custom HTML block', () => {
+    const c = emptyComposition();
+    const b = titleBlock({
+      text: '普通人的奥德赛', startSec: 0, durationSec: 3,
+      preset: 'editorial', animation: 'wordReveal', color: '#F7F1E8', accentColor: '#D8A84E',
+    });
+    c.blocks = [b];
+    const html = assembleHtml(c);
+    expect(b.templateId).toBe('title');
+    expect(html).toContain('preset-editorial');
+    expect(html).toContain('--display-fg:#F7F1E8');
+    expect(html).toContain(`tl.from('#${b.id} .t-unit'`);
+  });
+
+  it('原生花字默认白色并使用导出安全的可选字体', () => {
+    const c = emptyComposition();
+    const b = titleBlock({
+      text: '白色标题', startSec: 0, durationSec: 2,
+      preset: 'clean', fontFamily: 'mono',
+    });
+    c.blocks = [b];
+    const html = assembleHtml(c);
+    expect(html).toContain('--display-fg:#FFFFFF');
+    expect(html).toContain('font-family:"IBM Plex Mono","Noto Sans SC",ui-monospace,monospace');
+  });
+
+  it('原生花字安全编码并渲染用户系统字体族', () => {
+    const c = emptyComposition();
+    const fontFamily = localDisplayTextFontId('PingFang SC');
+    expect(fontFamily).toBe('local:PingFang%20SC');
+    c.blocks = [titleBlock({
+      text: '系统字体', startSec: 0, durationSec: 2,
+      preset: 'clean', fontFamily: fontFamily!,
+    })];
+    expect(assembleHtml(c)).toContain('font-family:"PingFang SC",sans-serif');
+  });
+
+  it('荧光和标签花字使用用户选择的文字色而不是固定反色', () => {
+    const c = emptyComposition();
+    c.blocks = [titleBlock({
+      text: '彩色文字', startSec: 0, durationSec: 2,
+      preset: 'marker', color: '#91C8FF', accentColor: '#FFD24D',
+    })];
+    const html = assembleHtml(c);
+    expect(html).toContain('--display-fg:#91C8FF');
+    expect(html).toContain('.preset-marker .t-unit{padding:.03em .09em');
+    expect(html).toContain('color:var(--display-fg);text-shadow:none');
+    expect(html).not.toContain('color:var(--bg,#0a0a0a)');
   });
 
   it('块按 trackIndex 排 z 序:低轨块后插入仍渲染在高轨块之前(DOM 顺序=叠层);同轨保持原顺序', () => {

@@ -59,6 +59,7 @@ import {
   removeNarrationClipsWithoutRipple,
   removeAudioDocumentClips,
   removeOverlayDocumentClips,
+  retimeOverlayDocumentClip,
   duplicateOverlayDocumentClip,
   freezeEditorDocumentBlockVars,
   insertOverlayDocumentClip,
@@ -587,7 +588,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       const s = Number(input.startSec);
       if (!Number.isFinite(s)) return { result: { ok: false, error: 'invalid startSec' } };
       const start = Math.max(0, Math.round(s * 100) / 100);
-      const edit = applyOverlayDocumentEdits({ document: p.document, updates: [{ clipId: b.id, startSec: start }] });
+      const edit = retimeOverlayDocumentClip({ document: p.document, clipId: b.id, startSec: start });
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: `Moved "${bname(b)}" to ${r1(start)}s` },
@@ -603,10 +604,7 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (!Number.isFinite(s) || !Number.isFinite(d)) return { result: { ok: false, error: 'invalid startSec/durationSec' } };
       const start = Math.max(0, Math.round(s * 100) / 100);
       const dur = Math.max(0.3, Math.round(d * 100) / 100);
-      const edit = applyOverlayDocumentEdits({
-        document: p.document,
-        updates: [{ clipId: b.id, startSec: start, durationSec: dur }],
-      });
+      const edit = retimeOverlayDocumentClip({ document: p.document, clipId: b.id, startSec: start, durationSec: dur });
       if (!edit.ok) return { result: { ok: false, error: edit.error.message, data: { code: edit.error.code, trackIds: edit.error.trackIds } } };
       return {
         result: { ok: true, summary: `Resized "${bname(b)}" to ${r1(start)}–${r1(start + dur)}s` },

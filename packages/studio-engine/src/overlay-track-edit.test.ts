@@ -4,6 +4,7 @@ import {
   duplicateOverlayDocumentClip,
   insertOverlayDocumentClip,
   moveOverlayDocumentClip,
+  retimeOverlayDocumentClip,
   reorderOverlayDocumentTracks,
 } from './overlay-track-edit';
 import { directorPlanFromSeconds } from './director-plan';
@@ -132,6 +133,30 @@ describe('overlay track transactions', () => {
     expect(moved.document.timeline.tracks.find((track) => track.id === 'high')).toBeUndefined();
     expect(moved.document.timeline.tracks.find((track) => track.id === 'middle')).toMatchObject({ stackOrder: 5, clips: [{ id: 'card' }] });
     expect(moved.document.timeline.tracks.filter((track) => track.type === 'graphics').map((track) => track.id)).toEqual(['middle']);
+  });
+
+  it('compacts a retimed non-overlapping graphic onto the lowest free existing lane', () => {
+    const document = documentWithGraphics();
+    const low = document.timeline.tracks.find((track) => track.id === 'low')!;
+    low.clips[0] = { ...low.clips[0]!, durationFrames: 60 };
+    const high = document.timeline.tracks.find((track) => track.id === 'high')!;
+    high.clips.push({
+      ...clip,
+      id: 'late-card',
+      startFrame: 15,
+      durationFrames: 30,
+    });
+
+    const retimed = retimeOverlayDocumentClip({
+      document,
+      clipId: 'late-card',
+      startSec: 3,
+      durationSec: 1,
+    });
+    expect(retimed.ok).toBe(true);
+    if (!retimed.ok) return;
+    expect(retimed.document.timeline.tracks.find((track) => track.id === 'low')?.clips.map((item) => item.id)).toEqual(['card', 'late-card']);
+    expect(retimed.document.timeline.tracks.find((track) => track.id === 'high')).toBeUndefined();
   });
 
   it('rejects moving a Motion Graphic onto a media lane without changing either lane', () => {

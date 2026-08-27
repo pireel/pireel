@@ -7,6 +7,8 @@
  * unicode-range" (for common CJK that's just a few, ~a few hundred KB). The result string is cached and reused for the whole export.
  */
 
+import { registeredLocalFontFace } from './local-font-access';
+
 export interface FontFace {
   family: string;
   style: string;
@@ -61,6 +63,33 @@ function toBase64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
+async function buildInlineLocalFontCss(
+  families: string[],
+  log: (m: string) => void,
+): Promise<string> {
+  const unique = [...new Set(families.map((family) => family.trim()).filter(Boolean))];
+  if (!unique.length) return '';
+  const parts = await Promise.all(unique.map(async (family) => {
+    const face = registeredLocalFontFace(family);
+    if (!face) {
+      log(`local font unavailable for export: ${family}`);
+      return '';
+    }
+    try {
+      const blob = await face.blob();
+      const bytes = await blob.arrayBuffer();
+      const mime = blob.type || 'font/ttf';
+      const cssFamily = family.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+      log(`local font embedded: ${family} · ${(bytes.byteLength / 1024 / 1024).toFixed(2)}MB`);
+      return `@font-face{font-family:"${cssFamily}";font-style:normal;font-weight:100 900;src:url(data:${mime};base64,${toBase64(bytes)})}`;
+    } catch {
+      log(`local font bytes unavailable for export: ${family}`);
+      return '';
+    }
+  }));
+  return parts.filter(Boolean).join('\n');
+}
+
 /**
  * Fetch a Google Fonts resource, same-origin proxy FIRST: Google's `/l/font` (text= subset)
  * endpoint doesn't reliably send Access-Control-Allow-Origin, so a direct browser fetch CORS-fails
@@ -91,6 +120,7 @@ async function fetchFont(url: string): Promise<Response | null> {
 export async function buildInlineFontCss(
   usedText: string,
   log: (m: string) => void = () => {},
+  localFamilies: string[] = [],
 ): Promise<string> {
   const t0 = performance.now();
   // DOM textContent keeps formatting newlines even when the composition has no visible text.
@@ -101,6 +131,7 @@ export async function buildInlineFontCss(
     log('font inlining skipped: no visible glyphs');
     return '';
   }
+  const localCss = await buildInlineLocalFontCss(localFamilies, log);
   // Exact subset: text= makes Google's server cut glyphs per character (a few hundred KB per CJK subset →
   // tens of KB total). The inline string is part of every changed frame's SVG data URI, so its size
   // multiplies directly into per-frame parse cost.
@@ -118,7 +149,7 @@ export async function buildInlineFontCss(
     // instead of throwing: the frame/export still renders with system fallback fonts. A hard
     // "Failed to fetch" here used to kill capture_frame outright.
     log('font CSS fetch failed — falling back to system fonts (no inlining)');
-    return '';
+    return localCss;
   }
   const faces = parseFontFaces(await res.text());
 
@@ -150,7 +181,7 @@ export async function buildInlineFontCss(
       return `@font-face{font-family:'${f.family}';font-style:${f.style};font-weight:${f.weight};src:url(data:font/woff2;base64,${toBase64(buf)}) format('woff2');${range}}`;
     }),
   );
-  const css = parts.filter(Boolean).join('\n');
+  const css = [parts.filter(Boolean).join('\n'), localCss].filter(Boolean).join('\n');
   log(`font inlining done: ${(css.length / 1024 / 1024).toFixed(2)}MB css · ${((performance.now() - t0) / 1000).toFixed(2)}s`);
   return css;
 }

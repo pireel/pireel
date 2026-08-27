@@ -45,6 +45,7 @@ import {
   type VideoShotTimelinePlacement,
   assembleHtml,
   cutTransitions,
+  displayTextLocalFontFamily,
   parseClipInset,
   localImageLocator,
   localImageLocatorSigs,
@@ -96,6 +97,12 @@ export const DEFAULT_RENDER_OPTS: ExportRenderOpts = { res: 1080, fps: 30, forma
 function assertExportableComposition(comp: Composition): void {
   const issues = validateComposition(comp);
   if (issues.length) throw new Error(`Invalid composition: ${issues.slice(0, 3).map((issue) => `${issue.path} ${issue.message}`).join('; ')}`);
+}
+
+function compositionLocalFontFamilies(comp: Composition): string[] {
+  return [...new Set(comp.blocks
+    .map((block) => displayTextLocalFontFamily(block.slots.fontFamily))
+    .filter((family): family is string => family !== null))];
 }
 
 /* ============================ Sources and segments ============================ */
@@ -468,7 +475,11 @@ export async function captureCompositionFrame(opts: {
   }
   try {
     await inlineImages(overlay.root);
-    const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
+    const fontCss = await buildInlineFontCss(
+      overlay.root.textContent ?? '',
+      undefined,
+      compositionLocalFontFamilies(comp),
+    );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
     overlay.win.__hfPreview!.seekTimelines(t);
     const el = overlay.doc.getElementById('vidEl');
@@ -685,7 +696,11 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
   }
   try {
     await inlineImages(overlay.root);
-    const fontCss = await buildInlineFontCss(overlay.root.textContent ?? '');
+    const fontCss = await buildInlineFontCss(
+      overlay.root.textContent ?? '',
+      undefined,
+      compositionLocalFontFamilies(comp),
+    );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
     // Layout coordinate system is always comp's W×H (font-size calibration unchanged); device size =
     // output outW×outH → vectors rasterize crisply at 4K

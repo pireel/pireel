@@ -10,6 +10,7 @@ import {
 } from '@pireel/studio-engine/composition';
 import { buildChatSystem, buildHtmlSystem } from '@pireel/studio-engine/prompts';
 import type { AgentToolCtx } from './agent-tool-runner';
+import { GeneratedBlockValidationError } from './compose-result';
 import { classifyAsrResponse } from './media';
 import { localAssetMentionId } from './chat-local-asset-mention';
 import { resolveInteraction } from './interaction-store';
@@ -1417,6 +1418,37 @@ describe('Agent composition transaction boundary', () => {
       templateId: 'custom',
       box: { x: 0.14, y: 0.3, w: 0.72, h: 0.4 },
     });
+  });
+
+  it('returns actionable generated-block lint failures with the complete retry input', async () => {
+    const h = harness();
+    Object.assign(h.ctx, {
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => h.undoStackRef.current.push(h.documentRef.current),
+      tRef: { current: 0 },
+      composeBlockChecked: async () => {
+        throw new GeneratedBlockValidationError('生成的动态图形没通过检查: letter-spacing 超限', ['letter-spacing 超限']);
+      },
+      noteOf: () => '',
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const input = {
+      instruction: '做一个关系图', atSec: 8.8, durationSec: 3,
+      placement: { xPct: 12, yPct: 18, widthPct: 70, heightPct: 24 },
+      backdrop: '人物在画面右侧',
+    };
+    const result = await runStudioTool(h.ctx, 'add_block', input);
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('letter-spacing'),
+      data: {
+        code: 'generated-block-static-checks',
+        issues: ['letter-spacing 超限'],
+        retryInput: input,
+        retryHint: expect.stringContaining('preserve every original timing'),
+      },
+    });
+    expect(h.compRef.current.blocks).toHaveLength(0);
   });
 
   it('stops a pending add_block without letting its late result mutate the timeline', async () => {

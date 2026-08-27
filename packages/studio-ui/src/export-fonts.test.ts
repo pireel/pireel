@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildInlineFontCss } from './export-fonts';
+import { loadLocalFontFamilies } from './local-font-access';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -33,5 +34,21 @@ describe('buildInlineFontCss', () => {
 
     expect(result.match(/@font-face/g)).toHaveLength(3);
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('embeds a granted system font into export CSS', async () => {
+    vi.stubGlobal('window', {
+      queryLocalFonts: vi.fn(async () => [{
+        family: 'Demo Sans', fullName: 'Demo Sans Regular', postscriptName: 'DemoSans-Regular', style: 'Regular',
+        blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'font/ttf' }),
+      }]),
+    });
+    await loadLocalFontFamilies();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+
+    const result = await buildInlineFontCss('系统字体', undefined, ['Demo Sans']);
+
+    expect(result).toContain('font-family:"Demo Sans"');
+    expect(result).toContain('data:font/ttf;base64,AQID');
   });
 });

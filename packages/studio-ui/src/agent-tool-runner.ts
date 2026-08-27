@@ -64,6 +64,7 @@ import {
   mediaVideoClipEntries,
   patchNarrativeClips,
   removeOverlayDocumentClips,
+  retimeOverlayDocumentClip,
   duplicateOverlayDocumentClip,
   insertOverlayDocumentClip,
   resolveDocumentWordIds,
@@ -118,7 +119,7 @@ import {
 } from '@pireel/studio-engine/scene-visual-qa';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
-import { type ComposeMode, type ComposedBlock, composedBlockFields, kitChoiceOf, newBlockComposeMode } from './compose-result';
+import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
@@ -1361,8 +1362,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const value = Number(input.startSec);
             if (!Number.isFinite(value)) return { ok: false, error: 'invalid startSec' };
             const startSec = Math.max(0, Math.round(value * 100) / 100);
-            const edit = commitOverlayEdits([{ clipId: b.id, startSec }]);
+            const edit = retimeOverlayDocumentClip({ document: documentRef.current, clipId: b.id, startSec });
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            setDocument(edit.document);
             return { ok: true, summary: t('workbench.movedNameSecS', { name: bname(b), sec: r1(startSec) }) };
           }
           case 'resize_block': {
@@ -1373,8 +1375,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             if (!Number.isFinite(s) || !Number.isFinite(d)) return { ok: false, error: 'invalid startSec/durationSec' };
             const startSec = Math.max(0, Math.round(s * 100) / 100);
             const durationSec = Math.max(0.3, Math.round(d * 100) / 100);
-            const edit = commitOverlayEdits([{ clipId: b.id, startSec, durationSec }]);
+            const edit = retimeOverlayDocumentClip({ document: documentRef.current, clipId: b.id, startSec, durationSec });
             if (!edit.ok) return { ok: false, error: editorErrorMessage(edit.error), data: { code: edit.error.code, trackIds: edit.error.trackIds } };
+            setDocument(edit.document);
             return { ok: true, summary: t('workbench.setNameFromS', { name: bname(b), from: r1(startSec), to: r1(startSec + durationSec) }) };
           }
           case 'place_block': {
@@ -3516,6 +3519,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') throw e;
         console.warn(`[studio-tool] ${toolId} failed`, e);
+        if (e instanceof GeneratedBlockValidationError) {
+          return {
+            ok: false,
+            error: e.message,
+            data: {
+              code: 'generated-block-static-checks',
+              issues: e.issues,
+              retryInput: input,
+              retryHint: 'If retrying, preserve every original timing, placement, backdrop and scene field; change only the instruction needed to resolve the listed checks.',
+            },
+          };
+        }
         return { ok: false, error: t('editorError.operationFailed') };
       }
 }

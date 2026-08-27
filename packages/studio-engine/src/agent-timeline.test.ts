@@ -169,8 +169,46 @@ describe('shared agent timeline atoms', () => {
     expect(added.ok).toBe(true);
     expect(added.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'title-1')).toMatchObject({
       kind: 'graphic',
-      block: { box: { x: 0.1, y: 0.34, w: 0.8, h: 0.32 } },
+      block: { box: { x: 0.1, y: 0.34, w: 0.8, h: 0.32 }, slots: { preset: 'clean' } },
     });
+  });
+
+  it('persists native display-text preset, animation, style and planned placement', () => {
+    const added = runAgentTimelineTool(emptyEditorDocumentV2({ fps: 30, width: 1080, height: 1920 }), 'add_texts', {
+      items: [{
+        id: 'hook', text: '仍然相信理想', startSec: 1, durationSec: 2.5,
+        preset: 'editorial', animation: 'wordReveal', color: '#F7F1E8', accentColor: '#D8A84E',
+        fontSize: 84, fontWeight: 650, fontFamily: 'serif', align: 'left',
+        placement: { xPct: 10, yPct: 18, widthPct: 76, heightPct: 22 },
+      }],
+    });
+    expect(added.ok).toBe(true);
+    const clip = added.document!.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === 'hook');
+    expect(clip).toMatchObject({
+      kind: 'graphic',
+      block: {
+        box: { x: 0.1, y: 0.18, w: 0.76, h: 0.22 },
+        slots: {
+          preset: 'editorial', animation: 'wordReveal', color: '#F7F1E8', accentColor: '#D8A84E',
+          fontSize: 84, fontWeight: 650, fontFamily: 'serif', align: 'left',
+        },
+      },
+    });
+  });
+
+  it('reuses one graphics lane for sequential display text and allocates another only for overlap', () => {
+    const added = runAgentTimelineTool(emptyEditorDocumentV2({ fps: 30 }), 'add_texts', {
+      items: [
+        { id: 'a', text: 'A', startSec: 0, durationSec: 1 },
+        { id: 'b', text: 'B', startSec: 1, durationSec: 1 },
+        { id: 'overlap', text: 'C', startSec: 1.5, durationSec: 1 },
+      ],
+    });
+    expect(added.ok).toBe(true);
+    const graphics = added.document!.timeline.tracks.filter((track) => track.type === 'graphics');
+    expect(graphics).toHaveLength(2);
+    expect(graphics.find((track) => track.stackOrder === 2)?.clips.map((clip) => clip.id)).toEqual(['a', 'b']);
+    expect(graphics.find((track) => track.stackOrder === 3)?.clips.map((clip) => clip.id)).toEqual(['overlap']);
   });
 
   it('uses a generated speech estimate as the initial asset and clip duration', () => {

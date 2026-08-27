@@ -29,6 +29,8 @@ import { directorPlanFromDocument } from './director-plan-artifact';
 import { directorPlanToMarkdown } from './director-plan-markdown';
 import { sceneDesignsFromDocument, sceneDesignsToMarkdown } from './scene-design';
 import { canvasSizeFollowingFirstVideo } from './editing-primitives';
+import { placementPercentToBox } from './overlay-placement';
+import { isDisplayTextAnimationId, isDisplayTextFontId, isDisplayTextPresetId } from './display-text-presets';
 
 export const AGENT_TIMELINE_TOOL_IDS = new Set([
   'get_timeline',
@@ -81,6 +83,17 @@ function sec(value: unknown, fallback = 0): number {
 
 function string(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function freeGraphicsStackOrder(document: EditorDocumentV2, startSec: number, durationSec: number): number {
+  const startFrame = secondsToTimelineFrames(startSec, document.canvas.fps);
+  const endFrame = startFrame + positiveDurationFrames(durationSec, document.canvas.fps);
+  for (let stackOrder = 2; ; stackOrder++) {
+    const track = document.timeline.tracks.find((candidate) => candidate.type === 'graphics' && candidate.stackOrder === stackOrder);
+    if (!track || !track.clips.some((clip) => clip.startFrame < endFrame && clip.startFrame + clip.durationFrames > startFrame)) {
+      return stackOrder;
+    }
+  }
 }
 
 function mediaBox(value: unknown): { x: number; y: number; w: number; h: number } | undefined {
@@ -1178,16 +1191,33 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     const item = (raw ?? {}) as Input;
     const text = string(item.text);
     if (!text) return fail(`items[${index}] text is required`);
+    const preset = isDisplayTextPresetId(item.preset) ? item.preset : 'clean';
+    const animation = isDisplayTextAnimationId(item.animation) ? item.animation : undefined;
+    const fontFamily = isDisplayTextFontId(item.fontFamily) ? item.fontFamily : undefined;
+    const align = item.align === 'left' || item.align === 'right' || item.align === 'center' ? item.align : undefined;
+    const placement = placementPercentToBox(item.placement, next.canvas.width, next.canvas.height);
+    if (placement.error) return fail(`items[${index}] ${placement.error}`);
+    const startSec = Math.max(0, sec(item.startSec));
+    const durationSec = Math.max(0.2, sec(item.durationSec, 3));
     const block = titleBlock({
       text,
-      startSec: Math.max(0, sec(item.startSec)),
-      durationSec: Math.max(0.2, sec(item.durationSec, 3)),
-      ...(typeof item.trackIndex === 'number' ? { trackIndex: Math.round(item.trackIndex) } : {}),
-      ...(string(item.sub) ? { sub: string(item.sub) } : {}),
+      startSec,
+      durationSec,
+      trackIndex: typeof item.trackIndex === 'number'
+        ? Math.round(item.trackIndex)
+        : freeGraphicsStackOrder(next, startSec, durationSec),
+      preset,
+      ...(animation ? { animation } : {}),
+      ...(string(item.color) ? { color: string(item.color) } : {}),
+      ...(string(item.accentColor) ? { accentColor: string(item.accentColor) } : {}),
+      ...(typeof item.fontSize === 'number' ? { fontSize: item.fontSize } : {}),
+      ...(typeof item.fontWeight === 'number' ? { fontWeight: item.fontWeight } : {}),
+      ...(fontFamily ? { fontFamily } : {}),
+      ...(align ? { align } : {}),
     });
     // Agent-created native text must remain positionable. Manual/legacy titleBlock callers retain
     // their established full-canvas behaviour; this tool supplies the editable safe-area geometry.
-    block.box = { x: 0.1, y: 0.34, w: 0.8, h: 0.32 };
+    block.box = placement.box ?? { x: 0.1, y: 0.34, w: 0.8, h: 0.32 };
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
     const inserted = insertOverlayDocumentClip({
@@ -1214,14 +1244,38 @@ function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOut
     const found = clipId ? locatedClip(document, clipId) : undefined;
     if (!found || found.clip.kind !== 'graphic' || found.clip.block.templateId !== 'title') return fail(`items[${index}] is not a title text clip`);
     const text = typeof item.text === 'string' ? item.text.trim() : undefined;
-    const sub = typeof item.sub === 'string' ? item.sub.trim() : undefined;
+    const preset = isDisplayTextPresetId(item.preset) ? item.preset : undefined;
+    const animation = isDisplayTextAnimationId(item.animation) ? item.animation : undefined;
+    const fontFamily = isDisplayTextFontId(item.fontFamily) ? item.fontFamily : undefined;
+    const align = item.align === 'left' || item.align === 'right' || item.align === 'center' ? item.align : undefined;
+    const color = typeof item.color === 'string' ? item.color.trim() : undefined;
+    const accentColor = typeof item.accentColor === 'string' ? item.accentColor.trim() : undefined;
+    const fontSize = typeof item.fontSize === 'number' ? item.fontSize : undefined;
+    const fontWeight = typeof item.fontWeight === 'number' ? item.fontWeight : undefined;
+    const visualChanged = preset !== undefined || animation !== undefined || align !== undefined
+      || color !== undefined || accentColor !== undefined || fontSize !== undefined
+      || fontWeight !== undefined || fontFamily !== undefined;
+    const placement = placementPercentToBox(item.placement, document.canvas.width, document.canvas.height);
+    if (placement.error) return fail(`items[${index}] ${placement.error}`);
     updates.push({
       clipId: found.clip.id,
       ...(typeof item.startSec === 'number' ? { startSec: Math.max(0, item.startSec) } : {}),
       ...(typeof item.durationSec === 'number' ? { durationSec: Math.max(0.2, item.durationSec) } : {}),
-      ...((text !== undefined || sub !== undefined) ? { block: {
-        slots: { ...found.clip.block.slots, ...(text !== undefined ? { text } : {}), ...(sub !== undefined ? { sub } : {}) },
+      ...((text !== undefined || visualChanged || placement.box) ? { block: {
+        slots: {
+          ...found.clip.block.slots,
+          ...(text !== undefined ? { text } : {}),
+          ...(preset !== undefined ? { preset } : {}),
+          ...(animation !== undefined ? { animation } : {}),
+          ...(align !== undefined ? { align } : {}),
+          ...(color !== undefined ? { color } : {}),
+          ...(accentColor !== undefined ? { accentColor } : {}),
+          ...(fontSize !== undefined ? { fontSize } : {}),
+          ...(fontWeight !== undefined ? { fontWeight } : {}),
+          ...(fontFamily !== undefined ? { fontFamily } : {}),
+        },
         ...(text !== undefined ? { label: text } : {}),
+        ...(placement.box ? { box: placement.box } : {}),
       } } : {}),
     });
   }

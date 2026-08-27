@@ -21,6 +21,7 @@ ensureTemplatesRegistered();
 
 export * from './audio-tracks';
 export * from './caption-presets';
+export * from './display-text-presets';
 export * from './caption-layout-metrics';
 export * from './caption-layout-state';
 export * from './composition-core';

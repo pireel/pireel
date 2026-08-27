@@ -120,13 +120,13 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain(
       "The active Frame governs HOW a generated image should look",
     );
-    expect(CHAT_IDENTITY).toContain("AD DISPLAY TYPE USES THE SAME MOTION GRAPHIC SYSTEM");
+    expect(CHAT_IDENTITY).toContain("LIGHTWEIGHT DISPLAY TYPE IS NATIVE TEXT");
     expect(CHAT_IDENTITY).toContain("NO-VOICEOVER ADS STILL USE AN INDEPENDENT SCREEN-COPY TRACK");
     expect(CHAT_IDENTITY).toContain("The absence of speech or a transcript is never a reason to omit designed ad copy");
     expect(CHAT_IDENTITY).toContain("actual shot cuts, visible action peaks, evidence holds, and music beats");
     expect(CHAT_IDENTITY).toContain("not a new timeline object, Director Plan, caption layer, or approval artifact");
-    expect(CHAT_IDENTITY).toContain("not a separate native text-sticker object");
-    expect(CHAT_IDENTITY).toContain("whole-object rotation, proportional scale, and position belong to the Motion card's canvas controls");
+    expect(CHAT_IDENTITY).toContain("MUST use batched add_texts with a visual preset");
+    expect(CHAT_IDENTITY).toContain("Use add_block only when the meaning depends on custom composed objects");
     expect(CHAT_IDENTITY).toContain(
       "exact subject and physical action/relation",
     );
@@ -233,18 +233,18 @@ describe("静态提示词完整性", () => {
     expect(STUDIO_SKILL_CAPABILITY_MAP.read_editing_guide).toBeUndefined();
   });
 
-  it("广告花字复用 Motion Graphic，原生文字只保留普通标题能力", () => {
+  it("轻量花字走原生文字预设，复杂图形才生成 Motion Graphic", () => {
     const addTexts = STUDIO_TOOLS.find((tool) => tool.id === "add_texts");
     const updateText = STUDIO_TOOLS.find((tool) => tool.id === "update_text");
-    expect(addTexts?.description).toContain("ordinary title/subtitle text Components");
-    expect(updateText?.description).toContain("main text, subtitle, start, and duration");
+    expect(addTexts?.description).toContain("lightweight display typography");
+    expect(addTexts?.description).toContain("instead of generating HTML");
+    expect(updateText?.description).toContain("display preset, named animation");
     const schema = JSON.stringify(addTexts?.inputSchema);
-    expect(schema).not.toContain('"outline-pop"');
-    expect(schema).not.toContain('"textRole"');
-    expect(schema).not.toContain('"rotationDeg"');
-    expect(BLOCK_SYSTEM).toContain("LIGHTWEIGHT AD TYPOGRAPHY");
-    expect(BLOCK_SYSTEM).toContain("not a separate text-sticker system");
-    expect(BLOCK_SYSTEM).toContain("rotation belong to the Motion card's canvas transform controls");
+    expect(schema).toContain('"editorial"');
+    expect(schema).toContain('"outline"');
+    expect(schema).toContain('"highlightBlock"');
+    expect(schema).toContain('"placement"');
+    expect(CHAT_IDENTITY).toContain("LIGHTWEIGHT DISPLAY TYPE IS NATIVE TEXT");
   });
   it("回复语言优先跟随用户输入，无法判断时才用宿主 locale，不跟随英文工具回执", () => {
     expect(CHAT_IDENTITY).toContain("host-supplied <reply_language> block");

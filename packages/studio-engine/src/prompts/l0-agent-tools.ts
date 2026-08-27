@@ -629,13 +629,24 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'add_texts', kind: 'badge', icon: 'T', label: 'tools.add_texts.label',
     skillContract: { version: 1, stability: 'stable' },
-    description: 'Add one or more ordinary title/subtitle text Components as native graphic blocks. This is the atomic text primitive; use a generated Motion Graphic Component only when custom composition or animation is actually needed.',
+    description: 'Batch-add deterministic native text Components. Use these for ordinary titles AND lightweight display typography such as hooks, pull quotes, labels, benefits and CTAs: choose a visual preset plus a named animation instead of generating HTML. Presets: clean, editorial, headline, outline, marker, label. Animations: none, popIn, slideUp, typewriter, wordReveal, wordSlide, highlightPop, highlightBlock. Use add_block only when the idea needs custom composed objects, diagrams, data graphics or choreography beyond styled text.',
     inputSchema: obj({
       items: { type: 'array', items: {
         type: 'object', additionalProperties: false,
         properties: {
-          id: { type: 'string' }, text: { type: 'string' }, sub: { type: 'string' }, startSec: { type: 'number' },
+          id: { type: 'string' }, text: { type: 'string' }, startSec: { type: 'number' },
           durationSec: { type: 'number' }, trackId: { type: 'string' }, trackIndex: { type: 'number' },
+          preset: { type: 'string', enum: ['clean', 'editorial', 'headline', 'outline', 'marker', 'label'] },
+          animation: { type: 'string', enum: ['none', 'popIn', 'slideUp', 'typewriter', 'wordReveal', 'wordSlide', 'highlightPop', 'highlightBlock'] },
+          color: { type: 'string', description: 'Optional #RGB/#RRGGBB text color override.' },
+          accentColor: { type: 'string', description: 'Optional #RGB/#RRGGBB accent/highlight override.' },
+          fontSize: { type: 'number', description: 'Optional 24–180 px size inside the text Component.' },
+          fontWeight: { type: 'number', description: 'Optional 300–950 font weight.' },
+          fontFamily: { type: 'string', enum: ['preset', 'sans', 'serif', 'mono'], description: 'Export-safe font family. preset follows the selected display style.' },
+          align: { type: 'string', enum: ['left', 'center', 'right'] },
+          placement: { type: 'object', additionalProperties: false, properties: {
+            xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
+          }, required: ['xPct', 'yPct', 'widthPct', 'heightPct'] },
           sceneId: { type: 'string', description: 'Exact Director scene id for planned text.' },
         },
         required: ['text', 'startSec'],
@@ -645,11 +656,21 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   {
     id: 'update_text', kind: 'badge', icon: '✏️', label: 'tools.update_text.label',
     skillContract: { version: 1, stability: 'stable' },
-    description: 'Batch-update native title text Components by stable clip id: main text, subtitle, start, and duration. It does not rewrite arbitrary custom HTML Components such as Motion Graphics.',
+    description: 'Batch-update native text Components by stable clip id: content, timing, placement, display preset, named animation, color, size, weight and alignment. It does not rewrite arbitrary custom HTML Components such as Motion Graphics.',
     inputSchema: obj({
       items: { type: 'array', items: {
         type: 'object', additionalProperties: false,
-        properties: { clipId: { type: 'string' }, text: { type: 'string' }, sub: { type: 'string' }, startSec: { type: 'number' }, durationSec: { type: 'number' } },
+        properties: {
+          clipId: { type: 'string' }, text: { type: 'string' }, startSec: { type: 'number' }, durationSec: { type: 'number' },
+          preset: { type: 'string', enum: ['clean', 'editorial', 'headline', 'outline', 'marker', 'label'] },
+          animation: { type: 'string', enum: ['none', 'popIn', 'slideUp', 'typewriter', 'wordReveal', 'wordSlide', 'highlightPop', 'highlightBlock'] },
+          color: { type: 'string' }, accentColor: { type: 'string' }, fontSize: { type: 'number' }, fontWeight: { type: 'number' },
+          fontFamily: { type: 'string', enum: ['preset', 'sans', 'serif', 'mono'] },
+          align: { type: 'string', enum: ['left', 'center', 'right'] },
+          placement: { type: 'object', additionalProperties: false, properties: {
+            xPct: { type: 'number' }, yPct: { type: 'number' }, widthPct: { type: 'number' }, heightPct: { type: 'number' },
+          }, required: ['xPct', 'yPct', 'widthPct', 'heightPct'] },
+        },
         required: ['clipId'],
       } },
     }, ['items']),

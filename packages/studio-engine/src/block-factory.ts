@@ -16,6 +16,7 @@ import {
 } from './composition-core';
 import { effectiveThemeVars, getTheme } from './theme';
 import { t } from './i18n';
+import type { DisplayTextAnimationId, DisplayTextFontId, DisplayTextPresetId } from './display-text-presets';
 
 /* ============================ Frozen look (Block.vars) ============================ */
 
@@ -108,11 +109,36 @@ export function customBlock(opts: {
   };
 }
 
-export function titleBlock(opts: { text: string; startSec: number; durationSec: number; trackIndex?: number; sub?: string }): Block {
+export function titleBlock(opts: {
+  text: string;
+  startSec: number;
+  durationSec: number;
+  trackIndex?: number;
+  sub?: string;
+  preset?: DisplayTextPresetId;
+  animation?: DisplayTextAnimationId;
+  color?: string;
+  accentColor?: string;
+  fontSize?: number;
+  fontWeight?: number;
+  fontFamily?: DisplayTextFontId;
+  align?: 'left' | 'center' | 'right';
+}): Block {
   return {
     id: blockId('title'),
     templateId: 'title',
-    slots: { text: opts.text, ...(opts.sub ? { sub: opts.sub } : {}) },
+    slots: {
+      text: opts.text,
+      ...(opts.sub ? { sub: opts.sub } : {}),
+      ...(opts.preset ? { preset: opts.preset } : {}),
+      ...(opts.animation ? { animation: opts.animation } : {}),
+      ...(opts.color ? { color: opts.color } : {}),
+      ...(opts.accentColor ? { accentColor: opts.accentColor } : {}),
+      ...(opts.fontSize != null ? { fontSize: opts.fontSize } : {}),
+      ...(opts.fontWeight != null ? { fontWeight: opts.fontWeight } : {}),
+      ...(opts.fontFamily ? { fontFamily: opts.fontFamily } : {}),
+      ...(opts.align ? { align: opts.align } : {}),
+    },
     startSec: opts.startSec,
     durationSec: opts.durationSec,
     trackIndex: opts.trackIndex ?? 2,
