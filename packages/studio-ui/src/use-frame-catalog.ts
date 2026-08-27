@@ -26,7 +26,47 @@ export interface FrameCatalogItem {
 
 // Catalog metadata is localized by the hosted endpoint. Keep both memory and localStorage
 // scoped by locale so changing language never reuses another locale's Frame titles.
-const cache = new Map<string, FrameCatalogItem[]>();
+export class FrameCatalogRequestCache {
+  private source: () => Promise<FrameCatalogItem[]>;
+  private generation = 0;
+  private readonly completed = new Map<string, FrameCatalogItem[]>();
+  private readonly pending = new Map<string, Promise<FrameCatalogItem[]>>();
+
+  constructor(source: () => Promise<FrameCatalogItem[]>) {
+    this.source = source;
+  }
+
+  get(locale: string): FrameCatalogItem[] | undefined {
+    return this.completed.get(locale);
+  }
+
+  setSource(source: () => Promise<FrameCatalogItem[]>): void {
+    this.source = source;
+    this.generation += 1;
+    this.completed.clear();
+    this.pending.clear();
+  }
+
+  load(locale: string): Promise<FrameCatalogItem[]> {
+    const completed = this.completed.get(locale);
+    if (completed) return Promise.resolve(completed);
+    const pending = this.pending.get(locale);
+    if (pending) return pending;
+
+    const generation = this.generation;
+    const request = this.source()
+      .then((frames) => {
+        if (generation === this.generation && frames.length)
+          this.completed.set(locale, frames);
+        return frames;
+      })
+      .finally(() => {
+        if (this.pending.get(locale) === request) this.pending.delete(locale);
+      });
+    this.pending.set(locale, request);
+    return request;
+  }
+}
 
 // localStorage mirror: the catalog is present on the first frame after refresh/new tab
 // (boot theme wall isn't empty), then overwritten once the background fetch lands.
@@ -54,14 +94,14 @@ function storeCatalog(locale: string, frames: FrameCatalogItem[]): void {
 // The catalog source is injectable (same approach as setStudioProviders): the hosted shell
 // defaults to the API (clients can't reach the server-only registry); the OSS shell feeds in
 // @pireel/studio-frames/vite's client registry directly, no backend.
-let source: () => Promise<FrameCatalogItem[]> = () =>
+const defaultSource = () =>
   fetch('/api/studio/frames')
     .then((r) => (r.ok ? r.json() : { frames: [] }))
     .then((d: { frames?: FrameCatalogItem[] }) => d.frames ?? []);
+const requests = new FrameCatalogRequestCache(defaultSource);
 
 export function setFrameCatalogSource(fn: () => Promise<FrameCatalogItem[]>): void {
-  source = fn;
-  cache.clear();
+  requests.setSource(fn);
 }
 
 /** Theme catalog shared by the frame panel + chat `/` menu + boot card wall.
@@ -73,24 +113,23 @@ export function useFrameCatalog(): FrameCatalogItem[] {
     items: FrameCatalogItem[];
   }>(() => ({
     locale,
-    items: cache.get(locale) ?? readStoredCatalog(locale) ?? [],
+    items: requests.get(locale) ?? readStoredCatalog(locale) ?? [],
   }));
   const visibleItems =
     state.locale === locale
       ? state.items
-      : cache.get(locale) ?? readStoredCatalog(locale) ?? [];
+      : requests.get(locale) ?? readStoredCatalog(locale) ?? [];
   useEffect(() => {
-    const cached = cache.get(locale);
+    const cached = requests.get(locale);
     if (cached) {
       setState({ locale, items: cached });
       return;
     }
     setState({ locale, items: readStoredCatalog(locale) ?? [] });
     let alive = true;
-    source()
+    requests.load(locale)
       .then((frames) => {
         if (!frames.length) return; // fetch failed — don't clobber the mirror with empty
-        cache.set(locale, frames);
         storeCatalog(locale, frames);
         if (alive) setState({ locale, items: frames });
       })

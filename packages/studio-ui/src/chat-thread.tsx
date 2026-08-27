@@ -61,6 +61,7 @@ import { studioLocale, t } from "./i18n";
 import type { StudioScenarioSkillOption } from "./shell-context";
 import { localAssetMentionContext } from "./chat-local-asset-mention";
 import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
+import { DeferredActivation } from "./deferred-activation";
 import type {
   AttachedFrame,
   ProgressHandle,
@@ -140,11 +141,6 @@ export function ChatThread({
   skillRef.current = skillId;
   const onFrameAppliedRef = useRef(onFrameApplied);
   onFrameAppliedRef.current = onFrameApplied;
-  /** Attach a frame (shared by panel/theme button): besides session state, also notifies the workbench to apply the theme palette to comp. */
-  const applyFrame = useCallback((f: AttachedFrame | null) => {
-    setFrame(f);
-    onFrameAppliedRef.current?.(f);
-  }, []);
 
   // body carries session-level frameId + skillId; the situation snapshot is attached to metadata.situation at send time (persists with the session,
   // the route materializes it into a <composition_state> part) — stable history bytes are what let the prompt cache hit
@@ -234,12 +230,38 @@ export function ChatThread({
   // otherwise merely opening an old session refreshes its updatedAt and scrambles the history ordering.
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-  const mountedRef = useRef(false);
+  const persistSessionState = useCallback(
+    (nextFrame: AttachedFrame | null, nextSkillId: StudioScenarioSkillId) => {
+      if (messagesRef.current.length > 0)
+        onSnapshot(messagesRef.current, nextFrame, nextSkillId);
+    },
+    [onSnapshot],
+  );
+  /** Attach a frame (shared by panel/theme button): update the request state, apply the palette, and persist this explicit user action. */
+  const applyFrame = useCallback(
+    (nextFrame: AttachedFrame | null) => {
+      frameRef.current = nextFrame;
+      setFrame(nextFrame);
+      onFrameAppliedRef.current?.(nextFrame);
+      persistSessionState(nextFrame, skillRef.current);
+    },
+    [persistSessionState],
+  );
+  const applySkill = useCallback(
+    (nextSkillId: StudioScenarioSkillId) => {
+      if (skillRef.current === nextSkillId) return;
+      skillRef.current = nextSkillId;
+      setSkillId(nextSkillId);
+      persistSessionState(frameRef.current, nextSkillId);
+    },
+    [persistSessionState],
+  );
+  const statusSnapshotActivationRef = useRef<DeferredActivation | null>(null);
+  if (!statusSnapshotActivationRef.current)
+    statusSnapshotActivationRef.current = new DeferredActivation();
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      return;
-    }
+    if (!statusSnapshotActivationRef.current!.active)
+      return statusSnapshotActivationRef.current!.defer();
     if (status === "ready" || status === "error")
       onSnapshot(messagesRef.current, frameRef.current, skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,7 +275,7 @@ export function ChatThread({
   // completion state (keyed by message id + part count), after a grace delay re-checking status so
   // the SDK's own trigger always wins (no double request), and never on first mount (opening an old
   // session that happens to end on a tool card must not start a paid request by itself; dedicated
-  // ref — mountedRef above is already true by the time this later-defined effect first runs).
+  // ref — the snapshot activation above is intentionally independent from continuation recovery).
   const statusRef = useRef(status);
   statusRef.current = status;
   const autoResumedRef = useRef("");
@@ -321,20 +343,6 @@ export function ChatThread({
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [busy]);
-
-  // Attaching/detaching a frame also persists (only if there are messages; an empty session shouldn't enter history)
-  useEffect(() => {
-    if (messagesRef.current.length > 0)
-      onSnapshot(messagesRef.current, frame, skillRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame]);
-
-  // Skill is session state like the attached frame: changing it affects future turns and survives history switching.
-  useEffect(() => {
-    if (messagesRef.current.length > 0)
-      onSnapshot(messagesRef.current, frameRef.current, skillId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skillId]);
 
   const run = useCallback(
     async (
@@ -485,17 +493,17 @@ export function ChatThread({
 
   const pickStarter = useCallback(
     (nextSkillId: StudioScenarioSkillId, starterId: string, prompt: string) => {
-      setSkillId(nextSkillId);
+      applySkill(nextSkillId);
       setActiveStarterId(`${nextSkillId}:${starterId}`);
       fillComposer(prompt);
     },
-    [fillComposer],
+    [applySkill, fillComposer],
   );
 
   const pickSkill = useCallback((nextSkillId: StudioScenarioSkillId) => {
-    setSkillId(nextSkillId);
+    applySkill(nextSkillId);
     setActiveStarterId(null);
-  }, []);
+  }, [applySkill]);
 
   // Expose "one-tap film" progress + selected pill to the workbench.
   useImperativeHandle(

@@ -30,6 +30,7 @@ import type { VisualTimeline } from './visual';
 import type { StudioElementRef } from './studio-chat';
 import { agentElementRosterKey, buildAgentElementRoster } from './agent-element-roster';
 import { blockDisplayTitle } from './block-display-title';
+import { loadCurrentUserBalance } from './current-user';
 import { t } from './i18n';
 
 export interface AgentContextDeps {
@@ -74,10 +75,9 @@ export function useAgentContext(deps: AgentContextDeps) {
     let gone = false;
     const refresh = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      fetch('/api/me/balance')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j: { balance?: number } | null) => {
-          if (!gone && j && typeof j.balance === 'number') canGenerateRef.current = j.balance > 0;
+      loadCurrentUserBalance()
+        .then((balance) => {
+          if (!gone && balance) canGenerateRef.current = balance.balance > 0;
         })
         .catch(() => {});
     };

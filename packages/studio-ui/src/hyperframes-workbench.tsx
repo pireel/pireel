@@ -240,6 +240,8 @@ import {
   CloudProjectSaveQueue,
   DeferredEffectDisposer,
 } from "./cloud-project-save";
+import { DeferredActivation } from "./deferred-activation";
+import { loadCurrentUser } from "./current-user";
 import {
   StudioTimeline,
   DEFAULT_PPS,
@@ -845,10 +847,15 @@ export function HyperframesWorkbench({
   // Debug instruments (analysis/face/source) are admin-only: no entry rendered for normal users
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => {
-    fetch("/api/me")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b: { role?: string } | null) => setIsAdmin(b?.role === "admin"))
+    let alive = true;
+    loadCurrentUser()
+      .then((value) => {
+        if (alive) setIsAdmin(value?.role === "admin");
+      })
       .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, []);
   // Right-panel categories (selected via the vertical toolbar): chat / image / video / blocks / upload / captions / frame (code = source drill-down of the selected block)
   const [codeBlockId, setCodeBlockId] = useState<string | null>(null); // which block the source editor is viewing
@@ -890,6 +897,19 @@ export function HyperframesWorkbench({
   const cloudSaveQueueRef =
     useRef<CloudProjectSaveQueue<ProjectSavePayload> | null>(null);
   const cloudSaveQueueProjectRef = useRef(projectId);
+  const cloudAutosaveActivationRef = useRef<{
+    projectId: string;
+    activation: DeferredActivation;
+  } | null>(null);
+  if (
+    !cloudAutosaveActivationRef.current ||
+    cloudAutosaveActivationRef.current.projectId !== projectId
+  ) {
+    cloudAutosaveActivationRef.current = {
+      projectId,
+      activation: new DeferredActivation(),
+    };
+  }
   const cloudSaveQueueDisposerRef = useRef<DeferredEffectDisposer | null>(null);
   if (!cloudSaveQueueDisposerRef.current)
     cloudSaveQueueDisposerRef.current = new DeferredEffectDisposer();
@@ -7673,7 +7693,13 @@ export function HyperframesWorkbench({
   // its in-memory state is by definition stale, and "retry until it lands" is exactly how a zombie tab clobbers the writer.
   useEffect(() => {
     // No content gate here: buildCloudPayload decides (full payload / null).
-    if (!projectId || displaced || migrationWriteBlockedRef.current) return;
+    if (!bootDataReady || !projectId) return;
+    const activation = cloudAutosaveActivationRef.current!.activation;
+    // Hydration, derived captions, restored media and output metadata can settle over several
+    // effects. None is user intent. Wait until that cascade is quiet before autosave can become
+    // dirty; real edits after the editor is interactive still take the normal 1.2s path.
+    if (!activation.active) return activation.defer();
+    if (displaced || migrationWriteBlockedRef.current) return;
     cloudSaveQueue.markDirty();
     const timer = window.setTimeout(() => {
       if (displacedRef.current || migrationWriteBlockedRef.current) return; // demoted/migration-blocked while this timer was armed
@@ -7682,6 +7708,7 @@ export function HyperframesWorkbench({
     return () => window.clearTimeout(timer);
     // asrSentences/clipAsr are also deps: changes that touch only the transcript, not comp (like translations (sub)), must sync too
   }, [
+    bootDataReady,
     comp,
     editorDocument,
     videoFile,
