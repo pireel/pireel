@@ -1,14 +1,15 @@
 'use client';
 
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import { Check, Loader2, Trash2, Upload } from 'lucide-react';
+import { CalendarDays, Check, CircleUserRound, Info, Loader2, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { TriggerPopover, type TriggerPopoverHandle } from '@pireel/ui/trigger-popover';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@pireel/ui/dialog';
 import { toast } from '@pireel/ui/toast';
 import {
   STUDIO_AUTO_SKILL_ID,
   type StudioScenarioSkillId,
 } from '@pireel/studio-engine/scenario-skills';
-import type { StudioScenarioSkillOption } from './shell-context';
+import type { StudioScenarioSkillOption, StudioSkillMarketMetadata } from './shell-context';
 import { t } from './i18n';
 
 interface SkillOption {
@@ -16,6 +17,7 @@ interface SkillOption {
   label: string;
   summary: string;
   custom?: boolean;
+  market?: StudioSkillMarketMetadata;
   action?: 'import';
 }
 
@@ -157,6 +159,110 @@ function importErrorMessage(error: unknown): string {
   return t('chatGen.skill.import.failed');
 }
 
+function detailSourceLabel(source: StudioSkillMarketMetadata['source']): string {
+  if (source === 'official') return t('chatGen.skill.detail.source.official');
+  if (source === 'market') return t('chatGen.skill.detail.source.market');
+  return t('chatGen.skill.detail.source.owned');
+}
+
+function visibilityLabel(visibility: StudioSkillMarketMetadata['visibility']): string {
+  return t(`chatGen.skill.detail.visibility.${visibility}`);
+}
+
+function formatDetailDate(value: number): string {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value));
+}
+
+function SkillMarketDetailDialog({
+  option,
+  onClose,
+}: {
+  option: SkillOption | null;
+  onClose: () => void;
+}) {
+  const market = option?.market;
+  return (
+    <Dialog open={!!option && !!market} onOpenChange={(open) => { if (!open) onClose(); }}>
+      {option && market && (
+        <DialogContent className="bg-panel border-line w-[min(520px,calc(100vw-2rem))] gap-0 overflow-hidden p-0">
+          <DialogHeader className="border-line border-b px-5 pb-4 pt-5 pr-12">
+            <div className="flex items-start gap-3.5">
+              <span className="border-line bg-bg text-ink grid size-11 shrink-0 place-items-center rounded-xl border shadow-sm">
+                <SkillMark option={option} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <DialogTitle className="text-ink text-[16px] leading-tight">{option.label}</DialogTitle>
+                  <span className="border-line bg-panel-2 text-ink-3 rounded-full border px-2 py-0.5 text-[10px] font-medium">
+                    {detailSourceLabel(market.source)}
+                  </span>
+                </div>
+                <DialogDescription className="text-ink-3 mt-1.5 text-[12.5px] leading-relaxed">
+                  {option.summary}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="px-5 py-4">
+            <dl className="border-line grid grid-cols-2 overflow-hidden rounded-lg border">
+              <div className="border-line border-b border-r px-3.5 py-3">
+                <dt className="text-ink-4 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em]">
+                  <CircleUserRound size={12} /> {t('chatGen.skill.detail.publisher')}
+                </dt>
+                <dd className="text-ink mt-1 truncate text-[12.5px] font-medium">
+                  {market.publisherName || (market.source === 'owned' ? t('chatGen.skill.detail.you') : '—')}
+                </dd>
+              </div>
+              <div className="border-line border-b px-3.5 py-3">
+                <dt className="text-ink-4 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em]">
+                  <ShieldCheck size={12} /> {t('chatGen.skill.detail.version')}
+                </dt>
+                <dd className="text-ink mt-1 text-[12.5px] font-medium">v{market.version}</dd>
+              </div>
+              <div className="border-line border-r px-3.5 py-3">
+                <dt className="text-ink-4 text-[10px] font-medium uppercase tracking-[0.08em]">
+                  {t('chatGen.skill.detail.visibility')}
+                </dt>
+                <dd className="text-ink mt-1 text-[12.5px] font-medium">{visibilityLabel(market.visibility)}</dd>
+              </div>
+              <div className="px-3.5 py-3">
+                <dt className="text-ink-4 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em]">
+                  <CalendarDays size={12} />
+                  {market.publishedAt ? t('chatGen.skill.detail.publishedAt') : t('chatGen.skill.detail.updatedAt')}
+                </dt>
+                <dd className="text-ink mt-1 text-[12.5px] font-medium">
+                  {market.publishedAt
+                    ? formatDetailDate(market.publishedAt)
+                    : market.updatedAt
+                      ? formatDetailDate(market.updatedAt)
+                      : '—'}
+                </dd>
+              </div>
+            </dl>
+
+            <section className="mt-5">
+              <h3 className="text-ink-4 text-[10px] font-medium uppercase tracking-[0.08em]">
+                {t('chatGen.skill.detail.description')}
+              </h3>
+              <p className="text-ink-2 mt-2 text-[13px] leading-6">{market.description}</p>
+            </section>
+
+            <div className="border-line bg-panel-2 mt-5 flex items-start gap-2.5 rounded-lg border px-3.5 py-3">
+              <ShieldCheck size={14} className="text-ink-3 mt-0.5 shrink-0" />
+              <p className="text-ink-3 text-[11.5px] leading-relaxed">
+                {t('chatGen.skill.detail.playbookHidden')}
+              </p>
+            </div>
+
+            <p className="text-ink-4 mt-3 truncate font-mono text-[10px]">{market.listingId}</p>
+          </div>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
 export function ChatSkillPicker({
   editorRef,
   skillId,
@@ -181,6 +287,7 @@ export function ChatSkillPicker({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<SkillOption | null>(null);
   const selectableOptions = useMemo<SkillOption[]>(
     () => [
       {
@@ -193,6 +300,7 @@ export function ChatSkillPicker({
         label: skill.title,
         summary: skill.summary,
         custom: skill.custom,
+        market: skill.market,
       })),
     ],
     [skills],
@@ -294,55 +402,74 @@ export function ChatSkillPicker({
           }
           const selectedItem = item.id === skillId;
           return (
-            <button
-              type="button"
+            <div
               data-active={active || undefined}
               onMouseEnter={setActive}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={pick}
-              className={`flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left ${active ? 'bg-panel-2' : ''}`}
+              className={`group flex w-full items-center rounded-md pr-1.5 transition-colors ${active ? 'bg-panel-2' : ''}`}
             >
-              <span className={`grid h-8 w-8 shrink-0 place-items-center ${selectedItem ? 'text-ink' : 'text-ink-3'}`}>
-                <SkillMark option={item} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="text-ink truncate text-[12.5px] font-medium">{item.label}</span>
-                  {selectedItem && <Check size={12} className="text-accent shrink-0" strokeWidth={2.5} />}
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={pick}
+                className="flex min-w-0 flex-1 items-start gap-2.5 px-2.5 py-2 text-left"
+              >
+                <span className={`grid h-8 w-8 shrink-0 place-items-center ${selectedItem ? 'text-ink' : 'text-ink-3'}`}>
+                  <SkillMark option={item} />
                 </span>
-                <span className="text-ink-4 mt-0.5 line-clamp-2 text-[11px] leading-snug">{item.summary}</span>
-              </span>
-              {item.custom && onDeleteCustom && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={t('chatGen.skill.delete')}
-                  title={t('chatGen.skill.delete')}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (deletingId || !window.confirm(t('chatGen.skill.deleteConfirm', { title: item.label }))) return;
-                    setDeletingId(item.id);
-                    void onDeleteCustom(item.id)
-                      .then(() => {
-                        if (selectedItem) onChange(STUDIO_AUTO_SKILL_ID);
-                        toast.success(t('chatGen.skill.deleted'));
-                      })
-                      .catch(() => toast.error(t('chatGen.skill.deleteFailed')))
-                      .finally(() => setDeletingId(null));
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') event.currentTarget.click();
-                  }}
-                  className="text-ink-4 hover:bg-line hover:text-ink grid h-7 w-7 shrink-0 place-items-center rounded"
-                >
-                  {deletingId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-ink truncate text-[12.5px] font-medium">{item.label}</span>
+                    {selectedItem && <Check size={12} className="text-accent shrink-0" strokeWidth={2.5} />}
+                  </span>
+                  <span className="text-ink-4 mt-0.5 line-clamp-2 text-[11px] leading-snug">{item.summary}</span>
                 </span>
-              )}
-            </button>
+              </button>
+              <span className={`flex shrink-0 items-center gap-0.5 transition-opacity ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}>
+                {item.market && (
+                  <button
+                    type="button"
+                    aria-label={t('chatGen.skill.detail.open', { title: item.label })}
+                    title={t('chatGen.skill.detail.openShort')}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      popoverRef.current?.close();
+                      setDetail(item);
+                    }}
+                    className="text-ink-4 hover:bg-line hover:text-ink grid size-7 place-items-center rounded-md transition-colors"
+                  >
+                    <Info size={13.5} />
+                  </button>
+                )}
+                {item.custom && onDeleteCustom && (
+                  <button
+                    type="button"
+                    aria-label={t('chatGen.skill.delete')}
+                    title={t('chatGen.skill.delete')}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (deletingId || !window.confirm(t('chatGen.skill.deleteConfirm', { title: item.label }))) return;
+                      setDeletingId(item.id);
+                      void onDeleteCustom(item.id)
+                        .then(() => {
+                          if (selectedItem) onChange(STUDIO_AUTO_SKILL_ID);
+                          toast.success(t('chatGen.skill.deleted'));
+                        })
+                        .catch(() => toast.error(t('chatGen.skill.deleteFailed')))
+                        .finally(() => setDeletingId(null));
+                    }}
+                    className="text-ink-4 hover:bg-line hover:text-ink grid size-7 place-items-center rounded-md transition-colors"
+                  >
+                    {deletingId === item.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  </button>
+                )}
+              </span>
+            </div>
           );
         }}
       />
+      <SkillMarketDetailDialog option={detail} onClose={() => setDetail(null)} />
     </>
   );
 }

@@ -34,6 +34,7 @@ import { useUiI18n } from './i18n';
  *  otherwise it falls back to the editor position. */
 export interface TriggerPopoverHandle {
   open: (anchorEl?: HTMLElement | null) => void;
+  close: () => void;
 }
 
 export interface TriggerPopoverPickContext {
@@ -319,6 +320,7 @@ function TriggerPopoverImpl<T>(
   useImperativeHandle(
     ref,
     () => ({
+      close,
       open: (anchorEl?: HTMLElement | null) => {
         // Already open → clicking the same button again toggles it closed (the click-outside handler skips the
         // button, so it's still in the open state here and correctly switches to closed).

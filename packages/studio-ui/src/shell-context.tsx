@@ -22,6 +22,20 @@ export interface ShellQualityConfig {
 }
 
 /** Browser-safe catalog metadata. Full Skill Markdown stays in the host's server bundle. */
+export interface StudioSkillMarketMetadata {
+  /** Stable market identity; versions change without changing this id. */
+  listingId: string;
+  source: 'official' | 'owned' | 'market';
+  /** Public/publish-form description. Never contains the Markdown playbook body. */
+  description: string;
+  publisherName?: string | null;
+  version: string | number;
+  versionId?: string;
+  visibility: 'official' | 'private' | 'unlisted' | 'public';
+  publishedAt?: number | null;
+  updatedAt?: number | null;
+}
+
 export interface StudioScenarioSkillOption {
   id: string;
   title: string;
@@ -32,6 +46,8 @@ export interface StudioScenarioSkillOption {
   starters?: readonly StudioScenarioSkillStarter[];
   /** User-owned account Skill. Enables management controls; never changes prompt authority. */
   custom?: boolean;
+  /** Market listing metadata used by the picker detail view. Markdown is intentionally absent. */
+  market?: StudioSkillMarketMetadata;
 }
 
 export interface StudioScenarioSkillStarter {
