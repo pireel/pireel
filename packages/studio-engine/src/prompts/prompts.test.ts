@@ -62,6 +62,15 @@ describe("静态提示词完整性", () => {
       "Outside those direct-execution scopes, before Approve do not call set_director_plan, remove_silence",
     );
     expect(CHAT_IDENTITY).toContain(
+      "A BOUNDED SINGLE-OUTPUT SOURCE-LED SHORT EDIT IS ALSO A DIRECT EXECUTION SCOPE",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "without request_approval, set_director_plan, set_scene_designs, sceneId bookkeeping",
+    );
+    expect(CHAT_IDENTITY).toContain(
+      "Outside the direct-execution scopes above, for a broad whole-video request",
+    );
+    expect(CHAT_IDENTITY).toContain(
       "CONSERVATIVE SPEECH CLEANUP IS A DIRECT EXECUTION SCOPE",
     );
     expect(CHAT_IDENTITY).toContain(
@@ -791,6 +800,20 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     };
     expect(prepareLocalImageSchema.properties).toHaveProperty("assetId");
     expect(prepareLocalImageSchema.required).toEqual(["assetId"]);
+  });
+
+  it("画面分析提供本地质量窗口并区分真实切点与长镜头观察段", () => {
+    const analyze = STUDIO_TOOLS.find((tool) => tool.id === "analyze_visual")!;
+    expect(analyze.description).toContain("qualityWindows");
+    expect(analyze.description).toContain("sharpness/exposure/stability");
+    expect(analyze.description).toContain("only sceneCutsSec are real cut points");
+  });
+  it("已放置素材可按源时间精确重取区间", () => {
+    const patchClip = STUDIO_TOOLS.find((tool) => tool.id === "set_clip_properties")!;
+    expect(patchClip.description).toContain("sourceInSec/sourceOutSec precisely retrim placed video or audio");
+    const schema = patchClip.inputSchema as { properties: { items: { items: { properties: Record<string, unknown> } } } };
+    expect(schema.properties.items.items.properties).toHaveProperty("sourceInSec");
+    expect(schema.properties.items.items.properties).toHaveProperty("sourceOutSec");
   });
   it("批量切分带 framing 目的,稳定人物区间内由运行时拒绝冗余切点", () => {
     const split = STUDIO_TOOLS.find((tool) => tool.id === "split_shot")!;

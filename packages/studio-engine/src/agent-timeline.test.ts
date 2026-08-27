@@ -452,6 +452,27 @@ describe('shared agent timeline atoms', () => {
     });
   });
 
+  it('retrims placed video by source clock, preserves playback speed, and ripples later primary clips', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.main = { id: 'main', kind: 'video', locator: { remoteUrl: 'https://cdn.example/main.mp4' }, metadata: { durationSec: 10 } };
+    document.timeline.tracks[0]!.clips = [
+      { id: 'shot-1', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 150, sourceInSec: 0, sourceOutSec: 5, properties: { treatment: 'full' }, enabled: true },
+      { id: 'shot-2', kind: 'narrative', assetId: 'main', startFrame: 150, durationFrames: 150, sourceInSec: 5, sourceOutSec: 10, properties: { treatment: 'full' }, enabled: true },
+    ];
+
+    const retrimmed = runAgentTimelineTool(document, 'set_clip_properties', {
+      items: [{ clipId: 'shot-1', sourceInSec: 1, sourceOutSec: 4 }],
+    });
+    expect(retrimmed.ok).toBe(true);
+    expect(retrimmed.document!.timeline.tracks[0]!.clips).toMatchObject([
+      { id: 'shot-1', startFrame: 0, durationFrames: 90, sourceInSec: 1, sourceOutSec: 4 },
+      { id: 'shot-2', startFrame: 90, durationFrames: 150, sourceInSec: 5, sourceOutSec: 10 },
+    ]);
+    expect(runAgentTimelineTool(retrimmed.document!, 'set_clip_properties', {
+      items: [{ clipId: 'shot-1', sourceOutSec: 12 }],
+    })).toMatchObject({ ok: false, error: expect.stringContaining('inside the asset duration') });
+  });
+
   it('retimes video picture and source audio together while keeping source ranges fixed', () => {
     const document = emptyEditorDocumentV2({ fps: 30 });
     document.assets.main = { id: 'main', kind: 'video', locator: { remoteUrl: 'https://cdn.example/main.mp4' }, metadata: { durationSec: 6, hasAudio: true } };

@@ -1,23 +1,26 @@
 'use client';
 
 /**
- * Studio visual analysis: understand the talking-head footage. It does NOT discover shots; it produces just two things:
- *  1) Source cuts (if the footage itself cuts to screen recording/b-roll, these points need transitions) — detectScenes, pure client-side, no model.
- *  2) Per-segment understanding label (where the person is / safe zone / existing content / burned-in text) — single frame -> VLM (OpenRouter).
- * Gives auto-shot-splitting hard cut points, and gives "how to perform" the safe-zone/content constraints. One frame at a time (no grid stitching for now).
+ * Studio visual analysis: observe footage without prescribing an edit. It produces:
+ *  1) Real source cuts (detectScenes, browser-local).
+ *  2) Dense local geometry and ranked technical-quality windows.
+ *  3) Sparse semantic labels (one VLM frame per sampled interval, including subdivisions of long uncut takes).
+ * Real cuts remain distinct from observation intervals; downstream editorial judgment chooses the shot ranges.
  */
 
 import { detectScenes } from '@pireel/studio-engine/video-edit/scene-detection';
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
-import { type NRect, type SafeZone, analyzeGeometry, analyzeGeometryRange, geomNote, safeZoneForRange } from './geometry';
+import { type NRect, type SafeZone, analyzeGeometryAndQuality, analyzeGeometryRange, geomNote, safeZoneForRange } from './geometry';
 import { type DerivedPalette, extractPalette } from './palette';
 import { fileSig } from './media';
+import { buildVisualQualityWindows, type VisualQualityWindow } from '@pireel/studio-engine/visual-quality';
 
 // Data contracts live in the engine package (analysis impl stays here): layoutFromPlan etc. consume these shapes
 export type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-engine/visual-types';
 import type { VisualLabel, VisualSegment, VisualTimeline } from '@pireel/studio-engine/visual-types';
 
 const MAX_VLM = 8; // VLM (paid) cost cap: segments are NOT dropped; only this many points are sampled to the VLM, other segments inherit semantics from the nearest
+const MAX_SEMANTIC_SPAN_SEC = 12; // a long take with no hard cuts still needs action/content observations across time
 const VLM_CONCURRENCY = 2; // Avoid bursting every sampled frame into the same pinned upstream at once.
 const CAPTION_RESERVE = 0.16; // fixed bottom 16% reserved for captions (don't detect original captions: the start often has none, and captions get added to the bottom in post)
 const DEFAULT_LABEL: VisualLabel = { content: 'talkinghead', person: 'center', safe: 'full', hasText: false, desc: '' };
@@ -44,8 +47,8 @@ export async function mapWithConcurrency<T, R>(
 }
 
 /* ---------- Visual-analysis cache (localStorage, keyed by file fingerprint; same clip doesn't rerun the VLM) ---------- */
-// v3: segments no longer dropped (full-clip coverage, no gaps) + framing direction set by dense geometry; new prefix invalidates the old 8-segment cache.
-const VPREFIX = 'pinshot:studio:visual:v3:';
+// v4: local technical-quality windows + long-take semantic subdivisions; old caches lack both and must be refreshed.
+const VPREFIX = 'pinshot:studio:visual:v4:';
 export function getCachedVisual(sig: string): VisualTimeline | null {
   if (!sig || typeof localStorage === 'undefined') return null;
   try {
@@ -90,15 +93,24 @@ async function blobToBase64(blob: Blob): Promise<{ base64: string; mime: string 
   return { base64: btoa(bin), mime: blob.type || 'image/jpeg' };
 }
 
-/** Cuts -> segments (filter jittery cut points, drop too-short segments). */
-function segmentsFromCuts(cuts: number[], durationSec: number): { start: number; end: number }[] {
+/** Real cuts -> analysis segments. Long takes are subdivided only for observation coverage;
+ * `VisualTimeline.cuts` remains the source of truth for actual edit boundaries. */
+export function analysisSegmentsFromCuts(cuts: number[], durationSec: number): { start: number; end: number }[] {
   const inner = cuts.filter((t) => t > 0.3 && t < durationSec - 0.1).sort((a, b) => a - b);
   const bounds = [0, ...inner, durationSec];
   const segs: { start: number; end: number }[] = [];
   for (let i = 0; i < bounds.length - 1; i++) {
     const start = bounds[i]!;
     const end = bounds[i + 1]!;
-    if (end - start > 0.4) segs.push({ start, end });
+    const span = end - start;
+    if (span <= 0.4) continue;
+    const pieces = Math.max(1, Math.ceil(span / MAX_SEMANTIC_SPAN_SEC));
+    for (let piece = 0; piece < pieces; piece++) {
+      segs.push({
+        start: start + (span * piece) / pieces,
+        end: start + (span * (piece + 1)) / pieces,
+      });
+    }
   }
   return segs.length ? segs : [{ start: 0, end: durationSec }];
 }
@@ -151,7 +163,8 @@ export interface VisualPrep {
   segsAll: { start: number; end: number }[];
   /** VLM sampling frames (base64, timestamp = the actual sampled moment; extractThumbnails silently skips points it can't decode). */
   frames: { timestamp: number; base64: string; mime: string }[];
-  geomFrames: Awaited<ReturnType<typeof analyzeGeometry>> | null;
+  geomFrames: Awaited<ReturnType<typeof analyzeGeometryAndQuality>>['frames'];
+  qualityWindows: VisualQualityWindow[];
   palette: DerivedPalette | null;
 }
 
@@ -170,17 +183,18 @@ export async function prepareVisualAnalysis(
   const cutObjs = await detectScenes(file).catch(() => []);
   const cuts = cutObjs.map((c) => c.timestamp).filter((t) => t > 0.3 && t < durationSec - 0.1);
 
-  const segsAll = segmentsFromCuts(cuts, durationSec); // all segments, covering the whole clip (not dropped -> no gaps)
+  const segsAll = analysisSegmentsFromCuts(cuts, durationSec); // all analysis intervals, covering the whole clip (not dropped -> no gaps)
   const vlmSegs = capSegments(segsAll, MAX_VLM); // only these points get semantic sampling; other segments inherit from the nearest
 
   const stamps = vlmSegs.map((s) => Math.min(s.end - 0.05, s.start + (s.end - s.start) / 2));
   const thumbs = await extractThumbnails(file, stamps, { width: 360 });
   const palettePromise = extractPalette(thumbs); // reuse the same batch of thumbnail frames to sample the palette
   // The geometry pass (MediaPipe, per-frame) is the long pole; progress tracks it
-  const [geomFrames, palette] = await Promise.all([
-    analyzeGeometry(file, durationSec, onProgress).catch(() => null),
+  const [local, palette] = await Promise.all([
+    analyzeGeometryAndQuality(file, durationSec, onProgress).catch(() => ({ frames: null, quality: [] })),
     palettePromise,
   ]);
+  const qualityWindows = buildVisualQualityWindows(local.quality, durationSec, cuts);
   const frames = await Promise.all(
     thumbs.map(async (th) => {
       const img = await blobToBase64(th.blob);
@@ -188,7 +202,7 @@ export async function prepareVisualAnalysis(
     }),
   );
   thumbs.forEach((th) => URL.revokeObjectURL(th.url));
-  return { prep: { sig, durationSec, cuts, segsAll, frames, geomFrames, palette } };
+  return { prep: { sig, durationSec, cuts, segsAll, frames, geomFrames: local.frames, qualityWindows, palette } };
 }
 
 /** Semantic labels (labels[i] maps 1:1 to prep.frames[i], null = that frame got none) -> assemble the full VisualTimeline and cache it. */
@@ -197,7 +211,7 @@ export function finishVisualAnalysis(
   labels: (VisualLabel | null)[],
   options: { cache?: boolean } = {},
 ): VisualTimeline {
-  const { cuts, segsAll, frames, geomFrames, palette } = prep;
+  const { cuts, segsAll, frames, geomFrames, qualityWindows, palette } = prep;
   // Sample points (actual sampled frame time -> label), letting non-sampled segments inherit semantics (content/hasText/desc) from the nearest.
   // Match back by the frames' own timestamp, not by index against vlmSegs (index misalignment would smear labels across segments).
   const vlmPts = frames.map((f, i) => ({ t: f.timestamp, label: labels[i] ?? DEFAULT_LABEL }));
@@ -226,11 +240,18 @@ export function finishVisualAnalysis(
     const label: VisualLabel = { ...base, person };
     return { ...s, label, ...(geom ? { geom } : {}) };
   });
-  const result: VisualTimeline = { cuts, segments, geomNote: geomNote(), ...(textBands.length ? { textBands } : {}), ...(palette ? { palette } : {}) };
+  const result: VisualTimeline = {
+    cuts,
+    segments,
+    geomNote: geomNote(),
+    ...(qualityWindows.length ? { qualityWindows } : {}),
+    ...(textBands.length ? { textBands } : {}),
+    ...(palette ? { palette } : {}),
+  };
   // Only cache results where "at least one pass succeeded": semantics all failed + geometry pass all failed = pure fallback data;
   // caching that would pin the failure (reopening the same clip hits the cache and never retries). Partial success is cacheable; use clearVisualCache to force a rerun.
   const vlmOk = labels.some((l) => l !== null);
-  if (options.cache !== false && (vlmOk || geomFrames)) setCachedVisual(prep.sig, result);
+  if (options.cache !== false && (vlmOk || geomFrames || qualityWindows.length)) setCachedVisual(prep.sig, result);
   return result;
 }
 

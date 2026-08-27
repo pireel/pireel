@@ -24,6 +24,18 @@ export function patchEditorClip(
     return commandFailure(document, 'clip-not-found', `Clip does not exist on track ${trackId}: ${clipId}`, { trackIds: [trackId] });
   }
   const current = track.clips[clipIndex]!;
+  const patchesSourceRange = patch.sourceInSec != null || patch.sourceOutSec != null;
+  if (patchesSourceRange) {
+    if ((current.kind !== 'media' && current.kind !== 'narrative') || document.assets[current.assetId]?.kind !== 'video') {
+      return commandFailure(document, 'invalid-command', 'Source-clock video trim is only valid for video narrative/media clips.', { path: 'patch' });
+    }
+    const sourceInSec = patch.sourceInSec ?? current.sourceInSec;
+    const sourceOutSec = patch.sourceOutSec ?? current.sourceOutSec;
+    const sourceDurationSec = document.assets[current.assetId]?.metadata.durationSec;
+    if (!Number.isFinite(sourceInSec) || !Number.isFinite(sourceOutSec) || sourceInSec < 0 || sourceOutSec <= sourceInSec || (sourceDurationSec != null && sourceOutSec > sourceDurationSec + 0.001)) {
+      return commandFailure(document, 'invalid-command', 'Video source range must be finite, positive, ordered, and inside the asset duration.', { path: 'patch' });
+    }
+  }
   if ((patch.box != null || patch.mediaFraming !== undefined) && current.kind !== 'media' && current.kind !== 'narrative') {
     return commandFailure(document, 'invalid-command', 'Canvas placement and framing are only valid for video and visual media clips.', { path: 'patch' });
   }
@@ -34,6 +46,8 @@ export function patchEditorClip(
     ? {
         ...current,
         ...(patch.enabled != null ? { enabled: patch.enabled } : {}),
+        ...(patch.sourceInSec != null ? { sourceInSec: patch.sourceInSec } : {}),
+        ...(patch.sourceOutSec != null ? { sourceOutSec: patch.sourceOutSec } : {}),
         ...(patch.fit ? { fit: patch.fit } : {}),
         ...(patch.box ? { box: patch.box } : {}),
         ...(patch.mediaFraming === null ? { mediaFraming: undefined } : patch.mediaFraming ? { mediaFraming: patch.mediaFraming } : {}),
@@ -47,6 +61,8 @@ export function patchEditorClip(
       ? {
           ...current,
           ...(patch.enabled != null ? { enabled: patch.enabled } : {}),
+          ...(patch.sourceInSec != null ? { sourceInSec: patch.sourceInSec } : {}),
+          ...(patch.sourceOutSec != null ? { sourceOutSec: patch.sourceOutSec } : {}),
           ...(patch.box ? { box: patch.box } : {}),
           ...(patch.mediaFraming === null ? { mediaFraming: undefined } : patch.mediaFraming ? { mediaFraming: patch.mediaFraming } : {}),
         }

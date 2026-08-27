@@ -7,6 +7,7 @@
 import type { NRect, SafeZone } from './geometry-math';
 import type { VideoShot } from './composition-core';
 import { editedToSrc, spans as clipSpans } from './trim';
+import type { VisualQualityWindow } from './visual-quality';
 
 /** Palette derived from footage base colors (CSS var overrides). */
 export type DerivedPalette = Record<string, string>;
@@ -37,6 +38,8 @@ export interface VisualTimeline {
   palette?: DerivedPalette;
   /** Bottom band reserved for captions (global no-go zone for graphics). */
   textBands?: NRect[];
+  /** Ranked browser-local technical-quality source ranges. Absent only when local measurement failed. */
+  qualityWindows?: VisualQualityWindow[];
 }
 
 export interface AgentVisualRect {
@@ -76,6 +79,8 @@ export interface AgentVisualSummary {
   subjectTracks: AgentSubjectTrack[];
   /** Compact semantic intervals; repeated geometry intentionally lives only in subjectTracks. */
   segments: AgentVisualSegment[];
+  /** Browser-local technical measurements; use as a shortlist, then apply semantic/editorial judgment. */
+  qualityWindows?: VisualQualityWindow[];
 }
 
 /** Token-free/local observations that are sufficient for crop, framing and empty-space decisions.
@@ -83,6 +88,7 @@ export interface AgentVisualSummary {
 export interface AgentVisualGeometrySummary {
   sceneCutsSec: number[];
   subjectTracks: AgentSubjectTrack[];
+  qualityWindows?: VisualQualityWindow[];
 }
 
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
@@ -260,6 +266,7 @@ export function visualTimelineForAgent(timeline: VisualTimeline): AgentVisualSum
     sceneCutsSec: timeline.cuts.map(round3),
     subjectTracks: stableSubjectTracks(timeline.segments),
     segments: compactSemanticSegments(timeline.segments),
+    ...(timeline.qualityWindows?.length ? { qualityWindows: timeline.qualityWindows } : {}),
   };
 }
 
@@ -267,5 +274,6 @@ export function visualGeometryForAgent(timeline: VisualTimeline): AgentVisualGeo
   return {
     sceneCutsSec: timeline.cuts.map(round3),
     subjectTracks: stableSubjectTracks(timeline.segments),
+    ...(timeline.qualityWindows?.length ? { qualityWindows: timeline.qualityWindows } : {}),
   };
 }

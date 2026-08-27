@@ -806,6 +806,7 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
   const unchangedPrimaryFillClipIds: string[] = [];
+  let visualSourceChanged = false;
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Input;
     const clipId = string(item.clipId);
@@ -819,8 +820,45 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
       found = locatedClip(next, clipId!);
     }
     if (!found) return fail(`items[${index}] clip not found after move`);
+    const visualAsset = (found.clip.kind === 'media' || found.clip.kind === 'narrative')
+      ? next.assets[found.clip.assetId]
+      : undefined;
+    const patchesVisualSource = typeof item.sourceInSec === 'number' || typeof item.sourceOutSec === 'number';
+    if (patchesVisualSource && visualAsset?.kind === 'video' && (found.clip.kind === 'media' || found.clip.kind === 'narrative')) {
+      const sourceInSec = typeof item.sourceInSec === 'number' ? item.sourceInSec : found.clip.sourceInSec;
+      const sourceOutSec = typeof item.sourceOutSec === 'number' ? item.sourceOutSec : found.clip.sourceOutSec;
+      if (!Number.isFinite(sourceInSec) || !Number.isFinite(sourceOutSec) || sourceInSec < 0 || sourceOutSec <= sourceInSec || (visualAsset.metadata.durationSec != null && sourceOutSec > visualAsset.metadata.durationSec + 0.001)) {
+        return fail(`items[${index}] video source range must be positive, ordered, and inside the asset duration`);
+      }
+      const oldSourceDurationSec = found.clip.sourceOutSec - found.clip.sourceInSec;
+      const oldTimelineDurationSec = timelineFramesToSeconds(found.clip.durationFrames, next.canvas.fps);
+      const playbackSpeed = oldTimelineDurationSec > 0 ? oldSourceDurationSec / oldTimelineDurationSec : 1;
+      const newDurationFrames = positiveDurationFrames((sourceOutSec - sourceInSec) / Math.max(0.01, playbackSpeed), next.canvas.fps);
+      if (newDurationFrames !== found.clip.durationFrames) {
+        const retimed = applyEditorCommand(next, {
+          type: 'clip.retime',
+          trackId: found.track.id,
+          clipId: found.clip.id,
+          durationFrames: newDurationFrames,
+          ripple: found.clip.kind === 'narrative',
+        });
+        if (!retimed.ok) return fail(retimed.error.message, retimed.error);
+        next = retimed.document;
+        receipts.push(retimed.receipt);
+        found = locatedClip(next, clipId!);
+        if (!found) return fail(`items[${index}] clip not found after source-range retime`);
+      }
+      visualSourceChanged = true;
+    } else if (patchesVisualSource && found.clip.kind !== 'audio') {
+      return fail(`items[${index}] sourceInSec/sourceOutSec require a video or audio clip`);
+    }
+    if (typeof item.speed === 'number' && visualAsset?.kind === 'video') {
+      return fail(`items[${index}] use set_video_speed for video speed changes`);
+    }
     const commonPatch: ClipPatch = {
       ...(typeof item.enabled === 'boolean' ? { enabled: item.enabled } : {}),
+      ...(patchesVisualSource && visualAsset?.kind === 'video' && typeof item.sourceInSec === 'number' ? { sourceInSec: item.sourceInSec } : {}),
+      ...(patchesVisualSource && visualAsset?.kind === 'video' && typeof item.sourceOutSec === 'number' ? { sourceOutSec: item.sourceOutSec } : {}),
     };
     if (item.fit === 'contain' || item.fit === 'cover') {
       if (found.clip.kind === 'narrative') {
@@ -877,6 +915,12 @@ function setClipProperties(document: EditorDocumentV2, input: Input): AgentTimel
         receipts.push(...edited.receipts);
       }
     }
+  }
+  if (visualSourceChanged && next.semantics.managedCaptionTrackId) {
+    const relayed = applyEditorCommand(next, { type: 'captions.relay' });
+    if (!relayed.ok) return fail(relayed.error.message, relayed.error);
+    next = relayed.document;
+    receipts.push(relayed.receipt);
   }
   const changedCount = receipts.filter((receipt) => receipt.affectedTrackIds.length > 0).length;
   const summary = changedCount === 0 && unchangedPrimaryFillClipIds.length

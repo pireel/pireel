@@ -60,6 +60,9 @@ export type TrackPatch = Partial<Pick<EditorTrack,
 
 export interface ClipPatch {
   enabled?: boolean;
+  /** Source-clock trim boundaries for video narrative/media clips. Duration/ripple is coordinated by the caller. */
+  sourceInSec?: number;
+  sourceOutSec?: number;
   /** Visual media fill policy; valid only for media clips. */
   fit?: 'contain' | 'cover';
   /** Canvas-relative placement. x/y may be outside 0..1 and w/h may exceed 1. */
