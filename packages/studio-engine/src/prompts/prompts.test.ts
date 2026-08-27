@@ -3,6 +3,9 @@ import {
   AGENT_TRANSCRIPT_MAX_CHARS,
   BLOCK_SYSTEM,
   CHAT_IDENTITY,
+  STUDIO_SKILL_CAPABILITIES,
+  STUDIO_SKILL_CAPABILITY_CATALOG,
+  STUDIO_SKILL_CAPABILITY_MAP,
   STUDIO_TOOLS,
   THEME_GENERAL_BRIEF,
   VIDEO_DESIGN_METHOD,
@@ -204,6 +207,30 @@ describe("静态提示词完整性", () => {
         ["analyze_narration", "lay_out", "add_graphics"].includes(tool.id),
       ),
     ).toBe(false);
+  });
+  it("Skill 只能依赖显式稳定、带版本的原子能力契约", () => {
+    const ids = STUDIO_SKILL_CAPABILITIES.map((capability) => capability.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(expect.arrayContaining([
+      "get_timeline",
+      "read_script",
+      "apply_layout",
+      "remove_silence",
+      "set_captions",
+      "review_visuals",
+    ]));
+    for (const capability of STUDIO_SKILL_CAPABILITIES) {
+      expect(capability.version).toBe(1);
+      expect(capability.inputSchema).toMatchObject({
+        type: "object",
+        additionalProperties: false,
+      });
+      expect(STUDIO_SKILL_CAPABILITY_MAP[capability.id]).toBe(capability);
+      expect(STUDIO_SKILL_CAPABILITY_CATALOG).toContain(
+        `${capability.id}@${capability.version}`,
+      );
+    }
+    expect(STUDIO_SKILL_CAPABILITY_MAP.read_editing_guide).toBeUndefined();
   });
 
   it("广告花字复用 Motion Graphic，原生文字只保留普通标题能力", () => {

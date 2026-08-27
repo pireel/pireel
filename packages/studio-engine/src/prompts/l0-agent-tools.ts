@@ -31,6 +31,20 @@ import { BROLL_DECISIONS, NARRATIVE_ROLES, SCENE_FAMILIES, VIEWER_TASKS } from '
 
 export type StudioToolKind = 'badge' | 'card';
 
+/**
+ * Public contract for tool names that may be written into a reusable Studio Skill.
+ *
+ * A missing contract means the tool is an implementation detail and Skill authors must
+ * describe the intent instead of depending on its current name or payload. Stable contracts
+ * are append-only within one version: optional inputs may be added, but existing names,
+ * meanings, enums and accepted payloads must remain valid. Breaking changes require a new
+ * capability id or a higher contract version with an explicit compatibility path.
+ */
+export interface StudioSkillCapabilityContract {
+  version: number;
+  stability: 'stable' | 'experimental';
+}
+
 export interface StudioToolDef {
   id: string;
   /** badge = instant state change (small badge); card = needs generation, slower (card shows note). */
@@ -45,6 +59,8 @@ export interface StudioToolDef {
   description: string;
   /** JSON schema — server wraps it via jsonSchema() into tool(); client only reads input, no validation. */
   inputSchema: Record<string, unknown>;
+  /** Opt-in public contract for reusable Skills. Unset tools are not safe to name in a Skill. */
+  skillContract?: StudioSkillCapabilityContract;
   /** Chat-surface only: not exposed on MCP (external agents bring their own vision via capture_frame/review_sequence). */
   chatOnly?: boolean;
 }
@@ -328,6 +344,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   /* ---------- media analysis (card · slow) ---------- */
   {
     id: 'read_script',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'card',
     busyText: 'tools.read_script.busy',
     icon: '📖',
@@ -343,6 +360,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'list_words',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🔤',
     label: 'tools.list_words.label',
@@ -515,6 +533,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'review_visuals',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'card',
     busyText: 'tools.review_visuals.busy',
     icon: '🔎',
@@ -534,6 +553,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   /* ---------- neutral timeline atoms (one contract: live, offline and MCP) ---------- */
   {
     id: 'get_timeline', kind: 'badge', icon: '🧭', label: 'tools.get_timeline.label',
+    skillContract: { version: 1, stability: 'stable' },
     description:
       'Read the canonical typed timeline: canvas, duration, assets, semantic roles, every track and every clip with both frame and second geometry. Use before generic editing when ids or lane roles are not already present in context. Works live, offline, and through MCP.',
     inputSchema: obj({}, []),
@@ -569,11 +589,13 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'inspect_media', kind: 'badge', icon: '🔬', label: 'tools.inspect_media.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Inspect registered media metadata, transcript coverage, and every placed occurrence. Omit ids to inspect the whole active project manifest. This is read-only and never analyzes pixels or spends model credits.',
     inputSchema: obj({ assetIds: { type: 'array', items: { type: 'string' } }, clipIds: { type: 'array', items: { type: 'string' } } }, []),
   },
   {
     id: 'inspect_images', kind: 'card', busyText: 'tools.inspect_images.busy', icon: '👁️', label: 'tools.inspect_images.label',
+    skillContract: { version: 1, stability: 'stable' },
     chatOnly: true,
     description:
       'Inspect the ACTUAL PIXELS of up to 8 still images before choosing, describing, or placing them. Pass exact project-local assetIds returned by list_assets/search_assets, or exact registered image asset ids from inspect_media. Returns one grounded visual description per image, including visible subject, composition, text/data and likely editorial use. Use this instead of inferring image contents from filenames or dimensions. This sends compressed inspection copies to the configured vision service but does not upload the source files to the media library.',
@@ -606,6 +628,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_texts', kind: 'badge', icon: 'T', label: 'tools.add_texts.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Add one or more ordinary title/subtitle text Components as native graphic blocks. This is the atomic text primitive; use a generated Motion Graphic Component only when custom composition or animation is actually needed.',
     inputSchema: obj({
       items: { type: 'array', items: {
@@ -621,6 +644,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'update_text', kind: 'badge', icon: '✏️', label: 'tools.update_text.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Batch-update native title text Components by stable clip id: main text, subtitle, start, and duration. It does not rewrite arbitrary custom HTML Components such as Motion Graphics.',
     inputSchema: obj({
       items: { type: 'array', items: {
@@ -632,36 +656,43 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_clips', kind: 'badge', icon: '➕', label: 'tools.add_clips.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Place one or more registered assets without opening timeline time. Device-local image, audio, and video bytes are prepared before commit; unavailable access fails without changing the timeline. Use role=primary for the continuous full-frame video story spine; use role=broll only for deliberate concurrent overlay/PiP evidence. When trackId is omitted, overlapping broll and overlapping role=sfx audio are placed on free semantic lanes so every item is preserved; non-overlapping SFX reuse an existing free SFX lane. Pass an exact trackId only when replacement is intentional. The receipt returns the actual placed timeline/source ranges and any overwritten clip ids. A 5-second fallback is only an editable initial duration, never proof of source length or coverage. Reuse is valid only when the repeated occurrence has a distinct editorial job or treatment; inspect the source, pass deliberate duration/source ranges, and verify placements instead of looping one span as filler. Use insert_clips to open time. Each clip is typed from its asset; missing semantic lanes are created transactionally. Planned visual clips must pass their exact sceneId. Audio must declare narration/music/sfx when the default narration role is not intended. Omit initial volumeDb unless the user specified a level: narration defaults to a clarity lift, and music is capped to a speech-safe bed while narration exists. One output may mix BGM/source sound with narration, but it cannot contain time-overlapping audible narration tracks. Replace or remove the current narration; if the user requested another finished version, create and switch to its independent output before placing that version\'s narration.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
     id: 'insert_clips', kind: 'badge', icon: '↪️', label: 'tools.insert_clips.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Insert one or more registered assets and ripple later material on sync-locked/linked lanes while keeping Director scene intervals aligned. Planned visual clips must pass their exact sceneId. Use add_clips when replacement rather than timeline opening is intended.',
     inputSchema: obj({ clips: { type: 'array', items: AGENT_CLIP_ITEM_SCHEMA }, atSec: { type: 'number' }, includeLinked: { type: 'boolean' } }, ['clips']),
   },
   {
     id: 'move_clips', kind: 'badge', icon: '↔️', label: 'tools.move_clips.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Move exact clip identities to edited-timeline starts, optionally across compatible tracks. Linked partners move by the same delta unless includeLinked=false.',
     inputSchema: obj({ items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { clipId: { type: 'string' }, startSec: { type: 'number' }, toTrackId: { type: 'string' } }, required: ['clipId', 'startSec'] } }, includeLinked: { type: 'boolean' } }, ['items']),
   },
   {
     id: 'remove_clips', kind: 'badge', icon: '🗑️', label: 'tools.remove_clips.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Remove exact clip identities without shifting surviving material. Linked partners are included by default.',
     inputSchema: obj({ clipIds: { type: 'array', items: { type: 'string' } }, includeLinked: { type: 'boolean' } }, ['clipIds']),
   },
   {
     id: 'split_clips', kind: 'badge', icon: '✂️', label: 'tools.split_clips.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Split exact typed clips at edited-timeline seconds. Linked partners crossing the same moment split together by default.',
     inputSchema: obj({ items: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { clipId: { type: 'string' }, atSec: { type: 'number' } }, required: ['clipId', 'atSec'] } }, includeLinked: { type: 'boolean' } }, ['items']),
   },
   {
     id: 'set_clip_properties', kind: 'badge', icon: '🎚️', label: 'tools.set_clip_properties.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Batch patch common typed clip properties. sourceInSec/sourceOutSec precisely retrim placed video or audio to new source-clock boundaries; startSec repositions it on the edited timeline. Also supports enabled for all clips; canvas-relative box for primary and ordinary video/image clips (it may extend outside the canvas); fit, cover-crop anchor, and opacity for ordinary visual media; and level/fades/speed/mute for audio. The box is the atomic canvas placement primitive; source framing/crop remains independent.',
     inputSchema: obj({ items: { type: 'array', items: AGENT_CLIP_PROPERTY_SCHEMA } }, ['items']),
   },
   {
     id: 'set_media_transform', kind: 'badge', icon: '↗', label: 'tools.set_media_transform.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Patch the atomic layer transform for one or many narrative/video/image clips. scale is uniform around the layer centre; offsetX/offsetY are fractions of the untransformed layer width/height. This does not change timeline timing, source crop, or clip.box placement. Presets such as split/corner compile into this same transform; use reset=true to restore only the transform atom.',
     inputSchema: obj({
       items: { type: 'array', minItems: 1, maxItems: 120, items: obj({
@@ -675,6 +706,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'set_media_crop', kind: 'badge', icon: '⌗', label: 'tools.set_media_crop.label',
+    skillContract: { version: 1, stability: 'stable' },
     description: 'Patch normalized layer-local crop insets for one or many narrative/video/image clips. top/right/bottom/left are 0..<1 fractions; opposing sides must leave visible content. This is the atomic crop primitive used by split presets and is independent from clip.box placement. Use reset=true to clear only crop.',
     inputSchema: obj({
       items: { type: 'array', minItems: 1, maxItems: 120, items: obj({
@@ -1047,6 +1079,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   /* ---------- captions (global preset layer: full-line captions / per-word emphasis, laid from the transcript, one setting applies to the whole video) ---------- */
   {
     id: 'set_captions',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'card',
     busyText: 'tools.set_captions.busy',
     icon: '💬',
@@ -1133,6 +1166,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   /* ---------- video track shots (instant, badge) ---------- */
   {
     id: 'set_canvas',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '▣',
     label: 'tools.set_canvas.label',
@@ -1149,6 +1183,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'set_shot_framing',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🎯',
     label: 'tools.set_shot_framing.label',
@@ -1170,6 +1205,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'apply_layout',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '▦',
     label: 'tools.apply_layout.label',
@@ -1202,6 +1238,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'set_video_filter',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🎨',
     label: 'tools.set_video_filter.label',
@@ -1219,6 +1256,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'set_shot_audio',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🔊',
     label: 'tools.set_shot_audio.label',
@@ -1238,6 +1276,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'set_video_speed',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '⏩',
     label: 'tools.set_video_speed.label',
@@ -1270,6 +1309,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'set_bgm',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🎵',
     label: 'tools.set_bgm.label',
@@ -1295,6 +1335,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'split_shot',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '✂️',
     label: 'tools.split_shot.label',
@@ -1311,6 +1352,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'trim_shot',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🔪',
     label: 'tools.trim_shot.label',
@@ -1326,6 +1368,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'delete_shot',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🚫',
     label: 'tools.delete_shot.label',
@@ -1334,6 +1377,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'cut_range',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '✂️',
     label: 'tools.cut_range.label',
@@ -1349,6 +1393,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'remove_silence',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'card',
     busyText: 'tools.remove_silence.busy',
     icon: '✂️',
@@ -1365,6 +1410,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'cut_narration',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '✂️',
     label: 'tools.cut_narration.label',
@@ -1383,6 +1429,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'delete_words',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '⌫',
     label: 'tools.delete_words.label',
@@ -1415,6 +1462,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
   },
   {
     id: 'add_transition',
+    skillContract: { version: 1, stability: 'stable' },
     kind: 'badge',
     icon: '🎬',
     label: 'tools.add_transition.label',
@@ -1525,6 +1573,33 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
 export const STUDIO_TOOL_MAP: Record<string, StudioToolDef> = Object.fromEntries(
   STUDIO_TOOLS.map((d) => [d.id, d]),
 );
+
+export interface StudioSkillCapability {
+  id: string;
+  version: number;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** Stable, Skill-safe capability catalog derived from the same table used by Chat, MCP and UI. */
+export const STUDIO_SKILL_CAPABILITIES: readonly StudioSkillCapability[] = STUDIO_TOOLS
+  .filter((tool): tool is StudioToolDef & { skillContract: StudioSkillCapabilityContract } => (
+    tool.skillContract?.stability === 'stable'
+  ))
+  .map((tool) => ({
+    id: tool.id,
+    version: tool.skillContract.version,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+  }));
+
+export const STUDIO_SKILL_CAPABILITY_MAP: Readonly<Record<string, StudioSkillCapability>> =
+  Object.fromEntries(STUDIO_SKILL_CAPABILITIES.map((capability) => [capability.id, capability]));
+
+/** Compact prompt catalog; exact parameter contracts remain available through attached tool schemas. */
+export const STUDIO_SKILL_CAPABILITY_CATALOG = STUDIO_SKILL_CAPABILITIES
+  .map((capability) => `- ${capability.id}@${capability.version}`)
+  .join('\n');
 
 /** Tool result (client runTool returns → addToolOutput → shared by model + card render). */
 export interface StudioToolResult {
