@@ -43,7 +43,7 @@ import {
 } from "@pireel/studio-engine/skill-actions";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
-  CHAT_PILL_CLASS,
+  CHAT_ACTION_PILL_CLASS,
   CHAT_PILL_ICON_CLASS,
   CHAT_PILL_LABEL_CLASS,
   mid,
@@ -805,8 +805,8 @@ export function ChatThread({
                               <div className="text-[13px] leading-relaxed">
                                 {idx === parts.findIndex((candidate) => candidate.type === "text")
                                   && (m.metadata as { studioAction?: unknown } | undefined)?.studioAction === STUDIO_CREATE_SKILL_ACTION && (
-                                  <span className={`${CHAT_PILL_CLASS} mr-1.5 border-ink/15 bg-ink text-bg`}>
-                                    <span className={`${CHAT_PILL_ICON_CLASS} bg-bg/10 text-bg`}>✦</span>
+                                  <span className={`${CHAT_ACTION_PILL_CLASS} mr-1.5`}>
+                                    <span className={`${CHAT_PILL_ICON_CLASS} text-accent`}>✦</span>
                                     <span className={CHAT_PILL_LABEL_CLASS}>{t("chatGen.skill.create.title")}</span>
                                   </span>
                                 )}

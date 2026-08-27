@@ -41,6 +41,10 @@ export function PiAvatar({ thinking = false, size = 22 }: { thinking?: boolean; 
 export const CHAT_PILL_CLASS =
   'sc-pill group/chat-pill relative mx-0.5 inline-flex h-6 max-w-[160px] cursor-default select-none items-center gap-1 rounded border border-accent/30 bg-accent/10 px-1.5 align-middle text-[12px] font-medium leading-none text-accent';
 
+/** A quieter mode tag: identifiable as a Skill action without competing with the draft text. */
+export const CHAT_ACTION_PILL_CLASS =
+  'sc-pill group/chat-pill relative mx-0.5 inline-flex h-6 max-w-[160px] cursor-default select-none items-center gap-1 rounded border border-accent/20 bg-accent/5 px-1.5 align-middle text-[12px] font-medium leading-none text-ink-2';
+
 export const CHAT_PILL_ICON_CLASS =
   'bg-accent/10 inline-flex h-4 w-5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-[11px] leading-none';
 

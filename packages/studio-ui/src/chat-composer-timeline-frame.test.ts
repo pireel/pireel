@@ -72,6 +72,8 @@ describe('Composer timeline-frame tags', () => {
     const tag = editor.querySelector<HTMLElement>('[data-studio-action="create-skill"]')!;
     expect(tag).not.toBeNull();
     expect(tag.classList).toContain('sc-pill');
+    expect(tag.classList).toContain('bg-accent/5');
+    expect(tag.classList).not.toContain('bg-ink');
     expect(editor.textContent).toContain('提炼这次对话，保留关键判断。');
     expect(onSubmit).not.toHaveBeenCalled();
 

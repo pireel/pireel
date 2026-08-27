@@ -19,6 +19,7 @@ import { ChatSkillPicker } from "./chat-skill-picker";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   appendChatPillRemoveIcon,
+  CHAT_ACTION_PILL_CLASS,
   CHAT_PILL_CLASS,
   CHAT_PILL_ICON_CLASS,
   CHAT_PILL_LABEL_CLASS,
@@ -406,11 +407,11 @@ export function Composer({
     const pill = document.createElement("span");
     pill.contentEditable = "false";
     pill.dataset.studioAction = STUDIO_CREATE_SKILL_ACTION;
-    pill.className = `${CHAT_PILL_CLASS} border-ink/15 bg-ink text-bg`;
+    pill.className = CHAT_ACTION_PILL_CLASS;
     pill.title = label;
 
     const icon = document.createElement("span");
-    icon.className = `${CHAT_PILL_ICON_CLASS} bg-bg/10 text-bg`;
+    icon.className = `${CHAT_PILL_ICON_CLASS} text-accent`;
     icon.textContent = "✦";
     pill.appendChild(icon);
 
