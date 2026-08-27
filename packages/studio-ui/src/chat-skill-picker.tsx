@@ -20,10 +20,11 @@ interface SkillOption {
   icon?: string;
   custom?: boolean;
   market?: StudioSkillMarketMetadata;
-  action?: 'market';
+  action?: 'market' | 'create';
 }
 
 const OPEN_SKILL_MARKET_ID = '__open_skill_market__';
+const CREATE_SKILL_ID = '__create_skill__';
 
 function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compact?: boolean }) {
   const size = compact ? 16 : 22;
@@ -149,6 +150,7 @@ function SkillGlyph({ id, compact = false }: { id: StudioScenarioSkillId; compac
 
 function SkillMark({ option, compact = false }: { option: SkillOption; compact?: boolean }) {
   if (option.action === 'market') return <ScenarioSkillIcon icon="market" size={compact ? 14 : 18} />;
+  if (option.action === 'create') return <ScenarioSkillIcon icon="create" size={compact ? 14 : 18} />;
   if (option.icon || option.market) {
     return <ScenarioSkillIcon icon={option.icon ?? 'skill-director'} size={compact ? 16 : 22} />;
   }
@@ -259,6 +261,7 @@ export function ChatSkillPicker({
   disabled,
   onChange,
   onOpenSkillMarket,
+  onCreateSkill,
   onDeleteCustom,
   onTriggerPick,
 }: {
@@ -268,6 +271,7 @@ export function ChatSkillPicker({
   disabled?: boolean;
   onChange: (id: StudioScenarioSkillId) => void;
   onOpenSkillMarket?: () => void;
+  onCreateSkill?: () => void;
   onDeleteCustom?: (id: string) => Promise<void>;
   /** Remove the `/query` token when the picker was opened from the composer. */
   onTriggerPick?: () => void;
@@ -295,17 +299,23 @@ export function ChatSkillPicker({
   );
   const options = useMemo<SkillOption[]>(() => [
     ...selectableOptions,
+    ...(onCreateSkill ? [{
+      id: CREATE_SKILL_ID,
+      label: t('chatGen.skill.create.title'),
+      summary: t('chatGen.skill.create.summary'),
+      action: 'create' as const,
+    }] : []),
     ...(onOpenSkillMarket ? [{
       id: OPEN_SKILL_MARKET_ID,
       label: t('chatGen.skill.market.title'),
       summary: t('chatGen.skill.market.summary'),
       action: 'market' as const,
     }] : []),
-  ], [selectableOptions, onOpenSkillMarket]);
+  ], [selectableOptions, onCreateSkill, onOpenSkillMarket]);
   const selected = selectableOptions.find((item) => item.id === skillId) ?? selectableOptions[0]!;
 
   // No host catalog means there is nothing useful to choose: keep the empty Skill state visually quiet.
-  if (selectableOptions.length === 1 && !onOpenSkillMarket) return null;
+  if (selectableOptions.length === 1 && !onOpenSkillMarket && !onCreateSkill) return null;
 
   return (
     <>
@@ -342,10 +352,15 @@ export function ChatSkillPicker({
             onOpenSkillMarket?.();
             return;
           }
+          if (item.action === 'create') {
+            onCreateSkill?.();
+            return;
+          }
           onChange(item.id as StudioScenarioSkillId);
         }}
         renderItem={(item, { active, pick, setActive }) => {
-          if (item.action === 'market') {
+          if (item.action) {
+            const firstAction = item.action === 'create' || !onCreateSkill;
             return (
               <button
                 type="button"
@@ -353,9 +368,13 @@ export function ChatSkillPicker({
                 onMouseEnter={setActive}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={pick}
-                className={`border-line mt-1 flex w-full items-start gap-2.5 border-t px-2.5 pb-2 pt-3 text-left disabled:opacity-50 ${active ? 'bg-panel-2' : ''}`}
+                className={`border-line flex w-full items-start gap-2.5 px-2.5 py-2.5 text-left disabled:opacity-50 ${
+                  firstAction ? 'mt-1 border-t pt-3' : ''
+                } ${active ? 'bg-panel-2' : ''}`}
               >
-                <span className="text-ink-3 grid h-8 w-8 shrink-0 place-items-center">
+                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${
+                  item.action === 'create' ? 'bg-accent/10 text-accent' : 'text-ink-3'
+                }`}>
                   <SkillMark option={item} />
                 </span>
                 <span className="min-w-0 flex-1">

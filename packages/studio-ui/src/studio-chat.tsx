@@ -403,6 +403,7 @@ export const StudioChat = memo(
           initialSkillId={active?.skillId ?? defaultSkillId}
           scenarioSkills={scenarioSkills}
           onOpenSkillMarket={customScenarioSkillManager?.openMarket}
+          onCreateScenarioSkill={customScenarioSkillManager?.openCreate}
           onDeleteScenarioSkill={
             customScenarioSkillManager ? deleteScenarioSkill : undefined
           }

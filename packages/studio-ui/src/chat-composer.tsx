@@ -65,6 +65,7 @@ export function Composer({
   skillId,
   scenarioSkills,
   onOpenSkillMarket,
+  onCreateScenarioSkill,
   onDeleteScenarioSkill,
   onPickSkill,
   frame,
@@ -86,6 +87,7 @@ export function Composer({
   /** Browser-safe host catalog; full Markdown never enters this component. */
   scenarioSkills: readonly StudioScenarioSkillOption[];
   onOpenSkillMarket?: () => void;
+  onCreateScenarioSkill?: () => void;
   onDeleteScenarioSkill?: (id: string) => Promise<void>;
   onPickSkill: (id: StudioScenarioSkillId) => void;
   /** Visual direction attached to the current session. */
@@ -627,6 +629,7 @@ export function Composer({
               skillId={skillId}
               skills={scenarioSkills}
               onOpenSkillMarket={onOpenSkillMarket}
+              onCreateSkill={onCreateScenarioSkill}
               onDeleteCustom={onDeleteScenarioSkill}
               disabled={isBusy}
               onChange={onPickSkill}

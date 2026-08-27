@@ -66,6 +66,13 @@ export function ScenarioSkillIcon({
   }
 
   switch (icon) {
+    case 'create':
+      return (
+        <svg {...common}>
+          <path d="M5 3.5h9l5 5V20H5zM14 3.5V9h5" />
+          <path d="M9 14h6M12 11v6" />
+        </svg>
+      );
     case 'market':
       return (
         <svg {...common}>
