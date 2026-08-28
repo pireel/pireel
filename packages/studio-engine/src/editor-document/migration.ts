@@ -315,6 +315,7 @@ export function migrateLegacyProjectToV2(input: LegacyProjectForMigration): Edit
         startSec: _startSec,
         inSec: _inSec,
         outSec: _outSec,
+        role: _role,
         ...properties
       } = audio;
       return {

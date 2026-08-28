@@ -14,7 +14,7 @@
  * export bakes identical gains into the PCM mix.
  */
 
-import { VOLUME_DB_MAX, VOLUME_DB_MIN, dbToGain, fadeShape } from './composition-core';
+import { SPLICE_FADE_SEC, VOLUME_DB_MAX, VOLUME_DB_MIN, dbToGain, fadeShape } from './composition-core';
 
 export interface AudioClip {
   id: string;
@@ -24,6 +24,8 @@ export interface AudioClip {
   sig?: string;
   /** Display name (file name / generation prompt digest). */
   label?: string;
+  /** Render/edit role projected from the owning V2 track. Absent preserves legacy music semantics. */
+  role?: AudioClipRole;
   /** Media duration in seconds (stored at mount so span math never needs to probe the file). */
   durationSec?: number;
   /** Where the clip begins on the EDITED timeline (lane drag position; absent = 0). */
@@ -32,7 +34,7 @@ export interface AudioClip {
    *  under narration is a mistake nobody wants; an explicit 0 stores as volumeDb: 0? No — 0 is
    *  representable via patch clamping, absent simply means the default). */
   volumeDb?: number;
-  /** Fade edges in seconds (absent = AUDIO_FADE_IN_SEC / AUDIO_FADE_OUT_SEC). */
+  /** Fade edges in seconds. Absent resolves from role: music fades, narration/SFX stay dry. */
   fadeInSec?: number;
   fadeOutSec?: number;
   /** Playback-speed multiplier (absent = 1; clamped AUDIO_SPEED_MIN..MAX). Changes pitch, see header. */
@@ -46,6 +48,8 @@ export interface AudioClip {
   muted?: boolean;
 }
 
+export type AudioClipRole = 'music' | 'narration' | 'sfx' | 'audio';
+
 export const AUDIO_DEFAULT_DB = -18;
 export const AUDIO_FADE_IN_SEC = 0.8;
 export const AUDIO_FADE_OUT_SEC = 1.5;
@@ -55,6 +59,13 @@ export const AUDIO_SPEED_MIN = 0.5;
 export const AUDIO_SPEED_MAX = 2;
 /** Shortest a clip may be trimmed to, in TIMELINE seconds. */
 export const AUDIO_MIN_LEN_SEC = 0.2;
+
+export function audioFadeDefaults(role: AudioClipRole | undefined): { fadeInSec: number; fadeOutSec: number } {
+  // AudioClip predates role-aware V2 tracks; an absent role is a legacy music bed.
+  return role == null || role === 'music'
+    ? { fadeInSec: AUDIO_FADE_IN_SEC, fadeOutSec: AUDIO_FADE_OUT_SEC }
+    : { fadeInSec: 0, fadeOutSec: 0 };
+}
 
 let _audioUid = 0;
 export function audioClipId(): string {
@@ -73,12 +84,18 @@ export function audioClipDefaults(c: AudioClip): Required<Pick<AudioClip, 'start
   const outSec = Math.max(inSec, Math.min(cap, c.outSec ?? cap));
   const speed = Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, c.speed ?? 1));
   const span = Number.isFinite(outSec) ? (outSec - inSec) / speed : Infinity;
-  const fadeIn = Math.min(Math.max(0, c.fadeInSec ?? AUDIO_FADE_IN_SEC), AUDIO_FADE_MAX_SEC, span);
+  const roleDefaults = audioFadeDefaults(c.role);
+  const dryRole = c.role === 'narration' || c.role === 'sfx' || c.role === 'audio';
+  const implicitFadeIn = dryRole && inSec > 0.001 ? SPLICE_FADE_SEC : roleDefaults.fadeInSec;
+  const implicitFadeOut = dryRole && Number.isFinite(cap) && outSec < cap - 0.001
+    ? SPLICE_FADE_SEC
+    : roleDefaults.fadeOutSec;
+  const fadeIn = Math.min(Math.max(0, c.fadeInSec ?? implicitFadeIn), AUDIO_FADE_MAX_SEC, span);
   return {
     startSec: Math.max(0, c.startSec ?? 0),
     volumeDb: Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, c.volumeDb ?? AUDIO_DEFAULT_DB)),
     fadeInSec: fadeIn,
-    fadeOutSec: Math.min(Math.max(0, c.fadeOutSec ?? AUDIO_FADE_OUT_SEC), AUDIO_FADE_MAX_SEC, Math.max(0, span - fadeIn)),
+    fadeOutSec: Math.min(Math.max(0, c.fadeOutSec ?? implicitFadeOut), AUDIO_FADE_MAX_SEC, Math.max(0, span - fadeIn)),
     speed,
     inSec,
     outSec,
@@ -161,13 +178,21 @@ export function patchAudioClip(cur: AudioClip, patch: Partial<Pick<AudioClip, 's
   const out: AudioClip = { id: cur.id, src: next.src };
   if (next.sig) out.sig = next.sig;
   if (next.label) out.label = next.label;
+  if (next.role) out.role = next.role;
   if (next.durationSec != null) out.durationSec = next.durationSec;
   if (next.startSec) out.startSec = Math.round(Math.max(0, next.startSec) * 100) / 100; // same precision as in/out — a coarser start would slide the audio inside the clip on a left trim
   const db = next.volumeDb != null ? Math.max(VOLUME_DB_MIN, Math.min(VOLUME_DB_MAX, next.volumeDb)) : undefined;
   if (db != null && db !== AUDIO_DEFAULT_DB) out.volumeDb = Math.round(db * 10) / 10;
   const fadeSec = (v: number) => Math.round(Math.max(0, Math.min(AUDIO_FADE_MAX_SEC, v)) * 10) / 10;
-  if (next.fadeInSec != null && fadeSec(next.fadeInSec) !== AUDIO_FADE_IN_SEC) out.fadeInSec = fadeSec(next.fadeInSec);
-  if (next.fadeOutSec != null && fadeSec(next.fadeOutSec) !== AUDIO_FADE_OUT_SEC) out.fadeOutSec = fadeSec(next.fadeOutSec);
+  const roleDefaults = audioFadeDefaults(next.role);
+  const explicitFadeIn = cur.fadeInSec != null || Object.prototype.hasOwnProperty.call(patch, 'fadeInSec');
+  const explicitFadeOut = cur.fadeOutSec != null || Object.prototype.hasOwnProperty.call(patch, 'fadeOutSec');
+  if (next.fadeInSec != null && (fadeSec(next.fadeInSec) !== roleDefaults.fadeInSec || (roleDefaults.fadeInSec === 0 && explicitFadeIn))) {
+    out.fadeInSec = fadeSec(next.fadeInSec);
+  }
+  if (next.fadeOutSec != null && (fadeSec(next.fadeOutSec) !== roleDefaults.fadeOutSec || (roleDefaults.fadeOutSec === 0 && explicitFadeOut))) {
+    out.fadeOutSec = fadeSec(next.fadeOutSec);
+  }
   const sp = next.speed != null ? Math.max(AUDIO_SPEED_MIN, Math.min(AUDIO_SPEED_MAX, next.speed)) : undefined;
   if (sp != null && sp !== 1) out.speed = Math.round(sp * 100) / 100;
   if (next.muted) out.muted = true;

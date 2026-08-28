@@ -24,6 +24,7 @@ import {
 import { GL_MIXER_SRC, TRANSITION_GLSL, glDirection } from './transition-gl';
 import { SOURCE_DRAW_RECT_FUNCTION } from './source-framing';
 import { compositionVisualLayerPlan, type SupplementalVisualMediaClip } from './visual-layer-plan';
+import { BLOCK_TEXT_BASELINE_PX } from './block-typography';
 
 /* ============================ Assembly ============================ */
 
@@ -701,7 +702,7 @@ export function assembleHtml(
   html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: ${documentBg}; }
   #root { position: relative; width: ${W}px; height: ${H}px; background: ${documentBg}; overflow: hidden;
     ${themeVarsCss(theme, comp.palette)} font-family: var(--font-body); color: var(--fg); }
-  .comp { position: absolute; }
+  .comp { position: absolute; font-size: ${BLOCK_TEXT_BASELINE_PX}px; }
   /* media-slot placeholder: not rendered by default (clean export), shown only in editor mode (body.hf-editor) */
   .hf-ph { position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:14px;
     border:3px dashed rgba(255,255,255,0.34); border-radius:24px; color:rgba(255,255,255,0.72); background:rgba(255,255,255,0.05); }

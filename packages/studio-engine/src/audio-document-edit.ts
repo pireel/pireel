@@ -203,7 +203,7 @@ function normalizedAudioClip(clip: AudioClip): AudioClip {
 function propertiesOf(clip: AudioClip): AudioTimelineClip['properties'] {
   const {
     id: _id, src: _src, sig: _sig, durationSec: _durationSec,
-    startSec: _startSec, inSec: _inSec, outSec: _outSec,
+    startSec: _startSec, inSec: _inSec, outSec: _outSec, role: _role,
     ...properties
   } = clip;
   return properties;
@@ -221,6 +221,11 @@ function nativeAudioClip(document: EditorDocumentV2, clipId: string): { trackId:
       legacy: {
         id: clip.id,
         src: asset.locator.remoteUrl ?? `blob:pireel-offline/${asset.id}`,
+        ...(track.role === 'narration' || track.role === 'sfx'
+          ? { role: track.role }
+          : track.role === 'music'
+            ? {}
+            : { role: 'audio' as const }),
         ...(asset.locator.localSig ? { sig: asset.locator.localSig } : {}),
         ...(asset.label ? { label: asset.label } : {}),
         ...(asset.metadata.durationSec ? { durationSec: asset.metadata.durationSec } : {}),

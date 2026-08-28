@@ -75,7 +75,8 @@ describe('MCP 工具面', () => {
     expect(design.description).toContain('customVoiceAccess.designCredits');
     expect(design.description).toContain('explicit approval');
     expect((design.inputSchema as { required?: string[] }).required).toContain('prompt');
-    expect(speech.description).toContain('exact approved text');
+    expect(speech.description).toContain('exact approved clean text');
+    expect(speech.description).toContain('The runtime compiles those controls only for synthesis');
   });
   it('description 不引用 MCP 语境里不存在的机制(frame 目录经 list_frames,不在 system)', () => {
     const t = buildMcpTools().find((t) => t.name === 'attach_frame')!;

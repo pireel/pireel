@@ -174,7 +174,7 @@ export interface CaptionTimelineClip extends TimelineClipBase {
   anchor: TimelineAnchor;
 }
 
-export type AudioClipProperties = Omit<AudioClip, 'id' | 'src' | 'sig' | 'durationSec' | 'startSec' | 'inSec' | 'outSec'>;
+export type AudioClipProperties = Omit<AudioClip, 'id' | 'src' | 'sig' | 'durationSec' | 'startSec' | 'inSec' | 'outSec' | 'role'>;
 
 export interface AudioTimelineClip extends TimelineClipBase {
   kind: 'audio';

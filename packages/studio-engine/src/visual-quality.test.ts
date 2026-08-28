@@ -42,6 +42,19 @@ describe('buildVisualQualityWindows', () => {
     expect(present.subjectPresence).toBe(1);
   });
 
+  it('carries centeredness as editorial evidence without changing technical score', () => {
+    const left = Array.from({ length: 4 }, (_, index): FrameQualityObservation => ({
+      ...sample(index * 0.5, 0.9),
+      subjectCenteredness: 0.2,
+    }));
+    const centered = left.map((entry) => ({ ...entry, subjectCenteredness: 0.95 }));
+    const leftWindow = buildVisualQualityWindows(left, 2)[0]!;
+    const centeredWindow = buildVisualQualityWindows(centered, 2)[0]!;
+    expect(leftWindow.score).toBe(centeredWindow.score);
+    expect(leftWindow.subjectCenteredness).toBeCloseTo(0.2);
+    expect(centeredWindow.subjectCenteredness).toBeCloseTo(0.95);
+  });
+
   it('returns no candidate when the whole source is below the absolute quality floor', () => {
     const observations = Array.from({ length: 12 }, (_, index) => sample(index * 0.25, 0.4));
     expect(buildVisualQualityWindows(observations, 3)).toEqual([]);

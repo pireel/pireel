@@ -17,8 +17,9 @@
 
 // mediabunny / @mediapipe/tasks-vision are heavy and only needed after "user picked a video + ran visual analysis":
 // always dynamic-import, keep them out of the /studio initial bundle. Type imports don't enter the bundle.
-import type { FaceDetector, ImageSegmenter } from '@mediapipe/tasks-vision';
+import type { FaceDetector, FaceLandmarker, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { GRID_H, GRID_W, type FrameGeom, type NRect, type SafeZone, safeZoneForRange } from '@pireel/studio-engine/geometry-math';
+import { isMouthVisiblyOpen, type EditorialFaceObservation } from '@pireel/studio-engine/mouth-state';
 import { frameStabilityScore, type FrameMotionVector, type FrameQualityObservation } from '@pireel/studio-engine/visual-quality';
 import { t } from './i18n';
 
@@ -35,6 +36,10 @@ const QUALITY_LONG_EDGE = 64;
 const WASM = '/mediapipe/wasm';
 const SEG_MODEL = '/mediapipe/selfie_segmenter.tflite';
 const FACE_MODEL = '/mediapipe/blaze_face_short_range.tflite';
+const EDITORIAL_FACE_MODEL = '/mediapipe/blaze_face_full_range.tflite';
+const FACE_LANDMARKER_MODEL = '/mediapipe/face_landmarker.task';
+const EDITORIAL_FACE_LONG_EDGE = 720;
+const EDITORIAL_FACE_CROP_SIZE = 256;
 
 interface MP {
   seg: ImageSegmenter;
@@ -42,6 +47,8 @@ interface MP {
   delegate: 'GPU' | 'CPU';
 }
 let _mp: Promise<MP | null> | null = null;
+let _faceLandmarker: Promise<FaceLandmarker | null> | null = null;
+let _editorialFaceDetector: Promise<FaceDetector | null> | null = null;
 
 // Diagnostics: last geometry-pass status (for the 🧪 panel + console; no more silent failures)
 let _note: string | null = null; // null = not run (t() banned at module scope; default string is translated at geomNote's use site)
@@ -90,6 +97,180 @@ function loadMP(): Promise<MP | null> {
     },
   );
   return p;
+}
+
+function loadFaceLandmarker(): Promise<FaceLandmarker | null> {
+  if (_faceLandmarker) return _faceLandmarker;
+  const pending = (async () => {
+    const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision');
+    for (const delegate of ['CPU', 'GPU'] as const) {
+      try {
+        const fileset = await FilesetResolver.forVisionTasks(WASM);
+        return await FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: FACE_LANDMARKER_MODEL, delegate },
+          runningMode: 'IMAGE',
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.45,
+          minFacePresenceConfidence: 0.45,
+          minTrackingConfidence: 0.45,
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: false,
+        });
+      } catch (error) {
+        console.warn('[studio/geometry] face landmarker failed:', error instanceof Error ? error.message : String(error));
+      }
+    }
+    return null;
+  })();
+  _faceLandmarker = pending;
+  pending.then(
+    (landmarker) => { if (!landmarker && _faceLandmarker === pending) _faceLandmarker = null; },
+    () => { if (_faceLandmarker === pending) _faceLandmarker = null; },
+  );
+  return pending;
+}
+
+function loadEditorialFaceDetector(): Promise<FaceDetector | null> {
+  if (_editorialFaceDetector) return _editorialFaceDetector;
+  const pending = (async () => {
+    const { FaceDetector, FilesetResolver } = await import('@mediapipe/tasks-vision');
+    for (const delegate of ['CPU', 'GPU'] as const) {
+      try {
+        const fileset = await FilesetResolver.forVisionTasks(WASM);
+        return await FaceDetector.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: EDITORIAL_FACE_MODEL, delegate },
+          runningMode: 'IMAGE',
+          minDetectionConfidence: 0.35,
+          minSuppressionThreshold: 0.25,
+        });
+      } catch (error) {
+        console.warn('[studio/geometry] editorial face detector failed:', error instanceof Error ? error.message : String(error));
+      }
+    }
+    return null;
+  })();
+  _editorialFaceDetector = pending;
+  pending.then(
+    (detector) => { if (!detector && _editorialFaceDetector === pending) _editorialFaceDetector = null; },
+    () => { if (_editorialFaceDetector === pending) _editorialFaceDetector = null; },
+  );
+  return pending;
+}
+
+const landmarkDistance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+interface PixelFaceBox { x: number; y: number; w: number; h: number; area: number }
+
+function expandedSquareCrop(box: PixelFaceBox, width: number, height: number): { x: number; y: number; size: number } {
+  const desired = Math.min(Math.max(box.w, box.h) * 1.8, width, height);
+  const centerX = box.x + box.w / 2;
+  const centerY = box.y + box.h / 2;
+  return {
+    x: Math.max(0, Math.min(width - desired, centerX - desired / 2)),
+    y: Math.max(0, Math.min(height - desired, centerY - desired / 2)),
+    size: desired,
+  };
+}
+
+/** Editorial-only local mouth scan. It is lazy and never runs for ordinary geometry/semantic analysis. */
+export async function analyzeMouthAtTimes(
+  file: File,
+  requestedTimes: readonly number[],
+): Promise<EditorialFaceObservation[]> {
+  const stamps = [...new Set(requestedTimes
+    .filter((time) => Number.isFinite(time) && time >= 0)
+    .map((time) => Math.round(time * 1_000) / 1_000))]
+    .sort((a, b) => a - b);
+  if (!stamps.length) return [];
+  const [landmarker, faceDetector] = await Promise.all([loadFaceLandmarker(), loadEditorialFaceDetector()]);
+  if (!landmarker || !faceDetector) return [];
+  const { ALL_FORMATS, BlobSource, Input, VideoSampleSink } = await import('mediabunny');
+  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return [];
+    const vw = track.displayWidth || 720;
+    const vh = track.displayHeight || 1280;
+    const scale = Math.min(1, EDITORIAL_FACE_LONG_EDGE / Math.max(vw, vh));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(8, Math.round(vw * scale));
+    canvas.height = Math.max(8, Math.round(vh * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return [];
+    const faceCanvas = document.createElement('canvas');
+    faceCanvas.width = EDITORIAL_FACE_CROP_SIZE;
+    faceCanvas.height = EDITORIAL_FACE_CROP_SIZE;
+    const faceCtx = faceCanvas.getContext('2d');
+    if (!faceCtx) return [];
+    const t0 = Math.max(0, await input.getFirstTimestamp());
+    const sink = new VideoSampleSink(track);
+    const observations: EditorialFaceObservation[] = [];
+    for await (const sample of sink.samplesAtTimestamps(stamps.map((stamp) => stamp + t0))) {
+      if (!sample) continue;
+      const timeSec = sample.timestamp - t0;
+      sample.draw(ctx as unknown as CanvasRenderingContext2D, 0, 0, canvas.width, canvas.height);
+      sample.close();
+      const boxes = faceDetector.detect(canvas).detections.flatMap((detection): PixelFaceBox[] => {
+        const box = detection.boundingBox;
+        if (!box || box.width <= 0 || box.height <= 0) return [];
+        return [{
+          x: box.originX,
+          y: box.originY,
+          w: box.width,
+          h: box.height,
+          area: (box.width * box.height) / Math.max(1, canvas.width * canvas.height),
+        }];
+      }).sort((left, right) => right.area - left.area);
+      const primary = boxes[0];
+      const prominentFloor = primary ? Math.max(0.0015, primary.area * 0.3) : Infinity;
+      const prominentFaceCount = boxes.filter((box) => box.area >= prominentFloor).length;
+      const backgroundFaceCount = Math.max(0, boxes.length - prominentFaceCount);
+      if (!primary) {
+        observations.push({
+          timeSec,
+          faceDetected: false,
+          mouthReadable: false,
+          jawOpenScore: null,
+          lipApertureRatio: null,
+          visiblyOpen: false,
+          prominentFaceCount: 0,
+          backgroundFaceCount,
+        });
+        continue;
+      }
+      const crop = expandedSquareCrop(primary, canvas.width, canvas.height);
+      faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+      faceCtx.drawImage(canvas, crop.x, crop.y, crop.size, crop.size, 0, 0, faceCanvas.width, faceCanvas.height);
+      const result = landmarker.detect(faceCanvas);
+      const landmarks = result.faceLandmarks[0];
+      const categories = result.faceBlendshapes[0]?.categories ?? [];
+      const jaw = categories.find((category) => category.categoryName.replace(/[_-]/g, '').toLowerCase() === 'jawopen')?.score ?? null;
+      const upperLip = landmarks?.[13];
+      const lowerLip = landmarks?.[14];
+      const leftCorner = landmarks?.[78];
+      const rightCorner = landmarks?.[308];
+      const mouthWidth = leftCorner && rightCorner ? landmarkDistance(leftCorner, rightCorner) : 0;
+      const lipApertureRatio = upperLip && lowerLip && mouthWidth > 0.001
+        ? landmarkDistance(upperLip, lowerLip) / mouthWidth
+        : null;
+      const signals = { jawOpenScore: jaw, lipApertureRatio };
+      observations.push({
+        timeSec,
+        faceDetected: true,
+        mouthReadable: Boolean(landmarks),
+        ...signals,
+        visiblyOpen: isMouthVisiblyOpen(signals),
+        prominentFaceCount,
+        backgroundFaceCount,
+      });
+    }
+    return observations;
+  } catch (error) {
+    console.warn('[studio/geometry] mouth scan failed:', error instanceof Error ? error.message : String(error));
+    return [];
+  } finally {
+    await input.dispose();
+  }
 }
 
 /** Single-frame inference: segment -> person occupancy grid + face box. Shared by both entry points (dense analysis / realtime single frame). */
@@ -142,6 +323,21 @@ function inferFrame(mp: MP, canvas: HTMLCanvasElement, cw: number, ch: number): 
 }
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+function horizontalSubjectCenteredness(occ: Uint8Array, face: NRect | null): number | null {
+  let sum = 0;
+  let weightedX = 0;
+  for (let y = 0; y < GRID_H; y++) {
+    for (let x = 0; x < GRID_W; x++) {
+      const value = occ[y * GRID_W + x] ?? 0;
+      sum += value;
+      weightedX += value * ((x + 0.5) / GRID_W);
+    }
+  }
+  const centerX = sum > 0 ? weightedX / sum : face ? face.x + face.w / 2 : null;
+  if (centerX == null) return null;
+  return clamp01(1 - Math.abs(centerX - 0.5) / 0.38);
+}
 
 /** Small local signal pass: no network/model calls. Background-dominant block matching estimates
  * camera translation, while Laplacian variance and luminance distribution cover focus/exposure. */
@@ -338,12 +534,14 @@ export async function analyzeGeometryAndQuality(
         const inferred = inferFrame(mp, canvas, cw, ch);
         out.push({ t, ...inferred });
         const occupancy = inferred.occ.reduce((sum, value) => sum + value, 0) / (GRID_W * GRID_H);
+        const subjectCenteredness = horizontalSubjectCenteredness(inferred.occ, inferred.face);
         quality.push({
           timeSec: t,
           sharpness: measured.sharpness,
           exposure: measured.exposure,
           stability: measured.stability,
           subjectPresence: inferred.face ? 1 : clamp01(occupancy / 0.12),
+          ...(subjectCenteredness == null ? {} : { subjectCenteredness }),
         });
       } else {
         quality.push({ timeSec: t, sharpness: measured.sharpness, exposure: measured.exposure, stability: measured.stability });

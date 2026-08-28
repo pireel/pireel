@@ -71,4 +71,13 @@ describe('visibleStripTiles', () => {
     expect(visible[0]?.left).toBe(1_950);
     expect(visible.at(-1)?.left).toBe(2_500);
   });
+
+  it('stretches source-time tiles across a slowed timeline clip', () => {
+    const strip = Array.from({ length: 4 }, (_, index) => ({ t: index + 0.5, url: `frame-${index}` }));
+    const visible = visibleStripTiles(strip, 0, 3.3, 1, 50, 42.7, 42.7, 48.5, 48.5);
+    expect(visible).toHaveLength(4);
+    expect(visible[0]).toMatchObject({ left: 0, url: 'frame-0' });
+    expect(visible[0]!.width).toBeCloseTo(87.88, 1);
+    expect(visible.at(-1)!.left + visible.at(-1)!.width).toBeGreaterThan(290);
+  });
 });

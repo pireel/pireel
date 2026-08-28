@@ -11,6 +11,8 @@ describe('BLOCK_SYSTEM 质量契约(反单调 + 分阶段动效)', () => {
     expect(BLOCK_SYSTEM).toContain('get_icons');
     expect(BLOCK_SYSTEM).toContain('NO emoji');
     expect(BLOCK_SYSTEM).toContain('worse than none');
+    expect(BLOCK_SYSTEM).toContain('36px inherited fallback');
+    expect(BLOCK_SYSTEM).toContain('smaller than 24px');
     // 就地改字句柄:可见文本必须带唯一 data-edit key(编辑面=预览本身的前提)
     expect(BLOCK_SYSTEM).toContain('data-edit');
   });

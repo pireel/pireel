@@ -65,6 +65,12 @@ export function projectV2ToLegacyComposition(document: EditorDocumentV2, options
         audioTracks.push({
           id: clip.id,
           src,
+          // Legacy AudioClip absence already means music; only project roles whose defaults differ.
+          ...(track.role === 'narration' || track.role === 'sfx'
+            ? { role: track.role }
+            : track.role === 'music'
+              ? {}
+              : { role: 'audio' as const }),
           ...(asset.locator.localSig ? { sig: asset.locator.localSig } : {}),
           ...(asset.label ? { label: asset.label } : {}),
           ...(asset.metadata.durationSec ? { durationSec: asset.metadata.durationSec } : {}),

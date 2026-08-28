@@ -2330,54 +2330,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             return { ok: true, summary: t('workbench.voiceDeleted') };
           }
           case 'generate_speech': {
-            if (surface !== 'chat') return { ok: false, error: 'generate_speech requires the in-Studio approval card; open Studio and run it in Chat' };
             const text = typeof input.text === 'string' ? input.text.trim() : '';
             const voiceId = typeof input.voiceId === 'string' ? input.voiceId.trim() : '';
             if (!text || !voiceId) return { ok: false, error: 'generate_speech requires exact text and voiceId' };
+            const instruction = typeof input.instruction === 'string' ? input.instruction.trim().slice(0, 500) : '';
+            const { action: _ignoredAction, instruction: _rawInstruction, ...speechArgs } = input;
+            const speechInput = { ...speechArgs, text, voiceId, ...(instruction ? { instruction } : {}) };
             try {
-              report(t('workbench.calculatingSpeechCharge'));
-              const quoteRes = await fetch('/api/studio/speech', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ action: 'quote', ...input, text, voiceId }),
-                ...(signal ? { signal } : {}),
-              });
-              const quoteBody = (await quoteRes.json().catch(() => ({}))) as {
-                quote?: { credits?: number; charCount?: number; estimatedDurationSec?: number; textLengthTier?: string };
-                error?: string;
-                detail?: string;
-              };
-              if (!quoteRes.ok || !quoteBody.quote || typeof quoteBody.quote.credits !== 'number') {
-                return { ok: false, error: quoteBody.detail || quoteBody.error || t('workbench.speechQuoteFailed') };
-              }
-              const speed = Number(input.speed);
-              const instruction = typeof input.instruction === 'string' ? input.instruction.trim() : '';
-              const settings = [
-                t('workbench.speechApprovalVoice', { voice: voiceId }),
-                Number.isFinite(speed) && speed > 0 ? t('workbench.speechApprovalSpeed', { speed }) : '',
-                instruction ? t('workbench.speechApprovalDelivery', { instruction }) : '',
-              ].filter(Boolean).join('\n');
-              const decision = await parkInteraction<{ title: string; content: string }, 'approved' | 'rejected'>(
-                'approval',
-                {
-                  title: t('workbench.speechApprovalTitle'),
-                  content: `${settings}\n\n${t('workbench.speechApprovalScript')}\n${text}\n\n${t('workbench.speechApprovalEstimate', {
-                    duration: quoteBody.quote.estimatedDurationSec ?? '?',
-                    chars: quoteBody.quote.charCount ?? [...text].length,
-                    credits: quoteBody.quote.credits,
-                  })}`,
-                },
-                { signal },
-              );
-              if (decision == null) throw abortErr();
-              if (decision !== 'approved') {
-                return { ok: true, summary: t('workbench.speechRejected'), data: { decision: 'rejected' } };
-              }
               report(t('workbench.generatingSpeech'));
               const res = await fetch('/api/studio/speech', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ ...input, text, voiceId }),
+                body: JSON.stringify(speechInput),
                 ...(signal ? { signal } : {}),
               });
               const body = (await res.json().catch(() => ({}))) as {
@@ -3653,6 +3617,14 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
   }
   const delta = compReceiptDelta(before, next) ?? { compositionUpdated: ['other'] };
   return { ...result, data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), delta } };
+}
+
+/** A rejected parked approval is a turn boundary, not an ordinary successful tool receipt. */
+export function studioToolResultStopsAgentTurn(result: StudioToolResult): boolean {
+  const data = result.ok && result.data && typeof result.data === 'object'
+    ? result.data as { decision?: unknown }
+    : null;
+  return data?.decision === 'rejected';
 }
 
 export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {

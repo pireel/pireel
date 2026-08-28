@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
+import { audioClipDefaults } from './audio-tracks';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
 import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
 import { withDirectorPlanInSemantics } from './director-plan-artifact';
@@ -81,6 +82,10 @@ describe('shared agent timeline atoms', () => {
     expect(placed.ok).toBe(true);
     const narration = placed.document!.timeline.tracks.find((track) => track.role === 'narration')!;
     expect(narration).toMatchObject({ type: 'audio', clips: [{ kind: 'audio', assetId: 'tts-1', properties: { volumeDb: 4 } }] });
+    const projectedNarration = projectV2ToLegacyComposition(placed.document!).audioTracks?.[0];
+    expect(projectedNarration).toMatchObject({ role: 'narration' });
+    expect(audioClipDefaults(projectedNarration!).fadeInSec).toBe(0);
+    expect(audioClipDefaults(projectedNarration!).fadeOutSec).toBe(0);
     const captions = applyCaptionDocumentEdit({
       document: placed.document!, patch: { on: true, preset: 'ln-clean' }, source: { mode: 'track', trackId: narration.id }, mainTranscript: null, clipTranscripts: {},
     });

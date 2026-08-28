@@ -1,6 +1,6 @@
 import type { VisualQualityWindow } from './visual-quality';
 
-export const EDITORIAL_CANDIDATE_PHASES = ['entry', 'middle', 'exit'] as const;
+export const EDITORIAL_CANDIDATE_PHASES = ['entry', 'early', 'middle', 'late', 'exit'] as const;
 export type EditorialCandidatePhase = (typeof EDITORIAL_CANDIDATE_PHASES)[number];
 
 export const EDITORIAL_CANDIDATE_ROLES = ['hook', 'momentum', 'proof', 'reflection', 'ending', 'versatile'] as const;
@@ -10,6 +10,8 @@ export const EDITORIAL_CANDIDATE_ISSUES = [
   'incomplete-action',
   'weak-presence',
   'awkward-expression',
+  'open-mouth',
+  'multiple-people',
   'poor-composition',
   'subject-crop',
   'obstruction',
@@ -31,6 +33,7 @@ export interface EditorialCandidateSpec {
   endSec: number;
   technicalRank: number;
   technicalScore: number;
+  subjectCenteredness?: number;
   frames: EditorialCandidateFrame[];
 }
 
@@ -55,9 +58,24 @@ export interface EditorialCandidateReview {
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 const clampScore = (value: unknown) => Math.round(Math.max(0, Math.min(100, Number(value) || 0)));
 
+/** Private/editorial preference only: technical quality stays authoritative, while centered
+ * composition may promote an otherwise comparable candidate into the small review shortlist. */
+export function rankEditorialWindows(
+  windows: readonly VisualQualityWindow[],
+  options: { preferCenteredSubject?: boolean; centerednessWeight?: number } = {},
+): VisualQualityWindow[] {
+  if (!options.preferCenteredSubject) return [...windows];
+  const weight = Math.max(0, Math.min(20, options.centerednessWeight ?? 10));
+  return [...windows].sort((left, right) => {
+    const leftScore = left.score + (left.subjectCenteredness ?? 0.5) * weight;
+    const rightScore = right.score + (right.subjectCenteredness ?? 0.5) * weight;
+    return rightScore - leftScore || left.rank - right.rank;
+  });
+}
+
 /**
- * Convert a technical shortlist into temporally comparable candidates. Three observations are
- * deliberate: a pretty midpoint is insufficient evidence that the action enters and exits cleanly.
+ * Convert a technical shortlist into temporally comparable candidates. Five observations make
+ * transient expression/action defects visible without losing the entry and exit evidence.
  */
 export function buildEditorialCandidateSpecs(
   windows: readonly VisualQualityWindow[],
@@ -75,9 +93,12 @@ export function buildEditorialCandidateSpecs(
       endSec,
       technicalRank: window.rank,
       technicalScore: clampScore(window.score),
+      ...(window.subjectCenteredness == null ? {} : { subjectCenteredness: window.subjectCenteredness }),
       frames: [
         { phase: 'entry', atSec: round3(startSec + inset) },
+        { phase: 'early', atSec: round3(startSec + span / 4) },
         { phase: 'middle', atSec: round3(startSec + span / 2) },
+        { phase: 'late', atSec: round3(startSec + (span * 3) / 4) },
         { phase: 'exit', atSec: round3(Math.max(startSec, endSec - inset)) },
       ],
     };
@@ -131,5 +152,20 @@ export function normalizeEditorialCandidateReviews(
   });
   return normalized
     .sort((a, b) => a.rank - b.rank || b.score - a.score || a.startSec - b.startSec)
+    .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+}
+
+/** One raw take normally contains one intended performance surrounded by setup and alternate tries.
+ * Keep the highest-ranked accepted range selectable while retaining rejects as audit evidence. */
+export function selectPrimarySourceCandidate(
+  candidates: readonly EditorialCandidateReview[],
+  options: { allowMultiple?: boolean } = {},
+): EditorialCandidateReview[] {
+  const ordered = [...candidates].sort((left, right) => left.rank - right.rank || right.score - left.score || left.startSec - right.startSec);
+  if (options.allowMultiple) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  const primary = ordered.find((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
+  if (!primary) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  return ordered
+    .filter((candidate) => candidate.candidateId === primary.candidateId || candidate.verdict === 'reject' || candidate.verdict === 'unreviewed')
     .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
 }

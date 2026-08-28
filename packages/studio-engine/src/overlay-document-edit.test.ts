@@ -61,4 +61,33 @@ describe('stable-id overlay document edits', () => {
     expect(result).toMatchObject({ ok: false, document, error: { code: 'track-locked' } });
     expect(document.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id))).toEqual(expect.arrayContaining(['lower', 'upper']));
   });
+
+  it('keeps native display text editable instead of converting it to a custom Motion Graphic', () => {
+    const document = documentWithOverlays();
+    const nativeText = document.timeline.tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.id === 'lower');
+    if (!nativeText || nativeText.kind !== 'graphic') throw new Error('fixture must contain a graphic');
+    nativeText.block.templateId = 'title';
+
+    const converted = applyOverlayDocumentEdits({
+      document,
+      updates: [{ clipId: 'lower', block: { templateId: 'custom', slots: { innerHtml: '<div>replacement</div>' } } }],
+    });
+    expect(converted).toMatchObject({
+      ok: false,
+      document,
+      error: { code: 'invalid-command', path: 'updates[0].block.templateId' },
+    });
+    expect(nativeText.block).toMatchObject({ templateId: 'title', slots: { innerHtml: '<div>lower</div>' } });
+
+    const restyled = applyOverlayDocumentEdits({
+      document,
+      updates: [{ clipId: 'lower', block: { slots: { color: '#f7f1e7' } } }],
+    });
+    expect(restyled.ok).toBe(true);
+    if (!restyled.ok) return;
+    const updated = restyled.document.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'lower');
+    expect(updated).toMatchObject({ kind: 'graphic', block: { templateId: 'title', slots: { color: '#f7f1e7' } } });
+  });
 });

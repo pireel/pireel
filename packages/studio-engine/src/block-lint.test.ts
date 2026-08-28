@@ -22,6 +22,17 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(HARD_LINT_CODES.has('unscoped-selector')).toBe(true);
   });
 
+  it('逗号选择器逐项检查，不能由一个已作用域分支掩护全局分支', () => {
+    const mixed = ok(`<div data-edit="t">文字四个</div><style>#b7 .safe, .leak{font-size:36px}</style>`);
+    expect(mixed.map((issue) => issue.code)).toContain('unscoped-selector');
+    expect(ok(`<div data-edit="t">文字四个</div><style>#b7 .a, #b7 .b{font-size:36px}</style>`)).toEqual([]);
+  });
+
+  it('原生 CSS nesting 继承父选择器作用域，不误报内部相对选择器', () => {
+    const issues = ok(`<div data-edit="t">文字四个</div><style>#b7 .wrap{font-size:36px;.title{color:white}@media (min-width:1px){&>.mark{width:2em}}}</style>`);
+    expect(issues).toEqual([]);
+  });
+
   it('空壳组件不能以成功状态写入时间线', () => {
     for (const html of ['', '<div></div>', '<div class="wrap"></div><style>#b7 .wrap{position:absolute;inset:0}</style>']) {
       const issues = ok(html);
@@ -53,26 +64,51 @@ describe('lintBlock(块产物静态检查)', () => {
     expect(ok(`<div>这是一段没有句柄的可见文字</div>`).map((i) => i.code)).toContain('no-data-edit');
   });
 
-  it('可见文字没有 px 字号基线时命中硬错误，避免落到浏览器默认 16px', () => {
-    const missing = ok(`<div data-edit="t">没有字号</div><style>#b7 .x{color:white}</style>`);
-    expect(missing.map((i) => i.code)).toContain('missing-font-size');
-    expect(HARD_LINT_CODES.has('missing-font-size')).toBe(true);
-    expect(ok(`<div data-edit="t">明确字号</div><style>#b7 .x{font-size:36px}</style>`)).toEqual([]);
+  it('未声明字号的文字继承平台 36px 基线，显式字号不得低于 24px', () => {
+    expect(ok(`<div data-edit="t">继承平台字号</div><style>#b7 .x{color:white}</style>`)).toEqual([]);
+    expect(ok(`<div data-edit="t">最小字号</div><style>#b7 .x{font-size:24px}</style>`)).toEqual([]);
+    const tooSmall = ok(`<div data-edit="t">过小字号</div><style>#b7 .x{font-size:23px}</style>`);
+    expect(tooSmall.map((issue) => issue.code)).toContain('too-small-font-size');
+    expect(HARD_LINT_CODES.has('too-small-font-size')).toBe(true);
   });
 
   it('语义字号 token 必须在组件内解析为 px', () => {
     expect(ok(`<div data-edit="t">语义字号</div><style>#b7{--type-body:36px}#b7 .x{font-size:var(--type-body)}</style>`)).toEqual([]);
     const unresolved = ok(`<div data-edit="t">未知字号</div><style>#b7 .x{font-size:var(--type-body)}</style>`);
     expect(unresolved.map((issue) => issue.code)).toContain('non-px-length-unit');
-    expect(unresolved.map((issue) => issue.code)).toContain('missing-font-size');
+    const tooSmall = ok(`<div data-edit="t">过小语义字号</div><style>#b7{--type-meta:20px}#b7 .x{font-size:var(--type-meta)}</style>`);
+    expect(tooSmall.map((issue) => issue.code)).toContain('too-small-font-size');
+    const unusedTooSmall = ok(`<div data-edit="t">继承平台字号</div><style>#b7{--type-unused:18px}</style>`);
+    expect(unusedTooSmall.map((issue) => issue.code)).toContain('too-small-font-size');
+    const unstableToken = ok(`<div data-edit="t">继承平台字号</div><style>#b7{--type-unused:2em}</style>`);
+    expect(unstableToken.map((issue) => issue.code)).toContain('non-px-length-unit');
   });
 
-  it('只允许有边界的字距和 1em 行内图标跟随字号', () => {
-    expect(ok(`<div data-edit="t">安全相对单位<svg/></div><style>#b7 .x{font-size:36px;letter-spacing:.08em}#b7 svg{width:1em;height:1em}</style>`)).toEqual([]);
-    for (const declaration of ['padding:1em', 'font-size:2em', 'letter-spacing:.4em', 'width:2em']) {
-      const issues = ok(`<div data-edit="t">不稳定相对单位</div><style>#b7 .x{font-size:36px;${declaration}}</style>`);
-      expect(issues.map((issue) => issue.code), declaration).toContain('non-px-length-unit');
-    }
+  it('font 简写不能绕过显式字号契约', () => {
+    const shorthand = ok(`<div data-edit="t">简写字号</div><style>#b7 .x{font:700 18px/1.2 var(--font-body)}</style>`);
+    expect(shorthand.map((issue) => issue.code)).toContain('non-px-length-unit');
+  });
+
+  it('平台基线让 em 间距和装饰稳定，但 font-size 本身仍不能使用 em', () => {
+    expect(ok(`<div data-edit="t">安全相对单位<svg/></div><style>#b7 .x{font-size:36px;letter-spacing:.4em;padding-left:.4em}#b7 svg{width:2em;height:1em}</style>`)).toEqual([]);
+
+    const relativeFont = ok(`<div data-edit="t">不稳定字号</div><style>#b7 .x{font-size:2em}</style>`);
+    expect(relativeFont.map((issue) => issue.code)).toContain('non-px-length-unit');
+    expect(ok(`<svg viewBox="0 0 10 10"><circle r="4"/></svg><style>#b7 svg{width:2em}</style>`)).toEqual([]);
+  });
+
+  it('只允许平台流式化产物携带容器单位，模型原始输出仍拒绝', () => {
+    const fluid = `<div data-hf-fluidized style="container-type:size"><div data-edit="t">流式布局</div></div><style>#b7 .x{font-size:36px;padding:min(4cqw,3cqh)}</style>`;
+    expect(ok(fluid)).toEqual([]);
+    const raw = ok(fluid.replace(' data-hf-fluidized', ''));
+    expect(raw.map((issue) => issue.code)).toContain('non-px-length-unit');
+  });
+
+  it('旧版平台流式字号可继续编辑，新生成的同类写法仍被拒绝', () => {
+    const legacy = `<div style="position:absolute;inset:0;container-type:size;"><div data-edit="t">旧版流式字号</div><style>#b7 .x{font-size:min(8cqw,4cqh)}</style></div>`;
+    expect(ok(legacy)).toEqual([]);
+    const raw = ok(`<div data-edit="t">模型流式字号</div><style>#b7 .x{font-size:min(8cqw,4cqh)}</style>`);
+    expect(raw.map((issue) => issue.code)).toContain('non-px-length-unit');
   });
 
   it('纯结构无文本(如只有图形)不要求 data-edit', () => {

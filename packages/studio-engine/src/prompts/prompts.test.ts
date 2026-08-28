@@ -6,9 +6,9 @@ import {
   STUDIO_SKILL_CAPABILITIES,
   STUDIO_SKILL_CAPABILITY_CATALOG,
   STUDIO_SKILL_CAPABILITY_MAP,
+  STUDIO_CHAT_TOOLS,
   STUDIO_TOOLS,
   THEME_GENERAL_BRIEF,
-  VIDEO_DESIGN_METHOD,
   buildChatSystem,
   buildSituation,
   mcpInstructions,
@@ -56,51 +56,18 @@ describe("静态提示词完整性", () => {
       "Resolve only ONE blocking decision per wait",
     );
     expect(CHAT_IDENTITY).toContain(
-      "call request_approval and WAIT before executing it",
+      "does not require a proposal or request_approval merely because an edit is broad or complete",
     );
     expect(CHAT_IDENTITY).toContain(
-      "The approval card is not a fixed editing-plan form",
+      "A selected Skill may define its own task-specific planning and approval boundary",
     );
     expect(CHAT_IDENTITY).toContain(
-      "Outside those direct-execution scopes, before Approve do not call set_director_plan, remove_silence",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "A BOUNDED SINGLE-OUTPUT SOURCE-LED SHORT EDIT IS ALSO A DIRECT EXECUTION SCOPE",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "without request_approval, set_director_plan, set_scene_designs, sceneId bookkeeping",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "Outside the direct-execution scopes above, for a broad whole-video request",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "CONSERVATIVE SPEECH CLEANUP IS A DIRECT EXECUTION SCOPE",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "Run it without request_approval, set_director_plan, set_scene_designs, full visual analysis",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "Do not block cleanup by asking whether the user wants visual enhancement",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "ORDINARY SHORT-AD REMIX IS ALSO A DIRECT EXECUTION SCOPE",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "Run it without request_approval, set_director_plan, set_scene_designs, sceneId bookkeeping, or a Frame recommendation",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "every selected span with one coherent visible physical action as a Foley candidate by default",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "CALL one generate_foley batch so its exact event approval card is actually shown",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "Initial analyze_visual with assessAudio=false is not evidence that an action needs no sound",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "the collision allocator reuses a free SFX lane and creates parallel SFX lanes only for overlapping events",
+      "For a complete edit, first read the relevant transcript and footage evidence",
     );
     expect(CHAT_IDENTITY).toContain("EMPTY OUTPUT SOURCE RESOLUTION");
+    expect(CHAT_IDENTITY).toContain("ASSET CONTENT EVIDENCE GATE");
+    expect(CHAT_IDENTITY).toContain("It never proves a video's subject, action, location");
+    expect(CHAT_IDENTITY).toContain("never fill the missing observation with a filename-based guess");
     expect(CHAT_IDENTITY).toContain(
       "With exactly one compatible video or spoken-audio candidate",
     );
@@ -121,10 +88,6 @@ describe("静态提示词完整性", () => {
       "The active Frame governs HOW a generated image should look",
     );
     expect(CHAT_IDENTITY).toContain("LIGHTWEIGHT DISPLAY TYPE IS NATIVE TEXT");
-    expect(CHAT_IDENTITY).toContain("NO-VOICEOVER ADS STILL USE AN INDEPENDENT SCREEN-COPY TRACK");
-    expect(CHAT_IDENTITY).toContain("The absence of speech or a transcript is never a reason to omit designed ad copy");
-    expect(CHAT_IDENTITY).toContain("actual shot cuts, visible action peaks, evidence holds, and music beats");
-    expect(CHAT_IDENTITY).toContain("not a new timeline object, Director Plan, caption layer, or approval artifact");
     expect(CHAT_IDENTITY).toContain("MUST use batched add_texts with a visual preset");
     expect(CHAT_IDENTITY).toContain("Use add_block only when the meaning depends on custom composed objects");
     expect(CHAT_IDENTITY).toContain(
@@ -137,7 +100,7 @@ describe("静态提示词完整性", () => {
       'Do not pre-solve it as a "top label", "bottom card", "CTA box"',
     );
     expect(CHAT_IDENTITY).toContain(
-      "approval of that proposal authorizes attaching the recommendation",
+      "the global baseline does not create one",
     );
     expect(CHAT_IDENTITY).toContain(
       "Issue independent read-only inspection calls together in the same model turn",
@@ -151,23 +114,17 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain("goes directly to analyze_visual/read_script while still unplaced");
     expect(CHAT_IDENTITY).toContain("ask at most TWO short sentences");
     expect(CHAT_IDENTITY).toContain("private deliberation out of visible text");
+    expect(CHAT_IDENTITY).toContain("concise editorial progress, concrete results, and the final recap");
+    expect(CHAT_IDENTITY).not.toContain('Do not emit process preambles such as "让我先…"');
     expect(CHAT_IDENTITY).toContain("ALWAYS emit a short structured recap");
     expect(CHAT_IDENTITY).not.toContain("hard pre-pilot checkpoint");
     expect(mcpInstructions("test-version")).toContain(
-      "Ask one concise question and wait when only the user can resolve that boundary",
+      "Ask one concise question and wait only when a user-owned decision changes truth, cost, selection or deliverable shape",
     );
     expect(mcpInstructions("test-version")).toContain(
-      "present it in your host UI, and WAIT for explicit user approval",
+      "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
     );
-    expect(mcpInstructions("test-version")).toContain(
-      "do not force a fixed checklist of layout, theme, duration, or asset gaps",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "requires an explicit output count, purpose and meaningful variation dimension",
-    );
-    expect(mcpInstructions("test-version")).toContain(
-      "N independently editable finished outputs",
-    );
+    expect(mcpInstructions("test-version")).not.toContain("whole-film proposal");
     expect(mcpInstructions("test-version")).toContain(
       "Uniform slices or filename-order assembly",
     );
@@ -181,7 +138,7 @@ describe("静态提示词完整性", () => {
       "Prefer one strong proposition over keyword soup",
     );
     expect(mcpInstructions("test-version")).toContain(
-      "approval of that proposal authorizes attaching the recommendation",
+      "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
     );
     expect(mcpInstructions("test-version")).toContain(
       "Issue independent read-only inspection calls together",
@@ -273,21 +230,15 @@ describe("静态提示词完整性", () => {
       "backwards-compatible field name",
     );
   });
-  it("内置 Agent 与 MCP 共享整片视频设计方法", () => {
-    for (const phrase of [
-      "one creative thesis",
-      "one rhythm arc",
-      "one shared\n  video design system",
-      "full canvas composition through time",
-      "Motion Graphic is one possible layer",
-      "entrance, development, payoff",
-      "normal playback speed",
-    ]) {
-      expect(VIDEO_DESIGN_METHOD).toContain(phrase);
-    }
-    expect(VIDEO_DESIGN_METHOD).toContain("user-set layout");
-    expect(CHAT_IDENTITY).toContain(VIDEO_DESIGN_METHOD);
-    expect(mcpInstructions("test-version")).toContain(VIDEO_DESIGN_METHOD);
+  it("全局入口不注入导演方法，复杂方法只由选中的 Skill 提供", () => {
+    expect(CHAT_IDENTITY).not.toContain("VIDEO DESIGN METHOD");
+    expect(CHAT_IDENTITY).not.toContain("one creative thesis");
+    expect(CHAT_IDENTITY).not.toContain("one rhythm arc");
+    const mcp = mcpInstructions("test-version");
+    expect(mcp).not.toContain("VIDEO DESIGN METHOD");
+    expect(mcp).toContain(
+      "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
+    );
   });
   it("Chat 禁止把模型私有工具协议输出给用户", () => {
     expect(CHAT_IDENTITY).toContain("NEVER print or imitate XML, HTML, DSML");
@@ -343,13 +294,13 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(system).toContain("short-video-ad-remix");
     expect(system).not.toContain("<studio_skill id=");
   });
-  it("生成配音在准确文案和音色确认后仍经过最终费用批准", () => {
+  it("生成配音在准确文案和音色确定后直接开始", () => {
     const system = buildChatSystem(null);
-    expect(system).toContain("exact script, voice and current credit charge in its own final approval card");
+    expect(system).toContain("generate_speech starts synthesis directly without another approval card");
     const speech = STUDIO_TOOLS.find((tool) => tool.id === "generate_speech");
-    expect(speech?.description).toContain("rejection generates nothing and charges nothing");
+    expect(speech?.description).toContain("This call starts synthesis immediately and has no separate approval card");
   });
-  it("未选 Frame 时不隐式适配，完整创意任务会主动提供可跳过的选择", () => {
+  it("未选 Frame 时不隐式适配，推荐流程由 Skill 按需定义", () => {
     const system = buildChatSystem(
       null,
       "- zen-white · Zen White\n- editorial-bold · Editorial Bold",
@@ -360,17 +311,10 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     );
     expect(system).toContain("host's neutral visual-craft floor");
     expect(system).toContain("not permission to emit generic fixed cards");
-    expect(system).toContain(
-      "approves a whole-film proposal that names the exact recommendation",
-    );
-    expect(system).toContain(
-      "put it inside the whole-film proposal",
-    );
+    expect(system).toContain("only after the user explicitly chooses it or delegates the choice");
+    expect(system).toContain("A selected Skill may define a task-specific recommendation flow");
     expect(system).toContain(
       "catalog previews are samples of a visual language",
-    );
-    expect(system).toContain(
-      "Recommend from stated visual intent and footage evidence, never from supposed Skill compatibility",
     );
     expect(system).toContain("Do not use a hidden default");
     expect(system).not.toContain("choose the best-fitting frame");
@@ -393,16 +337,16 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "shape language, material and image treatment, typography personality",
     );
     expect(system).toContain(
-      "palette, caption and layout controls are independent explicit choices",
+      "Project-level palette, captions and layout controls remain independent",
     );
     expect(system).toContain(
       "The latest explicit user instruction and current manually configured project values are authoritative",
     );
     expect(system).toContain(
-      "never reset current values after reading the Frame",
+      "Carry its transferable visual principles directly into relevant edits",
     );
     expect(system).toContain(
-      "Skill and Director own story, evidence, timing",
+      "The editor owns story, evidence, timing",
     );
     expect(system).toContain(
       "Named situations and showcases are reference vocabulary",
@@ -411,10 +355,10 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       STUDIO_TOOLS.find((tool) => tool.id === "read_frame")?.description,
     ).toContain("professional art-direction playbook");
     expect(mcpInstructions("test-version")).toContain(
-      "A Frame supplies professional art direction",
+      "A Frame fills only unspecified visual decisions",
     );
     expect(mcpInstructions("test-version")).toContain(
-      "Palette, captions and layout remain independent project controls",
+      "Captions, layout, palette, canvas, crop, framing and element placement changed manually in Studio are user decisions",
     );
     expect(mcpInstructions("test-version")).toContain(
       "current project/manual UI state returned by the latest get_state",
@@ -477,7 +421,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(unsplit).toContain("Narrative-lane shots: (none; the current duration comes from other tracks)");
     expect(unsplit).not.toContain("the active output is empty");
   });
-  it("buildSituation 只携带 Director Plan 索引，完整 Markdown 按需读取", () => {
+  it("buildSituation 不再把历史 Director Plan 注入每一轮", () => {
     const s = buildSituation({
       composition: { durationSec: 10 },
       directorPlan: {
@@ -494,20 +438,21 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
         ],
       },
     });
-    expect(s).toContain('Director Plan saved as director-plan.md: goal "让观众相信结论"');
-    expect(s).toContain("sceneId=proof");
-    expect(s).toContain("@shot-proof, @block-proof");
-    expect(s).toContain("call read_director_plan");
+    expect(s).not.toContain("Director Plan");
+    expect(s).not.toContain("sceneId=proof");
+    expect(s).not.toContain("@shot-proof, @block-proof");
+    expect(s).not.toContain("read_director_plan");
     expect(s).not.toContain("B-roll:");
     expect(STUDIO_TOOLS.some((tool) => tool.id === "read_director_plan")).toBe(true);
   });
-  it("buildSituation 携带 Scene 设计文件索引而不重复开放式正文", () => {
+  it("buildSituation 不再把历史 Scene 设计索引注入每一轮", () => {
     const s = buildSituation({
       composition: { durationSec: 10 },
       sceneDesigns: { path: "scene-designs.md", sceneIds: ["opening", "proof"] },
     });
-    expect(s).toContain("Authored Scene designs saved as scene-designs.md for 2 Scene(s): opening, proof");
-    expect(s).toContain("Call read_scene_designs");
+    expect(s).not.toContain("Authored Scene designs");
+    expect(s).not.toContain("scene-designs.md");
+    expect(s).not.toContain("read_scene_designs");
     expect(s).not.toContain("protected zones");
   });
   it("新对话把已有项目状态当作素材现状，而不是继承上一段对话的任务", () => {
@@ -606,10 +551,12 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "one strong proposition over keyword soup",
     );
   });
-  it("完整编辑先审批模型自由方案，再保存可校验导演计划", () => {
+  it("全局完整编辑不强制导演审批，导演工具只保留兼容能力", () => {
     const approval = STUDIO_TOOLS.find((tool) => tool.id === "request_approval")!;
     expect(approval.chatOnly).toBe(true);
     expect(approval.description).toContain("instead of filling a host-defined checklist");
+    expect(approval.description).toContain("Reject ends the current execution turn immediately");
+    expect(CHAT_IDENTITY).toContain("Reject ends the current execution turn immediately");
     expect((approval.inputSchema as { required: string[] }).required).toEqual(["content"]);
     const plan = STUDIO_TOOLS.find((tool) => tool.id === "set_director_plan")!;
     expect(plan.chatOnly).not.toBe(true);
@@ -642,25 +589,10 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       ]),
     );
     expect(sceneSchema.properties).toHaveProperty("visualMetaphor");
-    expect(CHAT_IDENTITY).toContain(
-      "call set_director_plan before the remaining timeline mutations",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "Every planned add_block, add_texts, add_clips, insert_clips, and insert_clip call MUST pass the exact sceneId",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "call analyze_visual before approval whenever a Frame is attached",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "MUST NOT be implemented as add_block calls alone",
-    );
-    expect(CHAT_IDENTITY).toContain("pass placement and backdrop in the creation call");
-    expect(CHAT_IDENTITY).toContain(
-      "Treat B-roll selection as DIRECTOR judgment",
-    );
-    expect(CHAT_IDENTITY).toContain(
-      "A complete edit is NOT complete if review_visuals fails",
-    );
+    expect(CHAT_IDENTITY).toContain("compile them directly into batched picture, text, graphic and sound edits");
+    expect(CHAT_IDENTITY).toContain("Ordinary editing does not create persisted planning artifacts");
+    expect(CHAT_IDENTITY).toContain("does not require a proposal or request_approval merely because an edit is broad or complete");
+    expect(CHAT_IDENTITY).not.toContain("call set_director_plan before the remaining timeline mutations");
     const sceneDesigns = STUDIO_TOOLS.find((tool) => tool.id === "set_scene_designs")!;
     expect(sceneDesigns.chatOnly).not.toBe(true);
     expect(sceneDesigns.description).toContain("open design layer");
@@ -671,9 +603,12 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "sceneId", "designIntent", "composition", "choreography", "continuity", "successCriteria",
     ]);
     expect(sceneDesignSchema.properties.scenes.items.properties).not.toHaveProperty("layout");
-    expect(CHAT_IDENTITY).toContain("set_scene_designs BEFORE its planned visual mutations");
-    expect(CHAT_IDENTITY).toContain("may coexist and interact at the same time");
+    expect(CHAT_IDENTITY).not.toContain("set_scene_designs BEFORE its planned visual mutations");
     expect(STUDIO_TOOLS.some((tool) => tool.id === "read_scene_designs")).toBe(true);
+    for (const id of ["set_director_plan", "set_scene_designs", "read_director_plan", "read_scene_designs"]) {
+      expect(STUDIO_TOOLS.some((tool) => tool.id === id)).toBe(true);
+      expect(STUDIO_CHAT_TOOLS.some((tool) => tool.id === id)).toBe(false);
+    }
   });
   it("取景预设与原子 transform/crop 分层，不暴露完整自动重构工具", () => {
     const transform = STUDIO_TOOLS.find(
@@ -684,7 +619,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(crop.description).toContain("atomic crop primitive");
     expect(CHAT_IDENTITY).toContain("Combine these atoms");
   });
-  it("原生多轨放置也携带 Director Scene 归属", () => {
+  it("原生多轨保留可选的兼容 sceneId，但不要求全局导演流程", () => {
     for (const id of ["add_clips", "insert_clips"]) {
       const tool = STUDIO_TOOLS.find((candidate) => candidate.id === id)!;
       const schema = tool.inputSchema as {
@@ -731,13 +666,13 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(schema.properties).toHaveProperty("placement");
     expect(schema.properties).toHaveProperty("backdrop");
     expect(add.description).toContain("placement BEFORE generation");
-    expect(add.description).toContain("whole-film design system");
+    expect(add.description).not.toContain("whole-film design system");
     const insert = STUDIO_TOOLS.find((tool) => tool.id === "insert_clip")!;
     const insertSchema = insert.inputSchema as {
       properties: Record<string, unknown>;
     };
     expect(insertSchema.properties).toHaveProperty("sceneId");
-    expect(insert.description).toContain("scene's evidence + assetStrategy");
+    expect(insert.description).toContain("Optional sceneId");
   });
   it("语音与口型同步是可组合原子能力,不是数字人大工具", () => {
     const speech = STUDIO_TOOLS.find((tool) => tool.id === "generate_speech")!;
@@ -748,7 +683,11 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "text",
       "voiceId",
     ]);
-    expect(speech.description).toContain("Script approval and concrete voice selection are separate decisions");
+    expect(speech.description).toContain("A selected Skill's explicit voice binding or the user's named choice resolves the voice");
+    expect(speech.description).toContain("transcriptText and captions stay equal to the clean script");
+    expect((speech.inputSchema as { properties: Record<string, unknown> }).properties).toHaveProperty("emotion");
+    expect((speech.inputSchema as { properties: Record<string, unknown> }).properties).toHaveProperty("pauseStyle");
+    expect((speech.inputSchema as { properties: Record<string, unknown> }).properties).toHaveProperty("pauses");
     expect((lipSync.inputSchema as { required: string[] }).required).toEqual([
       "audioUrl",
     ]);
@@ -756,7 +695,8 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
       "VOICE AND LIP-SYNC ARE COMPOSED ATOMICALLY",
     );
     expect(CHAT_IDENTITY).toContain("A stored/default voice is neither a recommendation nor approval");
-    expect(mcpInstructions("test-version")).toContain("Generated narration always has two explicit decisions");
+    expect(mcpInstructions("test-version")).toContain("Generated narration needs an exact finalized script and a concrete voiceId");
+    expect(mcpInstructions("test-version")).toContain("the runtime compiles separate delivery controls only for synthesis");
     expect(CHAT_IDENTITY).toContain(
       "never look for or claim a monolithic digital-human workflow",
     );
@@ -836,7 +776,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(analyze.description).toContain("only sceneCutsSec are real cut points");
     expect(analyze.description).toContain("coarse-to-fine");
     expect(analyze.description).toContain("must never be treated as permission to force-select");
-    expect(analyze.description).toContain("entry/middle/exit");
+    expect(analyze.description).toContain("five ordered observations");
     expect(analyze.description).toContain("editorialCandidates");
     const schema = analyze.inputSchema as {
       properties: { mode: { enum: string[] }; brief: unknown; maxCandidates: unknown };
@@ -876,14 +816,14 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     };
     expect(review.description).toContain("sends the ordered temporal states together");
     expect(review.description).toContain("missing temporal development");
-    expect(review.description).toContain("entrance, development, payoff and exit");
+    expect(review.description).toContain("entry, development, payoff and exit");
     expect(review.description).toContain("repairScope");
     expect(schema.properties).toHaveProperty("sceneIds");
     expect(schema.properties).toHaveProperty("forceCloudAll");
     expect(CHAT_IDENTITY).toContain(
-      "samples Scene entrance, development, payoff and exit states",
+      "representative entry/development/payoff/exit moments from the actual timeline",
     );
-    expect(CHAT_IDENTITY).toContain("repair ONLY the listed Semantic Scenes");
+    expect(CHAT_IDENTITY).toContain("repair only the listed moments or ranges");
   });
   it("口播剪辑手册单独 skill:工具在表、映射到我们的剪辑面、按需进(不进 system)", () => {
     expect(STUDIO_TOOLS.some((t) => t.id === "read_editing_guide")).toBe(true);

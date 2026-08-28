@@ -11,6 +11,8 @@
  * Note: ``` fences in the body must be written as \`\`\` inside the template literal.
  */
 
+import { BLOCK_MIN_READABLE_FONT_PX, BLOCK_TEXT_BASELINE_PX } from '../block-typography';
+
 export const BLOCK_HTML_BODY = `You author/edit one Motion Graphic Component as MARKUP. Component is Studio's broader extensible element model; Motion Graphic is the family this contract is designing. It is ONE editable visual composition participating in a video scene: open typography, source annotation, a relationship or process, a data explanation, a transition plate, a full-field chapter/payoff, or a contained information surface when containment is genuinely needed. It is NOT a generic UI widget, a default rounded card, or a paragraph with decoration.
 
 A block has two parts:
@@ -18,8 +20,8 @@ A block has two parts:
 2) TIMELINE BODY: GSAP statements against an already-created paused timeline named \`tl\`, in LOCAL time (0 = block start). e.g. tl.from('#b7 .num',{autoAlpha:0,y:40,duration:0.4},0). No gsap.timeline() call, no registration — body statements only. Deterministic only (no setTimeout/Date/Math.random).
 
 SIZING — the canvas is a FIXED 1080px-wide reference (height follows the video aspect, ≈1920 for 9:16) and is scaled uniformly for preview/export, so use PLAIN px tuned to that 1080-wide reference (a 72px headline reads the same in every fragment). Do NOT scale type to the box SIZE; DO adapt the LAYOUT to the box's ASPECT RATIO.
-- Every visible text node MUST resolve to a deterministic px size. Prefer a small semantic scale declared on the component root, for example \`--type-display:144px; --type-headline:76px; --type-body:38px; --type-meta:28px\`, then apply it with \`font-size:var(--type-headline)\`. A one-off focal size may use literal px. Never rely on the browser's 16px default, \`inherit\`, an unresolved variable, or an unspecified font size.
-- Typography: line-height is unitless. Letter-spacing may use -0.2em…0.2em so it follows the resolved text role; a true inline icon may use exactly 1em for width/height. Do not use em for font-size, padding, gaps, layout, or standalone graphics. For fixed layout lengths use px: padding 36–64px · gaps 16–40px · radius 16–28px · hairline 2px. Percentages are allowed only for relative placement and sizing. NEVER cm/mm/in/pt/pc/Q, rem/ch, vw/vh/vmin/vmax, container units, or responsive font formulas such as clamp()/calc(). Reduce CJK headline one tier vs latin.
+- Studio supplies a ${BLOCK_TEXT_BASELINE_PX}px inherited fallback on every component. Text without a local font-size inherits that stable baseline instead of the browser's 16px default. Every explicit \`font-size\` and every \`--type-*\` token must resolve directly to px and must never be smaller than ${BLOCK_MIN_READABLE_FONT_PX}px. Prefer a small semantic scale declared on the component root, for example \`--type-display:144px; --type-headline:76px; --type-body:38px; --type-meta:28px\`, then apply it with \`font-size:var(--type-headline)\`. A one-off focal size may use literal px. Do not use the \`font\` shorthand, unresolved variables, \`inherit\` as an explicit value, or responsive font formulas.
+- Typography: line-height is unitless and explicit font-size always resolves to px. Because the platform inheritance baseline is already fixed in px, em may follow the text for letter-spacing, inline spacing, or a local decoration/icon; this is useful for authored display type. Keep composition-level geometry in px: padding 36–64px · gaps 16–40px · radius 16–28px · hairline 2px. Percentages are allowed only for relative placement and sizing. NEVER cm/mm/in/pt/pc/Q, rem/ch, vw/vh/vmin/vmax, container units, or responsive font formulas such as clamp()/calc(). Reduce CJK headline one tier vs latin.
 - Make .wrap a container and switch ARRANGEMENT by the box's aspect ratio (wide box → side-by-side, tall box → stacked). Sizes stay px; only the layout flips:
     #BLOCK_ID .wrap{position:absolute;inset:0;container-type:size;display:flex;flex-direction:column;justify-content:center;gap:32px;padding:48px}
     /* default above = tall/portrait. When the box is wide, go horizontal: */
@@ -116,8 +118,8 @@ RULES
 - The archetype for THIS content, not a carbon copy of an adjacent fragment: when the archetype repeats, the staging differs (see VARIETY).
 
 SELF-CHECK before you output — silently fix anything that fails:
-- Every text role inherits a declared readable baseline whose semantic token resolves directly to px, or has its own literal px font-size; no browser-default 16px text and no unresolved typography.
-- Type and fixed element sizes use px in the real authored box/canvas coordinate system supplied by the prompt; only bounded letter-spacing and 1em inline icons may follow text size. Layout adapts to the box's aspect ratio; NO vw/vh, NO cqmin fonts.
+- Every text role either inherits Studio's ${BLOCK_TEXT_BASELINE_PX}px fallback or uses an explicit px/\`--type-*\` size of at least ${BLOCK_MIN_READABLE_FONT_PX}px; no browser-default 16px text, unresolved typography, or \`font\` shorthand.
+- Type and composition-level geometry use px in the real authored box/canvas coordinate system supplied by the prompt; local type spacing and decorations may use em only after that px type baseline exists. Layout adapts to the box's aspect ratio; NO vw/vh, NO cqmin fonts.
 - The legibility strategy matches the stated BACKDROP (on footage: direct high-contrast type by default, card/scrim only for dense structured content; open composition on a flat theme page); nothing bleeds to the edge.
 - Every border/divider/track uses a DIFFERENT token than its surface (edges visible).
 - Genuine structure (≥1 non-text element), ONE focal element, size contrast ≥3× — not just words. CUSTOM DISPLAY TYPOGRAPHY is the exception: one authored typographic hierarchy plus its requested meaning-bearing mark may be the complete structure.

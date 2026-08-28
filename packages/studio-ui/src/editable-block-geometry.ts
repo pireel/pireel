@@ -117,7 +117,14 @@ export function normalizeElementForInsert(
       const ncq = (value: number) => `max(${-(Math.round((value / natW) * 100000) / 1000)}cqw,${-(Math.round((value / natH) * 100000) / 1000)}cqh)`;
       const fluidCss = (css: string) => {
         const guards: string[] = [];
+        const typography: string[] = [];
         return css
+          // Typography belongs to the authored 1080px canvas. Fluidizing it made text shrink with
+          // the element box and made Studio's own post-processed source fail the shared lint.
+          .replace(/(?:^|[;{])\s*(?:font-size|--type-[\w-]+)\s*:\s*[^;}]*/gi, (match) => {
+            typography.push(match);
+            return `@@HFT${typography.length - 1}@@`;
+          })
           .replace(/@(?:container|media|supports)[^{]*/g, (match) => {
             guards.push(match);
             return `@@HFG${guards.length - 1}@@`;
@@ -127,12 +134,13 @@ export function normalizeElementForInsert(
             if (Math.abs(value) <= 2) return match;
             return value > 0 ? cq(value) : ncq(-value);
           })
-          .replace(/@@HFG(\d+)@@/g, (_match, index: string) => guards[Number(index)]!);
+          .replace(/@@HFG(\d+)@@/g, (_match, index: string) => guards[Number(index)]!)
+          .replace(/@@HFT(\d+)@@/g, (_match, index: string) => typography[Number(index)]!);
       };
       const html = root.innerHTML
         .replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs: string, css: string) => `<style${attrs}>${fluidCss(css)}</style>`)
         .replace(/style="([^"]*)"/gi, (_match, css: string) => `style="${fluidCss(css)}"`);
-      const wrapped = `<div style="position:absolute;inset:0;container-type:size;">\n${html}\n</div>`;
+      const wrapped = `<div data-hf-fluidized style="position:absolute;inset:0;container-type:size;">\n${html}\n</div>`;
       if (fullBleed) return { innerHtml: wrapped, box: { x: 0, y: 0, w: 1, h: 1 } };
 
       let scale = 1;

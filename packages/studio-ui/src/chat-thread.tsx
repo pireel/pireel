@@ -61,6 +61,8 @@ import { Composer, type ComposerHandle } from "./chat-composer";
 import {
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
+  canRunVisualReview,
+  compactStudioChatMessages,
   isRecoverableStudioChatError,
 } from "./chat-thread-store";
 import { scopeSituationToThread } from "./chat-thread-context";
@@ -69,6 +71,7 @@ import type { StudioScenarioSkillOption } from "./shell-context";
 import { localAssetMentionContext } from "./chat-local-asset-mention";
 import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
 import { DeferredActivation } from "./deferred-activation";
+import { studioToolResultStopsAgentTurn } from "./agent-tool-runner";
 import type {
   AttachedFrame,
   ProgressHandle,
@@ -132,6 +135,7 @@ export function ChatThread({
   // safety net from resurrecting a turn the user just killed.
   const toolAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
+  const visualReviewCountRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
   const timelineFrameInspectionRef = useRef<AbortController | null>(null);
   const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
@@ -167,6 +171,21 @@ export function ChatThread({
             ? { skillId: skillRef.current }
             : {}),
         }),
+        prepareSendMessagesRequest: ({
+          body,
+          id,
+          messageId,
+          messages: requestMessages,
+          trigger,
+        }) => ({
+          body: {
+            ...body,
+            id,
+            messageId,
+            messages: compactStudioChatMessages(requestMessages),
+            trigger,
+          },
+        }),
       }),
     [],
   );
@@ -192,6 +211,23 @@ export function ChatThread({
       lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      if (id === "review_visuals") {
+        if (!canRunVisualReview(visualReviewCountRef.current)) {
+          addToolOutput({
+            tool: id,
+            toolCallId: toolCall.toolCallId,
+            output: {
+              ok: true,
+              skipped: true,
+              summary: studioLocale().toLowerCase().startsWith("zh")
+                ? "本轮画面检查已经完成，请根据现有检查结果修复或如实说明未完成项。"
+                : "This turn's visual review is complete. Use the existing evidence to repair the edit or state what remains unfinished.",
+            },
+          });
+          return;
+        }
+        visualReviewCountRef.current += 1;
+      }
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
@@ -202,6 +238,8 @@ export function ChatThread({
           (toolCall.input ?? {}) as Record<string, unknown>,
           { signal: ctrl.signal, surface: "chat" },
         );
+        const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
+        if (stopAfterReceipt) userStoppedRef.current = true;
         if (out.ok)
           addToolOutput({
             tool: id,
@@ -215,6 +253,7 @@ export function ChatThread({
             state: "output-error",
             errorText: out.error ?? t("chatGen.executionFailed"),
           });
+        if (stopAfterReceipt) void stop();
       } catch (e) {
         const isStop = e instanceof DOMException && e.name === "AbortError";
         addToolOutput({
@@ -242,7 +281,7 @@ export function ChatThread({
   const persistSessionState = useCallback(
     (nextFrame: AttachedFrame | null, nextSkillId: StudioScenarioSkillId) => {
       if (messagesRef.current.length > 0)
-        onSnapshot(messagesRef.current, nextFrame, nextSkillId);
+        onSnapshot(compactStudioChatMessages(messagesRef.current), nextFrame, nextSkillId);
     },
     [onSnapshot],
   );
@@ -272,7 +311,7 @@ export function ChatThread({
     if (!statusSnapshotActivationRef.current!.active)
       return statusSnapshotActivationRef.current!.defer();
     if (status === "ready" || status === "error")
-      onSnapshot(messagesRef.current, frameRef.current, skillRef.current);
+      onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === "streaming" || status === "submitted";
@@ -322,12 +361,15 @@ export function ChatThread({
   const statusRef = useRef(status);
   statusRef.current = status;
   const autoResumedRef = useRef("");
-  const resumeArmedRef = useRef(false);
+  const resumeActivationRef = useRef<DeferredActivation | null>(null);
+  if (!resumeActivationRef.current)
+    resumeActivationRef.current = new DeferredActivation();
   useEffect(() => {
-    if (!resumeArmedRef.current) {
-      resumeArmedRef.current = true;
-      return;
-    }
+    // Restoring and sanitizing a persisted thread may replace the initial message array after the
+    // first effect setup. Keep that entire startup cycle inert; only message changes that happen
+    // after the final mount settles are eligible for live tool continuation.
+    if (!resumeActivationRef.current!.active)
+      return resumeActivationRef.current!.defer();
     if (status !== "ready") return;
     const timer = setTimeout(() => {
       if (statusRef.current !== "ready") return; // the SDK sent its own follow-up meanwhile
@@ -348,7 +390,7 @@ export function ChatThread({
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(
-      () => onSnapshot(messagesRef.current, frameRef.current, skillRef.current),
+      () => onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current),
       2000,
     );
     return () => clearInterval(t);
@@ -374,7 +416,7 @@ export function ChatThread({
       } catch {
         /* already ended */
       }
-      onSnapshot(messagesRef.current, frameRef.current, skillRef.current);
+      onSnapshot(compactStudioChatMessages(messagesRef.current), frameRef.current, skillRef.current);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -407,6 +449,7 @@ export function ChatThread({
       if (!options.preserveAutoRecoveryAttempt)
         autoRecoveryAttemptedRef.current = false;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
+      visualReviewCountRef.current = 0;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       const attachedTimelineFrames = draftParts
         .filter(
@@ -723,7 +766,8 @@ export function ChatThread({
             </div>
           ) : (
             messages.map((m, mi) => {
-              const parts = (m.parts ?? []) as ToolPartLike[];
+              const displayMessage = compactStudioChatMessages([m])[0] ?? m;
+              const parts = (displayMessage.parts ?? []) as ToolPartLike[];
               // Collapse consecutive track_export polls (only step-starts between them): render just
               // the last of each run — a polling agent otherwise buries the conversation in a column
               // of identical progress badges. Polls separated by real text keep rendering.

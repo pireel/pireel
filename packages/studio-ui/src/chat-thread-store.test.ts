@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
+  canRunVisualReview,
+  compactStudioChatMessages,
   isRecoverableStudioChatError,
   sanitizeRestored,
 } from './chat-thread-store';
+import { analyzeVisualSourceLabel } from './chat-tool-parts';
 
 const assistant = (parts: UIMessage['parts']): UIMessage => ({
   id: 'assistant-1',
@@ -19,6 +22,60 @@ describe('sanitizeRestored', () => {
       { type: 'text', text: '先处理。<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="resize_block">x</｜｜DSML｜｜tool_calls>完成。' },
     ])]);
     expect((message!.parts[0] as { text: string }).text).toBe('先处理。完成。');
+  });
+});
+
+describe('compactStudioChatMessages', () => {
+  it('keeps every visible text fragment when later tool calls stream in', () => {
+    const [message] = compactStudioChatMessages([assistant([
+      { type: 'text', text: '让我先检查素材。' },
+      { type: 'step-start' },
+      { type: 'tool-list_assets', toolCallId: 'list-1', state: 'output-available', input: {}, output: {} },
+      { type: 'text', text: '我需要再分析画面和参数。' },
+      { type: 'tool-analyze_visual', toolCallId: 'vision-1', state: 'output-available', input: {}, output: {} },
+      { type: 'reasoning', text: 'private chain' },
+      { type: 'text', text: '已按旅行画面完成剪辑。' },
+    ] as UIMessage['parts'])]);
+
+    expect(message!.parts.map((part) => (part as { type: string }).type)).toEqual([
+      'text',
+      'tool-list_assets',
+      'text',
+      'tool-analyze_visual',
+      'text',
+    ]);
+    expect(message!.parts
+      .filter((part) => (part as { type: string }).type === 'text')
+      .map((part) => (part as { text: string }).text)).toEqual([
+      '让我先检查素材。',
+      '我需要再分析画面和参数。',
+      '已按旅行画面完成剪辑。',
+    ]);
+    expect((message!.parts.at(-1) as { text: string }).text).toBe('已按旅行画面完成剪辑。');
+  });
+
+  it('preserves a direct assistant answer when no tool was used', () => {
+    const [message] = compactStudioChatMessages([assistant([{ type: 'text', text: '直接回答。' }])]);
+    expect(message!.parts).toEqual([{ type: 'text', text: '直接回答。' }]);
+  });
+});
+
+describe('analyze visual card context', () => {
+  it('surfaces the resolved source label without showing an implementation id', () => {
+    expect(analyzeVisualSourceLabel({
+      type: 'tool-analyze_visual',
+      state: 'output-available',
+      input: { assetId: 'asset-internal-123' },
+      output: { ok: true, data: { label: '海边回眸.mov' } },
+    })).toBe('海边回眸.mov');
+  });
+});
+
+describe('visual review budget', () => {
+  it('allows one broad review and one targeted recheck per user turn', () => {
+    expect(canRunVisualReview(0)).toBe(true);
+    expect(canRunVisualReview(1)).toBe(true);
+    expect(canRunVisualReview(2)).toBe(false);
   });
 });
 

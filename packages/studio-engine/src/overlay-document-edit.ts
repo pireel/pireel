@@ -59,6 +59,22 @@ export function applyOverlayDocumentEdits(input: OverlayDocumentPatchInput): Ove
     if (update.durationSec != null && (!Number.isFinite(update.durationSec) || update.durationSec <= 0)) {
       return failure(input.document, 'invalid-range', 'Overlay durationSec must be a positive finite number.', { path: `updates[${index}].durationSec` });
     }
+    const existing = input.document.timeline.tracks
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.id === update.clipId);
+    if (
+      existing?.kind === 'graphic'
+      && existing.block.templateId === 'title'
+      && update.block?.templateId != null
+      && update.block.templateId !== 'title'
+    ) {
+      return failure(
+        input.document,
+        'invalid-command',
+        'Native display text must remain editable. Update its text and styling instead of converting it to a custom Motion Graphic.',
+        { path: `updates[${index}].block.templateId` },
+      );
+    }
     updates.push({
       clipId: update.clipId,
       patch: {

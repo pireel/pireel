@@ -8,6 +8,8 @@ export interface FrameQualityObservation {
   stability: number;
   /** Whether the locally detected person/face is present; not folded into technical score. */
   subjectPresence?: number;
+  /** Horizontal visual-center alignment of the detected subject in [0, 1]; not technical quality. */
+  subjectCenteredness?: number;
 }
 
 export interface VisualQualityWindow {
@@ -21,6 +23,8 @@ export interface VisualQualityWindow {
   exposure: number;
   stability: number;
   subjectPresence?: number;
+  /** Conservative subject-centeredness observation, kept separate from technical score. */
+  subjectCenteredness?: number;
   sampleCount: number;
   /** Weakest locally observed technical frame in [0, 100]. */
   worstFrameScore: number;
@@ -109,6 +113,9 @@ function candidateFor(samples: FrameQualityObservation[], startSec: number, endS
     ...(samples.some((sample) => sample.subjectPresence != null) ? {
       subjectPresence: metric(samples.flatMap((sample) => sample.subjectPresence == null ? [] : [clamp01(sample.subjectPresence)])),
     } : {}),
+    ...(samples.some((sample) => sample.subjectCenteredness != null) ? {
+      subjectCenteredness: metric(samples.flatMap((sample) => sample.subjectCenteredness == null ? [] : [clamp01(sample.subjectCenteredness)])),
+    } : {}),
     sampleCount: samples.length,
     worstFrameScore: Math.round(quantile(technical, 0) * 100),
     edgeScore: Math.round(quantile(edgeTechnical, 0.2) * 100),
@@ -184,6 +191,7 @@ export function buildVisualQualityWindows(
       exposure: clamp01(sample.exposure),
       stability: clamp01(sample.stability),
       ...(sample.subjectPresence == null ? {} : { subjectPresence: clamp01(sample.subjectPresence) }),
+      ...(sample.subjectCenteredness == null ? {} : { subjectCenteredness: clamp01(sample.subjectCenteredness) }),
     }))
     .sort((a, b) => a.timeSec - b.timeSec);
   if (!samples.length || durationSec <= 0) return [];

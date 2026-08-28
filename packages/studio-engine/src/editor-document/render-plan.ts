@@ -55,6 +55,11 @@ export function editorDocumentRenderPlan(
   options: EditorRenderPlanOptions = {},
 ): EditorRenderPlan {
   const fps = document.canvas.fps;
+  const durationFrames = editorTimelineTotalFrames(document);
+  const sourcePrimary = document.timeline.tracks.find(
+    (track) => track.id === document.semantics.primaryNarrativeTrackId,
+  );
+  const primaryOwnsDuration = (sourcePrimary?.clips.length ?? 0) > 0;
   const tracks = document.timeline.tracks.map((track, documentIndex): EditorRenderTrack & { documentIndex: number } => ({
     id: track.id,
     type: track.type,
@@ -63,11 +68,17 @@ export function editorDocumentRenderPlan(
     hidden: track.hidden,
     stackOrder: track.stackOrder,
     documentIndex,
-    clips: track.clips.map((clip): EditorRenderClip => {
+    clips: track.clips.flatMap((clip): EditorRenderClip[] => {
+      if (primaryOwnsDuration && track.id !== document.semantics.primaryNarrativeTrackId && clip.startFrame >= durationFrames) {
+        return [];
+      }
       const assetId = 'assetId' in clip ? clip.assetId : undefined;
       const asset = assetId ? document.assets[assetId] : undefined;
       const resolvedSource = asset ? options.resolveAssetUrl?.(asset) ?? undefined : undefined;
-      return {
+      const endFrame = primaryOwnsDuration && track.id !== document.semantics.primaryNarrativeTrackId
+        ? Math.min(clip.startFrame + clip.durationFrames, durationFrames)
+        : clip.startFrame + clip.durationFrames;
+      return [{
         clip,
         clipId: clip.id,
         trackId: track.id,
@@ -75,13 +86,13 @@ export function editorDocumentRenderPlan(
         ...(track.role ? { trackRole: track.role } : {}),
         stackOrder: track.stackOrder,
         startFrame: clip.startFrame,
-        endFrame: clip.startFrame + clip.durationFrames,
+        endFrame,
         startSec: clip.startFrame / fps,
-        endSec: (clip.startFrame + clip.durationFrames) / fps,
-        durationSec: clip.durationFrames / fps,
+        endSec: endFrame / fps,
+        durationSec: (endFrame - clip.startFrame) / fps,
         ...(asset ? { asset } : {}),
         ...(resolvedSource ? { resolvedSource } : {}),
-      };
+      }];
     }).sort((left, right) => left.startFrame - right.startFrame),
   })).sort((left, right) => left.stackOrder - right.stackOrder || left.documentIndex - right.documentIndex)
     .map(({ documentIndex: _documentIndex, ...track }) => track);
@@ -90,7 +101,6 @@ export function editorDocumentRenderPlan(
   const narrative = (primary?.clips ?? []).filter(
     (entry): entry is EditorRenderClip<NarrativeTimelineClip> => entry.clip.kind === 'narrative',
   );
-  const durationFrames = editorTimelineTotalFrames(document);
   return {
     fps,
     durationFrames,

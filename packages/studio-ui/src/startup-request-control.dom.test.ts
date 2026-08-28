@@ -8,12 +8,14 @@ import { STUDIO_AUTO_SKILL_ID } from "@pireel/studio-engine/scenario-skills";
 
 const mocks = vi.hoisted(() => ({
   composerProps: null as Record<string, (...args: never[]) => unknown> | null,
+  sendMessage: vi.fn(),
+  lastAssistantComplete: vi.fn(() => false),
 }));
 
 vi.mock("@ai-sdk/react", () => ({
   useChat: ({ messages }: { messages: unknown[] }) => ({
     messages,
-    sendMessage: vi.fn(),
+    sendMessage: mocks.sendMessage,
     status: "ready",
     stop: vi.fn(),
     setMessages: vi.fn(),
@@ -24,7 +26,7 @@ vi.mock("@ai-sdk/react", () => ({
 
 vi.mock("ai", () => ({
   DefaultChatTransport: class DefaultChatTransport {},
-  lastAssistantMessageIsCompleteWithToolCalls: () => false,
+  lastAssistantMessageIsCompleteWithToolCalls: mocks.lastAssistantComplete,
 }));
 
 vi.mock("@pireel/ui/ai-elements/conversation", () => ({
@@ -67,6 +69,8 @@ vi.mock("./chat-composer", () => ({
 vi.mock("./chat-thread-store", () => ({
   assistantHasOpenOrInterruptedInteraction: () => false,
   assistantMessageHasRenderableOutput: () => true,
+  canRunVisualReview: () => true,
+  compactStudioChatMessages: (messages: unknown) => messages,
   isRecoverableStudioChatError: () => false,
 }));
 
@@ -101,6 +105,9 @@ const mounted: Array<{ root: Root; host: HTMLDivElement }> = [];
 
 beforeEach(() => {
   mocks.composerProps = null;
+  mocks.sendMessage.mockReset();
+  mocks.lastAssistantComplete.mockReset();
+  mocks.lastAssistantComplete.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -167,6 +174,105 @@ describe("startup request control", () => {
 
     vi.runOnlyPendingTimers();
     expect(activation.active).toBe(true);
+  });
+
+  it("does not resume a restored completed-tool turn during StrictMode mount", () => {
+    vi.useFakeTimers();
+    mocks.lastAssistantComplete.mockReturnValue(true);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push({ root, host });
+    const initialMessages: UIMessage[] = [
+      { id: "user-1", role: "user", parts: [{ type: "text", text: "开始剪辑" }] },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        parts: [{
+          type: "tool-analyze_visual",
+          toolCallId: "visual-1",
+          state: "output-error",
+          input: {},
+          errorText: "已由用户暂停",
+        }] as UIMessage["parts"],
+      },
+    ];
+
+    const renderThread = (messages: UIMessage[]) => createElement(
+      StrictMode,
+      null,
+      createElement(ChatThread, {
+        threadId: "thread-stopped",
+        initialMessages: messages,
+        initialFrame: null,
+        initialSkillId: STUDIO_AUTO_SKILL_ID,
+        scenarioSkills: [],
+        frames: [],
+        runTool: vi.fn(),
+        getBody: () => ({}),
+        timelineFramePickActive: false,
+        timelineFramePickBusy: false,
+        timelineFramePickAvailable: true,
+        elements: [],
+        onSnapshot: vi.fn(),
+        handleRef: { current: null },
+      }),
+    );
+
+    act(() => root.render(renderThread(initialMessages)));
+    act(() => root.render(renderThread([...initialMessages])));
+    act(() => vi.advanceTimersByTime(350));
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still resumes a completed tool receipt that arrives after startup settles", () => {
+    vi.useFakeTimers();
+    mocks.lastAssistantComplete.mockReturnValue(true);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    mounted.push({ root, host });
+    const firstMessages: UIMessage[] = [
+      { id: "user-live", role: "user", parts: [{ type: "text", text: "继续" }] },
+    ];
+    const completedMessages: UIMessage[] = [
+      ...firstMessages,
+      {
+        id: "assistant-live",
+        role: "assistant",
+        parts: [{
+          type: "tool-analyze_visual",
+          toolCallId: "visual-live",
+          state: "output-available",
+          input: {},
+          output: { ok: true },
+        }] as UIMessage["parts"],
+      },
+    ];
+    const renderThread = (messages: UIMessage[]) => createElement(ChatThread, {
+      threadId: "thread-live",
+      initialMessages: messages,
+      initialFrame: null,
+      initialSkillId: STUDIO_AUTO_SKILL_ID,
+      scenarioSkills: [],
+      frames: [],
+      runTool: vi.fn(),
+      getBody: () => ({}),
+      timelineFramePickActive: false,
+      timelineFramePickBusy: false,
+      timelineFramePickAvailable: true,
+      elements: [],
+      onSnapshot: vi.fn(),
+      handleRef: { current: null },
+    });
+
+    act(() => root.render(renderThread(firstMessages)));
+    act(() => vi.runOnlyPendingTimers());
+    act(() => root.render(renderThread(completedMessages)));
+    act(() => vi.advanceTimersByTime(350));
+
+    expect(mocks.sendMessage).toHaveBeenCalledOnce();
   });
 
   it("does not save restored chat state on mount but saves explicit changes", () => {

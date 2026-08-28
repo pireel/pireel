@@ -61,6 +61,7 @@ describe('assembleHtml', () => {
   it('拼出 root + video + 块,并注册各块时间轴', () => {
     const html = assembleHtml(sampleComp());
     expect(html).toContain('data-composition-id="root"');
+    expect(html).toContain('.comp { position: absolute; font-size: 36px; }');
     expect(html).toContain('<canvas id="vidEl"'); // canvas 渲染模式:视频轨=画布,帧由父层引擎推
     // canvas 模式:源 URL 不再烤进文档(解码在父层引擎),不断言 src
     expect(html).toContain('data-track-index="0"'); // 视频轨

@@ -112,4 +112,27 @@ describe('editable block geometry', () => {
       measured.mockRestore();
     }
   });
+
+  it('fluidizes geometry but preserves typography and marks the platform transform', () => {
+    const rect = (left: number, top: number, width: number, height: number) => ({
+      left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}),
+    }) as DOMRect;
+    const measured = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.classList.contains('card')) return rect(120, 240, 360, 180);
+      return rect(0, 0, 1080, 1920);
+    });
+    try {
+      const normalized = normalizeElementForInsert({
+        seedId: 'fluid-card',
+        innerHtml: '<div class="card">Card</div><style>#fluid-card .card{font-size:36px;padding:24px;--type-meta:28px}</style>',
+      }, 1080, 1920);
+
+      expect(normalized.innerHtml).toContain('data-hf-fluidized');
+      expect(normalized.innerHtml).toContain('font-size:36px');
+      expect(normalized.innerHtml).toContain('--type-meta:28px');
+      expect(normalized.innerHtml).toMatch(/padding:min\([^)]+cqw,[^)]+cqh\)/);
+    } finally {
+      measured.mockRestore();
+    }
+  });
 });

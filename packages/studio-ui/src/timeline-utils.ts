@@ -150,15 +150,25 @@ export function visibleStripTiles(
   timelineStartSec: number,
   visibleStartSec: number,
   visibleEndSec: number,
-): { left: number; url: string }[] {
+  timelineEndSec: number = timelineStartSec + (srcEnd - srcStart),
+): { left: number; width: number; url: string }[] {
   if (!strip.length || tileDur <= 0 || pps <= 0 || srcEnd <= srcStart || visibleEndSec < visibleStartSec) return [];
+  const sourceDurationSec = srcEnd - srcStart;
+  const timelineDurationSec = timelineEndSec - timelineStartSec;
+  if (timelineDurationSec <= 0) return [];
+  // Video speed is represented canonically by source duration / timeline duration. Mapping tile
+  // geometry through that rate keeps a slowed or sped-up clip's filmstrip covering the same edited
+  // range as preview/export instead of drawing only source-duration seconds and leaving a blank tail.
+  const sourceRate = sourceDurationSec / timelineDurationSec;
   const sourceFirst = Math.floor(srcStart / tileDur);
   const sourceLast = Math.ceil(srcEnd / tileDur) - 1;
-  const visibleFirst = Math.ceil((visibleStartSec - timelineStartSec + srcStart - tileDur) / tileDur);
-  const visibleLast = Math.floor((visibleEndSec - timelineStartSec + srcStart) / tileDur);
+  const visibleSourceStart = srcStart + (visibleStartSec - timelineStartSec) * sourceRate;
+  const visibleSourceEnd = srcStart + (visibleEndSec - timelineStartSec) * sourceRate;
+  const visibleFirst = Math.ceil((visibleSourceStart - tileDur) / tileDur);
+  const visibleLast = Math.floor(visibleSourceEnd / tileDur);
   const first = Math.max(sourceFirst, visibleFirst);
   const last = Math.min(sourceLast, visibleLast);
-  const tiles: { left: number; url: string }[] = [];
+  const tiles: { left: number; width: number; url: string }[] = [];
   for (let k = first; k <= last; k++) {
     const srcT = (k + 0.5) * tileDur;
     let closest = strip[0]!;
@@ -170,7 +180,11 @@ export function visibleStripTiles(
         distance = candidate;
       }
     }
-    tiles.push({ left: (k * tileDur - srcStart) * pps, url: closest.url });
+    tiles.push({
+      left: ((k * tileDur - srcStart) / sourceRate) * pps,
+      width: (tileDur / sourceRate) * pps,
+      url: closest.url,
+    });
   }
   return tiles;
 }

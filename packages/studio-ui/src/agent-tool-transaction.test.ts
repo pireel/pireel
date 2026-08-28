@@ -232,39 +232,48 @@ describe('Agent composition transaction boundary', () => {
     }));
   });
 
-  it('does not generate or charge speech when the exact script and voice card is rejected', async () => {
+  it('generates speech directly without parking on a second approval card', async () => {
     const h = harness();
     const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({
       ok: true,
-      quote: { credits: 1, charCount: 8, estimatedDurationSec: 2.5, textLengthTier: 'short' },
+      asset: {
+        id: 'speech-direct', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
+        model: 'speech-2.8-hd', voiceId: 'system:Chinese (Mandarin)_Reliable_Executive', voiceLabel: 'Reliable Executive',
+        transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
+      },
     }));
     vi.stubGlobal('fetch', fetchMock);
     const { runStudioTool } = await import('./agent-tool-runner');
-    const pending = runStudioTool(h.ctx, 'generate_speech', {
+    const result = await runStudioTool(h.ctx, 'generate_speech', {
       text: '现在就试试看。',
       voiceId: 'system:Chinese (Mandarin)_Reliable_Executive',
       instruction: '自然、直接，不要播音腔',
+      emotion: 'calm',
+      pauseStyle: 'spacious',
+      pauses: [{ afterText: '现在就', durationSec: 0.5 }],
     }, { surface: 'chat' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    resolveInteraction('rejected');
 
-    await expect(pending).resolves.toMatchObject({
+    expect(result).toMatchObject({
       ok: true,
-      data: { decision: 'rejected' },
+      data: { asset: { id: 'speech-direct' } },
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith('/api/studio/speech', expect.objectContaining({
-      body: expect.stringContaining('"action":"quote"'),
+      body: expect.not.stringContaining('"action":"quote"'),
     }));
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain('"pauseStyle":"spacious"');
   });
 
-  it('generates speech only after the exact charge card is approved', async () => {
+  it('marks rejected approval receipts as a hard agent-turn boundary', async () => {
+    const { studioToolResultStopsAgentTurn } = await import('./agent-tool-runner');
+    expect(studioToolResultStopsAgentTurn({ ok: true, data: { decision: 'rejected' } })).toBe(true);
+    expect(studioToolResultStopsAgentTurn({ ok: true, data: { decision: 'approved' } })).toBe(false);
+    expect(studioToolResultStopsAgentTurn({ ok: false, data: { decision: 'rejected' } })).toBe(false);
+  });
+
+  it('also generates speech directly from the bridge execution surface', async () => {
     const h = harness();
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({
-        ok: true,
-        quote: { credits: 1, charCount: 8, estimatedDurationSec: 2.5, textLengthTier: 'short' },
-      }))
       .mockResolvedValueOnce(Response.json({
         ok: true,
         asset: {
@@ -275,19 +284,17 @@ describe('Agent composition transaction boundary', () => {
       }));
     vi.stubGlobal('fetch', fetchMock);
     const { runStudioTool } = await import('./agent-tool-runner');
-    const pending = runStudioTool(h.ctx, 'generate_speech', {
+    const result = await runStudioTool(h.ctx, 'generate_speech', {
       text: '现在就试试看。',
       voiceId: 'system:Chinese (Mandarin)_Reliable_Executive',
-    }, { surface: 'chat' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    resolveInteraction('approved');
+    }, { surface: 'bridge' });
 
-    await expect(pending).resolves.toMatchObject({
+    expect(result).toMatchObject({
       ok: true,
       data: { asset: { id: 'speech-1' }, voiceLabel: 'Reliable Executive' },
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
       body: expect.not.stringContaining('"action":"quote"'),
     }));
   });
@@ -346,12 +353,8 @@ describe('Agent composition transaction boundary', () => {
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
     expect(execute).toContain('After Approve, run `remove_silence` first');
     expect(execute).toContain('do not retry it in the same user request');
-    expect(buildChatSystem(null)).toContain('run remove_silence first when dead-air cleanup is in scope');
-    expect(buildChatSystem(null)).toContain('do not call it again in the same user request');
-    expect(buildChatSystem(null)).toContain('Build one cross-media evidence map before approval');
-    expect(buildChatSystem(null)).toContain('repetition used only to fill uncovered time is a planning failure');
-    expect(buildChatSystem(null)).toContain('compare actual clip ownership and media coverage');
-    expect(buildChatSystem(null)).toContain('Scope, not the reversibility of each individual edit atom, decides whether this is whole-video work');
+    expect(buildChatSystem(null)).toContain('run remove_silence before transcript-driven edits');
+    expect(buildChatSystem(null)).toContain('Ordinary editing does not create persisted planning artifacts');
   });
 
   it('prepares every referenced device-local media asset before clips are committed', async () => {
@@ -570,7 +573,9 @@ describe('Agent composition transaction boundary', () => {
     const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     expect(skill).not.toContain('Smart Select');
     expect(skill).not.toContain('attach `editorial-pulse`');
-    expect(skill).toContain('picture-change contract');
+    expect(skill).toContain('meaningful new visual anchor roughly every 5–10 seconds');
+    expect(skill).toContain('Compile those decisions directly into the timeline');
+    expect(skill).not.toContain('picture-change contract');
     expect(skill).toContain('roughly every 5–10 seconds');
     expect(skill).toContain('never loop or stretch one short clip as wallpaper');
     expect(skill).toContain('inspect local images with `inspect_images`, then place them by assetId');

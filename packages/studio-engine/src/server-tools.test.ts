@@ -61,7 +61,7 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     expect(r.result.state).toContain('stable id output-main');
     expect(r.comp).toBeUndefined(); // 纯查询不落库
   });
-  it('离线 MCP 也能保存整片方案并渐进持久化开放式 Scene 设计', () => {
+  it('离线 MCP 保留旧规划文档的读写兼容性，但不再注入全局状态', () => {
     const p = v2proj();
     const planned = runServerTool('set_director_plan', {
       goal: 'Teach one idea.', creativeThesis: 'Source and explanation become one field.', rhythmArc: 'Establish, build, hold.',
@@ -89,8 +89,8 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const read = runServerTool('read_scene_designs', {}, { ...designedProject, document: designed.document! });
     expect(read.result).toMatchObject({ ok: true, data: { path: 'scene-designs.md' } });
     const state = runServerTool('get_state', {}, { ...designedProject, document: designed.document! });
-    expect(state.result.state).toContain('Director Plan saved as director-plan.md');
-    expect(state.result.state).toContain('Authored Scene designs saved as scene-designs.md for 1 Scene(s): lesson');
+    expect(state.result.state).not.toContain('Director Plan saved as director-plan.md');
+    expect(state.result.state).not.toContain('Authored Scene designs saved as scene-designs.md');
     expect(SERVER_EXECUTABLE_TOOLS.has('set_director_plan')).toBe(true);
     expect(SERVER_EXECUTABLE_TOOLS.has('set_scene_designs')).toBe(true);
   });
@@ -893,6 +893,13 @@ describe('离线执行器(标签页关着时的 MCP fallback)', () => {
     const r2 = runServerTool('compose_context', { blockId: 'b1' }, proj());
     expect(r2.result.ok).toBe(true);
     expect((r2.result.data as { block: { id: string } }).block.id).toBe('b1');
+  });
+  it('apply_block 与站内生成共享最小字号硬约束', () => {
+    const raw = '小字\n```html\n<div data-edit="t">Too small</div><style>#small-type .t{font-size:18px}</style>\n```\n```js\n\n```';
+    const result = runServerTool('apply_block', { raw, blockId: 'small-type', atSec: 1 }, proj());
+    expect(result.result.ok).toBe(false);
+    expect(result.result.data).toMatchObject({ blockId: 'small-type' });
+    expect((result.result.data as { issues: string[] }).issues.join(' ')).toContain('24px');
   });
   it('compose_context 按 atSec 读取长视频当前位置，而不是固定取文稿开头', () => {
     const transcript = Array.from({ length: 80 }, (_, index) => ({

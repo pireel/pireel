@@ -20,6 +20,34 @@ export interface StoredThread {
   skillId?: StudioScenarioSkillId;
 }
 
+export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
+
+export function canRunVisualReview(completedReviews: number): boolean {
+  return completedReviews < MAX_VISUAL_REVIEWS_PER_USER_TURN;
+}
+
+/** Remove non-display protocol parts while preserving every user-visible text fragment and tool
+ * receipt. A text fragment may already be visible before a later tool call streams in; removing it
+ * after that point makes completed prose disappear from the conversation. */
+export function compactStudioChatMessages(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message;
+    const source = message.parts ?? [];
+    const parts = source.flatMap((part) => {
+      const candidate = part as { type?: string; text?: string };
+      if (candidate.type === 'reasoning' || candidate.type === 'step-start') return [];
+      if (candidate.type === 'text') {
+        if (typeof candidate.text === 'string') {
+          const text = stripLeakedToolProtocolText(candidate.text);
+          return text.trim() ? [{ ...part, text } as typeof part] : [];
+        }
+      }
+      return [part];
+    });
+    return { ...message, parts };
+  });
+}
+
 export function normalizeStoredThreads(value: unknown, availableSkillIds: readonly string[] = []): StoredThread[] {
   if (!Array.isArray(value)) return [];
   const available = new Set(availableSkillIds);
@@ -40,7 +68,7 @@ export function normalizeStoredThreads(value: unknown, availableSkillIds: readon
 /** Sanitize a restored session: an interrupted tool can no longer continue, and provider-native tool
  *  protocol accidentally persisted as assistant text must never become visible history. */
 export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
-  return messages.map((m) => {
+  return compactStudioChatMessages(messages.map((m) => {
     if (m.role !== 'assistant') return m;
     const parts = (m.parts ?? []).map((p) => {
       const tp = p as { type: string; state?: string; text?: string };
@@ -54,14 +82,15 @@ export function sanitizeRestored(messages: UIMessage[]): UIMessage[] {
       return p;
     });
     return { ...m, parts };
-  });
+  }));
 }
 
 /** The renderer intentionally hides reasoning and step markers. A completed assistant message
  * containing only those parts is therefore an empty response and must offer a visible retry. */
 export function assistantMessageHasRenderableOutput(message: UIMessage): boolean {
   if (message.role !== 'assistant') return true;
-  return (message.parts ?? []).some((part) => {
+  const compacted = compactStudioChatMessages([message])[0] ?? message;
+  return (compacted.parts ?? []).some((part) => {
     const candidate = part as { type?: string; text?: string };
     if (candidate.type === 'text') return !!candidate.text?.trim();
     return candidate.type === 'dynamic-tool' || !!candidate.type?.startsWith('tool-');

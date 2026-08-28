@@ -44,7 +44,6 @@ export {
   getPreset,
   listPresets,
 } from './presets';
-export { VIDEO_DESIGN_METHOD } from './video-design-method';
 export * from './chat';
 export { THEME_GENERAL_BRIEF } from './theme-brief';
 export { withActiveTheme } from './active-theme';

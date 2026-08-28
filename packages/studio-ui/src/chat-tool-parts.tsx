@@ -59,6 +59,16 @@ function toolIdOf(part: ToolPartLike): string {
   return part.type.startsWith('tool-') ? part.type.slice(5) : part.type;
 }
 
+export function analyzeVisualSourceLabel(part: ToolPartLike): string {
+  const output = part.output && typeof part.output === 'object'
+    ? part.output as { data?: unknown }
+    : null;
+  const data = output?.data && typeof output.data === 'object'
+    ? output.data as { label?: unknown }
+    : null;
+  return typeof data?.label === 'string' ? data.label.trim().slice(0, 120) : '';
+}
+
 function SpeechAssetBody({ output }: { output: unknown }) {
   const data = output && typeof output === 'object' ? (output as { data?: unknown }).data : null;
   const asset = data && typeof data === 'object' ? (data as { asset?: unknown }).asset : null;
@@ -127,6 +137,7 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
   const prog = useToolProgress(def.id);
   const live = running ? prog : null;
   const instruction = typeof part.input?.instruction === 'string' ? (part.input.instruction as string) : '';
+  const contextLabel = def.id === 'analyze_visual' ? analyzeVisualSourceLabel(part) : instruction;
 
   // Elapsed (clock starts once running is observed, ticks every 0.5s); on completion, record into the historical EMA
   const startRef = useRef<number | null>(null);
@@ -167,7 +178,7 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
       <div className="flex items-center gap-2 px-2.5 py-1.5">
         <span className="text-accent grid h-5 w-5 shrink-0 place-items-center rounded bg-accent/10 text-[12px]">{def.icon}</span>
         <span className="text-ink-2 shrink-0 text-[12px] font-semibold">{t(def.label)}</span>
-        {instruction && <span className="text-ink-4 truncate text-[12px]">{instruction}</span>}
+        {contextLabel && <span className="text-ink-4 truncate text-[12px]">{contextLabel}</span>}
         <span className={`ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5 text-[11px] ${st.kind === 'error' ? 'text-destructive' : 'text-ink-3'}`}>
           {running ? <Loader2 size={11} className="animate-spin" /> : st.kind === 'error' ? <X size={11} /> : <Check size={11} />}
           {running && <span className="tabular-nums">{timeText || t('chatGen.starting')}</span>}
@@ -210,9 +221,9 @@ export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocat
   if (id === 'ask_user') return <div key={key}><AskUserCard part={part} /></div>;
   // request_approval: model-authored proposal, host-owned generic Reject / Approve boundary
   if (id === 'request_approval') return <div key={key}><ApprovalCard part={part} /></div>;
-  // Charge-bearing Foley/TTS tools park on the same host-owned approval channel after quoting.
-  // While active, render the parked payload rather than an invisible generic busy card.
-  if ((id === 'generate_foley' || id === 'generate_speech')
+  // Foley parks on the host-owned approval channel after quoting. While active, render the
+  // parked payload rather than an invisible generic busy card. Speech generation runs directly.
+  if (id === 'generate_foley'
     && (part.state === 'input-available' || part.state === 'input-streaming')) {
     return <div key={key}><ApprovalCard part={part} /></div>;
   }

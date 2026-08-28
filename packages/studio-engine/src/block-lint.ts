@@ -8,12 +8,14 @@
  * if unfixable, keep a placeholder rather than commit bad output.
  */
 
+import { BLOCK_MIN_READABLE_FONT_PX } from './block-typography';
+
 export interface BlockLintIssue {
   code:
     | 'empty-content'
     | 'unscoped-selector'
     | 'non-px-length-unit'
-    | 'missing-font-size'
+    | 'too-small-font-size'
     | 'script-tag'
     | 'nondeterministic'
     | 'no-data-edit';
@@ -25,48 +27,149 @@ export const HARD_LINT_CODES: ReadonlySet<string> = new Set([
   'empty-content',
   'unscoped-selector',
   'non-px-length-unit',
-  'missing-font-size',
+  'too-small-font-size',
   'script-tag',
   'nondeterministic',
 ]);
 
-const FORBIDDEN_LENGTH_UNIT = /(?:^|[^\w.-])(-?(?:\d+(?:\.\d+)?|\.\d+))(rem|ex|ch|cap|ic|lh|rlh|cm|mm|q|in|pt|pc|vw|vh|vmin|vmax|cqw|cqh|cqi|cqb|cqmin|cqmax)\b/i;
+const FORBIDDEN_LENGTH_UNIT = /(?:^|[^\w.-])(-?(?:\d+(?:\.\d+)?|\.\d+))(rem|ex|ch|cap|ic|lh|rlh|cm|mm|q|in|pt|pc|vw|vh|vmin|vmax)\b/i;
+const CONTAINER_LENGTH_UNIT = /(?:^|[^\w.-])(-?(?:\d+(?:\.\d+)?|\.\d+))(cqw|cqh|cqi|cqb|cqmin|cqmax)\b/i;
 const PLAIN_PX_FONT_SIZE = /^\s*(?:\d+(?:\.\d+)?|\.\d+)px\s*(?:!important\s*)?$/i;
 const SEMANTIC_FONT_SIZE = /^\s*var\(\s*(--type-[\w-]+)\s*\)\s*(?:!important\s*)?$/i;
-const CSS_DECLARATION = /([\w-]+)\s*:\s*([^;{}]+)/g;
-const EM_LENGTH = /(-?(?:\d+(?:\.\d+)?|\.\d+))em\b/gi;
+const PLATFORM_FLUID_FONT_SIZE = /^\s*min\(\s*-?(?:\d+(?:\.\d+)?|\.\d+)cqw\s*,\s*-?(?:\d+(?:\.\d+)?|\.\d+)cqh\s*\)\s*(?:!important\s*)?$/i;
 
-function declaredTypeTokens(css: string): Set<string> {
-  const tokens = new Set<string>();
-  for (const match of css.matchAll(/(--type-[\w-]+)\s*:\s*(?:\d+(?:\.\d+)?|\.\d+)px\s*(?:!important\s*)?(?=;|})/gi)) {
-    tokens.add(match[1]!.toLowerCase());
+type TypeResolution = { kind: 'px'; value: number } | { kind: 'platform-fluid' };
+
+function typeTokenDeclarations(css: string): Array<{ name: string; value: string }> {
+  return [...css.matchAll(/(--type-[\w-]+)\s*:\s*([^;{}]+)(?=;|}|$)/gi)].map((match) => ({
+    name: match[1]!.toLowerCase(),
+    value: match[2]!.trim(),
+  }));
+}
+
+function declaredTypeTokens(css: string, platformFluidized: boolean): Map<string, TypeResolution> {
+  const tokens = new Map<string, TypeResolution>();
+  for (const { name, value } of typeTokenDeclarations(css)) {
+    if (PLAIN_PX_FONT_SIZE.test(value)) tokens.set(name, { kind: 'px', value: Number.parseFloat(value) });
+    else if (platformFluidized && PLATFORM_FLUID_FONT_SIZE.test(value)) tokens.set(name, { kind: 'platform-fluid' });
   }
   return tokens;
 }
 
-function isValidFontSize(value: string, typeTokens: ReadonlySet<string>): boolean {
-  if (PLAIN_PX_FONT_SIZE.test(value)) return true;
+function resolveFontSize(value: string, typeTokens: ReadonlyMap<string, TypeResolution>, platformFluidized: boolean): TypeResolution | undefined {
+  if (PLAIN_PX_FONT_SIZE.test(value)) return { kind: 'px', value: Number.parseFloat(value) };
   const semantic = SEMANTIC_FONT_SIZE.exec(value);
-  return Boolean(semantic && typeTokens.has(semantic[1]!.toLowerCase()));
+  if (semantic) return typeTokens.get(semantic[1]!.toLowerCase());
+  if (platformFluidized && PLATFORM_FLUID_FONT_SIZE.test(value)) return { kind: 'platform-fluid' };
+  return undefined;
 }
 
-/** `em` is useful only when it deliberately follows a resolved text size. */
-function invalidEmDeclaration(css: string): { property: string; value: string } | undefined {
-  for (const match of css.matchAll(CSS_DECLARATION)) {
-    const property = match[1]!.toLowerCase();
-    const value = match[2]!.trim();
-    const lengths = [...value.matchAll(EM_LENGTH)];
-    if (lengths.length === 0) continue;
+function explicitFontSizeValues(css: string): string[] {
+  return [...css.matchAll(/(?:^|[;{}\n])\s*font-size\s*:\s*([^;}]*)/gi)].map((match) => match[1]!.trim());
+}
 
-    if (property === 'letter-spacing' && lengths.every((entry) => Math.abs(Number(entry[1])) <= 0.2)) {
+function hasFontShorthand(css: string): boolean {
+  return /(?:^|[;{}\n])\s*font\s*:/i.test(css);
+}
+
+function splitSelectorList(selector: string): string[] {
+  const selectors: string[] = [];
+  let start = 0;
+  let quote = '';
+  let escaped = false;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  for (let i = 0; i < selector.length; i += 1) {
+    const ch = selector[i]!;
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = '';
       continue;
     }
-    if ((property === 'width' || property === 'height') && /^1(?:\.0+)?em\s*(?:!important\s*)?$/i.test(value)) {
-      continue;
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') parenDepth += 1;
+    else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+    else if (ch === ',' && parenDepth === 0 && bracketDepth === 0) {
+      selectors.push(selector.slice(start, i).trim());
+      start = i + 1;
     }
-    return { property, value };
   }
-  return undefined;
+  selectors.push(selector.slice(start).trim());
+  return selectors.filter(Boolean);
+}
+
+function selectorHasScope(selector: string, blockId: string): boolean {
+  const escapedId = blockId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`#${escapedId}(?![\\w-])`).test(selector);
+}
+
+/** Native CSS nesting inherits its parent's scope; root grouping at-rules do not. */
+function unscopedSelectors(css: string, blockId: string): string[] {
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const found = new Set<string>();
+  const stack: Array<{ scoped: boolean; ignore: boolean }> = [];
+  let buf = '';
+  let quote = '';
+  let escaped = false;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+
+  for (const ch of source) {
+    if (quote) {
+      buf += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch === '(') parenDepth += 1;
+    else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1);
+    else if (ch === '[') bracketDepth += 1;
+    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+
+    if (parenDepth === 0 && bracketDepth === 0 && ch === '{') {
+      const prelude = buf.trim();
+      buf = '';
+      const parent = stack.at(-1);
+      const parentScoped = parent?.scoped ?? false;
+      if (parent?.ignore || /^@(?:-webkit-)?keyframes\b/i.test(prelude) || /^@(font-face|font-feature-values|property|page|counter-style)\b/i.test(prelude)) {
+        stack.push({ scoped: parentScoped, ignore: true });
+        continue;
+      }
+      if (prelude.startsWith('@')) {
+        const scoped = parentScoped || (/^@scope\b/i.test(prelude) && selectorHasScope(prelude, blockId));
+        stack.push({ scoped, ignore: false });
+        continue;
+      }
+
+      const selectors = splitSelectorList(prelude);
+      const scoped = parentScoped || (selectors.length > 0 && selectors.every((selector) => selectorHasScope(selector, blockId)));
+      if (!parentScoped) {
+        for (const selector of selectors) if (!selectorHasScope(selector, blockId)) found.add(selector);
+      }
+      stack.push({ scoped, ignore: false });
+      continue;
+    }
+    if (parenDepth === 0 && bracketDepth === 0 && ch === '}') {
+      buf = '';
+      stack.pop();
+      continue;
+    }
+    if (parenDepth === 0 && bracketDepth === 0 && ch === ';') {
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  return [...found];
 }
 
 export function lintBlock(args: { blockId: string; innerHtml: string; timelineBody: string }): BlockLintIssue[] {
@@ -87,28 +190,13 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
   }
 
   const cssSources: string[] = [];
-  // <style> scoping: every rule's selector must contain #blockId (strip @keyframes blocks; rules nested
-  // inside @media/@container/@supports are checked like any other rule, only the condition line is skipped)
+  // Selector-list branches are checked independently. Grouping at-rules keep walking,
+  // while keyframes/declaration at-rules are ignored and nested rules inherit a scoped parent.
   for (const styleMatch of innerHtml.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
     const css = styleMatch[1]!;
     cssSources.push(css);
-    const noKf = css.replace(/@keyframes[^{]+\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/gi, '');
-    const flagged = new Set<string>();
-    let buf = '';
-    for (const ch of noKf) {
-      if (ch === '{') {
-        const sel = buf.trim();
-        buf = '';
-        if (!sel || sel.startsWith('@')) continue; // at-rule condition line; its body is walked by the same loop
-        if (!sel.includes(`#${blockId}`) && !flagged.has(sel)) {
-          flagged.add(sel);
-          issues.push({ code: 'unscoped-selector', message: `CSS selector "${sel.slice(0, 60)}" is not scoped under #${blockId}` });
-        }
-      } else if (ch === '}' || ch === ';') {
-        buf = ''; // end of a rule body or declaration: whatever accumulated is not a selector
-      } else {
-        buf += ch;
-      }
+    for (const selector of unscopedSelectors(css, blockId)) {
+      issues.push({ code: 'unscoped-selector', message: `CSS selector "${selector.slice(0, 60)}" is not scoped under #${blockId}` });
     }
   }
   for (const styleAttr of innerHtml.matchAll(/\sstyle\s*=\s*["']([^"']*)["']/gi)) {
@@ -116,7 +204,11 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
   }
 
   const allCss = cssSources.join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
-  const typeTokens = declaredTypeTokens(allCss);
+  // Generated CSS may not choose container units. The platform's insertion transform does,
+  // and marks that output so reopening it in Source/AI edit uses the exact same validator.
+  const platformFluidized = /\bdata-hf-fluidized\b/i.test(innerHtml)
+    || /<div\s+style=["']position:absolute;inset:0;container-type:size;["']>/i.test(innerHtml);
+  const typeTokens = declaredTypeTokens(allCss, platformFluidized);
   const forbidden = FORBIDDEN_LENGTH_UNIT.exec(allCss);
   if (forbidden) {
     issues.push({
@@ -124,29 +216,57 @@ export function lintBlock(args: { blockId: string; innerHtml: string; timelineBo
       message: `CSS length unit "${forbidden[2]}" is unstable on the fixed canvas — use resolved type tokens or px; percentages are allowed only for relative placement and sizing`,
     });
   }
-  const invalidEm = invalidEmDeclaration(allCss);
-  if (invalidEm) {
+  const containerUnit = CONTAINER_LENGTH_UNIT.exec(allCss);
+  if (containerUnit && !platformFluidized) {
     issues.push({
       code: 'non-px-length-unit',
-      message: `CSS ${invalidEm.property} value "${invalidEm.value.slice(0, 40)}" uses em outside the allowed text-relative cases (bounded letter-spacing or a 1em inline icon)`,
+      message: `CSS length unit "${containerUnit[2]}" belongs to Studio's internal fluidization step — generated source must use px or percentages`,
     });
   }
-  let hasValidFontSize = false;
-  for (const match of allCss.matchAll(/font-size\s*:\s*([^;}]*)/gi)) {
-    if (!isValidFontSize(match[1]!, typeTokens)) {
+  if (hasFontShorthand(allCss)) {
+    issues.push({
+      code: 'non-px-length-unit',
+      message: 'font shorthand obscures the resolved text size — declare font-family, font-weight, line-height and font-size separately',
+    });
+  }
+  const invalidTypeTokens = new Set<string>();
+  for (const { name, value } of typeTokenDeclarations(allCss)) {
+    const resolved = typeTokens.get(name);
+    if (!resolved) {
+      invalidTypeTokens.add(name);
       issues.push({
         code: 'non-px-length-unit',
-        message: `font-size must be explicit px or var(--type-*) declared to px in this component, received "${match[1]!.trim().slice(0, 40)}"`,
+        message: `typography token ${name} must resolve directly to px, received "${value.slice(0, 40)}"`,
       });
       break;
     }
-    hasValidFontSize = true;
+    if (resolved.kind === 'px' && resolved.value < BLOCK_MIN_READABLE_FONT_PX) {
+      invalidTypeTokens.add(name);
+      issues.push({
+        code: 'too-small-font-size',
+        message: `typography token ${name} resolves to ${resolved.value}px; Motion Graphic text must be at least ${BLOCK_MIN_READABLE_FONT_PX}px on the authored canvas`,
+      });
+      break;
+    }
   }
-  if (visibleText && !hasValidFontSize) {
-    issues.push({
-      code: 'missing-font-size',
-      message: 'visible text has no stable font-size — set a readable px baseline or declare --type-* tokens in px and apply one on the root wrapper',
-    });
+  for (const value of explicitFontSizeValues(allCss)) {
+    const semantic = SEMANTIC_FONT_SIZE.exec(value);
+    if (semantic && invalidTypeTokens.has(semantic[1]!.toLowerCase())) continue;
+    const resolved = resolveFontSize(value, typeTokens, platformFluidized);
+    if (!resolved) {
+      issues.push({
+        code: 'non-px-length-unit',
+        message: `font-size must be explicit px or var(--type-*) declared to px in this component, received "${value.slice(0, 40)}"`,
+      });
+      break;
+    }
+    if (resolved.kind === 'px' && resolved.value < BLOCK_MIN_READABLE_FONT_PX) {
+      issues.push({
+        code: 'too-small-font-size',
+        message: `font-size "${value.slice(0, 40)}" resolves to ${resolved.value}px; Motion Graphic text must be at least ${BLOCK_MIN_READABLE_FONT_PX}px on the authored canvas`,
+      });
+      break;
+    }
   }
 
   if (/\b(setTimeout|setInterval|requestAnimationFrame|Date\.now|Math\.random)\b/.test(timelineBody)) {

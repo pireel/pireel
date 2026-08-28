@@ -15,6 +15,11 @@ describe('preview runtime', () => {
     expect(PREVIEW_RUNTIME).toContain('local * authored / d');
   });
 
+  it('does not let overflow autofit shrink readable type below the shared floor', () => {
+    expect(PREVIEW_RUNTIME).toContain('minReadableFontPx = 24');
+    expect(PREVIEW_RUNTIME).toContain('Math.max(rawFit, readableFloor)');
+  });
+
   it('moves component content live while preserving one-shot parent commits', () => {
     expect(PREVIEW_RUNTIME).toContain("nudge.el.style.translate = (nudge.bx + dx)");
     expect(PREVIEW_RUNTIME).toContain("sel2.style.translate = ''");

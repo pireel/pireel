@@ -14,6 +14,8 @@
  * This convention reads the same attributes as real Hyperframes rendering → one HTML works on both sides.
  */
 
+import { BLOCK_MIN_READABLE_FONT_PX, BLOCK_TEXT_BASELINE_PX } from '@pireel/studio-engine/block-typography';
+
 /** Starter sample: portrait talking-head style, title card + per-word highlight captions. Pure HTML+GSAP, no build. */
 export const STARTER_HTML = `<!doctype html>
 <html lang="en">
@@ -25,7 +27,7 @@ export const STARTER_HTML = `<!doctype html>
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #root { position: relative; width: 1080px; height: 1920px;
     background: linear-gradient(160deg, #1a1147 0%, #3a1d5c 55%, #0a0a0a 100%); }
-  .comp { position: absolute; inset: 0; }
+  .comp { position: absolute; inset: 0; font-size: ${BLOCK_TEXT_BASELINE_PX}px; }
   #title { display: flex; flex-direction: column; align-items: center; justify-content: center; }
   #title h1 { color: #fff; font-size: 104px; font-weight: 800; text-align: center; max-width: 82%; line-height: 1.15; }
   #title .sub { color: #ffd24d; font-size: 42px; font-weight: 600; margin-top: 28px; }
@@ -334,6 +336,22 @@ export const PREVIEW_RUNTIME = `
     if (k > 0 && k < 0.999) { el.style.transform = 'scale(' + k + ')'; el.style.transformOrigin = 'center center'; }
     else { el.style.transform = ''; }
   }
+  var minReadableFontPx = ${BLOCK_MIN_READABLE_FONT_PX};
+  function smallestTextFontPx(root) {
+    var smallest = Infinity;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    var textNode;
+    while ((textNode = walker.nextNode())) {
+      if (!String(textNode.nodeValue || '').trim()) continue;
+      var parentEl = textNode.parentElement;
+      if (!parentEl || parentEl.tagName === 'STYLE' || parentEl.tagName === 'SCRIPT') continue;
+      var style = getComputedStyle(parentEl);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      var size = parseFloat(style.fontSize);
+      if (size > 0) smallest = Math.min(smallest, size);
+    }
+    return isFinite(smallest) ? smallest : 0;
+  }
   function measureFit() {
     var fits = {};
     comps().forEach(function (el) {
@@ -345,7 +363,10 @@ export const PREVIEW_RUNTIME = `
       // 2px tolerance: ignore subpixel/rounding pseudo-overflow, only compute scale on real overflow
       var kw = t.scrollWidth > cw + 2 ? cw / t.scrollWidth : 1;
       var kh = t.scrollHeight > ch + 2 ? ch / t.scrollHeight : 1;
-      fits[id] = Math.floor(Math.min(kw, kh) * 100) / 100; // quantize to 0.01 to de-jitter
+      var rawFit = Math.min(kw, kh);
+      var smallestFontPx = smallestTextFontPx(t);
+      var readableFloor = smallestFontPx > 0 ? Math.min(1, minReadableFontPx / smallestFontPx) : 0;
+      fits[id] = Math.floor(Math.max(rawFit, readableFloor) * 100) / 100; // quantize to 0.01 to de-jitter
       applyFit(id, fits[id]); // apply in place
     });
     fpost({ type: 'fit', fits: fits });

@@ -47,8 +47,8 @@ export async function mapWithConcurrency<T, R>(
 }
 
 /* ---------- Visual-analysis cache (localStorage, keyed by file fingerprint; same clip doesn't rerun the VLM) ---------- */
-// v5: quality windows now require a bounded fine scan plus absolute rejection diagnostics.
-const VPREFIX = 'pinshot:studio:visual:v5:';
+// v6: quality windows also carry subject-centeredness for brief-specific editorial ranking.
+const VPREFIX = 'pinshot:studio:visual:v6:';
 export function getCachedVisual(sig: string): VisualTimeline | null {
   if (!sig || typeof localStorage === 'undefined') return null;
   try {

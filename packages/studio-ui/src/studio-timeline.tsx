@@ -1837,8 +1837,8 @@ function StudioTimelineImpl({
                                 const strip = (shot.src ? clipStrips?.[shot.src] : null) ?? [];
                                 if (!strip.length) return <div className="absolute inset-0 bg-gradient-to-r from-sky-500/35 to-sky-500/15" />;
                                 if (end < visibleRange.startSec || start > visibleRange.endSec) return null;
-                                return visibleStripTiles(strip, displaySourceStart, displaySourceEnd, tileDur, pps, displayStart, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
-                                  <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
+                                return visibleStripTiles(strip, displaySourceStart, displaySourceEnd, tileDur, pps, displayStart, visibleRange.startSec, visibleRange.endSec, displayEnd).map((tl, ti) => (
+                                  <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none absolute top-0 object-cover" style={{ left: tl.left, width: tl.width, height: filmH }} />
                                 ));
                               })()}
                             </div>
@@ -1848,8 +1848,8 @@ function StudioTimelineImpl({
                             </div>
                           ) : (
                             <>
-                              {displayEnd >= visibleRange.startSec && displayStart <= visibleRange.endSec && visibleStripTiles(filmstrip ?? [], displaySourceStart, displaySourceEnd, tileDur, pps, displayStart, visibleRange.startSec, visibleRange.endSec).map((tl, ti) => (
-                                <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: thumbW, height: filmH }} />
+                              {displayEnd >= visibleRange.startSec && displayStart <= visibleRange.endSec && visibleStripTiles(filmstrip ?? [], displaySourceStart, displaySourceEnd, tileDur, pps, displayStart, visibleRange.startSec, visibleRange.endSec, displayEnd).map((tl, ti) => (
+                                <img key={ti} data-film-tile src={tl.url} aria-hidden="true" loading="lazy" decoding="async" draggable={false} className="max-w-none pointer-events-none absolute top-0 object-cover" style={{ left: tl.left, width: tl.width, height: filmH }} />
                               ))}
                               {(filmstrip ?? []).length === 0 && <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />}
                             </>
@@ -2110,6 +2110,7 @@ function StudioTimelineImpl({
                           clip.startSec,
                           visibleRange.startSec,
                           visibleRange.endSec,
+                          clip.endSec,
                         ).map((tile, index) => (
                           <img
                             key={index}
@@ -2117,7 +2118,7 @@ function StudioTimelineImpl({
                             alt=""
                             draggable={false}
                             className="absolute top-0 max-w-none object-cover"
-                            style={{ left: tile.left, width: visualThumbW, height: visualFilmH }}
+                            style={{ left: tile.left, width: tile.width, height: visualFilmH }}
                           />
                         )) : (
                           <div className="absolute inset-0 bg-gradient-to-r from-accent/20 to-accent/8" />
@@ -2272,11 +2273,14 @@ function StudioTimelineImpl({
                 const k = blockKind(b);
                 const meta = { ...KIND_META[k], ...KIND_CHIP[k] };
                 const Icon = meta.icon;
-                const left = x(btd?.startSec ?? b.startSec);
-                const width = Math.max(16, x(b.durationSec));
+                const displayStartSec = btd?.startSec ?? b.startSec;
+                const displayDurationSec = Math.max(0, Math.min(b.durationSec, dur - displayStartSec));
+                const left = x(displayStartSec);
+                const width = Math.max(16, x(displayDurationSec));
                 // Sentence captions don't enter the timeline: captions are a pure computed output of the script (edited from the script panel / caption panel);
                 // a row of chips that follow the transcript and can't be dragged or trimmed is just noise
                 if (isSentenceCaption(b)) return null;
+                if (displayDurationSec <= 0) return null;
                 // During cross-track drag the chip follows an exact physical lane identity. stackOrder
                 // is render z only and cannot identify a lane when two imported tracks share a value.
                 const crossing = !!btd && (btd.gap != null || btd.to !== track);
@@ -2421,7 +2425,9 @@ function StudioTimelineImpl({
                 captionBlocks.map((b) => {
                   const preview = captionResize?.id === b.id ? captionResize : b;
                   const selected = selectedBlockIds.has(b.id);
-                  const width = Math.max(10, x(preview.durationSec));
+                  const displayDurationSec = Math.max(0, Math.min(preview.durationSec, dur - preview.startSec));
+                  if (displayDurationSec <= 0) return null;
+                  const width = Math.max(10, x(displayDurationSec));
                   const precisionControls = width >= 18;
                   const end = b.startSec + b.durationSec;
                   const minDurationSec = 1 / Math.max(1, framePickFps);

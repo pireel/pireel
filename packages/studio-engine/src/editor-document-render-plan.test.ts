@@ -30,8 +30,34 @@ describe('EditorDocumentV2 render plan', () => {
       clipId: 'talk', startFrame: 60, endFrame: 180, startSec: 2, endSec: 6,
       resolvedSource: 'runtime:main',
     });
-    expect(plan.durationFrames).toBe(270);
-    expect(plan.durationSec).toBe(9);
+    expect(plan.durationFrames).toBe(180);
+    expect(plan.durationSec).toBe(6);
+    expect(plan.tracks.find((track) => track.id === 'graphics')?.clips).toEqual([]);
+  });
+
+  it('clips supporting tracks at the primary-picture boundary', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.main = { id: 'main', kind: 'video', locator: { localSig: 'main' }, metadata: { durationSec: 3 } };
+    document.timeline.tracks[0]!.clips = [{
+      id: 'picture', kind: 'narrative', assetId: 'main', startFrame: 0, durationFrames: 90,
+      sourceInSec: 0, sourceOutSec: 3, properties: { treatment: 'full' }, enabled: true,
+    }];
+    document.timeline.tracks.push({
+      id: 'captions', type: 'caption', role: 'managedCaptions', muted: false, hidden: false,
+      locked: false, syncLocked: true, stackOrder: 1, clips: [{
+        id: 'tail-caption', kind: 'caption', startFrame: 75, durationFrames: 45, enabled: true,
+        managed: true, anchor: { type: 'timeline' }, block: { templateId: 'caption', slots: {} },
+      }],
+    });
+    document.semantics.managedCaptionTrackId = 'captions';
+
+    const plan = editorDocumentRenderPlan(document);
+    expect(plan.durationSec).toBe(3);
+    expect(plan.tracks.find((track) => track.id === 'captions')?.clips[0]).toMatchObject({
+      startSec: 2.5,
+      endSec: 3,
+      durationSec: 0.5,
+    });
   });
 
   it('keeps an empty primary lane valid while other tracks determine duration', () => {

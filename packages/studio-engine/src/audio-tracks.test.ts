@@ -5,6 +5,7 @@ import {
   AUDIO_MIN_LEN_SEC,
   type AudioClip,
   audioClipDefaults,
+  audioFadeDefaults,
   audioClipGainAt,
   audioClipSrcTimeAt,
   audioClipWindow,
@@ -17,6 +18,16 @@ import { dbToGain, fadeShape } from './composition';
 const clip = (over: Partial<AudioClip> = {}): AudioClip => ({ id: 'a1', src: 'blob:x', ...over });
 
 describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+变速)', () => {
+  it('按角色解析默认包络：音乐保留淡化，旁白与短音效直入直出', () => {
+    expect(audioFadeDefaults(undefined)).toEqual({ fadeInSec: 0.8, fadeOutSec: 1.5 });
+    expect(audioClipDefaults(clip({ durationSec: 10, role: 'music' }))).toMatchObject({ fadeInSec: 0.8, fadeOutSec: 1.5 });
+    expect(audioClipDefaults(clip({ durationSec: 10, role: 'narration' }))).toMatchObject({ fadeInSec: 0, fadeOutSec: 0 });
+    expect(audioClipDefaults(clip({ durationSec: 10, role: 'sfx' }))).toMatchObject({ fadeInSec: 0, fadeOutSec: 0 });
+    expect(audioClipDefaults(clip({ durationSec: 10, role: 'narration', inSec: 2, outSec: 8 })))
+      .toMatchObject({ fadeInSec: 0.03, fadeOutSec: 0.03 });
+    expect(audioClipDefaults(clip({ durationSec: 10, role: 'narration', fadeInSec: 0.2, fadeOutSec: 0.3 })))
+      .toMatchObject({ fadeInSec: 0.2, fadeOutSec: 0.3 });
+  });
   it('窗口=起点+曲长/速度,一遍播完不循环;起点前后增益 0、源时间 null', () => {
     const c = clip({ startSec: 10, durationSec: 30 });
     expect(audioClipWindow(c, 120)).toEqual({ start: 10, end: 40 });
@@ -154,5 +165,17 @@ describe('音轨片段(多轨 NLE 语义:无循环/无 duck,位置+淡入淡出+
     expect(changed.startSec).toBe(12.34); // 0.01 精度:与 in/out 同口径,左端裁剪才不会让音频在片段内滑动
     const clamped = patchAudioClip(c, { speed: 9 });
     expect(clamped.speed).toBe(2);
+    const narration = patchAudioClip(clip({ role: 'narration' }), { fadeInSec: 0, fadeOutSec: 0 });
+    expect(narration).toEqual({ id: 'a1', src: 'blob:x', role: 'narration', fadeInSec: 0, fadeOutSec: 0 });
+    expect(patchAudioClip(narration, { fadeInSec: 0.2 })).toMatchObject({ role: 'narration', fadeInSec: 0.2 });
+  });
+
+  it('旁白连续分割的内侧边缘显式保持零淡化', () => {
+    const source = clip({ role: 'narration', durationSec: 20 });
+    const [head, tail] = splitAudioClipAt(source, 10, () => 'narration-tail')!;
+    expect(head.fadeOutSec).toBe(0);
+    expect(tail.fadeInSec).toBe(0);
+    expect(audioClipDefaults(head).fadeOutSec).toBe(0);
+    expect(audioClipDefaults(tail).fadeInSec).toBe(0);
   });
 });
