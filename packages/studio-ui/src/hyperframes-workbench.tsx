@@ -404,6 +404,7 @@ import {
   nativeProjectSharedLocalAssets,
 } from "./native-project-session";
 import { ProjectOutputSwitcher } from "./project-output-switcher";
+import { previewStageGeometry } from "./preview-stage-geometry";
 import { useProjectOutputs } from "./use-project-outputs";
 import { useProjectOutputRuntime } from "./use-project-output-runtime";
 import {
@@ -421,7 +422,6 @@ import {
 // production tree-shaking can flatten a re-export barrel before evaluating it.
 ensureTemplatesRegistered();
 
-const PREVIEW_FALLBACK_W = 320; // fallback width before parent size is measured
 const RAIL_NAV_W = 48; // vertical primary-nav strip on the rail's outer edge; railW measures the CONTENT column only
 const UNDO_CAP = 20; // undo snapshot stack cap (each = canonical V2 document, incl. custom block payloads)
 
@@ -1255,14 +1255,17 @@ export function HyperframesWorkbench({
   const iframesRef = useRef<(HTMLIFrameElement | null)[]>([null, null]);
   // Stage geometry = the ACTIVE buffer's canvas (see the note at the old fit site above)
   const activeDims = bufs.dims[bufs.active];
-  const fit =
-    area.w > 0 && area.h > 0
-      ? Math.min(area.w / activeDims.w, area.h / activeDims.h)
-      : PREVIEW_FALLBACK_W / activeDims.w;
+  const stageGeometry = previewStageGeometry({
+    areaW: area.w,
+    areaH: area.h,
+    canvasW: activeDims.w,
+    canvasH: activeDims.h,
+  });
+  const fit = stageGeometry.fit;
   const fitRef = useRef(fit); // used in the (mounted-once) message handler to convert comp px → stage px
   fitRef.current = fit;
-  const boxW = Math.round(activeDims.w * fit);
-  const boxH = Math.round(activeDims.h * fit);
+  const boxW = stageGeometry.width;
+  const boxH = stageGeometry.height;
   activeStageSizeRef.current = { width: boxW, height: boxH };
   const previewAreaRef = useRef<HTMLDivElement | null>(null);
   const tRef = useRef(0);
@@ -2061,7 +2064,8 @@ export function HyperframesWorkbench({
     [postPreview],
   );
 
-  // Measure the preview area's available size → uniform scale to fill (tracks window/panel changes)
+  // Measure the preview area and recompute the shared canvas/overlay fit, including
+  // the vertical selection-chrome gutter (tracks window and panel changes).
   useEffect(() => {
     const el = previewAreaRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
