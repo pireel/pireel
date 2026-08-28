@@ -22,7 +22,7 @@ describe('buildVisualQualityWindows', () => {
     ];
     const windows = buildVisualQualityWindows(observations, 4, [], { maxWindows: 2 });
     expect(windows).toHaveLength(1);
-    expect(windows[0]).toMatchObject({ rank: 1, startSec: 1.75, endSec: 3.25, score: 82 });
+    expect(windows[0]).toMatchObject({ rank: 1, startSec: 1.75, endSec: 3.75, score: 82 });
     expect(windows[0]!.edgeScore).toBeGreaterThanOrEqual(80);
     expect(windows[0]!.hardFailureFraction).toBe(0);
   });
@@ -32,6 +32,12 @@ describe('buildVisualQualityWindows', () => {
     const windows = buildVisualQualityWindows(observations, 6.5, [3], { maxWindows: 6 });
     expect(windows.length).toBeGreaterThan(0);
     expect(windows.every((window) => window.endSec <= 3 || window.startSec >= 3)).toBe(true);
+  });
+
+  it('preserves a long clean interval as reusable capacity instead of forcing a final short shot', () => {
+    const observations = Array.from({ length: 41 }, (_, index) => sample(index * 0.25, 0.9));
+    const [reservoir] = buildVisualQualityWindows(observations, 10.25, [], { maxWindows: 1 });
+    expect(reservoir!.endSec - reservoir!.startSec).toBeGreaterThan(9.5);
   });
 
   it('reports subject presence separately from technical score', () => {

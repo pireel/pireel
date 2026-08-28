@@ -610,6 +610,46 @@ describe('shared agent timeline atoms', () => {
     expect(runAgentTimelineTool(document, 'set_video_speed', { all: true, speed: 4.1 }).ok).toBe(false);
   });
 
+  it('places primary footage at natural speed with a full-frame cover anchor', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [{ id: 'portrait', kind: 'video', url: 'https://cdn.example/portrait.mp4', durationSec: 12 }],
+    }).document!;
+
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [{
+      id: 'hero', role: 'primary', assetId: 'portrait', startSec: 0,
+      durationSec: 3.2, sourceInSec: 2, sourceOutSec: 5.2, anchorY: 0.62,
+    }] });
+
+    expect(placed.ok).toBe(true);
+    expect(placed.document!.timeline.tracks[0]!.clips[0]).toMatchObject({
+      id: 'hero', durationFrames: 96, sourceInSec: 2, sourceOutSec: 5.2,
+      properties: {
+        treatment: 'full',
+        preciseFraming: {
+          scale: 1, anchorX: 0.5, anchorY: 0.62, coordinateSpace: 'source-normalized',
+        },
+      },
+    });
+    expect((runAgentTimelineTool(placed.document!, 'get_timeline', {}).data as {
+      tracks: Array<{ clips: Array<{ playbackSpeed?: number }> }>;
+    }).tracks[0]!.clips[0]!.playbackSpeed).toBeCloseTo(1, 8);
+  });
+
+  it('rejects primary duration fill disguised as an initial speed or mismatched source range', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [{ id: 'portrait', kind: 'video', url: 'https://cdn.example/portrait.mp4', durationSec: 12 }],
+    }).document!;
+
+    expect(runAgentTimelineTool(document, 'add_clips', { clips: [{
+      role: 'primary', assetId: 'portrait', durationSec: 4, sourceInSec: 2, sourceOutSec: 5, speed: 0.75,
+    }] })).toMatchObject({ ok: false, error: expect.stringContaining('natural speed') });
+    expect(runAgentTimelineTool(document, 'add_clips', { clips: [{
+      role: 'primary', assetId: 'portrait', durationSec: 7, sourceInSec: 2, sourceOutSec: 5,
+    }] })).toMatchObject({ ok: false, error: expect.stringContaining('must match') });
+  });
+
   it('removes a cross-track linked batch only once', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [
@@ -623,6 +663,26 @@ describe('shared agent timeline atoms', () => {
     const removed = runAgentTimelineTool(document, 'remove_clips', { clipIds: ['image-clip', 'audio-clip'] });
     expect(removed.ok).toBe(true);
     expect(removed.document!.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
+  });
+
+  it('does not leave narration behind by destructively clearing the entire primary picture', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'picture', kind: 'video', url: 'https://cdn.example/picture.mp4', durationSec: 5 },
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 5 },
+    ] }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { id: 'picture-clip', assetId: 'picture', role: 'primary', durationSec: 5 },
+      { id: 'voice-clip', assetId: 'voice', role: 'narration', durationSec: 5 },
+    ] }).document!;
+
+    expect(runAgentTimelineTool(document, 'remove_clips', {
+      clipIds: ['picture-clip'],
+      includeLinked: false,
+    })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Cannot remove the entire primary picture'),
+    });
   });
 
   it('aligns explicit matching markers and links the synced clips', () => {

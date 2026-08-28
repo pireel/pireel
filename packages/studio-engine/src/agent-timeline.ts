@@ -145,11 +145,18 @@ export function transcriptFromExactText(text: string, durationSec: number): Tran
 }
 
 function clipForAgent(clip: TimelineClip, fps: number) {
+  const durationSec = timelineFramesToSeconds(clip.durationFrames, fps);
+  const sourceInSec = 'sourceInSec' in clip ? Number(clip.sourceInSec) : NaN;
+  const sourceOutSec = 'sourceOutSec' in clip ? Number(clip.sourceOutSec) : NaN;
+  const playbackSpeed = Number.isFinite(sourceInSec) && Number.isFinite(sourceOutSec)
+    ? (sourceOutSec - sourceInSec) / Math.max(1 / fps, durationSec)
+    : undefined;
   return {
     ...clip,
     startSec: timelineFramesToSeconds(clip.startFrame, fps),
-    durationSec: timelineFramesToSeconds(clip.durationFrames, fps),
+    durationSec,
     endSec: timelineFramesToSeconds(clip.startFrame + clip.durationFrames, fps),
+    ...(playbackSpeed != null ? { playbackSpeed } : {}),
   };
 }
 
@@ -439,15 +446,32 @@ function placementFor(document: EditorDocumentV2, asset: EditorMediaAsset, item:
   if (item.anchorY !== undefined && anchorY === undefined) return fail('anchorY must be within 0..1');
   if (item.opacity !== undefined && opacity === undefined) return fail('opacity must be within 0..1');
   if (wantsPrimary) {
+    const sourceOutSec = sec(item.sourceOutSec, sourceInSec + requestedDuration);
+    const sourceDurationSec = sourceOutSec - sourceInSec;
+    if (!(sourceDurationSec > 0)) return fail('primary video sourceOutSec must be after sourceInSec');
+    if (typeof item.speed === 'number' && Math.abs(item.speed - 1) > 1e-6) {
+      return fail('Primary clips are placed at natural speed. Remove speed and make durationSec match the selected source range; use set_video_speed only for an intentional creative retime, never to fill narration time.');
+    }
+    const naturalDurationFrames = positiveDurationFrames(sourceDurationSec, document.canvas.fps);
+    if (Number.isFinite(explicitDurationSec) && Math.abs(durationFrames - naturalDurationFrames) > 2) {
+      return fail(`Primary clip durationSec must match its ${sourceDurationSec.toFixed(3)}s source range at natural speed. Add another usable source interval or revise narration instead of stretching footage.`);
+    }
     return {
       ...common,
+      durationFrames: naturalDurationFrames,
       kind: 'narrative',
       assetId: asset.id,
       sourceInSec,
-      sourceOutSec: sec(item.sourceOutSec, sourceInSec + requestedDuration),
+      sourceOutSec,
       ...(box ? { box } : {}),
       properties: {
         treatment: 'full',
+        preciseFraming: {
+          scale: 1,
+          anchorX: anchorX ?? 0.5,
+          anchorY: anchorY ?? 0.5,
+          coordinateSpace: 'source-normalized',
+        },
         ...(typeof item.volumeDb === 'number' ? { volumeDb: item.volumeDb } : {}),
         ...(typeof item.muted === 'boolean' ? { audioMuted: item.muted } : {}),
       },
@@ -871,6 +895,18 @@ function removeClips(document: EditorDocumentV2, input: Input): AgentTimelineOut
     if (!removed.ok) return fail(removed.error.message, removed.error);
     next = removed.document;
     receipts.push(removed.receipt);
+  }
+  const hadPrimaryPicture = document.timeline.tracks.some((track) => (
+    track.role === 'primaryNarrative' && track.clips.length > 0
+  ));
+  const hasPrimaryPicture = next.timeline.tracks.some((track) => (
+    track.role === 'primaryNarrative' && track.clips.length > 0
+  ));
+  const hasNarration = next.timeline.tracks.some((track) => (
+    track.role === 'narration' && track.clips.length > 0
+  ));
+  if (hadPrimaryPicture && !hasPrimaryPicture && hasNarration) {
+    return fail('Cannot remove the entire primary picture while narration remains. Preserve the current cut and patch or overwrite it with validated replacement clips first.');
   }
   return mutation(next, `Removed ${clipIds.length} clip${clipIds.length === 1 ? '' : 's'}`, receipts);
 }

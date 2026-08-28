@@ -121,6 +121,8 @@ export interface RenderTransition {
 export interface RenderOptions {
   width?: number;
   height?: number;
+  /** Override the default export bitrate for small internal review proxies. */
+  videoBitrate?: number;
   /** Subtitle/caption layer (absolute seconds on the segment timeline) */
   overlays?: RenderOverlay[];
   /** Seam transitions (keyed by afterIndex) */
@@ -193,7 +195,7 @@ export async function renderTimeline(
     const ctx = canvas.getContext('2d') as OffscreenCanvasRenderingContext2D;
     const videoSource = new CanvasSource(canvas, {
       codec: 'avc',
-      bitrate: QUALITY_HIGH,
+      bitrate: opts.videoBitrate ?? QUALITY_HIGH,
       keyFrameInterval: 1,
     });
     output.addVideoTrack(videoSource);

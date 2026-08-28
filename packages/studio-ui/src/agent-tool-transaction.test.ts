@@ -963,6 +963,7 @@ describe('Agent composition transaction boundary', () => {
         speechLikely: true,
         sceneCutsSec: [6],
         segments: [{ description: 'Hands demonstrate the product.' }],
+        instruction: expect.stringContaining('Descriptive content observations only'),
       },
     });
     expect(Object.keys(h.documentRef.current.assets)).toEqual(assetIdsBefore);
@@ -1090,6 +1091,7 @@ describe('Agent composition transaction boundary', () => {
         analysisMode: 'local-geometry',
         sceneCutsSec: [4],
         subjectTracks: [{ subject: { coordinateSpace: 'source-normalized' } }],
+        instruction: expect.stringContaining('Technical measurements only'),
       },
     });
     expect((result as { data?: Record<string, unknown> }).data).not.toHaveProperty('segments');
@@ -1113,10 +1115,14 @@ describe('Agent composition transaction boundary', () => {
     });
     editorialReviewMocks.reviewEditorialCandidates.mockResolvedValue({
       brief: 'Confident, restrained female-lead footage; compare hook and ending suitability.',
+      comparisonSummary: 'The intentional pose is stronger than the preparatory walk.',
       candidates: [{
         candidateId: 'candidate-1', startSec: 4, endSec: 6, rank: 1, verdict: 'strong', score: 92,
         action: 'walks forward and settles her gaze', rationale: 'complete confident action',
+        openingFrameScore: 96, openingFrameSec: 5.2, openingFrameState: 'closed-mouth frontal portrait',
         roleFit: [{ role: 'hook', score: 94 }], issues: [],
+        scoreBreakdown: { subjectClarity: 92, aestheticFit: 90, composition: 88, temporalCompleteness: 94, editability: 95 },
+        actionPhases: [], rejectedRanges: [], entryState: '', exitState: '', cameraMotion: '', subjectPlacement: '', bestUse: '',
       }],
     });
     Object.assign(h.ctx, {
@@ -1131,14 +1137,15 @@ describe('Agent composition transaction boundary', () => {
       mode: 'editorial',
       brief: 'Confident, restrained female-lead footage; compare hook and ending suitability.',
       maxCandidates: 4,
-      assessAudio: false,
     });
 
     expect(result).toMatchObject({
       ok: true,
       data: {
         analysisMode: 'editorial-candidates',
+        editorialComparisonSummary: expect.stringContaining('intentional pose'),
         editorialCandidates: [{ candidateId: 'candidate-1', verdict: 'strong', roleFit: [{ role: 'hook' }] }],
+        instruction: expect.stringContaining('Do not run another visual review after placement'),
       },
     });
     expect(editorialReviewMocks.reviewEditorialCandidates).toHaveBeenCalledWith(
@@ -1148,6 +1155,79 @@ describe('Agent composition transaction boundary', () => {
       expect.objectContaining({ maxCandidates: 4 }),
     );
     expect(visualMocks.analyzeVisual).not.toHaveBeenCalled();
+    expect(speechMocks.assessLocalSpeechAudio).not.toHaveBeenCalled();
+  });
+
+  it('reviews all editorial sources once through one bounded-concurrency batch', async () => {
+    const h = harness();
+    const first = new File(['first'], 'first.mp4', { type: 'video/mp4', lastModified: 1 });
+    const second = new File(['second'], 'second.mp4', { type: 'video/mp4', lastModified: 2 });
+    localMediaMocks.loadLocalAssetFile.mockImplementation(async (...args: unknown[]) => {
+      const entry = args[1] as { assetId?: string } | undefined;
+      return entry?.assetId === 'asset-first' ? first : second;
+    });
+    mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 12, width: 1080, height: 1920, hasAudio: true });
+    visualMocks.analyzeVisualGeometry.mockResolvedValue({
+      cuts: [],
+      segments: [{ start: 0, end: 12, label: { content: 'broll', person: 'center', safe: 'top', hasText: false, desc: '' } }],
+      qualityWindows: [{
+        rank: 1, startSec: 3, endSec: 5, score: 88, sharpness: 0.9, exposure: 0.86, stability: 0.87,
+        sampleCount: 4, worstFrameScore: 84, edgeScore: 86, hardFailureFraction: 0,
+      }],
+    });
+    let started = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    editorialReviewMocks.reviewEditorialCandidates.mockImplementation(async () => {
+      started += 1;
+      await gate;
+      return {
+        brief: 'Choose complete, polished performance ranges.',
+        comparisonSummary: 'One usable performance range.',
+        candidates: [{
+          candidateId: 'candidate-1', startSec: 3, endSec: 5, rank: 1, verdict: 'usable', score: 88,
+          contentRole: 'person-primary',
+          action: 'settles into a pose', rationale: 'complete action', openingFrameScore: 88,
+          openingFrameSec: 3.2, openingFrameState: 'stable', roleFit: [{ role: 'body', score: 88 }], issues: [],
+          scoreBreakdown: { subjectClarity: 88, aestheticFit: 88, composition: 88, temporalCompleteness: 88, editability: 88 },
+          actionPhases: [], rejectedRanges: [], entryState: '', exitState: '', cameraMotion: '', subjectPlacement: '', bestUse: '',
+          cutOptions: [{ durationSec: 2, startSec: 3, endSec: 5, score: 88, reason: 'complete action' }],
+        }],
+      };
+    });
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      localAssetIndexRef: { current: [
+        localEntry('asset-first', 'first:sig', '第一段', 'video'),
+        localEntry('asset-second', 'second:sig', '第二段', 'video'),
+      ] },
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const pending = runStudioTool(h.ctx, 'analyze_visual', {
+      mode: 'editorial',
+      brief: 'Choose complete, polished performance ranges.',
+      items: [{ assetId: 'asset-first' }, { assetId: 'asset-second' }],
+    });
+    await vi.waitFor(() => expect(started).toBe(2));
+    release();
+    const result = await pending;
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        analysisMode: 'editorial-batch',
+        acceptedDurationSec: 4,
+        items: [
+          { ok: true, localAssetId: 'asset-first', editorialCandidates: [{ verdict: 'usable' }] },
+          { ok: true, localAssetId: 'asset-second', editorialCandidates: [{ verdict: 'usable' }] },
+        ],
+        instruction: expect.stringContaining('Do not create a Director Plan, run another visual review'),
+      },
+    });
+    expect(visualMocks.analyzeVisualGeometry).toHaveBeenCalledTimes(2);
+    expect(editorialReviewMocks.reviewEditorialCandidates).toHaveBeenCalledTimes(2);
   });
 
   it('requires a concrete brief for editorial candidate review', async () => {

@@ -211,4 +211,8 @@ export const CHATGEN_ZH: Record<string, string> = {
   'chatGen.videoClip': '视频素材',
   'chatGen.wavesShore': '海浪拍岸',
   'chatGen.wrappingUp': '收尾中 · 已 {s}s',
+  'chatGen.workUpdates': '工作过程',
+  'chatGen.workNotFinished': '任务尚未完成',
+  'chatGen.workDurationSeconds': '{s} 秒',
+  'chatGen.workDurationMinutes': '{m} 分 {s} 秒',
 };

@@ -87,6 +87,7 @@ import { parseBlockResponse } from '@pireel/studio-engine/compose';
 import { HARD_LINT_CODES, lintBlock } from '@pireel/studio-engine/block-lint';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations } from '@pireel/studio-engine/build-blocks';
 import { beatsForWindow } from '@pireel/studio-engine/captions-relay';
+import { captionYPctForCanvas } from '@pireel/studio-engine/delivery-safety';
 import { applyCaptionTextEdits } from '@pireel/studio-engine/caption-text-edit';
 import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sentence-edit';
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
@@ -135,7 +136,7 @@ import type { FrameCatalogItem } from './use-frame-catalog';
 import type { StudioChatHandle } from './studio-chat';
 import { primaryNarrativeRenderPlan } from './primary-render-plan';
 import { supplementalVisualMedia } from './visual-render-plan';
-import { captionTranscriptsByAsset } from './caption-transcript-bridge';
+import { captionTranscriptForEdit, captionTranscriptsByAsset } from './caption-transcript-bridge';
 import { collectAssetSearchDocuments } from './asset-search-collector';
 import { getLocalVisualModelSnapshot } from './local-visual-search-model';
 import {
@@ -164,6 +165,26 @@ const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !
 
 const IMAGE_INSPECTION_MAX_DIM = 1280;
 const IMAGE_INSPECTION_MAX_BASE64_CHARS = 2 * 1024 * 1024;
+const EDITORIAL_BATCH_MAX_SOURCES = 24;
+const EDITORIAL_BATCH_CONCURRENCY = 2;
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  worker: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(values[index]!, index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
 
 export function adaptiveGeneratedVideoSpec(width: number, height: number): {
   aspectRatio: '9:16' | '16:9' | '1:1';
@@ -1123,7 +1144,85 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const reviewBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
             if (editorialReview && !reviewBrief) return { ok: false, error: 'analyze_visual mode="editorial" requires a concrete brief describing the desired visible qualities and editorial roles' };
             const maxReviewCandidates = Math.max(1, Math.min(6, Math.floor(Number(input.maxCandidates) || 6)));
-            const assessSourceAudio = input.assessAudio !== false;
+            const batchItems = Array.isArray(input.items)
+              ? input.items.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value))
+              : [];
+            if (batchItems.length) {
+              if (!editorialReview) return { ok: false, error: 'analyze_visual items[] is available only with mode="editorial"' };
+              if (batchItems.length > EDITORIAL_BATCH_MAX_SOURCES) {
+                return { ok: false, error: `analyze_visual items[] accepts at most ${EDITORIAL_BATCH_MAX_SOURCES} sources per call` };
+              }
+              const seen = new Set<string>();
+              for (const item of batchItems) {
+                const selectors = ['assetId', 'clipId', 'localAssetId', 'localSig']
+                  .flatMap((key) => typeof item[key] === 'string' && item[key].trim() ? [`${key}:${item[key].trim()}`] : []);
+                if (selectors.length !== 1) {
+                  return { ok: false, error: 'every analyze_visual items[] entry requires exactly one assetId or clipId' };
+                }
+                if (seen.has(selectors[0]!)) return { ok: false, error: `duplicate analyze_visual batch source: ${selectors[0]}` };
+                seen.add(selectors[0]!);
+              }
+              const baseInput = {
+                mode: 'editorial',
+                brief: reviewBrief,
+                maxCandidates: maxReviewCandidates,
+                assessAudio: input.assessAudio === true,
+              };
+              const results = await mapWithConcurrency(
+                batchItems,
+                EDITORIAL_BATCH_CONCURRENCY,
+                async (item) => {
+                  try {
+                    const result = await runStudioToolInner(ctx, 'analyze_visual', { ...baseInput, ...item }, opts);
+                    return result.ok
+                      ? { ok: true, summary: result.summary, ...((result.data as Record<string, unknown> | undefined) ?? {}) }
+                      : { ok: false, error: result.error ?? 'visual analysis failed', selector: item };
+                  } catch (error) {
+                    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+                    return {
+                      ok: false,
+                      error: error instanceof Error ? error.message : String(error),
+                      selector: item,
+                    };
+                  }
+                },
+              );
+              const completed = results.filter((result) => result.ok).length;
+              const acceptedDurationSec = Math.round(results.reduce((total, result) => {
+                const receipt = result as Record<string, unknown>;
+                if (receipt.ok !== true || !Array.isArray(receipt.editorialCandidates)) return total;
+                const accepted = receipt.editorialCandidates
+                  .filter((candidate): candidate is Record<string, unknown> => !!candidate
+                    && typeof candidate === 'object'
+                    && !Array.isArray(candidate)
+                    && (candidate.verdict === 'strong' || candidate.verdict === 'usable'))
+                  .map((candidate) => ({ startSec: Number(candidate.startSec), endSec: Number(candidate.endSec) }))
+                  .filter((range) => Number.isFinite(range.startSec) && Number.isFinite(range.endSec) && range.endSec > range.startSec)
+                  .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec);
+                let sourceCapacity = 0;
+                let coveredUntil = -Infinity;
+                for (const range of accepted) {
+                  const uncoveredStart = Math.max(range.startSec, coveredUntil);
+                  if (range.endSec > uncoveredStart) sourceCapacity += range.endSec - uncoveredStart;
+                  coveredUntil = Math.max(coveredUntil, range.endSec);
+                }
+                return total + sourceCapacity;
+              }, 0) * 1_000) / 1_000;
+              return {
+                ok: true,
+                summary: `analyzed ${completed}/${batchItems.length} video sources`,
+                data: {
+                  analysisMode: 'editorial-batch',
+                  editorialBrief: reviewBrief,
+                  acceptedDurationSec,
+                  items: results,
+                  instruction: `This batch is the complete source-selection review. The non-overlapping accepted source capacity is ${acceptedDurationSec}s. Assemble directly from this receipt: choose the accepted candidate with the highest openingFrameScore that also fits the requested opening preference, then order the remaining strong or usable ranges by score and visible action/setting continuity. Choose an appropriate scored child cut instead of consuming every reservoir whole. Place the selected source-video clips in one batch with muted=true. Source audio was excluded and must not affect ranking. Do not create a Director Plan, run another visual review, or retry the selection after placement; leave failed or fully rejected sources unused.`,
+                },
+              };
+            }
+            // Editorial range review is visual by default. Callers that genuinely need the source
+            // soundtrack can opt in; narrated/B-roll workflows no longer pay for accidental ASR.
+            const assessSourceAudio = input.assessAudio === true || (!editorialReview && input.assessAudio !== false);
             const analyze = geometryOnly || editorialReview ? analyzeVisualGeometry : analyzeVisual;
             const requestedLocalReference = typeof input.localAssetId === 'string'
               ? input.localAssetId.trim()
@@ -1182,9 +1281,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         ...(geometryOnly || editorialReview ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
                         ...(reviewed ? {
                           editorialBrief: reviewed.brief,
+                          editorialComparisonSummary: reviewed.comparisonSummary,
                           editorialCandidates: reviewed.candidates,
-                          instruction: 'Choose strong candidates by role fit and comparative rank. Never edit in rejected or unreviewed candidates; inspect the chosen source boundaries again after placement.',
-                        } : {}),
+                          instruction: 'Use this as the complete selection result. Place only final verdict strong or usable inside its refined startSec/endSec; aestheticScore and roleFit never override reject. For an opening, prefer the accepted range with the highest openingFrameScore that satisfies the requested face/composition preference. Place source video with muted=true because source audio was excluded. Do not run another visual review after placement.',
+                        } : geometryOnly ? {
+                          instruction: 'Technical measurements only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                        } : {
+                          instruction: 'Descriptive content observations only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                        }),
                       },
                     }
                   : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
@@ -1314,9 +1418,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                       ...(geometryOnly || editorialReview ? visualGeometryForAgent(vis) : visualTimelineForAgent(vis)),
                       ...(reviewed ? {
                         editorialBrief: reviewed.brief,
+                        editorialComparisonSummary: reviewed.comparisonSummary,
                         editorialCandidates: reviewed.candidates,
-                        instruction: 'Choose strong candidates by role fit and comparative rank. Never edit in rejected or unreviewed candidates; inspect the chosen source boundaries again after placement.',
-                      } : {}),
+                        instruction: 'Use this as the complete selection result. Place only final verdict strong or usable inside its refined startSec/endSec; aestheticScore and roleFit never override reject. For an opening, prefer the accepted range with the highest openingFrameScore that satisfies the requested face/composition preference. Place source video with muted=true because source audio was excluded. Do not run another visual review after placement.',
+                      } : geometryOnly ? {
+                        instruction: 'Technical measurements only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                      } : {
+                        instruction: 'Descriptive content observations only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
+                      }),
                     },
                   }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
@@ -2361,7 +2470,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   voiceLabel: asset.voiceLabel,
                   charCount: asset.charCount,
                   estimatedDurationSec: asset.estimatedDurationSec,
-                  next: `For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration. Never call set_bgm for speech.${asset.estimatedDurationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.estimatedDurationSec)))}.`}`,
+                  next: `asset.durationSec is the measured synthesized-audio duration and is authoritative; estimatedDurationSec was only the pre-generation estimate. For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration. Never call set_bgm for speech.${asset.durationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.durationSec)))}.`}`,
                 },
               };
             } finally {
@@ -2506,10 +2615,10 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'set_captions': {
             const preset = typeof input.preset === 'string' ? input.preset : undefined;
             if (preset && !CAPTION_PRESETS.some((p) => p.id === preset)) return { ok: false, error: t('workbench.noSuchCaptionPreset', { preset }) };
-            const yPct = Number(input.yPct);
+            const yPct = captionYPctForCanvas(documentRef.current.canvas, input.yPct);
             const scale = Number(input.scale);
             const patch: Parameters<typeof setCaptionStyle>[0] = {};
-            if (Number.isFinite(yPct)) patch.yPct = yPct;
+            if (yPct != null) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
             if (!preset && !Object.keys(patch).length) return { ok: false, error: t('workbench.nothingSetGiveLeast') };
             const source = input.source === 'track' && typeof input.trackId === 'string'
@@ -2557,16 +2666,20 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const shotIdIn = typeof input.shotId === 'string' ? input.shotId : undefined;
             const src = shotIdIn ? ensureShots(compRef.current).find((shot) => shot.id === shotIdIn)?.src : undefined;
             if (shotIdIn && !src) return { ok: false, error: t('workbench.shotIdNotInsertClip') };
-            const segments = src ? clipAsrRef.current[src] : asrRef.current;
-            if (!segments?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
-            const bad = items.filter((item) => item.index >= segments.length);
-            if (bad.length) return { ok: false, error: t('workbench.indexOutOfRange', { list: bad.map((item) => item.index).join(', '), n: segments.length }) };
             const primaryTrack = documentRef.current.timeline.tracks.find((track) => track.id === documentRef.current.semantics.primaryNarrativeTrackId);
             const targetNarrativeClip = shotIdIn ? primaryTrack?.clips.find((clip) => clip.id === shotIdIn) : undefined;
             const assetId = shotIdIn
               ? (targetNarrativeClip?.kind === 'narrative' ? targetNarrativeClip.assetId : undefined)
               : firstNarrativeAssetId(documentRef.current);
             if (!assetId) return { ok: false, error: shotIdIn ? t('workbench.shotIdNotInsertClip') : t('workbench.noTranscriptYetRun') };
+            const segments = captionTranscriptForEdit(
+              documentRef.current,
+              assetId,
+              src ? clipAsrRef.current[src] : asrRef.current,
+            );
+            if (!segments?.length) return { ok: false, error: src ? t('workbench.insertClipNoTranscript') : t('workbench.noTranscriptYetRun') };
+            const bad = items.filter((item) => item.index >= segments.length);
+            if (bad.length) return { ok: false, error: t('workbench.indexOutOfRange', { list: bad.map((item) => item.index).join(', '), n: segments.length }) };
             const resolved = resolveCaptionSentenceEdits(documentRef.current, assetId, items);
             if (!resolved.ok) return { ok: false, error: resolved.error };
             const next = applyCaptionTextEdits(segments, resolved.items);

@@ -33,6 +33,21 @@ export function captionTranscriptsByAsset(
   return bridged;
 }
 
+/**
+ * Caption copy is persisted in the editor document, while the browser ASR refs are only a runtime
+ * cache. Restored projects therefore must fall back to the durable transcript instead of asking
+ * the user to read/transcribe the already-known script again.
+ */
+export function captionTranscriptForEdit(
+  document: EditorDocumentV2,
+  assetId: string,
+  runtimeSegments: readonly AsrSegment[] | null | undefined,
+): AsrSegment[] | undefined {
+  if (runtimeSegments?.length) return runtimeSegments as AsrSegment[];
+  const stored = document.semantics.transcripts[assetId];
+  return stored?.length ? stored as AsrSegment[] : undefined;
+}
+
 /** Project document → browser runtime transcript refs after an engine-owned re-layout rewrites
  * cueLayout/cueTexts. Runtime source URLs are recovered through the projected shot's clip id. */
 export function captionTranscriptsFromDocument(

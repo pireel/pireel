@@ -112,6 +112,7 @@ import type { StudioProjectContext, TranscriptSegment } from './project-dto';
 import { type CutSeamEntry, finalizeCutSeams, narrationRowMarks, spans as clipSpans, tightenCutRanges } from './trim';
 import { type AsrSegment, applyCaptionTranslations, clearCaptionTranslations, desegmentCues } from './build-blocks';
 import { beatsForWindow } from './captions-relay';
+import { captionYPctForCanvas } from './delivery-safety';
 import { applyCaptionTextEdits } from './caption-text-edit';
 import { ensureTemplatesRegistered } from './templates';
 import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-search';
@@ -1168,10 +1169,10 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
     case 'set_captions': {
       const preset = typeof input.preset === 'string' ? input.preset : undefined;
       if (preset && !CAPTION_PRESETS.some((x) => x.id === preset)) return { result: { ok: false, error: `no such caption preset: ${preset}` } };
-      const yPct = Number(input.yPct);
+      const yPct = captionYPctForCanvas(p.document.canvas, input.yPct);
       const scale = Number(input.scale);
       const patch: Record<string, number> = {};
-      if (Number.isFinite(yPct)) patch.yPct = yPct;
+      if (yPct != null) patch.yPct = yPct;
       if (Number.isFinite(scale)) patch.scale = scale;
       if (!preset && !Object.keys(patch).length) return { result: { ok: false, error: 'nothing to set: provide at least one of preset / yPct / scale' } };
       const sourceDocument = p.document;

@@ -211,4 +211,8 @@ export const CHATGEN_EN: Record<string, string> = {
   'chatGen.videoClip': 'Video clip',
   'chatGen.wavesShore': 'Waves on the shore',
   'chatGen.wrappingUp': 'Wrapping up · {s}s',
+  'chatGen.workUpdates': 'Work updates',
+  'chatGen.workNotFinished': 'This task is not finished',
+  'chatGen.workDurationSeconds': '{s}s',
+  'chatGen.workDurationMinutes': '{m}m {s}s',
 };

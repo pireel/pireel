@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -61,9 +61,16 @@ import { Composer, type ComposerHandle } from "./chat-composer";
 import {
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
+  assistantMessageSuggestsContinuation,
+  assistantWorkDurationMs,
+  assistantWorkFold,
+  canRunEditorialAnalysis,
   canRunVisualReview,
   compactStudioChatMessages,
+  compactStudioChatMessagesForModel,
+  editorialPlacementIssue,
   isRecoverableStudioChatError,
+  stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
 import { scopeSituationToThread } from "./chat-thread-context";
 import { studioLocale, t } from "./i18n";
@@ -136,9 +143,12 @@ export function ChatThread({
   const toolAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
   const visualReviewCountRef = useRef(0);
+  const editorialAnalysisCountRef = useRef(0);
+  const interactionWaitDurationRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
   const timelineFrameInspectionRef = useRef<AbortController | null>(null);
   const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
+  const [expandedWorkMessages, setExpandedWorkMessages] = useState<Set<string>>(() => new Set());
   useEffect(() => () => timelineFrameInspectionRef.current?.abort(), []);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
@@ -182,13 +192,15 @@ export function ChatThread({
             ...body,
             id,
             messageId,
-            messages: compactStudioChatMessages(requestMessages),
+            messages: compactStudioChatMessagesForModel(requestMessages),
             trigger,
           },
         }),
       }),
     [],
   );
+
+  const messagesRef = useRef<UIMessage[]>(initialMessages);
 
   const {
     messages,
@@ -211,6 +223,43 @@ export function ChatThread({
       lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      const placementIssue = editorialPlacementIssue(
+        messagesRef.current,
+        id,
+        (toolCall.input ?? {}) as Record<string, unknown>,
+      );
+      if (placementIssue) {
+        const zh = studioLocale().toLowerCase().startsWith("zh");
+        const detail = placementIssue.reason === "review-rejected"
+          ? (zh ? "该素材本轮没有通过审片的可用区间。" : "This source has no accepted editorial range in this turn.")
+          : placementIssue.reason === "range-required"
+            ? (zh ? "该素材已经审片，放入时间线时必须填写通过审片的源区间。" : "This reviewed source requires an explicit accepted source range.")
+            : (zh ? "请求的源区间超出了本轮通过审片的范围。" : "The requested source range falls outside this turn's accepted editorial range.");
+        addToolOutput({
+          tool: id,
+          toolCallId: toolCall.toolCallId,
+          state: "output-error",
+          errorText: detail,
+        });
+        return;
+      }
+      if (id === "analyze_visual" && (toolCall.input as { mode?: unknown } | undefined)?.mode === "editorial") {
+        if (!canRunEditorialAnalysis(editorialAnalysisCountRef.current)) {
+          addToolOutput({
+            tool: id,
+            toolCallId: toolCall.toolCallId,
+            output: {
+              ok: true,
+              skipped: true,
+              summary: studioLocale().toLowerCase().startsWith("zh")
+                ? "本轮完整审片已经完成；继续使用已有可用区间、容量和分段评分，不再重复审片。"
+                : "This turn's complete source review already exists. Reuse its accepted reservoirs, capacity, and cut scores instead of reviewing again.",
+            },
+          });
+          return;
+        }
+        editorialAnalysisCountRef.current += 1;
+      }
       if (id === "review_visuals") {
         if (!canRunVisualReview(visualReviewCountRef.current)) {
           addToolOutput({
@@ -232,6 +281,9 @@ export function ChatThread({
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
       toolAbortRef.current = ctrl;
+      const interactionWaitStartedAt = id === "ask_user" || id === "request_approval"
+        ? Date.now()
+        : null;
       try {
         const out = await runToolRef.current(
           id,
@@ -267,6 +319,9 @@ export function ChatThread({
               : String(e),
         });
       } finally {
+        if (interactionWaitStartedAt !== null) {
+          interactionWaitDurationRef.current += Math.max(0, Date.now() - interactionWaitStartedAt);
+        }
         if (toolAbortRef.current === ctrl) toolAbortRef.current = null;
       }
     },
@@ -276,7 +331,6 @@ export function ChatThread({
   // so switching sessions / refreshing mid-generation doesn't evaporate the streamed-out parts and completed tool outputs.
   // On first mount status is already 'ready' (also when restoring/switching to an old session) — skip that one,
   // otherwise merely opening an old session refreshes its updatedAt and scrambles the history ordering.
-  const messagesRef = useRef(messages);
   messagesRef.current = messages;
   const persistSessionState = useCallback(
     (nextFrame: AttachedFrame | null, nextSkillId: StudioScenarioSkillId) => {
@@ -315,6 +369,24 @@ export function ChatThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
   const busy = status === "streaming" || status === "submitted";
+
+  const workTimingActivationRef = useRef<DeferredActivation | null>(null);
+  if (!workTimingActivationRef.current)
+    workTimingActivationRef.current = new DeferredActivation();
+  useEffect(() => {
+    if (!workTimingActivationRef.current!.active)
+      return workTimingActivationRef.current!.defer();
+    if (status !== "ready" && status !== "error") return;
+    const timedMessages = stampLatestAssistantWorkDuration(
+      messagesRef.current,
+      Date.now(),
+      interactionWaitDurationRef.current,
+    );
+    if (timedMessages === messagesRef.current) return;
+    messagesRef.current = timedMessages;
+    setMessages(timedMessages);
+    onSnapshot(compactStudioChatMessages(timedMessages), frameRef.current, skillRef.current);
+  }, [onSnapshot, setMessages, status]);
 
   const refreshedCreatedSkillRef = useRef<string | null>(null);
   useEffect(() => {
@@ -377,10 +449,9 @@ export function ChatThread({
       const msgs = messagesRef.current;
       const last = msgs[msgs.length - 1];
       if (!last || last.role !== "assistant") return;
-      if (!lastAssistantMessageIsCompleteWithToolCalls({ messages: msgs }))
-        return;
       const key = `${last.id}:${last.parts.length}`;
-      if (autoResumedRef.current === key) return;
+      const completedToolNeedsFollowup = lastAssistantMessageIsCompleteWithToolCalls({ messages: msgs });
+      if (!completedToolNeedsFollowup || autoResumedRef.current === key) return;
       autoResumedRef.current = key;
       void sendMessage();
     }, 300);
@@ -450,6 +521,8 @@ export function ChatThread({
         autoRecoveryAttemptedRef.current = false;
       userStoppedRef.current = false; // a new message re-arms the continuation safety net
       visualReviewCountRef.current = 0;
+      editorialAnalysisCountRef.current = 0;
+      interactionWaitDurationRef.current = 0;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       const attachedTimelineFrames = draftParts
         .filter(
@@ -485,6 +558,7 @@ export function ChatThread({
         previousMessages,
       );
       const metadata = {
+        workStartedAt: Date.now(),
         situation: [
           buildSituation(situation, {
             freshConversation: !previousMessages.some(
@@ -836,13 +910,58 @@ export function ChatThread({
                 isLast &&
                 status === "ready" &&
                 !assistantMessageHasRenderableOutput(m);
+              const incompleteCompletedAssistant =
+                m.role === "assistant" &&
+                isLast &&
+                status === "ready" &&
+                !emptyCompletedAssistant &&
+                assistantMessageSuggestsContinuation(m);
+              const workFold = assistantWorkFold(m, !isLast || status === "ready");
+              const workFoldAvailable = workFold !== null;
+              const workExpanded = expandedWorkMessages.has(m.id);
+              const workHidden = workFoldAvailable && !workExpanded;
+              const workDurationMs = workFoldAvailable
+                ? assistantWorkDurationMs(messages, mi)
+                : null;
+              const workDurationSeconds = workDurationMs === null
+                ? null
+                : Math.max(1, Math.round(workDurationMs / 1000));
+              const workDuration = workDurationSeconds === null
+                ? null
+                : workDurationSeconds < 60
+                  ? t("chatGen.workDurationSeconds", { s: workDurationSeconds })
+                  : t("chatGen.workDurationMinutes", {
+                      m: Math.floor(workDurationSeconds / 60),
+                      s: workDurationSeconds % 60,
+                    });
               return (
                 <Message key={m.id} from={m.role}>
                   <div className="flex items-start gap-2">
                     {m.role === "assistant" && <PiAvatar thinking={thinking} />}
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
+                      {workFoldAvailable && (
+                        <button
+                          type="button"
+                          aria-expanded={workExpanded}
+                          onClick={() => setExpandedWorkMessages((current) => {
+                            const next = new Set(current);
+                            if (next.has(m.id)) next.delete(m.id);
+                            else next.add(m.id);
+                            return next;
+                          })}
+                          className="text-ink-3 hover:text-ink flex w-fit items-center gap-1 py-0.5 text-[11px] transition-colors"
+                        >
+                          <ChevronRight
+                            aria-hidden
+                            className={`size-3 transition-transform ${workExpanded ? "rotate-90" : ""}`}
+                          />
+                          <span>{t("chatGen.workUpdates")}</span>
+                          {workDuration && <span>· {workDuration}</span>}
+                        </button>
+                      )}
                       {parts.map((part, idx) => {
                         const key = `${m.id}-${idx}`;
+                        if (workHidden && idx <= (workFold?.lastWorkPartIndex ?? -1)) return null;
                         if (part.type === "step-start") return null;
                         if (collapsed.has(idx)) return null;
                         if (part.type === "text") {
@@ -945,6 +1064,20 @@ export function ChatThread({
                           <X size={12} className="shrink-0 text-destructive" />
                           <span className="min-w-0 flex-1 text-destructive">
                             {t("chatGen.requestFailed")}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={continueFromCurrentState}
+                            className="text-ink-2 hover:bg-line hover:text-ink shrink-0 rounded px-1.5 py-0.5 font-medium"
+                          >
+                            {t("chatGen.continueFromCurrentState")}
+                          </button>
+                        </div>
+                      )}
+                      {incompleteCompletedAssistant && (
+                        <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
+                          <span className="text-ink-3 min-w-0 flex-1">
+                            {t("chatGen.workNotFinished")}
                           </span>
                           <button
                             type="button"

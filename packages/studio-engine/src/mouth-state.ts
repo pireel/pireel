@@ -18,7 +18,23 @@ export interface EditorialFaceObservation extends MouthStateSignals {
 
 export type EditorialFaceGateIssue = 'open-mouth' | 'multiple-people' | 'technical-risk';
 
+const CONFIRMATION_GAP_SEC = 0.22;
+
 const finiteOrNull = (value: number | null) => value != null && Number.isFinite(value) ? value : null;
+
+/** A single landmark/detector spike must not invalidate an otherwise strong moving shot. */
+function confirmedObservation(
+  observations: readonly EditorialFaceObservation[],
+  index: number,
+  predicate: (observation: EditorialFaceObservation) => boolean,
+): boolean {
+  const current = observations[index];
+  if (!current || !predicate(current)) return false;
+  const adjacent = [observations[index - 1], observations[index + 1]];
+  return adjacent.some((neighbor) => neighbor
+    && predicate(neighbor)
+    && Math.abs(neighbor.timeSec - current.timeSec) <= CONFIRMATION_GAP_SEC);
+}
 
 /** Conservative closed-lip gate. A single noisy landmark signal is insufficient unless it is strong. */
 export function isMouthVisiblyOpen(signals: MouthStateSignals): boolean {
@@ -56,7 +72,11 @@ export function editorialFaceGateIssues(
     issues.add('technical-risk');
   }
   if (options.requiresClosedMouth) {
-    if (relevant.some((observation) => observation.visiblyOpen)) issues.add('open-mouth');
+    if (relevant.some((_observation, index) => confirmedObservation(
+      relevant,
+      index,
+      (observation) => observation.visiblyOpen,
+    ))) issues.add('open-mouth');
     const visibleFaceFrames = relevant.filter((observation) => observation.faceDetected);
     if (visibleFaceFrames.length) {
       const readable = visibleFaceFrames.filter((observation) => observation.mouthReadable).length;
@@ -65,8 +85,10 @@ export function editorialFaceGateIssues(
       }
     }
   }
-  if (options.requiresSoloSubject && relevant.some((observation) => (
-    observation.prominentFaceCount > 1 || observation.backgroundFaceCount >= 3
+  if (options.requiresSoloSubject && relevant.some((_observation, index) => confirmedObservation(
+    relevant,
+    index,
+    (observation) => observation.prominentFaceCount > 1,
   ))) {
     issues.add('multiple-people');
   }
@@ -95,4 +117,80 @@ export function mouthSampleTimes(
     ? unique
     : Array.from({ length: maxSamples }, (_, index) => unique[Math.round((index * (unique.length - 1)) / (maxSamples - 1))]!);
   return bounded.map((stamp) => Math.round(stamp * 1_000) / 1_000);
+}
+
+export interface EditorialRangeSuggestion {
+  startSec: number;
+  endSec: number;
+  suggestedStartSec?: number;
+  suggestedEndSec?: number;
+  peakSec?: number;
+}
+
+const roundMillis = (value: number) => Math.round(value * 1_000) / 1_000;
+
+/**
+ * Turn the model's semantic range into frame-level local boundaries. The model decides which
+ * performance is intentional; dense MediaPipe observations only trim invalid edge/interior runs.
+ */
+export function refineEditorialRangeLocally(
+  candidate: EditorialRangeSuggestion,
+  observations: readonly EditorialFaceObservation[],
+  options: {
+    requiresClosedMouth?: boolean;
+    requiresSoloSubject?: boolean;
+    minDurationSec?: number;
+  } = {},
+): { startSec: number; endSec: number } {
+  const coarseStart = Math.max(candidate.startSec, candidate.suggestedStartSec ?? candidate.startSec);
+  const coarseEnd = Math.min(candidate.endSec, candidate.suggestedEndSec ?? candidate.endSec);
+  if (!(coarseEnd > coarseStart)) return { startSec: candidate.startSec, endSec: candidate.endSec };
+  if (!options.requiresClosedMouth && !options.requiresSoloSubject) {
+    return { startSec: roundMillis(coarseStart), endSec: roundMillis(coarseEnd) };
+  }
+  const relevant = observations
+    .filter((observation) => observation.timeSec >= coarseStart && observation.timeSec <= coarseEnd)
+    .sort((left, right) => left.timeSec - right.timeSec);
+  if (relevant.length < 2) return { startSec: roundMillis(coarseStart), endSec: roundMillis(coarseEnd) };
+  const invalid = (_observation: EditorialFaceObservation, index: number) => (
+    (options.requiresClosedMouth && confirmedObservation(
+      relevant,
+      index,
+      (observation) => observation.visiblyOpen,
+    ))
+    || (options.requiresSoloSubject && confirmedObservation(
+      relevant,
+      index,
+      (observation) => observation.prominentFaceCount > 1,
+    ))
+  );
+  const runs: EditorialFaceObservation[][] = [];
+  let run: EditorialFaceObservation[] = [];
+  for (const [index, observation] of relevant.entries()) {
+    if (invalid(observation, index)) {
+      if (run.length) runs.push(run);
+      run = [];
+    } else {
+      run.push(observation);
+    }
+  }
+  if (run.length) runs.push(run);
+  if (!runs.length) return { startSec: roundMillis(coarseStart), endSec: roundMillis(coarseEnd) };
+  const peak = Math.max(coarseStart, Math.min(coarseEnd, candidate.peakSec ?? (coarseStart + coarseEnd) / 2));
+  const chosen = [...runs].sort((left, right) => {
+    const leftContains = Number(peak >= left[0]!.timeSec && peak <= left.at(-1)!.timeSec);
+    const rightContains = Number(peak >= right[0]!.timeSec && peak <= right.at(-1)!.timeSec);
+    const leftSpan = left.at(-1)!.timeSec - left[0]!.timeSec;
+    const rightSpan = right.at(-1)!.timeSec - right[0]!.timeSec;
+    return rightContains - leftContains || rightSpan - leftSpan;
+  })[0]!;
+  const typicalStep = relevant.length > 1
+    ? Math.max(0.01, (relevant.at(-1)!.timeSec - relevant[0]!.timeSec) / (relevant.length - 1))
+    : 0.067;
+  const startSec = Math.max(coarseStart, chosen[0]!.timeSec - typicalStep * 0.45);
+  const endSec = Math.min(coarseEnd, chosen.at(-1)!.timeSec + typicalStep * 0.45);
+  if (endSec - startSec < Math.max(0.35, options.minDurationSec ?? 0.75)) {
+    return { startSec: roundMillis(coarseStart), endSec: roundMillis(coarseEnd) };
+  }
+  return { startSec: roundMillis(startSec), endSec: roundMillis(endSec) };
 }

@@ -765,6 +765,17 @@ export function HyperframesWorkbench({
   // be clobbered by the incoming generation — inside this window the patch path steps aside and falls back to a full
   // doc rebuild (rebuild composes the latest comp, always correct)
   const pendingSwitchRef = useRef(false);
+  // A live back-buffer is not ready to debut until its video canvas has received the current frame.
+  // Ping/pong proves only that the runtime listener exists; switching on pong alone exposed the
+  // untouched white canvas during rapid Agent rebuilds. The resident decoder primes this exact
+  // buffer first, then the delivery callback performs the atomic swap.
+  const previewFramePrimeRef = useRef<{
+    idx: 0 | 1;
+    doc: string;
+    attempts: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    onDelivered: () => void;
+  } | null>(null);
   // Full doc rebuild in progress (write back-buffer → handshake → swap): show an "updating frame" indicator in the
   // stage corner, covering all structural changes uniformly — manual insert / AI block landing / theme mount, etc.
   // (users reported no feedback in the gap between insert and display)
@@ -1329,9 +1340,21 @@ export function HyperframesWorkbench({
     const eng = new VideoTrackEngine();
     videoEngineRef.current = eng;
     eng.onFrame = (frame, info, frame2) => {
-      // Push only to the active buffer (ImageBitmap transferred once); when the background buffer debuts, the bufs.active effect refreshes to backfill the frame
+      const pendingPrime = previewFramePrimeRef.current;
+      const prime = pendingPrime
+        && bufsRef.current.docs[pendingPrime.idx] === pendingPrime.doc
+        && bufsRef.current.active !== pendingPrime.idx
+        ? pendingPrime
+        : null;
+      if (pendingPrime && !prime) {
+        if (pendingPrime.timer) clearTimeout(pendingPrime.timer);
+        previewFramePrimeRef.current = null;
+      }
+      const targetIdx = prime?.idx ?? bufsRef.current.active;
+      // Ordinarily push to the active buffer. During a pending structural rebuild, one current frame
+      // is deliberately delivered to the proven-live back-buffer before it is allowed to debut.
       // frame2 = the "other side" shadow frame within a transition window (true dual-stream: before cut = B's lead-in, after cut = A's tail)
-      const w = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      const w = iframesRef.current[targetIdx]?.contentWindow;
       if (!w) {
         // No target window (iframe torn down mid-decode): close instead of leaking the bitmaps
         frame.close();
@@ -1342,6 +1365,11 @@ export function HyperframesWorkbench({
         frame.close();
         frame2?.close();
         w.postMessage({ type: "hf:clearFrame", t: info.t }, "*");
+        if (prime && previewFramePrimeRef.current === prime) {
+          if (prime.timer) clearTimeout(prime.timer);
+          previewFramePrimeRef.current = null;
+          queueMicrotask(prime.onDelivered);
+        }
         return;
       }
       try {
@@ -1366,6 +1394,11 @@ export function HyperframesWorkbench({
           "*",
           frame2 ? [frame, frame2] : [frame],
         );
+        if (prime && previewFramePrimeRef.current === prime) {
+          if (prime.timer) clearTimeout(prime.timer);
+          previewFramePrimeRef.current = null;
+          queueMicrotask(prime.onDelivered);
+        }
       } catch {
         try {
           frame.close();
@@ -1376,8 +1409,19 @@ export function HyperframesWorkbench({
       }
     };
     eng.onBlank = (t) => {
-      const w = iframesRef.current[bufsRef.current.active]?.contentWindow;
+      const pendingPrime = previewFramePrimeRef.current;
+      const prime = pendingPrime
+        && bufsRef.current.docs[pendingPrime.idx] === pendingPrime.doc
+        && bufsRef.current.active !== pendingPrime.idx
+        ? pendingPrime
+        : null;
+      const w = iframesRef.current[prime?.idx ?? bufsRef.current.active]?.contentWindow;
       w?.postMessage({ type: "hf:clearFrame", t }, "*");
+      if (w && prime && previewFramePrimeRef.current === prime) {
+        if (prime.timer) clearTimeout(prime.timer);
+        previewFramePrimeRef.current = null;
+        queueMicrotask(prime.onDelivered);
+      }
     };
     eng.onTick = (t) => {
       if (!playingRef.current) return;
@@ -1401,6 +1445,9 @@ export function HyperframesWorkbench({
       setPlaying(false);
     };
     return () => {
+      const pendingPrime = previewFramePrimeRef.current;
+      if (pendingPrime?.timer) clearTimeout(pendingPrime.timer);
+      previewFramePrimeRef.current = null;
       eng.dispose();
       videoEngineRef.current = null;
     };
@@ -2518,6 +2565,9 @@ export function HyperframesWorkbench({
     tries: number;
   } | null>(null);
   const startSwitchPing = useCallback((idx: 0 | 1, doc: string) => {
+    const stalePrime = previewFramePrimeRef.current;
+    if (stalePrime?.timer) clearTimeout(stalePrime.timer);
+    previewFramePrimeRef.current = null;
     const prev = switchPingRef.current;
     if (prev?.timer) clearTimeout(prev.timer);
     const st = {
@@ -3301,11 +3351,12 @@ export function HyperframesWorkbench({
       if (d.type === "pong") {
         const st = switchPingRef.current;
         if (st && d.nonce === st.nonce && fromBack) {
-          // Target doc confirmed live → wait one beat (video/fonts settle) then swap atomically; the old buffer pauses and clears
+          // Target doc confirmed live. Do not swap yet: its video canvas is still untouched. Prime
+          // the current picture into this exact buffer, then debut it on successful frame delivery.
           switchPingRef.current = null;
           if (st.timer) clearTimeout(st.timer);
           const { idx, doc } = st;
-          setTimeout(() => {
+          const commitSwitch = () => {
             if (
               bufsRef.current.docs[idx] !== doc ||
               bufsRef.current.active === idx
@@ -3345,7 +3396,42 @@ export function HyperframesWorkbench({
             } catch {
               /* ignore */
             }
-          }, 120);
+          };
+          const prime = {
+            idx,
+            doc,
+            attempts: 0,
+            timer: null as ReturnType<typeof setTimeout> | null,
+            onDelivered: commitSwitch,
+          };
+          previewFramePrimeRef.current = prime;
+          const requestPrime = () => {
+            if (previewFramePrimeRef.current !== prime) return;
+            if (
+              bufsRef.current.docs[idx] !== doc ||
+              bufsRef.current.active === idx
+            ) {
+              previewFramePrimeRef.current = null;
+              return;
+            }
+            prime.attempts += 1;
+            videoEngineRef.current?.refresh();
+            if (prime.attempts < 10) {
+              prime.timer = setTimeout(requestPrime, 300);
+              return;
+            }
+            // Preserve the old complete frame instead of revealing an unprimed canvas. A later
+            // document change starts a fresh generation; this one has already failed ten seeks.
+            previewFramePrimeRef.current = null;
+            pendingSwitchRef.current = false;
+            setRebuilding(false);
+            setPendingInsert(null);
+            console.warn(
+              "[studio] background buffer never received a video frame; keeping the previous complete preview",
+              { idx },
+            );
+          };
+          requestPrime();
         } else if (d.nonce === "boot" && fromBack) {
           // Runtime boot beacon (scripts parsed, gsap loaded, listener installed): start the swap handshake
           // NOW instead of waiting for the iframe load event. The load event waits for every eager media

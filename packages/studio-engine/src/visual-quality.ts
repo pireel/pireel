@@ -84,7 +84,12 @@ function average(values: number[]): number {
 
 interface Candidate extends Omit<VisualQualityWindow, 'rank'> {}
 
-function candidateFor(samples: FrameQualityObservation[], startSec: number, endSec: number): Candidate {
+function candidateFor(
+  samples: FrameQualityObservation[],
+  startSec: number,
+  endSec: number,
+  policy: VisualQualityPolicy,
+): Candidate {
   const technical = samples.map((sample) => (
     clamp01(sample.sharpness) * 0.45
     + clamp01(sample.exposure) * 0.3
@@ -95,9 +100,9 @@ function candidateFor(samples: FrameQualityObservation[], startSec: number, endS
   const edgeCount = Math.max(1, Math.ceil(samples.length * 0.2));
   const edgeTechnical = [...technical.slice(0, edgeCount), ...technical.slice(-edgeCount)];
   const hardFailures = samples.filter((sample) => (
-    clamp01(sample.sharpness) < 0.12
-    || clamp01(sample.exposure) < 0.14
-    || clamp01(sample.stability) < 0.1
+    clamp01(sample.sharpness) < policy.minSharpness
+    || clamp01(sample.exposure) < policy.minExposure
+    || clamp01(sample.stability) < policy.minStability
   )).length;
   const metric = (values: number[]) => {
     // Report a conservative blend too: a clean midpoint must not conceal a bad entry or exit.
@@ -197,7 +202,10 @@ export function buildVisualQualityWindows(
   if (!samples.length || durationSec <= 0) return [];
 
   const minDuration = Math.max(0.6, options.minDurationSec ?? 1.2);
-  const maxDuration = Math.max(minDuration, options.maxDurationSec ?? 3.2);
+  // These ranges are maximal reusable source reservoirs, not final timeline shot lengths. Do not
+  // impose an editing-duration template here: the editorial model will find action-based child
+  // ranges inside the clipped reservoir. An explicit cap remains available to diagnostic callers.
+  const maxDuration = Math.max(minDuration, options.maxDurationSec ?? durationSec);
   const maxWindows = Math.max(1, Math.floor(options.maxWindows ?? 12));
   const policy: VisualQualityPolicy = { ...DEFAULT_VISUAL_QUALITY_POLICY, ...options.policy };
   const cuts = sceneCutsSec
@@ -227,14 +235,22 @@ export function buildVisualQualityWindows(
         const span = rangeEnd - rangeStart;
         if (span > maxDuration + 0.05) break;
         if (span < minDuration - 0.05 && !(boundaryEnd - boundaryStart < minDuration && start === 0 && end === local.length - 1)) continue;
-        const candidate = candidateFor(local.slice(start, end + 1), rangeStart, rangeEnd);
+        const candidate = candidateFor(local.slice(start, end + 1), rangeStart, rangeEnd, policy);
         if (options.enforceThresholds !== false && !passesPolicy(candidate, policy)) continue;
         candidates.push(candidate);
       }
     }
   }
 
-  candidates.sort((a, b) => b.score - a.score || b.sharpness - a.sharpness || a.startSec - b.startSec);
+  // Every candidate below already passed the absolute quality policy. Prefer the longest clean
+  // reservoir first, then use technical quality to break comparable spans. This preserves honest
+  // available duration without allowing a longer range to bypass the hard gates above.
+  candidates.sort((a, b) => (
+    (b.endSec - b.startSec) - (a.endSec - a.startSec)
+    || b.score - a.score
+    || b.sharpness - a.sharpness
+    || a.startSec - b.startSec
+  ));
   const picked: Candidate[] = [];
   for (const candidate of candidates) {
     const overlaps = picked.some((existing) => (

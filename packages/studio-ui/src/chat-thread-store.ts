@@ -21,9 +21,101 @@ export interface StoredThread {
 }
 
 export const MAX_VISUAL_REVIEWS_PER_USER_TURN = 2;
+export const MAX_EDITORIAL_ANALYSES_PER_USER_TURN = 1;
 
 export function canRunVisualReview(completedReviews: number): boolean {
   return completedReviews < MAX_VISUAL_REVIEWS_PER_USER_TURN;
+}
+
+/** A source-selection pass is paid, exhaustive evidence for the current turn, not a retry loop. */
+export function canRunEditorialAnalysis(completedAnalyses: number): boolean {
+  return completedAnalyses < MAX_EDITORIAL_ANALYSES_PER_USER_TURN;
+}
+
+export interface AssistantWorkFold {
+  /** Every part through this index belongs to the collapsible work log. */
+  lastWorkPartIndex: number;
+}
+
+/**
+ * Split a completed assistant turn into its live work log and its final answer.
+ *
+ * Nothing is deleted or rewritten: while streaming, every update remains visible. Once the turn
+ * has both a tool receipt and later summary text, the UI may collapse the earlier parts and leave
+ * that summary visible. Deriving this from persisted message parts also keeps refresh behavior
+ * deterministic without storing presentation state in the conversation.
+ */
+export function assistantWorkFold(
+  message: UIMessage,
+  completed: boolean,
+): AssistantWorkFold | null {
+  if (!completed || message.role !== 'assistant' || assistantMessageSuggestsContinuation(message)) return null;
+  const parts = message.parts ?? [];
+  const lastWorkPartIndex = parts.reduce((latest, part, index) => {
+    const type = (part as { type?: string }).type ?? '';
+    return type.startsWith('tool-') || type === 'dynamic-tool' ? index : latest;
+  }, -1);
+  if (lastWorkPartIndex < 0) return null;
+  const hasFinalSummary = parts.slice(lastWorkPartIndex + 1).some((part) => {
+    const candidate = part as { type?: string; text?: string };
+    return candidate.type === 'text' && !!candidate.text?.trim();
+  });
+  if (!hasFinalSummary) return null;
+  return { lastWorkPartIndex };
+}
+
+type WorkTimingMetadata = {
+  workStartedAt?: unknown;
+  workDurationMs?: unknown;
+  workWaitDurationMs?: unknown;
+};
+
+/** Read a persisted duration, or derive the live duration from the user request that began this
+ * assistant turn. Timing lives in message metadata so it survives refresh without altering text. */
+export function assistantWorkDurationMs(
+  messages: readonly UIMessage[],
+  assistantIndex: number,
+  now = Date.now(),
+): number | null {
+  const assistant = messages[assistantIndex];
+  if (!assistant || assistant.role !== 'assistant') return null;
+  const saved = Number((assistant.metadata as WorkTimingMetadata | undefined)?.workDurationMs);
+  if (Number.isFinite(saved) && saved >= 0) return saved;
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role !== 'user') continue;
+    const startedAt = Number((message.metadata as WorkTimingMetadata | undefined)?.workStartedAt);
+    return Number.isFinite(startedAt) && startedAt > 0 ? Math.max(0, now - startedAt) : null;
+  }
+  return null;
+}
+
+/** Freeze the latest completed turn's elapsed time in its assistant metadata. */
+export function stampLatestAssistantWorkDuration(
+  messages: readonly UIMessage[],
+  now = Date.now(),
+  waitDurationMs = 0,
+): UIMessage[] {
+  const assistantIndex = messages.findLastIndex((message) => message.role === 'assistant');
+  if (assistantIndex < 0) return messages as UIMessage[];
+  const assistant = messages[assistantIndex]!;
+  if (!assistantWorkFold(assistant, true)) return messages as UIMessage[];
+  const existing = Number((assistant.metadata as WorkTimingMetadata | undefined)?.workDurationMs);
+  if (Number.isFinite(existing) && existing >= 0) return messages as UIMessage[];
+  const elapsed = assistantWorkDurationMs(messages, assistantIndex, now);
+  if (elapsed === null) return messages as UIMessage[];
+  const excludedWait = Number.isFinite(waitDurationMs) ? Math.max(0, waitDurationMs) : 0;
+  const duration = Math.max(0, elapsed - excludedWait);
+  return messages.map((message, index) => index === assistantIndex
+    ? {
+        ...message,
+        metadata: {
+          ...(message.metadata && typeof message.metadata === 'object' ? message.metadata : {}),
+          workDurationMs: duration,
+          ...(excludedWait > 0 ? { workWaitDurationMs: excludedWait } : {}),
+        },
+      }
+    : message);
 }
 
 /** Remove non-display protocol parts while preserving every user-visible text fragment and tool
@@ -46,6 +138,154 @@ export function compactStudioChatMessages(messages: UIMessage[]): UIMessage[] {
     });
     return { ...message, parts };
   });
+}
+
+const takeArray = (value: unknown, limit: number) => Array.isArray(value) ? value.slice(0, limit) : undefined;
+
+function compactVisualAnalysisData(data: Record<string, unknown>): Record<string, unknown> {
+  const compactData: Record<string, unknown> = {};
+  for (const key of [
+    'analysisMode', 'assetId', 'localAssetId', 'label', 'durationSec', 'hasAudio',
+    'audioAssessment', 'speechLikely', 'audibleSec', 'speechSec', 'editorialBrief',
+    'editorialComparisonSummary', 'acceptedDurationSec', 'instruction', 'ok', 'error',
+  ]) {
+    if (data[key] !== undefined) compactData[key] = data[key];
+  }
+  if (data.analysisMode === 'editorial-batch') {
+    const items = takeArray(data.items, 24);
+    if (items) compactData.items = items.map((item) => item && typeof item === 'object' && !Array.isArray(item)
+      ? compactVisualAnalysisData(item as Record<string, unknown>)
+      : item);
+  } else if (data.analysisMode === 'editorial-candidates') {
+    const editorialCandidates = takeArray(data.editorialCandidates, 8);
+    if (editorialCandidates) compactData.editorialCandidates = editorialCandidates;
+  } else if (data.analysisMode === 'semantic') {
+    const segments = takeArray(data.segments, 20);
+    if (segments) compactData.segments = segments;
+  } else {
+    const sceneCutsSec = takeArray(data.sceneCutsSec, 80);
+    const subjectTracks = takeArray(data.subjectTracks, 24);
+    if (sceneCutsSec) compactData.sceneCutsSec = sceneCutsSec;
+    if (subjectTracks) compactData.subjectTracks = subjectTracks;
+  }
+  return compactData;
+}
+
+/** Keep the full visual receipt in the UI/persisted thread, but send only reusable evidence back to
+ * the model on later tool-continuation requests. Replaying dense per-frame tracks made real Studio
+ * turns grow from ~110k to ~190k input tokens without adding editorial information. */
+export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMessage[] {
+  return compactStudioChatMessages(messages).map((message) => {
+    if (message.role !== 'assistant') return message;
+    const sourceParts = message.parts ?? [];
+    const lastToolIndex = sourceParts.reduce((latest, part, index) => {
+      const type = (part as { type?: string }).type ?? '';
+      return type === 'dynamic-tool' || type.startsWith('tool-') ? index : latest;
+    }, -1);
+    return {
+      ...message,
+      parts: sourceParts.flatMap((part, index) => {
+        const candidate = part as {
+          type?: string;
+          toolName?: string;
+          output?: unknown;
+          text?: string;
+        };
+        // Progress prose before a tool remains in the persisted/UI thread, but replaying it gives
+        // the next model round thousands of tokens of obsolete deliberation. Receipts are the state.
+        if (candidate.type === 'text') {
+          if (index <= lastToolIndex) return [];
+          const text = candidate.text ?? '';
+          return [{ ...part, text: text.length > 6_000 ? text.slice(-6_000) : text } as typeof part];
+        }
+        const toolId = candidate.type === 'dynamic-tool'
+          ? candidate.toolName
+          : candidate.type?.startsWith('tool-')
+            ? candidate.type.slice('tool-'.length)
+            : '';
+        if (toolId !== 'analyze_visual' || !candidate.output || typeof candidate.output !== 'object') return [part];
+        const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
+        if (!output.data || typeof output.data !== 'object') return [part];
+        return [{ ...part, output: { ...output, data: compactVisualAnalysisData(output.data as Record<string, unknown>) } } as typeof part];
+      }),
+    };
+  });
+}
+
+export interface EditorialPlacementIssue {
+  assetId: string;
+  reason: 'review-rejected' | 'range-required' | 'outside-accepted-range';
+}
+
+/**
+ * Once a source has an editorial receipt in this conversation, picture placement must honor it.
+ * This makes the persisted verdict authoritative instead of trusting a later model step to
+ * remember that a high aesthetic score can still have a rejected usable range.
+ */
+export function editorialPlacementIssue(
+  messages: readonly UIMessage[],
+  toolId: string,
+  input: Record<string, unknown>,
+): EditorialPlacementIssue | null {
+  if (toolId !== 'add_clips' && toolId !== 'insert_clips') return null;
+  const reviewed = new Map<string, Array<{
+    startSec?: unknown;
+    endSec?: unknown;
+    verdict?: unknown;
+  }>>();
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const part of message.parts ?? []) {
+      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+      const partToolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      if (partToolId !== 'analyze_visual' || candidate.state !== 'output-available') continue;
+      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
+      if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
+      const data = output.data as Record<string, unknown>;
+      const receipts = data.analysisMode === 'editorial-batch' && Array.isArray(data.items)
+        ? data.items.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
+        : [data];
+      for (const receipt of receipts) {
+        const assetId = typeof receipt.localAssetId === 'string'
+          ? receipt.localAssetId
+          : typeof receipt.assetId === 'string'
+            ? receipt.assetId
+            : '';
+        if (!assetId || !Array.isArray(receipt.editorialCandidates)) continue;
+        reviewed.set(assetId, receipt.editorialCandidates);
+      }
+    }
+  }
+  const clips = Array.isArray(input.clips) ? input.clips : [];
+  for (const value of clips) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const clip = value as Record<string, unknown>;
+    const assetId = typeof clip.assetId === 'string' ? clip.assetId.trim().replace(/^@/, '') : '';
+    const candidates = reviewed.get(assetId);
+    if (!candidates) continue;
+    const accepted = candidates.filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
+    if (!accepted.length) return { assetId, reason: 'review-rejected' };
+    const sourceInSec = Number(clip.sourceInSec);
+    const sourceOutSec = Number(clip.sourceOutSec);
+    if (!Number.isFinite(sourceInSec) || !Number.isFinite(sourceOutSec) || sourceOutSec <= sourceInSec) {
+      return { assetId, reason: 'range-required' };
+    }
+    const tolerance = 0.06;
+    const insideAcceptedRange = accepted.some((candidate) => {
+      const startSec = Number(candidate.startSec);
+      const endSec = Number(candidate.endSec);
+      return Number.isFinite(startSec)
+        && Number.isFinite(endSec)
+        && sourceInSec >= startSec - tolerance
+        && sourceOutSec <= endSec + tolerance;
+    });
+    if (!insideAcceptedRange) return { assetId, reason: 'outside-accepted-range' };
+  }
+  return null;
 }
 
 export function normalizeStoredThreads(value: unknown, availableSkillIds: readonly string[] = []): StoredThread[] {
@@ -95,6 +335,28 @@ export function assistantMessageHasRenderableOutput(message: UIMessage): boolean
     if (candidate.type === 'text') return !!candidate.text?.trim();
     return candidate.type === 'dynamic-tool' || !!candidate.type?.startsWith('tool-');
   });
+}
+
+/** Offer an explicit continuation affordance when a provider ends a normal stream after announcing
+ * work it has not actually performed. This is intentionally narrow: ordinary answers and completed
+ * edit receipts must not grow a misleading "continue" button. */
+export function assistantMessageSuggestsContinuation(message: UIMessage): boolean {
+  if (message.role !== 'assistant' || assistantHasOpenOrInterruptedInteraction(message)) return false;
+  const text = (message.parts ?? [])
+    .flatMap((part) => {
+      const candidate = part as { type?: string; text?: string };
+      return candidate.type === 'text' && candidate.text ? [candidate.text] : [];
+    })
+    .join('\n')
+    .trim();
+  if (!text) return false;
+  if (/(?:要不要|是否|如需|请|点击|回复|输入).{0,16}(?:继续|接着)|(?:click|reply|say).{0,20}continue/i.test(text)) return true;
+  const tail = text.slice(-600);
+  if (/(?:我(?:现在|接下来)?(?:会|来|开始)|接下来|下一步|next(?:,| step)?)[^。！？!?\n]{0,160}(?:开始|继续|完成|处理|组片|剪辑|修复|复检|生成|放置|执行|proceed|continue|finish|start|execute)[。！.!…]*$/i.test(tail)) return true;
+  // Providers sometimes spend their whole response planning, then stop on a standalone action
+  // cue instead of emitting the promised tool call. A completed recap says “已完成/已执行”; the
+  // bare imperative below is an unfinished handoff and should be resumed automatically.
+  return /(?:^|[\n。！？!?])\s*(?!(?:已|已经|完成|成功))(?:现在|立即|开始)?\s*(?:执行|开始放置|开始剪辑|继续处理|execute|executing now|proceeding now)[。！.!…]*$/i.test(tail);
 }
 
 /** An interaction boundary cannot be resumed safely without the user. Automatic stream recovery

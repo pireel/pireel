@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildEditorialCandidateSpecs,
+  mapEditorialCandidateReviewsFromRelativeClock,
   normalizeEditorialCandidateReviews,
   rankEditorialWindows,
   selectPrimarySourceCandidate,
@@ -62,18 +63,28 @@ describe('editorial candidate review contract', () => {
       candidateId: 'candidate-1',
       rank: 1,
       verdict: 'strong',
+      contentRole: 'environment',
       score: 112,
       action: 'confident walk',
       rationale: 'Complete action with a strong gaze.',
       roleFit: [{ role: 'hook', score: 95 }, { role: 'invented', score: 100 }],
       issues: ['near-duplicate', 'near-duplicate', 'invented'],
+      cutOptions: [
+        { durationSec: 2, startSec: 0, endSec: 2, score: 92, reason: 'clean establishing beat' },
+        { durationSec: 99, startSec: -10, endSec: 99, score: 80, reason: 'bounded to source' },
+      ],
     }]);
     expect(reviews[0]).toMatchObject({
       candidateId: 'candidate-1',
       verdict: 'strong',
       score: 100,
+      contentRole: 'environment',
       roleFit: [{ role: 'hook', score: 95 }],
       issues: ['near-duplicate'],
+      cutOptions: [
+        { durationSec: 2, startSec: 0, endSec: 2, score: 92, reason: 'clean establishing beat' },
+        { durationSec: 2, startSec: 0, endSec: 2, score: 80, reason: 'bounded to source' },
+      ],
     });
     expect(reviews[1]).toMatchObject({ candidateId: 'candidate-2', verdict: 'unreviewed', score: 0 });
   });
@@ -88,6 +99,94 @@ describe('editorial candidate review contract', () => {
       issues: ['open-mouth'],
     }]);
     expect(reviews[0]).toMatchObject({ verdict: 'reject', issues: ['open-mouth'] });
+  });
+
+  it('keeps model timing as bounded coarse source-clock suggestions', () => {
+    const specs = buildEditorialCandidateSpecs([window(1, 10, 14)]);
+    const reviews = normalizeEditorialCandidateReviews(specs, [{
+      candidateId: 'candidate-1',
+      rank: 1,
+      verdict: 'strong',
+      score: 90,
+      suggestedStartSec: 9,
+      suggestedEndSec: 13.4,
+      peakSec: 99,
+      openingFrameScore: 96,
+      openingFrameSec: 9,
+      openingFrameState: 'closed-mouth frontal portrait',
+    }]);
+    expect(reviews[0]).toMatchObject({
+      suggestedStartSec: 10,
+      suggestedEndSec: 13.4,
+      peakSec: 13.4,
+      openingFrameScore: 96,
+      openingFrameSec: 10,
+      openingFrameState: 'closed-mouth frontal portrait',
+    });
+  });
+
+  it('maps every candidate-relative model timestamp back to the original source clock', () => {
+    const specs = buildEditorialCandidateSpecs([window(1, 10, 16)]);
+    const mapped = mapEditorialCandidateReviewsFromRelativeClock(specs, [{
+      candidateId: 'candidate-1',
+      suggestedStartSec: 1,
+      suggestedEndSec: 5.5,
+      peakSec: 3.2,
+      openingFrameSec: 1.4,
+      actionPhases: [{ phase: 'performance', startSec: 1, endSec: 4, note: 'clean action' }],
+      rejectedRanges: [{ startSec: 0, endSec: 0.8, reason: 'setup' }],
+      cutOptions: [{ startSec: 1.2, endSec: 3.7, score: 92, reason: 'complete turn' }],
+    }]);
+    expect(mapped[0]).toMatchObject({
+      suggestedStartSec: 11,
+      suggestedEndSec: 15.5,
+      peakSec: 13.2,
+      openingFrameSec: 11.4,
+      actionPhases: [{ startSec: 11, endSec: 14 }],
+      rejectedRanges: [{ startSec: 10, endSec: 10.8 }],
+      cutOptions: [{ startSec: 11.2, endSec: 13.7 }],
+    });
+  });
+
+  it('keeps reusable aesthetic, action-phase and cut evidence from the same review', () => {
+    const specs = buildEditorialCandidateSpecs([window(1, 10, 14)]);
+    const reviews = normalizeEditorialCandidateReviews(specs, [{
+      candidateId: 'candidate-1',
+      rank: 1,
+      verdict: 'strong',
+      score: 91,
+      scoreBreakdown: {
+        subjectClarity: 94,
+        aestheticFit: 90,
+        composition: 88,
+        temporalCompleteness: 93,
+        editability: 95,
+      },
+      actionPhases: [
+        { phase: 'setup', startSec: 9, endSec: 10.5, note: 'settles into position' },
+        { phase: 'performance', startSec: 10.5, endSec: 13.2, note: 'holds the intended pose' },
+        { phase: 'invented', startSec: 13.2, endSec: 13.5, note: 'ignored' },
+      ],
+      rejectedRanges: [{ startSec: 9.5, endSec: 10.4, reason: 'preparatory clothing adjustment' }],
+      entryState: 'upright and nearly still',
+      exitState: 'turns her shoulders to leave',
+      cameraMotion: 'static',
+      subjectPlacement: 'stable center',
+      bestUse: 'confident visual hook',
+    }]);
+    expect(reviews[0]).toMatchObject({
+      scoreBreakdown: { subjectClarity: 94, aestheticFit: 90, editability: 95 },
+      actionPhases: [
+        { phase: 'setup', startSec: 10, endSec: 10.5 },
+        { phase: 'performance', startSec: 10.5, endSec: 13.2 },
+      ],
+      rejectedRanges: [{ startSec: 10, endSec: 10.4, reason: 'preparatory clothing adjustment' }],
+      entryState: 'upright and nearly still',
+      exitState: 'turns her shoulders to leave',
+      cameraMotion: 'static',
+      subjectPlacement: 'stable center',
+      bestUse: 'confident visual hook',
+    });
   });
 
   it('turns duplicate provider ranks into a deterministic total order', () => {

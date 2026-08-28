@@ -110,6 +110,10 @@ describe("静态提示词完整性", () => {
     );
     expect(CHAT_IDENTITY).toContain("non-speech-or-noise");
     expect(CHAT_IDENTITY).toContain("analyze_visual with assessAudio=false");
+    expect(CHAT_IDENTITY).toContain("SOURCE-RANGE SELECTION EVIDENCE");
+    expect(CHAT_IDENTITY).toContain('mode="editorial"');
+    expect(CHAT_IDENTITY).toContain("geometry scores and semantic descriptions alone are never selection approval");
+    expect(CHAT_IDENTITY).toContain("If every candidate is rejected or unreviewed");
     expect(CHAT_IDENTITY).toContain("Never pre-register it");
     expect(CHAT_IDENTITY).toContain("goes directly to analyze_visual/read_script while still unplaced");
     expect(CHAT_IDENTITY).toContain("ask at most TWO short sentences");
@@ -776,14 +780,20 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(analyze.description).toContain("only sceneCutsSec are real cut points");
     expect(analyze.description).toContain("coarse-to-fine");
     expect(analyze.description).toContain("must never be treated as permission to force-select");
-    expect(analyze.description).toContain("five ordered observations");
+    expect(analyze.description).toContain("comparative temporal review");
     expect(analyze.description).toContain("editorialCandidates");
+    expect(analyze.description).toContain("general evidence contract");
+    expect(analyze.description).toContain("never authorizes visually selected source ranges");
     const schema = analyze.inputSchema as {
       properties: { mode: { enum: string[] }; brief: unknown; maxCandidates: unknown };
     };
     expect(schema.properties.mode.enum).toContain("editorial");
     expect(schema.properties).toHaveProperty("brief");
     expect(schema.properties).toHaveProperty("maxCandidates");
+    expect(schema.properties).toHaveProperty("items");
+    expect(analyze.description).toContain('one complete source-selection pass');
+    expect(analyze.description).toContain('bounded concurrency');
+    expect(CHAT_IDENTITY).toContain('ONE analyze_visual mode="editorial" items[] call');
   });
   it("已放置素材可按源时间精确重取区间", () => {
     const patchClip = STUDIO_TOOLS.find((tool) => tool.id === "set_clip_properties")!;
@@ -859,6 +869,19 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
         },
       }),
     ).toContain("Captions: ON — preset ln-black");
+  });
+  it("buildSituation 把安全区作为 9:16 画布的全局状态而非 Skill 约束", () => {
+    const portrait = buildSituation({
+      composition: { durationSec: 10, width: 1080, height: 1920 },
+    });
+    expect(portrait).toContain("Global 9:16 delivery-safe field");
+    expect(portrait).toContain("faces");
+    expect(portrait).toContain("titles");
+    expect(portrait).toContain("captions");
+    expect(portrait).toContain("CTA");
+    expect(buildSituation({
+      composition: { durationSec: 10, width: 1920, height: 1080 },
+    })).not.toContain("Global 9:16 delivery-safe field");
   });
 });
 
