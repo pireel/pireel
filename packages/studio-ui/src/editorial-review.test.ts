@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { editorialBriefFaceRequirements, editorialContentRoleUsesFaceGates } from './editorial-review';
+import {
+  editorialBriefFaceRequirements,
+  editorialContentRoleUsesFaceGates,
+  openingComparisonVisualIndex,
+} from './editorial-review';
+
+describe('openingComparisonVisualIndex', () => {
+  it('keeps comparison images in numbered candidate order instead of source-time order', () => {
+    expect([
+      { id: 'opening-10', sourceStartSec: 0.1 },
+      { id: 'opening-2', sourceStartSec: 90 },
+      { id: 'opening-1', sourceStartSec: 12 },
+    ].sort((left, right) => (
+      openingComparisonVisualIndex(left.id) - openingComparisonVisualIndex(right.id)
+    )).map((row) => row.id)).toEqual(['opening-1', 'opening-2', 'opening-10']);
+  });
+});
 
 describe('editorialBriefFaceRequirements', () => {
   it('allows back and side views in a female-lead brief while enforcing visible mouth state', () => {

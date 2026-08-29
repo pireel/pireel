@@ -143,6 +143,27 @@ describe('VideoTrackEngine timeline-only clock', () => {
     engine.dispose();
   });
 
+  it('stops a removed narration element before releasing it from the preview graph', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    const engine = new VideoTrackEngine();
+    engine.setAudioClips([{
+      id: 'speech-old',
+      url: 'blob:narration-old',
+      speed: 1,
+      gainAt: () => 1,
+      srcTimeAt: () => 0,
+    }]);
+    const audio = document.querySelector('audio')!;
+    Object.defineProperty(audio, 'paused', { configurable: true, value: false });
+
+    engine.setAudioClips([]);
+
+    expect(pause).toHaveBeenCalledWith();
+    expect(audio.isConnected).toBe(false);
+    expect(audio.getAttribute('src')).toBeNull();
+    engine.dispose();
+  });
+
   it('keeps an explicit leading video gap instead of compacting or skipping it', () => {
     const engine = new VideoTrackEngine();
     const ticks: number[] = [];

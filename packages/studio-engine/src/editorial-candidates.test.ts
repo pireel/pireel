@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildEditorialCandidateSpecs,
+  evaluateEditorialAssembly,
   mapEditorialCandidateReviewsFromRelativeClock,
   normalizeEditorialCandidateReviews,
+  planEditorialAssembly,
   rankEditorialWindows,
+  reconcileEditorialCandidateTemporalEvidence,
   selectPrimarySourceCandidate,
 } from './editorial-candidates';
+import type { EditorialCandidateReview } from './editorial-candidates';
 import type { VisualQualityWindow } from './visual-quality';
 
 const window = (rank: number, startSec: number, endSec: number, score = 80): VisualQualityWindow => ({
@@ -221,5 +225,135 @@ describe('editorial candidate review contract', () => {
       { candidateId: 'candidate-3', rank: 2, verdict: 'reject' },
     ]);
     expect(selectPrimarySourceCandidate(reviews, { allowMultiple: true })).toHaveLength(3);
+  });
+});
+
+const reviewedCandidate = (patch: Partial<EditorialCandidateReview> = {}): EditorialCandidateReview => ({
+  candidateId: 'candidate-1', startSec: 0, endSec: 20, rank: 1, verdict: 'strong', score: 95,
+  contentRole: 'person-primary', action: 'turns and walks toward camera', rationale: 'polished action',
+  openingFrameScore: 80, openingFrameState: 'back to camera', roleFit: [], issues: [],
+  scoreBreakdown: { subjectClarity: 90, aestheticFit: 95, composition: 92, temporalCompleteness: 90, editability: 94 },
+  actionPhases: [
+    { phase: 'setup', startSec: 0, endSec: 7, note: 'Stillness from behind with no movement.' },
+    { phase: 'transition', startSec: 7, endSec: 12, note: 'Turns and starts walking.' },
+    { phase: 'performance', startSec: 12, endSec: 19, note: 'Walks toward camera with direct eye contact.' },
+  ],
+  rejectedRanges: [], entryState: 'still', exitState: 'complete', cameraMotion: 'static',
+  subjectPlacement: 'centered', bestUse: 'confident walk',
+  cutOptions: [{ durationSec: 8, startSec: 0, endSec: 8, score: 90, reason: 'establishing mood' }],
+  ...patch,
+});
+
+describe('editorial temporal reconciliation and assembly', () => {
+  it('demotes static setup and derives better variable cuts from reviewed action phases', () => {
+    const reconciled = reconcileEditorialCandidateTemporalEvidence(reviewedCandidate());
+    expect(reconciled.cutOptions[0]!.startSec).toBeGreaterThanOrEqual(12);
+    expect(reconciled.cutOptions[0]!.endSec).toBeLessThanOrEqual(19);
+    const staticSetup = reconciled.cutOptions.find((option) => option.startSec === 0 && option.endSec === 8);
+    expect(staticSetup == null || staticSetup.score <= 45).toBe(true);
+    expect(reconciled.cutOptions.some((option) => option.startSec >= 7 && option.endSec <= 19)).toBe(true);
+  });
+
+  it('clips stale provider timing to the locally accepted source interval', () => {
+    const reconciled = reconcileEditorialCandidateTemporalEvidence(reviewedCandidate({
+      startSec: 12.2,
+      endSec: 16.1,
+      suggestedStartSec: 0,
+      suggestedEndSec: 19,
+      peakSec: 18,
+    }));
+    expect(reconciled.actionPhases).toEqual([
+      expect.objectContaining({ phase: 'performance', startSec: 12.2, endSec: 16.1 }),
+    ]);
+    expect(reconciled.suggestedStartSec).toBe(12.2);
+    expect(reconciled.suggestedEndSec).toBe(16.1);
+    expect(reconciled.peakSec).toBe(16.1);
+    expect(reconciled.cutOptions.length).toBeGreaterThan(0);
+    expect(reconciled.cutOptions.every((option) => option.startSec >= 12.2 && option.endSec <= 16.1)).toBe(true);
+  });
+
+  it('detects the real class of narrated montage failures without fixed shot lengths', () => {
+    const source = { assetId: '998', candidates: [reviewedCandidate()] };
+    const clips = [
+      { assetId: '998', startSec: 4.1, sourceInSec: 0, sourceOutSec: 8 },
+      { assetId: 'bbf', startSec: 46.8, sourceInSec: 3.407, sourceOutSec: 7.5 },
+      { assetId: 'bbf', startSec: 50.9, sourceInSec: 3.407, sourceOutSec: 7.5 },
+      { assetId: 'tail', startSec: 55.3, sourceInSec: 0, sourceOutSec: 4 },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        assetId: `short-${index}`,
+        startSec: 12 + index * 3,
+        sourceInSec: 0,
+        sourceOutSec: 2.5,
+      })),
+    ];
+    const violations = evaluateEditorialAssembly({ clips, sources: [source], targetDurationSec: 54.288 });
+    expect(violations.map((violation) => violation.kind)).toEqual(expect.arrayContaining([
+      'duration-overrun', 'duplicate-range', 'static-overlong',
+    ]));
+  });
+
+  it('uses reviewed natural phases to fit narration and replaces the static 0-8s recommendation', () => {
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: '998', startSec: 0, sourceInSec: 0, sourceOutSec: 8 },
+        { assetId: 'other', startSec: 8, sourceInSec: 2, sourceOutSec: 9 },
+      ],
+      sources: [
+        { assetId: '998', candidates: [reviewedCandidate()] },
+        { assetId: 'other', candidates: [reviewedCandidate({
+          candidateId: 'candidate-other', startSec: 2, endSec: 9,
+          actionPhases: [{ phase: 'performance', startSec: 2, endSec: 9, note: 'continuous finished action' }],
+          cutOptions: [{ durationSec: 7, startSec: 2, endSec: 9, score: 92, reason: 'complete action' }],
+        })] },
+      ],
+      targetDurationSec: 12,
+    });
+    expect(planned.actualDurationSec).toBeLessThanOrEqual(12);
+    expect(planned.clips[0]).toMatchObject({ assetId: '998' });
+    expect(planned.clips[0]!.sourceInSec).toBeGreaterThanOrEqual(7);
+    expect(evaluateEditorialAssembly({
+      clips: planned.clips,
+      sources: [{ assetId: '998', candidates: [reviewedCandidate()] }],
+      targetDurationSec: 12,
+    }).some((violation) => violation.kind === 'static-overlong')).toBe(false);
+  });
+
+  it('uses a readable portion of the final reviewed interval to close a discrete duration gap', () => {
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'first', startSec: 0, sourceInSec: 0, sourceOutSec: 3 },
+        { assetId: 'second', startSec: 3, sourceInSec: 10, sourceOutSec: 14 },
+      ],
+      sources: [
+        { assetId: 'first', candidates: [reviewedCandidate({
+          candidateId: 'first-candidate', startSec: 0, endSec: 3,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 3, note: 'complete first action' }],
+          cutOptions: [{ durationSec: 3, startSec: 0, endSec: 3, score: 94, reason: 'complete first action' }],
+        })] },
+        { assetId: 'second', candidates: [reviewedCandidate({
+          candidateId: 'second-candidate', startSec: 10, endSec: 14,
+          actionPhases: [{ phase: 'performance', startSec: 10, endSec: 14, note: 'continuous second action' }],
+          cutOptions: [{ durationSec: 4, startSec: 10, endSec: 14, score: 92, reason: 'complete second action' }],
+        })] },
+      ],
+      targetDurationSec: 5.5,
+    });
+    expect(planned.actualDurationSec).toBe(5.5);
+    expect(planned.clips).toHaveLength(2);
+    expect(planned.clips[1]!.sourceOutSec - planned.clips[1]!.sourceInSec).toBe(2.5);
+    expect(planned.clips[1]!.startSec).toBe(3);
+  });
+
+  it('does not create an unreadable tail shot when the remaining gap is too small', () => {
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'first', startSec: 0, sourceInSec: 0, sourceOutSec: 3 },
+        { assetId: 'second', startSec: 3, sourceInSec: 10, sourceOutSec: 14 },
+      ],
+      sources: [],
+      targetDurationSec: 3.4,
+    });
+    expect(planned.actualDurationSec).toBe(3);
+    expect(planned.clips).toHaveLength(1);
   });
 });

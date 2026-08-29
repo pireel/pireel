@@ -21,6 +21,12 @@ export interface ToolProgress {
   frac?: number;
   /** Blocks this run is producing: the chat card can preview them while generating. */
   blockIds?: string[];
+  /** Per-source progress for a real batch call. The card keeps one batch receipt and renders these as rows. */
+  items?: Array<{
+    id: string;
+    label: string;
+    frac: number;
+  }>;
 }
 
 let map: Record<string, ToolProgress> = {};

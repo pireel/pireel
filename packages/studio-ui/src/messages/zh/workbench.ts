@@ -366,6 +366,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "chatGen.assetScope.mine": "我的素材",
   "chatGen.assetScope.cloud": "云端素材",
   "chatGen.assetScope.official": "官方素材",
+  "chatGen.editorialCapacityShortfall":
+    "当前高质量素材比配音短约 {s} 秒，已按现有素材完成。你可以补充素材，或在时间线中手动调整。",
   "workbench.searchedMediaN": "找到 {n} 个项目片段",
   "workbench.searchedMediaNoMatch": "项目视频源里没有找到匹配片段",
   "workbench.loadedSize": "已读入 {w}×{h}",

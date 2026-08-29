@@ -8,6 +8,11 @@ import {
   isStudioScenarioSkillId,
   type StudioScenarioSkillId,
 } from '@pireel/studio-engine/scenario-skills';
+import {
+  planEditorialAssembly,
+  type EditorialAssemblySource,
+  type EditorialCandidateReview,
+} from '@pireel/studio-engine/editorial-candidates';
 
 export interface StoredThread {
   id: string;
@@ -178,9 +183,19 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
   return compactStudioChatMessages(messages).map((message) => {
     if (message.role !== 'assistant') return message;
     const sourceParts = message.parts ?? [];
+    const unfinishedVisibleTail = assistantMessageSuggestsContinuation(message);
     const lastToolIndex = sourceParts.reduce((latest, part, index) => {
       const type = (part as { type?: string }).type ?? '';
       return type === 'dynamic-tool' || type.startsWith('tool-') ? index : latest;
+    }, -1);
+    const lastTimelineIndex = sourceParts.reduce((latest, part, index) => {
+      const candidate = part as { type?: string; toolName?: string };
+      const toolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      return toolId === 'get_timeline' ? index : latest;
     }, -1);
     return {
       ...message,
@@ -195,6 +210,10 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
         // the next model round thousands of tokens of obsolete deliberation. Receipts are the state.
         if (candidate.type === 'text') {
           if (index <= lastToolIndex) return [];
+          // A provider can exhaust its output budget in visible scratchpad prose after the last
+          // receipt. Keep that text in the UI for diagnosis, but do not feed it back as if it were
+          // an authoritative final instruction when the recovery turn resumes from live state.
+          if (unfinishedVisibleTail) return [];
           const text = candidate.text ?? '';
           return [{ ...part, text: text.length > 6_000 ? text.slice(-6_000) : text } as typeof part];
         }
@@ -203,6 +222,22 @@ export function compactStudioChatMessagesForModel(messages: UIMessage[]): UIMess
           : candidate.type?.startsWith('tool-')
             ? candidate.type.slice('tool-'.length)
             : '';
+        // A long tool turn may request the timeline repeatedly. Replaying every complete snapshot
+        // makes mutually obsolete project states dominate the next model request; only the newest
+        // snapshot is authoritative. The UI/persisted history still keeps every original receipt.
+        if (toolId === 'get_timeline' && index !== lastTimelineIndex && candidate.output && typeof candidate.output === 'object') {
+          const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown };
+          return [{
+            ...part,
+            output: {
+              ...output,
+              data: {
+                superseded: true,
+                instruction: 'A newer timeline snapshot is present later in this message. Ignore this snapshot.',
+              },
+            },
+          } as typeof part];
+        }
         if (toolId !== 'analyze_visual' || !candidate.output || typeof candidate.output !== 'object') return [part];
         const output = candidate.output as { ok?: unknown; summary?: unknown; error?: unknown; data?: unknown };
         if (!output.data || typeof output.data !== 'object') return [part];
@@ -217,22 +252,50 @@ export interface EditorialPlacementIssue {
   reason: 'review-rejected' | 'range-required' | 'outside-accepted-range';
 }
 
-/**
- * Once a source has an editorial receipt in this conversation, picture placement must honor it.
- * This makes the persisted verdict authoritative instead of trusting a later model step to
- * remember that a high aesthetic score can still have a rejected usable range.
- */
-export function editorialPlacementIssue(
-  messages: readonly UIMessage[],
-  toolId: string,
-  input: Record<string, unknown>,
-): EditorialPlacementIssue | null {
-  if (toolId !== 'add_clips' && toolId !== 'insert_clips') return null;
-  const reviewed = new Map<string, Array<{
-    startSec?: unknown;
-    endSec?: unknown;
-    verdict?: unknown;
-  }>>();
+export interface PreparedEditorialPlacement {
+  input: Record<string, unknown>;
+  changed: boolean;
+  actualDurationSec: number;
+  targetDurationSec: number;
+  droppedClipCount: number;
+}
+
+/** Return only a material shortage after deterministic picture assembly has finished.
+ * This is presentation metadata, never a gate: the best available edit remains complete and the
+ * user can decide later whether to add footage or adjust the timeline manually. */
+export function assistantEditorialCapacityShortfall(message: UIMessage): number | null {
+  if (message.role !== 'assistant') return null;
+  let latest: { targetDurationSec: number; actualDurationSec: number } | null = null;
+  for (const part of message.parts ?? []) {
+    const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+    const toolId = candidate.type === 'dynamic-tool'
+      ? candidate.toolName
+      : candidate.type?.startsWith('tool-')
+        ? candidate.type.slice('tool-'.length)
+        : '';
+    if (toolId !== 'add_clips' || candidate.state !== 'output-available') continue;
+    const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
+    if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
+    const assembly = (output.data as { editorialAssembly?: unknown }).editorialAssembly;
+    if (!assembly || typeof assembly !== 'object') continue;
+    const targetDurationSec = Number((assembly as { targetDurationSec?: unknown }).targetDurationSec);
+    const actualDurationSec = Number((assembly as { actualDurationSec?: unknown }).actualDurationSec);
+    if (Number.isFinite(targetDurationSec) && targetDurationSec > 0 && Number.isFinite(actualDurationSec)) {
+      latest = { targetDurationSec, actualDurationSec };
+    }
+  }
+  if (!latest) return null;
+  const shortfallSec = Math.max(0, latest.targetDurationSec - latest.actualDurationSec);
+  const toleranceSec = Math.max(1, latest.targetDurationSec * 0.03);
+  return shortfallSec > toleranceSec ? Math.round(shortfallSec * 10) / 10 : null;
+}
+
+const canonicalEditorialAssetId = (value: unknown) => typeof value === 'string'
+  ? value.trim().replace(/^@/, '').replace(/^local:/, '')
+  : '';
+
+function reviewedEditorialSources(messages: readonly UIMessage[]): EditorialAssemblySource[] {
+  const reviewed = new Map<string, EditorialCandidateReview[]>();
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     for (const part of message.parts ?? []) {
@@ -250,21 +313,140 @@ export function editorialPlacementIssue(
         ? data.items.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
         : [data];
       for (const receipt of receipts) {
-        const assetId = typeof receipt.localAssetId === 'string'
-          ? receipt.localAssetId
-          : typeof receipt.assetId === 'string'
-            ? receipt.assetId
-            : '';
+        const assetId = canonicalEditorialAssetId(receipt.localAssetId ?? receipt.assetId);
         if (!assetId || !Array.isArray(receipt.editorialCandidates)) continue;
-        reviewed.set(assetId, receipt.editorialCandidates);
+        reviewed.set(assetId, receipt.editorialCandidates as EditorialCandidateReview[]);
       }
     }
   }
+  return [...reviewed].map(([assetId, candidates]) => ({ assetId, candidates }));
+}
+
+/** Turn the one editorial review receipt into the actual narrated montage before the write tool
+ * runs. Qwen supplies semantic phases and aesthetic scores; deterministic local optimization owns
+ * source-clock reconciliation, duplicate removal, natural-speed placement, and duration fitting. */
+export function prepareEditorialPlacement(
+  messages: readonly UIMessage[],
+  toolId: string,
+  input: Record<string, unknown>,
+  targetDurationSec: number,
+): PreparedEditorialPlacement | null {
+  if (toolId !== 'add_clips' || !Number.isFinite(targetDurationSec) || targetDurationSec <= 0) return null;
+  const sources = reviewedEditorialSources(messages);
+  if (!sources.length || !Array.isArray(input.clips)) return null;
+  const sourceIds = new Set(sources.map((source) => source.assetId));
+  const rows = input.clips.filter((value): value is Record<string, unknown> => (
+    !!value && typeof value === 'object' && !Array.isArray(value)
+  ));
+  if (!rows.length || rows.length !== input.clips.length) return null;
+  // Mixed audio/overlay batches retain their authored semantics. The montage optimizer owns only
+  // one contiguous, reviewed primary-picture batch.
+  if (!rows.every((clip) => (
+    (clip.role == null || clip.role === 'primary')
+    && sourceIds.has(canonicalEditorialAssetId(clip.assetId))
+    && Number.isFinite(Number(clip.startSec))
+    && Number.isFinite(Number(clip.sourceInSec))
+    && Number.isFinite(Number(clip.sourceOutSec))
+  ))) return null;
+  const plan = planEditorialAssembly({
+    targetDurationSec,
+    sources,
+    clips: rows.map((clip) => ({
+      assetId: canonicalEditorialAssetId(clip.assetId),
+      startSec: Number(clip.startSec),
+      sourceInSec: Number(clip.sourceInSec),
+      sourceOutSec: Number(clip.sourceOutSec),
+    })),
+  });
+  const unusedRows = [...rows];
+  const clips = plan.clips.map((planned) => {
+    const matchIndex = unusedRows.findIndex((row) => canonicalEditorialAssetId(row.assetId) === planned.assetId);
+    const original = matchIndex >= 0 ? unusedRows.splice(matchIndex, 1)[0]! : rows[0]!;
+    const durationSec = Math.round((planned.sourceOutSec - planned.sourceInSec) * 1_000) / 1_000;
+    const { speed: _discardSpeed, ...naturalSpeed } = original;
+    return {
+      ...naturalSpeed,
+      role: 'primary',
+      startSec: planned.startSec,
+      sourceInSec: planned.sourceInSec,
+      sourceOutSec: planned.sourceOutSec,
+      durationSec,
+      muted: true,
+    };
+  });
+  return {
+    input: { ...input, clips, __replacePrimaryTrack: true },
+    changed: plan.changed,
+    actualDurationSec: plan.actualDurationSec,
+    targetDurationSec: plan.targetDurationSec,
+    droppedClipCount: plan.droppedClipCount,
+  };
+}
+
+/** A successful deterministic montage receipt is the picture lock for this user turn. The model
+ * may continue with captions, typography, sound and delivery checks, but must not rebuild picture
+ * from another interpretation of the same editorial evidence. */
+export function hasCompletedEditorialPlacement(messages: readonly UIMessage[]): boolean {
+  return messages.some((message) => message.role === 'assistant' && (message.parts ?? []).some((part) => {
+    const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+    const toolId = candidate.type === 'dynamic-tool'
+      ? candidate.toolName
+      : candidate.type?.startsWith('tool-')
+        ? candidate.type.slice('tool-'.length)
+        : '';
+    if (toolId !== 'add_clips' || candidate.state !== 'output-available') return false;
+    const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
+    return output?.ok === true
+      && !!output.data
+      && typeof output.data === 'object'
+      && !!(output.data as { editorialAssembly?: unknown }).editorialAssembly;
+  }));
+}
+
+/** One authoritative timeline read after picture lock is enough for deterministic delivery checks. */
+export function hasPostAssemblyTimelineSnapshot(messages: readonly UIMessage[]): boolean {
+  let pictureLocked = false;
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const part of message.parts ?? []) {
+      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+      const toolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
+      if (
+        toolId === 'add_clips'
+        && candidate.state === 'output-available'
+        && output?.ok === true
+        && output.data
+        && typeof output.data === 'object'
+        && (output.data as { editorialAssembly?: unknown }).editorialAssembly
+      ) pictureLocked = true;
+      if (pictureLocked && toolId === 'get_timeline' && candidate.state === 'output-available' && output?.ok === true) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Once a source has an editorial receipt in this conversation, picture placement must honor it.
+ * This makes the persisted verdict authoritative instead of trusting a later model step to
+ * remember that a high aesthetic score can still have a rejected usable range.
+ */
+export function editorialPlacementIssue(
+  messages: readonly UIMessage[],
+  toolId: string,
+  input: Record<string, unknown>,
+): EditorialPlacementIssue | null {
+  if (toolId !== 'add_clips' && toolId !== 'insert_clips') return null;
+  const reviewed = new Map(reviewedEditorialSources(messages).map((source) => [source.assetId, source.candidates]));
   const clips = Array.isArray(input.clips) ? input.clips : [];
   for (const value of clips) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const clip = value as Record<string, unknown>;
-    const assetId = typeof clip.assetId === 'string' ? clip.assetId.trim().replace(/^@/, '') : '';
+    const assetId = canonicalEditorialAssetId(clip.assetId);
     const candidates = reviewed.get(assetId);
     if (!candidates) continue;
     const accepted = candidates.filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
@@ -350,6 +532,10 @@ export function assistantMessageSuggestsContinuation(message: UIMessage): boolea
     .join('\n')
     .trim();
   if (!text) return false;
+  // Output-limit truncation has no explicit marker in persisted SDK messages. A long tool-driven
+  // response ending mid-token/mid-sentence is not a final answer; the observed failure ended in
+  // the middle of a clip id after thousands of characters of planning.
+  if (text.length >= 6_000 && /[\p{L}\p{N}_-]$/u.test(text) && !/[。！？.!?…）)】\]"'”’]$/u.test(text)) return true;
   if (/(?:要不要|是否|如需|请|点击|回复|输入).{0,16}(?:继续|接着)|(?:click|reply|say).{0,20}continue/i.test(text)) return true;
   const tail = text.slice(-600);
   if (/(?:我(?:现在|接下来)?(?:会|来|开始)|接下来|下一步|next(?:,| step)?)[^。！？!?\n]{0,160}(?:开始|继续|完成|处理|组片|剪辑|修复|复检|生成|放置|执行|proceed|continue|finish|start|execute)[。！.!…]*$/i.test(tail)) return true;

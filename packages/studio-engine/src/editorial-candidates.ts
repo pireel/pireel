@@ -116,8 +116,410 @@ export interface EditorialCandidateReview {
   cutOptions: EditorialCutOption[];
 }
 
+export type EditorialAssemblyViolation =
+  | {
+      kind: 'duration-overrun';
+      targetDurationSec: number;
+      actualDurationSec: number;
+      excessDurationSec: number;
+    }
+  | {
+      kind: 'duplicate-range';
+      clipIndexes: [number, number];
+      assetId: string;
+    }
+  | {
+      kind: 'static-overlong';
+      clipIndex: number;
+      assetId: string;
+      durationSec: number;
+      adaptiveAverageSec: number;
+      staticFraction: number;
+    };
+
+export interface EditorialAssemblyClip {
+  assetId: string;
+  startSec: number;
+  sourceInSec: number;
+  sourceOutSec: number;
+}
+
+export interface EditorialAssemblySource {
+  assetId: string;
+  candidates: readonly EditorialCandidateReview[];
+}
+
+export interface EditorialAssemblyPlan {
+  clips: EditorialAssemblyClip[];
+  targetDurationSec: number;
+  actualDurationSec: number;
+  changed: boolean;
+  droppedClipCount: number;
+}
+
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
 const clampScore = (value: unknown) => Math.round(Math.max(0, Math.min(100, Number(value) || 0)));
+const overlapDuration = (leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) => (
+  Math.max(0, Math.min(leftEnd, rightEnd) - Math.max(leftStart, rightStart))
+);
+
+const STATIC_PHASE_NOTE = /\b(?:static|still(?:ness)?|motionless|no (?:action|movement)|waiting|preparation|empty frame)\b|静止|停留|准备|等待|空镜/i;
+
+function phaseUtility(candidate: EditorialCandidateReview, phase: EditorialActionPhaseRange): number {
+  const staticPhase = STATIC_PHASE_NOTE.test(phase.note);
+  if (candidate.contentRole === 'environment' || candidate.contentRole === 'detail') {
+    if (phase.phase === 'performance' || phase.phase === 'transition') return 1;
+    return staticPhase ? 0.72 : 0.78;
+  }
+  if (staticPhase && (phase.phase === 'setup' || phase.phase === 'hold')) return 0.2;
+  if (phase.phase === 'performance') return 1;
+  if (phase.phase === 'transition') return 0.86;
+  if (phase.phase === 'exit-reset') return 0.68;
+  if (phase.phase === 'hold') return 0.62;
+  return 0.42;
+}
+
+function centeredRange(startSec: number, endSec: number, centerSec: number, durationSec: number) {
+  const boundedDuration = Math.min(endSec - startSec, Math.max(0, durationSec));
+  const unclampedStart = centerSec - boundedDuration / 2;
+  const rangeStart = Math.max(startSec, Math.min(endSec - boundedDuration, unclampedStart));
+  return { startSec: round3(rangeStart), endSec: round3(rangeStart + boundedDuration) };
+}
+
+/** Reconcile semantic evidence after deterministic face/mouth checks tighten a reservoir.
+ *
+ * Provider phases are observations over the original technical interval. Local compliance may
+ * later keep only a smaller island; clip every phase to that island and derive ranked, variable-
+ * duration final-shot choices from the surviving performance geometry. This prevents an empty
+ * cutOptions array from turning the whole reservoir into the accidental default shot. */
+export function reconcileEditorialCandidateTemporalEvidence(
+  candidate: EditorialCandidateReview,
+): EditorialCandidateReview {
+  const startSec = candidate.startSec;
+  const endSec = candidate.endSec;
+  const clippedRange = (rangeStart: number, rangeEnd: number) => {
+    const clippedStart = round3(Math.max(startSec, rangeStart));
+    const clippedEnd = round3(Math.min(endSec, rangeEnd));
+    return clippedEnd - clippedStart >= 0.12 ? { startSec: clippedStart, endSec: clippedEnd } : null;
+  };
+  const actionPhases = candidate.actionPhases.flatMap((phase): EditorialActionPhaseRange[] => {
+    const range = clippedRange(phase.startSec, phase.endSec);
+    return range ? [{ ...phase, ...range }] : [];
+  });
+  const rejectedRanges = candidate.rejectedRanges.flatMap((range): EditorialRejectedRange[] => {
+    const clipped = clippedRange(range.startSec, range.endSec);
+    return clipped ? [{ ...range, ...clipped }] : [];
+  });
+  const scoreRange = (range: { startSec: number; endSec: number }, baseScore: number) => {
+    const durationSec = range.endSec - range.startSec;
+    if (durationSec <= 0) return 0;
+    let coveredSec = 0;
+    let weighted = 0;
+    let staticSec = 0;
+    for (const phase of actionPhases) {
+      const overlap = overlapDuration(range.startSec, range.endSec, phase.startSec, phase.endSec);
+      if (!overlap) continue;
+      coveredSec += overlap;
+      weighted += overlap * phaseUtility(candidate, phase);
+      if ((phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note)) staticSec += overlap;
+    }
+    const utility = coveredSec > 0 ? weighted / coveredSec : 0.66;
+    const staticDominant = candidate.contentRole !== 'environment'
+      && candidate.contentRole !== 'detail'
+      && staticSec / durationSec >= 0.65;
+    return Math.max(0, Math.min(staticDominant ? 45 : 100, Math.round(baseScore * (0.64 + utility * 0.36))));
+  };
+  const options: EditorialCutOption[] = candidate.cutOptions.flatMap((option): EditorialCutOption[] => {
+    const range = clippedRange(option.startSec, option.endSec);
+    if (!range) return [];
+    return [{
+      ...option,
+      ...range,
+      durationSec: round3(range.endSec - range.startSec),
+      score: scoreRange(range, option.score),
+    }];
+  });
+
+  // Natural phases remain the authoritative outer boundaries. Peak-centred fractions provide
+  // variable-duration alternatives inside a long performance phase without imposing global 2/3/4s slots.
+  for (const phase of actionPhases) {
+    const utility = phaseUtility(candidate, phase);
+    if (utility < 0.6) continue;
+    const full = { startSec: phase.startSec, endSec: phase.endSec };
+    options.push({
+      ...full,
+      durationSec: round3(full.endSec - full.startSec),
+      score: scoreRange(full, Math.round(candidate.score * (0.58 + utility * 0.42))),
+      reason: `Locally reconciled ${phase.phase} phase: ${phase.note}`.slice(0, 140),
+    });
+    if (phase.phase !== 'performance' || phase.endSec - phase.startSec < 0.6) continue;
+    const peakSec = Math.max(phase.startSec, Math.min(phase.endSec, candidate.peakSec ?? ((phase.startSec + phase.endSec) / 2)));
+    for (const ratio of [0.45, 0.7]) {
+      const range = centeredRange(phase.startSec, phase.endSec, peakSec, (phase.endSec - phase.startSec) * ratio);
+      options.push({
+        ...range,
+        durationSec: round3(range.endSec - range.startSec),
+        score: scoreRange(range, Math.min(100, candidate.score + (ratio === 0.45 ? 4 : 2))),
+        reason: `${ratio === 0.45 ? 'Tight' : 'Balanced'} peak-centred performance cut derived from the reviewed action phase.`,
+      });
+    }
+  }
+  const cutOptions = [...new Map(options
+    .filter((option) => option.durationSec >= 0.12)
+    .sort((left, right) => right.score - left.score || left.durationSec - right.durationSec)
+    .map((option) => [`${option.startSec.toFixed(2)}:${option.endSec.toFixed(2)}`, option])).values()]
+    .slice(0, 4);
+  const suggested = clippedRange(candidate.suggestedStartSec ?? startSec, candidate.suggestedEndSec ?? endSec);
+  return {
+    ...candidate,
+    ...(suggested ? { suggestedStartSec: suggested.startSec, suggestedEndSec: suggested.endSec } : {
+      suggestedStartSec: startSec,
+      suggestedEndSec: endSec,
+    }),
+    ...(candidate.peakSec == null ? {} : { peakSec: round3(Math.max(startSec, Math.min(endSec, candidate.peakSec))) }),
+    actionPhases,
+    rejectedRanges,
+    cutOptions,
+  };
+}
+
+/** Validate one proposed narrated montage against adaptive pacing rather than fixed shot seconds.
+ * The optimizer remains free to choose natural action boundaries, but it may not overrun the
+ * measured narration, duplicate an identical source range, or spend an abnormally long slot on
+ * a phase the review itself describes as static setup. */
+export function evaluateEditorialAssembly(input: {
+  clips: readonly EditorialAssemblyClip[];
+  sources: readonly EditorialAssemblySource[];
+  targetDurationSec?: number;
+}): EditorialAssemblyViolation[] {
+  const clips = input.clips.filter((clip) => clip.sourceOutSec > clip.sourceInSec && clip.startSec >= 0);
+  const violations: EditorialAssemblyViolation[] = [];
+  const firstRange = new Map<string, number>();
+  clips.forEach((clip, index) => {
+    const key = `${clip.assetId}:${round3(clip.sourceInSec)}:${round3(clip.sourceOutSec)}`;
+    const previous = firstRange.get(key);
+    if (previous == null) firstRange.set(key, index);
+    else violations.push({ kind: 'duplicate-range', clipIndexes: [previous, index], assetId: clip.assetId });
+  });
+  const targetDurationSec = Number(input.targetDurationSec);
+  if (Number.isFinite(targetDurationSec) && targetDurationSec > 0 && clips.length) {
+    const actualDurationSec = Math.max(...clips.map((clip) => clip.startSec + clip.sourceOutSec - clip.sourceInSec));
+    const toleranceSec = Math.max(1, targetDurationSec * 0.03);
+    if (actualDurationSec > targetDurationSec + toleranceSec) {
+      violations.push({
+        kind: 'duration-overrun',
+        targetDurationSec: round3(targetDurationSec),
+        actualDurationSec: round3(actualDurationSec),
+        excessDurationSec: round3(actualDurationSec - targetDurationSec),
+      });
+    }
+    const adaptiveAverageSec = targetDurationSec / clips.length;
+    const sourceById = new Map(input.sources.map((source) => [source.assetId, source]));
+    clips.forEach((clip, clipIndex) => {
+      const durationSec = clip.sourceOutSec - clip.sourceInSec;
+      if (durationSec <= adaptiveAverageSec * 1.25) return;
+      const source = sourceById.get(clip.assetId);
+      const candidate = source?.candidates.find((row) => (
+        (row.verdict === 'strong' || row.verdict === 'usable')
+        && clip.sourceInSec >= row.startSec - 0.06
+        && clip.sourceOutSec <= row.endSec + 0.06
+      ));
+      if (!candidate || candidate.contentRole === 'environment' || candidate.contentRole === 'detail') return;
+      const staticSec = candidate.actionPhases.reduce((total, phase) => (
+        (phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note)
+          ? total + overlapDuration(clip.sourceInSec, clip.sourceOutSec, phase.startSec, phase.endSec)
+          : total
+      ), 0);
+      const staticFraction = staticSec / durationSec;
+      if (staticFraction < 0.65) return;
+      violations.push({
+        kind: 'static-overlong',
+        clipIndex,
+        assetId: clip.assetId,
+        durationSec: round3(durationSec),
+        adaptiveAverageSec: round3(adaptiveAverageSec),
+        staticFraction: round3(staticFraction),
+      });
+    });
+  }
+  return violations;
+}
+
+/** Fit reviewed visual choices to measured narration with a multiple-choice knapsack.
+ *
+ * Each accepted source reservoir contributes natural provider/local phase choices rather than
+ * fixed global shot lengths. The optimizer keeps source order, uses at most one choice from one
+ * accepted reservoir, maximizes covered narration first and editorial score second, then places
+ * the result contiguously at natural-speed source time. This is deterministic assembly from the
+ * one paid review receipt; it never asks the provider to review the same footage again. */
+export function planEditorialAssembly(input: {
+  clips: readonly EditorialAssemblyClip[];
+  sources: readonly EditorialAssemblySource[];
+  targetDurationSec: number;
+}): EditorialAssemblyPlan {
+  const targetDurationSec = round3(Math.max(0, Number(input.targetDurationSec) || 0));
+  if (!targetDurationSec || !input.clips.length) {
+    return {
+      clips: [...input.clips],
+      targetDurationSec,
+      actualDurationSec: input.clips.length
+        ? round3(Math.max(...input.clips.map((clip) => clip.startSec + clip.sourceOutSec - clip.sourceInSec)))
+        : 0,
+      changed: false,
+      droppedClipCount: 0,
+    };
+  }
+  const sourceById = new Map(input.sources.map((source) => [source.assetId, source]));
+  const seenReservoirs = new Set<string>();
+  type PlanningRow = {
+    clip: EditorialAssemblyClip;
+    originalIndex: number;
+    choices: Array<{ clip: EditorialAssemblyClip; score: number }>;
+  };
+  const rows = input.clips.flatMap<PlanningRow>((clip, originalIndex) => {
+    const candidates = sourceById.get(clip.assetId)?.candidates ?? [];
+    const accepted = candidates
+      .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
+      .map(reconcileEditorialCandidateTemporalEvidence);
+    const candidate = accepted.find((row) => (
+      clip.sourceInSec >= row.startSec - 0.06 && clip.sourceOutSec <= row.endSec + 0.06
+    ));
+    if (!candidate) return [{ clip, originalIndex, choices: [{ clip, score: 50 }] }];
+    const reservoirKey = `${clip.assetId}:${candidate.candidateId}`;
+    if (seenReservoirs.has(reservoirKey)) return [];
+    seenReservoirs.add(reservoirKey);
+    const requestedKey = `${round3(clip.sourceInSec)}:${round3(clip.sourceOutSec)}`;
+    const reviewedChoices = candidate.cutOptions.map((option) => ({
+      clip: { ...clip, sourceInSec: option.startSec, sourceOutSec: option.endSec },
+      score: option.score,
+    }));
+    const matchingReviewed = candidate.cutOptions.find((option) => (
+      `${round3(option.startSec)}:${round3(option.endSec)}` === requestedKey
+    ));
+    const choices = [
+      ...reviewedChoices,
+      {
+        clip,
+        score: matchingReviewed?.score ?? Math.max(0, candidate.score - (
+          clip.sourceOutSec - clip.sourceInSec > candidate.cutOptions[0]?.durationSec * 1.5 ? 10 : 0
+        )),
+      },
+    ];
+    const unique = [...new Map(choices
+      .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= 0.12)
+      .sort((left, right) => right.score - left.score)
+      .map((choice) => [
+        `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,
+        choice,
+      ])).values()];
+    const bestScore = unique[0]?.score ?? 0;
+    const viable = bestScore >= 70
+      ? unique.filter((choice) => choice.score >= Math.max(50, bestScore - 35))
+      : unique;
+    return [{ clip, originalIndex, choices: viable }];
+  });
+  if (!rows.length) {
+    return { clips: [], targetDurationSec, actualDurationSec: 0, changed: true, droppedClipCount: input.clips.length };
+  }
+
+  type State = {
+    score: number;
+    durationSec: number;
+    selected: Array<{ rowIndex: number; clip: EditorialAssemblyClip }>;
+  };
+  const targetTick = Math.max(1, Math.round(targetDurationSec * 10));
+  let states = new Map<number, State>([[0, { score: 0, durationSec: 0, selected: [] }]]);
+  rows.forEach((row, rowIndex) => {
+    const next = new Map<number, State>();
+    for (const [tick, state] of states) {
+      const mayDrop = rowIndex > 0;
+      if (mayDrop) next.set(tick, state);
+      for (const choice of row.choices) {
+        const durationSec = choice.clip.sourceOutSec - choice.clip.sourceInSec;
+        const remainingSec = round3(targetDurationSec - state.durationSec);
+        if (remainingSec <= 0) continue;
+        let selectedClip = choice.clip;
+        let selectedDurationSec = durationSec;
+        let selectedScore = choice.score;
+        if (durationSec > remainingSec + 0.001) {
+          // Whole natural choices are preferred. When the next reviewed choice would cross the
+          // narration boundary, use a meaningful peak-centred portion of that already-approved
+          // interval instead of dropping the whole shot and leaving a visible tail gap.
+          const minimumReadableSec = Math.min(1.2, Math.max(0.8, durationSec * 0.35));
+          if (remainingSec < minimumReadableSec) continue;
+          const sourceCenterSec = (choice.clip.sourceInSec + choice.clip.sourceOutSec) / 2;
+          const trimmed = centeredRange(
+            choice.clip.sourceInSec,
+            choice.clip.sourceOutSec,
+            sourceCenterSec,
+            remainingSec,
+          );
+          selectedClip = { ...choice.clip, sourceInSec: trimmed.startSec, sourceOutSec: trimmed.endSec };
+          selectedDurationSec = trimmed.endSec - trimmed.startSec;
+          selectedScore = choice.score * Math.max(0.7, selectedDurationSec / durationSec);
+        }
+        const nextDurationSec = round3(state.durationSec + selectedDurationSec);
+        const nextTick = Math.min(targetTick, Math.max(1, Math.round(nextDurationSec * 10)));
+        const nextState: State = {
+          score: state.score + selectedScore,
+          durationSec: nextDurationSec,
+          selected: [...state.selected, { rowIndex, clip: selectedClip }],
+        };
+        const existing = next.get(nextTick);
+        if (
+          !existing
+          || Math.abs(targetDurationSec - nextState.durationSec) < Math.abs(targetDurationSec - existing.durationSec)
+          || (
+            Math.abs(targetDurationSec - nextState.durationSec) === Math.abs(targetDurationSec - existing.durationSec)
+            && nextState.score > existing.score
+          )
+        ) next.set(nextTick, nextState);
+      }
+    }
+    states = next.size ? next : states;
+  });
+  const bestEntry = [...states.entries()].sort(([leftTick, left], [rightTick, right]) => (
+    Math.abs(targetDurationSec - left.durationSec) - Math.abs(targetDurationSec - right.durationSec)
+    || Math.abs(targetTick - leftTick) - Math.abs(targetTick - rightTick)
+    || right.score - left.score
+    || right.selected.length - left.selected.length
+  ))[0];
+  const selected = bestEntry?.[1].selected ?? [];
+  let atSec = round3(Math.min(...input.clips.map((clip) => clip.startSec)));
+  const clips = selected.map(({ clip }) => {
+    const placed = { ...clip, startSec: atSec };
+    atSec = round3(atSec + clip.sourceOutSec - clip.sourceInSec);
+    return placed;
+  });
+  // Rounding the dynamic-programming buckets can leave a sub-frame-scale overrun. Trim only the
+  // last chosen natural range, never slow footage or duplicate a shot to manufacture duration.
+  const actualEnd = clips.length ? clips[clips.length - 1]!.startSec
+    + clips[clips.length - 1]!.sourceOutSec - clips[clips.length - 1]!.sourceInSec : 0;
+  const targetEnd = Math.min(...input.clips.map((clip) => clip.startSec)) + targetDurationSec;
+  if (actualEnd > targetEnd + 0.001 && clips.length) {
+    const last = clips[clips.length - 1]!;
+    const overflow = actualEnd - targetEnd;
+    if (last.sourceOutSec - last.sourceInSec - overflow >= 0.5) last.sourceOutSec = round3(last.sourceOutSec - overflow);
+  }
+  const actualDurationSec = clips.length
+    ? round3(clips[clips.length - 1]!.startSec + clips[clips.length - 1]!.sourceOutSec - clips[0]!.startSec - clips[clips.length - 1]!.sourceInSec)
+    : 0;
+  const changed = clips.length !== input.clips.length || clips.some((clip, index) => {
+    const original = input.clips[index];
+    return !original
+      || clip.assetId !== original.assetId
+      || Math.abs(clip.startSec - original.startSec) > 0.01
+      || Math.abs(clip.sourceInSec - original.sourceInSec) > 0.01
+      || Math.abs(clip.sourceOutSec - original.sourceOutSec) > 0.01;
+  });
+  return {
+    clips,
+    targetDurationSec,
+    actualDurationSec,
+    changed,
+    droppedClipCount: Math.max(0, input.clips.length - clips.length),
+  };
+}
 
 /** Private/editorial preference only: technical quality stays authoritative, while centered
  * composition may promote an otherwise comparable candidate into the small review shortlist. */

@@ -1,6 +1,7 @@
 import type { UIMessage } from 'ai';
 import { describe, expect, it } from 'vitest';
 import {
+  assistantEditorialCapacityShortfall,
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
   assistantMessageSuggestsContinuation,
@@ -11,6 +12,9 @@ import {
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   editorialPlacementIssue,
+  hasCompletedEditorialPlacement,
+  hasPostAssemblyTimelineSnapshot,
+  prepareEditorialPlacement,
   isRecoverableStudioChatError,
   sanitizeRestored,
   stampLatestAssistantWorkDuration,
@@ -129,6 +133,23 @@ describe('assistant work duration', () => {
 });
 
 describe('compactStudioChatMessagesForModel', () => {
+  it('replays only the newest full timeline snapshot in a long tool turn', () => {
+    const oldTimeline = {
+      type: 'tool-get_timeline', toolCallId: 'timeline-old', state: 'output-available', input: {},
+      output: { ok: true, data: { durationSec: 0, tracks: [{ role: 'primaryNarrative', clips: [] }], dense: 'x'.repeat(20_000) } },
+    };
+    const currentTimeline = {
+      type: 'tool-get_timeline', toolCallId: 'timeline-current', state: 'output-available', input: {},
+      output: { ok: true, data: { durationSec: 12, tracks: [{ role: 'primaryNarrative', clips: [{ id: 'shot-1' }] }] } },
+    };
+    const message = assistant([oldTimeline, currentTimeline] as UIMessage['parts']);
+
+    const [forModel] = compactStudioChatMessagesForModel([message]);
+    expect((forModel!.parts[0] as { output: { data: Record<string, unknown> } }).output.data).toEqual(expect.objectContaining({ superseded: true }));
+    expect((forModel!.parts[1] as { output: unknown }).output).toEqual(currentTimeline.output);
+    expect((message.parts[0] as { output: unknown }).output).toEqual(oldTimeline.output);
+  });
+
   it('keeps the complete visual receipt for display but replays only editorial verdict evidence', () => {
     const subjectTracks = Array.from({ length: 100 }, (_, index) => ({ startSec: index, dense: 'x'.repeat(200) }));
     const message = assistant([{
@@ -211,8 +232,20 @@ describe('editorial placement receipts', () => {
       data: {
         localAssetId: 'asset-beach',
         editorialCandidates: [
-          { candidateId: 'candidate-1', verdict: 'strong', startSec: 0.3, endSec: 2.1 },
-          { candidateId: 'candidate-2', verdict: 'reject', startSec: 4, endSec: 6 },
+          {
+            candidateId: 'candidate-1', verdict: 'strong', startSec: 0.3, endSec: 2.1,
+            rank: 1, score: 90, contentRole: 'person-primary', action: 'turn', rationale: 'complete',
+            openingFrameScore: 90, openingFrameState: 'stable', roleFit: [], issues: [],
+            scoreBreakdown: { subjectClarity: 90, aestheticFit: 90, composition: 90, temporalCompleteness: 90, editability: 90 },
+            actionPhases: [], rejectedRanges: [], entryState: '', exitState: '', cameraMotion: '', subjectPlacement: '', bestUse: '', cutOptions: [],
+          },
+          {
+            candidateId: 'candidate-2', verdict: 'reject', startSec: 4, endSec: 6,
+            rank: 2, score: 20, contentRole: 'person-primary', action: 'setup', rationale: 'reject',
+            openingFrameScore: 20, openingFrameState: 'unstable', roleFit: [], issues: [],
+            scoreBreakdown: { subjectClarity: 20, aestheticFit: 20, composition: 20, temporalCompleteness: 20, editability: 20 },
+            actionPhases: [], rejectedRanges: [], entryState: '', exitState: '', cameraMotion: '', subjectPlacement: '', bestUse: '', cutOptions: [],
+          },
         ],
       },
     },
@@ -259,6 +292,28 @@ describe('editorial placement receipts', () => {
       clips: [{ assetId: 'asset-a', role: 'primary', sourceInSec: 0, sourceOutSec: 1 }],
     })).toMatchObject({ reason: 'outside-accepted-range' });
   });
+
+  it('marks a prepared montage as an atomic primary-track replacement and recognizes its picture lock receipt', () => {
+    const prepared = prepareEditorialPlacement([review], 'add_clips', {
+      clips: [{ assetId: 'asset-beach', role: 'primary', startSec: 0, sourceInSec: 0.3, sourceOutSec: 2.1 }],
+    }, 1.8);
+    expect(prepared?.input).toMatchObject({ __replacePrimaryTrack: true });
+
+    const completed = assistant([{
+      type: 'tool-add_clips',
+      toolCallId: 'assembly-1',
+      state: 'output-available',
+      input: prepared?.input,
+      output: { ok: true, data: { editorialAssembly: { targetDurationSec: 1.8, actualDurationSec: 1.8 } } },
+    }] as UIMessage['parts']);
+    expect(hasCompletedEditorialPlacement([review, completed])).toBe(true);
+    expect(hasPostAssemblyTimelineSnapshot([review, completed])).toBe(false);
+    const verified = assistant([{
+      type: 'tool-get_timeline', toolCallId: 'timeline-after-assembly', state: 'output-available', input: {},
+      output: { ok: true, data: { durationSec: 1.8, tracks: [] } },
+    }] as UIMessage['parts']);
+    expect(hasPostAssemblyTimelineSnapshot([review, completed, verified])).toBe(true);
+  });
 });
 
 describe('analyze visual card context', () => {
@@ -269,6 +324,27 @@ describe('analyze visual card context', () => {
       input: { assetId: 'asset-internal-123' },
       output: { ok: true, data: { label: '海边回眸.mov' } },
     })).toBe('海边回眸.mov');
+  });
+});
+
+describe('editorial capacity notice', () => {
+  it('returns one material shortfall from the latest completed assembly without blocking the result', () => {
+    const message = assistant([
+      {
+        type: 'tool-add_clips', toolCallId: 'assembly-short', state: 'output-available', input: {},
+        output: { ok: true, data: { editorialAssembly: { targetDurationSec: 51.912, actualDurationSec: 40.321 } } },
+      },
+      { type: 'text', text: '已完成当前版本。' },
+    ] as UIMessage['parts']);
+    expect(assistantEditorialCapacityShortfall(message)).toBe(11.6);
+  });
+
+  it('does not warn for a sub-second or three-percent fitting tolerance', () => {
+    const message = assistant([{
+      type: 'tool-add_clips', toolCallId: 'assembly-close', state: 'output-available', input: {},
+      output: { ok: true, data: { editorialAssembly: { targetDurationSec: 40, actualDurationSec: 39.2 } } },
+    }] as UIMessage['parts']);
+    expect(assistantEditorialCapacityShortfall(message)).toBeNull();
   });
 });
 
@@ -326,6 +402,15 @@ describe('assistantMessageSuggestsContinuation', () => {
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '本轮先注册配音，再放置画面。\n\n执行。' },
     ]))).toBe(true);
+  });
+
+  it('detects an output-limit truncation and omits its scratchpad from model replay', () => {
+    const truncated = assistant([
+      { type: 'tool-get_timeline', toolCallId: 'timeline-1', state: 'output-available', input: {}, output: {} },
+      { type: 'text', text: `${'继续计算镜头顺序。'.repeat(900)}clip_local_c` },
+    ] as UIMessage['parts']);
+    expect(assistantMessageSuggestsContinuation(truncated)).toBe(true);
+    expect(compactStudioChatMessagesForModel([truncated])[0]!.parts).toEqual([truncated.parts[0]]);
   });
 
   it('does not annotate a completed answer or duplicate an approval interaction', () => {

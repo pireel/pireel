@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChevronRight, X } from "lucide-react";
+import { ChevronRight, Info, X } from "lucide-react";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -41,6 +41,7 @@ import {
   STUDIO_CREATE_SKILL_ACTION,
   latestStudioMetaAction,
 } from "@pireel/studio-engine/skill-actions";
+import { audioClipWindow } from "@pireel/studio-engine/composition";
 import type { FrameCatalogItem } from "./use-frame-catalog";
 import {
   CHAT_ACTION_PILL_CLASS,
@@ -59,6 +60,7 @@ import {
 } from "./chat-tool-parts";
 import { Composer, type ComposerHandle } from "./chat-composer";
 import {
+  assistantEditorialCapacityShortfall,
   assistantHasOpenOrInterruptedInteraction,
   assistantMessageHasRenderableOutput,
   assistantMessageSuggestsContinuation,
@@ -69,7 +71,10 @@ import {
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   editorialPlacementIssue,
+  hasCompletedEditorialPlacement,
+  hasPostAssemblyTimelineSnapshot,
   isRecoverableStudioChatError,
+  prepareEditorialPlacement,
   stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
 import { scopeSituationToThread } from "./chat-thread-context";
@@ -148,7 +153,9 @@ export function ChatThread({
   const autoRecoveryAttemptedRef = useRef(false);
   const timelineFrameInspectionRef = useRef<AbortController | null>(null);
   const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
-  const [expandedWorkMessages, setExpandedWorkMessages] = useState<Set<string>>(() => new Set());
+  // Completed work stays visible by default. The arrow is an explicit user collapse, not an
+  // automatic replacement of the whole turn with an empty-looking summary row.
+  const [collapsedWorkMessages, setCollapsedWorkMessages] = useState<Set<string>>(() => new Set());
   useEffect(() => () => timelineFrameInspectionRef.current?.abort(), []);
   const getBodyRef = useRef(getBody);
   getBodyRef.current = getBody;
@@ -223,10 +230,75 @@ export function ChatThread({
       lastAssistantMessageIsCompleteWithToolCalls(args),
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
+      const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
+      const comp = getComp?.();
+      const narrationEndSec = comp?.audioTracks
+        ?.filter((clip) => clip.role === "narration" && !clip.muted)
+        .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
+      const preparedPlacement = prepareEditorialPlacement(
+        messagesRef.current,
+        id,
+        requestedInput,
+        narrationEndSec,
+      );
+      const editorialPictureLocked = hasCompletedEditorialPlacement(messagesRef.current);
+      if (preparedPlacement && editorialPictureLocked) {
+        addToolOutput({
+          tool: id,
+          toolCallId: toolCall.toolCallId,
+          output: {
+            ok: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "主画面已经完成，本轮不再重复重建"
+              : "The primary picture is already assembled; it will not be rebuilt again in this turn.",
+            data: {
+              skipped: true,
+              reason: "editorial-picture-locked",
+              instruction: "Preserve the current picture edit. Continue only with unfinished captions, typography, sound, deterministic delivery checks, and a concise final summary.",
+            },
+          },
+        });
+        return;
+      }
+      if (id === "review_visuals" && editorialPictureLocked) {
+        addToolOutput({
+          tool: id,
+          toolCallId: toolCall.toolCallId,
+          output: {
+            ok: true,
+            skipped: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "选片阶段已完成画面判断，成片仅做基础状态验收"
+              : "Picture judgment is complete; delivery uses deterministic state checks only.",
+            data: {
+              instruction: "Do not run another visual review or rebuild the montage. Verify coverage, canvas fill, muted source audio, and track boundaries from the current project state, then finish.",
+            },
+          },
+        });
+        return;
+      }
+      if (id === "get_timeline" && editorialPictureLocked && hasPostAssemblyTimelineSnapshot(messagesRef.current)) {
+        addToolOutput({
+          tool: id,
+          toolCallId: toolCall.toolCallId,
+          output: {
+            ok: true,
+            skipped: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "基础状态已经核对，本轮不再重复读取时间线"
+              : "The delivery state is already verified; the timeline will not be read again in this turn.",
+            data: {
+              instruction: "Use the latest authoritative timeline snapshot already present, finish any unchecked non-picture layers, and provide a concise final summary.",
+            },
+          },
+        });
+        return;
+      }
+      const executionInput = preparedPlacement?.input ?? requestedInput;
       const placementIssue = editorialPlacementIssue(
         messagesRef.current,
         id,
-        (toolCall.input ?? {}) as Record<string, unknown>,
+        executionInput,
       );
       if (placementIssue) {
         const zh = studioLocale().toLowerCase().startsWith("zh");
@@ -287,16 +359,30 @@ export function ChatThread({
       try {
         const out = await runToolRef.current(
           id,
-          (toolCall.input ?? {}) as Record<string, unknown>,
+          executionInput,
           { signal: ctrl.signal, surface: "chat" },
         );
+        const reportedOut = out.ok && preparedPlacement
+          ? {
+              ...out,
+              data: {
+                ...(out.data && typeof out.data === "object" ? out.data : {}),
+                editorialAssembly: {
+                  targetDurationSec: preparedPlacement.targetDurationSec,
+                  actualDurationSec: preparedPlacement.actualDurationSec,
+                  droppedClipCount: preparedPlacement.droppedClipCount,
+                  naturalSpeed: true,
+                },
+              },
+            }
+          : out;
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (stopAfterReceipt) userStoppedRef.current = true;
         if (out.ok)
           addToolOutput({
             tool: id,
             toolCallId: toolCall.toolCallId,
-            output: out,
+            output: reportedOut,
           });
         else
           addToolOutput({
@@ -916,9 +1002,12 @@ export function ChatThread({
                 status === "ready" &&
                 !emptyCompletedAssistant &&
                 assistantMessageSuggestsContinuation(m);
+              const editorialCapacityShortfall = m.role === "assistant" && (!isLast || status === "ready")
+                ? assistantEditorialCapacityShortfall(m)
+                : null;
               const workFold = assistantWorkFold(m, !isLast || status === "ready");
               const workFoldAvailable = workFold !== null;
-              const workExpanded = expandedWorkMessages.has(m.id);
+              const workExpanded = !collapsedWorkMessages.has(m.id);
               const workHidden = workFoldAvailable && !workExpanded;
               const workDurationMs = workFoldAvailable
                 ? assistantWorkDurationMs(messages, mi)
@@ -943,7 +1032,7 @@ export function ChatThread({
                         <button
                           type="button"
                           aria-expanded={workExpanded}
-                          onClick={() => setExpandedWorkMessages((current) => {
+                          onClick={() => setCollapsedWorkMessages((current) => {
                             const next = new Set(current);
                             if (next.has(m.id)) next.delete(m.id);
                             else next.add(m.id);
@@ -1086,6 +1175,14 @@ export function ChatThread({
                           >
                             {t("chatGen.continueFromCurrentState")}
                           </button>
+                        </div>
+                      )}
+                      {editorialCapacityShortfall !== null && (
+                        <div className="border-line bg-panel-2 text-ink-3 flex items-start gap-2 rounded-md border px-2.5 py-2 text-[12px] leading-relaxed">
+                          <Info size={13} className="mt-0.5 shrink-0 text-accent" />
+                          <span>
+                            {t("chatGen.editorialCapacityShortfall", { s: editorialCapacityShortfall })}
+                          </span>
                         </div>
                       )}
                     </div>

@@ -59,6 +59,10 @@ export interface McpDeps {
   callBridge: (tool: string, input: Record<string, unknown>, timeoutMs: number) => Promise<McpBridgeResult>;
   /** Frame catalog (routing layer = frameRegistry.list()). */
   listFrames: () => { id: string; title: string; summary: string }[];
+  /** Account-scoped Studio Skill catalog and full playbook lookup. Catalog metadata is
+   *  lightweight; private instructions are returned only by an explicit read. */
+  listSkills: (args: Record<string, unknown>) => Promise<McpBridgeResult>;
+  readSkill: (skillId: string) => Promise<McpBridgeResult>;
   /** Frame playbook body (routing layer = frameRegistry.get). */
   readFrame: (frameId: string) => McpBridgeResult;
   /** A-roll editing guide body (routing layer = AROLL_GUIDE). */
@@ -112,7 +116,7 @@ export interface McpDeps {
 /* ============================ Tool surface ============================ */
 
 /** Tools answered directly on the server (body only on server / pure catalog / direct cloud-state ops): no bridge. */
-export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'search_stock', 'import_stock', 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
+export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 'list_frames', 'list_skills', 'read_skill', 'get_icons', 'import_media', 'create_browser_handoff', 'create_project', 'list_projects', 'switch_project', 'rename_project', 'list_assets', 'search_assets', 'search_stock', 'import_stock', 'list_models', 'generate_image', 'generate_video', 'generate_music', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync']);
 
 /** MCP-only bridge tools (not in STUDIO_TOOLS, invisible to internal chat):
  *  get_state=state snapshot; apply_block=the validate-and-place surface for BYO generation output;
@@ -180,6 +184,32 @@ export function buildMcpTools(): McpToolDef[] {
       description:
         'List available visual directions. Each Frame supplies professional art direction — shape, material, image treatment, typography personality, color-role relationships, spatial tension and motion temperament — while story, Scene strategy, palette, captions and layout remain independent. Apply one with attach_frame and read its playbook with read_frame.',
       inputSchema: EMPTY_SCHEMA,
+    },
+    {
+      name: 'list_skills',
+      description:
+        "List the authenticated user's Studio Skills, including private author-owned Skills and installed community Skills. This returns catalog metadata only, never private playbook text. When the user names a Skill or asks for a style/workflow that may have one, find the exact skill id here and call read_skill before editing.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          query: { type: 'string', description: 'Optional title/summary search, 1–80 characters.' },
+          limit: { type: 'number', description: 'Maximum results, default 30 and maximum 100.' },
+        },
+      },
+    },
+    {
+      name: 'read_skill',
+      description:
+        "Read one exact account-accessible Studio Skill as a complete Markdown playbook. This is the stable Skill boundary: follow its editorial judgment and combine general editing tools; never infer or depend on Pireel's internal function names. A Skill may explicitly bind a named voice. In that case call list_voices with that exact name to resolve its stable voiceId, then generate_speech may use it without asking the user to choose the voice again; still follow the Skill's own text/charge rules.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          skill_id: { type: 'string', description: 'Exact id returned by list_skills.' },
+        },
+        required: ['skill_id'],
+      },
     },
     {
       name: 'search_stock',
@@ -507,6 +537,12 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
           const fid = args.frame_id;
           if (typeof fid !== 'string' || !fid) return toolResponse(raw.id, { ok: false, error: 'frame_id required (ids via list_frames)' });
           return toolResponse(raw.id, deps.readFrame(fid));
+        }
+        if (name === 'list_skills') return toolResponse(raw.id, await deps.listSkills(args));
+        if (name === 'read_skill') {
+          const skillId = args.skill_id;
+          if (typeof skillId !== 'string' || !skillId) return toolResponse(raw.id, { ok: false, error: 'skill_id required (ids via list_skills)' });
+          return toolResponse(raw.id, await deps.readSkill(skillId));
         }
         if (name === 'get_icons') {
           const names = Array.isArray(args.names) ? (args.names as unknown[]).map(String).filter(Boolean) : [];

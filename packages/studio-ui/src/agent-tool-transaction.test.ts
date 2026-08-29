@@ -18,10 +18,18 @@ import { resolveInteraction } from './interaction-store';
 const providerMocks = vi.hoisted(() => ({ transcribe: vi.fn() }));
 const mediaMocks = vi.hoisted(() => ({ probeVideoFile: vi.fn() }));
 const visualMocks = vi.hoisted(() => ({ analyzeVisual: vi.fn(), analyzeVisualGeometry: vi.fn() }));
-const editorialReviewMocks = vi.hoisted(() => ({ reviewEditorialCandidates: vi.fn() }));
+const editorialReviewMocks = vi.hoisted(() => ({
+  reviewEditorialCandidates: vi.fn(),
+  editorialOpeningEvidence: vi.fn(),
+  compareEditorialOpenings: vi.fn(),
+}));
 const speechMocks = vi.hoisted(() => ({
   assessLocalSpeechAudio: vi.fn(),
   detectSpeechSilenceCuts: vi.fn(),
+}));
+const progressMocks = vi.hoisted(() => ({
+  setToolProgress: vi.fn(),
+  clearToolProgress: vi.fn(),
 }));
 const localMediaMocks = vi.hoisted(() => {
   const loadLocalVideo = vi.fn();
@@ -46,6 +54,8 @@ vi.mock('./visual', async (importOriginal) => ({
 }));
 vi.mock('./editorial-review', () => ({
   reviewEditorialCandidates: editorialReviewMocks.reviewEditorialCandidates,
+  editorialOpeningEvidence: editorialReviewMocks.editorialOpeningEvidence,
+  compareEditorialOpenings: editorialReviewMocks.compareEditorialOpenings,
 }));
 vi.mock('./speech-silence', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./speech-silence')>()),
@@ -58,6 +68,10 @@ vi.mock('./local-media', async (importOriginal) => ({
   loadLocalAssetFile: localMediaMocks.loadLocalAssetFile,
   loadLocalFolderFile: localMediaMocks.loadLocalFolderFile,
   saveLocalVideo: localMediaMocks.saveLocalVideo,
+}));
+vi.mock('./tool-progress', () => ({
+  setToolProgress: progressMocks.setToolProgress,
+  clearToolProgress: progressMocks.clearToolProgress,
 }));
 
 async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () => Promise<{ ok: boolean; summary?: string; error?: string }>) {
@@ -122,6 +136,20 @@ describe('Agent composition transaction boundary', () => {
       classification: 'speech-likely', hasAudio: true, audible: true, speechLikely: true,
       audibleSec: 4, speechSec: 1, speechFraction: 0.25,
     });
+    editorialReviewMocks.editorialOpeningEvidence.mockImplementation((file, sourceId, label, candidates) => ({
+      file, sourceId, label, candidate: candidates[0],
+    }));
+    editorialReviewMocks.compareEditorialOpenings.mockImplementation(async (evidence) => ({
+      comparisonSummary: 'Compared together.',
+      contenders: evidence.map((row: { sourceId: string; candidate: { candidateId: string; openingFrameScore: number; openingFrameSec?: number } }, index: number) => ({
+        sourceId: row.sourceId,
+        candidateId: row.candidate.candidateId,
+        rank: index + 1,
+        openingFrameScore: row.candidate.openingFrameScore,
+        openingFrameSec: row.candidate.openingFrameSec,
+        rationale: 'shared comparison',
+      })),
+    }));
   });
 
   afterEach(() => {
@@ -130,6 +158,8 @@ describe('Agent composition transaction boundary', () => {
     visualMocks.analyzeVisual.mockReset();
     visualMocks.analyzeVisualGeometry.mockReset();
     editorialReviewMocks.reviewEditorialCandidates.mockReset();
+    editorialReviewMocks.editorialOpeningEvidence.mockReset();
+    editorialReviewMocks.compareEditorialOpenings.mockReset();
     speechMocks.assessLocalSpeechAudio.mockReset();
     speechMocks.detectSpeechSilenceCuts.mockReset();
     localMediaMocks.loadLocalVideo.mockReset();
@@ -137,6 +167,8 @@ describe('Agent composition transaction boundary', () => {
     localMediaMocks.loadLocalAssetFile.mockImplementation(() => localMediaMocks.loadLocalVideo());
     localMediaMocks.loadLocalFolderFile.mockReset();
     localMediaMocks.saveLocalVideo.mockReset();
+    progressMocks.setToolProgress.mockReset();
+    progressMocks.clearToolProgress.mockReset();
     vi.unstubAllGlobals();
   });
 
@@ -178,6 +210,45 @@ describe('Agent composition transaction boundary', () => {
       retryable: true,
       detail: 'Failed to fetch',
     });
+  });
+
+  it('atomically replaces a prepared primary montage without retaining frame slivers', async () => {
+    const h = harness();
+    let document = runAgentTimelineTool(h.documentRef.current, 'register_media', {
+      assets: [
+        { id: 'old-video', kind: 'video', url: 'https://cdn.example/old.mp4', durationSec: 5 },
+        { id: 'new-video', kind: 'video', url: 'https://cdn.example/new.mp4', durationSec: 5 },
+        { id: 'narration', kind: 'audio', url: 'https://cdn.example/narration.mp3', durationSec: 5 },
+      ],
+    }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'old-picture', role: 'primary', assetId: 'old-video', startSec: 0, sourceInSec: 0, sourceOutSec: 5 },
+        { id: 'voice', role: 'narration', assetId: 'narration', startSec: 0, sourceInSec: 0, sourceOutSec: 5 },
+      ],
+    }).document!;
+    h.documentRef.current = document;
+    h.compRef.current = projectDocumentToComposition(document);
+    Object.assign(h.ctx, {
+      projectId: 'test',
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => {},
+    });
+    const { runStudioTool } = await import('./agent-tool-runner');
+    const result = await runStudioTool(h.ctx, 'add_clips', {
+      __replacePrimaryTrack: true,
+      clips: [{
+        id: 'new-picture', role: 'primary', assetId: 'new-video', startSec: 1 / 30,
+        sourceInSec: 0, sourceOutSec: 149 / 30,
+      }],
+    });
+
+    expect(result.ok).toBe(true);
+    const primary = h.documentRef.current.timeline.tracks.find((track) => track.role === 'primaryNarrative')!;
+    expect(primary.clips).toHaveLength(1);
+    expect(primary.clips[0]).toMatchObject({ id: 'new-picture', startFrame: 1, durationFrames: 149 });
+    expect(primary.clips.some((clip) => clip.id === 'old-picture')).toBe(false);
+    expect(h.documentRef.current.timeline.tracks.find((track) => track.role === 'narration')?.clips).toHaveLength(1);
   });
 
   it('returns the stable value for an ask_user voice choice', async () => {
@@ -1167,13 +1238,22 @@ describe('Agent composition transaction boundary', () => {
       return entry?.assetId === 'asset-first' ? first : second;
     });
     mediaMocks.probeVideoFile.mockResolvedValue({ durationSec: 12, width: 1080, height: 1920, hasAudio: true });
-    visualMocks.analyzeVisualGeometry.mockResolvedValue({
+    const visualTimeline = {
       cuts: [],
       segments: [{ start: 0, end: 12, label: { content: 'broll', person: 'center', safe: 'top', hasText: false, desc: '' } }],
       qualityWindows: [{
         rank: 1, startSec: 3, endSec: 5, score: 88, sharpness: 0.9, exposure: 0.86, stability: 0.87,
         sampleCount: 4, worstFrameScore: 84, edgeScore: 86, hardFailureFraction: 0,
       }],
+    };
+    visualMocks.analyzeVisualGeometry.mockImplementation(async (
+      _file: File,
+      _duration: number,
+      onProgress: (done: number, total: number) => void,
+    ) => {
+      onProgress(1, 2);
+      onProgress(2, 2);
+      return visualTimeline;
     });
     let started = 0;
     let release!: () => void;
@@ -1195,6 +1275,27 @@ describe('Agent composition transaction boundary', () => {
         }],
       };
     });
+    editorialReviewMocks.compareEditorialOpenings.mockImplementation(async (evidence) => ({
+      comparisonSummary: '第二段在共同对比中开场更强。',
+      contenders: [
+        {
+          sourceId: evidence[1].sourceId,
+          candidateId: evidence[1].candidate.candidateId,
+          rank: 1,
+          openingFrameScore: 96,
+          openingFrameSec: 3.4,
+          rationale: 'cleaner immediate presence',
+        },
+        {
+          sourceId: evidence[0].sourceId,
+          candidateId: evidence[0].candidate.candidateId,
+          rank: 2,
+          openingFrameScore: 84,
+          openingFrameSec: 3.2,
+          rationale: 'usable later',
+        },
+      ],
+    }));
     Object.assign(h.ctx, {
       projectId: 'test',
       localAssetIndexRef: { current: [
@@ -1220,14 +1321,39 @@ describe('Agent composition transaction boundary', () => {
         analysisMode: 'editorial-batch',
         acceptedDurationSec: 4,
         items: [
-          { ok: true, localAssetId: 'asset-first', editorialCandidates: [{ verdict: 'usable' }] },
-          { ok: true, localAssetId: 'asset-second', editorialCandidates: [{ verdict: 'usable' }] },
+          { ok: true, localAssetId: 'asset-first', editorialCandidates: [{ verdict: 'usable', openingComparisonRank: 2, openingFrameScore: 84 }] },
+          { ok: true, localAssetId: 'asset-second', editorialCandidates: [{ verdict: 'usable', openingComparisonRank: 1, openingFrameScore: 96 }] },
         ],
-        instruction: expect.stringContaining('Do not create a Director Plan, run another visual review'),
+        openingComparison: {
+          contenders: [
+            { sourceId: 'asset-second', rank: 1, openingFrameScore: 96 },
+            { sourceId: 'asset-first', rank: 2, openingFrameScore: 84 },
+          ],
+        },
+        instruction: expect.stringContaining('shared cross-source visual comparison'),
       },
     });
     expect(visualMocks.analyzeVisualGeometry).toHaveBeenCalledTimes(2);
     expect(editorialReviewMocks.reviewEditorialCandidates).toHaveBeenCalledTimes(2);
+    expect(editorialReviewMocks.compareEditorialOpenings).toHaveBeenCalledOnce();
+    const fractions = progressMocks.setToolProgress.mock.calls
+      .map(([progress]) => progress.frac as number)
+      .filter((value) => typeof value === 'number');
+    expect(fractions.length).toBeGreaterThan(2);
+    expect(fractions.every((value, index) => index === 0 || value >= fractions[index - 1]!)).toBe(true);
+    expect(fractions.at(-1)).toBe(1);
+    expect(progressMocks.setToolProgress).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'analyze_visual',
+      text: expect.stringContaining('第一段'),
+    }));
+    expect(progressMocks.setToolProgress).toHaveBeenLastCalledWith(expect.objectContaining({
+      frac: 1,
+      items: [
+        expect.objectContaining({ label: '第一段', frac: 1 }),
+        expect.objectContaining({ label: '第二段', frac: 1 }),
+      ],
+    }));
+    expect(progressMocks.clearToolProgress).toHaveBeenCalledTimes(1);
   });
 
   it('requires a concrete brief for editorial candidate review', async () => {

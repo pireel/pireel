@@ -68,6 +68,7 @@ vi.mock("./chat-composer", () => ({
 }));
 
 vi.mock("./chat-thread-store", () => ({
+  assistantEditorialCapacityShortfall: () => null,
   assistantHasOpenOrInterruptedInteraction: () => false,
   assistantMessageHasRenderableOutput: () => true,
   assistantMessageSuggestsContinuation: mocks.suggestsContinuation,

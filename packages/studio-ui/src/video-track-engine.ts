@@ -97,6 +97,16 @@ export interface FrameInfo {
 
 const EPS = 0.04;
 
+/** Removing a playing media element from the DOM does not reliably stop its audio. Pause it before
+ * releasing the node so a transient preview respec cannot leave an orphan narration playing beside
+ * the replacement element. Source swaps reuse the resident decoder and let assigning the new src
+ * stop the old resource; this helper is only for permanent removal. */
+function releaseMediaElement(el: HTMLMediaElement): void {
+  if (!el.paused) el.pause();
+  el.removeAttribute('src');
+  el.remove();
+}
+
 export class VideoTrackEngine {
   private host: HTMLDivElement | null = null;
   private els = new Map<string, HTMLVideoElement>();
@@ -184,13 +194,13 @@ export class VideoTrackEngine {
       if (prev) {
         this.bitmapModes.delete(prev);
         this.bitmapStages.delete(prev);
-        prev.remove();
+        releaseMediaElement(prev);
         this.els.delete(key);
       }
       for (const side of ['pre', 'post'] as const) {
         const gDrop = this.ghosts.get(`${key}::${side}`);
         if (gDrop) {
-          gDrop.remove();
+          releaseMediaElement(gDrop);
           this.ghosts.delete(`${key}::${side}`);
           if (this.activeGhost === gDrop) this.activeGhost = null;
         }
@@ -221,7 +231,7 @@ export class VideoTrackEngine {
       for (const side of ['pre', 'post'] as const) {
         const gStale = this.ghosts.get(`${key}::${side}`);
         if (gStale) {
-          gStale.remove();
+          releaseMediaElement(gStale);
           this.ghosts.delete(`${key}::${side}`);
           if (this.activeGhost === gStale) this.activeGhost = null;
         }
@@ -348,7 +358,7 @@ export class VideoTrackEngine {
     for (const [id, c] of this.audioClips) {
       if (!keep.has(id)) {
         c.gain?.disconnect();
-        c.el.remove();
+        releaseMediaElement(c.el);
         this.audioClips.delete(id);
       }
     }
@@ -381,7 +391,7 @@ export class VideoTrackEngine {
     const cur = this.dubs.get(key);
     if (!url) {
       if (cur) {
-        cur.el.remove();
+        releaseMediaElement(cur.el);
         this.dubs.delete(key);
       }
       // hand the sound back to the decode element on the next activate/seek
@@ -993,15 +1003,15 @@ export class VideoTrackEngine {
     this.pause();
     for (const c of this.audioClips.values()) {
       c.gain?.disconnect();
-      c.el.remove();
+      releaseMediaElement(c.el);
     }
     this.audioClips.clear();
     void this.actx?.close().catch(() => {});
     this.actx = null;
-    for (const d of this.dubs.values()) d.el.remove();
+    for (const d of this.dubs.values()) releaseMediaElement(d.el);
     this.dubs.clear();
-    for (const el of this.els.values()) el.remove();
-    for (const g of this.ghosts.values()) g.remove();
+    for (const el of this.els.values()) releaseMediaElement(el);
+    for (const g of this.ghosts.values()) releaseMediaElement(g);
     for (const u of this.urls.values()) URL.revokeObjectURL(u);
     this.els.clear();
     this.ghosts.clear();

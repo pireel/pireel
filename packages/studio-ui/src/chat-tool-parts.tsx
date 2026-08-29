@@ -192,8 +192,25 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
       )}
       {/* Running: stage-text body row (stream note > progress text > default busy text), multi-line readable */}
       {running && (
-        <div className="border-line/70 text-ink-3 line-clamp-3 border-t px-2.5 py-1.5 text-[12px] leading-relaxed">
-          {live?.text || (def.busyText ? t(def.busyText) : t('chatGen.running'))}
+        <div className="border-line/70 text-ink-3 border-t px-2.5 py-1.5 text-[12px] leading-relaxed">
+          <div className="line-clamp-3">{live?.text || (def.busyText ? t(def.busyText) : t('chatGen.running'))}</div>
+          {live?.items?.length ? (
+            <div className="border-line/70 mt-2 max-h-52 space-y-1.5 overflow-y-auto border-t pt-2">
+              {live.items.map((item) => {
+                const fraction = Math.max(0, Math.min(1, item.frac));
+                const done = fraction >= 1;
+                return (
+                  <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
+                    <span className="text-ink-2 truncate" title={item.label}>{item.label}</span>
+                    <span className="text-ink-4 tabular-nums">{done ? <Check size={11} /> : `${Math.round(fraction * 100)}%`}</span>
+                    <div className="bg-line/50 col-span-2 h-0.5 overflow-hidden rounded-full">
+                      <div className="bg-accent h-full transition-[width] duration-200" style={{ width: `${Math.round(fraction * 100)}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
       )}
       {/* Tool-specific extra body (e.g. a component preview strip) */}

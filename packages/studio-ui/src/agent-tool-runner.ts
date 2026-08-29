@@ -121,14 +121,19 @@ import {
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
-import { clearToolProgress, setToolProgress } from './tool-progress';
+import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
 import { localAssetReference, normalizeStudioToolInputReferences, resolveLocalAssetReference } from './studio-tool-input-references';
 import { analyzeVisual, analyzeVisualGeometry, type VisualLabel, type VisualPrep, type VisualTimeline, finishVisualAnalysis, prepareVisualAnalysis } from './visual';
-import { reviewEditorialCandidates } from './editorial-review';
+import {
+  compareEditorialOpenings,
+  editorialOpeningEvidence,
+  reviewEditorialCandidates,
+  type EditorialOpeningEvidence,
+} from './editorial-review';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
 import { groupSimilarReviewFrames } from './review-similarity';
@@ -433,7 +438,14 @@ export interface AgentToolCtx {
   chatRef: MutableRefObject<StudioChatHandle | null>;
 }
 
-async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
+type StudioToolRunInternalOptions = {
+  signal?: AbortSignal;
+  surface?: 'chat' | 'bridge';
+  collectOpeningEvidence?: boolean;
+  reportProgress?: (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => void;
+};
+
+async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: StudioToolRunInternalOptions): Promise<StudioToolResult> {
   const {
     compRef, documentRef, resolveAssetUrl, prepareLocalAssetRuntime, setDocument, ensureShots, projectId,
     listProjectOutputs, resolveProjectOutput, createProjectOutput, duplicateProjectOutput, switchProjectOutput, renameProjectOutput, deleteProjectOutput,
@@ -496,8 +508,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       // Pipeline tools push friendly progress to their card. A provider may keep producing
       // harmless late deltas after our abort race has stopped waiting; never let those deltas
       // resurrect a completed/aborted progress state.
-      const report = (text: string, frac?: number, extra?: { blockIds?: string[] }) => {
+      const report = (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => {
         if (stopped()) return;
+        if (opts?.reportProgress) {
+          opts.reportProgress(text, frac, extra);
+          return;
+        }
         setToolProgress({ id: toolId, text, ...(frac != null ? { frac } : {}), ...(extra ?? {}) });
       };
       const race = <T,>(p: Promise<T>): Promise<T> =>
@@ -668,7 +684,31 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
       if (!NO_UNDO_TOOLS.has(toolId)) pushUndoSnapshot(); // same entry: agent changes also void the redo line
       try {
         if (AGENT_TIMELINE_TOOL_IDS.has(toolId)) {
-          const outcome = runAgentTimelineTool(documentRef.current, toolId, input);
+          let timelineInput = input;
+          if (toolId === 'add_clips' && input.__replacePrimaryTrack === true) {
+            const { __replacePrimaryTrack: _privateReplace, ...publicInput } = input;
+            timelineInput = publicInput;
+            const primaryTrack = documentRef.current.timeline.tracks.find((track) => (
+              track.id === documentRef.current.semantics.primaryNarrativeTrackId
+            ));
+            if (primaryTrack?.clips.length) {
+              const cleared = applyEditorCommand(documentRef.current, {
+                type: 'clips.remove',
+                trackId: primaryTrack.id,
+                clipIds: primaryTrack.clips.map((clip) => clip.id),
+                includeLinked: false,
+              });
+              if (!cleared.ok) {
+                return {
+                  ok: false,
+                  error: editorErrorMessage(cleared.error),
+                  data: { code: cleared.error.code, trackIds: cleared.error.trackIds },
+                };
+              }
+              setDocument(cleared.document);
+            }
+          }
+          const outcome = runAgentTimelineTool(documentRef.current, toolId, timelineInput);
           if (outcome.ok && outcome.document && outcome.document !== documentRef.current) setDocument(outcome.document);
           const summary = outcome.summary
             ? (surface === 'chat' ? t(`tools.${toolId}.label`) : outcome.summary)
@@ -1168,27 +1208,130 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 maxCandidates: maxReviewCandidates,
                 assessAudio: input.assessAudio === true,
               };
-              const results = await mapWithConcurrency(
-                batchItems,
-                EDITORIAL_BATCH_CONCURRENCY,
-                async (item) => {
-                  try {
-                    const result = await runStudioToolInner(ctx, 'analyze_visual', { ...baseInput, ...item }, opts);
-                    return result.ok
-                      ? { ok: true, summary: result.summary, ...((result.data as Record<string, unknown> | undefined) ?? {}) }
-                      : { ok: false, error: result.error ?? 'visual analysis failed', selector: item };
-                  } catch (error) {
-                    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+              const progressByItem = batchItems.map(() => 0);
+              const sourceLabel = (item: Record<string, unknown>, index: number) => {
+                const explicitLocalReference = typeof item.localAssetId === 'string'
+                  ? item.localAssetId
+                  : typeof item.localSig === 'string'
+                    ? item.localSig
+                    : '';
+                const assetId = typeof item.assetId === 'string' ? item.assetId : '';
+                const localReference = explicitLocalReference || assetId;
+                const local = localReference ? resolveLocalAssetReference(localReference, localAssetIndex) : null;
+                if (local?.label) return local.label;
+                if (assetId && documentRef.current.assets[assetId]?.label) return documentRef.current.assets[assetId]!.label;
+                const clipId = typeof item.clipId === 'string' ? item.clipId : '';
+                const clip = clipId
+                  ? documentRef.current.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === clipId)
+                  : undefined;
+                const clipAssetId = clip && 'assetId' in clip ? clip.assetId : '';
+                return (clipAssetId && documentRef.current.assets[clipAssetId]?.label)
+                  || localReference
+                  || assetId
+                  || clipId
+                  || `${index + 1}`;
+              };
+              const reportBatchProgress = (index: number, fraction?: number) => {
+                if (fraction != null && Number.isFinite(fraction)) {
+                  progressByItem[index] = Math.max(progressByItem[index]!, Math.max(0, Math.min(1, fraction)));
+                }
+                const aggregate = progressByItem.reduce((total, value) => total + value, 0) / batchItems.length;
+                const done = progressByItem.filter((value) => value >= 1).length;
+                report(t('common.analyzingVisualBatchProgress', {
+                  done,
+                  total: batchItems.length,
+                  pct: Math.round(aggregate * 100),
+                  label: sourceLabel(batchItems[index]!, index),
+                }), aggregate, {
+                  items: batchItems.map((item, itemIndex) => ({
+                    id: `${itemIndex}`,
+                    label: sourceLabel(item, itemIndex),
+                    frac: progressByItem[itemIndex]!,
+                  })),
+                });
+              };
+              reportBatchProgress(0, 0);
+              let results: Array<{
+                ok: boolean;
+                summary?: string;
+                error?: string;
+                [key: string]: unknown;
+              }>;
+              try {
+                results = await mapWithConcurrency(
+                  batchItems,
+                  EDITORIAL_BATCH_CONCURRENCY,
+                  async (item, index) => {
+                    reportBatchProgress(index, 0);
+                    try {
+                      const result = await runStudioToolInner(ctx, 'analyze_visual', { ...baseInput, ...item }, {
+                        ...opts,
+                        collectOpeningEvidence: true,
+                        reportProgress: (_text, fraction) => reportBatchProgress(index, fraction),
+                      });
+                      return result.ok
+                        ? { ok: true, summary: result.summary, ...((result.data as Record<string, unknown> | undefined) ?? {}) }
+                        : { ok: false, error: result.error ?? 'visual analysis failed', selector: item };
+                    } catch (error) {
+                      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+                      return {
+                        ok: false,
+                        error: error instanceof Error ? error.message : String(error),
+                        selector: item,
+                      };
+                    } finally {
+                      reportBatchProgress(index, 1);
+                    }
+                  },
+                );
+              } catch (error) {
+                clearToolProgress(toolId);
+                throw error;
+              }
+              const openingEvidence = results.flatMap((result): EditorialOpeningEvidence[] => {
+                const receipt = result as Record<string, unknown>;
+                const evidence = receipt.__openingEvidence;
+                delete receipt.__openingEvidence;
+                return evidence && typeof evidence === 'object' ? [evidence as EditorialOpeningEvidence] : [];
+              });
+              let openingComparison: Awaited<ReturnType<typeof compareEditorialOpenings>> | null = null;
+              if (openingEvidence.length) {
+                try {
+                  openingComparison = await race(compareEditorialOpenings(openingEvidence, reviewBrief, {
+                    ...(signal ? { signal } : {}),
+                  }));
+                } catch (error) {
+                  console.warn('[studio/editorial-review] cross-source opening comparison failed', error);
+                }
+              }
+              const openingBySource = new Map(openingComparison?.contenders.map((row) => [row.sourceId, row]) ?? []);
+              const comparableResults = results.map((result) => {
+                const receipt = result as Record<string, unknown>;
+                const sourceId = typeof receipt.localAssetId === 'string'
+                  ? receipt.localAssetId
+                  : typeof receipt.assetId === 'string'
+                    ? receipt.assetId
+                    : '';
+                const comparison = openingBySource.get(sourceId);
+                if (!comparison || !Array.isArray(receipt.editorialCandidates)) return result;
+                return {
+                  ...result,
+                  editorialCandidates: receipt.editorialCandidates.map((candidate) => {
+                    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return candidate;
+                    const row = candidate as Record<string, unknown>;
+                    if (row.candidateId !== comparison.candidateId) return row;
                     return {
-                      ok: false,
-                      error: error instanceof Error ? error.message : String(error),
-                      selector: item,
+                      ...row,
+                      openingFrameScore: comparison.openingFrameScore,
+                      ...(comparison.openingFrameSec == null ? {} : { openingFrameSec: comparison.openingFrameSec }),
+                      openingComparisonRank: comparison.rank,
+                      openingComparisonRationale: comparison.rationale,
                     };
-                  }
-                },
-              );
-              const completed = results.filter((result) => result.ok).length;
-              const acceptedDurationSec = Math.round(results.reduce((total, result) => {
+                  }),
+                };
+              });
+              const completed = comparableResults.filter((result) => result.ok).length;
+              const acceptedDurationSec = Math.round(comparableResults.reduce((total, result) => {
                 const receipt = result as Record<string, unknown>;
                 if (receipt.ok !== true || !Array.isArray(receipt.editorialCandidates)) return total;
                 const accepted = receipt.editorialCandidates
@@ -1208,17 +1351,27 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 }
                 return total + sourceCapacity;
               }, 0) * 1_000) / 1_000;
-              return {
+              const batchResult: StudioToolResult = {
                 ok: true,
                 summary: `analyzed ${completed}/${batchItems.length} video sources`,
                 data: {
                   analysisMode: 'editorial-batch',
                   editorialBrief: reviewBrief,
                   acceptedDurationSec,
-                  items: results,
-                  instruction: `This batch is the complete source-selection review. The non-overlapping accepted source capacity is ${acceptedDurationSec}s. Assemble directly from this receipt: choose the accepted candidate with the highest openingFrameScore that also fits the requested opening preference, then order the remaining strong or usable ranges by score and visible action/setting continuity. Choose an appropriate scored child cut instead of consuming every reservoir whole. Place the selected source-video clips in one batch with muted=true. Source audio was excluded and must not affect ranking. Do not create a Director Plan, run another visual review, or retry the selection after placement; leave failed or fully rejected sources unused.`,
+                  items: comparableResults,
+                  ...(openingComparison ? {
+                    openingComparison: {
+                      comparisonSummary: openingComparison.comparisonSummary,
+                      contenders: openingComparison.contenders.map(({ sourceId, candidateId, rank, openingFrameScore, openingFrameSec, rationale }) => ({
+                        sourceId, candidateId, rank, openingFrameScore, ...(openingFrameSec == null ? {} : { openingFrameSec }), rationale,
+                      })),
+                    },
+                  } : {}),
+                  instruction: `This batch is the complete source-selection review. The non-overlapping accepted source capacity is ${acceptedDurationSec}s. ${openingComparison?.contenders.length ? `Use openingComparison rank 1 as the opening; it was selected by one shared cross-source visual comparison, so do not re-rank independent per-source scores.` : 'Only one accepted opening contender was available, or the shared opening comparison was unavailable; use the strongest accepted candidate without another review.'} Then order the remaining strong or usable ranges by score and visible action/setting continuity. Choose an appropriate scored child cut instead of consuming every reservoir whole. Place the selected source-video clips in one batch with muted=true. Source audio was excluded and must not affect ranking. Do not create a Director Plan, run another visual review, or retry the selection after placement; leave failed or fully rejected sources unused.`,
                 },
               };
+              clearToolProgress(toolId);
+              return batchResult;
             }
             // Editorial range review is visual by default. Callers that genuinely need the source
             // soundtrack can opt in; narrated/B-roll workflows no longer pay for accidental ASR.
@@ -1283,6 +1436,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                           editorialBrief: reviewed.brief,
                           editorialComparisonSummary: reviewed.comparisonSummary,
                           editorialCandidates: reviewed.candidates,
+                          ...(opts?.collectOpeningEvidence ? {
+                            __openingEvidence: editorialOpeningEvidence(file, entry.assetId, entry.label, reviewed.candidates),
+                          } : {}),
                           instruction: 'Use this as the complete selection result. Place only final verdict strong or usable inside its refined startSec/endSec; aestheticScore and roleFit never override reject. For an opening, prefer the accepted range with the highest openingFrameScore that satisfies the requested face/composition preference. Place source video with muted=true because source audio was excluded. Do not run another visual review after placement.',
                         } : geometryOnly ? {
                           instruction: 'Technical measurements only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
@@ -1293,7 +1449,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     }
                   : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
               } finally {
-                clearToolProgress(toolId);
+                if (!opts?.reportProgress) clearToolProgress(toolId);
               }
             }
             const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
@@ -1420,6 +1576,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         editorialBrief: reviewed.brief,
                         editorialComparisonSummary: reviewed.comparisonSummary,
                         editorialCandidates: reviewed.candidates,
+                        ...(opts?.collectOpeningEvidence ? {
+                          __openingEvidence: editorialOpeningEvidence(sourceFile!, targetAssetId, targetAsset.label || targetAssetId, reviewed.candidates),
+                        } : {}),
                         instruction: 'Use this as the complete selection result. Place only final verdict strong or usable inside its refined startSec/endSec; aestheticScore and roleFit never override reject. For an opening, prefer the accepted range with the highest openingFrameScore that satisfies the requested face/composition preference. Place source video with muted=true because source audio was excluded. Do not run another visual review after placement.',
                       } : geometryOnly ? {
                         instruction: 'Technical measurements only. They do not approve a source range for aesthetic or action-based selection; request one editorial review before placing any visually selected interval.',
@@ -1430,7 +1589,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }
                 : { ok: false, error: t('workbench.visualAnalysisFoundNothingWhy') };
             } finally {
-              clearToolProgress(toolId);
+              if (!opts?.reportProgress) clearToolProgress(toolId);
             }
           }
           case 'visual_brief': {

@@ -400,6 +400,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "chatGen.assetScope.mine": "My assets",
   "chatGen.assetScope.cloud": "Cloud",
   "chatGen.assetScope.official": "Official",
+  "chatGen.editorialCapacityShortfall":
+    "The high-quality footage is about {s}s shorter than the narration. The best available edit is complete; you can add footage or adjust it manually on the timeline.",
   "workbench.searchedMediaN": "Found {n} project media segments",
   "workbench.searchedMediaNoMatch":
     "No matching segment in the project video sources",

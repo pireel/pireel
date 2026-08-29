@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildEditorialReviewProxyPlan } from './editorial-review-proxy';
+import {
+  buildEditorialReviewProxyPlan,
+  editorialReviewProxyMeetsProviderMinimum,
+} from './editorial-review-proxy';
 
 describe('editorial review proxy plan', () => {
   it('uses each maximal interval exactly by default so its model clock starts at zero', () => {
@@ -52,5 +55,14 @@ describe('editorial review proxy plan', () => {
       { id: 'candidate-2', startSec: 9, endSec: 10, technicalRank: 2, technicalScore: 70, frames: [] },
     ], 10, 1);
     expect(plan.map((segment) => [segment.sourceStartSec, segment.sourceEndSec])).toEqual([[0, 2], [8, 10]]);
+  });
+
+  it('routes provider-too-short reels directly to ordered still review', () => {
+    expect(editorialReviewProxyMeetsProviderMinimum([
+      { id: 'short', startSec: 4, endSec: 5.9, technicalRank: 1, technicalScore: 90, frames: [] },
+    ])).toBe(false);
+    expect(editorialReviewProxyMeetsProviderMinimum([
+      { id: 'long-enough', startSec: 4, endSec: 6.3, technicalRank: 1, technicalScore: 90, frames: [] },
+    ])).toBe(true);
   });
 });

@@ -121,6 +121,8 @@ describe("静态提示词完整性", () => {
     expect(CHAT_IDENTITY).toContain("concise editorial progress, concrete results, and the final recap");
     expect(CHAT_IDENTITY).not.toContain('Do not emit process preambles such as "让我先…"');
     expect(CHAT_IDENTITY).toContain("ALWAYS emit a short structured recap");
+    expect(CHAT_IDENTITY).toContain("do not call review_visuals");
+    expect(CHAT_IDENTITY).toContain("do not add a generic rendered review");
     expect(CHAT_IDENTITY).not.toContain("hard pre-pilot checkpoint");
     expect(mcpInstructions("test-version")).toContain(
       "Ask one concise question and wait only when a user-owned decision changes truth, cost, selection or deliverable shape",
@@ -700,6 +702,7 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     );
     expect(CHAT_IDENTITY).toContain("A stored/default voice is neither a recommendation nor approval");
     expect(mcpInstructions("test-version")).toContain("Generated narration needs an exact finalized script and a concrete voiceId");
+    expect(mcpInstructions("test-version")).toContain("call list_skills and then read_skill");
     expect(mcpInstructions("test-version")).toContain("the runtime compiles separate delivery controls only for synthesis");
     expect(CHAT_IDENTITY).toContain(
       "never look for or claim a monolithic digital-human workflow",

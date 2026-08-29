@@ -4,6 +4,7 @@ export const COMMON_ZH: Record<string, string> = {
   'common.analyzingVisualsAboutSec': '分析画面… 预计约 {sec}s',
   'common.analyzingVisualSemanticsColor': '画面语义/调色分析…',
   'common.analyzingVisualsPctSec': '分析画面 {pct}% · 约剩 {sec}s',
+  'common.analyzingVisualBatchProgress': '批量分析画面 · 已完成 {done}/{total} · 总进度 {pct}% · 当前：{label}',
   'common.bigNumber': '大数字',
   'common.blinds': '百叶窗',
   'common.bulletList': '要点列表',

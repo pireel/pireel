@@ -13,6 +13,8 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     skillVersion: '2099-01-01.1',
     callBridge: vi.fn(async () => ({ ok: true, summary: 'done' })),
     listFrames: vi.fn(() => [{ id: 'f1', title: 'F1', summary: 's' }]),
+    listSkills: vi.fn(async () => ({ ok: true, summary: '1 skill', data: { skills: [{ id: 'usk_1', title: '大女主' }] } })),
+    readSkill: vi.fn(async (id: string) => ({ ok: true, summary: id, data: { skill: { id, playbook: 'PB' } } })),
     readFrame: vi.fn((id: string) => ({ ok: true, summary: id, data: { playbook: 'PB' } })),
     readEditingGuide: vi.fn(() => ({ ok: true, data: { guide: 'G' } })),
     assembleComposeBrief: vi.fn((_d: Record<string, unknown>, instruction: string) => ({ ok: true, data: { system: 'SYS', prompt: `P:${instruction}` } })),
@@ -47,9 +49,20 @@ describe('MCP 工具面', () => {
     const names = new Set(buildMcpTools().map((t) => t.name));
     // chatOnly 工具(review_visuals 这类托管视觉模型)不出现在 MCP 面——外部 agent 通过 capture_frame/review_sequence 使用自己的眼睛
     for (const d of STUDIO_TOOLS) expect(names.has(d.id)).toBe(!d.chatOnly);
-    for (const extra of ['get_state', 'list_frames', 'compose_block_brief', 'apply_block', 'review_sequence', 'get_icons', 'search_stock', 'import_stock']) {
+    for (const extra of ['get_state', 'list_frames', 'list_skills', 'read_skill', 'compose_block_brief', 'apply_block', 'review_sequence', 'get_icons', 'search_stock', 'import_stock']) {
       expect(names.has(extra)).toBe(true);
     }
+  });
+  it('私有/community Skill 通过稳定的目录与正文接口暴露，不把内部实现当契约', () => {
+    const tools = buildMcpTools();
+    const list = tools.find((tool) => tool.name === 'list_skills')!;
+    const read = tools.find((tool) => tool.name === 'read_skill')!;
+    expect(list.description).toContain('private author-owned Skills');
+    expect(list.description).toContain('never private playbook text');
+    expect((read.inputSchema as { required?: string[] }).required).toContain('skill_id');
+    expect(read.description).toContain('stable Skill boundary');
+    expect(read.description).toContain('list_voices');
+    expect(read.description).not.toContain('editorialOpeningEvidence');
   });
   it('自家 LLM 收费工具在 MCP 面标注 credits 警示并指到 BYO 流(商业模式:编排+文本生成走用户订阅)', () => {
     const tools = buildMcpTools();
@@ -124,16 +137,20 @@ describe('MCP 协议处理', () => {
     const r = await handleMcpRequest({ id: 2, method: 'resources/list' }, deps());
     expect(r!.error?.code).toBe(-32601);
   });
-  it('服务端内容工具不过桥:read_editing_guide / read_frame / list_frames', async () => {
+  it('服务端内容工具不过桥:read_editing_guide / read_frame / list_frames / Studio Skills', async () => {
     const d = deps();
     await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'read_editing_guide' } }, d);
     await handleMcpRequest({ id: 4, method: 'tools/call', params: { name: 'read_frame', arguments: { frame_id: 'f1' } } }, d);
     await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'list_frames' } }, d);
+    await handleMcpRequest({ id: 51, method: 'tools/call', params: { name: 'list_skills', arguments: { query: '大女主' } } }, d);
+    await handleMcpRequest({ id: 52, method: 'tools/call', params: { name: 'read_skill', arguments: { skill_id: 'usk_1' } } }, d);
     expect(d.callBridge).not.toHaveBeenCalled();
     expect(d.readEditingGuide).toHaveBeenCalled();
     expect(d.readFrame).toHaveBeenCalledWith('f1');
+    expect(d.listSkills).toHaveBeenCalledWith({ query: '大女主' });
+    expect(d.readSkill).toHaveBeenCalledWith('usk_1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_voices', 'read_editing_guide', 'read_frame', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_skills', 'list_voices', 'read_editing_guide', 'read_frame', 'read_skill', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);

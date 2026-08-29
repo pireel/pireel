@@ -15,6 +15,19 @@ export interface EditorialReviewProxySegment {
 
 const round3 = (value: number) => Math.round(value * 1_000) / 1_000;
 
+// Qwen's base video input accepts videos from 2 seconds. Leave a small encoder/container
+// margin because a planned 2.000s reel can be reported a frame shorter after muxing.
+export const MIN_EDITORIAL_REVIEW_PROXY_SEC = 2.25;
+
+export function editorialReviewProxyMeetsProviderMinimum(
+  specs: readonly EditorialCandidateSpec[],
+): boolean {
+  const plannedDurationSec = specs.reduce((total, candidate) => (
+    total + Math.max(0, candidate.endSec - candidate.startSec)
+  ), 0);
+  return plannedDurationSec >= MIN_EDITORIAL_REVIEW_PROXY_SEC;
+}
+
 export function buildEditorialReviewProxyPlan(
   specs: readonly EditorialCandidateSpec[],
   sourceDurationSec: number,
