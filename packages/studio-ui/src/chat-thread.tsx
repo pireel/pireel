@@ -364,7 +364,7 @@ export function ChatThread({
             data: {
               skipped: true,
               reason: "editorial-picture-locked",
-              instruction: "The assembled picture is FINAL for this turn: it deterministically covers the narration with reviewed ranges. Do not remove, reorder, or rebuild picture clips, and do not re-judge shots by topic — reviewed footage only needs to match tone, not narration subject matter. Continue with captions, typography, sound, and the final summary. Only a new user request may change the picture.",
+              instruction: "The assembled picture is FINAL for this turn: it deterministically covers the narration with reviewed ranges. Do not remove, reorder, or rebuild picture clips. Selection criteria live in the review brief and were already applied during review — do not re-litigate selection (topic fit, ordering, taste) after assembly. Continue with captions, typography, sound, and the final summary. Only a new user request may change the picture.",
             },
           });
           return;
@@ -496,7 +496,7 @@ export function ChatThread({
                   // A covered assembly is equally explicit the other way: without the FINAL
                   // declaration a model re-planned "its own" cut and stripped the montage apart.
                   ...(assemblyCovered ? {
-                    instruction: `The montage is COMPLETE: deterministic assembly placed ${preparedPlacement.actualDurationSec}s of reviewed picture covering the full ${preparedPlacement.targetDurationSec}s narration at natural speed. This IS the final picture for this turn — do not remove, reorder, re-add, or re-plan picture clips, and do not re-judge shots by topic: reviewed footage only needs to match tone, not narration subject matter. Continue with captions, typography, sound, and the final summary.`,
+                    instruction: `The montage is COMPLETE: deterministic assembly placed ${preparedPlacement.actualDurationSec}s of reviewed picture covering the full ${preparedPlacement.targetDurationSec}s narration at natural speed. This IS the final picture for this turn — do not remove, reorder, re-add, or re-plan picture clips. Selection criteria live in the review brief and were already applied during review; do not re-litigate selection (topic fit, ordering, taste) after assembly. Continue with captions, typography, sound, and the final summary.`,
                   } : {
                     shortfallSec: Math.round(assemblyShortfallSec * 10) / 10,
                     instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s narration. Close the remaining ${Math.round(assemblyShortfallSec * 10) / 10}s in ONE follow-up add_clips batch using unplaced accepted or reserve:true ranges from the SAME review receipt; never stretch, slow down, or repeat already-placed shots. If accepted capacity is genuinely exhausted, shorten the narration script or report the gap.`,
