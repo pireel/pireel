@@ -115,7 +115,7 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
 /** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
 export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   const sig = fileSig(file);
-  const cached = getCachedAsr(sig);
+  const cached = await getCachedAsr(sig);
   if (cached) return cached;
 
   const probe = await probeVideoFile(file).catch(() => null);

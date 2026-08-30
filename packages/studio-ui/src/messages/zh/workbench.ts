@@ -433,6 +433,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.noTranscriptYetExtract":
     "还没有口播稿——先提取口播(智能剪口播/字幕面板)再同步",
   "workbench.noTranscriptYetRun": "还没有口播稿,先调用 read_script 获取",
+  "workbench.speechReused": "同稿同音色已合成过,直接复用缓存语音(未扣费)",
   "workbench.wordCutNeedsPrimarySpeech":
     "逐词剪辑只针对主轨视频里的原声口播;当前旁白是生成的语音轨,要改内容请修改口播稿文本后重新生成语音",
   "workbench.noVideoYet": "还没有视频",

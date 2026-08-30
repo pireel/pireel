@@ -18,6 +18,14 @@ import {
 import { extractThumbnails } from '@pireel/studio-engine/video-edit/thumbnails';
 import { analyzeMouthAtTimes } from './geometry';
 import {
+  editorialBriefHash,
+  editorialReviewCacheKey,
+  editorialSpecsSig,
+  getCachedEditorialReview,
+  setCachedEditorialReview,
+} from './editorial-review-cache';
+import { fileSig } from './media';
+import {
   deleteEditorialReviewProxy,
   editorialReviewProxyMeetsProviderMinimum,
   renderEditorialReviewProxy,
@@ -35,6 +43,8 @@ export interface EditorialCandidateReviewResult {
   brief: string;
   comparisonSummary: string;
   candidates: EditorialCandidateReview[];
+  /** True when this result came from the persistent review cache (no provider charge). */
+  reused?: true;
 }
 
 export interface EditorialOpeningEvidence {
@@ -271,6 +281,16 @@ export async function reviewEditorialCandidates(
   }), options.maxCandidates ?? 6);
   if (!specs.length) return { brief: normalizedBrief, comparisonSummary: '', candidates: [] };
 
+  // Same file already reviewed → reuse the stored result instead of re-paying the provider.
+  // Exact (same brief + same intervals) reuse is always safe; dev builds additionally tolerate
+  // brief/window drift so debugging reruns cost nothing. Skipping here also skips proxy
+  // rendering/upload and the local face passes — the cached candidates already embed them.
+  const reviewCacheKey = editorialReviewCacheKey(fileSig(file), options.maxCandidates ?? 6);
+  const reviewBriefHash = editorialBriefHash(normalizedBrief);
+  const reviewSpecsSig = editorialSpecsSig(specs);
+  const cachedReview = await getCachedEditorialReview(reviewCacheKey, reviewBriefHash, reviewSpecsSig);
+  if (cachedReview) return { ...cachedReview.result, reused: true };
+
   const { requiresClosedMouth, requiresSoloSubject } = editorialBriefFaceRequirements(normalizedBrief);
   const faceScanRanges = specs.map((candidate) => ({
     startSec: Math.max(0, candidate.startSec - 0.15),
@@ -427,6 +447,12 @@ export async function reviewEditorialCandidates(
       .sort((a, b) => Number(a.verdict === 'reject') - Number(b.verdict === 'reject') || a.rank - b.rank), {
         allowMultiple: explicitlyRequestsMultipleFromSource,
       });
+    void setCachedEditorialReview(reviewCacheKey, {
+      briefHash: reviewBriefHash,
+      specsSig: reviewSpecsSig,
+      savedAt: Date.now(),
+      result: { brief: normalizedBrief, comparisonSummary, candidates: normalized },
+    });
     return {
       brief: normalizedBrief,
       comparisonSummary,

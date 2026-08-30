@@ -223,6 +223,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.followSourceUnavailable": "Add a video clip with known dimensions first",
   "workbench.couldNotGenerateCaptions":
     "Could not generate captions (the transcript may be empty)",
+  "workbench.speechReused": "Same script and voice already synthesized — reused the cached audio (no charge)",
   "workbench.wordCutNeedsPrimarySpeech":
     "Word-exact cutting addresses speech on the primary video lane; this project's narration is a generated voice track — edit the script text and regenerate the speech instead",
   "workbench.captionsNeedNarrationOnTimeline":

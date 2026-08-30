@@ -123,6 +123,7 @@ import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
 import { clearToolProgress, setToolProgress, type ToolProgress } from './tool-progress';
 import { fileSig, probeVideoFile } from './media';
+import { deleteCachedTts, getCachedTts, setCachedTts, ttsCacheKey, type CachedTtsAsset } from './tts-cache';
 import { loadLocalAssetFile, loadLocalVideo, saveLocalVideo } from './local-media';
 import { materializeRemoteMedia } from './remote-media';
 import { localAssetIndexEntry, runLocalImportSession } from './local-import-session';
@@ -1378,9 +1379,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const acceptedDurationSec = Math.round(annotatedResults.reduce((total, result) => (
                 total + sourceAcceptedSec(result as Record<string, unknown>)
               ), 0) * 1_000) / 1_000;
+              const reusedCount = annotatedResults.filter((result) => (
+                (result as Record<string, unknown>).editorialReviewReused === true
+              )).length;
               const batchResult: StudioToolResult = {
                 ok: true,
-                summary: `analyzed ${completed}/${batchItems.length} video sources`,
+                summary: `analyzed ${completed}/${batchItems.length} video sources${reusedCount ? ` (${reusedCount} reused from cache, no charge)` : ''}`,
                 data: {
                   analysisMode: 'editorial-batch',
                   editorialBrief: reviewBrief,
@@ -1463,6 +1467,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                           editorialBrief: reviewed.brief,
                           editorialComparisonSummary: reviewed.comparisonSummary,
                           editorialCandidates: reviewed.candidates,
+                          ...(reviewed.reused ? { editorialReviewReused: true } : {}),
                           ...(opts?.collectOpeningEvidence ? {
                             __openingEvidence: editorialOpeningEvidence(file, entry.assetId, entry.label, reviewed.candidates),
                           } : {}),
@@ -1603,6 +1608,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                         editorialBrief: reviewed.brief,
                         editorialComparisonSummary: reviewed.comparisonSummary,
                         editorialCandidates: reviewed.candidates,
+                        ...(reviewed.reused ? { editorialReviewReused: true } : {}),
                         ...(opts?.collectOpeningEvidence ? {
                           __openingEvidence: editorialOpeningEvidence(sourceFile!, targetAssetId, targetAsset.label || targetAssetId, reviewed.candidates),
                         } : {}),
@@ -2631,7 +2637,32 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const instruction = typeof input.instruction === 'string' ? input.instruction.trim().slice(0, 500) : '';
             const { action: _ignoredAction, instruction: _rawInstruction, ...speechArgs } = input;
             const speechInput = { ...speechArgs, text, voiceId, ...(instruction ? { instruction } : {}) };
+            const speechResult = (asset: CachedTtsAsset, reused: boolean) => ({
+              ok: true as const,
+              summary: t(reused ? 'workbench.speechReused' : 'workbench.speechGenerated'),
+              data: {
+                asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, transcriptText: asset.transcriptText, durationSec: asset.durationSec, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
+                model: asset.model,
+                voiceId: asset.voiceId,
+                voiceLabel: asset.voiceLabel,
+                charCount: asset.charCount,
+                estimatedDurationSec: asset.estimatedDurationSec,
+                next: `asset.durationSec is the measured synthesized-audio duration and is authoritative; estimatedDurationSec was only the pre-generation estimate. For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration. Never call set_bgm for speech.${asset.durationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.durationSec)))}.`}`,
+              },
+            });
             try {
+              // Same script + same voice/delivery = same audio: reuse the already-uploaded result
+              // instead of paying the provider once per debugging rerun. A HEAD probe guards
+              // against a cached URL whose upload has since been cleaned up.
+              const cacheKey = ttsCacheKey(speechInput);
+              const cached = await getCachedTts(cacheKey);
+              if (cached) {
+                const alive = await fetch(cached.url, { method: 'HEAD', ...(signal ? { signal } : {}) })
+                  .then((probe) => probe.ok)
+                  .catch(() => false);
+                if (alive) return speechResult(cached, true);
+                deleteCachedTts(cacheKey);
+              }
               report(t('workbench.generatingSpeech'));
               const res = await fetch('/api/studio/speech', {
                 method: 'POST',
@@ -2645,20 +2676,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 detail?: string;
               };
               if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || t('workbench.speechGenerationFailed') };
-              const asset = body.asset;
-              return {
-                ok: true,
-                summary: t('workbench.speechGenerated'),
-                data: {
-                  asset: { id: asset.id, kind: asset.kind, url: asset.url, mime: asset.mime, transcriptText: asset.transcriptText, durationSec: asset.durationSec, estimatedDurationSec: asset.estimatedDurationSec, ...(asset.label ? { label: asset.label } : {}) },
-                  model: asset.model,
-                  voiceId: asset.voiceId,
-                  voiceLabel: asset.voiceLabel,
-                  charCount: asset.charCount,
-                  estimatedDurationSec: asset.estimatedDurationSec,
-                  next: `asset.durationSec is the measured synthesized-audio duration and is authoritative; estimatedDurationSec was only the pre-generation estimate. For timeline narration, pass the returned asset fields unchanged to register_media, then call add_clips with role=narration. Never call set_bgm for speech.${asset.durationSec > 15 ? ' For lip_sync, split the performance into deliberate <=15s sections.' : ` For lip_sync, use durationSec approximately ${Math.max(4, Math.min(15, Math.ceil(asset.durationSec)))}.`}`,
-                },
-              };
+              setCachedTts(ttsCacheKey(speechInput), body.asset);
+              return speechResult(body.asset, false);
             } finally {
               clearToolProgress(toolId);
             }
