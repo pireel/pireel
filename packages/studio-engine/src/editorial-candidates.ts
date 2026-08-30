@@ -937,31 +937,27 @@ export function normalizeEditorialCandidateReviews(
     .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
 }
 
-/** One raw take normally contains one intended performance surrounded by setup and alternate
- * tries, so the highest-ranked accepted range leads. Every further NON-OVERLAPPING accepted
- * range survives as an explicit `reserve` (bounded below): a single-reserve policy once threw
- * away a reviewed 92-score 3.8s window from a 30s source, and the coverage fit was then forced
- * into a monolithic hold. Rejects always remain as audit evidence. */
-const MAX_RESERVE_CANDIDATES_PER_SOURCE = 3;
+/** The quality standard is the only gate: EVERY accepted range survives. The highest-ranked one
+ * leads (opening/ordering semantics); the rest are marked `reserve` purely as secondary-choice
+ * information. Only overlapping alternatives collapse to their best-ranked representative (two
+ * verdicts on the same footage are one shot, not two), and rejects remain as audit evidence.
+ * Earlier count-capped policies (one reserve, then three) threw away reviewed 90+-score windows
+ * from long sources and forced coverage into monolithic holds. */
 export function selectPrimarySourceCandidate(
   candidates: readonly EditorialCandidateReview[],
   options: { allowMultiple?: boolean } = {},
 ): EditorialCandidateReview[] {
   const ordered = [...candidates].sort((left, right) => left.rank - right.rank || right.score - left.score || left.startSec - right.startSec);
   if (options.allowMultiple) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
-  const primary = ordered.find((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
-  if (!primary) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
-  const kept: EditorialCandidateReview[] = [primary];
-  const reserveIds = new Set<string>();
+  const kept: EditorialCandidateReview[] = [];
   for (const candidate of ordered) {
-    if (reserveIds.size >= MAX_RESERVE_CANDIDATES_PER_SOURCE) break;
-    if (candidate.candidateId === primary.candidateId) continue;
     if (candidate.verdict !== 'strong' && candidate.verdict !== 'usable') continue;
     if (candidate.issues.includes('near-duplicate')) continue;
     if (kept.some((other) => overlapDuration(candidate.startSec, candidate.endSec, other.startSec, other.endSec) > 0)) continue;
     kept.push(candidate);
-    reserveIds.add(candidate.candidateId);
   }
+  if (!kept.length) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  const primaryId = kept[0]!.candidateId;
   return ordered
     .filter((candidate) => kept.some((other) => other.candidateId === candidate.candidateId)
       || candidate.verdict === 'reject'
@@ -969,6 +965,8 @@ export function selectPrimarySourceCandidate(
     .map((candidate, index) => ({
       ...candidate,
       rank: index + 1,
-      ...(reserveIds.has(candidate.candidateId) ? { reserve: true } : {}),
+      ...(kept.some((other) => other.candidateId === candidate.candidateId) && candidate.candidateId !== primaryId
+        ? { reserve: true }
+        : {}),
     }));
 }
