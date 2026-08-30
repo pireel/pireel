@@ -413,13 +413,112 @@ export function evaluateEditorialAssembly(input: {
   return violations;
 }
 
+/** One placeable action unit ("brick") derived from a reviewed phase, and a chain of contiguous
+ * bricks from one continuous take. */
+export interface EditorialShotUnit {
+  startSec: number;
+  endSec: number;
+  score: number;
+}
+export type EditorialShotChain = EditorialShotUnit[];
+
+/** Explode one reconciled accepted candidate into chains of contiguous action units.
+ *
+ * The review's action phases ARE the content segmentation; treating the candidate span as the
+ * placeable unit forced every downstream stage to re-derive content structure from annotations
+ * (whole-span injection, static shaving, keep-longest — each a patch over the same mismatch).
+ * Here each non-static phase becomes a scored brick (phase utility scales the candidate score),
+ * statically-noted setup/hold phases are simply NOT bricks — they split the take into separate
+ * chains — and a temporal gap between phases splits chains too (unannotated footage is never
+ * silently bridged). Environment/detail roles keep their static imagery as usable bricks. */
+export function reservoirShotChains(candidate: EditorialCandidateReview): EditorialShotChain[] {
+  const phases = [...candidate.actionPhases]
+    .map((phase) => ({
+      ...phase,
+      startSec: Math.max(candidate.startSec, phase.startSec),
+      endSec: Math.min(candidate.endSec, phase.endSec),
+    }))
+    .filter((phase) => phase.endSec - phase.startSec > 0.05)
+    .sort((left, right) => left.startSec - right.startSec);
+  if (!phases.length) {
+    // Sparse/legacy reviews without phases: the (static-shaved) suggested span is one brick.
+    const startSec = candidate.suggestedStartSec ?? candidate.startSec;
+    const endSec = candidate.suggestedEndSec ?? candidate.endSec;
+    return endSec - startSec > 0.05 ? [[{ startSec: round3(startSec), endSec: round3(endSec), score: candidate.score }]] : [];
+  }
+  const chains: EditorialShotChain[] = [];
+  let current: EditorialShotChain = [];
+  let cursor: number | null = null;
+  for (const phase of phases) {
+    const staticBreak = STATIC_PHASE_NOTE.test(phase.note)
+      && (phase.phase === 'setup' || phase.phase === 'hold')
+      && candidate.contentRole !== 'environment'
+      && candidate.contentRole !== 'detail';
+    const discontinuous = cursor !== null && phase.startSec > cursor + 0.25;
+    if ((staticBreak || discontinuous) && current.length) {
+      chains.push(current);
+      current = [];
+    }
+    cursor = Math.max(cursor ?? phase.endSec, phase.endSec);
+    if (staticBreak) continue;
+    current.push({
+      startSec: round3(phase.startSec),
+      endSec: round3(phase.endSec),
+      score: Math.round(Math.min(100, candidate.score * (0.6 + phaseUtility(candidate, phase) * 0.4))),
+    });
+  }
+  if (current.length) chains.push(current);
+  return chains;
+}
+
+/** All placeable takes from one chain: every contiguous run of bricks long enough to stand alone
+ * (score = duration-weighted mean), plus peak-centred fractions of single long bricks so a lone
+ * 20s performance phase still offers shorter takes. Rhythm shaping biases toward mid lengths. */
+function chainAssemblyChoices(
+  chain: EditorialShotChain,
+  baseClip: EditorialAssemblyClip,
+): Array<{ clip: EditorialAssemblyClip; score: number }> {
+  const spans: Array<{ startSec: number; endSec: number; score: number }> = [];
+  for (let from = 0; from < chain.length; from += 1) {
+    let weighted = 0;
+    for (let to = from; to < chain.length; to += 1) {
+      const unit = chain[to]!;
+      weighted += (unit.endSec - unit.startSec) * unit.score;
+      const startSec = chain[from]!.startSec;
+      const endSec = unit.endSec;
+      const durationSec = endSec - startSec;
+      if (durationSec < MIN_ASSEMBLY_SHOT_SEC) continue;
+      spans.push({ startSec, endSec, score: weighted / durationSec });
+      if (from === to && durationSec > ASSEMBLY_LONG_SHOT_SEC) {
+        const centerSec = (unit.startSec + unit.endSec) / 2;
+        for (const ratio of [0.45, 0.7]) {
+          const range = centeredRange(unit.startSec, unit.endSec, centerSec, durationSec * ratio);
+          if (range.endSec - range.startSec >= MIN_ASSEMBLY_SHOT_SEC) {
+            spans.push({ ...range, score: unit.score });
+          }
+        }
+      }
+    }
+  }
+  return [...new Map(spans
+    .map((span) => ({
+      clip: { ...baseClip, sourceInSec: round3(span.startSec), sourceOutSec: round3(span.endSec) },
+      score: Math.round(rhythmShapedScore(span.score, span.endSec - span.startSec) * 10) / 10,
+    }))
+    .sort((left, right) => right.score - left.score)
+    .map((choice) => [
+      `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,
+      choice,
+    ])).values()];
+}
+
 /** Fit reviewed visual choices to measured narration with a multiple-choice knapsack.
  *
- * Each accepted source reservoir contributes natural provider/local phase choices rather than
- * fixed global shot lengths. The optimizer keeps source order, uses at most one choice from one
- * accepted reservoir, maximizes covered narration first and editorial score second, then places
- * the result contiguously at natural-speed source time. This is deterministic assembly from the
- * one paid review receipt; it never asks the provider to review the same footage again. */
+ * Each chain of contiguous action units contributes its natural takes rather than fixed global
+ * shot lengths. The optimizer keeps source order, uses at most one take from one chain,
+ * maximizes covered narration first and editorial score second, then places the result
+ * contiguously at natural-speed source time. This is deterministic assembly from the one paid
+ * review receipt; it never asks the provider to review the same footage again. */
 export function planEditorialAssembly(input: {
   clips: readonly EditorialAssemblyClip[];
   sources: readonly EditorialAssemblySource[];
@@ -438,83 +537,47 @@ export function planEditorialAssembly(input: {
     };
   }
   const sourceById = new Map(input.sources.map((source) => [source.assetId, source]));
-  const seenReservoirs = new Set<string>();
   type PlanningRow = {
     clip: EditorialAssemblyClip;
     originalIndex: number;
     choices: Array<{ clip: EditorialAssemblyClip; score: number }>;
   };
+  // The full brick-chain pool: every accepted candidate of every reviewed source, exploded into
+  // chains of contiguous action units. This IS the assembly's whole choice space — the batch only
+  // decides which chains lead (opening/ordering) by claiming them below.
+  type ChainEntry = { assetId: string; chain: EditorialShotChain; startSec: number; endSec: number; used: boolean };
+  const chainPool: ChainEntry[] = input.sources.flatMap((source) => (
+    source.candidates
+      .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
+      .map(reconcileEditorialCandidateTemporalEvidence)
+      .flatMap((candidate) => reservoirShotChains(candidate))
+      .flatMap((chain) => (chain.length ? [{
+        assetId: source.assetId,
+        chain,
+        startSec: chain[0]!.startSec,
+        endSec: chain[chain.length - 1]!.endSec,
+        used: false,
+      }] : []))
+  ));
   const rows = input.clips.flatMap<PlanningRow>((clip, originalIndex) => {
     const source = sourceById.get(clip.assetId);
-    const accepted = (source?.candidates ?? [])
-      .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
-      .map(reconcileEditorialCandidateTemporalEvidence);
-    const candidate = accepted.find((row) => (
-      clip.sourceInSec >= row.startSec - 0.06 && clip.sourceOutSec <= row.endSec + 0.06
-    ));
-    if (!candidate) {
-      // An UNREVIEWED source keeps the neutral pass-through so the contract stays total. A range
-      // from a REVIEWED source that misses every accepted candidate would fail the placement
-      // guard anyway; passing it through dooms the WHOLE optimized batch to that guard error, so
-      // drop just this row (the receipt reports it in droppedClipCount) and place the rest.
-      if (!source) return [{ clip, originalIndex, choices: [{ clip, score: 50 }] }];
-      return [];
+    if (!source) {
+      // An UNREVIEWED source keeps the neutral pass-through so the contract stays total.
+      return [{ clip, originalIndex, choices: [{ clip, score: 50 }] }];
     }
-    const reservoirKey = `${clip.assetId}:${candidate.candidateId}`;
-    if (seenReservoirs.has(reservoirKey)) return [];
-    seenReservoirs.add(reservoirKey);
-    const requestedKey = `${round3(clip.sourceInSec)}:${round3(clip.sourceOutSec)}`;
-    const reviewedChoices = candidate.cutOptions.map((option) => ({
-      clip: { ...clip, sourceInSec: option.startSec, sourceOutSec: option.endSec },
-      score: option.score,
-    }));
-    const matchingReviewed = candidate.cutOptions.find((option) => (
-      `${round3(option.startSec)}:${round3(option.endSec)}` === requestedKey
+    // The batch row claims the chain its requested range overlaps; a range from a reviewed
+    // source that touches no chain (mis-ranged, static-only, or already claimed) is dropped —
+    // passing it through would doom the WHOLE optimized batch to the placement guard error.
+    const entry = chainPool.find((candidate) => (
+      candidate.assetId === clip.assetId
+      && !candidate.used
+      && overlapDuration(clip.sourceInSec, clip.sourceOutSec, candidate.startSec, candidate.endSec) > 0
     ));
-    // The reservoir's longest independently usable range is always a reachable choice. The stated
-    // accepted capacity is measured on these spans; without this row the knapsack tops out at the
-    // sum of curated short cuts and a fully covered narration can be unreachable by construction.
-    // Synthetic choices obey the same elimination as reviewed cut options: reconcile drops
-    // static-dominant ranges, and bypassing that once let a mostly-static 19.5s whole-source
-    // span enter the montage at full score.
-    const failsStandard = (startSec: number, endSec: number) => (
-      editorialStaticDominantSpan(candidate.contentRole, candidate.actionPhases, startSec, endSec)
-    );
-    const suggestedInSec = candidate.suggestedStartSec ?? candidate.startSec;
-    const suggestedOutSec = candidate.suggestedEndSec ?? candidate.endSec;
-    const choices = [
-      ...reviewedChoices,
-      ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC && !failsStandard(suggestedInSec, suggestedOutSec)
-        ? [{ clip: { ...clip, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec }, score: candidate.score }]
-        : []),
-      ...(failsStandard(clip.sourceInSec, clip.sourceOutSec)
-        ? []
-        : [{
-            clip,
-            score: matchingReviewed?.score ?? Math.max(0, candidate.score - (
-              clip.sourceOutSec - clip.sourceInSec > candidate.cutOptions[0]?.durationSec * 1.5 ? 10 : 0
-            )),
-          }]),
-    ];
-    const unique = [...new Map(choices
-      .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= MIN_ASSEMBLY_SHOT_SEC)
-      .map((choice) => ({
-        ...choice,
-        score: rhythmShapedScore(choice.score, choice.clip.sourceOutSec - choice.clip.sourceInSec),
-      }))
-      .sort((left, right) => right.score - left.score)
-      .map((choice) => [
-        `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,
-        choice,
-      ])).values()];
-    const bestScore = unique[0]?.score ?? 0;
-    const viable = bestScore >= 70
-      ? unique.filter((choice) => choice.score >= Math.max(50, bestScore - 35))
-      : unique;
-    // Every usable range in this reservoir failed the selection standard: drop the row entirely
-    // (reported via droppedClipCount) rather than feeding an empty-choice row into the DP.
-    if (!viable.length) return [];
-    return [{ clip, originalIndex, choices: viable }];
+    if (!entry) return [];
+    entry.used = true;
+    const choices = chainAssemblyChoices(entry.chain, clip);
+    if (!choices.length) return [];
+    return [{ clip, originalIndex, choices }];
   });
   if (!rows.length) {
     // Every requested range missed the accepted evidence. Return the request untouched so the
@@ -533,43 +596,14 @@ export function planEditorialAssembly(input: {
   // choice space as a droppable filler row, so a fully covered narration is reachable whenever
   // the reviewed pool allows it. An under-target plan therefore means the POOL is exhausted —
   // a fact to surface to the user — never that the model under-sampled its batch.
-  for (const source of input.sources) {
-    const accepted = source.candidates
-      .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
-      .map(reconcileEditorialCandidateTemporalEvidence);
-    for (const candidate of accepted) {
-      const reservoirKey = `${source.assetId}:${candidate.candidateId}`;
-      if (seenReservoirs.has(reservoirKey)) continue;
-      seenReservoirs.add(reservoirKey);
-      const suggestedInSec = candidate.suggestedStartSec ?? candidate.startSec;
-      const suggestedOutSec = candidate.suggestedEndSec ?? candidate.endSec;
-      const baseClip: EditorialAssemblyClip = {
-        assetId: source.assetId, startSec: 0, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec,
-      };
-      const fillerChoices = [
-        ...candidate.cutOptions.map((option) => ({
-          clip: { ...baseClip, sourceInSec: option.startSec, sourceOutSec: option.endSec },
-          score: option.score,
-        })),
-        ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC
-          && !editorialStaticDominantSpan(candidate.contentRole, candidate.actionPhases, suggestedInSec, suggestedOutSec)
-          ? [{ clip: { ...baseClip }, score: candidate.score }]
-          : []),
-      ];
-      const unique = [...new Map(fillerChoices
-        .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= MIN_ASSEMBLY_SHOT_SEC)
-        .map((choice) => ({
-          ...choice,
-          score: rhythmShapedScore(choice.score, choice.clip.sourceOutSec - choice.clip.sourceInSec),
-        }))
-        .sort((left, right) => right.score - left.score)
-        .map((choice) => [
-          `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,
-          choice,
-        ])).values()];
-      if (!unique.length) continue;
-      rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices: unique });
-    }
+  for (const entry of chainPool) {
+    if (entry.used) continue;
+    const baseClip: EditorialAssemblyClip = {
+      assetId: entry.assetId, startSec: 0, sourceInSec: entry.startSec, sourceOutSec: entry.endSec,
+    };
+    const choices = chainAssemblyChoices(entry.chain, baseClip);
+    if (!choices.length) continue;
+    rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices });
   }
 
   type State = {

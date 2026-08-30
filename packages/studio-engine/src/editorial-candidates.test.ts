@@ -508,8 +508,10 @@ describe('editorial temporal reconciliation and assembly', () => {
     });
     const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
     expect(total).toBeGreaterThanOrEqual(19);
-    // Coverage is reachable without the 20s monolith; rhythm shaping keeps it out of the plan.
-    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec <= 8)).toBe(true);
+    // Coverage is reachable without the 20s monolith: the long phase contributes a peak-centred
+    // fraction and the alternates carry the rest.
+    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec < 16)).toBe(true);
+    expect(planned.clips.length).toBeGreaterThanOrEqual(3);
   });
 
   it('uses a readable portion of the final reviewed interval to close a discrete duration gap', () => {
