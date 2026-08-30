@@ -40,25 +40,6 @@ export const MAX_STUDIO_REFUSED_TIMELINE_READS = 3;
  * re-firing it verbatim (e.g. removing already-removed clip ids seven times) is looping. */
 export const MAX_STUDIO_IDENTICAL_FAILURES = 3;
 
-const clipIdList = (value: unknown): string[] => (Array.isArray(value)
-  ? value.filter((entry): entry is string => typeof entry === 'string')
-  : []);
-const itemClipIds = (value: unknown): string[] => (Array.isArray(value)
-  ? value.flatMap((entry) => (entry && typeof entry === 'object' && typeof (entry as { clipId?: unknown }).clipId === 'string'
-    ? [(entry as { clipId: string }).clipId]
-    : []))
-  : []);
-/** Every tool route that can change a picture shot's presence, duration, order or speed, with
- * its target-id extractor. The picture lock must cover all of them: blocking only removals let a
- * locked montage be shrunk under the narration via a set_clip_properties source-range trim.
- * Framing and audio tools are deliberately absent — they never change coverage. */
-export const STUDIO_PICTURE_SURGERY_TARGETS: Record<string, (input: Record<string, unknown>) => string[]> = {
-  remove_clips: (input) => clipIdList(input.clipIds),
-  set_clip_properties: (input) => itemClipIds(input.items),
-  move_clips: (input) => itemClipIds(input.items),
-  split_clips: (input) => itemClipIds(input.items),
-  set_video_speed: (input) => clipIdList(input.shotIds),
-};
 
 export interface StudioTurnLedger {
   /** Tool receipts published synchronously, before React/useChat commits them to message state. */
@@ -76,6 +57,9 @@ export interface StudioTurnLedger {
   lastFailureSig: string | null;
   /** How many consecutive times that same failing call has been fired. */
   repeatedFailureCount: number;
+  /** A post-assembly edit reopened a picture-vs-narration gap: the assembly gate stands down so
+   * one repair add_clips batch can close it. Cleared when a covering assembly lands. */
+  pictureRepairArmed: boolean;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -114,6 +98,7 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     refusedTimelineReads: 0,
     lastFailureSig: null,
     repeatedFailureCount: 0,
+    pictureRepairArmed: false,
   };
 }
 
@@ -170,7 +155,10 @@ export function recordStudioTurnToolResult(
   const didMutate = !failed && !!data?.delta && typeof data.delta === 'object';
   const editorialAssembly = data?.editorialAssembly;
   if (!failed && editorialAssembly && typeof editorialAssembly === 'object'
-    && editorialAssemblyCoversTarget(editorialAssembly)) ledger.pictureLocked = true;
+    && editorialAssemblyCoversTarget(editorialAssembly)) {
+    ledger.pictureLocked = true;
+    ledger.pictureRepairArmed = false;
+  }
 
   if (record.canMutate && failed) ledger.unsafeUndoBlocked = true;
   if (didMutate) {

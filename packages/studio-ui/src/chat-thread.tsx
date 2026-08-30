@@ -80,7 +80,6 @@ import {
   prepareEditorialPlacement,
   recordStudioTurnToolResult,
   reserveStudioTurnToolCall,
-  STUDIO_PICTURE_SURGERY_TARGETS,
   shouldBlockStudioTurnUndo,
   stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
@@ -321,7 +320,10 @@ export function ChatThread({
         requestedInput,
         narrationEndSec,
       );
-      const editorialPictureLocked = ledger.pictureLocked || hasCompletedEditorialPlacement(effectiveMessages);
+      // Repair arming (a detected coverage gap) stands the assembly gate down so the one legal
+      // fix — an add_clips batch from the same review evidence — is not blocked by its own lock.
+      const editorialPictureLocked = !ledger.pictureRepairArmed
+        && (ledger.pictureLocked || hasCompletedEditorialPlacement(effectiveMessages));
       if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
         publishSuccess({
           ok: true,
@@ -346,31 +348,6 @@ export function ChatThread({
           },
         });
         return;
-      }
-      // The picture lock must hold against demolition through EVERY duration/order route, not
-      // just remove: blocking re-adds while allowing removals let a model strip a complete 53s
-      // montage to 17s, and blocking removals still let it shrink source ranges 3.8s under the
-      // narration via set_clip_properties (rippling captions and titles along). Framing, audio
-      // and non-picture targets (music, sfx, titles) stay allowed.
-      const pictureSurgeryTargets = STUDIO_PICTURE_SURGERY_TARGETS[id];
-      if (pictureSurgeryTargets && editorialPictureLocked) {
-        const pictureShotIds = new Set((comp?.shots ?? []).map((shot) => shot.id));
-        const requestedIds = pictureSurgeryTargets(requestedInput);
-        if (requestedIds.some((clipId) => pictureShotIds.has(clipId))) {
-          publishSuccess({
-            ok: true,
-            skipped: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "主画面已经完成，本轮不再改动画面镜头的时长、顺序或去留"
-              : "The primary picture is already assembled; picture shots keep their duration, order and presence for this turn.",
-            data: {
-              skipped: true,
-              reason: "editorial-picture-locked",
-              instruction: "The assembled picture is FINAL for this turn: it deterministically covers the narration with reviewed ranges. Do not remove, trim, retime, reorder, or rebuild picture clips — shrinking any shot reopens a gap under the narration. Selection criteria live in the review brief and were already applied during review — do not re-litigate selection (topic fit, mouth movement, ordering, taste) after assembly. Framing and audio adjustments on shots remain available. Continue with captions, typography, sound, and the final summary. Only a new user request may change the picture.",
-            },
-          });
-          return;
-        }
       }
       if (id === "review_visuals" && editorialPictureLocked) {
         publishSuccess({
@@ -487,6 +464,38 @@ export function ChatThread({
           : 0;
         const assemblyCovered = !preparedPlacement
           || assemblyShortfallSec <= Math.max(1, preparedPlacement.targetDurationSec * 0.03);
+        // Coverage self-heal replaces the demolition veto: trims are legitimate editing (bad
+        // frames DO get cut), so instead of forbidding picture surgery the turn re-measures the
+        // picture against the narration after each successful non-assembly mutation. A reopened
+        // gap arms repair — the receipt orders one add_clips batch from the same review evidence
+        // and the assembly gate stands down for exactly that fix.
+        let pictureCoverageGapSec = 0;
+        if (out.ok && !preparedPlacement
+          && (ledger.pictureLocked || hasCompletedEditorialPlacement(effectiveStudioTurnMessages(messagesRef.current, ledger)))) {
+          const compAfter = getComp?.();
+          const narrationEnd = compAfter?.audioTracks
+            ?.filter((clip) => clip.role === "narration" && !clip.muted)
+            .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
+          const pictureSec = (compAfter?.shots ?? [])
+            .reduce((sum, shot) => sum + Math.max(0, shot.srcEnd - shot.srcStart), 0);
+          const gap = narrationEnd - pictureSec;
+          if (narrationEnd > 0 && gap > Math.max(1, narrationEnd * 0.03)) {
+            pictureCoverageGapSec = Math.round(gap * 10) / 10;
+            ledger.pictureRepairArmed = true;
+          }
+        }
+        const outWithGap = pictureCoverageGapSec > 0
+          ? {
+              ...out,
+              data: {
+                ...(out.data && typeof out.data === "object" ? out.data : {}),
+                pictureCoverageGap: {
+                  gapSec: pictureCoverageGapSec,
+                  instruction: `This edit left the picture ${pictureCoverageGapSec}s SHORT of the narration. Close the gap now in ONE add_clips batch using unplaced accepted or reserve:true ranges from the existing review receipt; never stretch, slow down, or repeat already-placed shots. The assembly gate is open for exactly this repair.`,
+                },
+              },
+            }
+          : out;
         const reportedOut = out.ok && preparedPlacement
           ? {
               ...out,
@@ -510,7 +519,7 @@ export function ChatThread({
                 },
               },
             }
-          : out;
+          : outWithGap;
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (stopAfterReceipt) userStoppedRef.current = true;
         if (out.ok) publishSuccess(reportedOut as unknown as Record<string, unknown>);

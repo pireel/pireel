@@ -21,7 +21,6 @@ import {
   recordStudioTurnToolResult,
   reserveStudioTurnToolCall,
   shouldBlockStudioTurnUndo,
-  STUDIO_PICTURE_SURGERY_TARGETS,
   prepareEditorialPlacement,
   isRecoverableStudioChatError,
   sanitizeRestored,
@@ -398,15 +397,16 @@ describe('synchronous studio turn ledger', () => {
     expect(ledger.forceFinalResponse).toBe(true);
   });
 
-  it('maps every picture-surgery tool route to its target clip ids', () => {
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.remove_clips!({ clipIds: ['a', 'b'] })).toEqual(['a', 'b']);
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_clip_properties!({ items: [{ clipId: 'a', sourceOutSec: 4 }] })).toEqual(['a']);
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.move_clips!({ items: [{ clipId: 'a', startSec: 2 }] })).toEqual(['a']);
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.split_clips!({ items: [{ clipId: 'a', atSec: 2 }] })).toEqual(['a']);
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_video_speed!({ shotIds: ['a'], speed: 2 })).toEqual(['a']);
-    // Framing and audio adjustments never change coverage and stay ungated.
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_shot_framing).toBeUndefined();
-    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_shot_audio).toBeUndefined();
+  it('re-locks the picture and disarms repair when a covering assembly lands', () => {
+    const ledger = createStudioTurnLedger();
+    ledger.pictureRepairArmed = true;
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'repair', input: {},
+      output: { ok: true, data: { delta: { durationSec: [46, 50] }, editorialAssembly: { targetDurationSec: 50, actualDurationSec: 50 } } },
+      canMutate: true,
+    });
+    expect(ledger.pictureLocked).toBe(true);
+    expect(ledger.pictureRepairArmed).toBe(false);
   });
 
   it('forces the final response after a failed call is retried verbatim', () => {

@@ -183,6 +183,29 @@ const overlapDuration = (leftStart: number, leftEnd: number, rightStart: number,
 
 const STATIC_PHASE_NOTE = /\b(?:static|still(?:ness)?|motionless|no (?:action|movement)|waiting|preparation|empty frame)\b|静止|停留|准备|等待|空镜/i;
 
+/** A person-led range that is mostly static hold fails the selection standard outright: it is
+ * ELIMINATED before assembly rather than demoted, so duration fitting can never trade quality
+ * for coverage with it. Capacity shrinks honestly and any resulting shortfall asks for more
+ * sources instead of a stalled hold. Environment/detail roles keep static imagery by design. */
+function editorialStaticDominantSpan(
+  contentRole: string | undefined,
+  actionPhases: ReadonlyArray<{ phase: string; startSec: number; endSec: number; note: string }>,
+  startSec: number,
+  endSec: number,
+): boolean {
+  const durationSec = endSec - startSec;
+  if (durationSec <= 0) return false;
+  if (contentRole === 'environment' || contentRole === 'detail') return false;
+  let staticSec = 0;
+  for (const phase of actionPhases) {
+    const overlap = overlapDuration(startSec, endSec, phase.startSec, phase.endSec);
+    if (overlap && (phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note)) {
+      staticSec += overlap;
+    }
+  }
+  return staticSec / durationSec >= 0.65;
+}
+
 function phaseUtility(candidate: EditorialCandidateReview, phase: EditorialActionPhaseRange): number {
   const staticPhase = STATIC_PHASE_NOTE.test(phase.note);
   if (candidate.contentRole === 'environment' || candidate.contentRole === 'detail') {
@@ -233,23 +256,21 @@ export function reconcileEditorialCandidateTemporalEvidence(
     if (durationSec <= 0) return 0;
     let coveredSec = 0;
     let weighted = 0;
-    let staticSec = 0;
     for (const phase of actionPhases) {
       const overlap = overlapDuration(range.startSec, range.endSec, phase.startSec, phase.endSec);
       if (!overlap) continue;
       coveredSec += overlap;
       weighted += overlap * phaseUtility(candidate, phase);
-      if ((phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note)) staticSec += overlap;
     }
     const utility = coveredSec > 0 ? weighted / coveredSec : 0.66;
-    const staticDominant = candidate.contentRole !== 'environment'
-      && candidate.contentRole !== 'detail'
-      && staticSec / durationSec >= 0.65;
-    return Math.max(0, Math.min(staticDominant ? 45 : 100, Math.round(baseScore * (0.64 + utility * 0.36))));
+    return Math.max(0, Math.min(100, Math.round(baseScore * (0.64 + utility * 0.36))));
   };
+  const staticDominantSpan = (startSec: number, endSec: number) => (
+    editorialStaticDominantSpan(candidate.contentRole, actionPhases, startSec, endSec)
+  );
   const options: EditorialCutOption[] = candidate.cutOptions.flatMap((option): EditorialCutOption[] => {
     const range = clippedRange(option.startSec, option.endSec);
-    if (!range) return [];
+    if (!range || staticDominantSpan(range.startSec, range.endSec)) return [];
     return [{
       ...option,
       ...range,
@@ -262,7 +283,7 @@ export function reconcileEditorialCandidateTemporalEvidence(
   // variable-duration alternatives inside a long performance phase without imposing global 2/3/4s slots.
   for (const phase of actionPhases) {
     const utility = phaseUtility(candidate, phase);
-    if (utility < 0.6) continue;
+    if (utility < 0.6 || staticDominantSpan(phase.startSec, phase.endSec)) continue;
     const full = { startSec: phase.startSec, endSec: phase.endSec };
     options.push({
       ...full,
@@ -432,40 +453,27 @@ export function planEditorialAssembly(input: {
     // The reservoir's longest independently usable range is always a reachable choice. The stated
     // accepted capacity is measured on these spans; without this row the knapsack tops out at the
     // sum of curated short cuts and a fully covered narration can be unreachable by construction.
-    // Synthetic choices must NOT ride on the headline candidate score: reconcile demotes
-    // static-dominant ranges inside cutOptions, and bypassing that let a mostly-static 19.5s
-    // whole-source span enter the montage at full score. Replicate the demotion here.
-    const staticAwareScore = (base: number, startSec: number, endSec: number) => {
-      const durationSec = endSec - startSec;
-      if (durationSec <= 0) return 0;
-      let staticSec = 0;
-      for (const phase of candidate.actionPhases) {
-        const overlap = overlapDuration(startSec, endSec, phase.startSec, phase.endSec);
-        if (overlap && (phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note)) {
-          staticSec += overlap;
-        }
-      }
-      const staticDominant = candidate.contentRole !== 'environment'
-        && candidate.contentRole !== 'detail'
-        && staticSec / durationSec >= 0.65;
-      return staticDominant ? Math.min(base, 45) : base;
-    };
+    // Synthetic choices obey the same elimination as reviewed cut options: reconcile drops
+    // static-dominant ranges, and bypassing that once let a mostly-static 19.5s whole-source
+    // span enter the montage at full score.
+    const failsStandard = (startSec: number, endSec: number) => (
+      editorialStaticDominantSpan(candidate.contentRole, candidate.actionPhases, startSec, endSec)
+    );
     const suggestedInSec = candidate.suggestedStartSec ?? candidate.startSec;
     const suggestedOutSec = candidate.suggestedEndSec ?? candidate.endSec;
     const choices = [
       ...reviewedChoices,
-      ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC
-        ? [{
-            clip: { ...clip, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec },
-            score: staticAwareScore(candidate.score, suggestedInSec, suggestedOutSec),
-          }]
+      ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC && !failsStandard(suggestedInSec, suggestedOutSec)
+        ? [{ clip: { ...clip, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec }, score: candidate.score }]
         : []),
-      {
-        clip,
-        score: matchingReviewed?.score ?? staticAwareScore(Math.max(0, candidate.score - (
-          clip.sourceOutSec - clip.sourceInSec > candidate.cutOptions[0]?.durationSec * 1.5 ? 10 : 0
-        )), clip.sourceInSec, clip.sourceOutSec),
-      },
+      ...(failsStandard(clip.sourceInSec, clip.sourceOutSec)
+        ? []
+        : [{
+            clip,
+            score: matchingReviewed?.score ?? Math.max(0, candidate.score - (
+              clip.sourceOutSec - clip.sourceInSec > candidate.cutOptions[0]?.durationSec * 1.5 ? 10 : 0
+            )),
+          }]),
     ];
     const unique = [...new Map(choices
       .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= MIN_ASSEMBLY_SHOT_SEC)
@@ -482,6 +490,9 @@ export function planEditorialAssembly(input: {
     const viable = bestScore >= 70
       ? unique.filter((choice) => choice.score >= Math.max(50, bestScore - 35))
       : unique;
+    // Every usable range in this reservoir failed the selection standard: drop the row entirely
+    // (reported via droppedClipCount) rather than feeding an empty-choice row into the DP.
+    if (!viable.length) return [];
     return [{ clip, originalIndex, choices: viable }];
   });
   if (!rows.length) {
