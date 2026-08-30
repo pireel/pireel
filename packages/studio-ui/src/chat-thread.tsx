@@ -335,6 +335,24 @@ export function ChatThread({
         });
         return;
       }
+      // The planner fills from the whole reviewed pool, so an under-target assembly is a
+      // pool-level fact — re-running placement is idempotent and cannot add coverage. Route the
+      // model to the user instead of letting it grind retries.
+      if (preparedPlacement && ledger.assemblyCapacityExhausted) {
+        publishSuccess({
+          ok: true,
+          skipped: true,
+          summary: studioLocale().toLowerCase().startsWith("zh")
+            ? "已审素材容量低于旁白时长，重拼不会改变结果——请询问用户"
+            : "The reviewed footage cannot cover the narration; re-running placement cannot change that — ask the user.",
+          data: {
+            skipped: true,
+            reason: "assembly-capacity-exhausted",
+            instruction: "The deterministic assembly already used the ENTIRE reviewed pool and still falls short of the narration. Do not retry placement. Use ask_user to offer the user a choice: add more footage for review, or shorten the narration script (then regenerate speech, which re-opens assembly).",
+          },
+        });
+        return;
+      }
       if (preparedPlacement && editorialPictureLocked) {
         publishSuccess({
           ok: true,
@@ -514,7 +532,7 @@ export function ChatThread({
                     instruction: `The montage is COMPLETE: deterministic assembly placed ${preparedPlacement.actualDurationSec}s of reviewed picture covering the full ${preparedPlacement.targetDurationSec}s narration at natural speed. This IS the final picture for this turn — do not remove, reorder, re-add, or re-plan picture clips. Selection criteria live in the review brief and were already applied during review; do not re-litigate selection (topic fit, ordering, taste) after assembly. Continue with captions, typography, sound, and the final summary.`,
                   } : {
                     shortfallSec: Math.round(assemblyShortfallSec * 10) / 10,
-                    instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s narration. Close the remaining ${Math.round(assemblyShortfallSec * 10) / 10}s in ONE follow-up add_clips batch using unplaced accepted or reserve:true ranges from the SAME review receipt; never stretch, slow down, or repeat already-placed shots. If accepted capacity is genuinely exhausted, shorten the narration script or report the gap.`,
+                    instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s narration, and deterministic assembly already drew on the ENTIRE reviewed pool — retrying placement cannot add coverage. Never stretch, slow down, or repeat shots. Use ask_user to offer the user a choice: add more footage for review, or shorten the narration script and regenerate speech.`,
                   }),
                 },
               },

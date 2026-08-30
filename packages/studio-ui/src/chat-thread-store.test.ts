@@ -397,6 +397,29 @@ describe('synchronous studio turn ledger', () => {
     expect(ledger.forceFinalResponse).toBe(true);
   });
 
+  it('marks pool exhaustion on an under-target assembly and clears it on new speech or coverage', () => {
+    const ledger = createStudioTurnLedger();
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'short', input: {},
+      output: { ok: true, data: { delta: { durationSec: [0, 36] }, editorialAssembly: { targetDurationSec: 50, actualDurationSec: 36 } } },
+      canMutate: true,
+    });
+    expect(ledger.assemblyCapacityExhausted).toBe(true);
+    // A new narration changes the target: the verdict no longer holds.
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'generate_speech', toolCallId: 'speech', input: {},
+      output: { ok: true, data: { asset: { durationSec: 30 } } }, canMutate: false,
+    });
+    expect(ledger.assemblyCapacityExhausted).toBe(false);
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'covered', input: {},
+      output: { ok: true, data: { delta: { durationSec: [36, 30] }, editorialAssembly: { targetDurationSec: 30, actualDurationSec: 30 } } },
+      canMutate: true,
+    });
+    expect(ledger.assemblyCapacityExhausted).toBe(false);
+    expect(ledger.pictureLocked).toBe(true);
+  });
+
   it('re-locks the picture and disarms repair when a covering assembly lands', () => {
     const ledger = createStudioTurnLedger();
     ledger.pictureRepairArmed = true;

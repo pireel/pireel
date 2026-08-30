@@ -507,6 +507,49 @@ export function planEditorialAssembly(input: {
       droppedClipCount: 0,
     };
   }
+  // Deterministic pool completion: the batch seeds the opening and ordering preference, but
+  // COVERAGE is the algorithm's job. Every accepted reservoir the batch left unused joins the
+  // choice space as a droppable filler row, so a fully covered narration is reachable whenever
+  // the reviewed pool allows it. An under-target plan therefore means the POOL is exhausted —
+  // a fact to surface to the user — never that the model under-sampled its batch.
+  for (const source of input.sources) {
+    const accepted = source.candidates
+      .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
+      .map(reconcileEditorialCandidateTemporalEvidence);
+    for (const candidate of accepted) {
+      const reservoirKey = `${source.assetId}:${candidate.candidateId}`;
+      if (seenReservoirs.has(reservoirKey)) continue;
+      seenReservoirs.add(reservoirKey);
+      const suggestedInSec = candidate.suggestedStartSec ?? candidate.startSec;
+      const suggestedOutSec = candidate.suggestedEndSec ?? candidate.endSec;
+      const baseClip: EditorialAssemblyClip = {
+        assetId: source.assetId, startSec: 0, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec,
+      };
+      const fillerChoices = [
+        ...candidate.cutOptions.map((option) => ({
+          clip: { ...baseClip, sourceInSec: option.startSec, sourceOutSec: option.endSec },
+          score: option.score,
+        })),
+        ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC
+          && !editorialStaticDominantSpan(candidate.contentRole, candidate.actionPhases, suggestedInSec, suggestedOutSec)
+          ? [{ clip: { ...baseClip }, score: candidate.score }]
+          : []),
+      ];
+      const unique = [...new Map(fillerChoices
+        .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= MIN_ASSEMBLY_SHOT_SEC)
+        .map((choice) => ({
+          ...choice,
+          score: rhythmShapedScore(choice.score, choice.clip.sourceOutSec - choice.clip.sourceInSec),
+        }))
+        .sort((left, right) => right.score - left.score)
+        .map((choice) => [
+          `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,
+          choice,
+        ])).values()];
+      if (!unique.length) continue;
+      rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices: unique });
+    }
+  }
 
   type State = {
     score: number;

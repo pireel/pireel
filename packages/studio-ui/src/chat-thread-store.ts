@@ -60,6 +60,10 @@ export interface StudioTurnLedger {
   /** A post-assembly edit reopened a picture-vs-narration gap: the assembly gate stands down so
    * one repair add_clips batch can close it. Cleared when a covering assembly lands. */
   pictureRepairArmed: boolean;
+  /** The planner already fills from the ENTIRE reviewed pool, so an under-target assembly is a
+   * pool-level fact: re-running placement cannot add coverage. Further prepared placements are
+   * refused with an ask-the-user instruction until the narration changes (new speech). */
+  assemblyCapacityExhausted: boolean;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -99,6 +103,7 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     lastFailureSig: null,
     repeatedFailureCount: 0,
     pictureRepairArmed: false,
+    assemblyCapacityExhausted: false,
   };
 }
 
@@ -154,11 +159,17 @@ export function recordStudioTurnToolResult(
   // those changes, so the next get_timeline was refused against a stale world.
   const didMutate = !failed && !!data?.delta && typeof data.delta === 'object';
   const editorialAssembly = data?.editorialAssembly;
-  if (!failed && editorialAssembly && typeof editorialAssembly === 'object'
-    && editorialAssemblyCoversTarget(editorialAssembly)) {
-    ledger.pictureLocked = true;
-    ledger.pictureRepairArmed = false;
+  if (!failed && editorialAssembly && typeof editorialAssembly === 'object') {
+    if (editorialAssemblyCoversTarget(editorialAssembly)) {
+      ledger.pictureLocked = true;
+      ledger.pictureRepairArmed = false;
+      ledger.assemblyCapacityExhausted = false;
+    } else {
+      ledger.assemblyCapacityExhausted = true;
+    }
   }
+  // A new narration changes the target, so a previous pool-exhaustion verdict no longer holds.
+  if (record.toolId === 'generate_speech' && !failed) ledger.assemblyCapacityExhausted = false;
 
   if (record.canMutate && failed) ledger.unsafeUndoBlocked = true;
   if (didMutate) {

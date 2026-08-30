@@ -387,8 +387,16 @@ describe('editorial temporal reconciliation and assembly', () => {
       ],
       targetDurationSec: 7,
     });
-    expect(planned.clips.every((clip) => clip.assetId === 'other')).toBe(true);
-    expect(planned.droppedClipCount).toBeGreaterThanOrEqual(1);
+    // The mis-ranged request is dropped, but its reservoir's ACCEPTED evidence stays available
+    // to pool completion — any 'a' placement must sit inside the accepted 0–10s span, never the
+    // rejected 20–24s request.
+    expect(planned.clips.length).toBeGreaterThan(0);
+    expect(planned.clips
+      .filter((clip) => clip.assetId === 'a')
+      .every((clip) => clip.sourceInSec >= 0 && clip.sourceOutSec <= 10)).toBe(true);
+    const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
+    expect(total).toBeGreaterThanOrEqual(6.5);
+    expect(total).toBeLessThanOrEqual(7.5);
   });
 
   it('returns the request untouched when no range matches accepted evidence, letting the guard teach', () => {
@@ -423,6 +431,31 @@ describe('editorial temporal reconciliation and assembly', () => {
     });
     expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec >= 1)).toBe(true);
     expect(planned.clips.some((clip) => clip.assetId === 'flash')).toBe(false);
+  });
+
+  it('completes coverage from unused pool reservoirs when the batch under-samples', () => {
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'picked', startSec: 0, sourceInSec: 0, sourceOutSec: 6 }],
+      sources: [
+        { assetId: 'picked', candidates: [reviewedCandidate({
+          candidateId: 'candidate-picked', startSec: 0, endSec: 6, score: 90,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 6, note: 'complete action' }],
+          cutOptions: [{ durationSec: 6, startSec: 0, endSec: 6, score: 90, reason: 'complete action' }],
+        })] },
+        { assetId: 'unpicked', candidates: [reviewedCandidate({
+          candidateId: 'candidate-unpicked', startSec: 1, endSec: 8, score: 84,
+          actionPhases: [{ phase: 'performance', startSec: 1, endSec: 8, note: 'complete action' }],
+          cutOptions: [{ durationSec: 7, startSec: 1, endSec: 8, score: 84, reason: 'complete action' }],
+        })] },
+      ],
+      targetDurationSec: 12,
+    });
+    const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
+    // The batch alone tops out at 6s; the pool reservoir closes the remaining coverage.
+    expect(total).toBeGreaterThanOrEqual(11);
+    expect(planned.clips.some((clip) => clip.assetId === 'unpicked')).toBe(true);
+    // The batch row still leads the sequence (opening protection).
+    expect(planned.clips[0]?.assetId).toBe('picked');
   });
 
   it('prefers spreading coverage across reservoirs over one monolithic hold when capacity allows', () => {
