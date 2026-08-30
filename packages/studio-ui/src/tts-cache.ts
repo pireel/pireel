@@ -7,6 +7,7 @@
  */
 
 import { kvDelete, kvGet, kvSet } from './idb-kv';
+import { remoteDerivedGet, remoteDerivedPut } from './derived-cache-remote';
 
 const PREFIX = 'tts:';
 const LEGACY_LOCALSTORAGE_PREFIX = 'pinshot:studio:tts:';
@@ -66,16 +67,27 @@ export function ttsCacheKey(request: Record<string, unknown>): string {
   return `${(hash >>> 0).toString(36)}_${(hash2 >>> 0).toString(36)}_${canonical.length.toString(36)}`;
 }
 
+const validTtsAsset = (value: unknown): value is CachedTtsAsset => {
+  const asset = value as CachedTtsAsset | undefined;
+  return !!asset && typeof asset.url === 'string' && Number.isFinite(asset.durationSec);
+};
+
 export async function getCachedTts(key: string): Promise<CachedTtsAsset | null> {
   if (!key) return null;
   sweepLegacyLocalStorage();
-  const value = await kvGet(PREFIX + key) as CachedTtsAsset | undefined;
-  return value && typeof value.url === 'string' && Number.isFinite(value.durationSec) ? value : null;
+  const value = await kvGet(PREFIX + key);
+  if (validTtsAsset(value)) return value;
+  // L1 miss → server L2 (survives device switches and cleared browser data); hydrate L1 on hit.
+  const remote = await remoteDerivedGet('tts', key);
+  if (!validTtsAsset(remote)) return null;
+  void kvSet(PREFIX + key, remote);
+  return remote;
 }
 
 export function setCachedTts(key: string, asset: CachedTtsAsset): void {
   if (!key) return;
   sweepLegacyLocalStorage();
+  remoteDerivedPut('tts', key, asset);
   void kvSet(PREFIX + key, asset);
 }
 

@@ -17,6 +17,7 @@
 
 import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
 import { kvDelete, kvGet, kvSet } from './idb-kv';
+import { remoteDerivedGet, remoteDerivedPut } from './derived-cache-remote';
 
 const PREFIX = 'review:';
 const INDEX_KEY = 'review-index';
@@ -102,7 +103,15 @@ export async function getCachedEditorialReview(
 ): Promise<{ result: CachedEditorialReviewResult; exact: boolean } | null> {
   if (!key) return null;
   sweepLegacyLocalStorage();
-  const entry = await kvGet(PREFIX + key) as CachedEditorialReviewEntry | undefined;
+  let entry = await kvGet(PREFIX + key) as CachedEditorialReviewEntry | undefined;
+  if (!entry?.result) {
+    // L1 miss → server L2 (survives device switches and cleared browser data); hydrate L1 on hit.
+    const remote = await remoteDerivedGet('visual-review', key) as CachedEditorialReviewEntry | null;
+    if (remote?.result && Array.isArray(remote.result.candidates)) {
+      entry = remote;
+      void kvSet(PREFIX + key, remote);
+    }
+  }
   if (!entry?.result || !Array.isArray(entry.result.candidates)) return null;
   const exact = entry.briefHash === briefHash && entry.specsSig === specsSig;
   if (!exact && !crossBriefReuseEnabled()) return null;
@@ -112,6 +121,7 @@ export async function getCachedEditorialReview(
 export async function setCachedEditorialReview(key: string, entry: CachedEditorialReviewEntry): Promise<void> {
   if (!key) return;
   sweepLegacyLocalStorage();
+  remoteDerivedPut('visual-review', key, entry);
   await kvSet(PREFIX + key, entry);
   const raw = await kvGet(INDEX_KEY);
   const index = (Array.isArray(raw) ? raw as Array<{ k: string; at: number }> : [])

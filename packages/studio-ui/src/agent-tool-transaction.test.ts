@@ -305,14 +305,19 @@ describe('Agent composition transaction boundary', () => {
 
   it('generates speech directly without parking on a second approval card', async () => {
     const h = harness();
-    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({
-      ok: true,
-      asset: {
-        id: 'speech-direct', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
-        model: 'speech-2.8-hd', voiceId: 'system:Chinese (Mandarin)_Reliable_Executive', voiceLabel: 'Reliable Executive',
-        transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
-      },
-    }));
+    // The derived-cache L2 probes fetch first (miss); route by URL so those probes stay inert.
+    const fetchMock = vi.fn().mockImplementation((url: unknown) => Promise.resolve(
+      String(url).startsWith('/api/studio/derived-cache')
+        ? Response.json({ ok: true, payload: null })
+        : Response.json({
+            ok: true,
+            asset: {
+              id: 'speech-direct', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
+              model: 'speech-2.8-hd', voiceId: 'system:Chinese (Mandarin)_Reliable_Executive', voiceLabel: 'Reliable Executive',
+              transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
+            },
+          }),
+    ));
     vi.stubGlobal('fetch', fetchMock);
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'generate_speech', {
@@ -328,11 +333,10 @@ describe('Agent composition transaction boundary', () => {
       ok: true,
       data: { asset: { id: 'speech-direct' } },
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('/api/studio/speech', expect.objectContaining({
-      body: expect.not.stringContaining('"action":"quote"'),
-    }));
-    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain('"pauseStyle":"spacious"');
+    const speechCalls = fetchMock.mock.calls.filter(([url]) => String(url) === '/api/studio/speech');
+    expect(speechCalls).toHaveLength(1);
+    expect(String(speechCalls[0]?.[1]?.body)).not.toContain('"action":"quote"');
+    expect(String(speechCalls[0]?.[1]?.body)).toContain('"pauseStyle":"spacious"');
   });
 
   it('marks rejected approval receipts as a hard agent-turn boundary', async () => {
@@ -344,15 +348,18 @@ describe('Agent composition transaction boundary', () => {
 
   it('also generates speech directly from the bridge execution surface', async () => {
     const h = harness();
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(Response.json({
-        ok: true,
-        asset: {
-          id: 'speech-1', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
-          model: 'speech-2.8-hd', voiceId: 'system:Chinese (Mandarin)_Reliable_Executive', voiceLabel: 'Reliable Executive',
-          transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
-        },
-      }));
+    const fetchMock = vi.fn().mockImplementation((url: unknown) => Promise.resolve(
+      String(url).startsWith('/api/studio/derived-cache')
+        ? Response.json({ ok: true, payload: null })
+        : Response.json({
+            ok: true,
+            asset: {
+              id: 'speech-1', kind: 'audio', key: 'speech.mp3', url: 'https://cdn.example/speech.mp3', mime: 'audio/mpeg',
+              model: 'speech-2.8-hd', voiceId: 'system:Chinese (Mandarin)_Reliable_Executive', voiceLabel: 'Reliable Executive',
+              transcriptText: '现在就试试看。', charCount: 8, durationSec: 2.4, estimatedDurationSec: 2.5,
+            },
+          }),
+    ));
     vi.stubGlobal('fetch', fetchMock);
     const { runStudioTool } = await import('./agent-tool-runner');
     const result = await runStudioTool(h.ctx, 'generate_speech', {
@@ -364,10 +371,9 @@ describe('Agent composition transaction boundary', () => {
       ok: true,
       data: { asset: { id: 'speech-1' }, voiceLabel: 'Reliable Executive' },
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
-      body: expect.not.stringContaining('"action":"quote"'),
-    }));
+    const speechCalls = fetchMock.mock.calls.filter(([url]) => String(url) === '/api/studio/speech');
+    expect(speechCalls).toHaveLength(1);
+    expect(String(speechCalls[0]?.[1]?.body)).not.toContain('"action":"quote"');
   });
 
   it('routes designed voices through the shared voice API', async () => {
