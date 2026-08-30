@@ -1451,6 +1451,7 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
   let next = document;
   const receipts: EditorCommandReceipt[] = [];
   const clipIds: string[] = [];
+  const skippedDuplicates: string[] = [];
   const used = new Set(next.timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
   for (const [index, raw] of items.entries()) {
     const item = (raw ?? {}) as Input;
@@ -1464,6 +1465,21 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     if (placement.error) return fail(`items[${index}] ${placement.error}`);
     const startSec = Math.max(0, sec(item.startSec));
     const durationSec = Math.max(0.2, sec(item.durationSec, 3));
+    // Duplicate protection: a second styling pass once re-ADDED an existing line instead of
+    // updating it, stacking two copies of the same words on screen. Identical text overlapping
+    // the same time window is an update target, never a second copy.
+    const itemEndSec = startSec + durationSec;
+    const duplicate = next.timeline.tracks.some((track) => track.clips.some((clip) => {
+      if (clip.kind !== 'graphic' || clip.block.templateId !== 'title') return false;
+      const clipStart = timelineFramesToSeconds(clip.startFrame, next.canvas.fps);
+      const clipEnd = clipStart + timelineFramesToSeconds(clip.durationFrames, next.canvas.fps);
+      const clipText = typeof clip.block.slots?.text === 'string' ? clip.block.slots.text.trim() : '';
+      return clipText === text && clipEnd > startSec && clipStart < itemEndSec;
+    }));
+    if (duplicate) {
+      skippedDuplicates.push(text.slice(0, 24));
+      continue;
+    }
     const block = titleBlock({
       text,
       startSec,
@@ -1501,7 +1517,18 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     receipts.push(...inserted.receipts);
     clipIds.push(block.id);
   }
-  return mutation(next, `Added ${clipIds.length} text clip${clipIds.length === 1 ? '' : 's'}`, receipts, { clipIds });
+  return mutation(
+    next,
+    `Added ${clipIds.length} text clip${clipIds.length === 1 ? '' : 's'}${skippedDuplicates.length ? `; skipped ${skippedDuplicates.length} duplicate${skippedDuplicates.length === 1 ? '' : 's'}` : ''}`,
+    receipts,
+    {
+      clipIds,
+      ...(skippedDuplicates.length ? {
+        skippedDuplicates,
+        instruction: 'Identical on-screen text already exists in that time window. Use update_texts to restyle or move the existing clip instead of adding a copy.',
+      } : {}),
+    },
+  );
 }
 
 function updateTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {

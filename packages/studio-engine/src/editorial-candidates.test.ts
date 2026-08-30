@@ -433,6 +433,25 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(planned.clips.some((clip) => clip.assetId === 'flash')).toBe(false);
   });
 
+  it('shaves statically-noted edge phases off the suggested span', () => {
+    const reconciled = reviewedCandidate({
+      candidateId: 'candidate-edge', startSec: 0, endSec: 19.5, score: 95,
+      suggestedStartSec: 0, suggestedEndSec: 19.5,
+      actionPhases: [
+        { phase: 'setup', startSec: 0, endSec: 8, note: 'Static pose from behind, waiting' },
+        { phase: 'transition', startSec: 8, endSec: 11, note: 'turns around' },
+        { phase: 'performance', startSec: 11, endSec: 15, note: 'direct gaze, confident walk' },
+        { phase: 'hold', startSec: 15, endSec: 19, note: 'arms spread wide in an embracing gesture' },
+        { phase: 'exit-reset', startSec: 19, endSec: 19.5, note: 'walks away into depth' },
+      ],
+      cutOptions: [{ durationSec: 4, startSec: 11, endSec: 15, score: 95, reason: 'performance' }],
+    });
+    const shaved = reconcileEditorialCandidateTemporalEvidence(reconciled);
+    // The static 0–8s head leaves the long choice; the dynamic hold and exit tail stay.
+    expect(shaved.suggestedStartSec).toBeCloseTo(8, 2);
+    expect(shaved.suggestedEndSec).toBeCloseTo(19.5, 2);
+  });
+
   it('completes coverage from unused pool reservoirs when the batch under-samples', () => {
     const planned = planEditorialAssembly({
       clips: [{ assetId: 'picked', startSec: 0, sourceInSec: 0, sourceOutSec: 6 }],

@@ -156,6 +156,30 @@ describe('shared agent timeline atoms', () => {
     expect((placed.data as { overwrittenClipIds?: string[] }).overwrittenClipIds).toBeUndefined();
   });
 
+  it('skips a duplicate title with the same text in an overlapping time window', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    const first = runAgentTimelineTool(document, 'add_texts', { items: [{
+      id: 'line-1', text: '普通的人生，依然值得被爱', startSec: 50, durationSec: 4,
+      placement: { xPct: 10, yPct: 40, widthPct: 80, heightPct: 16 },
+    }] });
+    expect(first.ok).toBe(true);
+    const second = runAgentTimelineTool(first.document!, 'add_texts', { items: [{
+      id: 'line-copy', text: '普通的人生，依然值得被爱', startSec: 50.2, durationSec: 3.9,
+      placement: { xPct: 8, yPct: 26, widthPct: 84, heightPct: 14 },
+    }] });
+    expect(second.ok).toBe(true);
+    expect((second.data as { skippedDuplicates?: string[] }).skippedDuplicates).toHaveLength(1);
+    const titles = second.document!.timeline.tracks.flatMap((track) => track.clips)
+      .filter((clip) => clip.kind === 'graphic');
+    expect(titles).toHaveLength(1);
+    // Same text at a NON-overlapping time (a deliberate structural echo) still lands.
+    const echo = runAgentTimelineTool(second.document!, 'add_texts', { items: [{
+      id: 'line-echo', text: '普通的人生，依然值得被爱', startSec: 90, durationSec: 3,
+    }] });
+    expect(echo.ok).toBe(true);
+    expect((echo.data as { clipIds: string[] }).clipIds).toEqual(['line-echo']);
+  });
+
   it('keeps overlay text out of the caption band and off concurrent titles', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = { ...document, appearance: { ...document.appearance, captionStyle: { on: true, preset: 'ln-clean', yPct: 84 } } };

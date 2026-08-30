@@ -316,13 +316,34 @@ export function reconcileEditorialCandidateTemporalEvidence(
     const longest = deduped.reduce((best, option) => (option.durationSec > best.durationSec ? option : best));
     if (!cutOptions.includes(longest)) cutOptions[cutOptions.length - 1] = longest;
   }
+  // Static edges make the whole-reservoir choice dishonest: the review itself calls the head or
+  // tail static (an 8s "static pose from behind" led a 19.5s span into a montage whenever
+  // coverage was tight), so the long choice must start where visible action starts. Only
+  // statically-NOTED edge phases are shaved; dynamic holds and exits stay.
+  const shaveStaticEdges = (fromSec: number, toSec: number) => {
+    let from = fromSec;
+    let to = toSec;
+    const ordered = [...actionPhases].sort((left, right) => left.startSec - right.startSec);
+    for (const phase of ordered) {
+      if (phase.startSec > from + 0.05) break;
+      if ((phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note) && phase.endSec < to) {
+        from = Math.max(from, phase.endSec);
+      } else break;
+    }
+    for (const phase of [...ordered].reverse()) {
+      if (phase.endSec < to - 0.05) break;
+      if ((phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note) && phase.startSec > from) {
+        to = Math.min(to, phase.startSec);
+      } else break;
+    }
+    return to - from >= 1 ? { startSec: round3(from), endSec: round3(to) } : { startSec: fromSec, endSec: toSec };
+  };
   const suggested = clippedRange(candidate.suggestedStartSec ?? startSec, candidate.suggestedEndSec ?? endSec);
+  const shaved = shaveStaticEdges(suggested?.startSec ?? startSec, suggested?.endSec ?? endSec);
   return {
     ...candidate,
-    ...(suggested ? { suggestedStartSec: suggested.startSec, suggestedEndSec: suggested.endSec } : {
-      suggestedStartSec: startSec,
-      suggestedEndSec: endSec,
-    }),
+    suggestedStartSec: shaved.startSec,
+    suggestedEndSec: shaved.endSec,
     ...(candidate.peakSec == null ? {} : { peakSec: round3(Math.max(startSec, Math.min(endSec, candidate.peakSec))) }),
     actionPhases,
     rejectedRanges,
