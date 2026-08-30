@@ -156,6 +156,27 @@ describe('shared agent timeline atoms', () => {
     expect((placed.data as { overwrittenClipIds?: string[] }).overwrittenClipIds).toBeUndefined();
   });
 
+  it('appends unanchored batch clips sequentially instead of stacking them at the track head', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', { assets: [
+      { id: 'voice', kind: 'audio', url: 'https://cdn.example/voice.mp3', durationSec: 12 },
+      { id: 'vid-a', kind: 'video', url: 'https://cdn.example/a.mp4', durationSec: 20 },
+      { id: 'vid-b', kind: 'video', url: 'https://cdn.example/b.mp4', durationSec: 20 },
+      { id: 'vid-c', kind: 'video', url: 'https://cdn.example/c.mp4', durationSec: 20 },
+    ] }).document!;
+    const placed = runAgentTimelineTool(document, 'add_clips', { clips: [
+      { assetId: 'voice', role: 'narration', startSec: 0, durationSec: 12 },
+      { id: 'shot-a', assetId: 'vid-a', role: 'primary', muted: true, sourceInSec: 1, sourceOutSec: 4 },
+      { id: 'shot-b', assetId: 'vid-b', role: 'primary', muted: true, sourceInSec: 0, sourceOutSec: 5 },
+      { id: 'shot-c', assetId: 'vid-c', role: 'primary', muted: true, sourceInSec: 2, sourceOutSec: 6 },
+    ] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+    const primary = placed.document!.timeline.tracks.find((track) => track.role === 'primaryNarrative')!;
+    expect(primary.clips.map((clip) => clip.id)).toEqual(['shot-a', 'shot-b', 'shot-c']);
+    expect(primary.clips.map((clip) => clip.startFrame)).toEqual([0, 90, 240]);
+    expect(primary.clips.reduce((sum, clip) => sum + clip.durationFrames, 0)).toBe(360);
+  });
+
   it('inherits probed dimensions when an alias registers the same local source', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [{
@@ -721,5 +742,20 @@ describe('shared agent timeline atoms', () => {
       { index: 5, sourceSec: 2.5, timelineSec: 3.25, timelineFrame: 98 },
       { index: 6, sourceSec: 3, timelineSec: 3.5, timelineFrame: 105 },
     ]);
+  });
+});
+
+describe('asset-id typo suggestion', () => {
+  it('names the nearest registered id when a retyped asset id misses', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets['local_7be336cc-bbaf-485c-b32a-f2929b2903c9'] = {
+      id: 'local_7be336cc-bbaf-485c-b32a-f2929b2903c9', kind: 'video',
+      locator: { localSig: 'sig-1' }, metadata: { durationSec: 90 },
+    };
+    const outcome = runAgentTimelineTool(document, 'add_clips', {
+      clips: [{ role: 'primary', assetId: 'local:local_76be336cc-bbaf-485c-b32a-f2929b2903c9', sourceInSec: 0, sourceOutSec: 2 }],
+    });
+    expect(outcome.ok).toBe(false);
+    expect((outcome as { error?: string }).error).toContain('Closest registered id: local_7be336cc-bbaf-485c-b32a-f2929b2903c9');
   });
 });

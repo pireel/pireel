@@ -32,6 +32,10 @@ export const MAX_EDITORIAL_ANALYSES_PER_USER_TURN = 1;
  * unsafe-undo guards handle discipline; keep in sync with MAX_STUDIO_TOOL_RECEIPTS_PER_TURN
  * enforced server-side. */
 export const MAX_STUDIO_TOOL_CALLS_PER_USER_TURN = 40;
+/** A model that keeps re-reading an unchanged timeline after being told to stop is looping, not
+ * verifying — a real turn burned ~28 of its 40 calls on refused reads and died mid-edit. After
+ * this many consecutive refusals with no mutation in between, the turn goes final-only. */
+export const MAX_STUDIO_REFUSED_TIMELINE_READS = 3;
 
 export interface StudioTurnLedger {
   /** Tool receipts published synchronously, before React/useChat commits them to message state. */
@@ -43,6 +47,8 @@ export interface StudioTurnLedger {
   blockFurtherTimelineReads: boolean;
   unsafeUndoBlocked: boolean;
   lastTimelineFingerprint: string | null;
+  /** Consecutive get_timeline calls answered with a refusal (unchanged-dedupe or read-block). */
+  refusedTimelineReads: number;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -78,6 +84,7 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     blockFurtherTimelineReads: false,
     unsafeUndoBlocked: false,
     lastTimelineFingerprint: null,
+    refusedTimelineReads: 0,
   };
 }
 
@@ -132,6 +139,7 @@ export function recordStudioTurnToolResult(
     ledger.lastTimelineFingerprint = null;
     ledger.blockFurtherTimelineReads = false;
     ledger.postAssemblyTimelineRead = false;
+    ledger.refusedTimelineReads = 0;
   }
 
   let timelineUnchanged = false;
@@ -141,6 +149,14 @@ export function recordStudioTurnToolResult(
     if (fingerprint) ledger.lastTimelineFingerprint = fingerprint;
     if (ledger.pictureLocked) ledger.postAssemblyTimelineRead = true;
     if (timelineUnchanged) ledger.blockFurtherTimelineReads = true;
+    // Refusals include both the unchanged-dedupe and pre-execution read-block receipts (the
+    // latter arrive here as skipped successes). Persistent defiance ends the turn's tool budget.
+    if (timelineUnchanged || record.output?.skipped === true) {
+      ledger.refusedTimelineReads += 1;
+      if (ledger.refusedTimelineReads >= MAX_STUDIO_REFUSED_TIMELINE_READS) ledger.forceFinalResponse = true;
+    } else {
+      ledger.refusedTimelineReads = 0;
+    }
   }
 
   ledger.receipts.push((record.errorText
@@ -343,7 +359,7 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
   for (const key of [
     'analysisMode', 'assetId', 'localAssetId', 'label', 'durationSec', 'hasAudio',
     'audioAssessment', 'speechLikely', 'audibleSec', 'speechSec', 'editorialBrief',
-    'editorialComparisonSummary', 'acceptedDurationSec', 'instruction', 'ok', 'error',
+    'editorialComparisonSummary', 'editorialReviewReused', 'acceptedDurationSec', 'instruction', 'ok', 'error',
   ]) {
     if (data[key] !== undefined) compactData[key] = data[key];
   }
@@ -534,29 +550,43 @@ export function prepareEditorialPlacement(
     !!value && typeof value === 'object' && !Array.isArray(value)
   ));
   if (!rows.length || rows.length !== input.clips.length) return null;
-  // Mixed audio/overlay batches retain their authored semantics. The montage optimizer owns only
-  // one contiguous, reviewed primary-picture batch.
-  if (!rows.every((clip) => (
+  // The optimizer owns the reviewed primary-picture rows; audio, overlays and unreviewed footage
+  // ride along with their authored semantics. A mixed batch (narration + picture in one call, a
+  // common model shape) must engage assembly for its picture rows, not disable it wholesale.
+  const isPictureRow = (clip: Record<string, unknown>) => (
     (clip.role == null || clip.role === 'primary')
     && sourceIds.has(canonicalEditorialAssetId(clip.assetId))
-    && Number.isFinite(Number(clip.startSec))
-    && Number.isFinite(Number(clip.sourceInSec))
+  );
+  const pictureRows = rows.filter(isPictureRow);
+  if (!pictureRows.length) return null;
+  if (!pictureRows.every((clip) => (
+    Number.isFinite(Number(clip.sourceInSec))
     && Number.isFinite(Number(clip.sourceOutSec))
   ))) return null;
+  const passthroughRows = rows.filter((clip) => !isPictureRow(clip));
+  // Models often batch picture without startSec, intending sequential placement. Synthesize the
+  // sequence so assembly engages; freehand placement of an unanchored batch is never the intent.
+  let appendCursorSec = 0;
+  const orderedPicture = pictureRows.map((clip) => {
+    const spanSec = Math.max(0, Number(clip.sourceOutSec) - Number(clip.sourceInSec));
+    const startSec = Number.isFinite(Number(clip.startSec)) ? Number(clip.startSec) : appendCursorSec;
+    appendCursorSec = Math.max(appendCursorSec, startSec) + spanSec;
+    return { row: clip, startSec };
+  });
   const plan = planEditorialAssembly({
     targetDurationSec,
     sources,
-    clips: rows.map((clip) => ({
-      assetId: canonicalEditorialAssetId(clip.assetId),
-      startSec: Number(clip.startSec),
-      sourceInSec: Number(clip.sourceInSec),
-      sourceOutSec: Number(clip.sourceOutSec),
+    clips: orderedPicture.map(({ row, startSec }) => ({
+      assetId: canonicalEditorialAssetId(row.assetId),
+      startSec,
+      sourceInSec: Number(row.sourceInSec),
+      sourceOutSec: Number(row.sourceOutSec),
     })),
   });
-  const unusedRows = [...rows];
+  const unusedRows = orderedPicture.map(({ row }) => row);
   const clips = plan.clips.map((planned) => {
     const matchIndex = unusedRows.findIndex((row) => canonicalEditorialAssetId(row.assetId) === planned.assetId);
-    const original = matchIndex >= 0 ? unusedRows.splice(matchIndex, 1)[0]! : rows[0]!;
+    const original = matchIndex >= 0 ? unusedRows.splice(matchIndex, 1)[0]! : pictureRows[0]!;
     const durationSec = Math.round((planned.sourceOutSec - planned.sourceInSec) * 1_000) / 1_000;
     const { speed: _discardSpeed, ...naturalSpeed } = original;
     return {
@@ -570,7 +600,7 @@ export function prepareEditorialPlacement(
     };
   });
   return {
-    input: { ...input, clips, __replacePrimaryTrack: true },
+    input: { ...input, clips: [...passthroughRows, ...clips], __replacePrimaryTrack: true },
     changed: plan.changed,
     actualDurationSec: plan.actualDurationSec,
     targetDurationSec: plan.targetDurationSec,

@@ -322,6 +322,21 @@ describe('editorial placement receipts', () => {
     expect(hasPostAssemblyTimelineSnapshot([review, completed, verified])).toBe(true);
   });
 
+  it('engages deterministic assembly for a mixed batch whose picture rows omit startSec', () => {
+    const prepared = prepareEditorialPlacement([review], 'add_clips', {
+      clips: [
+        { assetId: 'narration-asset', role: 'narration', startSec: 0, durationSec: 1.8 },
+        { assetId: 'asset-beach', role: 'primary', muted: true, sourceInSec: 0.3, sourceOutSec: 2.1 },
+      ],
+    }, 1.8);
+    expect(prepared).not.toBeNull();
+    expect(prepared!.input).toMatchObject({ __replacePrimaryTrack: true });
+    const clips = prepared!.input.clips as Array<Record<string, unknown>>;
+    expect(clips[0]).toMatchObject({ role: 'narration', assetId: 'narration-asset' });
+    expect(clips.length).toBeGreaterThan(1);
+    expect(clips.slice(1).every((clip) => clip.role === 'primary' && typeof clip.startSec === 'number')).toBe(true);
+  });
+
   it('makes a just-finished review available before React commits the SDK message', () => {
     const ledger = createStudioTurnLedger();
     recordStudioTurnToolResult(ledger, {
@@ -362,6 +377,24 @@ describe('synchronous studio turn ledger', () => {
     expect(first.timelineUnchanged).toBe(false);
     expect(repeated.timelineUnchanged).toBe(true);
     expect(ledger.blockFurtherTimelineReads).toBe(true);
+  });
+
+  it('forces the final response only after persistently refused timeline reads', () => {
+    const ledger = createStudioTurnLedger();
+    const read = (id: string) => recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: id, input: {},
+      output: { ok: true, data: { durationSec: 4, tracks: [] } }, canMutate: false,
+    });
+    read('t1'); read('t2'); read('t3');
+    expect(ledger.forceFinalResponse).toBe(false);
+    // A real edit re-arms the read budget instead of counting toward the loop breaker.
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'edit', input: {},
+      output: { ok: true, data: { delta: { durationSec: [4, 6] } } }, canMutate: true,
+    });
+    expect(ledger.refusedTimelineReads).toBe(0);
+    read('t4'); read('t5'); read('t6'); read('t7');
+    expect(ledger.forceFinalResponse).toBe(true);
   });
 
   it('refuses to lock the picture on an under-target assembly so the gap stays fixable', () => {

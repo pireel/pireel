@@ -864,6 +864,12 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     expect(sys).toContain("em-yellow");
     expect(sys).toBe(buildChatSystem(null));
   });
+  it("目录用颜色名说预设事实:'text white' 只出现在真白字行(ln-white 是蓝字白底陷阱)", () => {
+    const sys = buildChatSystem(null);
+    expect(sys).toContain("- ln-white · line · blue text, on white bar, italic");
+    expect(sys).toContain("- ln-clean · line · white text, no background");
+    expect(sys).not.toMatch(/rgba\(255,255,255/);
+  });
   it("buildSituation 反映字幕开关态", () => {
     expect(buildSituation({ composition: { durationSec: 10 } })).toContain(
       "Captions: off",

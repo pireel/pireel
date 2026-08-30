@@ -728,6 +728,41 @@ export function resizeNarrativeTimelineClip(
   });
 }
 
+/** Bounded edit distance for id-typo detection; bails out once the distance exceeds `cap`. */
+function boundedEditDistance(left: string, right: string, cap: number): number {
+  if (Math.abs(left.length - right.length) > cap) return cap + 1;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= left.length; i += 1) {
+    const current = [i];
+    let rowMin = i;
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      current[j] = Math.min(previous[j]! + 1, current[j - 1]! + 1, previous[j - 1]! + cost);
+      if (current[j]! < rowMin) rowMin = current[j]!;
+    }
+    if (rowMin > cap) return cap + 1;
+    previous = current;
+  }
+  return previous[right.length]!;
+}
+
+/** A model retyping an id from memory usually lands within a few edits of the real one (an extra
+ * character, one swapped uuid group). Naming the nearest registered id turns a dead-end retry
+ * loop into a one-shot correction. */
+function closestAssetId(assets: EditorDocumentV2['assets'], requested: string): string | null {
+  const needle = requested.replace(/^local:/, '');
+  let best: string | null = null;
+  let bestDistance = 7;
+  for (const id of Object.keys(assets)) {
+    const distance = boundedEditDistance(needle, id, 6);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = id;
+    }
+  }
+  return best;
+}
+
 function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
   document = normalizePeerNarrativeSources(document);
   const items = Array.isArray(input.clips) ? input.clips : [];
@@ -744,10 +779,31 @@ function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' 
     const item = (raw ?? {}) as Input;
     const assetId = string(item.assetId);
     const asset = assetId ? next.assets[assetId] : undefined;
-    if (!asset) return fail(`clips[${index}] asset not found: ${assetId ?? ''}`);
+    if (!asset) {
+      const suggestion = assetId ? closestAssetId(next.assets, assetId) : null;
+      return fail(`clips[${index}] asset not found: ${assetId ?? ''}.${suggestion ? ` Closest registered id: ${suggestion}.` : ''} Copy ids exactly from receipts; never retype them.`);
+    }
     const placement = placementFor(next, asset, item, used);
     if ('ok' in placement) return placement;
-    const atFrame = secondsToTimelineFrames(Math.max(0, sec(item.startSec, sec(input.atSec))), next.canvas.fps);
+    // No explicit start = append after the destination lane's current content (including clips
+    // placed earlier in this batch). Defaulting to 0 made every unanchored clip overwrite its
+    // predecessors at the head of the track, shredding a batched montage into fragments.
+    const hasExplicitStart = item.startSec != null || input.atSec != null;
+    let atFrame: number;
+    if (hasExplicitStart) {
+      atFrame = secondsToTimelineFrames(Math.max(0, sec(item.startSec, sec(input.atSec))), next.canvas.fps);
+    } else {
+      const requestedTrack = string(item.trackId)
+        ? next.timeline.tracks.find((track) => track.id === string(item.trackId))
+        : undefined;
+      const desired = expectedTrack(asset, string(item.role));
+      const laneTracks = requestedTrack
+        ? [requestedTrack]
+        : next.timeline.tracks.filter((track) => track.type === desired.type && track.role === desired.role);
+      atFrame = laneTracks
+        .flatMap((track) => track.clips.map((clip) => clip.startFrame + clip.durationFrames))
+        .reduce((latest, end) => Math.max(latest, end), 0);
+    }
     const ensured = ensureTrack(
       next,
       asset,

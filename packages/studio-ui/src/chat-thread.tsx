@@ -255,11 +255,11 @@ export function ChatThread({
           reported = {
             ok: true,
             summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "时间线没有变化，本轮不再重复读取"
-              : "The timeline is unchanged and will not be read again in this turn.",
+              ? "时间线和上次读取完全一致。不要再调用 get_timeline——立即执行下一步编辑，或给出最终回复"
+              : "The timeline is exactly as your last read reported. Do not call get_timeline again — take the next editing action or write the final reply.",
             data: {
               unchanged: true,
-              instruction: "Use the preceding authoritative timeline snapshot and finish the turn.",
+              instruction: "The preceding timeline snapshot is still authoritative. Do NOT call get_timeline again this turn: your next call MUST be an editing tool, or you must write the final user-facing reply. Repeated reads end this turn's tool budget.",
             },
           };
           const lastReceipt = ledger.receipts.at(-1) as { output?: unknown } | undefined;
@@ -363,10 +363,10 @@ export function ChatThread({
           ok: true,
           skipped: true,
           summary: studioLocale().toLowerCase().startsWith("zh")
-            ? "基础状态已经核对，本轮不再重复读取时间线"
-            : "The delivery state is already verified; the timeline will not be read again in this turn.",
+            ? "基础状态已核对完毕。不要再调用 get_timeline——继续未完成的编辑，或给出最终回复"
+            : "The delivery state is verified. Do not call get_timeline again — continue unfinished edits or write the final reply.",
           data: {
-            instruction: "Use the latest authoritative timeline snapshot already present, finish any unchecked non-picture layers, and provide a concise final summary.",
+            instruction: "Do NOT call get_timeline again this turn. Use the latest authoritative snapshot already present: your next call MUST be an editing tool, or you must write the final user-facing reply. Repeated reads end this turn's tool budget.",
           },
         });
         return;

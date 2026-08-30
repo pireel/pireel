@@ -393,13 +393,29 @@ export function buildSituation(
  *  Each row states the preset's CONCRETE look. Ids are opaque labels: "ln-white" is a white BAR
  *  with blue italic text, so a model picking by id wording alone chooses wrong — a real incident;
  *  the stated facts are what a task or Skill caption rule must be matched against. */
+/** Raw hex/rgba reads as noise to a model scanning for "white text" — worse, a white BAR's
+ *  rgba(255,255,255,…) puts the word-shape "white" on a blue-text row. Name every color so the
+ *  only row matching "text white" is one whose text is actually white. */
+const CAPTION_COLOR_NAMES: Record<string, string> = {
+  '#ffffff': 'white', '#111111': 'black', '#000000': 'black',
+  '#3901ee': 'blue', '#0059ff': 'blue', '#ffe34f': 'yellow',
+  '#5affb6': 'mint green', '#63ffc7': 'mint green', '#cf96ff': 'light purple',
+  '#fccfcf': 'pink', '#b89d4c': 'gold', '#7f6000': 'dark gold',
+  'rgba(255,255,255,0.85)': 'white', 'rgba(255,255,255,0.78)': 'white',
+  'rgba(0,0,0,0.72)': 'black', 'rgba(0,0,0,0.8)': 'black', 'rgba(0,0,0,0.4)': 'black',
+  'rgba(255,140,90,0.85)': 'orange', 'rgba(255,227,79,0.85)': 'yellow',
+  'rgba(255,0,0,0.85)': 'red', 'rgba(70,80,109,0.85)': 'navy',
+  'rgba(118,40,187,0.85)': 'purple', 'rgba(0,89,255,0.85)': 'blue',
+  'rgba(236,137,134,0.85)': 'coral pink', 'rgba(248,233,192,0.85)': 'cream',
+};
+const captionColor = (value: string): string => CAPTION_COLOR_NAMES[value] ?? value;
 const captionPresetFacts = (p: (typeof CAPTION_PRESETS)[number]): string => [
-  `text ${p.text}`,
-  ...(p.emphasis ? [`spoken-word highlight ${p.emphasis}`] : []),
-  p.bg ? `on ${p.bg} bar` : 'no background',
+  `${captionColor(p.text)} text`,
+  ...(p.emphasis ? [`spoken-word highlight ${captionColor(p.emphasis)}`] : []),
+  p.bg ? `on ${captionColor(p.bg)} bar` : 'no background',
   ...(p.font ? [`${p.font} font`] : []),
   ...(p.italic ? ['italic'] : []),
-  ...(p.deco ? [`${p.deco}${p.decoColor ? ` ${p.decoColor}` : ''}`] : []),
+  ...(p.deco ? [`${p.deco}${p.decoColor ? ` ${captionColor(p.decoColor)}` : ''}`] : []),
 ].join(', ');
 export const CAPTION_CATALOG_BLOCK = `\n\n<caption_catalog>\nCaption style presets for set_captions — two modes: emphasis (word-by-word: whole line shown, the spoken word highlighted) / line (clean full-line fade-in). Each row lists the preset's concrete look. Ids are opaque — NEVER infer colors from an id; match the stated facts against the task or the selected Skill's caption rules. NEVER invent an id. yPct/scale tune position & size separately.\n${CAPTION_PRESETS.map((p) => `- ${p.id} · ${p.mode} · ${captionPresetFacts(p)}`).join("\n")}\n</caption_catalog>`;
 
