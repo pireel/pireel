@@ -114,6 +114,9 @@ export interface EditorialCandidateReview {
   bestUse: string;
   /** Ranked non-destructive ways to take a shorter final shot from this accepted reservoir. */
   cutOptions: EditorialCutOption[];
+  /** Secondary accepted range from the same raw source, kept ONLY for accepted-capacity shortfall
+   * or a deliberate structural echo. The primary (unmarked) range is always preferred. */
+  reserve?: boolean;
 }
 
 export type EditorialAssemblyViolation =
@@ -158,6 +161,9 @@ export interface EditorialAssemblyPlan {
 }
 
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
+/** Perceptual floor for a standalone assembled shot. Sub-0.6s flashes read as glitches in a
+ * narrated montage; cutOptions below this remain in the receipt as data but are never assembled. */
+const MIN_ASSEMBLY_SHOT_SEC = 0.6;
 const clampScore = (value: unknown) => Math.round(Math.max(0, Math.min(100, Number(value) || 0)));
 const overlapDuration = (leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) => (
   Math.max(0, Math.min(leftEnd, rightEnd) - Math.max(leftStart, rightStart))
@@ -264,11 +270,19 @@ export function reconcileEditorialCandidateTemporalEvidence(
       });
     }
   }
-  const cutOptions = [...new Map(options
+  const deduped = [...new Map(options
     .filter((option) => option.durationSec >= 0.12)
     .sort((left, right) => right.score - left.score || left.durationSec - right.durationSec)
-    .map((option) => [`${option.startSec.toFixed(2)}:${option.endSec.toFixed(2)}`, option])).values()]
-    .slice(0, 4);
+    .map((option) => [`${option.startSec.toFixed(2)}:${option.endSec.toFixed(2)}`, option])).values()];
+  // Peak-centred tight cuts earn score boosts, so a pure top-4 evicts every long option and the
+  // reservoir's reachable duration collapses far below its accepted span (a 19.5s reservoir once
+  // shrank to a 5s ceiling and the montage could not cover the narration). The longest usable
+  // option always survives as one of the four, so stated capacity stays reachable.
+  const cutOptions = deduped.slice(0, 4);
+  if (deduped.length > 4) {
+    const longest = deduped.reduce((best, option) => (option.durationSec > best.durationSec ? option : best));
+    if (!cutOptions.includes(longest)) cutOptions[cutOptions.length - 1] = longest;
+  }
   const suggested = clippedRange(candidate.suggestedStartSec ?? startSec, candidate.suggestedEndSec ?? endSec);
   return {
     ...candidate,
@@ -377,14 +391,21 @@ export function planEditorialAssembly(input: {
     choices: Array<{ clip: EditorialAssemblyClip; score: number }>;
   };
   const rows = input.clips.flatMap<PlanningRow>((clip, originalIndex) => {
-    const candidates = sourceById.get(clip.assetId)?.candidates ?? [];
-    const accepted = candidates
+    const source = sourceById.get(clip.assetId);
+    const accepted = (source?.candidates ?? [])
       .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
       .map(reconcileEditorialCandidateTemporalEvidence);
     const candidate = accepted.find((row) => (
       clip.sourceInSec >= row.startSec - 0.06 && clip.sourceOutSec <= row.endSec + 0.06
     ));
-    if (!candidate) return [{ clip, originalIndex, choices: [{ clip, score: 50 }] }];
+    if (!candidate) {
+      // An UNREVIEWED source keeps the neutral pass-through so the contract stays total. A range
+      // from a REVIEWED source that misses every accepted candidate would fail the placement
+      // guard anyway; passing it through dooms the WHOLE optimized batch to that guard error, so
+      // drop just this row (the receipt reports it in droppedClipCount) and place the rest.
+      if (!source) return [{ clip, originalIndex, choices: [{ clip, score: 50 }] }];
+      return [];
+    }
     const reservoirKey = `${clip.assetId}:${candidate.candidateId}`;
     if (seenReservoirs.has(reservoirKey)) return [];
     seenReservoirs.add(reservoirKey);
@@ -396,8 +417,16 @@ export function planEditorialAssembly(input: {
     const matchingReviewed = candidate.cutOptions.find((option) => (
       `${round3(option.startSec)}:${round3(option.endSec)}` === requestedKey
     ));
+    // The reservoir's longest independently usable range is always a reachable choice. The stated
+    // accepted capacity is measured on these spans; without this row the knapsack tops out at the
+    // sum of curated short cuts and a fully covered narration can be unreachable by construction.
+    const suggestedInSec = candidate.suggestedStartSec ?? candidate.startSec;
+    const suggestedOutSec = candidate.suggestedEndSec ?? candidate.endSec;
     const choices = [
       ...reviewedChoices,
+      ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC
+        ? [{ clip: { ...clip, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec }, score: candidate.score }]
+        : []),
       {
         clip,
         score: matchingReviewed?.score ?? Math.max(0, candidate.score - (
@@ -406,7 +435,7 @@ export function planEditorialAssembly(input: {
       },
     ];
     const unique = [...new Map(choices
-      .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= 0.12)
+      .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= MIN_ASSEMBLY_SHOT_SEC)
       .sort((left, right) => right.score - left.score)
       .map((choice) => [
         `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,
@@ -419,7 +448,16 @@ export function planEditorialAssembly(input: {
     return [{ clip, originalIndex, choices: viable }];
   });
   if (!rows.length) {
-    return { clips: [], targetDurationSec, actualDurationSec: 0, changed: true, droppedClipCount: input.clips.length };
+    // Every requested range missed the accepted evidence. Return the request untouched so the
+    // placement guard emits its teaching error (naming the accepted ranges) instead of the
+    // runtime receiving an empty mutation with no explanation.
+    return {
+      clips: [...input.clips],
+      targetDurationSec,
+      actualDurationSec: round3(Math.max(...input.clips.map((clip) => clip.startSec + clip.sourceOutSec - clip.sourceInSec))),
+      changed: false,
+      droppedClipCount: 0,
+    };
   }
 
   type State = {
@@ -431,9 +469,25 @@ export function planEditorialAssembly(input: {
   let states = new Map<number, State>([[0, { score: 0, durationSec: 0, selected: [] }]]);
   rows.forEach((row, rowIndex) => {
     const next = new Map<number, State>();
+    // One state survives per 0.1s bucket. Within a bucket durations are near-ties, so editorial
+    // score decides; only a material duration-gap difference (the saturated final bucket collects
+    // real overshoots) outranks score. The drop-carry goes through the same comparison — an
+    // unconditional set could overwrite a same-bucket combination with strictly higher score.
+    const keepBetter = (tick: number, state: State) => {
+      const existing = next.get(tick);
+      if (!existing) {
+        next.set(tick, state);
+        return;
+      }
+      const stateGap = Math.abs(targetDurationSec - state.durationSec);
+      const existingGap = Math.abs(targetDurationSec - existing.durationSec);
+      if (stateGap < existingGap - 0.05 || (stateGap <= existingGap + 0.05 && state.score > existing.score)) {
+        next.set(tick, state);
+      }
+    };
     for (const [tick, state] of states) {
       const mayDrop = rowIndex > 0;
-      if (mayDrop) next.set(tick, state);
+      if (mayDrop) keepBetter(tick, state);
       for (const choice of row.choices) {
         const durationSec = choice.clip.sourceOutSec - choice.clip.sourceInSec;
         const remainingSec = round3(targetDurationSec - state.durationSec);
@@ -465,15 +519,7 @@ export function planEditorialAssembly(input: {
           durationSec: nextDurationSec,
           selected: [...state.selected, { rowIndex, clip: selectedClip }],
         };
-        const existing = next.get(nextTick);
-        if (
-          !existing
-          || Math.abs(targetDurationSec - nextState.durationSec) < Math.abs(targetDurationSec - existing.durationSec)
-          || (
-            Math.abs(targetDurationSec - nextState.durationSec) === Math.abs(targetDurationSec - existing.durationSec)
-            && nextState.score > existing.score
-          )
-        ) next.set(nextTick, nextState);
+        keepBetter(nextTick, nextState);
       }
     }
     states = next.size ? next : states;
@@ -499,7 +545,7 @@ export function planEditorialAssembly(input: {
   if (actualEnd > targetEnd + 0.001 && clips.length) {
     const last = clips[clips.length - 1]!;
     const overflow = actualEnd - targetEnd;
-    if (last.sourceOutSec - last.sourceInSec - overflow >= 0.5) last.sourceOutSec = round3(last.sourceOutSec - overflow);
+    if (last.sourceOutSec - last.sourceInSec - overflow >= MIN_ASSEMBLY_SHOT_SEC) last.sourceOutSec = round3(last.sourceOutSec - overflow);
   }
   const actualDurationSec = clips.length
     ? round3(clips[clips.length - 1]!.startSec + clips[clips.length - 1]!.sourceOutSec - clips[0]!.startSec - clips[clips.length - 1]!.sourceInSec)
@@ -780,7 +826,10 @@ export function normalizeEditorialCandidateReviews(
 }
 
 /** One raw take normally contains one intended performance surrounded by setup and alternate tries.
- * Keep the highest-ranked accepted range selectable while retaining rejects as audit evidence. */
+ * Keep the highest-ranked accepted range selectable while retaining rejects as audit evidence.
+ * One additional non-overlapping accepted range survives as an explicit `reserve`: without it,
+ * a capacity shortfall against the measured narration has no legal escape (re-review is forbidden
+ * and rejected ranges are unplaceable), which pushes the editor toward duplicating shots. */
 export function selectPrimarySourceCandidate(
   candidates: readonly EditorialCandidateReview[],
   options: { allowMultiple?: boolean } = {},
@@ -789,7 +838,20 @@ export function selectPrimarySourceCandidate(
   if (options.allowMultiple) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   const primary = ordered.find((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
   if (!primary) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  const reserve = ordered.find((candidate) => (
+    candidate.candidateId !== primary.candidateId
+    && (candidate.verdict === 'strong' || candidate.verdict === 'usable')
+    && overlapDuration(candidate.startSec, candidate.endSec, primary.startSec, primary.endSec) === 0
+    && !candidate.issues.includes('near-duplicate')
+  ));
   return ordered
-    .filter((candidate) => candidate.candidateId === primary.candidateId || candidate.verdict === 'reject' || candidate.verdict === 'unreviewed')
-    .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+    .filter((candidate) => candidate.candidateId === primary.candidateId
+      || candidate.candidateId === reserve?.candidateId
+      || candidate.verdict === 'reject'
+      || candidate.verdict === 'unreviewed')
+    .map((candidate, index) => ({
+      ...candidate,
+      rank: index + 1,
+      ...(candidate.candidateId === reserve?.candidateId ? { reserve: true } : {}),
+    }));
 }

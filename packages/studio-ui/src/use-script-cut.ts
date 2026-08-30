@@ -327,7 +327,7 @@ export function useScriptCut(deps: ScriptCutDeps) {
   const [asrBusy, setAsrBusy] = useState(false);
   const asrBusyRef = useRef(false);
   const extractForScript = async () => {
-    if (!timelineTranscriptionTargets(documentRef.current).length) {
+    if (!timelineTranscriptionTargets(documentRef.current, documentRef.current.semantics.managedCaptionSource ?? { mode: 'auto' }).length) {
       toast.error(t('common.uploadVideoFirst'));
       return;
     }
@@ -345,11 +345,17 @@ export function useScriptCut(deps: ScriptCutDeps) {
     }
   };
   // Opening the script panel auto-extracts (no button needed): fileSig cache hit returns instantly; runs ASR once if uncached.
-  // Only triggers when asrSentences is still null (never extracted) — an empty array = extracted but empty, don't retry in a loop
+  // Only triggers when asrSentences is still null (never extracted) — an empty array = extracted but empty, don't retry in a loop.
+  // Auto-extraction attempts each asset ONCE per session: an unresolvable target (bytes not
+  // restored, provider failure) must not re-launch the whole extraction flow on every tab
+  // switch/refresh. The panel's explicit extract button remains a fresh attempt.
+  const autoAsrAttemptedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const targets = timelineTranscriptionTargets(liveDocument);
-    const needsTranscript = targets.some((target) => !Object.prototype.hasOwnProperty.call(liveDocument.semantics.transcripts, target.assetId));
-    if (floatWin !== 'script' || !targets.length || !needsTranscript) return;
+    const targets = timelineTranscriptionTargets(liveDocument, liveDocument.semantics.managedCaptionSource ?? { mode: 'auto' });
+    const missing = targets.filter((target) => !Object.prototype.hasOwnProperty.call(liveDocument.semantics.transcripts, target.assetId));
+    const fresh = missing.filter((target) => !autoAsrAttemptedRef.current.has(target.assetId));
+    if (floatWin !== 'script' || !targets.length || !fresh.length) return;
+    for (const target of fresh) autoAsrAttemptedRef.current.add(target.assetId);
     void extractForScript();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floatWin, comp.shots, asrSentences, liveDocument]);

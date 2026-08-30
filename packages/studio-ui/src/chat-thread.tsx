@@ -70,11 +70,17 @@ import {
   canRunVisualReview,
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
+  createStudioTurnLedger,
   editorialPlacementIssue,
+  effectiveStudioTurnMessages,
   hasCompletedEditorialPlacement,
   hasPostAssemblyTimelineSnapshot,
   isRecoverableStudioChatError,
+  narrationDurationFromMessages,
   prepareEditorialPlacement,
+  recordStudioTurnToolResult,
+  reserveStudioTurnToolCall,
+  shouldBlockStudioTurnUndo,
   stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
 import { scopeSituationToThread } from "./chat-thread-context";
@@ -83,7 +89,7 @@ import type { StudioScenarioSkillOption } from "./shell-context";
 import { localAssetMentionContext } from "./chat-local-asset-mention";
 import { inspectTimelineFrameEvidence } from "./chat-timeline-frame-evidence";
 import { DeferredActivation } from "./deferred-activation";
-import { studioToolResultStopsAgentTurn } from "./agent-tool-runner";
+import { studioToolCanMutate, studioToolResultStopsAgentTurn } from "./agent-tool-runner";
 import type {
   AttachedFrame,
   ProgressHandle,
@@ -151,6 +157,8 @@ export function ChatThread({
   const editorialAnalysisCountRef = useRef(0);
   const interactionWaitDurationRef = useRef(0);
   const autoRecoveryAttemptedRef = useRef(false);
+  const turnLedgerRef = useRef(createStudioTurnLedger());
+  const finalOnlyRef = useRef(false);
   const timelineFrameInspectionRef = useRef<AbortController | null>(null);
   const [timelineFrameInspectionError, setTimelineFrameInspectionError] = useState(false);
   // Completed work stays visible by default. The arrow is an explicit user collapse, not an
@@ -187,6 +195,7 @@ export function ChatThread({
           ...(skillRef.current !== STUDIO_AUTO_SKILL_ID
             ? { skillId: skillRef.current }
             : {}),
+          ...(finalOnlyRef.current ? { finalOnly: true } : {}),
         }),
         prepareSendMessagesRequest: ({
           body,
@@ -231,102 +240,180 @@ export function ChatThread({
     async onToolCall({ toolCall }) {
       const id = toolCall.toolName;
       const requestedInput = (toolCall.input ?? {}) as Record<string, unknown>;
+      const ledger = turnLedgerRef.current;
+      const canMutate = studioToolCanMutate(id);
+      const publishSuccess = (output: Record<string, unknown>) => {
+        const recorded = recordStudioTurnToolResult(ledger, {
+          toolId: id,
+          toolCallId: toolCall.toolCallId,
+          input: requestedInput,
+          output,
+          canMutate,
+        });
+        let reported = output;
+        if (recorded.timelineUnchanged) {
+          reported = {
+            ok: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "时间线没有变化，本轮不再重复读取"
+              : "The timeline is unchanged and will not be read again in this turn.",
+            data: {
+              unchanged: true,
+              instruction: "Use the preceding authoritative timeline snapshot and finish the turn.",
+            },
+          };
+          const lastReceipt = ledger.receipts.at(-1) as { output?: unknown } | undefined;
+          if (lastReceipt) lastReceipt.output = reported;
+        }
+        addToolOutput({ tool: id, toolCallId: toolCall.toolCallId, output: reported });
+        return recorded;
+      };
+      const publishError = (errorText: string) => {
+        recordStudioTurnToolResult(ledger, {
+          toolId: id,
+          toolCallId: toolCall.toolCallId,
+          input: requestedInput,
+          errorText,
+          canMutate,
+        });
+        addToolOutput({
+          tool: id,
+          toolCallId: toolCall.toolCallId,
+          state: "output-error",
+          errorText,
+        });
+      };
+      const reservation = reserveStudioTurnToolCall(ledger);
+      finalOnlyRef.current = reservation.forceFinalResponse;
+      if (!reservation.allowed) {
+        publishSuccess({
+          ok: true,
+          skipped: true,
+          summary: studioLocale().toLowerCase().startsWith("zh")
+            ? "本轮处理次数已达上限，正在收尾"
+            : "This turn reached its processing limit and is finishing now.",
+          data: { reason: "turn-tool-limit", instruction: "Do not call more tools. Summarize the authoritative current state." },
+        });
+        return;
+      }
+      const effectiveMessages = effectiveStudioTurnMessages(messagesRef.current, ledger);
       const comp = getComp?.();
-      const narrationEndSec = comp?.audioTracks
+      const placedNarrationEndSec = comp?.audioTracks
         ?.filter((clip) => clip.role === "narration" && !clip.muted)
         .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
+      // Placed narration is authoritative; when it is absent (not yet placed, or rolled back) the
+      // measured duration of the narration audio produced this session keeps deterministic
+      // assembly engaged instead of silently degrading to freehand placement at target=0.
+      const narrationEndSec = placedNarrationEndSec > 0
+        ? placedNarrationEndSec
+        : narrationDurationFromMessages(effectiveMessages);
       const preparedPlacement = prepareEditorialPlacement(
-        messagesRef.current,
+        effectiveMessages,
         id,
         requestedInput,
         narrationEndSec,
       );
-      const editorialPictureLocked = hasCompletedEditorialPlacement(messagesRef.current);
+      const editorialPictureLocked = ledger.pictureLocked || hasCompletedEditorialPlacement(effectiveMessages);
+      if (id === "undo" && shouldBlockStudioTurnUndo(ledger)) {
+        publishSuccess({
+          ok: true,
+          skipped: true,
+          summary: studioLocale().toLowerCase().startsWith("zh")
+            ? "上一项失败且未改动时间线，已跳过撤销"
+            : "The previous operation failed without changing the timeline, so undo was skipped.",
+          data: { skipped: true, reason: "previous-mutation-failed", didMutate: false },
+        });
+        return;
+      }
       if (preparedPlacement && editorialPictureLocked) {
-        addToolOutput({
-          tool: id,
-          toolCallId: toolCall.toolCallId,
-          output: {
-            ok: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "主画面已经完成，本轮不再重复重建"
-              : "The primary picture is already assembled; it will not be rebuilt again in this turn.",
-            data: {
-              skipped: true,
-              reason: "editorial-picture-locked",
-              instruction: "Preserve the current picture edit. Continue only with unfinished captions, typography, sound, deterministic delivery checks, and a concise final summary.",
-            },
+        publishSuccess({
+          ok: true,
+          summary: studioLocale().toLowerCase().startsWith("zh")
+            ? "主画面已经完成，本轮不再重复重建"
+            : "The primary picture is already assembled; it will not be rebuilt again in this turn.",
+          data: {
+            skipped: true,
+            reason: "editorial-picture-locked",
+            instruction: "Preserve the current picture edit. Continue only with unfinished captions, typography, sound, deterministic delivery checks, and a concise final summary.",
           },
         });
         return;
       }
       if (id === "review_visuals" && editorialPictureLocked) {
-        addToolOutput({
-          tool: id,
-          toolCallId: toolCall.toolCallId,
-          output: {
-            ok: true,
-            skipped: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "选片阶段已完成画面判断，成片仅做基础状态验收"
-              : "Picture judgment is complete; delivery uses deterministic state checks only.",
-            data: {
-              instruction: "Do not run another visual review or rebuild the montage. Verify coverage, canvas fill, muted source audio, and track boundaries from the current project state, then finish.",
-            },
+        publishSuccess({
+          ok: true,
+          skipped: true,
+          summary: studioLocale().toLowerCase().startsWith("zh")
+            ? "选片阶段已完成画面判断，成片仅做基础状态验收"
+            : "Picture judgment is complete; delivery uses deterministic state checks only.",
+          data: {
+            instruction: "Do not run another visual review or rebuild the montage. Verify coverage, canvas fill, muted source audio, and track boundaries from the current project state, then finish.",
           },
         });
         return;
       }
-      if (id === "get_timeline" && editorialPictureLocked && hasPostAssemblyTimelineSnapshot(messagesRef.current)) {
-        addToolOutput({
-          tool: id,
-          toolCallId: toolCall.toolCallId,
-          output: {
-            ok: true,
-            skipped: true,
-            summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "基础状态已经核对，本轮不再重复读取时间线"
-              : "The delivery state is already verified; the timeline will not be read again in this turn.",
-            data: {
-              instruction: "Use the latest authoritative timeline snapshot already present, finish any unchecked non-picture layers, and provide a concise final summary.",
-            },
+      if (
+        id === "get_timeline"
+        && (ledger.blockFurtherTimelineReads || (
+          editorialPictureLocked
+          && (ledger.postAssemblyTimelineRead || hasPostAssemblyTimelineSnapshot(effectiveMessages))
+        ))
+      ) {
+        publishSuccess({
+          ok: true,
+          skipped: true,
+          summary: studioLocale().toLowerCase().startsWith("zh")
+            ? "基础状态已经核对，本轮不再重复读取时间线"
+            : "The delivery state is already verified; the timeline will not be read again in this turn.",
+          data: {
+            instruction: "Use the latest authoritative timeline snapshot already present, finish any unchecked non-picture layers, and provide a concise final summary.",
           },
         });
         return;
       }
       const executionInput = preparedPlacement?.input ?? requestedInput;
       const placementIssue = editorialPlacementIssue(
-        messagesRef.current,
+        effectiveMessages,
         id,
         executionInput,
       );
       if (placementIssue) {
         const zh = studioLocale().toLowerCase().startsWith("zh");
+        const sec = (value: number) => `${Math.round(value * 100) / 100}s`;
+        const acceptedList = placementIssue.acceptedRanges?.length
+          ? placementIssue.acceptedRanges.map((range) => `${sec(range.startSec)}–${sec(range.endSec)}`).join(", ")
+          : null;
+        const requested = placementIssue.requestedRange
+          ? `${sec(placementIssue.requestedRange.sourceInSec)}–${sec(placementIssue.requestedRange.sourceOutSec)}`
+          : null;
         const detail = placementIssue.reason === "review-rejected"
-          ? (zh ? "该素材本轮没有通过审片的可用区间。" : "This source has no accepted editorial range in this turn.")
+          ? (zh
+            ? `素材 ${placementIssue.assetId} 本轮没有通过审片的可用区间。`
+            : `Source ${placementIssue.assetId} has no accepted editorial range in this turn.`)
           : placementIssue.reason === "range-required"
-            ? (zh ? "该素材已经审片，放入时间线时必须填写通过审片的源区间。" : "This reviewed source requires an explicit accepted source range.")
-            : (zh ? "请求的源区间超出了本轮通过审片的范围。" : "The requested source range falls outside this turn's accepted editorial range.");
-        addToolOutput({
-          tool: id,
-          toolCallId: toolCall.toolCallId,
-          state: "output-error",
-          errorText: detail,
-        });
+            ? (zh
+              ? `素材 ${placementIssue.assetId} 已经审片，放入时间线时必须填写通过审片的源区间${acceptedList ? `（可用：${acceptedList}）` : ""}。`
+              : `Source ${placementIssue.assetId} is reviewed; placing it requires an explicit accepted source range${acceptedList ? ` (accepted: ${acceptedList})` : ""}.`)
+            : (zh
+              ? `素材 ${placementIssue.assetId} 请求的源区间${requested ? ` ${requested}` : ""}超出了本轮通过审片的范围${acceptedList ? `（可用：${acceptedList}）` : ""}。`
+              : `Source ${placementIssue.assetId} requested range${requested ? ` ${requested}` : ""} falls outside this turn's accepted editorial range${acceptedList ? ` (accepted: ${acceptedList})` : ""}.`);
+        // The guard rejected the call before execution: nothing changed, so an undo here would
+        // revert the previous SUCCESSFUL operation — say so explicitly instead of relying on the
+        // model to know failed calls apply nothing.
+        const noMutation = zh
+          ? "本次调用没有改动时间线，不要撤销；请改用通过审片的区间重新调用。"
+          : "This call changed nothing on the timeline — do not undo; retry with an accepted range.";
+        publishError(zh ? `${detail}${noMutation}` : `${detail} ${noMutation}`);
         return;
       }
       if (id === "analyze_visual" && (toolCall.input as { mode?: unknown } | undefined)?.mode === "editorial") {
         if (!canRunEditorialAnalysis(editorialAnalysisCountRef.current)) {
-          addToolOutput({
-            tool: id,
-            toolCallId: toolCall.toolCallId,
-            output: {
-              ok: true,
-              skipped: true,
-              summary: studioLocale().toLowerCase().startsWith("zh")
-                ? "本轮完整审片已经完成；继续使用已有可用区间、容量和分段评分，不再重复审片。"
-                : "This turn's complete source review already exists. Reuse its accepted reservoirs, capacity, and cut scores instead of reviewing again.",
-            },
+          publishSuccess({
+            ok: true,
+            skipped: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "本轮完整审片已经完成；继续使用已有可用区间、容量和分段评分，不再重复审片。"
+              : "This turn's complete source review already exists. Reuse its accepted reservoirs, capacity, and cut scores instead of reviewing again.",
           });
           return;
         }
@@ -334,16 +421,12 @@ export function ChatThread({
       }
       if (id === "review_visuals") {
         if (!canRunVisualReview(visualReviewCountRef.current)) {
-          addToolOutput({
-            tool: id,
-            toolCallId: toolCall.toolCallId,
-            output: {
-              ok: true,
-              skipped: true,
-              summary: studioLocale().toLowerCase().startsWith("zh")
-                ? "本轮画面检查已经完成，请根据现有检查结果修复或如实说明未完成项。"
-                : "This turn's visual review is complete. Use the existing evidence to repair the edit or state what remains unfinished.",
-            },
+          publishSuccess({
+            ok: true,
+            skipped: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "本轮画面检查已经完成，请根据现有检查结果修复或如实说明未完成项。"
+              : "This turn's visual review is complete. Use the existing evidence to repair the edit or state what remains unfinished.",
           });
           return;
         }
@@ -362,6 +445,11 @@ export function ChatThread({
           executionInput,
           { signal: ctrl.signal, surface: "chat" },
         );
+        const assemblyShortfallSec = preparedPlacement
+          ? Math.max(0, preparedPlacement.targetDurationSec - preparedPlacement.actualDurationSec)
+          : 0;
+        const assemblyCovered = !preparedPlacement
+          || assemblyShortfallSec <= Math.max(1, preparedPlacement.targetDurationSec * 0.03);
         const reportedOut = out.ok && preparedPlacement
           ? {
               ...out,
@@ -372,38 +460,30 @@ export function ChatThread({
                   actualDurationSec: preparedPlacement.actualDurationSec,
                   droppedClipCount: preparedPlacement.droppedClipCount,
                   naturalSpeed: true,
+                  // An under-target assembly is NOT a finished picture: say so in the receipt and
+                  // name the one legal fix, instead of letting a lock message call it complete.
+                  ...(assemblyCovered ? {} : {
+                    shortfallSec: Math.round(assemblyShortfallSec * 10) / 10,
+                    instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s narration. Close the remaining ${Math.round(assemblyShortfallSec * 10) / 10}s in ONE follow-up add_clips batch using unplaced accepted or reserve:true ranges from the SAME review receipt; never stretch, slow down, or repeat already-placed shots. If accepted capacity is genuinely exhausted, shorten the narration script or report the gap.`,
+                  }),
                 },
               },
             }
           : out;
         const stopAfterReceipt = studioToolResultStopsAgentTurn(out);
         if (stopAfterReceipt) userStoppedRef.current = true;
-        if (out.ok)
-          addToolOutput({
-            tool: id,
-            toolCallId: toolCall.toolCallId,
-            output: reportedOut,
-          });
-        else
-          addToolOutput({
-            tool: id,
-            toolCallId: toolCall.toolCallId,
-            state: "output-error",
-            errorText: out.error ?? t("chatGen.executionFailed"),
-          });
+        if (out.ok) publishSuccess(reportedOut as unknown as Record<string, unknown>);
+        else publishError(out.error ?? t("chatGen.executionFailed"));
         if (stopAfterReceipt) void stop();
       } catch (e) {
         const isStop = e instanceof DOMException && e.name === "AbortError";
-        addToolOutput({
-          tool: id,
-          toolCallId: toolCall.toolCallId,
-          state: "output-error",
-          errorText: isStop
+        publishError(
+          isStop
             ? e.message || t("chatGen.stopped")
             : e instanceof Error
               ? e.message
               : String(e),
-        });
+        );
       } finally {
         if (interactionWaitStartedAt !== null) {
           interactionWaitDurationRef.current += Math.max(0, Date.now() - interactionWaitStartedAt);
@@ -609,6 +689,8 @@ export function ChatThread({
       visualReviewCountRef.current = 0;
       editorialAnalysisCountRef.current = 0;
       interactionWaitDurationRef.current = 0;
+      turnLedgerRef.current = createStudioTurnLedger();
+      finalOnlyRef.current = false;
       // Snapshot the current situation at send time: only the latest one represents reality (situations in old messages are history, identity accounts for it)
       const attachedTimelineFrames = draftParts
         .filter(

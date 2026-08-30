@@ -19,7 +19,7 @@ function stripBlockPlacement(block: ReturnType<typeof captionBlocksFromAsr>[numb
   return payload;
 }
 
-/** a professional NLE treats caption word timing as clip-local data and rescales it with a text-clip trim.
+/** Peer editors treat caption word timing as clip-local data and rescale it with a text-clip trim.
  * Our renderer stores edited-timeline seconds, so materialize the equivalent mapping here while
  * leaving the source transcript and sourceRef untouched. */
 function retimeCaptionBlock(
@@ -96,7 +96,16 @@ function isCaptionableClip(document: EditorDocumentV2, clip: TimelineClip): clip
   return !!asset && (asset.kind === 'audio' || (asset.kind === 'video' && asset.metadata.hasAudio !== false));
 }
 
-/** NLE-style transcription scope over native timeline identity. The primary lane is one
+/** Clip-level audible state. A muted clip is outside the mix, so automatic narration-source
+ * selection must never transcribe it (muted montage B-roll is not the narration script); an
+ * explicit track/clip selection still honors the caller's stated intent. */
+function clipAudioMuted(clip: SpeechTimelineClip): boolean {
+  if (clip.kind === 'audio') return clip.properties.muted === true;
+  if (clip.kind === 'narrative') return clip.properties.audioMuted === true;
+  return clip.video?.audioMuted === true;
+}
+
+/** Transcription scope over native timeline identity. The primary lane is one
  * candidate, never a prerequisite. Linked A/V uses the audio-side clip so one recording is not
  * billed and transcribed twice. Assets are returned once even when split into several clips. */
 export function timelineTranscriptionTargets(
@@ -106,7 +115,9 @@ export function timelineTranscriptionTargets(
   const all = document.timeline.tracks.flatMap((track) => track.clips
     .filter((clip) => isCaptionableClip(document, clip))
     .map((clip) => ({ trackId: track.id, trackMuted: track.muted, clip })));
-  const eligible = selection.mode === 'auto' ? all.filter((entry) => !entry.trackMuted) : all;
+  const eligible = selection.mode === 'auto'
+    ? all.filter((entry) => !entry.trackMuted && !clipAudioMuted(entry.clip))
+    : all;
   const selected = selection.mode === 'auto'
     ? eligible
     : selection.mode === 'track'
@@ -130,6 +141,66 @@ export function timelineTranscriptionTargets(
     });
 }
 
+export interface ManagedCaptionLineRow {
+  clipId: string;
+  /** Transcript owner (sourceRef) — the edit write-back target when runtime refs miss. */
+  assetId?: string;
+  /** Runtime source key carried by the cue ref; absent = legacy main narration domain. */
+  src?: string;
+  seg: number;
+  w0: number;
+  w1: number;
+  text: string;
+  sub?: string;
+  editedStartSec: number;
+  durationSec: number;
+}
+
+/** Panel line rows straight from the document's managed caption lane — the same clips the canvas
+ * renders. This is the only caption row source that understands an audio-lane narration: the
+ * legacy comp-side displayCues derivation maps main-domain segments through primary-lane shots
+ * and structurally cannot represent narration placed as an audio clip. Returns null when the lane
+ * holds no managed cues so legacy projects keep their comp-side derivation. */
+export function managedCaptionLineRows(document: EditorDocumentV2): ManagedCaptionLineRow[] | null {
+  const track = document.semantics.managedCaptionTrackId
+    ? document.timeline.tracks.find((candidate) => candidate.id === document.semantics.managedCaptionTrackId)
+    : undefined;
+  const clips = (track?.clips ?? []).filter(
+    (clip): clip is CaptionTimelineClip => clip.kind === 'caption' && clip.managed && clip.enabled,
+  );
+  if (!clips.length) return null;
+  const fps = document.canvas.fps;
+  const rows = clips
+    .flatMap((clip): ManagedCaptionLineRow[] => {
+      const slots = clip.block.slots as {
+        ref?: { src?: unknown; seg?: unknown; w0?: unknown; w1?: unknown };
+        words?: Array<{ text?: unknown }>;
+        sub?: unknown;
+      };
+      const ref = slots.ref;
+      if (!ref || !Number.isInteger(Number(ref.seg))) return [];
+      const label = (clip.block as { label?: unknown }).label;
+      const text = typeof label === 'string' && label.trim()
+        ? label.trim()
+        : (Array.isArray(slots.words) ? slots.words : []).map((word) => String(word?.text ?? '')).join('');
+      if (!text) return [];
+      return [{
+        clipId: clip.id,
+        ...(clip.sourceRef ? { assetId: clip.sourceRef.assetId } : {}),
+        ...(typeof ref.src === 'string' && ref.src ? { src: ref.src } : {}),
+        seg: Number(ref.seg),
+        w0: Number(ref.w0) || 0,
+        w1: Number(ref.w1) || 0,
+        text,
+        ...(typeof slots.sub === 'string' && slots.sub.trim() ? { sub: slots.sub.trim() } : {}),
+        editedStartSec: timelineFramesToSeconds(clip.startFrame, fps),
+        durationSec: Math.max(0.1, timelineFramesToSeconds(clip.durationFrames, fps)),
+      }];
+    })
+    .sort((left, right) => left.editedStartSec - right.editedStartSec || left.clipId.localeCompare(right.clipId));
+  return rows.length ? rows : null;
+}
+
 function transcriptBearingClips(document: EditorDocumentV2, clips: readonly TimelineClip[]): SpeechTimelineClip[] {
   return clips
     .filter((clip): clip is SpeechTimelineClip => isSpeechClip(clip) && clip.enabled)
@@ -137,12 +208,17 @@ function transcriptBearingClips(document: EditorDocumentV2, clips: readonly Time
     .sort((left, right) => left.startFrame - right.startFrame);
 }
 
-/** The spoken lane a transcript-first UI should expose by default. As in a professional NLE, a semantic
+/** The spoken lane a transcript-first UI should expose by default. A semantic
  * primary lane is only one candidate; the lane with the most surviving words wins. */
 export function dominantTimelineSpeechTrack(document: EditorDocumentV2): TimelineSpeechTrack | null {
   return document.timeline.tracks
     .filter((track) => !track.muted)
-    .map((track) => ({ trackId: track.id, clips: transcriptBearingClips(document, track.clips) }))
+    // Clip-muted footage is outside the mix: its (possibly polluted) transcript must not win the
+    // dominant-lane vote, or auto caption source re-pins to a silent montage lane.
+    .map((track) => ({
+      trackId: track.id,
+      clips: transcriptBearingClips(document, track.clips).filter((clip) => !clipAudioMuted(clip)),
+    }))
     .filter((entry) => entry.clips.length)
     .sort((left, right) => (
       right.clips.reduce((sum, clip) => sum + spokenWordCount(document, clip), 0)
@@ -318,6 +394,19 @@ export function relayManagedCaptionTrack(
   if (trackIndex < 0) return commandFailure(document, 'track-not-found', `Track does not exist: ${trackId}`, { trackIds: [trackId] });
   const track = document.timeline.tracks[trackIndex]!;
   if (track.locked) return commandFailure(document, 'track-locked', `Track is locked: ${trackId}`, { trackIds: [trackId] });
+
+  // Captions-off is authoritative. Bare relays arrive from transcript edits and sync passes; if
+  // they materialize cues into a lane the user just switched off, captions resurrect on the next
+  // word edit — a real incident surfaced them from the wrong source entirely.
+  const on = document.appearance.captionStyle?.on ?? Boolean(track.clips.length);
+  if (!on) {
+    if (!track.clips.length) return { ok: true, document, receipt: emptyCommandReceipt('captions.relay') };
+    const tracks = [...document.timeline.tracks];
+    tracks[trackIndex] = { ...track, clips: [] };
+    const receipt = emptyCommandReceipt('captions.relay');
+    receipt.affectedTrackIds = [track.id];
+    return { ok: true, document: { ...document, timeline: { ...document.timeline, tracks } }, receipt };
+  }
 
   const selection = requestedSource ?? document.semantics.managedCaptionSource ?? { mode: 'auto' };
   const automaticTrack = selection.mode === 'auto' ? dominantTimelineSpeechTrack(document) : null;

@@ -220,11 +220,30 @@ describe('editorial candidate review contract', () => {
       candidateId: candidate.candidateId,
       rank: candidate.rank,
       verdict: candidate.verdict,
+      reserve: candidate.reserve ?? false,
     }))).toEqual([
-      { candidateId: 'candidate-2', rank: 1, verdict: 'strong' },
-      { candidateId: 'candidate-3', rank: 2, verdict: 'reject' },
+      { candidateId: 'candidate-2', rank: 1, verdict: 'strong', reserve: false },
+      { candidateId: 'candidate-1', rank: 2, verdict: 'usable', reserve: true },
+      { candidateId: 'candidate-3', rank: 3, verdict: 'reject', reserve: false },
     ]);
     expect(selectPrimarySourceCandidate(reviews, { allowMultiple: true })).toHaveLength(3);
+    expect(selectPrimarySourceCandidate(reviews, { allowMultiple: true }).every((candidate) => !candidate.reserve)).toBe(true);
+  });
+
+  it('keeps no reserve when the secondary accepted range overlaps the primary or is a near-duplicate', () => {
+    const specs = buildEditorialCandidateSpecs([window(1, 0, 4), window(2, 2, 6)]);
+    const overlapping = normalizeEditorialCandidateReviews(specs, [
+      { candidateId: 'candidate-1', rank: 1, verdict: 'strong', score: 92 },
+      { candidateId: 'candidate-2', rank: 2, verdict: 'usable', score: 80 },
+    ]);
+    expect(selectPrimarySourceCandidate(overlapping).map((candidate) => candidate.candidateId)).toEqual(['candidate-1']);
+
+    const dupSpecs = buildEditorialCandidateSpecs([window(1, 0, 2), window(2, 5, 8)]);
+    const nearDuplicate = normalizeEditorialCandidateReviews(dupSpecs, [
+      { candidateId: 'candidate-1', rank: 1, verdict: 'strong', score: 92 },
+      { candidateId: 'candidate-2', rank: 2, verdict: 'usable', score: 80, issues: ['near-duplicate'] },
+    ]);
+    expect(selectPrimarySourceCandidate(nearDuplicate).map((candidate) => candidate.candidateId)).toEqual(['candidate-1']);
   });
 });
 
@@ -316,6 +335,94 @@ describe('editorial temporal reconciliation and assembly', () => {
       sources: [{ assetId: '998', candidates: [reviewedCandidate()] }],
       targetDurationSec: 12,
     }).some((violation) => violation.kind === 'static-overlong')).toBe(false);
+  });
+
+  it('reaches the stated reservoir capacity when curated short cuts alone cannot cover narration', () => {
+    // Incident shape: the request sums ~9s but one reservoir spans 19.5s. Curated cutOptions are
+    // all short; the suggested longest-usable range must remain a reachable knapsack choice so an
+    // under-requested batch can still cover the narration instead of capping at the request sum.
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'long', startSec: 0, sourceInSec: 8, sourceOutSec: 13 },
+        { assetId: 'short', startSec: 5, sourceInSec: 2, sourceOutSec: 6 },
+      ],
+      sources: [
+        { assetId: 'long', candidates: [reviewedCandidate({
+          candidateId: 'candidate-long', startSec: 0, endSec: 19.5,
+          suggestedStartSec: 0, suggestedEndSec: 19.5,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 19.5, note: 'continuous walk with turns' }],
+          cutOptions: [
+            { durationSec: 1.8, startSec: 8, endSec: 9.8, score: 99, reason: 'tight peak' },
+            { durationSec: 2.8, startSec: 7.5, endSec: 10.3, score: 97, reason: 'balanced peak' },
+            { durationSec: 4, startSec: 7, endSec: 11, score: 95, reason: 'wide peak' },
+            { durationSec: 5, startSec: 8, endSec: 13, score: 91, reason: 'requested take' },
+          ],
+        })] },
+        { assetId: 'short', candidates: [reviewedCandidate({
+          candidateId: 'candidate-short', startSec: 2, endSec: 6,
+          suggestedStartSec: 2, suggestedEndSec: 6,
+          actionPhases: [{ phase: 'performance', startSec: 2, endSec: 6, note: 'complete gesture' }],
+          cutOptions: [{ durationSec: 4, startSec: 2, endSec: 6, score: 92, reason: 'complete action' }],
+        })] },
+      ],
+      targetDurationSec: 22,
+    });
+    expect(planned.actualDurationSec).toBeGreaterThan(18);
+    expect(planned.actualDurationSec).toBeLessThanOrEqual(22);
+  });
+
+  it('drops only the range that misses accepted evidence instead of dooming the whole batch', () => {
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'a', startSec: 0, sourceInSec: 20, sourceOutSec: 24 },
+        { assetId: 'other', startSec: 4, sourceInSec: 2, sourceOutSec: 9 },
+      ],
+      sources: [
+        { assetId: 'a', candidates: [reviewedCandidate({ candidateId: 'candidate-a', startSec: 0, endSec: 10 })] },
+        { assetId: 'other', candidates: [reviewedCandidate({
+          candidateId: 'candidate-other', startSec: 2, endSec: 9,
+          actionPhases: [{ phase: 'performance', startSec: 2, endSec: 9, note: 'continuous finished action' }],
+          cutOptions: [{ durationSec: 7, startSec: 2, endSec: 9, score: 92, reason: 'complete action' }],
+        })] },
+      ],
+      targetDurationSec: 7,
+    });
+    expect(planned.clips.every((clip) => clip.assetId === 'other')).toBe(true);
+    expect(planned.droppedClipCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('returns the request untouched when no range matches accepted evidence, letting the guard teach', () => {
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'a', startSec: 0, sourceInSec: 20, sourceOutSec: 24 }],
+      sources: [{ assetId: 'a', candidates: [reviewedCandidate({ candidateId: 'candidate-a', startSec: 0, endSec: 10 })] }],
+      targetDurationSec: 7,
+    });
+    expect(planned.changed).toBe(false);
+    expect(planned.clips).toEqual([{ assetId: 'a', startSec: 0, sourceInSec: 20, sourceOutSec: 24 }]);
+  });
+
+  it('never assembles a sub-0.6s flash shot even when the reviewed reservoir is that short', () => {
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'flash', startSec: 0, sourceInSec: 0, sourceOutSec: 0.5 },
+        { assetId: 'other', startSec: 0.5, sourceInSec: 2, sourceOutSec: 9 },
+      ],
+      sources: [
+        { assetId: 'flash', candidates: [reviewedCandidate({
+          candidateId: 'candidate-flash', startSec: 0, endSec: 0.5, score: 45,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 0.5, note: 'brief glance' }],
+          cutOptions: [{ durationSec: 0.5, startSec: 0, endSec: 0.5, score: 45, reason: 'entire interval' }],
+        })] },
+        { assetId: 'other', candidates: [reviewedCandidate({
+          candidateId: 'candidate-other', startSec: 2, endSec: 9,
+          actionPhases: [{ phase: 'performance', startSec: 2, endSec: 9, note: 'continuous finished action' }],
+          cutOptions: [{ durationSec: 7, startSec: 2, endSec: 9, score: 92, reason: 'complete action' }],
+        })] },
+      ],
+      targetDurationSec: 7,
+    });
+    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec >= 0.6)).toBe(true);
+    expect(planned.clips.some((clip) => clip.assetId === 'flash')).toBe(false);
   });
 
   it('uses a readable portion of the final reviewed interval to close a discrete duration gap', () => {

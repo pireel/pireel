@@ -37,6 +37,9 @@ export interface CaptionLineRow {
   key: string;
   /** null = main narration; otherwise the inserted clip's src. */
   src: string | null;
+  /** Transcript owner for document-derived rows (audio-lane narration): edit write-back target
+   *  when the runtime asr refs do not hold this row's segments. */
+  assetId?: string;
   /** Sentence index within its source's transcript. */
   index: number;
   /** Word range within the source sentence this cue covers (edit/translation write-back key). */

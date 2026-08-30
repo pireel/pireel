@@ -9,11 +9,18 @@ import {
   assistantWorkFold,
   canRunVisualReview,
   canRunEditorialAnalysis,
+  createStudioTurnLedger,
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   editorialPlacementIssue,
+  effectiveStudioTurnMessages,
   hasCompletedEditorialPlacement,
   hasPostAssemblyTimelineSnapshot,
+  MAX_STUDIO_TOOL_CALLS_PER_USER_TURN,
+  narrationDurationFromMessages,
+  recordStudioTurnToolResult,
+  reserveStudioTurnToolCall,
+  shouldBlockStudioTurnUndo,
   prepareEditorialPlacement,
   isRecoverableStudioChatError,
   sanitizeRestored,
@@ -314,6 +321,157 @@ describe('editorial placement receipts', () => {
     }] as UIMessage['parts']);
     expect(hasPostAssemblyTimelineSnapshot([review, completed, verified])).toBe(true);
   });
+
+  it('makes a just-finished review available before React commits the SDK message', () => {
+    const ledger = createStudioTurnLedger();
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'analyze_visual',
+      toolCallId: 'vision-live',
+      input: { mode: 'editorial' },
+      output: (review.parts[0] as { output: Record<string, unknown> }).output,
+      canMutate: false,
+    });
+
+    const effective = effectiveStudioTurnMessages([], ledger);
+    expect(prepareEditorialPlacement(effective, 'add_clips', {
+      clips: [{ assetId: 'asset-beach', role: 'primary', startSec: 0, sourceInSec: 0.3, sourceOutSec: 2.1 }],
+    }, 1.8)).not.toBeNull();
+  });
+});
+
+describe('synchronous studio turn ledger', () => {
+  it('locks picture immediately and detects one unchanged timeline re-read', () => {
+    const ledger = createStudioTurnLedger();
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips',
+      toolCallId: 'assembly-live',
+      input: {},
+      output: { ok: true, data: { delta: { duration: [0, 4] }, editorialAssembly: { actualDurationSec: 4 } } },
+      canMutate: true,
+    });
+    expect(ledger.pictureLocked).toBe(true);
+
+    const first = recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: 'timeline-1', input: {},
+      output: { ok: true, data: { durationSec: 4, tracks: [{ id: 'primary' }] } }, canMutate: false,
+    });
+    const repeated = recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: 'timeline-2', input: {},
+      output: { ok: true, data: { durationSec: 4, tracks: [{ id: 'primary' }] } }, canMutate: false,
+    });
+    expect(first.timelineUnchanged).toBe(false);
+    expect(repeated.timelineUnchanged).toBe(true);
+    expect(ledger.blockFurtherTimelineReads).toBe(true);
+  });
+
+  it('refuses to lock the picture on an under-target assembly so the gap stays fixable', () => {
+    const ledger = createStudioTurnLedger();
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'assembly-short', input: {},
+      output: { ok: true, data: { delta: { durationSec: [0, 36] }, editorialAssembly: { targetDurationSec: 53.8, actualDurationSec: 35.95 } } },
+      canMutate: true,
+    });
+    expect(ledger.pictureLocked).toBe(false);
+
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'assembly-full', input: {},
+      output: { ok: true, data: { delta: { durationSec: [36, 53.5] }, editorialAssembly: { targetDurationSec: 53.8, actualDurationSec: 53.4 } } },
+      canMutate: true,
+    });
+    expect(ledger.pictureLocked).toBe(true);
+
+    const shortReceipt = assistant([{
+      type: 'tool-add_clips', toolCallId: 'assembly-short-msg', state: 'output-available', input: {},
+      output: { ok: true, data: { editorialAssembly: { targetDurationSec: 53.8, actualDurationSec: 35.95 } } },
+    }] as UIMessage['parts']);
+    expect(hasCompletedEditorialPlacement([shortReceipt])).toBe(false);
+    expect(hasPostAssemblyTimelineSnapshot([shortReceipt])).toBe(false);
+  });
+
+  it('invalidates the read snapshot when a NO_UNDO tool still changes state (undo, output switch)', () => {
+    const ledger = createStudioTurnLedger();
+    const snapshot = { ok: true, data: { durationSec: 4, tracks: [{ id: 'primary' }] } };
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: 'timeline-1', input: {}, output: snapshot, canMutate: false,
+    });
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: 'timeline-2', input: {}, output: snapshot, canMutate: false,
+    });
+    expect(ledger.blockFurtherTimelineReads).toBe(true);
+
+    // undo carries a delta but sits outside the composition undo roster (canMutate=false).
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'undo', toolCallId: 'undo-1', input: {},
+      output: { ok: true, data: { delta: { durationSec: [4, 0.1] } } }, canMutate: false,
+    });
+    expect(ledger.blockFurtherTimelineReads).toBe(false);
+    expect(ledger.lastTimelineFingerprint).toBeNull();
+  });
+
+  it('recovers the narration target from speech receipts when the clip is absent from the timeline', () => {
+    const generated = assistant([{
+      type: 'tool-generate_speech', toolCallId: 'speech-1', state: 'output-available', input: {},
+      output: { ok: true, data: { asset: { id: 'up_1', durationSec: 55.656 } } },
+    }] as UIMessage['parts']);
+    expect(narrationDurationFromMessages([generated])).toBe(55.656);
+
+    const registered = assistant([{
+      type: 'tool-register_media', toolCallId: 'register-1', state: 'output-available',
+      input: { assets: [{ id: 'up_2', kind: 'audio', durationSec: 42.5, transcriptText: '旁白文本' }] },
+      output: { ok: true, data: {} },
+    }] as UIMessage['parts']);
+    expect(narrationDurationFromMessages([registered])).toBe(42.5);
+
+    const plainAudio = assistant([{
+      type: 'tool-register_media', toolCallId: 'register-2', state: 'output-available',
+      input: { assets: [{ id: 'up_3', kind: 'audio', durationSec: 30 }] },
+      output: { ok: true, data: {} },
+    }] as UIMessage['parts']);
+    expect(narrationDurationFromMessages([plainAudio])).toBe(0);
+  });
+
+  it('scopes the picture lock to the current user turn', () => {
+    const oldAssembly = assistant([{
+      type: 'tool-add_clips', toolCallId: 'assembly-old', state: 'output-available', input: {},
+      output: { ok: true, data: { editorialAssembly: { targetDurationSec: 4, actualDurationSec: 4 } } },
+    }] as UIMessage['parts']);
+    const newUserRequest: UIMessage = {
+      id: 'user-recut', role: 'user', parts: [{ type: 'text', text: '重新剪一版画面' }],
+    };
+    expect(hasCompletedEditorialPlacement([oldAssembly])).toBe(true);
+    expect(hasCompletedEditorialPlacement([oldAssembly, newUserRequest])).toBe(false);
+    expect(hasPostAssemblyTimelineSnapshot([oldAssembly, newUserRequest])).toBe(false);
+  });
+
+  it('blocks undo after a failed mutation until another mutation actually succeeds', () => {
+    const ledger = createStudioTurnLedger();
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'failed-add', input: {},
+      errorText: 'outside accepted range', canMutate: true,
+    });
+    expect(shouldBlockStudioTurnUndo(ledger)).toBe(true);
+
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: 'read-only', input: {},
+      output: { ok: true, data: { durationSec: 0 } }, canMutate: false,
+    });
+    expect(shouldBlockStudioTurnUndo(ledger)).toBe(true);
+
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'add_clips', toolCallId: 'successful-add', input: {},
+      output: { ok: true, data: { delta: { duration: [0, 3] } } }, canMutate: true,
+    });
+    expect(shouldBlockStudioTurnUndo(ledger)).toBe(false);
+  });
+
+  it('forces the next request to be final-only after the bounded tool budget', () => {
+    const ledger = createStudioTurnLedger();
+    for (let index = 0; index < MAX_STUDIO_TOOL_CALLS_PER_USER_TURN; index += 1) {
+      expect(reserveStudioTurnToolCall(ledger).allowed).toBe(true);
+    }
+    expect(ledger.forceFinalResponse).toBe(true);
+    expect(reserveStudioTurnToolCall(ledger).allowed).toBe(false);
+  });
 });
 
 describe('analyze visual card context', () => {
@@ -402,6 +560,13 @@ describe('assistantMessageSuggestsContinuation', () => {
     expect(assistantMessageSuggestsContinuation(assistant([
       { type: 'text', text: '本轮先注册配音，再放置画面。\n\n执行。' },
     ]))).toBe(true);
+    expect(assistantMessageSuggestsContinuation(assistant([
+      { type: 'text', text: '让我用一条自然收尾的镜头补上这段，然后加字幕。' },
+    ]))).toBe(true);
+    expect(assistantMessageSuggestsContinuation(assistant([
+      { type: 'text', text: '正在检查时间线。' },
+      { type: 'tool-get_timeline', toolCallId: 'timeline-final', state: 'output-available', input: {}, output: { ok: true } },
+    ] as UIMessage['parts']))).toBe(true);
   });
 
   it('detects an output-limit truncation and omits its scratchpad from model replay', () => {

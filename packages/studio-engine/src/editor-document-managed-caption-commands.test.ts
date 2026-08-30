@@ -5,6 +5,7 @@ import {
   emptyEditorDocumentV2,
   spokenTimelineBeats,
   timelineSpeechRangesForAsset,
+  managedCaptionLineRows,
   timelineTranscriptionTargets,
   type CaptionTimelineClip,
   type EditorDocumentV2,
@@ -95,6 +96,112 @@ describe('EditorDocument V2 managed caption command', () => {
 
     expect(timelineTranscriptionTargets(document)).toMatchObject([
       { trackId: 'media', clipId: 'video-clip', assetId: 'video' },
+    ]);
+  });
+
+  it('keeps captions OFF through bare relays and excludes muted lanes from the dominant vote', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.broll = {
+      id: 'broll', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 10, hasAudio: true },
+    };
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { localSig: 'voice-sig' }, metadata: { durationSec: 10 },
+    };
+    // Polluted state: the muted montage lane carries a chatter transcript with MORE words than the narration.
+    document.semantics.transcripts.broll = [{
+      start: 0, end: 8, text: 'one two three four five six seven eight nine ten', words: [],
+    }];
+    document.semantics.transcripts.voice = [{ start: 0, end: 6, text: 'hello world', words: [] }];
+    document.timeline.tracks[0]!.clips = [
+      narrative({ id: 'broll-clip', assetId: 'broll', properties: { treatment: 'full', audioMuted: true } }),
+    ];
+    document.timeline.tracks.push({
+      id: 'track-narration', type: 'audio', role: 'narration', muted: false, hidden: false, locked: false,
+      syncLocked: true, stackOrder: 2,
+      clips: [{
+        id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 0, durationFrames: 300,
+        enabled: true, sourceInSec: 0, sourceOutSec: 10, properties: {}, anchor: { type: 'timeline' },
+      }],
+    });
+    document.timeline.tracks.push({
+      id: 'managed-captions', type: 'caption', role: 'managedCaptions', muted: true, hidden: true,
+      locked: false, syncLocked: true, stackOrder: 8, clips: [],
+    });
+    document.semantics.managedCaptionTrackId = 'managed-captions';
+    document.appearance.captionStyle = { on: false, preset: 'ln-clean' };
+
+    // The muted montage lane must not win the dominant-speech vote despite its larger word count.
+    expect(dominantTimelineSpeechTrack(document)?.trackId).toBe('track-narration');
+
+    // A bare relay while captions are OFF materializes nothing.
+    const relaid = applyEditorCommand(document, { type: 'captions.relay' });
+    expect(relaid.ok).toBe(true);
+    const lane = (relaid.ok ? relaid.document : document).timeline.tracks.find((track) => track.id === 'managed-captions');
+    expect(lane?.clips).toHaveLength(0);
+  });
+
+  it('derives panel line rows from the managed lane, carrying the audio-lane transcript owner', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { localSig: 'voice-sig' }, metadata: { durationSec: 10 },
+    };
+    document.timeline.tracks.push({
+      id: 'managed-captions', type: 'caption', role: 'managedCaptions', muted: true, hidden: true,
+      locked: false, syncLocked: true, stackOrder: 8,
+      clips: [{
+        id: 'cue-1', kind: 'caption', startFrame: 30, durationFrames: 60, enabled: true, managed: true,
+        block: {
+          templateId: 'caption',
+          label: '普通的人生，依然值得被爱',
+          slots: { ref: { src: 'voice', seg: 2, w0: 0, w1: 5 } },
+        } as unknown as CaptionTimelineClip['block'],
+        sourceRef: { assetId: 'voice', segmentIndex: 2, wordStart: 0, wordEnd: 5 },
+        anchor: { type: 'timeline' },
+      }],
+    });
+    document.semantics.managedCaptionTrackId = 'managed-captions';
+
+    expect(managedCaptionLineRows(document)).toEqual([{
+      clipId: 'cue-1',
+      assetId: 'voice',
+      src: 'voice',
+      seg: 2,
+      w0: 0,
+      w1: 5,
+      text: '普通的人生，依然值得被爱',
+      editedStartSec: 1,
+      durationSec: 2,
+    }]);
+    expect(managedCaptionLineRows(emptyEditorDocumentV2({ fps: 30 }))).toBeNull();
+  });
+
+  it('never treats muted montage footage as the narration script source', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets.broll = {
+      id: 'broll', kind: 'video', locator: { localSig: 'broll-sig' }, metadata: { durationSec: 10, hasAudio: true },
+    };
+    document.assets.voice = {
+      id: 'voice', kind: 'audio', locator: { localSig: 'voice-sig' }, metadata: { durationSec: 10 },
+    };
+    document.timeline.tracks[0]!.clips = [
+      narrative({ id: 'broll-clip', assetId: 'broll', properties: { treatment: 'full', audioMuted: true } }),
+    ];
+    document.timeline.tracks.push({
+      id: 'track-narration', type: 'audio', role: 'narration', muted: false, hidden: false, locked: false,
+      syncLocked: true, stackOrder: 2,
+      clips: [{
+        id: 'voice-clip', kind: 'audio', assetId: 'voice', startFrame: 0, durationFrames: 300,
+        enabled: true, sourceInSec: 0, sourceOutSec: 10, properties: {}, anchor: { type: 'timeline' },
+      }],
+    });
+
+    // Auto mode: the muted primary-lane video is outside the mix and must not be transcribed.
+    expect(timelineTranscriptionTargets(document)).toMatchObject([
+      { trackId: 'track-narration', clipId: 'voice-clip', assetId: 'voice' },
+    ]);
+    // A pinned narration source resolves to the same single target.
+    expect(timelineTranscriptionTargets(document, { mode: 'track', trackId: 'track-narration' })).toMatchObject([
+      { trackId: 'track-narration', clipId: 'voice-clip', assetId: 'voice' },
     ]);
   });
 

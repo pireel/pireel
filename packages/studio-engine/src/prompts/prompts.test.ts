@@ -596,9 +596,13 @@ describe("chat 缓存架构:system 静态、局势在消息里", () => {
     );
     expect(sceneSchema.properties).toHaveProperty("visualMetaphor");
     expect(CHAT_IDENTITY).toContain("compile them directly into batched picture, text, graphic and sound edits");
-    expect(CHAT_IDENTITY).toContain("Ordinary editing does not create persisted planning artifacts");
     expect(CHAT_IDENTITY).toContain("does not require a proposal or request_approval merely because an edit is broad or complete");
-    expect(CHAT_IDENTITY).not.toContain("call set_director_plan before the remaining timeline mutations");
+    // Director-plan workflow lives entirely on the MCP/Skill capability surface now; the chat
+    // identity teaches none of it (the four persisted-planning tools are not attached to chat).
+    expect(CHAT_IDENTITY).not.toContain("set_director_plan");
+    expect(CHAT_IDENTITY).not.toContain("read_director_plan");
+    expect(CHAT_IDENTITY).not.toContain("Director Plan");
+    expect(CHAT_IDENTITY).not.toContain("planning artifact");
     const sceneDesigns = STUDIO_TOOLS.find((tool) => tool.id === "set_scene_designs")!;
     expect(sceneDesigns.chatOnly).not.toBe(true);
     expect(sceneDesigns.description).toContain("open design layer");

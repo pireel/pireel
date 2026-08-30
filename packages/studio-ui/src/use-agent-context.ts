@@ -259,7 +259,10 @@ export function useAgentContext(deps: AgentContextDeps) {
       clipAsrFailRef.current.add(src);
       toast.error(t('workbench.bRollTranscriptionFailed'));
     };
-    const srcs = [...new Set((compRef.current.shots ?? []).filter((s) => s.src).map((s) => s.src!))];
+    // Muted inserted sources are outside the mix: captions, translation and spoken-word addressing
+    // never derive from them, so bulk transcription skips them — a fully muted montage lane must
+    // not relaunch one ASR per source on every captions-panel action or read_script call.
+    const srcs = [...new Set((compRef.current.shots ?? []).filter((s) => s.src && !s.audioMuted).map((s) => s.src!))];
     for (const src of srcs) {
       if (clipAsrRef.current[src] || clipAsrFailRef.current.has(src)) continue;
       if (clipAsrBusyRef.current.has(src)) {

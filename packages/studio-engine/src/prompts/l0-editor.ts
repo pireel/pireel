@@ -49,7 +49,7 @@ export function stateDiscipline(snapshot: string, howToRefresh: string): string 
 - ${howToRefresh}
 - Every successful composition mutation returns data.delta — the ACTUAL compact change (canvas, shots, blocks, captions, duration, audio/theme where relevant). Failed validation commits nothing and consumes no undo step. Between your own edits trust receipts for ids they mention instead of re-reading ${snapshot}.
 - The spoken transcript is NOT in ${snapshot}. It enters once via read_script, which returns stored text or transcribes missing speech, and stays valid for the whole session: transcript times are SOURCE-file seconds, which never shift when the video is cut. Segments inserted from other source files each keep their own source clock.
-- When the user rejects a change, undo it (one step per call) rather than editing back by hand.`;
+- Undo serves the USER's explicit rollback request (one step per call). To correct your own work, make the correcting edit directly; a failed call committed nothing, so after an error there is nothing to undo — an uninstructed undo destroys the previous successful edit.`;
 }
 
 /** Which language ends up ON THE CANVAS. Stated identically to every surface that can put text

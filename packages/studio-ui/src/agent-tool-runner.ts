@@ -168,6 +168,12 @@ export function classifyStudioReviewFailure(error: unknown, phase: StudioReviewF
 }
 const QUERY_TOOLS = new Set([...NO_UNDO_TOOLS].filter((id) => id !== 'undo' && !PROJECT_MUTATION_TOOLS.has(id)));
 
+/** Whether this tool can create a composition undo entry. Chat uses the same authority to prevent
+ * an automatic undo after a failed mutation from rolling back an earlier successful edit. */
+export function studioToolCanMutate(toolId: string): boolean {
+  return !NO_UNDO_TOOLS.has(toolId);
+}
+
 const IMAGE_INSPECTION_MAX_DIM = 1280;
 const IMAGE_INSPECTION_MAX_BASE64_CHARS = 2 * 1024 * 1024;
 const EDITORIAL_BATCH_MAX_SOURCES = 24;
@@ -1062,7 +1068,19 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ? documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined
               : undefined;
             const mainTranscript = asrRef.current?.length ? asrRef.current : storedPrimary;
-            if (!mainTranscript?.length && typeof input.shotId !== 'string') return { ok: false, error: t('workbench.noTranscriptYetRun') };
+            if (!mainTranscript?.length && typeof input.shotId !== 'string') {
+              // Word-exact cutting addresses speech on the primary VIDEO lane. In a narrated
+              // montage the narration is a generated audio track — telling the model to call
+              // read_script again just loops it; the truthful move is edit-script-and-regenerate.
+              const doc = documentRef.current;
+              const narrationHasTranscript = doc.timeline.tracks.some((track) => (
+                track.role === 'narration' && track.clips.some((clip) => (
+                  'assetId' in clip && ((doc.semantics.transcripts[(clip as { assetId: string }).assetId]?.length ?? 0) > 0)
+                ))
+              ));
+              if (narrationHasTranscript) return { ok: false, error: t('workbench.wordCutNeedsPrimarySpeech') };
+              return { ok: false, error: t('workbench.noTranscriptYetRun') };
+            }
             if (!asrRef.current?.length && storedPrimary?.length) {
               asrRef.current = storedPrimary;
               setAsrSentences(storedPrimary);
@@ -1331,9 +1349,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 };
               });
               const completed = comparableResults.filter((result) => result.ok).length;
-              const acceptedDurationSec = Math.round(comparableResults.reduce((total, result) => {
-                const receipt = result as Record<string, unknown>;
-                if (receipt.ok !== true || !Array.isArray(receipt.editorialCandidates)) return total;
+              const sourceAcceptedSec = (receipt: Record<string, unknown>): number => {
+                if (receipt.ok !== true || !Array.isArray(receipt.editorialCandidates)) return 0;
                 const accepted = receipt.editorialCandidates
                   .filter((candidate): candidate is Record<string, unknown> => !!candidate
                     && typeof candidate === 'object'
@@ -1349,8 +1366,18 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   if (range.endSec > uncoveredStart) sourceCapacity += range.endSec - uncoveredStart;
                   coveredUntil = Math.max(coveredUntil, range.endSec);
                 }
-                return total + sourceCapacity;
-              }, 0) * 1_000) / 1_000;
+                return Math.round(sourceCapacity * 1_000) / 1_000;
+              };
+              // Per-source capacity lands on each item so duration fitting and shortfall
+              // attribution read straight from the receipt instead of re-deriving from ranges.
+              const annotatedResults = comparableResults.map((result) => {
+                const receipt = result as Record<string, unknown>;
+                if (receipt.ok !== true || !Array.isArray(receipt.editorialCandidates)) return result;
+                return { ...result, acceptedDurationSec: sourceAcceptedSec(receipt) };
+              });
+              const acceptedDurationSec = Math.round(annotatedResults.reduce((total, result) => (
+                total + sourceAcceptedSec(result as Record<string, unknown>)
+              ), 0) * 1_000) / 1_000;
               const batchResult: StudioToolResult = {
                 ok: true,
                 summary: `analyzed ${completed}/${batchItems.length} video sources`,
@@ -1358,7 +1385,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   analysisMode: 'editorial-batch',
                   editorialBrief: reviewBrief,
                   acceptedDurationSec,
-                  items: comparableResults,
+                  items: annotatedResults,
                   ...(openingComparison ? {
                     openingComparison: {
                       comparisonSummary: openingComparison.comparisonSummary,
@@ -1367,7 +1394,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                       })),
                     },
                   } : {}),
-                  instruction: `This batch is the complete source-selection review. The non-overlapping accepted source capacity is ${acceptedDurationSec}s. ${openingComparison?.contenders.length ? `Use openingComparison rank 1 as the opening; it was selected by one shared cross-source visual comparison, so do not re-rank independent per-source scores.` : 'Only one accepted opening contender was available, or the shared opening comparison was unavailable; use the strongest accepted candidate without another review.'} Then order the remaining strong or usable ranges by score and visible action/setting continuity. Choose an appropriate scored child cut instead of consuming every reservoir whole. Place the selected source-video clips in one batch with muted=true. Source audio was excluded and must not affect ranking. Do not create a Director Plan, run another visual review, or retry the selection after placement; leave failed or fully rejected sources unused.`,
+                  instruction: `This batch is the complete source-selection review. The non-overlapping accepted source capacity is ${acceptedDurationSec}s. ${openingComparison?.contenders.length ? `Use openingComparison rank 1 as the opening; it was selected by one shared cross-source visual comparison, so do not re-rank independent per-source scores.` : 'Only one accepted opening contender was available, or the shared opening comparison was unavailable; use the strongest accepted candidate without another review.'} Then order the remaining strong or usable ranges by score and visible action/setting continuity. Choose an appropriate scored child cut instead of consuming every reservoir whole. Ranges marked reserve:true are secondary accepted ranges from the same source: use one only when the accepted capacity falls short of the narration or a deliberate structural echo needs it; otherwise leave reserves unused. Place the selected source-video clips in one batch with muted=true. Source audio was excluded and must not affect ranking. Do not run another visual review or retry the selection after placement; leave failed or fully rejected sources unused.`,
                 },
               };
               clearToolProgress(toolId);
@@ -2799,7 +2826,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setDocument(edit.document);
             } else if (preset) await applyCaptionPreset(preset, patch);
             else if (Object.keys(patch).length) setCaptionStyle(patch);
-            if (!compRef.current.blocks.some(isSentenceCaption)) return { ok: false, error: t('workbench.couldNotGenerateCaptions') };
+            if (!compRef.current.blocks.some(isSentenceCaption)) {
+              // Captions derive from speech PLACED on the timeline. A stored transcript with no
+              // narration clip and no main-track speech yields nothing — name the real cause, or
+              // the model chases "empty transcript" while read_script keeps returning text.
+              const narrationPlaced = (compRef.current.audioTracks ?? []).some((clip) => clip.role === 'narration');
+              if (hasStoredTranscript && !narrationPlaced && !asrRef.current?.length) {
+                return { ok: false, error: t('workbench.captionsNeedNarrationOnTimeline') };
+              }
+              return { ok: false, error: t('workbench.couldNotGenerateCaptions') };
+            }
             const cs = resolveCaptionStyle(compRef.current);
             return { ok: true, summary: preset ? t('workbench.captionsSetName', { name: t(getCaptionPreset(cs.preset).name) }) : t('workbench.captionsAdjustedName', { name: t(getCaptionPreset(cs.preset).name) }) };
           }

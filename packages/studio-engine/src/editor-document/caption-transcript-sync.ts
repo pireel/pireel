@@ -40,8 +40,13 @@ export function syncCaptionTranscripts(
   const managedTrack = document.semantics.managedCaptionTrackId
     ? document.timeline.tracks.find((track) => track.id === document.semantics.managedCaptionTrackId)
     : undefined;
+  // Caption sources are not necessarily narrative-lane assets (audio-lane narration): accept
+  // their transcripts too, keyed by runtime src OR directly by asset id.
+  const captionSourceAssetIds = new Set<string>();
   for (const clip of managedTrack?.clips ?? []) {
     if (clip.kind !== 'caption' || !clip.sourceRef) continue;
+    captionSourceAssetIds.add(clip.sourceRef.assetId);
+    assetBySourceKey.set(clip.sourceRef.assetId, clip.sourceRef.assetId);
     const ref = clip.block.slots.ref as { src?: unknown } | undefined;
     if (typeof ref?.src === 'string' && ref.src) assetBySourceKey.set(ref.src, clip.sourceRef.assetId);
   }
@@ -60,7 +65,7 @@ export function syncCaptionTranscripts(
   }
   for (const [sourceKey, segments] of Object.entries(clipTranscripts)) {
     const assetId = assetBySourceKey.get(sourceKey);
-    if (!assetId || !narrativeAssetIds.has(assetId) || !segments.length) continue;
+    if (!assetId || !(narrativeAssetIds.has(assetId) || captionSourceAssetIds.has(assetId)) || !segments.length) continue;
     const merged = withDocumentLayout(transcripts[assetId] as AsrSegment[] | undefined, segments);
     if (sameTranscript(transcripts[assetId], merged)) continue;
     transcripts[assetId] = merged;

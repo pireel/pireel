@@ -18,6 +18,8 @@ import {
   applyCaptionDocumentEdit,
   isCaptionsOn,
   isSentenceCaption,
+  managedCaptionLineRows,
+  timelineTranscriptionTargets,
   resolveCaptionStyle,
   resolveSubCaptionStyle,
 } from '@pireel/studio-engine/composition';
@@ -137,7 +139,14 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
   const editCaptionLine = (row: CaptionLineRow, nextText: string, phase: 'live' | 'commit' | 'revert' = 'commit') => {
     if (phase !== 'commit') return;
     const src = row.src;
-    const segs = src ? clipAsrRef.current[src] : asrRef.current;
+    const runtimeSegs = src ? clipAsrRef.current[src] : asrRef.current;
+    // Document-derived rows (audio-lane narration) live in semantics.transcripts, not in the
+    // browser asr refs; without this fallback their edits silently no-op.
+    const documentSegs = row.assetId
+      ? documentRef.current.semantics.transcripts[row.assetId] as AsrSegment[] | undefined
+      : undefined;
+    const usesRuntime = !!runtimeSegs?.[row.index];
+    const segs = usesRuntime ? runtimeSegs : documentSegs;
     if (!segs?.[row.index] || !nextText.trim()) return;
     // Snapshot every currently materialized cue in this sentence. Locking only the edited range
     // would let the untouched tail rebalance around it on relay, which is still a hidden re-segment.
@@ -152,21 +161,24 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       }));
     const next = applyCaptionTextEdits(segs, items);
     if (next === segs) return;
-    const nextClipAsr = src ? { ...clipAsrRef.current, [src]: next } : clipAsrRef.current;
+    const nextClipAsr = usesRuntime && src ? { ...clipAsrRef.current, [src]: next } : clipAsrRef.current;
     const edit = applyCaptionDocumentEdit({
       document: documentRef.current,
-      mainTranscript: src ? asrRef.current : next,
-      clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
+      mainTranscript: usesRuntime && !src ? next : asrRef.current,
+      clipTranscripts: {
+        ...captionTranscriptsByAsset(documentRef.current, compRef.current, nextClipAsr),
+        ...(!usesRuntime && row.assetId ? { [row.assetId]: next } : {}),
+      },
     });
     if (!edit.ok) {
       toast.error(editorErrorMessage(edit.error));
       return;
     }
     pushUndoSnapshot();
-    if (src) {
+    if (usesRuntime && src) {
       clipAsrRef.current = nextClipAsr;
       setClipAsr(nextClipAsr);
-    } else {
+    } else if (usesRuntime) {
       asrRef.current = next;
       setAsrSentences(next);
     }
@@ -229,7 +241,7 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     comp,
     generating: capGenBusy,
     onPickPreset: applyCaptionPreset,
-    onRelayout: relayoutCaptions,
+    onRelayout: () => void relayoutCaptionsWithFeedback(),
     onRemove: removeCaptionLayer,
     // Per-line style controls (main / translation): resolved current styles + patch callbacks.
     // Patches with an explicit undefined clear that override; sub patches deep-merge into captionStyle.sub.
@@ -388,11 +400,81 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
     setDocument(edit.document);
     return { ok: true };
   };
+  /** Panel refresh = RE-ACQUIRE, then re-lay. Refresh must survive a changed caption source:
+   * a pinned track/clip that no longer exists falls back to auto (the current audible source and
+   * the re-selection is persisted), a resolved source with no stored transcript is extracted
+   * first, and only then are cue boundaries regenerated. The busy overlay paints before the
+   * synchronous relayout (one macrotask so the sync work cannot block the paint), holds long
+   * enough to read as an action, and a toast confirms completion. */
+  const relayoutCaptionsWithFeedback = async () => {
+    if (captionGenBusyRef.current) return;
+    if (!isCaptionsOn(compRef.current)) {
+      toast.error(t('workbench.thereNoCaptionsRight'));
+      return;
+    }
+    captionGenBusyRef.current = true;
+    setCapGenBusy(true);
+    const shownAt = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    try {
+      const selection = documentRef.current.semantics.managedCaptionSource ?? { mode: 'auto' as const };
+      let targets = timelineTranscriptionTargets(documentRef.current, selection);
+      const staleSource = !targets.length && selection.mode !== 'auto';
+      if (staleSource) {
+        targets = timelineTranscriptionTargets(documentRef.current, { mode: 'auto' });
+        // Extraction reads the persisted source: commit the auto re-selection first and let the
+        // render flush so documentRef reflects it before ASR resolves its targets.
+        const reselect = applyCaptionDocumentEdit({
+          document: documentRef.current,
+          source: { mode: 'auto' },
+          mainTranscript: asrRef.current,
+          clipTranscripts: captionTranscriptsByAsset(documentRef.current, compRef.current, clipAsrRef.current),
+        });
+        if (!reselect.ok) {
+          toast.error(editorErrorMessage(reselect.error));
+          return;
+        }
+        setDocument(reselect.document);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const missingTranscript = targets.some(
+        (target) => !(documentRef.current.semantics.transcripts[target.assetId]?.length),
+      );
+      if (missingTranscript) await stepAsr();
+      const result = relayoutCaptions();
+      if (result.ok) toast.success(t('captions.relayoutDone'));
+    } catch {
+      toast.error(t('workbench.transcriptExtractionFailedTry'));
+    } finally {
+      const holdRemainingMs = 350 - (Date.now() - shownAt);
+      if (holdRemainingMs > 0) await new Promise((resolve) => setTimeout(resolve, holdRemainingMs));
+      captionGenBusyRef.current = false;
+      setCapGenBusy(false);
+    }
+  };
   const captionLineRows = useMemo<CaptionLineRow[]>(() => {
-    // Rows = the SAME derivation the canvas renders (displayCues): one row = one on-screen line, by
-    // construction. Read document-owned cueLayout first: browser transcript refs can legitimately
-    // lag a style transaction, but the list must never show different boundaries from the canvas.
-    // NOTE deliberately not gated on comp.video: transcript + shots are cloud-backed.
+    // The document's managed caption lane is what the canvas renders — when it holds cues, rows
+    // come straight from it. This is the only row source that understands an audio-lane narration
+    // (the legacy comp-side derivation maps main-domain segments through primary-lane shots and
+    // shows the wrong source for a muted montage).
+    const documentRows = managedCaptionLineRows(documentRef.current);
+    if (documentRows) {
+      return documentRows.map((row) => ({
+        key: `${row.src ?? 'main'}:${row.seg}:${row.w0}`,
+        src: row.src ?? null,
+        ...(row.assetId ? { assetId: row.assetId } : {}),
+        index: row.seg,
+        w0: row.w0,
+        w1: row.w1,
+        text: row.text,
+        ...(row.sub ? { sub: row.sub } : {}),
+        editedStart: row.editedStartSec,
+        dur: row.durationSec,
+      }));
+    }
+    // Legacy comp-side fallback (projects without materialized managed cues): same derivation the
+    // legacy canvas renders (displayCues). NOTE deliberately not gated on comp.video: transcript +
+    // shots are cloud-backed.
     const documentTranscripts = captionTranscriptsFromDocument(documentRef.current, comp, clipAsr);
     const narr = documentTranscripts.main?.length ? documentTranscripts.main : asrSentences;
     return displayCues(ensureShots(comp), narr, documentTranscripts.clips, {
@@ -413,7 +495,9 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
         dur: Math.max(0.1, c.end - c.start),
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.shots, comp.width, comp.height, comp.captionStyle, asrSentences, clipAsr]);
+    // `comp` itself is in the deps: it is reprojected on every document commit, so document-side
+    // caption relays re-derive the rows even when no legacy field changed.
+  }, [comp, comp.shots, comp.width, comp.height, comp.captionStyle, asrSentences, clipAsr]);
   /* ---------- Bilingual translation (the captions panel "bilingual" section): translations come from the in-house LLM
      (providers.translate; the OSS shell's default hides this section), data lands via the same set_caption_translations executor (undo/re-lay shared). ---------- */
   const translateCaptionsTo = async (target: string) => {

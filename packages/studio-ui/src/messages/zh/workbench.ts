@@ -208,6 +208,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.ratioFollowSource": "自适应",
   "workbench.followSourceUnavailable": "先添加一个有尺寸信息的视频片段",
   "workbench.couldNotGenerateCaptions": "没能生成字幕(口播稿可能是空的)",
+  "workbench.captionsNeedNarrationOnTimeline":
+    "没能生成字幕:口播稿存在,但旁白没有放在时间轴上。先用 add_clips(role=narration)放置旁白音频,再设置字幕",
   "workbench.couldNotGetSource": "取不到该片段的源文件,无法抠像",
   "workbench.couldNotReadDuration": "读取视频时长失败(换 mp4/mov 试试)",
   "workbench.couldNotReadDurationCodec":
@@ -431,6 +433,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.noTranscriptYetExtract":
     "还没有口播稿——先提取口播(智能剪口播/字幕面板)再同步",
   "workbench.noTranscriptYetRun": "还没有口播稿,先调用 read_script 获取",
+  "workbench.wordCutNeedsPrimarySpeech":
+    "逐词剪辑只针对主轨视频里的原声口播;当前旁白是生成的语音轨,要改内容请修改口播稿文本后重新生成语音",
   "workbench.noVideoYet": "还没有视频",
   "workbench.openChat": "打开对话",
   "workbench.originalVideoReconnectedDraft": "原视频已接回，草稿完整恢复",

@@ -425,7 +425,7 @@ describe('Agent composition transaction boundary', () => {
     expect(execute).toContain('After Approve, run `remove_silence` first');
     expect(execute).toContain('do not retry it in the same user request');
     expect(buildChatSystem(null)).toContain('run remove_silence before transcript-driven edits');
-    expect(buildChatSystem(null)).toContain('Ordinary editing does not create persisted planning artifacts');
+    expect(buildChatSystem(null)).not.toContain('planning artifact');
   });
 
   it('prepares every referenced device-local media asset before clips are committed', async () => {

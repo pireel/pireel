@@ -66,7 +66,9 @@ export function useMediaAnalysis(deps: MediaAnalysisDeps) {
   function runAsr(report: ((text: string) => void) | undefined, force: boolean): Promise<AsrSegment[]> {
     return dedup('asr', async () => {
       const current = documentRef.current;
-      const targets = timelineTranscriptionTargets(current);
+      // Honor the pinned caption/narration source: with the source pinned to the narration track,
+      // ASR must not transcribe muted montage footage as if it were the narration script.
+      const targets = timelineTranscriptionTargets(current, current.semantics.managedCaptionSource ?? { mode: 'auto' });
       if (!targets.length) {
         const silentAssetIds = [...new Set(current.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
           const assetId = 'assetId' in clip && typeof clip.assetId === 'string' ? clip.assetId : null;
