@@ -289,6 +289,11 @@ export async function reviewEditorialCandidates(
   const reviewBriefHash = editorialBriefHash(normalizedBrief);
   const reviewSpecsSig = editorialSpecsSig(specs);
   const cachedReview = await getCachedEditorialReview(reviewCacheKey, reviewBriefHash, reviewSpecsSig);
+  if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+    // Dev-only lookup trace: a run that should have reused but re-paid is diagnosable from the
+    // console (stale bundle, unseeded store, or a key drift) without replaying the whole flow.
+    console.debug(`[editorial-review] cache ${cachedReview ? (cachedReview.exact ? 'hit' : 'hit-cross-brief') : 'miss'} key=${reviewCacheKey} file=${file.name}`);
+  }
   if (cachedReview) return { ...cachedReview.result, reused: true };
 
   const { requiresClosedMouth, requiresSoloSubject } = editorialBriefFaceRequirements(normalizedBrief);
