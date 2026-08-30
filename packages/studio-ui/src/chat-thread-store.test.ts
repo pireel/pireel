@@ -322,6 +322,54 @@ describe('editorial placement receipts', () => {
     expect(hasPostAssemblyTimelineSnapshot([review, completed, verified])).toBe(true);
   });
 
+  it('stamps pool-completion filler clips with their OWN asset id and passes the placement guard', () => {
+    const twoSourceReview = assistant([{
+      type: 'tool-analyze_visual',
+      toolCallId: 'vision-two',
+      state: 'output-available',
+      input: { mode: 'editorial', items: [{ assetId: 'asset-a' }, { assetId: 'asset-b' }] },
+      output: {
+        ok: true,
+        data: {
+          analysisMode: 'editorial-batch',
+          items: [
+            {
+              ok: true, analysisMode: 'editorial-candidates', localAssetId: 'asset-a',
+              editorialCandidates: [{
+                candidateId: 'cand-a', verdict: 'strong', startSec: 0, endSec: 4, score: 90,
+                contentRole: 'person-primary',
+                actionPhases: [{ phase: 'performance', startSec: 0, endSec: 4, note: 'complete action' }],
+                cutOptions: [{ durationSec: 4, startSec: 0, endSec: 4, score: 90, reason: 'complete' }],
+                rejectedRanges: [],
+              }],
+            },
+            {
+              ok: true, analysisMode: 'editorial-candidates', localAssetId: 'asset-b',
+              editorialCandidates: [{
+                candidateId: 'cand-b', verdict: 'usable', startSec: 10, endSec: 16, score: 82,
+                contentRole: 'person-primary',
+                actionPhases: [{ phase: 'performance', startSec: 10, endSec: 16, note: 'complete action' }],
+                cutOptions: [{ durationSec: 6, startSec: 10, endSec: 16, score: 82, reason: 'complete' }],
+                rejectedRanges: [],
+              }],
+            },
+          ],
+        },
+      },
+    }] as UIMessage['parts']);
+    // The batch references asset-a only; covering 10s forces pool completion to pull asset-b in.
+    const prepared = prepareEditorialPlacement([twoSourceReview], 'add_clips', {
+      clips: [{ assetId: 'local:asset-a', role: 'primary', muted: true, sourceInSec: 0, sourceOutSec: 4 }],
+    }, 10);
+    expect(prepared).not.toBeNull();
+    const clips = prepared!.input.clips as Array<{ assetId: string; sourceInSec: number; sourceOutSec: number }>;
+    const filler = clips.filter((clip) => clip.assetId.includes('asset-b'));
+    expect(filler.length).toBeGreaterThan(0);
+    // Filler ranges belong to asset-b's accepted span — never to another row's asset id.
+    expect(filler.every((clip) => clip.sourceInSec >= 10 && clip.sourceOutSec <= 16)).toBe(true);
+    expect(editorialPlacementIssue([twoSourceReview], 'add_clips', prepared!.input)).toBeNull();
+  });
+
   it('engages deterministic assembly for a mixed batch whose picture rows omit startSec', () => {
     const prepared = prepareEditorialPlacement([review], 'add_clips', {
       clips: [

@@ -625,12 +625,16 @@ export function prepareEditorialPlacement(
   const unusedRows = orderedPicture.map(({ row }) => row);
   const clips = plan.clips.map((planned) => {
     const matchIndex = unusedRows.findIndex((row) => canonicalEditorialAssetId(row.assetId) === planned.assetId);
-    const original = matchIndex >= 0 ? unusedRows.splice(matchIndex, 1)[0]! : pictureRows[0]!;
+    // Pool-completion filler clips have NO batch row: they must carry the PLANNER's asset id.
+    // Falling back to another row's fields once stamped the batch's first asset id onto every
+    // filler clip — foreign ranges under the wrong asset, killed by the placement guard.
+    const original = matchIndex >= 0 ? unusedRows.splice(matchIndex, 1)[0]! : null;
     const durationSec = Math.round((planned.sourceOutSec - planned.sourceInSec) * 1_000) / 1_000;
-    const { speed: _discardSpeed, ...naturalSpeed } = original;
+    const { speed: _discardSpeed, ...naturalSpeed } = original ?? {};
     return {
       ...naturalSpeed,
       role: 'primary',
+      assetId: original ? original.assetId : planned.assetId,
       startSec: planned.startSec,
       sourceInSec: planned.sourceInSec,
       sourceOutSec: planned.sourceOutSec,
