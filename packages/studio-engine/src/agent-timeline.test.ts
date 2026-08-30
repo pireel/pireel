@@ -686,7 +686,7 @@ describe('shared agent timeline atoms', () => {
     expect(removed.document!.timeline.tracks.flatMap((track) => track.clips)).toEqual([]);
   });
 
-  it('does not leave narration behind by destructively clearing the entire primary picture', () => {
+  it('removes the entire primary picture when asked — remove is an honest primitive', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [
       { id: 'picture', kind: 'video', url: 'https://cdn.example/picture.mp4', durationSec: 5 },
@@ -697,13 +697,15 @@ describe('shared agent timeline atoms', () => {
       { id: 'voice-clip', assetId: 'voice', role: 'narration', durationSec: 5 },
     ] }).document!;
 
-    expect(runAgentTimelineTool(document, 'remove_clips', {
+    // Protecting an assembled cut from agent self-demolition is the harness picture lock's job;
+    // the engine executes the removal (recoverable via undo) instead of vetoing editing intent.
+    const removed = runAgentTimelineTool(document, 'remove_clips', {
       clipIds: ['picture-clip'],
       includeLinked: false,
-    })).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('Cannot remove the entire primary picture'),
     });
+    expect(removed.ok).toBe(true);
+    expect(removed.document!.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips).toEqual([]);
+    expect(removed.document!.timeline.tracks.find((track) => track.role === 'narration')?.clips).toHaveLength(1);
   });
 
   it('aligns explicit matching markers and links the synced clips', () => {

@@ -121,7 +121,7 @@ export interface StudioChatProps {
   runTool: (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge" },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
   ) => Promise<StudioToolResult>;
   /** Callback when a frame is attached (both panel "use" and the theme button): the workbench uses it to apply the theme palette to comp. */
   onFrameApplied?: (frame: AttachedFrame | null) => void;

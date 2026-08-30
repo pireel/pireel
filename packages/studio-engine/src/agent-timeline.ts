@@ -952,18 +952,10 @@ function removeClips(document: EditorDocumentV2, input: Input): AgentTimelineOut
     next = removed.document;
     receipts.push(removed.receipt);
   }
-  const hadPrimaryPicture = document.timeline.tracks.some((track) => (
-    track.role === 'primaryNarrative' && track.clips.length > 0
-  ));
-  const hasPrimaryPicture = next.timeline.tracks.some((track) => (
-    track.role === 'primaryNarrative' && track.clips.length > 0
-  ));
-  const hasNarration = next.timeline.tracks.some((track) => (
-    track.role === 'narration' && track.clips.length > 0
-  ));
-  if (hadPrimaryPicture && !hasPrimaryPicture && hasNarration) {
-    return fail('Cannot remove the entire primary picture while narration remains. Preserve the current cut and patch or overwrite it with validated replacement clips first.');
-  }
+  // remove means remove — no editorial-judgment guard here. Protecting an assembled cut from
+  // agent self-demolition is the per-turn harness lock's job (it knows intent and turn state);
+  // an engine-level veto also blocked legitimate clears from the UI, MCP agents and other flows,
+  // and removals stay recoverable through undo.
   return mutation(next, `Removed ${clipIds.length} clip${clipIds.length === 1 ? '' : 's'}`, receipts);
 }
 

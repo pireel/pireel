@@ -6957,7 +6957,7 @@ export function HyperframesWorkbench({
   const runStudioTool = (
     toolId: string,
     input: Record<string, unknown>,
-    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge" },
+    opts?: { signal?: AbortSignal; surface?: "chat" | "bridge"; skillId?: string },
   ) => persistToolMutation(runAgentStudioTool(agentToolCtx, toolId, input, opts));
   runToolRef.current = runStudioTool; // break the hook↔dispatcher cycle (assigned every render before any handler can fire)
   const runExternalTool = (tool: string, input: Record<string, unknown>) =>

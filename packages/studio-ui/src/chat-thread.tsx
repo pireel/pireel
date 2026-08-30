@@ -474,7 +474,11 @@ export function ChatThread({
         const out = await runToolRef.current(
           id,
           executionInput,
-          { signal: ctrl.signal, surface: "chat" },
+          {
+            signal: ctrl.signal,
+            surface: "chat",
+            ...(skillRef.current !== STUDIO_AUTO_SKILL_ID ? { skillId: skillRef.current } : {}),
+          },
         );
         const assemblyShortfallSec = preparedPlacement
           ? Math.max(0, preparedPlacement.targetDurationSec - preparedPlacement.actualDurationSec)

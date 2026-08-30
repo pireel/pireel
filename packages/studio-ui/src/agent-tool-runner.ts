@@ -93,6 +93,7 @@ import { resolveCaptionSentenceEdits } from '@pireel/studio-engine/caption-sente
 import { exportRecommendations } from '@pireel/studio-engine/export-options';
 import { parkInteraction } from './interaction-store';
 import { interpretApplyRaw } from '@pireel/studio-engine/briefs';
+import { composeEditorialBrief } from '@pireel/studio-engine/review-brief';
 import { studioProviders } from '@pireel/studio-engine/providers';
 import { compositionRevision } from '@pireel/studio-engine/analysis-jobs';
 import { compactAssetSearchElementResults, searchAssetLibrary } from '@pireel/studio-engine/asset-search';
@@ -448,9 +449,32 @@ export interface AgentToolCtx {
 type StudioToolRunInternalOptions = {
   signal?: AbortSignal;
   surface?: 'chat' | 'bridge';
+  /** Active Skill for this turn: its declared review-brief (when present) overrides the
+   * model-authored brief for editorial visual review. */
+  skillId?: string;
   collectOpeningEvidence?: boolean;
   reportProgress?: (text: string, frac?: number, extra?: Pick<ToolProgress, 'blockIds' | 'items'>) => void;
 };
+
+/** Session-scoped cache of Skill-declared review briefs (null = skill has no brief block). */
+const skillReviewBriefCache = new Map<string, Promise<string | null>>();
+function fetchSkillReviewBrief(skillId: string): Promise<string | null> {
+  const cached = skillReviewBriefCache.get(skillId);
+  if (cached) return cached;
+  const pending = fetch(`/api/studio/skill-brief?skillId=${encodeURIComponent(skillId)}`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error(`skill-brief ${response.status}`);
+      const body = (await response.json()) as { brief?: unknown };
+      return typeof body.brief === 'string' && body.brief.trim() ? body.brief.trim() : null;
+    })
+    .catch(() => {
+      // A transient failure must not pin "no brief" for the whole session.
+      skillReviewBriefCache.delete(skillId);
+      return null;
+    });
+  skillReviewBriefCache.set(skillId, pending);
+  return pending;
+}
 
 async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: StudioToolRunInternalOptions): Promise<StudioToolResult> {
   const {
@@ -1200,7 +1224,15 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'analyze_visual': {
             const geometryOnly = input.mode === 'geometry';
             const editorialReview = input.mode === 'editorial';
-            const reviewBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
+            const modelBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
+            // Selection criteria are the active Skill's data, applied verbatim; the model-authored
+            // brief is demoted to bounded session notes (a re-authored brief drifted in practice —
+            // it invented topical constraints the Skill never asked for). Batch fan-out re-enters
+            // this case without opts.skillId, so composition happens exactly once per call.
+            const skillBrief = editorialReview && opts?.skillId
+              ? await fetchSkillReviewBrief(opts.skillId)
+              : null;
+            const reviewBrief = skillBrief ? composeEditorialBrief(skillBrief, modelBrief) : modelBrief;
             if (editorialReview && !reviewBrief) return { ok: false, error: 'analyze_visual mode="editorial" requires a concrete brief describing the desired visible qualities and editorial roles' };
             const maxReviewCandidates = Math.max(1, Math.min(6, Math.floor(Number(input.maxCandidates) || 6)));
             const batchItems = Array.isArray(input.items)
@@ -1388,6 +1420,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 data: {
                   analysisMode: 'editorial-batch',
                   editorialBrief: reviewBrief,
+                  ...(skillBrief ? { briefSource: 'skill' } : {}),
                   acceptedDurationSec,
                   items: annotatedResults,
                   ...(openingComparison ? {
@@ -3954,7 +3987,7 @@ export function studioToolResultStopsAgentTurn(result: StudioToolResult): boolea
   return data?.decision === 'rejected';
 }
 
-export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge' }): Promise<StudioToolResult> {
+export async function runStudioTool(ctx: AgentToolCtx, toolId: string, input: Record<string, unknown>, opts?: { signal?: AbortSignal; surface?: 'chat' | 'bridge'; skillId?: string }): Promise<StudioToolResult> {
   const result = QUERY_TOOLS.has(toolId) || PROJECT_MUTATION_TOOLS.has(toolId)
     ? await runStudioToolInner(ctx, toolId, input, opts)
     : await runAtomicCompositionTool(ctx, () => runStudioToolInner(ctx, toolId, input, opts));
