@@ -579,23 +579,14 @@ export function planEditorialAssembly(input: {
     if (!choices.length) return [];
     return [{ clip, originalIndex, choices }];
   });
-  if (!rows.length) {
-    // Every requested range missed the accepted evidence. Return the request untouched so the
-    // placement guard emits its teaching error (naming the accepted ranges) instead of the
-    // runtime receiving an empty mutation with no explanation.
-    return {
-      clips: [...input.clips],
-      targetDurationSec,
-      actualDurationSec: round3(Math.max(...input.clips.map((clip) => clip.startSec + clip.sourceOutSec - clip.sourceInSec))),
-      changed: false,
-      droppedClipCount: 0,
-    };
-  }
   // Deterministic pool completion: the batch seeds the opening and ordering preference, but
-  // COVERAGE is the algorithm's job. Every accepted reservoir the batch left unused joins the
+  // COVERAGE is the algorithm's job. Every accepted chain the batch left unclaimed joins the
   // choice space as a droppable filler row, so a fully covered narration is reachable whenever
-  // the reviewed pool allows it. An under-target plan therefore means the POOL is exhausted —
-  // a fact to surface to the user — never that the model under-sampled its batch.
+  // the reviewed pool allows it — even when EVERY batch row was unusable (mis-ranged, or
+  // pointing at a sub-floor sliver: a real batch of one 0.76s row once returned untouched
+  // before pool completion ran, and 87s of accepted footage read as "pool exhausted").
+  // An under-target plan therefore means the POOL is exhausted — a fact to surface to the
+  // user — never that the model under-sampled its batch.
   for (const entry of chainPool) {
     if (entry.used) continue;
     const baseClip: EditorialAssemblyClip = {
@@ -604,6 +595,17 @@ export function planEditorialAssembly(input: {
     const choices = chainAssemblyChoices(entry.chain, baseClip);
     if (!choices.length) continue;
     rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices });
+  }
+  if (!rows.length) {
+    // Nothing usable in the batch AND nothing in the reviewed pool. Return the request untouched
+    // so the placement guard emits its teaching error instead of an empty unexplained mutation.
+    return {
+      clips: [...input.clips],
+      targetDurationSec,
+      actualDurationSec: round3(Math.max(...input.clips.map((clip) => clip.startSec + clip.sourceOutSec - clip.sourceInSec))),
+      changed: false,
+      droppedClipCount: 0,
+    };
   }
 
   type State = {

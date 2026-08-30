@@ -399,10 +399,24 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(total).toBeLessThanOrEqual(7.5);
   });
 
-  it('returns the request untouched when no range matches accepted evidence, letting the guard teach', () => {
+  it('replaces a fully mis-ranged request with accepted pool evidence', () => {
     const planned = planEditorialAssembly({
       clips: [{ assetId: 'a', startSec: 0, sourceInSec: 20, sourceOutSec: 24 }],
       sources: [{ assetId: 'a', candidates: [reviewedCandidate({ candidateId: 'candidate-a', startSec: 0, endSec: 10 })] }],
+      targetDurationSec: 7,
+    });
+    expect(planned.changed).toBe(true);
+    expect(planned.clips.length).toBeGreaterThan(0);
+    // Every placed range comes from the reviewed pool — never the rejected 20–24s request.
+    expect(planned.clips.every((clip) => clip.assetId === 'a' && clip.sourceOutSec <= 10.01)).toBe(true);
+  });
+
+  it('returns the request untouched only when the reviewed pool is empty too', () => {
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'a', startSec: 0, sourceInSec: 20, sourceOutSec: 24 }],
+      sources: [{ assetId: 'a', candidates: [reviewedCandidate({
+        candidateId: 'candidate-a', verdict: 'reject', startSec: 0, endSec: 10,
+      })] }],
       targetDurationSec: 7,
     });
     expect(planned.changed).toBe(false);
@@ -450,6 +464,31 @@ describe('editorial temporal reconciliation and assembly', () => {
     // The static 0–8s head leaves the long choice; the dynamic hold and exit tail stay.
     expect(shaved.suggestedStartSec).toBeCloseTo(8, 2);
     expect(shaved.suggestedEndSec).toBeCloseTo(19.5, 2);
+  });
+
+  it('assembles from the pool even when every batch row is unusable', () => {
+    // The single batch row points at a sub-floor 0.76s sliver — a real incident where the plan
+    // returned untouched before pool completion ran and 87s of accepted footage read as
+    // "pool exhausted".
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'sliver', startSec: 0, sourceInSec: 10.4, sourceOutSec: 11.15 }],
+      sources: [
+        { assetId: 'sliver', candidates: [reviewedCandidate({
+          candidateId: 'cand-sliver', startSec: 10.4, endSec: 11.15, score: 94,
+          actionPhases: [{ phase: 'performance', startSec: 10.4, endSec: 11.15, note: 'brief gaze' }],
+          cutOptions: [{ durationSec: 0.75, startSec: 10.4, endSec: 11.15, score: 94, reason: 'gaze' }],
+        })] },
+        { assetId: 'deep-pool', candidates: [reviewedCandidate({
+          candidateId: 'cand-pool', startSec: 0, endSec: 12, score: 88,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 12, note: 'continuous walk' }],
+          cutOptions: [{ durationSec: 12, startSec: 0, endSec: 12, score: 88, reason: 'walk' }],
+        })] },
+      ],
+      targetDurationSec: 10,
+    });
+    const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
+    expect(total).toBeGreaterThanOrEqual(9);
+    expect(planned.clips.every((clip) => clip.assetId === 'deep-pool')).toBe(true);
   });
 
   it('completes coverage from unused pool reservoirs when the batch under-samples', () => {
