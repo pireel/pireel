@@ -269,13 +269,20 @@ export function ChatThread({
         return recorded;
       };
       const publishError = (errorText: string) => {
-        recordStudioTurnToolResult(ledger, {
+        const recorded = recordStudioTurnToolResult(ledger, {
           toolId: id,
           toolCallId: toolCall.toolCallId,
           input: requestedInput,
           errorText,
           canMutate,
         });
+        // A verbatim retry of a failed call fails identically forever; say so on the receipt the
+        // moment the repetition starts instead of letting the streak burn the turn budget.
+        if (recorded.repeatedFailureCount >= 2) {
+          errorText += studioLocale().toLowerCase().startsWith("zh")
+            ? `（完全相同的调用已连续失败 ${recorded.repeatedFailureCount} 次，重试不会成功：改用回执里的真实 id 与参数，或放弃该操作直接收尾。）`
+            : ` (This identical call has now failed ${recorded.repeatedFailureCount} times in a row; retrying cannot succeed. Use the real ids and parameters from receipts, or drop this operation and finish.)`;
+        }
         addToolOutput({
           tool: id,
           toolCallId: toolCall.toolCallId,
@@ -338,6 +345,30 @@ export function ChatThread({
           },
         });
         return;
+      }
+      // The picture lock must hold against demolition too: blocking re-adds while allowing
+      // remove_clips let a second-guessing model strip a complete 53s montage down to 17s and
+      // then dead-end against the rebuild gate. Non-picture removals (music, sfx) stay allowed.
+      if (id === "remove_clips" && editorialPictureLocked) {
+        const pictureShotIds = new Set((comp?.shots ?? []).map((shot) => shot.id));
+        const requestedIds = Array.isArray(requestedInput.clipIds)
+          ? requestedInput.clipIds.filter((value): value is string => typeof value === "string")
+          : [];
+        if (requestedIds.some((clipId) => pictureShotIds.has(clipId))) {
+          publishSuccess({
+            ok: true,
+            skipped: true,
+            summary: studioLocale().toLowerCase().startsWith("zh")
+              ? "主画面已经完成，本轮不再拆除画面镜头"
+              : "The primary picture is already assembled; picture shots will not be removed in this turn.",
+            data: {
+              skipped: true,
+              reason: "editorial-picture-locked",
+              instruction: "The assembled picture is FINAL for this turn: it deterministically covers the narration with reviewed ranges. Do not remove, reorder, or rebuild picture clips, and do not re-judge shots by topic — reviewed footage only needs to match tone, not narration subject matter. Continue with captions, typography, sound, and the final summary. Only a new user request may change the picture.",
+            },
+          });
+          return;
+        }
       }
       if (id === "review_visuals" && editorialPictureLocked) {
         publishSuccess({
@@ -462,7 +493,11 @@ export function ChatThread({
                   naturalSpeed: true,
                   // An under-target assembly is NOT a finished picture: say so in the receipt and
                   // name the one legal fix, instead of letting a lock message call it complete.
-                  ...(assemblyCovered ? {} : {
+                  // A covered assembly is equally explicit the other way: without the FINAL
+                  // declaration a model re-planned "its own" cut and stripped the montage apart.
+                  ...(assemblyCovered ? {
+                    instruction: `The montage is COMPLETE: deterministic assembly placed ${preparedPlacement.actualDurationSec}s of reviewed picture covering the full ${preparedPlacement.targetDurationSec}s narration at natural speed. This IS the final picture for this turn — do not remove, reorder, re-add, or re-plan picture clips, and do not re-judge shots by topic: reviewed footage only needs to match tone, not narration subject matter. Continue with captions, typography, sound, and the final summary.`,
+                  } : {
                     shortfallSec: Math.round(assemblyShortfallSec * 10) / 10,
                     instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s narration. Close the remaining ${Math.round(assemblyShortfallSec * 10) / 10}s in ONE follow-up add_clips batch using unplaced accepted or reserve:true ranges from the SAME review receipt; never stretch, slow down, or repeat already-placed shots. If accepted capacity is genuinely exhausted, shorten the narration script or report the gap.`,
                   }),

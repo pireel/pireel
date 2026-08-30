@@ -36,6 +36,9 @@ export const MAX_STUDIO_TOOL_CALLS_PER_USER_TURN = 40;
  * verifying — a real turn burned ~28 of its 40 calls on refused reads and died mid-edit. After
  * this many consecutive refusals with no mutation in between, the turn goes final-only. */
 export const MAX_STUDIO_REFUSED_TIMELINE_READS = 3;
+/** A call that failed with the exact same tool and input will fail the exact same way; a model
+ * re-firing it verbatim (e.g. removing already-removed clip ids seven times) is looping. */
+export const MAX_STUDIO_IDENTICAL_FAILURES = 3;
 
 export interface StudioTurnLedger {
   /** Tool receipts published synchronously, before React/useChat commits them to message state. */
@@ -49,6 +52,10 @@ export interface StudioTurnLedger {
   lastTimelineFingerprint: string | null;
   /** Consecutive get_timeline calls answered with a refusal (unchanged-dedupe or read-block). */
   refusedTimelineReads: number;
+  /** Signature (tool + input) of the most recent failed call, for detecting verbatim retries. */
+  lastFailureSig: string | null;
+  /** How many consecutive times that same failing call has been fired. */
+  repeatedFailureCount: number;
 }
 
 export interface StudioTurnToolResultRecord {
@@ -85,6 +92,8 @@ export function createStudioTurnLedger(): StudioTurnLedger {
     unsafeUndoBlocked: false,
     lastTimelineFingerprint: null,
     refusedTimelineReads: 0,
+    lastFailureSig: null,
+    repeatedFailureCount: 0,
   };
 }
 
@@ -118,8 +127,19 @@ function studioTimelineFingerprint(data: unknown): string | null {
 export function recordStudioTurnToolResult(
   ledger: StudioTurnLedger,
   record: StudioTurnToolResultRecord,
-): { timelineUnchanged: boolean } {
+): { timelineUnchanged: boolean; repeatedFailureCount: number } {
   const failed = !!record.errorText || record.output?.ok === false;
+  if (failed) {
+    const failureSig = `${record.toolId}:${studioTimelineFingerprint(record.input) ?? ''}`;
+    ledger.repeatedFailureCount = failureSig === ledger.lastFailureSig ? ledger.repeatedFailureCount + 1 : 1;
+    ledger.lastFailureSig = failureSig;
+    if (ledger.repeatedFailureCount >= MAX_STUDIO_IDENTICAL_FAILURES) ledger.forceFinalResponse = true;
+  } else if (record.output?.skipped !== true) {
+    // Only a genuinely executed success clears the streak — refused/skipped no-ops interleaved
+    // between verbatim retries must not disarm the breaker.
+    ledger.lastFailureSig = null;
+    ledger.repeatedFailureCount = 0;
+  }
   const data = record.output?.data && typeof record.output.data === 'object'
     ? record.output.data as Record<string, unknown>
     : null;
@@ -174,7 +194,7 @@ export function recordStudioTurnToolResult(
         input: record.input,
         output: record.output ?? { ok: true },
       }) as UIMessage['parts'][number]);
-  return { timelineUnchanged };
+  return { timelineUnchanged, repeatedFailureCount: ledger.repeatedFailureCount };
 }
 
 export function shouldBlockStudioTurnUndo(ledger: StudioTurnLedger): boolean {

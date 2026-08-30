@@ -397,6 +397,42 @@ describe('synchronous studio turn ledger', () => {
     expect(ledger.forceFinalResponse).toBe(true);
   });
 
+  it('forces the final response after a failed call is retried verbatim', () => {
+    const ledger = createStudioTurnLedger();
+    const failRemove = (id: string) => recordStudioTurnToolResult(ledger, {
+      toolId: 'remove_clips', toolCallId: id, input: { clipIds: ['clip-gone'] },
+      errorText: 'clip not found: clip-gone', canMutate: true,
+    });
+    expect(failRemove('f1').repeatedFailureCount).toBe(1);
+    // Skipped no-ops between retries must not disarm the breaker.
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'get_timeline', toolCallId: 'skip', input: {},
+      output: { ok: true, skipped: true, data: { instruction: 'stop' } }, canMutate: false,
+    });
+    expect(failRemove('f2').repeatedFailureCount).toBe(2);
+    expect(ledger.forceFinalResponse).toBe(false);
+    failRemove('f3');
+    expect(ledger.forceFinalResponse).toBe(true);
+
+    // A different input is a fresh attempt, and a genuine success clears the streak.
+    const other = createStudioTurnLedger();
+    recordStudioTurnToolResult(other, {
+      toolId: 'remove_clips', toolCallId: 'g1', input: { clipIds: ['a'] },
+      errorText: 'clip not found: a', canMutate: true,
+    });
+    recordStudioTurnToolResult(other, {
+      toolId: 'remove_clips', toolCallId: 'g2', input: { clipIds: ['b'] },
+      errorText: 'clip not found: b', canMutate: true,
+    });
+    expect(other.repeatedFailureCount).toBe(1);
+    recordStudioTurnToolResult(other, {
+      toolId: 'add_clips', toolCallId: 'g3', input: {},
+      output: { ok: true, data: { delta: { durationSec: [0, 4] } } }, canMutate: true,
+    });
+    expect(other.repeatedFailureCount).toBe(0);
+    expect(other.lastFailureSig).toBeNull();
+  });
+
   it('refuses to lock the picture on an under-target assembly so the gap stays fixable', () => {
     const ledger = createStudioTurnLedger();
     recordStudioTurnToolResult(ledger, {
