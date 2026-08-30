@@ -466,6 +466,25 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(shaved.suggestedEndSec).toBeCloseTo(19.5, 2);
   });
 
+  it("keeps the reviewer's own cut options in the choice space, clipped to chain territory", () => {
+    // One 12s dynamic phase; the reviewer's preferred take is 2.5–6.5 (score 98). The planner
+    // should be able to place exactly that take instead of only synthetic runs/fractions.
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'src', startSec: 0, sourceInSec: 0, sourceOutSec: 12 }],
+      sources: [
+        { assetId: 'src', candidates: [reviewedCandidate({
+          candidateId: 'cand-src', startSec: 0, endSec: 12, score: 80,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 12, note: 'continuous action' }],
+          cutOptions: [{ durationSec: 4, startSec: 2.5, endSec: 6.5, score: 98, reason: 'peak take' }],
+        })] },
+      ],
+      targetDurationSec: 4,
+    });
+    expect(planned.clips).toHaveLength(1);
+    expect(planned.clips[0]!.sourceInSec).toBeCloseTo(2.5, 2);
+    expect(planned.clips[0]!.sourceOutSec).toBeCloseTo(6.5, 2);
+  });
+
   it('orders the montage from evidence: opening contender first, ending fit last, sources spaced', () => {
     const performer = (assetId: string, candidateId: string, startSec: number, endSec: number, patch: Record<string, unknown> = {}) => ({
       assetId,

@@ -472,13 +472,26 @@ export function reservoirShotChains(candidate: EditorialCandidateReview): Editor
 }
 
 /** All placeable takes from one chain: every contiguous run of bricks long enough to stand alone
- * (score = duration-weighted mean), plus peak-centred fractions of single long bricks so a lone
- * 20s performance phase still offers shorter takes. Rhythm shaping biases toward mid lengths. */
+ * (score = duration-weighted mean), the reviewer's own scored cut options clipped to the chain
+ * (its actual aesthetic takes — possibly overlapping each other, which is fine: the DP takes at
+ * most one span per chain, so "select 2–4 and 3–8 then merge to 2–8" is already expressed as the
+ * contiguous-run choice), plus peak-centred fractions of single long bricks so a lone 20s
+ * performance phase still offers shorter takes. Rhythm shaping biases toward mid lengths. */
 function chainAssemblyChoices(
   chain: EditorialShotChain,
   baseClip: EditorialAssemblyClip,
+  cutOptions: readonly EditorialCutOption[] = [],
 ): Array<{ clip: EditorialAssemblyClip; score: number }> {
   const spans: Array<{ startSec: number; endSec: number; score: number }> = [];
+  const chainStartSec = chain[0]?.startSec ?? 0;
+  const chainEndSec = chain[chain.length - 1]?.endSec ?? 0;
+  for (const option of cutOptions) {
+    // Clip the reviewer's take to this chain's legal territory: static or otherwise excluded
+    // zones split chains, so a take that crosses one contributes only its compliant part here.
+    const startSec = Math.max(option.startSec, chainStartSec);
+    const endSec = Math.min(option.endSec, chainEndSec);
+    if (endSec - startSec >= MIN_ASSEMBLY_SHOT_SEC) spans.push({ startSec, endSec, score: option.score });
+  }
   for (let from = 0; from < chain.length; from += 1) {
     let weighted = 0;
     for (let to = from; to < chain.length; to += 1) {
@@ -545,6 +558,7 @@ export function planEditorialAssembly(input: {
     candidateId: string;
     endingFit: number;
     chain: EditorialShotChain;
+    cutOptions: readonly EditorialCutOption[];
     startSec: number;
     endSec: number;
     used: boolean;
@@ -567,6 +581,7 @@ export function planEditorialAssembly(input: {
         candidateId: candidate.candidateId,
         endingFit: (candidate.roleFit ?? []).find((fit) => fit.role === 'ending')?.score ?? 0,
         chain,
+        cutOptions: candidate.cutOptions ?? [],
         startSec: chain[0]!.startSec,
         endSec: chain[chain.length - 1]!.endSec,
         used: false,
@@ -588,7 +603,7 @@ export function planEditorialAssembly(input: {
     ));
     if (!entry) return [];
     entry.used = true;
-    const choices = chainAssemblyChoices(entry.chain, clip);
+    const choices = chainAssemblyChoices(entry.chain, clip, entry.cutOptions);
     if (!choices.length) return [];
     return [{ clip, originalIndex, choices, entry }];
   });
@@ -605,7 +620,7 @@ export function planEditorialAssembly(input: {
     const baseClip: EditorialAssemblyClip = {
       assetId: entry.assetId, startSec: 0, sourceInSec: entry.startSec, sourceOutSec: entry.endSec,
     };
-    const choices = chainAssemblyChoices(entry.chain, baseClip);
+    const choices = chainAssemblyChoices(entry.chain, baseClip, entry.cutOptions);
     if (!choices.length) continue;
     rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices, entry });
   }
