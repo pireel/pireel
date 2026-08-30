@@ -390,6 +390,11 @@ import {
   runStudioTool as runAgentStudioTool,
   runExternalTool as runAgentExternalTool,
 } from "./agent-tool-runner";
+import { registerStudioDevCacheTools } from "./dev-cache-tools";
+
+// Dev-only console entry (pireelStudioDev.clearReviewCache / clearTtsCache): module scope on
+// purpose — available as soon as any workbench chunk loads, no component lifecycle involved.
+registerStudioDevCacheTools();
 import { useCaptionsOps } from "./use-captions-ops";
 import { useClipInsert } from "./use-clip-insert";
 import { useElementOps } from "./use-element-ops";

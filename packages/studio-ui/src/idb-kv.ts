@@ -13,6 +13,7 @@ export interface KvBackend {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
   delete(key: string): Promise<void>;
+  keys?(): Promise<string[]>;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -49,6 +50,7 @@ function makeIdbBackend(): KvBackend {
     get: (key) => request((store) => store.get(key), 'readonly'),
     set: (key, value) => request((store) => store.put(value, key), 'readwrite').then(() => undefined),
     delete: (key) => request((store) => store.delete(key), 'readwrite').then(() => undefined),
+    keys: () => request((store) => store.getAllKeys(), 'readonly').then((keys) => keys.map(String)),
   };
 }
 
@@ -58,6 +60,7 @@ function makeMemoryBackend(): KvBackend {
     get: async (key) => values.get(key),
     set: async (key, value) => void values.set(key, value),
     delete: async (key) => void values.delete(key),
+    keys: async () => [...values.keys()],
   };
 }
 
@@ -89,6 +92,19 @@ export async function kvDelete(key: string): Promise<void> {
     await resolveBackend().delete(key);
   } catch {
     /* nothing to invalidate */
+  }
+}
+
+/** Delete every entry under a key prefix; returns how many were removed. */
+export async function kvDeleteByPrefix(prefix: string): Promise<number> {
+  try {
+    const store = resolveBackend();
+    const keys = (await store.keys?.()) ?? [];
+    const doomed = keys.filter((key) => key.startsWith(prefix));
+    await Promise.all(doomed.map((key) => store.delete(key)));
+    return doomed.length;
+  } catch {
+    return 0;
   }
 }
 

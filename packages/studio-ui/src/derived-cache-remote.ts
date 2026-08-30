@@ -21,6 +21,19 @@ export async function remoteDerivedGet(kind: DerivedCacheKind, key: string): Pro
   }
 }
 
+/** Wipe every server-side row of one kind for this user (debugging full refresh). */
+export async function remoteDerivedClear(kind: DerivedCacheKind): Promise<number> {
+  if (typeof fetch !== 'function') return 0;
+  try {
+    const response = await fetch(`/api/studio/derived-cache?kind=${encodeURIComponent(kind)}`, { method: 'DELETE' });
+    if (!response.ok) return 0;
+    const body = (await response.json()) as { deleted?: unknown };
+    return typeof body.deleted === 'number' ? body.deleted : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function remoteDerivedPut(kind: DerivedCacheKind, key: string, payload: unknown): void {
   if (!key || typeof fetch !== 'function') return;
   try {
