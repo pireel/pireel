@@ -937,11 +937,12 @@ export function normalizeEditorialCandidateReviews(
     .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
 }
 
-/** One raw take normally contains one intended performance surrounded by setup and alternate tries.
- * Keep the highest-ranked accepted range selectable while retaining rejects as audit evidence.
- * One additional non-overlapping accepted range survives as an explicit `reserve`: without it,
- * a capacity shortfall against the measured narration has no legal escape (re-review is forbidden
- * and rejected ranges are unplaceable), which pushes the editor toward duplicating shots. */
+/** One raw take normally contains one intended performance surrounded by setup and alternate
+ * tries, so the highest-ranked accepted range leads. Every further NON-OVERLAPPING accepted
+ * range survives as an explicit `reserve` (bounded below): a single-reserve policy once threw
+ * away a reviewed 92-score 3.8s window from a 30s source, and the coverage fit was then forced
+ * into a monolithic hold. Rejects always remain as audit evidence. */
+const MAX_RESERVE_CANDIDATES_PER_SOURCE = 3;
 export function selectPrimarySourceCandidate(
   candidates: readonly EditorialCandidateReview[],
   options: { allowMultiple?: boolean } = {},
@@ -950,20 +951,24 @@ export function selectPrimarySourceCandidate(
   if (options.allowMultiple) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   const primary = ordered.find((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable');
   if (!primary) return ordered.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
-  const reserve = ordered.find((candidate) => (
-    candidate.candidateId !== primary.candidateId
-    && (candidate.verdict === 'strong' || candidate.verdict === 'usable')
-    && overlapDuration(candidate.startSec, candidate.endSec, primary.startSec, primary.endSec) === 0
-    && !candidate.issues.includes('near-duplicate')
-  ));
+  const kept: EditorialCandidateReview[] = [primary];
+  const reserveIds = new Set<string>();
+  for (const candidate of ordered) {
+    if (reserveIds.size >= MAX_RESERVE_CANDIDATES_PER_SOURCE) break;
+    if (candidate.candidateId === primary.candidateId) continue;
+    if (candidate.verdict !== 'strong' && candidate.verdict !== 'usable') continue;
+    if (candidate.issues.includes('near-duplicate')) continue;
+    if (kept.some((other) => overlapDuration(candidate.startSec, candidate.endSec, other.startSec, other.endSec) > 0)) continue;
+    kept.push(candidate);
+    reserveIds.add(candidate.candidateId);
+  }
   return ordered
-    .filter((candidate) => candidate.candidateId === primary.candidateId
-      || candidate.candidateId === reserve?.candidateId
+    .filter((candidate) => kept.some((other) => other.candidateId === candidate.candidateId)
       || candidate.verdict === 'reject'
       || candidate.verdict === 'unreviewed')
     .map((candidate, index) => ({
       ...candidate,
       rank: index + 1,
-      ...(candidate.candidateId === reserve?.candidateId ? { reserve: true } : {}),
+      ...(reserveIds.has(candidate.candidateId) ? { reserve: true } : {}),
     }));
 }
