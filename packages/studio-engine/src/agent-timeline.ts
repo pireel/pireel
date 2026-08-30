@@ -1401,6 +1401,50 @@ function swapClipMedia(document: EditorDocumentV2, input: Input): AgentTimelineO
   return mutation(result.document, `Swapped media on clip ${clipId}`, [result.receipt], { clipId, assetId });
 }
 
+/** Deterministic overlay-text layout guard. Two collisions kept recurring in delivered edits:
+ * a title placed into the caption band (both stacked at the bottom), and two titles visible at
+ * the same time on intersecting boxes. Both are geometry facts the engine can resolve — captions
+ * own their bottom band whenever they are on, and a later title is lifted above a concurrent
+ * peer. Model-authored placement stays authoritative everywhere these rules are not violated. */
+const OVERLAY_TEXT_SAFE_TOP = 0.06;
+const CAPTION_BAND_HEIGHT_FRAC = 0.14;
+const OVERLAY_TEXT_GAP = 0.02;
+function overlayTextLayoutGuard(
+  document: EditorDocumentV2,
+  requested: { x: number; y: number; w: number; h: number },
+  startSec: number,
+  durationSec: number,
+): { x: number; y: number; w: number; h: number } {
+  const box = { ...requested };
+  const caption = document.appearance.captionStyle;
+  if (caption?.on) {
+    // captionStyle.yPct = caption bottom edge from canvas top (%); reserve up to two lines above.
+    const captionBottom = Math.min(1, Math.max(0, (caption.yPct ?? 88) / 100));
+    const bandTop = captionBottom - CAPTION_BAND_HEIGHT_FRAC;
+    if (box.y + box.h > bandTop - OVERLAY_TEXT_GAP && box.y < captionBottom + OVERLAY_TEXT_GAP) {
+      box.y = Math.max(OVERLAY_TEXT_SAFE_TOP, bandTop - OVERLAY_TEXT_GAP - box.h);
+    }
+  }
+  const windowEnd = startSec + durationSec;
+  const peers = document.timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => {
+    if (clip.kind !== 'graphic' || clip.block.templateId !== 'title' || !clip.block.box) return [];
+    const clipStart = timelineFramesToSeconds(clip.startFrame, document.canvas.fps);
+    const clipEnd = clipStart + timelineFramesToSeconds(clip.durationFrames, document.canvas.fps);
+    return clipEnd > startSec && clipStart < windowEnd ? [clip.block.box] : [];
+  }));
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const hit = peers.find((peer) => (
+      box.x < peer.x + peer.w && box.x + box.w > peer.x
+      && box.y < peer.y + peer.h && box.y + box.h > peer.y
+    ));
+    if (!hit) break;
+    const lifted = Math.max(OVERLAY_TEXT_SAFE_TOP, hit.y - OVERLAY_TEXT_GAP - box.h);
+    if (lifted === box.y) break; // crowded against the top: keep the residual rather than thrash
+    box.y = lifted;
+  }
+  return box;
+}
+
 function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcome {
   const items = Array.isArray(input.items) ? input.items : [];
   if (!items.length) return fail('items is required');
@@ -1438,7 +1482,12 @@ function addTexts(document: EditorDocumentV2, input: Input): AgentTimelineOutcom
     });
     // Agent-created native text must remain positionable. Manual/legacy titleBlock callers retain
     // their established full-canvas behaviour; this tool supplies the editable safe-area geometry.
-    block.box = placement.box ?? { x: 0.1, y: 0.34, w: 0.8, h: 0.32 };
+    block.box = overlayTextLayoutGuard(
+      next,
+      placement.box ?? { x: 0.1, y: 0.34, w: 0.8, h: 0.32 },
+      startSec,
+      durationSec,
+    );
     block.id = uniqueId(string(item.id) ?? block.id, used);
     used.add(block.id);
     const inserted = insertOverlayDocumentClip({

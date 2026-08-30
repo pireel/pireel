@@ -80,6 +80,7 @@ import {
   prepareEditorialPlacement,
   recordStudioTurnToolResult,
   reserveStudioTurnToolCall,
+  STUDIO_PICTURE_SURGERY_TARGETS,
   shouldBlockStudioTurnUndo,
   stampLatestAssistantWorkDuration,
 } from "./chat-thread-store";
@@ -346,25 +347,26 @@ export function ChatThread({
         });
         return;
       }
-      // The picture lock must hold against demolition too: blocking re-adds while allowing
-      // remove_clips let a second-guessing model strip a complete 53s montage down to 17s and
-      // then dead-end against the rebuild gate. Non-picture removals (music, sfx) stay allowed.
-      if (id === "remove_clips" && editorialPictureLocked) {
+      // The picture lock must hold against demolition through EVERY duration/order route, not
+      // just remove: blocking re-adds while allowing removals let a model strip a complete 53s
+      // montage to 17s, and blocking removals still let it shrink source ranges 3.8s under the
+      // narration via set_clip_properties (rippling captions and titles along). Framing, audio
+      // and non-picture targets (music, sfx, titles) stay allowed.
+      const pictureSurgeryTargets = STUDIO_PICTURE_SURGERY_TARGETS[id];
+      if (pictureSurgeryTargets && editorialPictureLocked) {
         const pictureShotIds = new Set((comp?.shots ?? []).map((shot) => shot.id));
-        const requestedIds = Array.isArray(requestedInput.clipIds)
-          ? requestedInput.clipIds.filter((value): value is string => typeof value === "string")
-          : [];
+        const requestedIds = pictureSurgeryTargets(requestedInput);
         if (requestedIds.some((clipId) => pictureShotIds.has(clipId))) {
           publishSuccess({
             ok: true,
             skipped: true,
             summary: studioLocale().toLowerCase().startsWith("zh")
-              ? "主画面已经完成，本轮不再拆除画面镜头"
-              : "The primary picture is already assembled; picture shots will not be removed in this turn.",
+              ? "主画面已经完成，本轮不再改动画面镜头的时长、顺序或去留"
+              : "The primary picture is already assembled; picture shots keep their duration, order and presence for this turn.",
             data: {
               skipped: true,
               reason: "editorial-picture-locked",
-              instruction: "The assembled picture is FINAL for this turn: it deterministically covers the narration with reviewed ranges. Do not remove, reorder, or rebuild picture clips. Selection criteria live in the review brief and were already applied during review — do not re-litigate selection (topic fit, ordering, taste) after assembly. Continue with captions, typography, sound, and the final summary. Only a new user request may change the picture.",
+              instruction: "The assembled picture is FINAL for this turn: it deterministically covers the narration with reviewed ranges. Do not remove, trim, retime, reorder, or rebuild picture clips — shrinking any shot reopens a gap under the narration. Selection criteria live in the review brief and were already applied during review — do not re-litigate selection (topic fit, mouth movement, ordering, taste) after assembly. Framing and audio adjustments on shots remain available. Continue with captions, typography, sound, and the final summary. Only a new user request may change the picture.",
             },
           });
           return;

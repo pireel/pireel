@@ -401,7 +401,7 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(planned.clips).toEqual([{ assetId: 'a', startSec: 0, sourceInSec: 20, sourceOutSec: 24 }]);
   });
 
-  it('never assembles a sub-0.6s flash shot even when the reviewed reservoir is that short', () => {
+  it('never assembles a sub-second flash shot even when the reviewed reservoir is that short', () => {
     const planned = planEditorialAssembly({
       clips: [
         { assetId: 'flash', startSec: 0, sourceInSec: 0, sourceOutSec: 0.5 },
@@ -421,8 +421,43 @@ describe('editorial temporal reconciliation and assembly', () => {
       ],
       targetDurationSec: 7,
     });
-    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec >= 0.6)).toBe(true);
+    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec >= 1)).toBe(true);
     expect(planned.clips.some((clip) => clip.assetId === 'flash')).toBe(false);
+  });
+
+  it('prefers spreading coverage across reservoirs over one monolithic hold when capacity allows', () => {
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'hold', startSec: 0, sourceInSec: 0, sourceOutSec: 20 },
+        { assetId: 'alt-a', startSec: 20, sourceInSec: 0, sourceOutSec: 7 },
+        { assetId: 'alt-b', startSec: 27, sourceInSec: 0, sourceOutSec: 7 },
+      ],
+      sources: [
+        { assetId: 'hold', candidates: [reviewedCandidate({
+          candidateId: 'candidate-hold', startSec: 0, endSec: 20, score: 88,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 20, note: 'long steady hold' }],
+          cutOptions: [
+            { durationSec: 20, startSec: 0, endSec: 20, score: 88, reason: 'entire hold' },
+            { durationSec: 6, startSec: 0, endSec: 6, score: 84, reason: 'strong entry' },
+          ],
+        })] },
+        { assetId: 'alt-a', candidates: [reviewedCandidate({
+          candidateId: 'candidate-a', startSec: 0, endSec: 7, score: 86,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 7, note: 'complete action' }],
+          cutOptions: [{ durationSec: 7, startSec: 0, endSec: 7, score: 86, reason: 'complete action' }],
+        })] },
+        { assetId: 'alt-b', candidates: [reviewedCandidate({
+          candidateId: 'candidate-b', startSec: 0, endSec: 7, score: 85,
+          actionPhases: [{ phase: 'performance', startSec: 0, endSec: 7, note: 'complete action' }],
+          cutOptions: [{ durationSec: 7, startSec: 0, endSec: 7, score: 85, reason: 'complete action' }],
+        })] },
+      ],
+      targetDurationSec: 20,
+    });
+    const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
+    expect(total).toBeGreaterThanOrEqual(19);
+    // Coverage is reachable without the 20s monolith; rhythm shaping keeps it out of the plan.
+    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec <= 8)).toBe(true);
   });
 
   it('uses a readable portion of the final reviewed interval to close a discrete duration gap', () => {

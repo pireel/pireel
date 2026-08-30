@@ -161,9 +161,21 @@ export interface EditorialAssemblyPlan {
 }
 
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
-/** Perceptual floor for a standalone assembled shot. Sub-0.6s flashes read as glitches in a
- * narrated montage; cutOptions below this remain in the receipt as data but are never assembled. */
-const MIN_ASSEMBLY_SHOT_SEC = 0.6;
+/** Perceptual floor for a standalone assembled shot. Sub-second flashes read as glitches in a
+ * narrated montage (a delivered 0.63s shot was flagged in review as exactly that); cutOptions
+ * below this remain in the receipt as data but are never assembled. */
+const MIN_ASSEMBLY_SHOT_SEC = 1.0;
+/** Rhythm shaping for choice scores: both extremes read as assembly failures — a near-floor cut
+ * feels like a flash, a monolithic hold (a delivered 19.5s single shot) reads as a stalled edit.
+ * These are soft penalties on the per-choice score only; the DP's coverage-first dominance still
+ * reaches for long spans whenever accepted capacity genuinely requires them. */
+const ASSEMBLY_SHORT_SHOT_SEC = 1.5;
+const ASSEMBLY_LONG_SHOT_SEC = 8;
+const rhythmShapedScore = (score: number, durationSec: number) => (
+  score
+  - Math.max(0, ASSEMBLY_SHORT_SHOT_SEC - durationSec) * 12
+  - Math.max(0, durationSec - ASSEMBLY_LONG_SHOT_SEC) * 2
+);
 const clampScore = (value: unknown) => Math.round(Math.max(0, Math.min(100, Number(value) || 0)));
 const overlapDuration = (leftStart: number, leftEnd: number, rightStart: number, rightEnd: number) => (
   Math.max(0, Math.min(leftEnd, rightEnd) - Math.max(leftStart, rightStart))
@@ -420,22 +432,47 @@ export function planEditorialAssembly(input: {
     // The reservoir's longest independently usable range is always a reachable choice. The stated
     // accepted capacity is measured on these spans; without this row the knapsack tops out at the
     // sum of curated short cuts and a fully covered narration can be unreachable by construction.
+    // Synthetic choices must NOT ride on the headline candidate score: reconcile demotes
+    // static-dominant ranges inside cutOptions, and bypassing that let a mostly-static 19.5s
+    // whole-source span enter the montage at full score. Replicate the demotion here.
+    const staticAwareScore = (base: number, startSec: number, endSec: number) => {
+      const durationSec = endSec - startSec;
+      if (durationSec <= 0) return 0;
+      let staticSec = 0;
+      for (const phase of candidate.actionPhases) {
+        const overlap = overlapDuration(startSec, endSec, phase.startSec, phase.endSec);
+        if (overlap && (phase.phase === 'setup' || phase.phase === 'hold') && STATIC_PHASE_NOTE.test(phase.note)) {
+          staticSec += overlap;
+        }
+      }
+      const staticDominant = candidate.contentRole !== 'environment'
+        && candidate.contentRole !== 'detail'
+        && staticSec / durationSec >= 0.65;
+      return staticDominant ? Math.min(base, 45) : base;
+    };
     const suggestedInSec = candidate.suggestedStartSec ?? candidate.startSec;
     const suggestedOutSec = candidate.suggestedEndSec ?? candidate.endSec;
     const choices = [
       ...reviewedChoices,
       ...(suggestedOutSec - suggestedInSec >= MIN_ASSEMBLY_SHOT_SEC
-        ? [{ clip: { ...clip, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec }, score: candidate.score }]
+        ? [{
+            clip: { ...clip, sourceInSec: suggestedInSec, sourceOutSec: suggestedOutSec },
+            score: staticAwareScore(candidate.score, suggestedInSec, suggestedOutSec),
+          }]
         : []),
       {
         clip,
-        score: matchingReviewed?.score ?? Math.max(0, candidate.score - (
+        score: matchingReviewed?.score ?? staticAwareScore(Math.max(0, candidate.score - (
           clip.sourceOutSec - clip.sourceInSec > candidate.cutOptions[0]?.durationSec * 1.5 ? 10 : 0
-        )),
+        )), clip.sourceInSec, clip.sourceOutSec),
       },
     ];
     const unique = [...new Map(choices
       .filter((choice) => choice.clip.sourceOutSec - choice.clip.sourceInSec >= MIN_ASSEMBLY_SHOT_SEC)
+      .map((choice) => ({
+        ...choice,
+        score: rhythmShapedScore(choice.score, choice.clip.sourceOutSec - choice.clip.sourceInSec),
+      }))
       .sort((left, right) => right.score - left.score)
       .map((choice) => [
         `${round3(choice.clip.sourceInSec)}:${round3(choice.clip.sourceOutSec)}`,

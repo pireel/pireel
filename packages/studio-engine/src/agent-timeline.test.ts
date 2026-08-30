@@ -156,6 +156,41 @@ describe('shared agent timeline atoms', () => {
     expect((placed.data as { overwrittenClipIds?: string[] }).overwrittenClipIds).toBeUndefined();
   });
 
+  it('keeps overlay text out of the caption band and off concurrent titles', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = { ...document, appearance: { ...document.appearance, captionStyle: { on: true, preset: 'ln-clean', yPct: 84 } } };
+    const first = runAgentTimelineTool(document, 'add_texts', { items: [{
+      id: 'title-low', text: 'bottom line', startSec: 10, durationSec: 5,
+      placement: { xPct: 10, yPct: 66, widthPct: 70, heightPct: 20 },
+    }] });
+    expect(first.ok).toBe(true);
+    const lowBox = first.document!.timeline.tracks.flatMap((track) => track.clips)
+      .find((clip) => clip.id === 'title-low')!;
+    const lowRect = (lowBox as { block: { box: { y: number; h: number } } }).block.box;
+    // Requested bottom edge 86% sat inside the caption band (bottom 84%); lifted above it.
+    expect(lowRect.y + lowRect.h).toBeLessThanOrEqual(0.84 - 0.14);
+
+    const second = runAgentTimelineTool(first.document!, 'add_texts', { items: [{
+      id: 'title-peer', text: 'concurrent', startSec: 12, durationSec: 5,
+      placement: { xPct: 10, yPct: Math.round(lowRect.y * 100), widthPct: 70, heightPct: 16 },
+    }] });
+    expect(second.ok).toBe(true);
+    const peerRect = (second.document!.timeline.tracks.flatMap((track) => track.clips)
+      .find((clip) => clip.id === 'title-peer') as { block: { box: { y: number; h: number } } }).block.box;
+    // Same time window + intersecting box: the later title stacks above the earlier one.
+    expect(peerRect.y + peerRect.h).toBeLessThanOrEqual(lowRect.y);
+
+    const later = runAgentTimelineTool(second.document!, 'add_texts', { items: [{
+      id: 'title-later', text: 'different moment', startSec: 30, durationSec: 4,
+      placement: { xPct: 10, yPct: Math.round(lowRect.y * 100), widthPct: 70, heightPct: 16 },
+    }] });
+    expect(later.ok).toBe(true);
+    const laterRect = (later.document!.timeline.tracks.flatMap((track) => track.clips)
+      .find((clip) => clip.id === 'title-later') as { block: { box: { y: number } } }).block.box;
+    // No temporal overlap: the requested placement stands.
+    expect(Math.round(laterRect.y * 100)).toBe(Math.round(lowRect.y * 100));
+  });
+
   it('appends unanchored batch clips sequentially instead of stacking them at the track head', () => {
     let document = emptyEditorDocumentV2({ fps: 30 });
     document = runAgentTimelineTool(document, 'register_media', { assets: [

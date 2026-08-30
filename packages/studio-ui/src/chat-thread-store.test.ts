@@ -21,6 +21,7 @@ import {
   recordStudioTurnToolResult,
   reserveStudioTurnToolCall,
   shouldBlockStudioTurnUndo,
+  STUDIO_PICTURE_SURGERY_TARGETS,
   prepareEditorialPlacement,
   isRecoverableStudioChatError,
   sanitizeRestored,
@@ -395,6 +396,17 @@ describe('synchronous studio turn ledger', () => {
     expect(ledger.refusedTimelineReads).toBe(0);
     read('t4'); read('t5'); read('t6'); read('t7');
     expect(ledger.forceFinalResponse).toBe(true);
+  });
+
+  it('maps every picture-surgery tool route to its target clip ids', () => {
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.remove_clips!({ clipIds: ['a', 'b'] })).toEqual(['a', 'b']);
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_clip_properties!({ items: [{ clipId: 'a', sourceOutSec: 4 }] })).toEqual(['a']);
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.move_clips!({ items: [{ clipId: 'a', startSec: 2 }] })).toEqual(['a']);
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.split_clips!({ items: [{ clipId: 'a', atSec: 2 }] })).toEqual(['a']);
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_video_speed!({ shotIds: ['a'], speed: 2 })).toEqual(['a']);
+    // Framing and audio adjustments never change coverage and stay ungated.
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_shot_framing).toBeUndefined();
+    expect(STUDIO_PICTURE_SURGERY_TARGETS.set_shot_audio).toBeUndefined();
   });
 
   it('forces the final response after a failed call is retried verbatim', () => {
