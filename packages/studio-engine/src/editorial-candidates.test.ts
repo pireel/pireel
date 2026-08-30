@@ -466,6 +466,34 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(shaved.suggestedEndSec).toBeCloseTo(19.5, 2);
   });
 
+  it('orders the montage from evidence: opening contender first, ending fit last, sources spaced', () => {
+    const performer = (assetId: string, candidateId: string, startSec: number, endSec: number, patch: Record<string, unknown> = {}) => ({
+      assetId,
+      candidates: [reviewedCandidate({
+        candidateId, startSec, endSec, score: 88,
+        actionPhases: [{ phase: 'performance', startSec, endSec, note: 'complete action' }],
+        cutOptions: [{ durationSec: endSec - startSec, startSec, endSec, score: 88, reason: 'complete' }],
+        ...patch,
+      })],
+    });
+    const planned = planEditorialAssembly({
+      clips: [
+        { assetId: 'walker', startSec: 0, sourceInSec: 0, sourceOutSec: 6 },
+        { assetId: 'opener', startSec: 6, sourceInSec: 0, sourceOutSec: 5 },
+        { assetId: 'closer', startSec: 11, sourceInSec: 0, sourceOutSec: 5 },
+      ],
+      sources: [
+        performer('walker', 'cand-w', 0, 6),
+        performer('opener', 'cand-o', 0, 5),
+        performer('closer', 'cand-c', 0, 5, { roleFit: [{ role: 'ending', score: 90 }] }),
+      ],
+      targetDurationSec: 16,
+      opening: [{ assetId: 'opener', candidateId: 'cand-o' }],
+    });
+    expect(planned.clips[0]?.assetId).toBe('opener');
+    expect(planned.clips[planned.clips.length - 1]?.assetId).toBe('closer');
+  });
+
   it('assembles from the pool even when every batch row is unusable', () => {
     // The single batch row points at a sub-floor 0.76s sliver — a real incident where the plan
     // returned untouched before pool completion ran and 87s of accepted footage read as

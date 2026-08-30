@@ -572,6 +572,36 @@ function reviewedEditorialSources(messages: readonly UIMessage[]): EditorialAsse
   return [...reviewed].map(([assetId, candidates]) => ({ assetId, candidates }));
 }
 
+/** Rank-ordered cross-source opening contenders from the batch review's shared comparison. */
+export function reviewedOpeningContenders(
+  messages: readonly UIMessage[],
+): Array<{ assetId: string; candidateId: string }> {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role !== 'assistant') continue;
+    for (const part of message.parts ?? []) {
+      const candidate = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+      const toolId = candidate.type === 'dynamic-tool'
+        ? candidate.toolName
+        : candidate.type?.startsWith('tool-')
+          ? candidate.type.slice('tool-'.length)
+          : '';
+      if (toolId !== 'analyze_visual' || candidate.state !== 'output-available') continue;
+      const output = candidate.output as { ok?: unknown; data?: unknown } | undefined;
+      if (output?.ok !== true || !output.data || typeof output.data !== 'object') continue;
+      const comparison = (output.data as { openingComparison?: { contenders?: unknown } }).openingComparison;
+      if (!comparison || !Array.isArray(comparison.contenders)) continue;
+      return [...comparison.contenders]
+        .filter((row): row is { sourceId: unknown; candidateId: unknown; rank: unknown } => !!row && typeof row === 'object')
+        .sort((left, right) => Number(left.rank) - Number(right.rank))
+        .flatMap((row) => (typeof row.sourceId === 'string' && typeof row.candidateId === 'string'
+          ? [{ assetId: canonicalEditorialAssetId(row.sourceId), candidateId: row.candidateId }]
+          : []));
+    }
+  }
+  return [];
+}
+
 /** Turn the one editorial review receipt into the actual narrated montage before the write tool
  * runs. Qwen supplies semantic phases and aesthetic scores; deterministic local optimization owns
  * source-clock reconciliation, duplicate removal, natural-speed placement, and duration fitting. */
@@ -615,6 +645,7 @@ export function prepareEditorialPlacement(
   const plan = planEditorialAssembly({
     targetDurationSec,
     sources,
+    opening: reviewedOpeningContenders(messages),
     clips: orderedPicture.map(({ row, startSec }) => ({
       assetId: canonicalEditorialAssetId(row.assetId),
       startSec,

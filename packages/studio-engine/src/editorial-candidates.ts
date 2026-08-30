@@ -523,6 +523,9 @@ export function planEditorialAssembly(input: {
   clips: readonly EditorialAssemblyClip[];
   sources: readonly EditorialAssemblySource[];
   targetDurationSec: number;
+  /** Cross-source opening contenders in rank order (from the shared opening comparison); the
+   * highest-ranked contender whose chain survived selection is pinned as the first shot. */
+  opening?: ReadonlyArray<{ assetId: string; candidateId: string }>;
 }): EditorialAssemblyPlan {
   const targetDurationSec = round3(Math.max(0, Number(input.targetDurationSec) || 0));
   if (!targetDurationSec || !input.clips.length) {
@@ -537,27 +540,37 @@ export function planEditorialAssembly(input: {
     };
   }
   const sourceById = new Map(input.sources.map((source) => [source.assetId, source]));
+  type ChainEntry = {
+    assetId: string;
+    candidateId: string;
+    endingFit: number;
+    chain: EditorialShotChain;
+    startSec: number;
+    endSec: number;
+    used: boolean;
+  };
   type PlanningRow = {
     clip: EditorialAssemblyClip;
     originalIndex: number;
     choices: Array<{ clip: EditorialAssemblyClip; score: number }>;
+    entry?: ChainEntry;
   };
   // The full brick-chain pool: every accepted candidate of every reviewed source, exploded into
   // chains of contiguous action units. This IS the assembly's whole choice space — the batch only
   // decides which chains lead (opening/ordering) by claiming them below.
-  type ChainEntry = { assetId: string; chain: EditorialShotChain; startSec: number; endSec: number; used: boolean };
   const chainPool: ChainEntry[] = input.sources.flatMap((source) => (
     source.candidates
       .filter((candidate) => candidate.verdict === 'strong' || candidate.verdict === 'usable')
       .map(reconcileEditorialCandidateTemporalEvidence)
-      .flatMap((candidate) => reservoirShotChains(candidate))
-      .flatMap((chain) => (chain.length ? [{
+      .flatMap((candidate) => reservoirShotChains(candidate).flatMap((chain) => (chain.length ? [{
         assetId: source.assetId,
+        candidateId: candidate.candidateId,
+        endingFit: (candidate.roleFit ?? []).find((fit) => fit.role === 'ending')?.score ?? 0,
         chain,
         startSec: chain[0]!.startSec,
         endSec: chain[chain.length - 1]!.endSec,
         used: false,
-      }] : []))
+      }] : [])))
   ));
   const rows = input.clips.flatMap<PlanningRow>((clip, originalIndex) => {
     const source = sourceById.get(clip.assetId);
@@ -577,7 +590,7 @@ export function planEditorialAssembly(input: {
     entry.used = true;
     const choices = chainAssemblyChoices(entry.chain, clip);
     if (!choices.length) return [];
-    return [{ clip, originalIndex, choices }];
+    return [{ clip, originalIndex, choices, entry }];
   });
   // Deterministic pool completion: the batch seeds the opening and ordering preference, but
   // COVERAGE is the algorithm's job. Every accepted chain the batch left unclaimed joins the
@@ -594,7 +607,7 @@ export function planEditorialAssembly(input: {
     };
     const choices = chainAssemblyChoices(entry.chain, baseClip);
     if (!choices.length) continue;
-    rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices });
+    rows.push({ clip: baseClip, originalIndex: input.clips.length + rows.length, choices, entry });
   }
   if (!rows.length) {
     // Nothing usable in the batch AND nothing in the reviewed pool. Return the request untouched
@@ -679,8 +692,51 @@ export function planEditorialAssembly(input: {
     || right.selected.length - left.selected.length
   ))[0];
   const selected = bestEntry?.[1].selected ?? [];
+  // Deterministic ordering pass: coverage and score chose WHAT plays; review evidence now
+  // chooses WHERE. The opening pins to the highest-ranked SURVIVING opening contender (a
+  // contender whose chain fell below the shot floor simply yields to the next rank), the
+  // strongest ending-fit chain closes, and adjacent same-source shots are spaced apart when an
+  // alternative order exists.
+  const orderedSelected = [...selected];
+  const entryOf = (item: { rowIndex: number }) => rows[item.rowIndex]?.entry ?? null;
+  for (const contender of input.opening ?? []) {
+    const index = orderedSelected.findIndex((item) => {
+      const entry = entryOf(item);
+      return !!entry && entry.assetId === contender.assetId && entry.candidateId === contender.candidateId;
+    });
+    if (index > 0) orderedSelected.unshift(...orderedSelected.splice(index, 1));
+    if (index >= 0) break;
+  }
+  let endingPinned = false;
+  if (orderedSelected.length > 2) {
+    let endingIndex = -1;
+    let bestEndingFit = 60;
+    for (let index = 1; index < orderedSelected.length; index += 1) {
+      const fit = entryOf(orderedSelected[index]!)?.endingFit ?? 0;
+      if (fit > bestEndingFit) {
+        bestEndingFit = fit;
+        endingIndex = index;
+      }
+    }
+    if (endingIndex >= 0) {
+      if (endingIndex !== orderedSelected.length - 1) orderedSelected.push(...orderedSelected.splice(endingIndex, 1));
+      endingPinned = true;
+    }
+  }
+  const spacingCeiling = orderedSelected.length - (endingPinned ? 1 : 0);
+  for (let index = 1; index < spacingCeiling; index += 1) {
+    if (orderedSelected[index]!.clip.assetId !== orderedSelected[index - 1]!.clip.assetId) continue;
+    for (let swap = index + 1; swap < spacingCeiling; swap += 1) {
+      if (orderedSelected[swap]!.clip.assetId !== orderedSelected[index - 1]!.clip.assetId) {
+        const displaced = orderedSelected[index]!;
+        orderedSelected[index] = orderedSelected[swap]!;
+        orderedSelected[swap] = displaced;
+        break;
+      }
+    }
+  }
   let atSec = round3(Math.min(...input.clips.map((clip) => clip.startSec)));
-  const clips = selected.map(({ clip }) => {
+  const clips = orderedSelected.map(({ clip }) => {
     const placed = { ...clip, startSec: atSec };
     atSec = round3(atSec + clip.sourceOutSec - clip.sourceInSec);
     return placed;
