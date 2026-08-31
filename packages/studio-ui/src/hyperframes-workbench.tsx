@@ -548,6 +548,21 @@ export function HyperframesWorkbench({
       ),
     [renderPlan],
   );
+  /** Source total duration per primary SHOT id (shot ids ARE narrative clip ids) — the slip
+   *  gesture/panel needs the full source extent, which the legacy VideoShot projection lacks. */
+  const shotSourceDurations = useMemo(() => {
+    const out = new Map<string, number>();
+    const primary = editorDocument.timeline.tracks.find(
+      (track) => track.id === editorDocument.semantics.primaryNarrativeTrackId,
+    );
+    for (const clip of primary?.clips ?? []) {
+      if (clip.kind !== "narrative") continue;
+      const durationSec = editorDocument.assets[clip.assetId]?.metadata.durationSec;
+      if (durationSec != null && durationSec > 0) out.set(clip.id, durationSec);
+    }
+    return out;
+  }, [editorDocument]);
+
   const timelineTrackStates = useMemo<TimelineTrackState[]>(
     () =>
       renderPlan.tracks.map((track) => ({
@@ -10668,6 +10683,7 @@ export function HyperframesWorkbench({
             disabledClipIds={disabledClipIds}
             audioPeaks={audioOps.audioPeaks}
             sourcePeaks={audioOps.sourcePeaks}
+            shotSourceDurations={shotSourceDurations}
             clipPendingAt={clipPending}
             {...timelineCbs}
           />

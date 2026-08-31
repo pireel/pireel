@@ -16,7 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeftRight, Clapperboard, Eye, EyeOff, Film, GalleryHorizontal, Loader2, Music, Plus, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import {
   type Block,
   type BlockKind,
@@ -178,6 +178,8 @@ interface StudioTimelineProps {
   onResizeShot?: (id: string, edge: 'left' | 'right', atSec: number) => void;
   /** Slip a shot's source window by SOURCE seconds (position/duration fixed). Alt-drag on the body. */
   onSlipShot?: (id: string, sourceDeltaSec: number) => void;
+  /** Source total duration per shot id — enables the slip panel and live tail clamping. */
+  shotSourceDurations?: ReadonlyMap<string, number>;
   /** Move a block across physical tracks. trackId is canonical; stackOrder is retained only for legacy hosts. */
   onMoveBlockTrack?: (id: string, target: TimelineBlockTrackTarget, startSec: number) => void;
   /** Drag a block into any native row boundary and create a graphics track at that document index. */
@@ -338,6 +340,7 @@ function StudioTimelineImpl({
   onMoveShot,
   onResizeShot,
   onSlipShot,
+  shotSourceDurations,
   onMoveBlockTrack,
   onMoveBlockNewTrack,
   onSelectBlock,
@@ -457,6 +460,9 @@ function StudioTimelineImpl({
   /** Slip ghost (alt-drag on a shot body): shifts WHICH source range plays, position/duration
    *  fixed. deltaSec is in SOURCE seconds; the filmstrip re-windows live, commit on release. */
   const [shotSlip, setShotSlip] = useState<{ shotId: string; deltaSec: number } | null>(null);
+  /** Slip panel (取窗浮窗): the whole source as one strip with the current window as a draggable
+   *  selection box — the discoverable way to relocate a shot inside its source. */
+  const [slipPanel, setSlipPanel] = useState<string | null>(null);
   const [captionResize, setCaptionResize] = useState<{
     id: string;
     startSec: number;
@@ -575,6 +581,11 @@ function StudioTimelineImpl({
           endSec: span.shot.srcEnd + shotSlip.deltaSec + pad,
         });
       }
+      // The slip panel shows the WHOLE source; demand it once (bucket grid caps tile count).
+      if (slipPanel === span.shot.id && span.shot.src) {
+        const dur = shotSourceDurations?.get(span.shot.id);
+        if (dur) (demand[span.shot.src] ??= []).push({ startSec: 0, endSec: dur });
+      }
     }
     for (const track of trackStates ?? []) {
       for (const clip of track.clips ?? []) {
@@ -586,7 +597,7 @@ function StudioTimelineImpl({
     if (key === filmstripDemandKeyRef.current) return;
     filmstripDemandKeyRef.current = key;
     onFilmstripDemandChange(demand);
-  }, [onFilmstripDemandChange, sceneSpans, shotSlip, trackStates, visibleRange]);
+  }, [onFilmstripDemandChange, sceneSpans, shotSlip, slipPanel, shotSourceDurations, trackStates, visibleRange]);
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
@@ -1383,7 +1394,8 @@ function StudioTimelineImpl({
     const span = sceneSpans[from];
     if (!span) return;
     const sourceRate = (span.shot.srcEnd - span.shot.srcStart) / Math.max(0.001, span.end - span.start);
-    const sourceDurationSec = sourcePeaks?.get(span.shot.src ?? 'main')?.durationSec;
+    const sourceDurationSec = shotSourceDurations?.get(span.shot.id)
+      ?? sourcePeaks?.get(span.shot.src ?? 'main')?.durationSec;
     const grabSec = secAt(e.clientX);
     shotSlipMovedRef.current = false;
     drag(
@@ -1900,6 +1912,23 @@ function StudioTimelineImpl({
                               {`${displaySourceStart.toFixed(1)}s – ${displaySourceEnd.toFixed(1)}s`}
                             </div>
                           ) : null}
+                          {onSlipShot && (shotSourceDurations?.get(shot.id) ?? 0) > 0 ? (
+                            <span
+                              role="button"
+                              tabIndex={-1}
+                              title={t('panels.slipWindowOpen')}
+                              aria-label={t('panels.slipWindowOpen')}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectShot(shot.id, false);
+                                setSlipPanel((current) => (current === shot.id ? null : shot.id));
+                              }}
+                              className={`absolute bottom-0.5 right-0.5 z-20 h-4 w-4 items-center justify-center rounded bg-black/60 text-white/90 hover:bg-black/85 ${slipPanel === shot.id ? 'flex' : 'hidden group-hover/shot:flex'}`}
+                            >
+                              <GalleryHorizontal size={10} />
+                            </span>
+                          ) : null}
                           {/* Filmstrip (clipped inside the card: rounded corners / hairline gaps from the card's overflow-hidden).
                               Externally inserted clip: the main filmstrip is the main video's frames, so pasting it would be wrong — lay down its own extracted frames
                               (clipStrips, t = clip source time; before frames are extracted, show a dedicated placeholder background) */}
@@ -2001,6 +2030,79 @@ function StudioTimelineImpl({
                       </div>
                     );
                   })}
+                  {/* Slip panel: the WHOLE source as one strip, current window = draggable selection
+                      box. Dragging drives the same shotSlip ghost as alt-drag (the card filmstrip
+                      re-windows live); release commits once. Click anywhere = center the window. */}
+                  {slipPanel ? (() => {
+                    const span = sceneSpans.find((candidate) => candidate.shot.id === slipPanel);
+                    const dur = span ? shotSourceDurations?.get(span.shot.id) : undefined;
+                    if (!span || !dur || !onSlipShot) return null;
+                    const strip = (span.shot.src ? clipStrips?.[span.shot.src] : filmstrip) ?? [];
+                    const live = shotSlip?.shotId === span.shot.id ? shotSlip.deltaSec : 0;
+                    const winLen = span.shot.srcEnd - span.shot.srcStart;
+                    const winStart = Math.min(Math.max(0, span.shot.srcStart + live), Math.max(0, dur - winLen));
+                    const W = Math.max(240, Math.min(640, x(visibleRange.endSec - visibleRange.startSec) - 24));
+                    const leftMin = x(visibleRange.startSec) + 8;
+                    const left = Math.min(Math.max(x(span.start), leftMin), Math.max(leftMin, x(visibleRange.endSec) - W - 24));
+                    const panelPps = W / dur;
+                    const tileW = 40;
+                    const tiles = stripTiles(strip, 0, dur, Math.max(0.2, tileW / panelPps), panelPps);
+                    const clampDelta = (deltaSec: number) => Math.min(
+                      Math.max(deltaSec, -span.shot.srcStart),
+                      Math.max(0, dur - span.shot.srcEnd),
+                    );
+                    return (
+                      <div
+                        className="absolute z-[70] rounded-lg border border-white/10 bg-black/85 p-2 shadow-xl backdrop-blur"
+                        style={{ left, top: H0 + 4, width: W + 16 }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <div className="mb-1 flex items-center gap-2 text-[10px] text-white/70">
+                          <span className="shrink-0">{t('panels.slipWindow')}</span>
+                          <span className="min-w-0 flex-1 truncate text-right tabular-nums">
+                            {`${winStart.toFixed(1)}s – ${(winStart + winLen).toFixed(1)}s / ${dur.toFixed(1)}s`}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label={t('workbench.close')}
+                            className="shrink-0 text-white/60 hover:text-white"
+                            onClick={() => setSlipPanel(null)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <div
+                          className="relative h-12 cursor-ew-resize overflow-hidden rounded bg-white/5"
+                          style={{ width: W }}
+                          onPointerDown={(e) => {
+                            const box = e.currentTarget.getBoundingClientRect();
+                            const apply = (clientX: number) => {
+                              const centerSec = ((clientX - box.left) / W) * dur;
+                              const deltaSec = clampDelta(centerSec - winLen / 2 - span.shot.srcStart);
+                              const next = { shotId: span.shot.id, deltaSec };
+                              shotSlipRef.current = next;
+                              setShotSlip(next);
+                            };
+                            apply(e.clientX);
+                            drag(e, (clientX) => apply(clientX), () => {
+                              const current = shotSlipRef.current;
+                              setShotSlip(null);
+                              if (current?.shotId === span.shot.id && Math.abs(current.deltaSec) > 0.001) {
+                                onSlipShot(span.shot.id, current.deltaSec);
+                              }
+                            });
+                          }}
+                        >
+                          {tiles.length ? tiles.map((tile, k) => (
+                            <img key={k} src={tile.url} alt="" draggable={false} className="absolute top-0 h-full object-cover" style={{ left: tile.left, width: tileW + 1 }} />
+                          )) : <div className="absolute inset-0 bg-gradient-to-r from-sky-500/25 to-sky-500/10" />}
+                          <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style={{ width: Math.max(0, (winStart / dur) * W) }} />
+                          <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/50" style={{ width: Math.max(0, W - ((winStart + winLen) / dur) * W) }} />
+                          <div className="ring-accent pointer-events-none absolute inset-y-0 rounded ring-2" style={{ left: (winStart / dur) * W, width: Math.max(6, (winLen / dur) * W) }} />
+                        </div>
+                      </div>
+                    );
+                  })() : null}
                   {/* Cut-point transition (content-level, mounted on the main track): unset = narrow "add" affordance; set = a
                       symmetric region centered on the cut (theme color), with handles on both sides dragging the duration symmetrically (drag one, the other mirrors; total <=4s).
                       z-30 is above scene cards, below the hover "+" (z-40) */}
