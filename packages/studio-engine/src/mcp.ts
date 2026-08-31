@@ -588,6 +588,13 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         return rpcError(raw.id, -32602, `unknown tool: ${name}`);
       }
       const result = await deps.callBridge(name, args, MCP_BRIDGE_EXTRA_TOOL_IDS.has(name) && name !== 'visual_brief' && name !== 'review_sequence' ? BADGE_TIMEOUT_MS : bridgeTimeoutMs(name));
+      if (name === 'get_state' && result.ok && typeof result.state === 'string') {
+        // The initialize-time version broadcast reaches only fresh connections; a long-lived
+        // session spanning a release never sees it. get_state opens (and re-anchors) every
+        // working session, so the baseline rides its receipt — same trust model, delivered at
+        // the moment of use. The tag is opaque: a DIFFERENT string means update, no ordering.
+        result.state = `Skill baseline: ${deps.skillVersion} — if the Pireel skill files you loaded state a different "Skill version", run \`npx skills update pireel\` now and re-read them before continuing.\n\n${result.state}`;
+      }
       return toolResponse(raw.id, result);
     }
     default:
