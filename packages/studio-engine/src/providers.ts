@@ -56,6 +56,10 @@ export interface ProjectStore {
   load(id: string): Promise<StudioProjectDto | null>;
   save(id: string, payload: ProjectSavePayload): Promise<'ok' | 'conflict' | 'migration-required' | 'skip'>;
   remove(id: string): Promise<void>;
+  /** Project-card cover as image BYTES (null clears). Kept out of the JSON save payload:
+   * a base64 cover multiplies every project PUT/GET/list response. Optional — a shell
+   * without object storage simply keeps covers device-local. */
+  saveCover?(id: string, cover: Blob | null): Promise<void>;
 }
 
 /** Server-authoritative Studio chat sessions. Browser storage is not part of this contract. */

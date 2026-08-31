@@ -2752,6 +2752,24 @@ export function HyperframesWorkbench({
   // deliverable. A secondary visual lane can be the whole edit, so primary-track presence must not
   // decide whether an output owns a cover.
   const coverThumbRef = useRef<string | null>(null);
+  // Cover BYTES travel their own debounced channel (providers.projects.saveCover → R2 key in the
+  // row); the JSON save payload never carries base64 — it multiplied every project PUT/GET/list.
+  const coverCloudTimerRef = useRef<number | null>(null);
+  const coverCloudPushedSigRef = useRef<string | null>(null);
+  const scheduleCoverCloudPush = (cover: Blob | null, sig: string | null) => {
+    const saveCover = studioProviders().projects.saveCover;
+    if (!saveCover || sig === coverCloudPushedSigRef.current) return;
+    if (coverCloudTimerRef.current) window.clearTimeout(coverCloudTimerRef.current);
+    coverCloudTimerRef.current = window.setTimeout(() => {
+      coverCloudTimerRef.current = null;
+      if (displacedRef.current) return;
+      void saveCover(projectId, cover)
+        .then(() => {
+          coverCloudPushedSigRef.current = sig;
+        })
+        .catch(() => {}); // a cover is a bonus; the next redraw retries
+    }, 2_500);
+  };
   // Cover clearing must wait for hydration: the first render is intentionally empty even when a
   // saved project has video. Once ready, an empty primary track is authoritative user state.
   const [bootDataReady, setBootDataReady] = useState(false);
@@ -2812,6 +2830,7 @@ export function HyperframesWorkbench({
       if (!bootDataReady) return;
       coverThumbRef.current = null;
       saveCoverThumb(projectId, null);
+      scheduleCoverCloudPush(null, null);
       return;
     }
     if (!coverVisual) return;
@@ -2834,6 +2853,10 @@ export function HyperframesWorkbench({
       cv.getContext("2d")!.drawImage(media, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
       coverThumbRef.current = cv.toDataURL("image/jpeg", 0.8);
       saveCoverThumb(projectId, coverThumbRef.current);
+      const sig = coverThumbRef.current;
+      cv.toBlob((blob) => {
+        if (blob) scheduleCoverCloudPush(blob, sig);
+      }, "image/jpeg", 0.8);
     };
     void (async () => {
       try {
@@ -7054,7 +7077,6 @@ export function HyperframesWorkbench({
             videoDurationSec: firstNarrativeDurationSec(
               editorDocumentRef.current,
             ),
-            coverThumb: currentCoverThumb(),
           }
         : null;
     }
@@ -7074,7 +7096,6 @@ export function HyperframesWorkbench({
         videoSigRef.current ??
         (videoFileRef.current ? fileSig(videoFileRef.current) : null),
       videoDurationSec: firstNarrativeDurationSec(editorDocumentRef.current),
-      coverThumb: currentCoverThumb(),
     };
   }
 
@@ -7852,12 +7873,18 @@ export function HyperframesWorkbench({
       if (timer != null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         void cloudSaveChainRef.current.then(async () => {
+          // Dirty-but-unflushed local state sits in the save queue's debounce, NOT in the save
+          // chain — a remote snapshot fetched now predates local intent, and adopting it would
+          // wipe just-imported assets (the panel treats a confirmed cloud index as exact).
+          // Skip; the next focus/visibility event retries once the push has been acknowledged.
+          if (cloudSaveQueueRef.current?.hasPendingSave) return;
           const mutationRev = localAssetIndexMutationRevRef.current;
           const remote = await studioProviders().projects.load(projectId);
           if (
             dead ||
             ticket !== request ||
-            mutationRev !== localAssetIndexMutationRevRef.current
+            mutationRev !== localAssetIndexMutationRevRef.current ||
+            cloudSaveQueueRef.current?.hasPendingSave
           )
             return;
           if (remote)

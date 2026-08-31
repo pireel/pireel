@@ -129,12 +129,28 @@ describe('V2 incremental save wire', () => {
     const acked = ackedFromDto({
       document: current.document!,
       context: sanitizeProjectContext(null),
-      coverThumb: current.coverThumb,
+      coverThumb: current.coverThumb ?? null,
       title: 'Hydrated project',
       videoSig: current.videoSig,
       videoDurationSec: current.videoDurationSec,
     });
 
+    expect(buildSaveWire(current, 7, acked)).toBeNull();
+  });
+
+  it('preserves a server-held cover key when the payload omits coverThumb entirely', () => {
+    const current = payload();
+    delete current.coverThumb;
+    const acked = ackedFromDto({
+      document: current.document!,
+      context: sanitizeProjectContext(null),
+      coverThumb: 'studio-covers/u1/p1-abc.jpg',
+      title: 'Hydrated project',
+      videoSig: current.videoSig,
+      videoDurationSec: current.videoDurationSec,
+    });
+    // Covers travel as bytes through saveCover; an absent field must neither clear the
+    // server's cover key nor register as a changed section (fake no-op PUT churns versions).
     expect(buildSaveWire(current, 7, acked)).toBeNull();
   });
 
@@ -293,7 +309,7 @@ describe('conflict baseline', () => {
   it('re-seeds from a server V2 DTO using the same canonical hashes', () => {
     const value = payload();
     const acked = ackedFromDto({
-      document: value.document!, context: { schemaVersion: 3 }, coverThumb: value.coverThumb,
+      document: value.document!, context: { schemaVersion: 3 }, coverThumb: value.coverThumb ?? null,
       title: '未命名项目', videoSig: value.videoSig, videoDurationSec: value.videoDurationSec,
     });
     const next = buildSaveWire(value, 9, acked);

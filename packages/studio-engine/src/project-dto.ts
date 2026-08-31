@@ -94,7 +94,9 @@ export interface ProjectSavePayload {
   context?: StudioProjectContext;
   videoSig: string | null;
   videoDurationSec: number | null;
-  coverThumb: string | null;
+  /** Optional legacy lane: covers now travel as bytes through ProjectStore.saveCover (an R2 key
+   * lands in the row); base64 here multiplied every save/list payload. Absent = untouched. */
+  coverThumb?: string | null;
 }
 
 /** Save payload cap (document graphics can be sizable, but keep it bounded). */
@@ -286,7 +288,12 @@ export function buildSaveWire(
     context: contextCanon != null
       ? hashSection(contextCanon)
       : (acked?.hashes.context ?? hashSection(canonicalJson(sanitizeProjectContext(null)))),
-    coverThumb: hashSection(p.coverThumb ?? ''),
+    // Absent cover = preserve (same contract as title): covers now travel as bytes through
+    // ProjectStore.saveCover, so a payload without the field must not read as "cover cleared"
+    // nor emit a fake no-op section against a server row that holds a cover key.
+    coverThumb: p.coverThumb !== undefined
+      ? hashSection(p.coverThumb ?? '')
+      : (acked?.hashes.coverThumb ?? hashSection('')),
     meta: metaHashOf(effectiveTitle, p.videoSig, p.videoDurationSec),
   };
   // JSON-clean current values (parsed from the canonical string: incidentally drops undefined, so diff is structurally comparable to the baseline)
@@ -322,7 +329,7 @@ export function buildSaveWire(
   if (documentCanon != null) emitBig('document', documentCanon, true);
   if (contextCanon != null) emitBig('context', contextCanon, true);
 
-  if (!acked || acked.hashes.coverThumb !== hashes.coverThumb) {
+  if (p.coverThumb !== undefined && (!acked || acked.hashes.coverThumb !== hashes.coverThumb)) {
     wire.coverThumb = p.coverThumb;
     changed = true;
   }
