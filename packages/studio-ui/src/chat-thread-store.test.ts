@@ -11,6 +11,7 @@ import {
   canRunEditorialAnalysis,
   createStudioTurnLedger,
   compactStudioChatMessages,
+  applyEditorialShotOrder,
   compactStudioChatMessagesForModel,
   editorialPlacementIssue,
   effectiveStudioTurnMessages,
@@ -368,6 +369,32 @@ describe('editorial placement receipts', () => {
     // Filler ranges belong to asset-b's accepted span — never to another row's asset id.
     expect(filler.every((clip) => clip.sourceInSec >= 10 && clip.sourceOutSec <= 16)).toBe(true);
     expect(editorialPlacementIssue([twoSourceReview], 'add_clips', prepared!.input)).toBeNull();
+  });
+
+  it('applies a model shot order only when it is a legal opening-pinned permutation', () => {
+    const prepared = prepareEditorialPlacement([review], 'add_clips', {
+      clips: [
+        { assetId: 'narration-asset', role: 'narration', startSec: 0, durationSec: 1.8 },
+        { assetId: 'asset-beach', role: 'primary', muted: true, sourceInSec: 0.3, sourceOutSec: 2.1 },
+      ],
+    }, 1.8)!;
+    expect(prepared.passthroughCount).toBe(1);
+    expect(prepared.shots.length).toBeGreaterThan(0);
+    const ids = prepared.shots.map((shot) => shot.id);
+    // Identity permutation applies cleanly and keeps sequential starts.
+    const applied = applyEditorialShotOrder(prepared, ids);
+    expect(applied).not.toBeNull();
+    const clips = (applied!.clips as Array<Record<string, unknown>>).slice(prepared.passthroughCount);
+    for (let index = 1; index < clips.length; index += 1) {
+      const previous = clips[index - 1]!;
+      const previousEnd = Number(previous.startSec)
+        + (Number(previous.sourceOutSec) - Number(previous.sourceInSec));
+      expect(Number(clips[index]!.startSec)).toBeCloseTo(previousEnd, 2);
+    }
+    // Losing a shot, inventing one, or demoting the opening all fall back to deterministic order.
+    expect(applyEditorialShotOrder(prepared, ids.slice(1))).toBeNull();
+    expect(applyEditorialShotOrder(prepared, [...ids.slice(0, -1), 'shot-fake'])).toBeNull();
+    if (ids.length > 1) expect(applyEditorialShotOrder(prepared, [...ids.slice(1), ids[0]!])).toBeNull();
   });
 
   it('engages deterministic assembly for a mixed batch whose picture rows omit startSec', () => {

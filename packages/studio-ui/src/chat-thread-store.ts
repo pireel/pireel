@@ -508,6 +508,50 @@ export interface PreparedEditorialPlacement {
   actualDurationSec: number;
   targetDurationSec: number;
   droppedClipCount: number;
+  /** Rows before the picture montage in input.clips (narration and other pass-through rows). */
+  passthroughCount: number;
+  /** Ordering handle: one entry per planned picture clip, in the deterministic order. Selection
+   * and durations are locked; a model may permute these (opening stays first) for narrative
+   * taste, applied via applyEditorialShotOrder. */
+  shots: Array<{
+    id: string;
+    assetId: string;
+    durationSec: number;
+    score: number;
+    facing?: string;
+    role?: string;
+    action?: string;
+    endingFit: number;
+  }>;
+}
+
+/** Apply a model-chosen narrative order to a prepared montage. The order must be a permutation
+ * of every shot id with the evidence-locked opening kept first; anything else returns null and
+ * the deterministic order stands. Timeline starts are recomputed for the new sequence. */
+export function applyEditorialShotOrder(
+  prepared: PreparedEditorialPlacement,
+  order: readonly string[],
+): Record<string, unknown> | null {
+  const ids = prepared.shots.map((shot) => shot.id);
+  if (order.length !== ids.length
+    || new Set(order).size !== ids.length
+    || !order.every((id) => ids.includes(id))
+    || order[0] !== ids[0]) return null;
+  const clips = prepared.input.clips;
+  if (!Array.isArray(clips)) return null;
+  const passthrough = clips.slice(0, prepared.passthroughCount);
+  const planned = clips.slice(prepared.passthroughCount) as Array<Record<string, unknown>>;
+  if (planned.length !== ids.length) return null;
+  const byId = new Map(ids.map((id, index) => [id, planned[index]!]));
+  let atSec = Math.min(...planned.map((clip) => Number(clip.startSec) || 0));
+  const reordered = order.map((id) => {
+    const clip = byId.get(id)!;
+    const durationSec = Number(clip.sourceOutSec) - Number(clip.sourceInSec);
+    const placed = { ...clip, startSec: Math.round(atSec * 1_000) / 1_000 };
+    atSec += durationSec;
+    return placed;
+  });
+  return { ...prepared.input, clips: [...passthrough, ...reordered] };
 }
 
 /** Return only a material shortage after deterministic picture assembly has finished.
@@ -673,8 +717,29 @@ export function prepareEditorialPlacement(
       muted: true,
     };
   });
+  // Ordering handle: describe each planned picture clip from its reviewed candidate so a
+  // narrative-ordering pass has facing/role/action evidence without re-deriving anything.
+  const shots = clips.map((clip, index) => {
+    const canonical = canonicalEditorialAssetId(clip.assetId);
+    const candidate = (sources.find((source) => source.assetId === canonical)?.candidates ?? [])
+      .find((row) => (row.verdict === 'strong' || row.verdict === 'usable')
+        && Number(clip.sourceInSec) >= row.startSec - 0.06
+        && Number(clip.sourceOutSec) <= row.endSec + 0.06);
+    return {
+      id: `shot-${index + 1}`,
+      assetId: canonical,
+      durationSec: Math.round((Number(clip.sourceOutSec) - Number(clip.sourceInSec)) * 10) / 10,
+      score: candidate?.score ?? 0,
+      ...(candidate?.facing ? { facing: candidate.facing } : {}),
+      ...(candidate?.contentRole ? { role: candidate.contentRole } : {}),
+      ...(candidate?.action ? { action: String(candidate.action).slice(0, 90) } : {}),
+      endingFit: (candidate?.roleFit ?? []).find((fit) => fit.role === 'ending')?.score ?? 0,
+    };
+  });
   return {
     input: { ...input, clips: [...passthroughRows, ...clips], __replacePrimaryTrack: true },
+    passthroughCount: passthroughRows.length,
+    shots,
     changed: plan.changed,
     actualDurationSec: plan.actualDurationSec,
     targetDurationSec: plan.targetDurationSec,

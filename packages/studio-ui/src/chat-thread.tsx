@@ -71,6 +71,7 @@ import {
   compactStudioChatMessages,
   compactStudioChatMessagesForModel,
   createStudioTurnLedger,
+  applyEditorialShotOrder,
   editorialPlacementIssue,
   effectiveStudioTurnMessages,
   hasCompletedEditorialPlacement,
@@ -460,6 +461,37 @@ export function ChatThread({
         }
         visualReviewCountRef.current += 1;
       }
+      // Narrative ordering is delegated taste: selection and durations are locked by the
+      // deterministic assembly, and a lightweight model pass may only permute the shots
+      // (opening stays pinned). Any failure — timeout, bad output, non-permutation — falls
+      // back silently to the deterministic order; correctness never depends on this call.
+      let orderedInput = executionInput;
+      let orderingSource: "model" | "deterministic" | undefined;
+      if (preparedPlacement && preparedPlacement.shots.length >= 4) {
+        orderingSource = "deterministic";
+        try {
+          const orderCtrl = new AbortController();
+          const orderTimer = setTimeout(() => orderCtrl.abort(), 8_000);
+          const response = await fetch("/api/studio/order-shots", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ shots: preparedPlacement.shots }),
+            signal: orderCtrl.signal,
+          });
+          clearTimeout(orderTimer);
+          if (response.ok) {
+            const bodyJson = (await response.json()) as { order?: unknown };
+            const order = Array.isArray(bodyJson.order) ? bodyJson.order.map(String) : [];
+            const applied = applyEditorialShotOrder(preparedPlacement, order);
+            if (applied) {
+              orderedInput = applied;
+              orderingSource = "model";
+            }
+          }
+        } catch {
+          /* deterministic order stands */
+        }
+      }
       // Fresh controller per tool run: the stop button aborts it so long tools can stand down at
       // their safe boundaries instead of holding the turn hostage until they finish
       const ctrl = new AbortController();
@@ -470,7 +502,7 @@ export function ChatThread({
       try {
         const out = await runToolRef.current(
           id,
-          executionInput,
+          orderedInput,
           {
             signal: ctrl.signal,
             surface: "chat",
@@ -524,6 +556,7 @@ export function ChatThread({
                   actualDurationSec: preparedPlacement.actualDurationSec,
                   droppedClipCount: preparedPlacement.droppedClipCount,
                   naturalSpeed: true,
+                  ...(orderingSource ? { ordering: orderingSource } : {}),
                   // An under-target assembly is NOT a finished picture: say so in the receipt and
                   // name the one legal fix, instead of letting a lock message call it complete.
                   // A covered assembly is equally explicit the other way: without the FINAL
