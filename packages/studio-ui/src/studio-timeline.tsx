@@ -1924,7 +1924,7 @@ function StudioTimelineImpl({
                                 onSelectShot(shot.id, false);
                                 setSlipPanel((current) => (current === shot.id ? null : shot.id));
                               }}
-                              className={`absolute bottom-0.5 right-0.5 z-20 h-4 w-4 items-center justify-center rounded bg-black/60 text-white/90 hover:bg-black/85 ${slipPanel === shot.id ? 'flex' : 'hidden group-hover/shot:flex'}`}
+                              className={`absolute bottom-0.5 right-3 z-30 h-4 w-4 items-center justify-center rounded bg-black/60 text-white/90 hover:bg-black/85 ${slipPanel === shot.id ? 'flex' : 'hidden group-hover/shot:flex'}`}
                             >
                               <GalleryHorizontal size={10} />
                             </span>
