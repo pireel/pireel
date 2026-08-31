@@ -588,6 +588,30 @@ const canonicalEditorialAssetId = (value: unknown) => typeof value === 'string'
   ? value.trim().replace(/^@/, '').replace(/^local:/, '')
   : '';
 
+// Mirrors the execution-boundary resolver's typo repair: an id garbled in its uuid TAIL still
+// names its source when the intact prefix (at least the full first uuid group) matches exactly
+// one reviewed source. Repairing during classification keeps the row inside the planner; left
+// as a passthrough row it poisons the atomic batch or places a duplicate outside the plan.
+const EDITORIAL_ID_PREFIX_MIN = 'local_'.length + 8;
+function uniquePrefixSourceId(canonical: string, sourceIds: ReadonlySet<string>): string | null {
+  if (canonical.length < EDITORIAL_ID_PREFIX_MIN) return null;
+  let best: string | null = null;
+  let bestLength = 0;
+  let ambiguous = false;
+  for (const id of sourceIds) {
+    let length = 0;
+    while (length < canonical.length && length < id.length && canonical[length] === id[length]) length += 1;
+    if (length > bestLength) {
+      best = id;
+      bestLength = length;
+      ambiguous = false;
+    } else if (length === bestLength && best && id !== best) {
+      ambiguous = true;
+    }
+  }
+  return !ambiguous && bestLength >= EDITORIAL_ID_PREFIX_MIN ? best : null;
+}
+
 function reviewedEditorialSources(messages: readonly UIMessage[]): EditorialAssemblySource[] {
   const reviewed = new Map<string, EditorialCandidateReview[]>();
   for (const message of messages) {
@@ -659,9 +683,17 @@ export function prepareEditorialPlacement(
   const sources = reviewedEditorialSources(messages);
   if (!sources.length || !Array.isArray(input.clips)) return null;
   const sourceIds = new Set(sources.map((source) => source.assetId));
-  const rows = input.clips.filter((value): value is Record<string, unknown> => (
-    !!value && typeof value === 'object' && !Array.isArray(value)
-  ));
+  const rows = input.clips
+    .filter((value): value is Record<string, unknown> => (
+      !!value && typeof value === 'object' && !Array.isArray(value)
+    ))
+    .map((row) => {
+      const rawId = typeof row.assetId === 'string' ? row.assetId.trim() : '';
+      const canonical = canonicalEditorialAssetId(rawId);
+      if (!canonical || sourceIds.has(canonical)) return row;
+      const healed = uniquePrefixSourceId(canonical, sourceIds);
+      return healed ? { ...row, assetId: rawId.slice(0, rawId.length - canonical.length) + healed } : row;
+    });
   if (!rows.length || rows.length !== input.clips.length) return null;
   // The optimizer owns the reviewed primary-picture rows; audio, overlays and unreviewed footage
   // ride along with their authored semantics. A mixed batch (narration + picture in one call, a

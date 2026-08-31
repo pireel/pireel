@@ -819,4 +819,21 @@ describe('asset-id typo suggestion', () => {
     expect(outcome.ok).toBe(false);
     expect((outcome as { error?: string }).error).toContain('Closest registered id: local_7be336cc-bbaf-485c-b32a-f2929b2903c9');
   });
+
+  it('suggests via unique long prefix when the uuid tail was dropped beyond edit distance', () => {
+    const document = emptyEditorDocumentV2({ fps: 30 });
+    document.assets['local_ef703761-8603-4562-af25-9973fdaae590'] = {
+      id: 'local_ef703761-8603-4562-af25-9973fdaae590', kind: 'video',
+      locator: { localSig: 'sig-a' }, metadata: { durationSec: 90 },
+    };
+    document.assets['local_efe8f32e-27b2-4f14-af6a-c4a430df240e'] = {
+      id: 'local_efe8f32e-27b2-4f14-af6a-c4a430df240e', kind: 'video',
+      locator: { localSig: 'sig-b' }, metadata: { durationSec: 90 },
+    };
+    const outcome = runAgentTimelineTool(document, 'add_clips', {
+      clips: [{ role: 'primary', assetId: 'local:local_ef703761-8603-4562-25', sourceInSec: 0, sourceOutSec: 2 }],
+    });
+    expect(outcome.ok).toBe(false);
+    expect((outcome as { error?: string }).error).toContain('Closest registered id: local_ef703761-8603-4562-af25-9973fdaae590');
+  });
 });

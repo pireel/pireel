@@ -285,6 +285,8 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.elementNotFound": "Element not found",
   "workbench.elementNotFoundIds":
     "Element not found (ids come from get_state / tool receipts)",
+  "workbench.focusTargetNotFound":
+    "No focusable element or shot with this id (visual element and shot ids only; audio clips cannot be focused)",
   "workbench.elementOpacity": "Element opacity",
   "workbench.elementSitsAbovePortrait":
     "This element sits above the portrait — click to send it behind",

@@ -371,6 +371,67 @@ describe('editorial placement receipts', () => {
     expect(editorialPlacementIssue([twoSourceReview], 'add_clips', prepared!.input)).toBeNull();
   });
 
+  it('heals a garbled reviewed-source id into a planner-owned picture row instead of a passthrough', () => {
+    const real = 'local_ef703761-8603-4562-af25-9973fdaae590';
+    const sibling = 'local_efe8f32e-27b2-4f14-af6a-c4a430df240e';
+    const uuidReview = assistant([{
+      type: 'tool-analyze_visual',
+      toolCallId: 'vision-uuid',
+      state: 'output-available',
+      input: { mode: 'editorial', items: [{ assetId: real }, { assetId: sibling }] },
+      output: {
+        ok: true,
+        data: {
+          analysisMode: 'editorial-batch',
+          items: [
+            {
+              ok: true, analysisMode: 'editorial-candidates', localAssetId: real,
+              editorialCandidates: [{
+                candidateId: 'cand-real', verdict: 'strong', startSec: 2, endSec: 6, score: 88,
+                contentRole: 'person-primary',
+                actionPhases: [{ phase: 'performance', startSec: 2, endSec: 6, note: 'walks toward camera' }],
+                cutOptions: [{ durationSec: 4, startSec: 2, endSec: 6, score: 88, reason: 'complete' }],
+                rejectedRanges: [],
+              }],
+            },
+            {
+              ok: true, analysisMode: 'editorial-candidates', localAssetId: sibling,
+              editorialCandidates: [{
+                candidateId: 'cand-sibling', verdict: 'usable', startSec: 10, endSec: 14, score: 80,
+                contentRole: 'person-primary',
+                actionPhases: [{ phase: 'performance', startSec: 10, endSec: 14, note: 'turns away' }],
+                cutOptions: [{ durationSec: 4, startSec: 10, endSec: 14, score: 80, reason: 'complete' }],
+                rejectedRanges: [],
+              }],
+            },
+          ],
+        },
+      },
+    }] as UIMessage['parts']);
+    // The batch retypes the first id with its uuid tail collapsed — the exact garble that once
+    // rode along as a passthrough row and poisoned the whole atomic add_clips batch.
+    const prepared = prepareEditorialPlacement([uuidReview], 'add_clips', {
+      clips: [
+        { assetId: 'local:local_ef703761-8603-4562-25', role: 'primary', muted: true, sourceInSec: 2.4, sourceOutSec: 3.2 },
+        { assetId: `local:${sibling}`, role: 'primary', muted: true, sourceInSec: 10, sourceOutSec: 14 },
+      ],
+    }, 8);
+    expect(prepared).not.toBeNull();
+    expect(prepared!.passthroughCount).toBe(0);
+    const clips = prepared!.input.clips as Array<{ assetId: string }>;
+    expect(clips.some((clip) => clip.assetId.includes('local_ef703761-8603-4562-25'))).toBe(false);
+    expect(clips.some((clip) => clip.assetId.includes(real))).toBe(true);
+    expect(editorialPlacementIssue([uuidReview], 'add_clips', prepared!.input)).toBeNull();
+    // An id that shares no meaningful prefix with any reviewed source stays a passthrough row.
+    const unrepaired = prepareEditorialPlacement([uuidReview], 'add_clips', {
+      clips: [
+        { assetId: 'local:local_zz000000-0000-0000-0000-000000000000', role: 'primary', muted: true, sourceInSec: 0, sourceOutSec: 1 },
+        { assetId: `local:${sibling}`, role: 'primary', muted: true, sourceInSec: 10, sourceOutSec: 14 },
+      ],
+    }, 8);
+    expect(unrepaired!.passthroughCount).toBe(1);
+  });
+
   it('applies a model shot order only when it is a legal opening-pinned permutation', () => {
     const prepared = prepareEditorialPlacement([review], 'add_clips', {
       clips: [

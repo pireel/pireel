@@ -74,6 +74,19 @@ describe('Studio tool input reference normalization', () => {
     });
   });
 
+  it('repairs a retyped local id with a garbled uuid tail only while the prefix is unique', () => {
+    const real = 'local_ef703761-8603-4562-af25-9973fdaae590';
+    const sibling = 'local_efe8f32e-27b2-4f14-af6a-c4a430df240e';
+    const pool = [
+      { assetId: real, contentSig: 'a.mov:1:1', sig: 'a.mov:1:1', label: 'a', kind: 'video' as const, createdAt: 1 },
+      { assetId: sibling, contentSig: 'b.mov:1:1', sig: 'b.mov:1:1', label: 'b', kind: 'video' as const, createdAt: 1 },
+    ];
+    expect(resolveLocalAssetReference('local:local_ef703761-8603-4562-25', pool)?.assetId).toBe(real);
+    // The shared 'local_ef' stem is far below the first-uuid-group bar — never guess between siblings.
+    expect(resolveLocalAssetReference('local:local_ef', pool)).toBeNull();
+    expect(resolveLocalAssetReference('up_totally-unrelated-id', pool)).toBeNull();
+  });
+
   it('preserves an explicit alias id when a legacy registration supplies a local sig', () => {
     expect(normalizeStudioToolInputReferences('register_media', {
       assets: [{ id: 'legacy-alias', kind: 'video', localSig: sig }],

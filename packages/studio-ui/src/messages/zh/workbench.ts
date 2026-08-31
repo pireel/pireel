@@ -258,6 +258,8 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.elementNotFound": "找不到这个动态图形",
   "workbench.elementNotFoundIds":
     "找不到这个动态图形(id 来自 get_state / 工具回执)",
+  "workbench.focusTargetNotFound":
+    "找不到可聚焦的元素或分镜(仅支持画面元素与分镜 id,音频片段不支持聚焦)",
   "workbench.elementOpacity": "动态图形透明度",
   "workbench.elementSitsAbovePortrait":
     "这个动态图形在人像上层,点击垫到人像后面",

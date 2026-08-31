@@ -2806,7 +2806,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               applyT(sp.editedStart + 0.01);
               return { ok: true, summary: t('workbench.focusedShotN', { n: sp.index + 1 }) };
             }
-            return { ok: false, error: t('workbench.elementNotFound') };
+            return { ok: false, error: t('workbench.focusTargetNotFound') };
           }
           case 'seek': {
             const to = Number(input.toSec);

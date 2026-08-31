@@ -28,6 +28,17 @@ function canonicalLocalAsset(entry: LocalAssetIndexEntry): LocalAssetIndexEntry 
   };
 }
 
+const sharedPrefixLength = (left: string, right: string): number => {
+  let index = 0;
+  while (index < left.length && index < right.length && left[index] === right[index]) index += 1;
+  return index;
+};
+
+// A model retyping an id from memory most often garbles the uuid TAIL (dropped segment, merged
+// groups) — far beyond any edit-distance cap. An intact prefix covering at least the full first
+// uuid group still identifies the asset when exactly one registered id shares it.
+const UNIQUE_PREFIX_MIN = 'local_'.length + 8;
+
 /** Resolve current asset ids, new mention tokens, and unambiguous legacy sig references. */
 export function resolveLocalAssetReference(
   value: string,
@@ -44,7 +55,24 @@ export function resolveLocalAssetReference(
   const legacyMatches = assets.filter(
     (entry) => entry.contentSig === withoutScheme || localAssetMentionId(entry.contentSig) === bare,
   );
-  return legacyMatches.length === 1 ? legacyMatches[0]! : null;
+  if (legacyMatches.length === 1) return legacyMatches[0]!;
+  if (bare.startsWith('local_') && bare.length >= UNIQUE_PREFIX_MIN) {
+    let best: LocalAssetIndexEntry | null = null;
+    let bestLength = 0;
+    let ambiguous = false;
+    for (const entry of assets) {
+      const length = sharedPrefixLength(bare, entry.assetId);
+      if (length > bestLength) {
+        best = entry;
+        bestLength = length;
+        ambiguous = false;
+      } else if (length === bestLength && best && entry.assetId !== best.assetId) {
+        ambiguous = true;
+      }
+    }
+    if (!ambiguous && bestLength >= UNIQUE_PREFIX_MIN) return best;
+  }
+  return null;
 }
 
 function localReferenceOf(value: string, localAssets: readonly LocalAssetIndexEntry[]): string {

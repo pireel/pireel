@@ -760,7 +760,24 @@ function closestAssetId(assets: EditorDocumentV2['assets'], requested: string): 
       best = id;
     }
   }
-  return best;
+  if (best) return best;
+  // A dropped uuid segment puts the retype far beyond any edit-distance cap, yet the intact
+  // prefix — at least the full first uuid group — still names the asset when it is unique.
+  let bestPrefix: string | null = null;
+  let bestLength = 0;
+  let ambiguous = false;
+  for (const id of Object.keys(assets)) {
+    let length = 0;
+    while (length < needle.length && length < id.length && needle[length] === id[length]) length += 1;
+    if (length > bestLength) {
+      bestPrefix = id;
+      bestLength = length;
+      ambiguous = false;
+    } else if (length === bestLength && bestPrefix && id !== bestPrefix) {
+      ambiguous = true;
+    }
+  }
+  return !ambiguous && bestLength >= 'local_'.length + 8 ? bestPrefix : null;
 }
 
 function placeClips(document: EditorDocumentV2, input: Input, mode: 'overwrite' | 'ripple'): AgentTimelineOutcome {
