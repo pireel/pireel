@@ -392,7 +392,7 @@ import {
 } from "./agent-tool-runner";
 import { registerStudioDevCacheTools } from "./dev-cache-tools";
 
-// Dev-only console entry (pireelStudioDev.clearReviewCache / clearTtsCache): module scope on
+// Console entry in all builds (pireelStudioDev.clearReviewCache / clearTtsCache): module scope on
 // purpose — available as soon as any workbench chunk loads, no component lifecycle involved.
 registerStudioDevCacheTools();
 import { useCaptionsOps } from "./use-captions-ops";

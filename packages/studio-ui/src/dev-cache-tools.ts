@@ -5,7 +5,9 @@
  * next run to re-review. Both tiers must be wiped together — clearing only the browser tier
  * would let the server tier re-hydrate the stale entries on the next lookup.
  *
- * Registered on globalThis in dev builds only:
+ * Registered on globalThis in ALL builds — production debugging of customer accounts needs the
+ * same cache-busting as dev, the tools only touch the signed-in user's own caches, and the name
+ * is an unadvertised console entry, not product surface:
  *   pireelStudioDev.clearReviewCache()  — visual reviews (IndexedDB + server), next run re-reviews
  *   pireelStudioDev.clearTtsCache()     — TTS receipts, next run re-synthesizes
  */
@@ -30,7 +32,6 @@ async function clearDerivedCache(kind: DerivedCacheKind): Promise<{ local: numbe
 
 export function registerStudioDevCacheTools(): void {
   try {
-    if (!(import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) return;
     (globalThis as Record<string, unknown>).pireelStudioDev = {
       clearReviewCache: () => clearDerivedCache('visual-review'),
       clearTtsCache: () => clearDerivedCache('tts'),
