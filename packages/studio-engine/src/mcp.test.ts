@@ -211,8 +211,9 @@ describe('MCP 协议处理', () => {
     const r = await handleMcpRequest({ id: 9, method: 'tools/call', params: { name: 'get_state' } }, d);
     const content = (r!.result as { content: { text: string }[]; isError: boolean }).content;
     expect(content[0]!.text).toContain('<composition_state>');
-    expect(content[0]!.text).toContain('Skill baseline:');
-    expect(content[0]!.text).toContain('npx skills update pireel');
+    expect(content[0]!.text).toContain('Pireel workflow baseline:');
+    // Channel-neutral by contract: Plugin bundles must NOT be told to run the standalone CLI.
+    expect(content[0]!.text).not.toContain('npx skills');
     expect((r!.result as { isError: boolean }).isError).toBe(false);
   });
   it('桥失败(studio 没开)→ isError=true,正文带 hint', async () => {

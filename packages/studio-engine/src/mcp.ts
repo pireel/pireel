@@ -592,8 +592,11 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
         // The initialize-time version broadcast reaches only fresh connections; a long-lived
         // session spanning a release never sees it. get_state opens (and re-anchors) every
         // working session, so the baseline rides its receipt — same trust model, delivered at
-        // the moment of use. The tag is opaque: a DIFFERENT string means update, no ordering.
-        result.state = `Skill baseline: ${deps.skillVersion} — if the Pireel skill files you loaded state a different "Skill version", run \`npx skills update pireel\` now and re-read them before continuing.\n\n${result.state}`;
+        // the moment of use. The tag is opaque (different string = update, no ordering), and
+        // the update COMMAND is deliberately not prescribed here: the installed skill's own
+        // distribution section routes Plugin bundles to the host Plugin manager and standalone
+        // Skills to their Skill installer — this line must stay channel-neutral.
+        result.state = `Pireel workflow baseline: ${deps.skillVersion} — if the VERSION next to your loaded Pireel SKILL.md differs, update through YOUR distribution's channel per that skill's update section (then re-read the files) before continuing. If it matches, ignore this line.\n\n${result.state}`;
       }
       return toolResponse(raw.id, result);
     }
