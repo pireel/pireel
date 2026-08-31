@@ -41,6 +41,17 @@ const LANGUAGE_LABELS: Record<string, string> = {
 };
 const CUSTOM_VOICE_LANGUAGE_CODES = ['zh', 'yue', 'en', 'pt', 'ko', 'es', 'ja', 'id', 'ru', 'fr', 'it', 'de', 'nl', 'ar', 'tr', 'uk', 'vi'] as const;
 
+interface CustomVoiceAccessState {
+  allowed: boolean;
+  cloneCredits: number | null;
+  designCredits: number | null;
+}
+
+// The panel unmounts on every rail switch; without a module-level snapshot each visit refetches
+// and flashes the loading state. Voice inventory only changes through explicit user actions, so
+// the last successful payload seeds the next mount instantly while a silent refresh reconciles.
+let voicesSnapshot: { voices: VoiceAsset[]; customVoiceAccess: CustomVoiceAccessState } | null = null;
+
 function languageLabel(code: string): string {
   return LANGUAGE_LABELS[code] ?? code.toUpperCase();
 }
@@ -114,20 +125,18 @@ function SampleButton({ loading, playing, onToggle }: { loading: boolean; playin
 }
 
 export function AvatarPanel() {
-  const [voices, setVoices] = useState<VoiceAsset[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [voices, setVoices] = useState<VoiceAsset[]>(() => voicesSnapshot?.voices ?? []);
+  const [loading, setLoading] = useState(!voicesSnapshot);
   const [error, setError] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [duration, setDuration] = useState<number | null>(null);
-  const [customVoiceAccess, setCustomVoiceAccess] = useState<{
-    allowed: boolean;
-    cloneCredits: number | null;
-    designCredits: number | null;
-  }>({
-    allowed: false,
-    cloneCredits: null,
-    designCredits: null,
-  });
+  const [customVoiceAccess, setCustomVoiceAccess] = useState<CustomVoiceAccessState>(
+    () => voicesSnapshot?.customVoiceAccess ?? {
+      allowed: false,
+      cloneCredits: null,
+      designCredits: null,
+    },
+  );
   const [composerText, setComposerText] = useState('');
   const [language, setLanguage] = useState('zh');
   const [consent, setConsent] = useState(false);
@@ -144,10 +153,18 @@ export function AvatarPanel() {
   const load = useCallback(async (refresh = true) => {
     try {
       const res = await fetch(`/api/studio/voices?refresh=${refresh}&limit=500`);
-      const body = (await res.json().catch(() => ({}))) as { voices?: VoiceAsset[]; customVoiceAccess?: typeof customVoiceAccess; error?: string; detail?: string };
+      const body = (await res.json().catch(() => ({}))) as { voices?: VoiceAsset[]; customVoiceAccess?: CustomVoiceAccessState; error?: string; detail?: string };
       if (!res.ok || !body.voices) throw new Error(body.detail || body.error || t('workbench.voiceListFailed'));
       setVoices(body.voices);
       if (body.customVoiceAccess) setCustomVoiceAccess(body.customVoiceAccess);
+      voicesSnapshot = {
+        voices: body.voices,
+        customVoiceAccess: body.customVoiceAccess ?? voicesSnapshot?.customVoiceAccess ?? {
+          allowed: false,
+          cloneCredits: null,
+          designCredits: null,
+        },
+      };
       setError('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('workbench.voiceListFailed'));
@@ -155,6 +172,16 @@ export function AvatarPanel() {
       setLoading(false);
     }
   }, []);
+
+  // Optimistic edits must flow through the snapshot too, or a panel switch resurrects the
+  // pre-edit list until the silent refresh lands.
+  const updateVoices = (updater: (current: VoiceAsset[]) => VoiceAsset[]) => {
+    setVoices((current) => {
+      const next = updater(current);
+      if (voicesSnapshot) voicesSnapshot = { ...voicesSnapshot, voices: next };
+      return next;
+    });
+  };
 
   useEffect(() => { void load(false); }, [load]);
   useEffect(() => () => previewAudioRef.current?.pause(), []);
@@ -269,7 +296,7 @@ export function AvatarPanel() {
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
       if (!res.ok) throw new Error(body.detail || body.error || t('workbench.voiceSelectFailed'));
-      setVoices((current) => current.map((item) => ({ ...item, selected: item.id === voice.id })));
+      updateVoices((current) => current.map((item) => ({ ...item, selected: item.id === voice.id })));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('workbench.voiceSelectFailed'));
     } finally {
@@ -287,7 +314,7 @@ export function AvatarPanel() {
     const label = renameDraft.trim().slice(0, 60);
     if (!label || label === renaming.label) return;
     const previous = renaming;
-    setVoices((current) => current.map((voice) => (voice.id === previous.id ? { ...voice, label } : voice)));
+    updateVoices((current) => current.map((voice) => (voice.id === previous.id ? { ...voice, label } : voice)));
     setRenaming(null);
     setRenameDraft('');
     setBusy(true);
@@ -301,7 +328,7 @@ export function AvatarPanel() {
       if (!res.ok) throw new Error(body.detail || body.error || t('workbench.voiceRenameFailed'));
       toast.success(t('workbench.voiceRenamed'));
     } catch (cause) {
-      setVoices((current) => current.map((voice) => (voice.id === previous.id ? { ...voice, label: previous.label } : voice)));
+      updateVoices((current) => current.map((voice) => (voice.id === previous.id ? { ...voice, label: previous.label } : voice)));
       setError(cause instanceof Error ? cause.message : t('workbench.voiceRenameFailed'));
       toast.error(t('workbench.voiceRenameFailed'));
     } finally {
