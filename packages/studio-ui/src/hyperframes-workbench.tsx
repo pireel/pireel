@@ -392,6 +392,7 @@ import {
   runExternalTool as runAgentExternalTool,
 } from "./agent-tool-runner";
 import { registerStudioDevCacheTools } from "./dev-cache-tools";
+import { SlipTwoUpOverlay } from "./slip-two-up-overlay";
 
 // Console entry in all builds (pireelStudioDev.clearReviewCache / clearTtsCache): module scope on
 // purpose — available as soon as any workbench chunk loads, no component lifecycle involved.
@@ -7417,6 +7418,29 @@ export function HyperframesWorkbench({
     setSelectedShotId(clipId);
   };
 
+  /** Slip two-up (over the preview stage): the slid window's new first/last frame while a slip
+   *  gesture is active. Source resolves through the render plan's playable URL per shot. */
+  const [slipTwoUp, setSlipTwoUp] = useState<{
+    source: string;
+    startSec: number;
+    endSec: number;
+  } | null>(null);
+  const onSlipPreview = (
+    state: { shotId: string; startSec: number; endSec: number } | null,
+  ) => {
+    if (!state) {
+      setSlipTwoUp(null);
+      return;
+    }
+    const primaryId = editorDocumentRef.current.semantics.primaryNarrativeTrackId;
+    const entry = renderPlan.tracks
+      .find((track) => track.id === primaryId)
+      ?.clips.find((candidate) => candidate.clipId === state.shotId);
+    setSlipTwoUp(entry?.resolvedSource
+      ? { source: entry.resolvedSource, startSec: state.startSec, endSec: state.endSec }
+      : null);
+  };
+
   /** Slip commit (alt-drag on a shot body): the source window shifts, timeline geometry is
    *  untouched, so no retime/ripple — the engine clamps the delta against the asset again. */
   const commitNarrativeClipSlip = (clipId: string, sourceDeltaSec: number) => {
@@ -7487,6 +7511,7 @@ export function HyperframesWorkbench({
     onMoveShot: commitVisualClipMove,
     onResizeShot: commitNarrativeClipResize,
     onSlipShot: commitNarrativeClipSlip,
+    onSlipPreview,
     onSelectVisualClip: selectVisualClip,
     onDeselectAll: () => {
       setSelectedVisualClipId(null);
@@ -8365,6 +8390,15 @@ export function HyperframesWorkbench({
                     <div
                       aria-hidden
                       className="absolute inset-0 z-40 cursor-wait"
+                    />
+                  )}
+                  {/* Slip two-up: while a slip drag is live, the stage shows the slid window's
+                      new first and last frame (industry-standard slip feedback). */}
+                  {slipTwoUp && (
+                    <SlipTwoUpOverlay
+                      source={slipTwoUp.source}
+                      startSec={slipTwoUp.startSec}
+                      endSec={slipTwoUp.endSec}
                     />
                   )}
                   {/* Native video/image placement: the layer box is independent from source framing.

@@ -232,6 +232,8 @@ export const PANELS_EN: Record<string, string> = {
   "panels.folderRestoreNone":
     "No matching assets found — choose the original folder",
   "panels.duplicateImportsSkipped": "Skipped {n} duplicate assets",
+  "panels.slipFirstFrame": "First frame",
+  "panels.slipLastFrame": "Last frame",
   "panels.slipWindow": "Slip window",
   "panels.slipWindowOpen": "Slip window: choose which part of the source this shot plays",
   "panels.localVideoOnly": "Unsupported file type (video, image, or audio)",

@@ -180,6 +180,9 @@ interface StudioTimelineProps {
   onSlipShot?: (id: string, sourceDeltaSec: number) => void;
   /** Source total duration per shot id — enables the slip panel and live tail clamping. */
   shotSourceDurations?: ReadonlyMap<string, number>;
+  /** Live slip window (source clock) while a slip gesture is active; null on release. The host
+   *  renders the two-up (new first/last frame) over the preview stage. */
+  onSlipPreview?: (state: { shotId: string; startSec: number; endSec: number } | null) => void;
   /** Move a block across physical tracks. trackId is canonical; stackOrder is retained only for legacy hosts. */
   onMoveBlockTrack?: (id: string, target: TimelineBlockTrackTarget, startSec: number) => void;
   /** Drag a block into any native row boundary and create a graphics track at that document index. */
@@ -341,6 +344,7 @@ function StudioTimelineImpl({
   onResizeShot,
   onSlipShot,
   shotSourceDurations,
+  onSlipPreview,
   onMoveBlockTrack,
   onMoveBlockNewTrack,
   onSelectBlock,
@@ -463,6 +467,24 @@ function StudioTimelineImpl({
   /** Slip panel (取窗浮窗): the whole source as one strip with the current window as a draggable
    *  selection box — the discoverable way to relocate a shot inside its source. */
   const [slipPanel, setSlipPanel] = useState<string | null>(null);
+  // Both slip paths (alt-drag + panel) feed the host's two-up through the one ghost state.
+  const onSlipPreviewRef = useRef(onSlipPreview);
+  onSlipPreviewRef.current = onSlipPreview;
+  useEffect(() => {
+    if (!onSlipPreviewRef.current) return;
+    if (!shotSlip) {
+      onSlipPreviewRef.current(null);
+      return;
+    }
+    const span = sceneSpans.find((candidate) => candidate.shot.id === shotSlip.shotId);
+    if (!span) return;
+    onSlipPreviewRef.current({
+      shotId: span.shot.id,
+      startSec: span.shot.srcStart + shotSlip.deltaSec,
+      endSec: span.shot.srcEnd + shotSlip.deltaSec,
+    });
+  }, [shotSlip, sceneSpans]);
+  useEffect(() => () => onSlipPreviewRef.current?.(null), []);
   const [captionResize, setCaptionResize] = useState<{
     id: string;
     startSec: number;
