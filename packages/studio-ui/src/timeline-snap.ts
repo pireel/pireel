@@ -66,7 +66,7 @@ export function snapTimelineSecond(
   let hit: number | null = null;
   const targets = [
     ...points.map((point) => ({ point, tolerance })),
-    // a professional NLE gives the playhead a wider acquisition range than ordinary clip edges.
+    // Professional editors give the playhead a wider acquisition range than ordinary clip edges.
     ...(options.dynamicPoints ?? []).map((point) => ({ point, tolerance: tolerance * 1.5 })),
   ];
   for (const target of targets) {

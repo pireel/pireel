@@ -2,7 +2,7 @@
  * Editor document V2 — the neutral timeline substrate underneath Pireel's semantic
  * talking-head workflow.
  *
- * Design rules (modelled after a professional NLE's Timeline -> Track[] -> Clip[] shape):
+ * Design rules (modelled after the standard NLE Timeline -> Track[] -> Clip[] shape):
  *  - the primary track is valid when empty; non-primary tracks are created transactionally with content;
  *  - every placed item has an explicit timeline position;
  *  - media identity lives in the asset manifest, never in a special "main video" field;

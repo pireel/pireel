@@ -18,7 +18,7 @@ const DEFAULT_BRIDGE_GAP_SEC = 0.05;
 const VOICE_PROBABILITY_THRESHOLD = 0.35;
 const SPEECH_REFERENCE_THRESHOLD = 0.5;
 const QUIET_TO_SPEECH_RATIO = 0.25; // about 12 dB below the recording's median speech energy.
-// a professional NLE clamps its normalized waveform gate to roughly -40..-22 dB. The lower bound matters for
+// Mainstream editors clamp their normalized waveform gate to roughly -40..-22 dB. The lower bound matters for
 // quiet recordings: an unbounded relative gate can fall below ordinary room tone and reject every
 // real pause even when VAD clearly reports non-speech.
 const MINIMUM_QUIET_CEILING_RMS = 10 ** (-40 / 20);

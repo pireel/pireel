@@ -90,7 +90,7 @@ export { DEFAULT_PPS, MAX_PPS, MIN_PPS } from './timeline-utils';
 
 /** Height of the audio strip drawn along the bottom of each scene card (the video's own sound). */
 const SCENE_WAVE_H = 18;
-/** a professional NLE keeps a permanent bottom drop zone instead of inserting a temporary dashed row. */
+/** Professional NLEs keep a permanent bottom drop zone instead of inserting a temporary dashed row. */
 const VISUAL_TRACK_DROP_ZONE_H = 38;
 const VIDEO_CLIP_H = SCENE_H - SCENE_PAD_T - SCENE_PAD_B;
 const VISUAL_VIDEO_CLIP_H = VISUAL_SCENE_H - VISUAL_SCENE_PAD_T - VISUAL_SCENE_PAD_B;

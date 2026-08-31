@@ -10,7 +10,7 @@ export const DISPLAY_TEXT_PRESET_IDS = [
 
 export type DisplayTextPresetId = (typeof DISPLAY_TEXT_PRESET_IDS)[number];
 
-/** Kept intentionally small and semantic. These mirror a professional NLE's current native text motion set. */
+/** Kept intentionally small and semantic. These mirror the native text motion set of mainstream editors. */
 export const DISPLAY_TEXT_ANIMATION_IDS = [
   'none',
   'popIn',

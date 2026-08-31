@@ -30,7 +30,7 @@ export interface MoveVisualDocumentClipInput {
   /** When present, preserve every primary clip and compact them from frame zero in this exact order.
    * This also packs the remaining primary clips when the moved clip leaves that lane. */
   primaryOrder?: readonly string[];
-  /** a professional NLE removes an emptied non-primary lane after a move. */
+  /** Professional NLEs remove an emptied non-primary lane after a move. */
   pruneEmptySourceTrack?: boolean;
 }
 

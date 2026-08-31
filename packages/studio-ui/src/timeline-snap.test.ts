@@ -30,7 +30,7 @@ describe('timeline snapping', () => {
     expect(snapTimelineSecond(5.13, [5], { pps: 100, lockedPoint: 5 })).toEqual({ second: 5.13, hit: null });
   });
 
-  it('acquires the playhead from a professional NLE\'s wider magnetic radius', () => {
+  it('acquires the playhead from the wider NLE-style magnetic radius', () => {
     expect(snapTimelineSecond(5.11, [], { pps: 100, dynamicPoints: [5] })).toEqual({ second: 5, hit: 5 });
   });
 });

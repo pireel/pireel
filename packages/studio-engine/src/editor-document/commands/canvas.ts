@@ -34,7 +34,7 @@ const hasDefaultLayerScale = (box: MediaBox) => (
   Math.abs(box.w - 1) <= 0.0001 && Math.abs(box.h - 1) <= 0.0001
 );
 
-/** Match a professional NLE/Jianying-style ratio changes: width is the stable normalized scale axis, height
+/** Match mainstream-editor ratio changes: width is the stable normalized scale axis, height
  * compensates for the new canvas aspect, and the clip remains around the same relative centre. */
 function reflowCustomMediaBox(box: MediaBox, canvasAspectScale: number): MediaBox {
   return resizeAroundRelativeCentre(box, box.w, box.h * canvasAspectScale);

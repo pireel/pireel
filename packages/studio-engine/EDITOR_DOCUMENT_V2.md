@@ -1,6 +1,6 @@
 # Editor Document V2
 
-Editor Document V2 is Pireel's final multi-track persistence model. Its neutral timeline follows the useful part of a professional NLE's architecture (`Timeline -> Track[] -> Clip[]`), while Pireel's transcript-first workflow remains a separate semantic layer.
+Editor Document V2 is Pireel's final multi-track persistence model. Its neutral timeline follows the proven professional-NLE architecture (`Timeline -> Track[] -> Clip[]`), while Pireel's transcript-first workflow remains a separate semantic layer.
 
 ## Non-negotiable invariants
 
