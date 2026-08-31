@@ -675,7 +675,6 @@ export function planEditorialAssembly(input: {
         if (remainingSec <= 0) continue;
         let selectedClip = choice.clip;
         let selectedDurationSec = durationSec;
-        let selectedScore = choice.score;
         if (durationSec > remainingSec + 0.001) {
           // Whole natural choices are preferred. When the next reviewed choice would cross the
           // narration boundary, use a meaningful peak-centred portion of that already-approved
@@ -691,12 +690,16 @@ export function planEditorialAssembly(input: {
           );
           selectedClip = { ...choice.clip, sourceInSec: trimmed.startSec, sourceOutSec: trimmed.endSec };
           selectedDurationSec = trimmed.endSec - trimmed.startSec;
-          selectedScore = choice.score * Math.max(0.7, selectedDurationSec / durationSec);
         }
         const nextDurationSec = round3(state.durationSec + selectedDurationSec);
         const nextTick = Math.min(targetTick, Math.max(1, Math.round(nextDurationSec * 10)));
         const nextState: State = {
-          score: state.score + selectedScore,
+          // Score is weighted by the seconds it fills: the objective is average QUALITY over the
+          // covered narration. An unweighted per-choice sum rewarded shot COUNT instead — with
+          // coverage fixed, the optimum was "every chain in the film at its shortest take", which
+          // dragged 25–35-score garnish (a slippers detail shot) into a montage that had 84s of
+          // high-scoring person footage for a 53s narration.
+          score: state.score + choice.score * selectedDurationSec,
           durationSec: nextDurationSec,
           selected: [...state.selected, { rowIndex, clip: selectedClip }],
         };
