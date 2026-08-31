@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyCaptionDocumentEdit } from './caption-document-edit';
 import { audioClipDefaults } from './audio-tracks';
 import { emptyEditorDocumentV2, parseEditorDocumentV2, projectV2ToLegacyComposition } from './editor-document';
-import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool } from './agent-timeline';
+import { resizeNarrativeTimelineClip, resizeVisualTimelineClip, runAgentTimelineTool, slipNarrativeTimelineClip } from './agent-timeline';
 import { withDirectorPlanInSemantics } from './director-plan-artifact';
 import { withSceneDesignsInSemantics } from './scene-design';
 
@@ -582,6 +582,41 @@ describe('shared agent timeline atoms', () => {
       { id: 'middle', startFrame: 180, durationFrames: 150 },
       { id: 'last', startFrame: 330, durationFrames: 150 },
     ]);
+  });
+
+  it('slips a primary clip source window without touching timeline geometry, clamped to the asset', () => {
+    let document = emptyEditorDocumentV2({ fps: 30 });
+    document = runAgentTimelineTool(document, 'register_media', {
+      assets: [{ id: 'src-video', kind: 'video', url: 'https://cdn.example/src.mp4', durationSec: 20 }],
+    }).document!;
+    document = runAgentTimelineTool(document, 'add_clips', {
+      clips: [
+        { id: 'held', role: 'primary', assetId: 'src-video', startSec: 0, durationSec: 4, sourceInSec: 5, sourceOutSec: 9 },
+        { id: 'after', role: 'primary', assetId: 'src-video', startSec: 4, durationSec: 2, sourceInSec: 12, sourceOutSec: 14 },
+      ],
+    }).document!;
+
+    const slid = slipNarrativeTimelineClip(document, 'held', 3);
+    expect(slid.ok).toBe(true);
+    expect(slid.document!.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId)?.clips).toMatchObject([
+      { id: 'held', startFrame: 0, durationFrames: 120, sourceInSec: 8, sourceOutSec: 12 },
+      { id: 'after', startFrame: 120, durationFrames: 60, sourceInSec: 12, sourceOutSec: 14 },
+    ]);
+
+    // Tail clamp: asset is 20s, window 8–12 → at most +8 despite asking for +50.
+    const tail = slipNarrativeTimelineClip(slid.document!, 'held', 50);
+    expect(tail.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'held')).toMatchObject({
+      sourceInSec: 16, sourceOutSec: 20, startFrame: 0, durationFrames: 120,
+    });
+    // Head clamp: at most back to source zero, span preserved exactly.
+    const head = slipNarrativeTimelineClip(tail.document!, 'held', -999);
+    expect(head.document!.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === 'held')).toMatchObject({
+      sourceInSec: 0, sourceOutSec: 4, startFrame: 0, durationFrames: 120,
+    });
+    // No-op delta returns the same document without a fake mutation.
+    const still = slipNarrativeTimelineClip(head.document!, 'held', 0);
+    expect(still.ok).toBe(true);
+    expect(still.document).toBe(head.document);
   });
 
   it('links and moves typed clips through one shared command path', () => {

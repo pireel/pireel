@@ -176,6 +176,8 @@ interface StudioTimelineProps {
   onMoveShot?: (id: string, startSec: number, target: TimelineMediaDropTarget) => void;
   /** Trim/extend a primary clip from either edge; packed-edge extensions ripple the magnetic main track. */
   onResizeShot?: (id: string, edge: 'left' | 'right', atSec: number) => void;
+  /** Slip a shot's source window by SOURCE seconds (position/duration fixed). Alt-drag on the body. */
+  onSlipShot?: (id: string, sourceDeltaSec: number) => void;
   /** Move a block across physical tracks. trackId is canonical; stackOrder is retained only for legacy hosts. */
   onMoveBlockTrack?: (id: string, target: TimelineBlockTrackTarget, startSec: number) => void;
   /** Drag a block into any native row boundary and create a graphics track at that document index. */
@@ -335,6 +337,7 @@ function StudioTimelineImpl({
   onBoxSelectShots,
   onMoveShot,
   onResizeShot,
+  onSlipShot,
   onMoveBlockTrack,
   onMoveBlockNewTrack,
   onSelectBlock,
@@ -451,6 +454,9 @@ function StudioTimelineImpl({
     edge: 'left' | 'right';
     atSec: number;
   } | null>(null);
+  /** Slip ghost (alt-drag on a shot body): shifts WHICH source range plays, position/duration
+   *  fixed. deltaSec is in SOURCE seconds; the filmstrip re-windows live, commit on release. */
+  const [shotSlip, setShotSlip] = useState<{ shotId: string; deltaSec: number } | null>(null);
   const [captionResize, setCaptionResize] = useState<{
     id: string;
     startSec: number;
@@ -559,6 +565,16 @@ function StudioTimelineImpl({
     };
     for (const span of sceneSpans) {
       addVisibleSourceRange(span.shot.src, span.start, span.end, span.shot.srcStart, span.shot.srcEnd);
+      // A live slip re-windows the filmstrip outside the committed source range; demand a padded
+      // window around the slid position so the tiles exist while the pointer is still moving
+      // (the consumer dedupes by bucket, so this only fetches genuinely new frames).
+      if (shotSlip?.shotId === span.shot.id && span.shot.src) {
+        const pad = 8;
+        (demand[span.shot.src] ??= []).push({
+          startSec: Math.max(0, span.shot.srcStart + shotSlip.deltaSec - pad),
+          endSec: span.shot.srcEnd + shotSlip.deltaSec + pad,
+        });
+      }
     }
     for (const track of trackStates ?? []) {
       for (const clip of track.clips ?? []) {
@@ -570,7 +586,7 @@ function StudioTimelineImpl({
     if (key === filmstripDemandKeyRef.current) return;
     filmstripDemandKeyRef.current = key;
     onFilmstripDemandChange(demand);
-  }, [onFilmstripDemandChange, sceneSpans, trackStates, visibleRange]);
+  }, [onFilmstripDemandChange, sceneSpans, shotSlip, trackStates, visibleRange]);
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
@@ -1355,6 +1371,45 @@ function StudioTimelineImpl({
     );
   };
 
+  const shotSlipRef = useRef(shotSlip);
+  shotSlipRef.current = shotSlip;
+  const shotSlipMovedRef = useRef(false);
+  /** Alt-drag on a shot body: slip the source window (which range plays), position/duration
+   *  fixed. Content follows the pointer — dragging RIGHT reveals EARLIER material. Head clamps
+   *  at source zero live; tail clamps live only when the source duration is known from mounted
+   *  peaks (the engine performs the authoritative tail clamp again on commit). */
+  const startShotSlip = (e: React.PointerEvent, from: number) => {
+    if (e.button !== 0 || !onSlipShot) return;
+    const span = sceneSpans[from];
+    if (!span) return;
+    const sourceRate = (span.shot.srcEnd - span.shot.srcStart) / Math.max(0.001, span.end - span.start);
+    const sourceDurationSec = sourcePeaks?.get(span.shot.src ?? 'main')?.durationSec;
+    const grabSec = secAt(e.clientX);
+    shotSlipMovedRef.current = false;
+    drag(
+      e,
+      (clientX) => {
+        shotSlipMovedRef.current = true;
+        let deltaSec = -(secAt(clientX) - grabSec) * sourceRate;
+        deltaSec = Math.max(-span.shot.srcStart, deltaSec);
+        if (sourceDurationSec != null && sourceDurationSec > 0) {
+          deltaSec = Math.min(deltaSec, Math.max(0, sourceDurationSec - span.shot.srcEnd));
+        }
+        const next = { shotId: span.shot.id, deltaSec };
+        shotSlipRef.current = next;
+        setShotSlip(next);
+      },
+      (moved) => {
+        const current = shotSlipRef.current;
+        setShotSlip(null);
+        if (moved && current?.shotId === span.shot.id && Math.abs(current.deltaSec) > 0.001) {
+          onSlipShot(span.shot.id, current.deltaSec);
+        }
+        setTimeout(() => { shotSlipMovedRef.current = false; }, 0);
+      },
+    );
+  };
+
   // Block cross-track drag uses the same document-row hit target as audio and visual media. Row
   // bodies stay typed; every boundary can create a graphics track at that exact document index.
   const [blockTrackDrag, setBlockTrackDrag] = useState<{
@@ -1782,12 +1837,17 @@ function StudioTimelineImpl({
                       : liveResize?.edge === 'right'
                         ? Math.max(start + 0.2, liveResize.atSec)
                         : end;
-                    const displaySourceStart = liveResize?.edge === 'left'
-                      ? shot.srcStart + (liveResize.atSec - start) * sourceRate
-                      : shot.srcStart;
-                    const displaySourceEnd = liveResize?.edge === 'right'
-                      ? shot.srcEnd + (displayEnd - end) * sourceRate
-                      : shot.srcEnd;
+                    const liveSlip = shotSlip?.shotId === shot.id ? shotSlip : null;
+                    const displaySourceStart = liveSlip
+                      ? shot.srcStart + liveSlip.deltaSec
+                      : liveResize?.edge === 'left'
+                        ? shot.srcStart + (liveResize.atSec - start) * sourceRate
+                        : shot.srcStart;
+                    const displaySourceEnd = liveSlip
+                      ? shot.srcEnd + liveSlip.deltaSec
+                      : liveResize?.edge === 'right'
+                        ? shot.srcEnd + (displayEnd - end) * sourceRate
+                        : shot.srcEnd;
                     const shotLen = displayEnd - displayStart;
                     const gapR = i < sceneSpans.length - 1 ? SHOT_GAP : 0; // hairline gap off the right edge, left edge stays time-accurate
                     const w = Math.max(8, x(shotLen) - gapR);
@@ -1799,12 +1859,20 @@ function StudioTimelineImpl({
                           // Card press enters exact-time movement; stopPropagation keeps marquee selection separate.
                           onPointerDown={(e) => {
                             e.stopPropagation();
+                            if (e.altKey && onSlipShot) {
+                              startShotSlip(e, i);
+                              return;
+                            }
                             startShotDrag(e, i);
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (shotResizeMovedRef.current) {
                               shotResizeMovedRef.current = false;
+                              return;
+                            }
+                            if (shotSlipMovedRef.current) {
+                              shotSlipMovedRef.current = false; // tail of a slip drag, not a click
                               return;
                             }
                             if (shotDragMovedRef.current) {
@@ -1827,6 +1895,11 @@ function StudioTimelineImpl({
                           }`}
                           style={{ left: x(displayStart), width: w, top: SCENE_PAD_T, height: H0 - SCENE_PAD_T - SCENE_PAD_B }}
                         >
+                          {liveSlip ? (
+                            <div className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-black/70 px-1.5 py-0.5 text-[10px] tabular-nums text-white">
+                              {`${displaySourceStart.toFixed(1)}s – ${displaySourceEnd.toFixed(1)}s`}
+                            </div>
+                          ) : null}
                           {/* Filmstrip (clipped inside the card: rounded corners / hairline gaps from the card's overflow-hidden).
                               Externally inserted clip: the main filmstrip is the main video's frames, so pasting it would be wrong — lay down its own extracted frames
                               (clipStrips, t = clip source time; before frames are extracted, show a dedicated placeholder background) */}

@@ -728,6 +728,53 @@ export function resizeNarrativeTimelineClip(
   });
 }
 
+/** Slip one primary narrative clip: shift WHICH source range plays while the clip's timeline
+ * position and duration stay untouched. `sourceDeltaSec` is in SOURCE seconds (positive = later
+ * material), clamped to the asset's head (0) and tail (metadata duration when known). The span
+ * sourceOutSec−sourceInSec is preserved EXACTLY — there is no speed field, so any span drift
+ * would silently retime the clip. Cut boundaries are unchanged, so transitions stay. */
+export function slipNarrativeTimelineClip(
+  document: EditorDocumentV2,
+  clipId: string,
+  sourceDeltaSec: number,
+): AgentTimelineOutcome {
+  if (!Number.isFinite(sourceDeltaSec)) return fail('slip delta must be finite');
+  const found = locatedClip(document, clipId);
+  if (!found || found.clip.kind !== 'narrative' || found.track.id !== document.semantics.primaryNarrativeTrackId) {
+    return fail(`primary narrative clip not found: ${clipId}`);
+  }
+  if (found.track.locked) return fail(`track is locked: ${found.track.id}`);
+  const asset = document.assets[found.clip.assetId];
+  if (!asset || asset.kind !== 'video') return fail(`narrative video asset not found: ${found.clip.assetId}`);
+
+  const span = found.clip.sourceOutSec - found.clip.sourceInSec;
+  let delta = Math.max(-found.clip.sourceInSec, sourceDeltaSec);
+  if (asset.metadata.durationSec != null) {
+    delta = Math.min(delta, Math.max(0, asset.metadata.durationSec - found.clip.sourceOutSec));
+  }
+  const sourceInSec = Math.max(0, found.clip.sourceInSec + delta);
+  const sourceOutSec = sourceInSec + span;
+  if (Math.abs(sourceInSec - found.clip.sourceInSec) < 1e-6) {
+    return mutation(document, 'Clip source window unchanged', [], {
+      clipId, sourceInSec: found.clip.sourceInSec, sourceOutSec: found.clip.sourceOutSec,
+    });
+  }
+  const tracks = document.timeline.tracks.map((track) => track.id === found.track.id
+    ? {
+        ...track,
+        clips: track.clips.map((clip) => (clip.id === clipId
+          ? { ...clip, sourceInSec, sourceOutSec }
+          : clip)),
+      }
+    : track);
+  const next = { ...document, timeline: { ...document.timeline, tracks } };
+  return mutation(next, `Slipped clip source window to ${Math.round(sourceInSec * 10) / 10}s`, [], {
+    clipId,
+    sourceInSec,
+    sourceOutSec,
+  });
+}
+
 /** Bounded edit distance for id-typo detection; bails out once the distance exceeds `cap`. */
 function boundedEditDistance(left: string, right: string, cap: number): number {
   if (Math.abs(left.length - right.length) > cap) return cap + 1;

@@ -148,6 +148,7 @@ import {
   normalizeAtomicMediaFraming,
   resolveShotMediaFraming,
   resizeNarrativeTimelineClip,
+  slipNarrativeTimelineClip,
   resizeVisualTimelineClip,
   supplementalVisualStateAt,
   DIRECTIONAL_TRANSITIONS,
@@ -7369,6 +7370,23 @@ export function HyperframesWorkbench({
     setSelectedShotId(clipId);
   };
 
+  /** Slip commit (alt-drag on a shot body): the source window shifts, timeline geometry is
+   *  untouched, so no retime/ripple — the engine clamps the delta against the asset again. */
+  const commitNarrativeClipSlip = (clipId: string, sourceDeltaSec: number) => {
+    const edit = slipNarrativeTimelineClip(
+      editorDocumentRef.current,
+      clipId,
+      sourceDeltaSec,
+    );
+    if (!edit.ok || !edit.document) {
+      toast.error(edit.error || t("editorError.operationFailed"));
+      return;
+    }
+    pushUndoSnapshot();
+    setEditorDocument(edit.document);
+    setSelectedShotId(clipId);
+  };
+
   const timelineCbs = useStableCallbacks({
     onPps: setPps,
     onSeek: (v: number) => {
@@ -7421,6 +7439,7 @@ export function HyperframesWorkbench({
     onBoxSelectShots: selectShotsBox,
     onMoveShot: commitVisualClipMove,
     onResizeShot: commitNarrativeClipResize,
+    onSlipShot: commitNarrativeClipSlip,
     onSelectVisualClip: selectVisualClip,
     onDeselectAll: () => {
       setSelectedVisualClipId(null);
