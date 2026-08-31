@@ -9,6 +9,9 @@ export type EditorialCandidateRole = (typeof EDITORIAL_CANDIDATE_ROLES)[number];
 export const EDITORIAL_CONTENT_ROLES = ['person-primary', 'environment', 'detail', 'transition', 'mixed', 'other'] as const;
 export type EditorialContentRole = (typeof EDITORIAL_CONTENT_ROLES)[number];
 
+export const EDITORIAL_FACINGS = ['frontal', 'near_frontal', 'profile', 'back', 'no_person'] as const;
+export type EditorialFacing = (typeof EDITORIAL_FACINGS)[number];
+
 export const EDITORIAL_CANDIDATE_ISSUES = [
   'incomplete-action',
   'weak-presence',
@@ -91,6 +94,8 @@ export interface EditorialCandidateReview {
   localCompliance?: 'passed' | 'trimmed' | 'rejected' | 'unverified';
   /** Visible source role, classified before applying role-specific editorial requirements. */
   contentRole: EditorialContentRole;
+  /** Main person's dominant orientation across the interval, judged from pixels. */
+  facing?: EditorialFacing;
   action: string;
   rationale: string;
   /** Provider semantic boundaries mapped back onto the original source clock by the host. */
@@ -838,6 +843,7 @@ export type RawCandidateReview = {
   rank?: unknown;
   verdict?: unknown;
   contentRole?: unknown;
+  facing?: unknown;
   score?: unknown;
   action?: unknown;
   rationale?: unknown;
@@ -1007,6 +1013,9 @@ export function normalizeEditorialCandidateReviews(
       verdict: allowedVerdicts.has(String(candidate?.verdict))
         ? String(candidate!.verdict) as EditorialCandidateReview['verdict']
         : 'unreviewed',
+      ...( (EDITORIAL_FACINGS as readonly string[]).includes(String(candidate?.facing))
+        ? { facing: String(candidate!.facing) as EditorialFacing }
+        : {}),
       contentRole: allowedContentRoles.has(String(candidate?.contentRole))
         ? String(candidate!.contentRole) as EditorialContentRole
         : 'other',
