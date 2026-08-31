@@ -560,7 +560,23 @@ export function MyAssetsPanel({
         projectId,
       );
       if (session.rejected.length) toast.error(t('panels.localVideoOnly'));
+      let duplicates = 0;
       for (const asset of session.imported) {
+        // Content dedupe (regressed when identity moved from sig to assetId — the id-based
+        // filter never matched a fresh import): re-importing the same bytes must not mint a
+        // second card. The EXISTING entry keeps its assetId (timeline references stay valid);
+        // only its byte liveness is refreshed from the just-picked file.
+        const existing = regRef.current.find(
+          (x) => (x.contentSig || x.sig) === asset.contentSig,
+        );
+        if (existing) {
+          duplicates += 1;
+          const url = URL.createObjectURL(asset.file);
+          link(existing.assetId, url);
+          noteCover(existing.assetId, asset.file, existing.kind ?? asset.kind);
+          onLocalAssetAvailable?.({ sig: asset.contentSig, kind: asset.kind, file: asset.file });
+          continue;
+        }
         const url = URL.createObjectURL(asset.file);
         const dims = await mediaDims(url, asset.kind);
         updateReg((r) => [
@@ -571,6 +587,7 @@ export function MyAssetsPanel({
         noteCover(asset.assetId, asset.file, asset.kind);
         onLocalAssetAvailable?.({ sig: asset.contentSig, kind: asset.kind, file: asset.file });
       }
+      if (duplicates) toast.info(t('panels.duplicateImportsSkipped', { n: duplicates }));
     } finally {
       setImporting(false);
       if (inputRef.current) inputRef.current.value = '';

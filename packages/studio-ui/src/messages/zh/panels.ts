@@ -215,6 +215,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.folderRestorePartial":
     "已恢复 {restored}/{total} 个素材，其余文件可能已移动或修改",
   "panels.folderRestoreNone": "没有找到匹配的素材，请选择原来的文件夹",
+  "panels.duplicateImportsSkipped": "已跳过 {n} 个重复素材",
   "panels.localVideoOnly": "不支持的文件类型(支持视频/图片/音频)",
   "panels.officialPreparing": "内容准备中,敬请期待",
   "panels.musicBed": "音轨",

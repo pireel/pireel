@@ -231,6 +231,7 @@ export const PANELS_EN: Record<string, string> = {
     "Restored {restored}/{total} assets; the rest may have moved or changed",
   "panels.folderRestoreNone":
     "No matching assets found — choose the original folder",
+  "panels.duplicateImportsSkipped": "Skipped {n} duplicate assets",
   "panels.localVideoOnly": "Unsupported file type (video, image, or audio)",
   "panels.officialPreparing": "Content coming soon",
   "panels.musicBed": "Audio track",
