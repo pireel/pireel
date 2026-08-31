@@ -57,11 +57,17 @@ export interface ImportedLocalAsset {
   source: LocalImportSource['type'];
 }
 
+/** Uniqueness domain is one project's asset set (content identity travels via contentSig), so
+ * 48 random bits are plenty. Kept deliberately SHORT: these ids are retyped by models in tool
+ * calls, and transcription errors scale with id length. */
 export function newLocalAssetId(): string {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  return uuid
-    ? `local_${uuid}`
-    : `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  const bytes = globalThis.crypto?.getRandomValues?.(new Uint8Array(6));
+  if (bytes) {
+    let value = 0;
+    for (const byte of bytes) value = value * 256 + byte;
+    return `local_${value.toString(36).padStart(10, '0')}`;
+  }
+  return `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
 /** The relay may tell the tab where to fetch, but it never grants general URL access. Keep this

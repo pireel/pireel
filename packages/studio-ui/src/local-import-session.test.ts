@@ -4,6 +4,7 @@ import {
   localAssetIndexEntry,
   localAssetKindOf,
   loopbackImportUrl,
+  newLocalAssetId,
   runLocalImportSession,
 } from './local-import-session';
 import { loadLocalVideo } from './local-media';
@@ -103,6 +104,12 @@ describe('unified local import session', () => {
     expect(
       localAssetKindOf({ name: 'notes.txt', type: 'text/plain' }),
     ).toBeNull();
+  });
+
+  it('mints short fixed-width asset ids that stay unique within a project', () => {
+    const ids = Array.from({ length: 2_000 }, () => newLocalAssetId());
+    expect(ids.every((id) => /^local_[0-9a-z]{10}$/.test(id))).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('accepts only one-time IPv4 loopback capability URLs', () => {
