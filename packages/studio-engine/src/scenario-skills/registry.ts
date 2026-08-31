@@ -4,7 +4,9 @@ import {
   type StudioScenarioSkillRegistryLayer,
 } from './types';
 
-const ALLOWED_FRONTMATTER_KEYS = new Set(['name', 'description']);
+// default_prompt: optional suggested first message a host may prefill into chat when the
+// Skill is selected. The engine ignores it beyond parsing; hosts read it from attributes.
+const ALLOWED_FRONTMATTER_KEYS = new Set(['name', 'description', 'default_prompt']);
 
 function unquote(value: string): string {
   const trimmed = value.trim();
