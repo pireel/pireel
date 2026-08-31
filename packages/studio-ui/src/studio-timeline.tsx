@@ -467,6 +467,27 @@ function StudioTimelineImpl({
   /** Slip panel (取窗浮窗): the whole source as one strip with the current window as a draggable
    *  selection box — the discoverable way to relocate a shot inside its source. */
   const [slipPanel, setSlipPanel] = useState<string | null>(null);
+  const slipPanelRef = useRef<HTMLDivElement | null>(null);
+  // Click-outside / Esc closes the panel. Presses on a slip trigger button are exempt — the
+  // button's own toggle owns that interaction (close-then-toggle would reopen it).
+  useEffect(() => {
+    if (!slipPanel) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (slipPanelRef.current?.contains(target)) return;
+      if (target?.closest?.('[data-slip-trigger]')) return;
+      setSlipPanel(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSlipPanel(null);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [slipPanel]);
   // Both slip paths (alt-drag + panel) feed the host's two-up through the one ghost state.
   const onSlipPreviewRef = useRef(onSlipPreview);
   onSlipPreviewRef.current = onSlipPreview;
@@ -1938,6 +1959,7 @@ function StudioTimelineImpl({
                             <span
                               role="button"
                               tabIndex={-1}
+                              data-slip-trigger
                               title={t('panels.slipWindowOpen')}
                               aria-label={t('panels.slipWindowOpen')}
                               onPointerDown={(e) => e.stopPropagation()}
@@ -2075,6 +2097,7 @@ function StudioTimelineImpl({
                     );
                     return (
                       <div
+                        ref={slipPanelRef}
                         className="absolute z-[70] rounded-lg border border-white/10 bg-black/85 p-2 shadow-xl backdrop-blur"
                         style={{ left, top: H0 + 4, width: W + 16 }}
                         onPointerDown={(e) => e.stopPropagation()}
