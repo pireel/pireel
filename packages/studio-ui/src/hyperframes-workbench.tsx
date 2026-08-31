@@ -548,6 +548,36 @@ export function HyperframesWorkbench({
       ),
     [renderPlan],
   );
+  /** Device-local video assets carry no metadata.durationSec (registration never probes bytes).
+   *  Probe it lazily from the resolved playable URL — metadata preload only, one per asset. */
+  const probedSourceDurationsRef = useRef(new Map<string, number>());
+  const [probedSourceDurationsRev, setProbedSourceDurationsRev] = useState(0);
+  useEffect(() => {
+    const primaryId = editorDocument.semantics.primaryNarrativeTrackId;
+    const track = renderPlan.tracks.find((candidate) => candidate.id === primaryId);
+    for (const entry of track?.clips ?? []) {
+      if (entry.clip.kind !== "narrative" || !entry.resolvedSource) continue;
+      const assetId = entry.clip.assetId;
+      if (editorDocument.assets[assetId]?.metadata.durationSec != null) continue;
+      if (probedSourceDurationsRef.current.has(assetId)) continue;
+      probedSourceDurationsRef.current.set(assetId, 0); // in-flight marker: never probe twice
+      const probe = document.createElement("video");
+      probe.preload = "metadata";
+      probe.onloadedmetadata = () => {
+        if (Number.isFinite(probe.duration) && probe.duration > 0) {
+          probedSourceDurationsRef.current.set(assetId, probe.duration);
+          setProbedSourceDurationsRev((value) => value + 1);
+        } else {
+          probedSourceDurationsRef.current.delete(assetId);
+        }
+        probe.removeAttribute("src");
+        probe.load();
+      };
+      probe.onerror = () => probedSourceDurationsRef.current.delete(assetId);
+      probe.src = entry.resolvedSource;
+    }
+  }, [renderPlan, editorDocument]);
+
   /** Source total duration per primary SHOT id (shot ids ARE narrative clip ids) — the slip
    *  gesture/panel needs the full source extent, which the legacy VideoShot projection lacks. */
   const shotSourceDurations = useMemo(() => {
@@ -557,11 +587,13 @@ export function HyperframesWorkbench({
     );
     for (const clip of primary?.clips ?? []) {
       if (clip.kind !== "narrative") continue;
-      const durationSec = editorDocument.assets[clip.assetId]?.metadata.durationSec;
+      const durationSec = editorDocument.assets[clip.assetId]?.metadata.durationSec
+        ?? probedSourceDurationsRef.current.get(clip.assetId);
       if (durationSec != null && durationSec > 0) out.set(clip.id, durationSec);
     }
     return out;
-  }, [editorDocument]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorDocument, probedSourceDurationsRev]);
 
   const timelineTrackStates = useMemo<TimelineTrackState[]>(
     () =>
