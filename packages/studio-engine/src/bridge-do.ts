@@ -29,12 +29,21 @@
 interface BridgeSocket {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** workerd hibernation API: the attachment survives eviction of in-memory state. */
+  serializeAttachment?(value: unknown): void;
+  deserializeAttachment?(): unknown;
 }
 
 interface BridgeState {
   acceptWebSocket(ws: unknown): void;
   getWebSockets(): BridgeSocket[];
   setWebSocketAutoResponse?(pair: unknown): void;
+  /** Durable storage (present on the real DurableObjectState); the project anchor lives here
+   *  so hibernation cannot forget which project this bridge session was editing. */
+  storage?: {
+    get(key: string): Promise<unknown>;
+    put(key: string, value: unknown): Promise<void>;
+  };
 }
 
 /** Browser reply (StudioToolResult + pass-through fields); carries state on get_state. */
@@ -57,6 +66,8 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 export class StudioBridge {
   private pending = new Map<string, { resolve: (r: BridgeResult) => void; timer: ReturnType<typeof setTimeout> }>();
   private seq = 0;
+  /** In-memory project tag per socket; the serialized attachment is the hibernation-safe copy. */
+  private socketProjects = new WeakMap<object, string>();
 
   constructor(private state: BridgeState) {
     // ping/pong keepalive: auto-response replies even while the DO hibernates, with no wake billing
@@ -71,14 +82,32 @@ export class StudioBridge {
    *  side can tell a same-project takeover (demote autosave) from an unrelated-project tab merely
    *  taking the tool-routing surface (keep autosaving its own project). */
   acceptBrowserSocket(server: unknown, projectId?: string): void {
+    const project = (projectId ?? '').slice(0, 100);
     for (const ws of this.state.getWebSockets()) {
       try {
-        ws.close(4000, (projectId ?? '').slice(0, 100));
+        ws.close(4000, project);
       } catch {
         /* dead socket, ignore */
       }
     }
     this.state.acceptWebSocket(server);
+    this.socketProjects.set(server as object, project);
+    try {
+      (server as BridgeSocket).serializeAttachment?.({ project });
+    } catch {
+      /* attachment unsupported (tests / old runtime): the in-memory tag still covers this lifetime */
+    }
+  }
+
+  private projectOf(ws: BridgeSocket): string {
+    const tagged = this.socketProjects.get(ws as object);
+    if (tagged !== undefined) return tagged;
+    try {
+      const attachment = ws.deserializeAttachment?.() as { project?: unknown } | undefined;
+      return typeof attachment?.project === 'string' ? attachment.project : '';
+    } catch {
+      return '';
+    }
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -109,6 +138,25 @@ export class StudioBridge {
           { status: 409 },
         );
       }
+      // getWebSockets order is unspecified, but single-active means at most one is alive
+      const target = sockets[sockets.length - 1]!;
+      // PROJECT ANCHOR: one bridge session edits one project. The routing surface can flip
+      // underneath the agent (opening another project's tab evicts the old socket, by design);
+      // without this gate the agent's next tool call would silently land in the wrong project.
+      // get_state is the deliberate re-anchor — its receipt shows the LIVE project header, so
+      // the agent continues with its eyes open. An untagged socket (legacy client) skips the gate.
+      const socketProject = this.projectOf(target);
+      if (socketProject) {
+        const anchor = (await this.state.storage?.get('anchorProject')) as string | undefined;
+        if (body.tool !== 'get_state' && anchor && anchor !== socketProject) {
+          return Response.json({
+            ok: false,
+            error: 'project_switched',
+            hint: `The connected studio tab now shows project ${socketProject}, but this session was editing project ${anchor}. No edit was performed. Call get_state to deliberately continue on the open project, or create_browser_handoff {project_id: "${anchor}"} to reopen the original one.`,
+          });
+        }
+        if (anchor !== socketProject) await this.state.storage?.put('anchorProject', socketProject);
+      }
       const id = `c${++this.seq}`;
       const timeoutMs = Math.min(Math.max(body.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), 600_000);
       const result = await new Promise<BridgeResult>((resolve) => {
@@ -118,8 +166,7 @@ export class StudioBridge {
         }, timeoutMs);
         this.pending.set(id, { resolve, timer });
         try {
-          // getWebSockets order is unspecified, but single-active means at most one is alive
-          sockets[sockets.length - 1]!.send(JSON.stringify({ id, tool: body.tool, input: body.input ?? {} }));
+          target.send(JSON.stringify({ id, tool: body.tool, input: body.input ?? {} }));
         } catch {
           clearTimeout(timer);
           this.pending.delete(id);

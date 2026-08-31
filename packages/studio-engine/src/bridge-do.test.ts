@@ -15,12 +15,20 @@ class FakeSocket {
 
 function makeState() {
   const sockets: FakeSocket[] = [];
+  const stored = new Map<string, unknown>();
   return {
     sockets,
+    stored,
     state: {
       acceptWebSocket: (ws: unknown) => sockets.push(ws as FakeSocket),
       getWebSockets: () => sockets.filter((s) => !s.closed) as unknown as { send(d: string): void; close(c?: number, r?: string): void }[],
       setWebSocketAutoResponse: () => {},
+      storage: {
+        get: async (key: string) => stored.get(key),
+        put: async (key: string, value: unknown) => {
+          stored.set(key, value);
+        },
+      },
     },
   };
 }
@@ -101,6 +109,41 @@ describe('StudioBridge DO', () => {
     bridge.webSocketClose();
     const body = (await (await p).json()) as { ok: boolean; error: string };
     expect(body).toEqual({ ok: false, error: 'studio_tab_closed' });
+  });
+
+  it('项目锚:换项目的标签页接管路由后,编辑被拒、get_state 显式重锚后放行', async () => {
+    const { state, sockets, stored } = makeState();
+    const bridge = new StudioBridge(state);
+    bridge.acceptBrowserSocket(new FakeSocket(), 'pmtaaa1111111');
+    // 第一次被服务的调用把锚定在 A 项目
+    const first = bridge.fetch(callReq('add_clips'));
+    await until(() => sockets[0]!.sent.length > 0);
+    const firstMsg = JSON.parse(sockets[0]!.sent[0]!) as { id: string };
+    bridge.webSocketMessage(sockets[0], JSON.stringify({ id: firstMsg.id, ok: true }));
+    await first;
+    expect(stored.get('anchorProject')).toBe('pmtaaa1111111');
+
+    // 用户开了 B 项目的标签页,顶掉 A 的 socket——路由面换了项目
+    bridge.acceptBrowserSocket(new FakeSocket(), 'pmtbbb2222222');
+    const rejected = (await (await bridge.fetch(callReq('add_clips'))).json()) as { ok: boolean; error: string; hint: string };
+    expect(rejected.ok).toBe(false);
+    expect(rejected.error).toBe('project_switched');
+    expect(rejected.hint).toContain('pmtbbb2222222');
+    expect(rejected.hint).toContain('pmtaaa1111111');
+    expect(sockets[1]!.sent.length).toBe(0); // B 的标签页没收到任何编辑
+
+    // get_state 是显式重锚:转发给 B,锚随之更新,后续编辑放行
+    const reanchor = bridge.fetch(callReq('get_state'));
+    await until(() => sockets[1]!.sent.length > 0);
+    const stateMsg = JSON.parse(sockets[1]!.sent[0]!) as { id: string };
+    bridge.webSocketMessage(sockets[1], JSON.stringify({ id: stateMsg.id, ok: true, state: 's' }));
+    await reanchor;
+    expect(stored.get('anchorProject')).toBe('pmtbbb2222222');
+    const after = bridge.fetch(callReq('add_clips'));
+    await until(() => sockets[1]!.sent.length > 1);
+    const afterMsg = JSON.parse(sockets[1]!.sent[1]!) as { id: string };
+    bridge.webSocketMessage(sockets[1], JSON.stringify({ id: afterMsg.id, ok: true }));
+    expect(((await (await after).json()) as { ok: boolean }).ok).toBe(true);
   });
 
   it('ping 兜底回 pong;非 JSON/无 id 的消息安全忽略', async () => {
