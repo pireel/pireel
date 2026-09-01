@@ -2311,7 +2311,7 @@ function StudioTimelineImpl({
                               type="button"
                               aria-label="−"
                               className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20"
-                              onClick={() => applyZoom(zoom / 2)}
+                              onClick={() => applyZoom(zoom / 1.25)}
                             >
                               −
                             </button>
@@ -2329,7 +2329,7 @@ function StudioTimelineImpl({
                               type="button"
                               aria-label="+"
                               className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20"
-                              onClick={() => applyZoom(zoom * 2)}
+                              onClick={() => applyZoom(zoom * 1.25)}
                             >
                               +
                             </button>
