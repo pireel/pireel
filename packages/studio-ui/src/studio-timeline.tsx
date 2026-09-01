@@ -578,23 +578,35 @@ function StudioTimelineImpl({
       document.removeEventListener('keydown', onKey);
     };
   }, [slipPanel]);
-  // Both slip paths (alt-drag + panel) feed the host's two-up through the one ghost state.
+  // Every source-window ghost feeds the host's two-up: slip (alt-drag + panel body) shifts the
+  // whole window, and a trim ghost (panel handles + card edges alike) moves one end of it.
   const onSlipPreviewRef = useRef(onSlipPreview);
   onSlipPreviewRef.current = onSlipPreview;
   useEffect(() => {
-    if (!onSlipPreviewRef.current) return;
-    if (!shotSlip) {
-      onSlipPreviewRef.current(null);
+    const publish = onSlipPreviewRef.current;
+    if (!publish) return;
+    const activeShotId = shotSlip?.shotId ?? shotResize?.shotId;
+    if (!activeShotId) {
+      publish(null);
       return;
     }
-    const span = sceneSpans.find((candidate) => candidate.shot.id === shotSlip.shotId);
+    const span = sceneSpans.find((candidate) => candidate.shot.id === activeShotId);
     if (!span) return;
-    onSlipPreviewRef.current({
-      shotId: span.shot.id,
-      startSec: span.shot.srcStart + shotSlip.deltaSec,
-      endSec: span.shot.srcEnd + shotSlip.deltaSec,
-    });
-  }, [shotSlip, sceneSpans]);
+    let startSec = span.shot.srcStart;
+    let endSec = span.shot.srcEnd;
+    if (shotSlip) {
+      startSec += shotSlip.deltaSec;
+      endSec += shotSlip.deltaSec;
+    } else if (shotResize) {
+      const rate = (span.shot.srcEnd - span.shot.srcStart) / Math.max(0.001, span.end - span.start);
+      if (shotResize.edge === 'left') {
+        startSec = Math.min(Math.max(0, span.shot.srcStart + (shotResize.atSec - span.start) * rate), endSec - 0.05);
+      } else {
+        endSec = Math.max(span.shot.srcEnd + (shotResize.atSec - span.end) * rate, startSec + 0.05);
+      }
+    }
+    publish({ shotId: span.shot.id, startSec, endSec });
+  }, [shotSlip, shotResize, sceneSpans]);
   useEffect(() => () => onSlipPreviewRef.current?.(null), []);
   const [captionResize, setCaptionResize] = useState<{
     id: string;
