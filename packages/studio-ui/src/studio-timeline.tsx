@@ -1823,6 +1823,12 @@ function StudioTimelineImpl({
             }}
             onMouseMove={(e) => {
               if (draggingRef.current) return; // during drag onSeek handles it, don't also hover-seek
+              // The slip panel is its own surface: hovering it must not scrub the main preview
+              // (and an already-armed scrub ends so the preview returns to the playhead).
+              if (slipPanelRef.current?.contains(e.target as Node)) {
+                endScrubRef.current();
+                return;
+              }
               hoverXRef.current = e.clientX;
               if (framePickActive) {
                 scrubArmedRef.current = true;
