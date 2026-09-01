@@ -468,11 +468,93 @@ function StudioTimelineImpl({
    *  selection box — the discoverable way to relocate a shot inside its source. */
   const [slipPanel, setSlipPanel] = useState<string | null>(null);
   const slipPanelRef = useRef<HTMLDivElement | null>(null);
-  /** Panel zoom view: null = fit the whole source; otherwise a zoomed sub-range. The ref mirror
-   *  lets in-flight drags read the CURRENT view after followView shifts it mid-gesture. */
+  /** Panel zoom view: null = the DEFAULT view (timeline-scale, window aligned under the card);
+   *  otherwise an explicit zoomed sub-range. The geometry mirror below carries the RESOLVED
+   *  current view each render so in-flight gestures and native listeners share one truth. */
   const [slipView, setSlipView] = useState<{ zoom: number; startSec: number } | null>(null);
-  const slipViewRef = useRef(slipView);
-  slipViewRef.current = slipView;
+  const slipStripRef = useRef<HTMLDivElement | null>(null);
+  const slipPanelGeomRef = useRef<{
+    dur: number;
+    W: number;
+    zoom: number;
+    viewStart: number;
+    viewLen: number;
+  } | null>(null);
+  // Same zoom language as the timeline itself: ctrl/meta + wheel (trackpad pinch arrives as
+  // ctrl+wheel) zooms anchored on the cursor; a plain wheel pans the zoomed view; a real
+  // two-finger touch pinch zooms around the touch midpoint. Native non-passive listener —
+  // React's wheel handler cannot preventDefault the page scroll.
+  useEffect(() => {
+    const el = slipStripRef.current;
+    if (!slipPanel || !el) return;
+    const zoomAt = (clientX: number, factor: number) => {
+      const geom = slipPanelGeomRef.current;
+      if (!geom) return;
+      const zoom = Math.min(16, Math.max(1, geom.zoom * factor));
+      if (Math.abs(zoom - geom.zoom) < 1e-4) return;
+      const len = geom.dur / zoom;
+      const box = el.getBoundingClientRect();
+      const frac = Math.min(1, Math.max(0, (clientX - box.left) / geom.W));
+      const anchor = geom.viewStart + frac * geom.viewLen;
+      setSlipView({
+        zoom,
+        startSec: Math.min(Math.max(anchor - frac * len, 0), Math.max(0, geom.dur - len)),
+      });
+    };
+    const onWheel = (ev: WheelEvent) => {
+      ev.preventDefault();
+      if (ev.ctrlKey || ev.metaKey) {
+        zoomAt(ev.clientX, ev.deltaY < 0 ? 1.1 : 0.9);
+        return;
+      }
+      const geom = slipPanelGeomRef.current;
+      if (!geom || geom.zoom <= 1 + 1e-4) return; // whole source visible: nothing to pan
+      const dominant = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
+      const startSec = Math.min(
+        Math.max(geom.viewStart + (dominant / geom.W) * geom.viewLen, 0),
+        Math.max(0, geom.dur - geom.viewLen),
+      );
+      setSlipView({ zoom: geom.zoom, startSec });
+    };
+    const touches = new Map<number, number>();
+    let pinchBase: { dist: number; zoom: number } | null = null;
+    const onPointerDown = (ev: PointerEvent) => {
+      if (ev.pointerType !== 'touch') return;
+      touches.set(ev.pointerId, ev.clientX);
+      if (touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        pinchBase = {
+          dist: Math.max(8, Math.abs(a - b)),
+          zoom: slipPanelGeomRef.current?.zoom ?? 1,
+        };
+      }
+    };
+    const onPointerMove = (ev: PointerEvent) => {
+      if (!touches.has(ev.pointerId)) return;
+      touches.set(ev.pointerId, ev.clientX);
+      if (touches.size !== 2 || !pinchBase) return;
+      const [a, b] = [...touches.values()];
+      const zoomNow = slipPanelGeomRef.current?.zoom ?? 1;
+      const target = Math.min(16, Math.max(1, pinchBase.zoom * (Math.max(8, Math.abs(a - b)) / pinchBase.dist)));
+      if (Math.abs(target - zoomNow) > 0.01) zoomAt((a + b) / 2, target / zoomNow);
+    };
+    const onPointerEnd = (ev: PointerEvent) => {
+      touches.delete(ev.pointerId);
+      if (touches.size < 2) pinchBase = null;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerEnd);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
+    };
+  }, [slipPanel]);
   // Click-outside / Esc closes the panel. Presses on a slip trigger button are exempt — the
   // button's own toggle owns that interaction (close-then-toggle would reopen it).
   useEffect(() => {
@@ -635,10 +717,14 @@ function StudioTimelineImpl({
         const dur = shotSourceDurations?.get(span.shot.id);
         if (dur) {
           (demand[span.shot.src] ??= []).push({ startSec: 0, endSec: dur });
-          if (slipView) {
-            const viewLen = dur / Math.min(16, Math.max(1, slipView.zoom));
-            const viewStart = Math.min(Math.max(slipView.startSec, 0), Math.max(0, dur - viewLen));
-            (demand[span.shot.src] ??= []).push({ startSec: viewStart, endSec: viewStart + viewLen });
+          // Zoomed views (including the timeline-scale default) demand their sub-range —
+          // the shorter range yields a finer bucket step. Geometry is render-synced.
+          const geom = slipPanelGeomRef.current;
+          if (geom && geom.zoom > 1) {
+            (demand[span.shot.src] ??= []).push({
+              startSec: geom.viewStart,
+              endSec: geom.viewStart + geom.viewLen,
+            });
           }
         }
       }
@@ -2115,22 +2201,41 @@ function StudioTimelineImpl({
                     winEnd = Math.min(dur, Math.max(winEnd, winStart + minSpanSrc));
                     const W = Math.max(240, Math.min(960, x(visibleRange.endSec - visibleRange.startSec) - 24));
                     const leftMin = x(visibleRange.startSec) + 8;
-                    const left = Math.min(Math.max(x(span.start), leftMin), Math.max(leftMin, x(visibleRange.endSec) - W - 24));
-                    const zoom = slipView?.zoom ?? 1;
+                    // Centre the panel on the card so both sides show neighbouring source content.
+                    const cardLeftPx = x(span.start);
+                    const cardWidthPx = x(span.end - span.start);
+                    const left = Math.min(
+                      Math.max(cardLeftPx + cardWidthPx / 2 - W / 2, leftMin),
+                      Math.max(leftMin, x(visibleRange.endSec) - W - 24),
+                    );
+                    // DEFAULT view (slipView null): timeline scale — panel pps equals the track's
+                    // pps and viewStart is chosen so the selection box sits EXACTLY under the card.
+                    let zoom: number;
+                    let viewStart: number;
+                    if (slipView) {
+                      zoom = Math.min(16, Math.max(1, slipView.zoom));
+                      viewStart = Math.min(Math.max(slipView.startSec, 0), Math.max(0, dur - dur / zoom));
+                    } else {
+                      zoom = Math.min(16, Math.max(1, (dur * pps) / W));
+                      const stripContentLeft = left + 8; // panel p-2 padding
+                      viewStart = Math.min(
+                        Math.max(winStart - (cardLeftPx - stripContentLeft) / pps, 0),
+                        Math.max(0, dur - dur / zoom),
+                      );
+                    }
                     const viewLen = dur / zoom;
-                    const viewStart = Math.min(Math.max(slipView?.startSec ?? 0, 0), Math.max(0, dur - viewLen));
                     const viewEnd = viewStart + viewLen;
+                    slipPanelGeomRef.current = { dur, W, zoom, viewStart, viewLen };
                     const panelPps = W / viewLen;
                     const tileW = 40;
                     const tiles = stripTiles(strip, viewStart, viewEnd, Math.max(0.05, tileW / panelPps), panelPps);
-                    // In-flight drags must read the LATEST view (followView shifts it mid-gesture),
-                    // so pointer→seconds mapping goes through the ref, not the render closure.
+                    // In-flight drags must read the LATEST view (followView/zoom shift it
+                    // mid-gesture), so pointer→seconds mapping goes through the geometry mirror.
                     const viewNow = () => {
-                      const v = slipViewRef.current;
-                      const z = Math.min(16, Math.max(1, v?.zoom ?? 1));
-                      const len = dur / z;
-                      const start = Math.min(Math.max(v?.startSec ?? 0, 0), Math.max(0, dur - len));
-                      return { start, len, z };
+                      const geom = slipPanelGeomRef.current;
+                      return geom
+                        ? { start: geom.viewStart, len: geom.viewLen, z: geom.zoom }
+                        : { start: viewStart, len: viewLen, z: zoom };
                     };
                     const secAtPanel = (clientX: number, box: DOMRect) => {
                       const v = viewNow();
@@ -2145,7 +2250,7 @@ function StudioTimelineImpl({
                       const z = Math.min(16, Math.max(1, nextZoom));
                       const nextLen = dur / z;
                       const center = (winStart + winEnd) / 2;
-                      setSlipView(z <= 1 ? null : {
+                      setSlipView({
                         zoom: z,
                         startSec: Math.min(Math.max(center - nextLen / 2, 0), Math.max(0, dur - nextLen)),
                       });
@@ -2194,7 +2299,7 @@ function StudioTimelineImpl({
                           </span>
                           <span className="flex shrink-0 items-center gap-1">
                             <button type="button" aria-label="−" className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20" onClick={() => applyZoom(zoom / 2)}>−</button>
-                            <button type="button" aria-label="1x" className="h-4 rounded bg-white/10 px-1 leading-none hover:bg-white/20" onClick={() => applyZoom(1)}>{`${zoom}x`}</button>
+                            <button type="button" aria-label={t('panels.slipWindow')} title={t('panels.slipWindow')} className="h-4 rounded bg-white/10 px-1 leading-none hover:bg-white/20" onClick={() => setSlipView(null)}>{`${Math.round(zoom * 10) / 10}x`}</button>
                             <button type="button" aria-label="+" className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20" onClick={() => applyZoom(zoom * 2)}>+</button>
                           </span>
                           <button
@@ -2207,8 +2312,9 @@ function StudioTimelineImpl({
                           </button>
                         </div>
                         <div
+                          ref={slipStripRef}
                           className="relative h-14 cursor-ew-resize overflow-hidden rounded bg-white/5"
-                          style={{ width: W }}
+                          style={{ width: W, touchAction: 'none' }}
                           onPointerDown={(e) => {
                             const box = e.currentTarget.getBoundingClientRect();
                             const apply = (clientX: number) => {
