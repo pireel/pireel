@@ -1,6 +1,6 @@
 ---
 name: audio-and-music
-description: Craft rules for sound in Pireel Studio: background music (set_bgm / generate_music), per-clip sound (set_shot_audio), narration / music / SFX audio clips (register_media + add_clips), transitions (add_transition), beat-aligned cuts (get_beat_grid), noise cleanup (denoise_audio) and speed changes (set_video_speed). Read before adding or fitting music or sound effects, changing levels, or placing transitions.
+description: Craft rules for sound in Pireel Studio: background music (set_bgm / generate_music), per-clip sound (set_shot_audio), narration / music / SFX audio clips (register_media + add_clips), picture-synchronous Foley (generate_foley), transitions (add_transition), beat-aligned cuts (get_beat_grid), noise cleanup (denoise_audio) and speed changes (set_video_speed). Read before adding or fitting music or sound effects, changing levels, or placing transitions.
 ---
 # Sound, music and transitions
 
@@ -71,9 +71,25 @@ Imported or generated audio can also live as an ordinary clip on its typed lane:
 `startSec` / `sourceInSec` / `sourceOutSec` retrims. Narration placed this way is transcript-readable via
 `read_script {assetId}` when word timing matters.
 
-**Sound effects**: Pireel has no built-in SFX library yet — use the user's files or a library asset. Anchor
-each SFX at its editorial moment (the reveal, the click, the transition), keep them short, and never stack
-two on the same beat. If the user wants an effect you cannot source, say so instead of faking it with music.
+**Sound effects** come from two places:
+
+- **Picture-synchronous Foley — `generate_foley`** (Studio chat only: it needs the in-Studio approval
+  card, so over MCP tell the user to run that step in Studio Chat). Give it up to 8 items, each an exact
+  1–30 s source span of a video asset plus a prompt that names only audible events grounded in the
+  picture — action, material, intensity, perspective, room, timing (`negativePrompt` for speech / music /
+  ambience to exclude). It shows the event list and the credit cost, waits for approval, uploads only those
+  spans, generates with a video-to-audio model, saves each result as a reusable AAC in the cross-project
+  audio library with `eventType` / `material` / `reusePolicy`, and returns registration fields. Then
+  `register_media` and place every result in **one** `add_clips` call with `role: "sfx"` and no `trackId`
+  so overlapping hits land on parallel SFX lanes. One coherent visible action = one item; merge continuous
+  actions; skip static, speech-only, decorative or misleading events. Never use it for speech or music.
+- **Existing sound** — the user's files, or library assets found with `search_assets` (reuse a
+  timing-compatible sound before generating a new one) → `register_media` → `add_clips {role:"sfx"}`.
+
+There is no text-only SFX generator and no built-in stock SFX library yet: an off-screen sound with no
+picture to drive it (a notification ping, a whoosh on a title) must come from the user's files or a
+library asset — say so instead of faking it with music. Anchor each SFX at its editorial moment, keep it
+short, and never stack two on the same beat.
 
 ## Transitions: `add_transition`
 
