@@ -195,7 +195,10 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
   const [loaded, setLoaded] = useState(false); // don't decide the view from empty entries before history loads (avoids "templates→mine" flash)
   const [input, setInput] = useState('');
   const [ratio, setRatio] = useState<'9:16' | '16:9' | '1:1'>('9:16');
-  const [audioSec, setAudioSec] = useState(60); // music panel only: requested length
+  const [audioSec, setAudioSec] = useState(60); // music panel only: requested length (effective, clamped)
+  // The FIELD keeps a free-typing draft; clamping every keystroke made backspace jump to 10 and
+  // clearing jump to 60 — the effective value clamps, the field converges on blur.
+  const [audioSecText, setAudioSecText] = useState('60');
   const [count, setCount] = useState(1); // image only
   const shell = useStudioShell();
   const [vidDur, setVidDur] = useState('5'); // video only: duration tier (per model, see videoDurationOptions)
@@ -303,7 +306,11 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
     if (seedPrompt) applyTemplate(seedPrompt.prompt);
   }, [applyTemplate, seedPrompt]);
   const applyHostedAudioTemplate = useCallback((prompt: string, durationSec?: number) => {
-    if (durationSec) setAudioSec(Math.max(10, Math.min(300, Math.round(durationSec))));
+    if (durationSec) {
+      const clamped = Math.max(10, Math.min(300, Math.round(durationSec)));
+      setAudioSec(clamped);
+      setAudioSecText(String(clamped));
+    }
     applyTemplate(prompt);
   }, [applyTemplate]);
 
@@ -609,8 +616,15 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
                   type="number"
                   min={10}
                   max={300}
-                  value={audioSec}
-                  onChange={(e) => setAudioSec(Math.max(10, Math.min(300, Number(e.target.value) || 60)))}
+                  value={audioSecText}
+                  onChange={(e) => {
+                    setAudioSecText(e.target.value);
+                    const parsed = Number(e.target.value);
+                    if (Number.isFinite(parsed) && e.target.value.trim() !== '') {
+                      setAudioSec(Math.max(10, Math.min(300, Math.round(parsed))));
+                    }
+                  }}
+                  onBlur={() => setAudioSecText(String(audioSec))}
                   className="border-line bg-paper text-ink w-14 rounded-md border px-1.5 py-0.5 tabular-nums"
                   aria-label={t('panels.musicDurationSec')}
                 />
