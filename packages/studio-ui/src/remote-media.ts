@@ -63,7 +63,11 @@ export async function materializeRemoteMedia(
   const response = await fetchRemote(url, options.signal);
   if (!response.ok || !response.body) throw new Error(`media fetch failed: HTTP ${response.status}`);
 
-  const headerSize = Number(response.headers.get('content-length'));
+  // Number(null) === 0: an ABSENT content-length (chunked/proxied responses stream without one)
+  // must read as "size unknown", never as "expect zero bytes" — that killed every export whose
+  // audio materialized through the same-origin proxy.
+  const headerRaw = response.headers.get('content-length');
+  const headerSize = headerRaw == null || headerRaw.trim() === '' ? Number.NaN : Number(headerRaw);
   const responseSize = Number.isSafeInteger(headerSize) && headerSize >= 0 ? headerSize : null;
   const requestedSig = options.sig?.trim() || null;
   const requestedSize = requestedSig ? sizeFromSig(requestedSig) : null;

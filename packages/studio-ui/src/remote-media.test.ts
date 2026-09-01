@@ -47,4 +47,32 @@ describe('remote media materialization', () => {
     );
     expect(blobSpy).not.toHaveBeenCalled();
   });
+
+  it('treats an absent content-length as size UNKNOWN, not zero (proxied chunked responses)', async () => {
+    // Number(null) === 0 once turned every same-origin-proxy materialization into
+    // "expected 0, received more than 0" and killed the client export.
+    const bytes = new TextEncoder().encode('proxied-narration');
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }), { headers: { 'content-type': 'audio/mpeg' } });
+    response.headers.delete('content-length');
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('navigator', { storage: {} });
+    vi.stubGlobal('fetch', vi.fn(async () => response));
+    const temporary = new File([bytes], 'audio', { type: 'audio/mpeg', lastModified: 0 });
+    localMediaMocks.saveLocalStream.mockResolvedValue(temporary);
+    localMediaMocks.saveLocalVideo.mockResolvedValue(temporary);
+
+    const result = await materializeRemoteMedia('/narration.mp3', { name: 'narration.mp3', type: 'audio/mpeg' });
+
+    expect(localMediaMocks.saveLocalStream).toHaveBeenCalledWith(
+      response.body,
+      expect.stringMatching(/^\.remote-/),
+      expect.objectContaining({ expectedSize: null }),
+    );
+    expect(result.sig).toMatch(new RegExp(`:${bytes.byteLength}:0$`));
+  });
 });
