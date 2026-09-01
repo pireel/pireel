@@ -485,7 +485,7 @@ function StudioTimelineImpl({
   // two-finger touch pinch zooms around the touch midpoint. Native non-passive listener —
   // React's wheel handler cannot preventDefault the page scroll.
   useEffect(() => {
-    const el = slipStripRef.current;
+    const el = slipPanelRef.current;
     if (!slipPanel || !el) return;
     const zoomAt = (clientX: number, factor: number) => {
       const geom = slipPanelGeomRef.current;
@@ -493,7 +493,7 @@ function StudioTimelineImpl({
       const zoom = Math.min(16, Math.max(1, geom.zoom * factor));
       if (Math.abs(zoom - geom.zoom) < 1e-4) return;
       const len = geom.dur / zoom;
-      const box = el.getBoundingClientRect();
+      const box = (slipStripRef.current ?? el).getBoundingClientRect();
       const frac = Math.min(1, Math.max(0, (clientX - box.left) / geom.W));
       const anchor = geom.viewStart + frac * geom.viewLen;
       setSlipView({
@@ -502,7 +502,10 @@ function StudioTimelineImpl({
       });
     };
     const onWheel = (ev: WheelEvent) => {
+      // The panel swallows every wheel event: the timeline's scroll surface sits underneath
+      // and would otherwise zoom/scroll the TRACK together with the panel.
       ev.preventDefault();
+      ev.stopPropagation();
       if (ev.ctrlKey || ev.metaKey) {
         zoomAt(ev.clientX, ev.deltaY < 0 ? 1.1 : 0.9);
         return;
@@ -2297,10 +2300,25 @@ function StudioTimelineImpl({
                           <span className="min-w-0 flex-1 truncate text-right tabular-nums">
                             {`${winStart.toFixed(1)}s – ${winEnd.toFixed(1)}s (${(winEnd - winStart).toFixed(1)}s) / ${dur.toFixed(1)}s`}
                           </span>
-                          <span className="flex shrink-0 items-center gap-1">
-                            <button type="button" aria-label="−" className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20" onClick={() => applyZoom(zoom / 2)}>−</button>
-                            <button type="button" aria-label={t('panels.slipWindow')} title={t('panels.slipWindow')} className="h-4 rounded bg-white/10 px-1 leading-none hover:bg-white/20" onClick={() => setSlipView(null)}>{`${Math.round(zoom * 10) / 10}x`}</button>
-                            <button type="button" aria-label="+" className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20" onClick={() => applyZoom(zoom * 2)}>+</button>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            <input
+                              type="range"
+                              min={1}
+                              max={16}
+                              step={0.1}
+                              value={zoom}
+                              onChange={(e) => applyZoom(Number(e.target.value))}
+                              className="zoom-range w-24"
+                              aria-label={t('panels.slipWindow')}
+                            />
+                            <button
+                              type="button"
+                              title={t('panels.slipWindow')}
+                              className="w-8 rounded bg-white/10 px-1 leading-4 tabular-nums hover:bg-white/20"
+                              onClick={() => setSlipView(null)}
+                            >
+                              {`${Math.round(zoom * 10) / 10}x`}
+                            </button>
                           </span>
                           <button
                             type="button"
