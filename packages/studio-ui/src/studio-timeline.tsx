@@ -2331,13 +2331,21 @@ function StudioTimelineImpl({
                         </div>
                         <div
                           ref={slipStripRef}
-                          className="relative h-14 cursor-ew-resize overflow-hidden rounded bg-white/5"
+                          className="relative h-14 cursor-crosshair overflow-hidden rounded bg-white/5"
                           style={{ width: W, touchAction: 'none' }}
                           onPointerDown={(e) => {
                             const box = e.currentTarget.getBoundingClientRect();
+                            // Pressing INSIDE the window drags it relatively (no recentering
+                            // jump); pressing outside jumps the window centre to the press.
+                            const pressSec = secAtPanel(e.clientX, box);
+                            const winStartNow = span.shot.srcStart
+                              + (shotSlipRef.current?.shotId === span.shot.id ? shotSlipRef.current.deltaSec : 0);
+                            const grabOffset = pressSec >= winStartNow && pressSec <= winStartNow + winLen0
+                              ? pressSec - winStartNow
+                              : winLen0 / 2;
                             const apply = (clientX: number) => {
-                              const centerSec = secAtPanel(clientX, box);
-                              const deltaSec = clampDelta(centerSec - winLen0 / 2 - span.shot.srcStart);
+                              const sec = secAtPanel(clientX, box);
+                              const deltaSec = clampDelta(sec - grabOffset - span.shot.srcStart);
                               const next = { shotId: span.shot.id, deltaSec };
                               shotSlipRef.current = next;
                               setShotSlip(next);
@@ -2358,7 +2366,7 @@ function StudioTimelineImpl({
                           )) : <div className="absolute inset-0 bg-gradient-to-r from-sky-500/25 to-sky-500/10" />}
                           <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style={{ width: Math.min(W, Math.max(0, pxOf(winStart))) }} />
                           <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/50" style={{ width: Math.min(W, Math.max(0, W - pxOf(winEnd))) }} />
-                          <div className="ring-accent pointer-events-none absolute inset-y-0 rounded ring-2" style={{ left: pxOf(winStart), width: Math.max(6, pxOf(winEnd) - pxOf(winStart)) }} />
+                          <div className="ring-accent absolute inset-y-0 cursor-grab rounded ring-2 active:cursor-grabbing" style={{ left: pxOf(winStart), width: Math.max(6, pxOf(winEnd) - pxOf(winStart)) }} />
                           {onResizeShot ? (
                             <>
                               <div
