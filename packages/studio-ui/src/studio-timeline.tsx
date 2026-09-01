@@ -2358,6 +2358,7 @@ function StudioTimelineImpl({
                             ✕
                           </button>
                         </div>
+                        <div className="relative" style={{ width: W }}>
                         <div
                           ref={slipStripRef}
                           className="relative h-14 cursor-crosshair overflow-hidden rounded bg-white/5"
@@ -2396,22 +2397,30 @@ function StudioTimelineImpl({
                           <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style={{ width: Math.min(W, Math.max(0, pxOf(winStart))) }} />
                           <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/50" style={{ width: Math.min(W, Math.max(0, W - pxOf(winEnd))) }} />
                           <div className="ring-accent absolute inset-y-0 cursor-grab rounded ring-2 active:cursor-grabbing" style={{ left: pxOf(winStart), width: Math.max(6, pxOf(winEnd) - pxOf(winStart)) }} />
-                          {onResizeShot ? (
-                            <>
+                        </div>
+                        {/* Trim handles live OUTSIDE the strip's overflow-hidden so a window at the
+                            view edge keeps them grabbable (they may overhang the strip by 3px);
+                            an endpoint scrolled out of the zoomed view hides its handle. */}
+                        {onResizeShot ? (
+                          <>
+                            {pxOf(winStart) >= -4 && pxOf(winStart) <= W + 4 ? (
                               <div
                                 role="none"
                                 onPointerDown={(e) => startTrimDrag(e, 'left')}
                                 className="bg-accent absolute inset-y-0 z-10 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
                                 style={{ left: pxOf(winStart) - 3 }}
                               />
+                            ) : null}
+                            {pxOf(winEnd) >= -4 && pxOf(winEnd) <= W + 4 ? (
                               <div
                                 role="none"
                                 onPointerDown={(e) => startTrimDrag(e, 'right')}
                                 className="bg-accent absolute inset-y-0 z-10 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
                                 style={{ left: pxOf(winEnd) - 3 }}
                               />
-                            </>
-                          ) : null}
+                            ) : null}
+                          </>
+                        ) : null}
                         </div>
                       </div>
                     );
