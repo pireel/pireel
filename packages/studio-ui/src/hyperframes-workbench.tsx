@@ -1307,8 +1307,13 @@ export function HyperframesWorkbench({
     docs: [string, string];
     dims: [{ w: number; h: number }, { w: number; h: number }];
     active: 0 | 1;
+    /** Per-buffer doc revision: the iframe is keyed on it so a doc change REMOUNTS the frame.
+     *  Navigating a mounted iframe (srcDoc mutation) pushes a session-history entry each time —
+     *  minutes of editing made the browser Back button need dozens of presses to leave. */
+    revs: [number, number];
   }>(() => ({
     docs: [injectPreviewRuntime(assembleHtml(starter)), ""],
+    revs: [0, 0],
     dims: [
       { w: starter.width, h: starter.height },
       { w: starter.width, h: starter.height },
@@ -2583,7 +2588,9 @@ export function HyperframesWorkbench({
             { w: number; h: number },
           ];
           dims[back] = { w: comp.width, h: comp.height };
-          return { docs, dims, active: s.active };
+          const revs = [...s.revs] as [number, number];
+          revs[back] += 1;
+          return { docs, dims, active: s.active, revs };
         });
       },
       fontsChanged ||
@@ -3457,8 +3464,11 @@ export function HyperframesWorkbench({
             setBufs((s) => {
               if (s.docs[idx] !== doc) return s;
               const docs = [...s.docs] as [string, string];
-              docs[s.active === idx ? (idx === 0 ? 1 : 0) : s.active] = "";
-              return { ...s, docs, active: idx };
+              const cleared = s.active === idx ? (idx === 0 ? 1 : 0) : s.active;
+              docs[cleared] = "";
+              const revs = [...s.revs] as [number, number];
+              revs[cleared] += 1;
+              return { ...s, docs, active: idx, revs };
             });
             // Replay the alignment now that the pong PROVED this doc listens: the load-time hf:seek can hit a
             // deaf half-loaded doc (the known pit) and vanish — a paused boot then leaves caption timelines at
@@ -8322,7 +8332,7 @@ export function HyperframesWorkbench({
                     local blob videos aren't readable → onBufLoad hands the File in to build its own URL; the control protocol is all postMessage. */}
                     {([0, 1] as const).map((i) => (
                       <iframe
-                        key={i}
+                        key={`${i}:${bufs.revs[i]}`}
                         ref={(el) => {
                           iframesRef.current[i] = el;
                         }}

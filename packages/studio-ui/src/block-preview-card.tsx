@@ -169,6 +169,10 @@ export function BlockPreviewFrame({
       onPointerLeave={animate === 'hover' ? () => setLoop(false) : undefined}
     >
       <iframe
+        // Keyed on the doc fingerprint: mutating srcDoc on a MOUNTED iframe navigates the frame
+        // and pushes a session-history entry (the many-presses-to-go-Back bug); a remount's
+        // initial load does not.
+        key={docKey}
         ref={iframeRef}
         title={blockDisplayTitle(block)}
         srcDoc={doc}
