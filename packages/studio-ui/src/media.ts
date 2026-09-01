@@ -30,7 +30,7 @@ export interface ProbedFile {
  * asr_ok:false response is a failed service call. */
 export function classifyAsrResponse(value: { asr_ok?: boolean; detail?: string }): 'ok' | 'empty' | 'failed' {
   if (value.asr_ok !== false) return 'ok';
-  return /returned no (?:text|transcript)|no speech/i.test(value.detail ?? '') ? 'empty' : 'failed';
+  return /returned no (?:text|transcript)|no speech|no_valid_fragment/i.test(value.detail ?? '') ? 'empty' : 'failed';
 }
 
 const durableFileSigs = new WeakMap<File, string>();
@@ -169,7 +169,9 @@ export async function transcribeFile(file: File, opts?: { projectId?: string }):
         ...(words.length ? { words } : {}),
       };
     });
-  if (segs.length) setCachedAsr(sig, segs);
+  // Empty is a durable verdict too — without caching it, every later pass re-uploads,
+  // re-charges and re-asks the provider about the same speech-less source.
+  setCachedAsr(sig, segs);
   return segs;
 }
 
