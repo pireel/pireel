@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const localMediaMocks = vi.hoisted(() => ({
   saveLocalStream: vi.fn(),
   saveLocalVideo: vi.fn(),
+  loadLocalVideo: vi.fn(),
   deleteLocalVideo: vi.fn(),
   alignFileToSig: vi.fn((file: File) => file),
 }));
@@ -16,6 +17,7 @@ describe('remote media materialization', () => {
     vi.restoreAllMocks();
     localMediaMocks.saveLocalStream.mockReset();
     localMediaMocks.saveLocalVideo.mockReset();
+    localMediaMocks.loadLocalVideo.mockReset();
     localMediaMocks.deleteLocalVideo.mockReset();
     localMediaMocks.alignFileToSig.mockClear();
   });
@@ -63,8 +65,10 @@ describe('remote media materialization', () => {
     vi.stubGlobal('navigator', { storage: {} });
     vi.stubGlobal('fetch', vi.fn(async () => response));
     const temporary = new File([bytes], 'audio', { type: 'audio/mpeg', lastModified: 0 });
+    const durable = new File([bytes], 'audio-durable', { type: 'audio/mpeg', lastModified: 0 });
     localMediaMocks.saveLocalStream.mockResolvedValue(temporary);
-    localMediaMocks.saveLocalVideo.mockResolvedValue(temporary);
+    localMediaMocks.saveLocalVideo.mockResolvedValue(true);
+    localMediaMocks.loadLocalVideo.mockResolvedValue(durable);
 
     const result = await materializeRemoteMedia('/narration.mp3', { name: 'narration.mp3', type: 'audio/mpeg' });
 
@@ -74,5 +78,9 @@ describe('remote media materialization', () => {
       expect.objectContaining({ expectedSize: null }),
     );
     expect(result.sig).toMatch(new RegExp(`:${bytes.byteLength}:0$`));
+    // The temporary-backed File must never escape: its backing entry is deleted right after,
+    // and OPFS Files read lazily — the export mixer would hit NotFoundError at mux time.
+    expect(result.file).toBe(durable);
+    expect(localMediaMocks.deleteLocalVideo).toHaveBeenCalled();
   });
 });
