@@ -255,7 +255,7 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
     if (type === 'video') {
       return { duration_sec: vidDur, count: 1, resolution: vidRes, aspect_ratio: ratio === '1:1' ? '9:16' : ratio, generate_audio: false };
     }
-    if (type === 'audio') return { tier: audioSec < 30 ? 'clip' : 'song' };
+    if (type === 'audio') return { tier: 'song' }; // duration floor is 30s → always the full-track tier
     return {};
   }, [type, ratio, count, vidDur, quality, vidRes, modelId, audioSec]);
   // elements: modelId empty → useQuote returns null, no request. Audio quotes its own per-call tool,
@@ -610,20 +610,20 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
           />
           <div className="flex items-center gap-1 px-2 pb-2 pt-1">
             {type === 'audio' && (
-              // Reference, not a contract: the model takes it as a wish (see the music route), and it also
-              // decides which tier is bought — under 30s is the cheaper short-clip model.
+              // Reference, not a contract: the model takes it as a wish (see the music route).
+              // Floor 30s = the model's real output floor; asking for less just misleads.
               <label className="text-ink-3 flex items-center gap-1.5 text-[11px]" title={t('panels.musicDurationHint')}>
                 {t('panels.musicDurationSec')}
                 <input
                   type="number"
-                  min={10}
+                  min={30}
                   max={300}
                   value={audioSecText}
                   onChange={(e) => {
                     setAudioSecText(e.target.value);
                     const parsed = Number(e.target.value);
                     if (Number.isFinite(parsed) && e.target.value.trim() !== '') {
-                      setAudioSec(Math.max(10, Math.min(300, Math.round(parsed))));
+                      setAudioSec(Math.max(30, Math.min(300, Math.round(parsed))));
                     }
                   }}
                   onBlur={() => setAudioSecText(String(audioSec))}
@@ -1018,7 +1018,14 @@ function EntryRow({
       <PromptLine text={e.prompt} />
 
       {/* output (left side) */}
-      {e.status === 'pending' && (
+      {e.status === 'pending' && e.type === 'audio' && (
+        // sized like the finished audio player so the card doesn't jump on completion
+        <div className="border-line text-ink-3 flex h-8 w-full max-w-[260px] items-center gap-2 self-start rounded-lg border px-2.5 text-[11.5px]" style={SHIMMER}>
+          <Loader2 size={13} className="shrink-0 animate-spin" />
+          {t('panels.generatingMusic')}
+        </div>
+      )}
+      {e.status === 'pending' && e.type !== 'audio' && (
         <div
           // self-start: don't let flex-col stretch to full width, otherwise aspectRatio yields to the stretched width → goes full-width
           className="border-line self-start rounded-lg border"
