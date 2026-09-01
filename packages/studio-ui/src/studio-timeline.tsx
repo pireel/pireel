@@ -2221,16 +2221,8 @@ function StudioTimelineImpl({
                     winStart = Math.max(0, winStart);
                     winEnd = Math.min(dur, Math.max(winEnd, winStart + minSpanSrc));
                     const W = Math.max(240, Math.min(960, x(visibleRange.endSec - visibleRange.startSec) - 24));
-                    const leftMin = x(visibleRange.startSec) + 8;
-                    // Centre the panel on the card so both sides show neighbouring source content.
-                    const cardLeftPx = x(span.start);
-                    const cardWidthPx = x(span.end - span.start);
-                    const left = Math.min(
-                      Math.max(cardLeftPx + cardWidthPx / 2 - W / 2, leftMin),
-                      Math.max(leftMin, x(visibleRange.endSec) - W - 24),
-                    );
                     // DEFAULT view (slipView null): timeline scale — panel pps equals the track's
-                    // pps and viewStart is chosen so the selection box sits EXACTLY under the card.
+                    // pps — centred on the current window.
                     let zoom: number;
                     let viewStart: number;
                     if (slipView) {
@@ -2238,22 +2230,26 @@ function StudioTimelineImpl({
                       viewStart = Math.min(Math.max(slipView.startSec, 0), Math.max(0, dur - dur / zoom));
                     } else {
                       zoom = Math.min(16, Math.max(1, (dur * pps) / W));
-                      const stripContentLeft = left + 8; // panel p-2 padding
+                      const viewLenDefault = dur / zoom;
                       viewStart = Math.min(
-                        Math.max(winStart - (cardLeftPx - stripContentLeft) / pps, 0),
-                        Math.max(0, dur - dur / zoom),
+                        Math.max((winStart + winEnd) / 2 - viewLenDefault / 2, 0),
+                        Math.max(0, dur - viewLenDefault),
                       );
                     }
                     const viewLen = dur / zoom;
                     const viewEnd = viewStart + viewLen;
                     slipPanelGeomRef.current = { dur, W, zoom, viewStart, viewLen };
-                    // Fixed positioning floats the panel ABOVE the track (over the stage edge):
-                    // inside the scroll container it would be clipped at the ruler. Content-px →
-                    // viewport-px goes through the lane rect; scroll re-renders (visibleRange)
-                    // keep it glued to the card.
-                    const laneRect = laneRef.current?.getBoundingClientRect();
-                    if (!laneRect) return null;
+                    // Fixed positioning floats the panel ABOVE the timeline, horizontally centred
+                    // in the visible timeline area and clamped to the viewport — card-anchored
+                    // placement kept computing off-screen once the card sat near an edge.
+                    const hostRect = scrollRef.current?.getBoundingClientRect();
+                    if (!hostRect) return null;
                     const SLIP_PANEL_H = 100;
+                    const panelLeft = Math.min(
+                      Math.max(hostRect.left + hostRect.width / 2 - (W + 16) / 2, 8),
+                      Math.max(8, window.innerWidth - W - 24),
+                    );
+                    const panelTop = Math.max(8, hostRect.top - SLIP_PANEL_H - 6);
                     const panelPps = W / viewLen;
                     const tileW = 40;
                     const tiles = stripTiles(strip, viewStart, viewEnd, Math.max(0.05, tileW / panelPps), panelPps);
@@ -2317,11 +2313,7 @@ function StudioTimelineImpl({
                       <div
                         ref={slipPanelRef}
                         className="fixed z-[70] rounded-lg border border-white/10 bg-black/85 p-2 shadow-xl backdrop-blur"
-                        style={{
-                          left: laneRect.left + left,
-                          top: Math.max(8, laneRect.top - SLIP_PANEL_H - 6),
-                          width: W + 16,
-                        }}
+                        style={{ left: panelLeft, top: panelTop, width: W + 16 }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div className="mb-1 flex items-center gap-2 text-[10px] text-white/70">
