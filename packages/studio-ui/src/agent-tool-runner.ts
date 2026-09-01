@@ -1168,7 +1168,12 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'load_local_assets': {
             // Folder/batch counterpart of load_local_source. It deliberately stops at the asset
             // library: importing music/images/clips must not replace the project's main footage.
-            const rows = Array.isArray(input.entries) ? input.entries.slice(0, 50) : [];
+            // The per-call bound is a payload sanity cap, not a product limit (customers import
+            // 100+ sources); overflow is REPORTED so the agent batches the rest instead of
+            // silently believing everything landed.
+            const requested = Array.isArray(input.entries) ? input.entries : [];
+            const rows = requested.slice(0, 500);
+            const truncated = requested.length - rows.length;
             const sources = rows.flatMap((value) => {
               if (!value || typeof value !== 'object') return [];
               const row = value as Record<string, unknown>;
@@ -1214,10 +1219,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             }
             return {
               ok: true,
-              summary: `imported ${session.imported.length} local assets${session.rejected.length ? ` · ${session.rejected.length} failed` : ''}`,
+              summary: `imported ${session.imported.length} local assets${session.rejected.length ? ` · ${session.rejected.length} failed` : ''}${truncated > 0 ? ` · ${truncated} over the per-call cap` : ''}`,
               data: {
                 imported: session.imported.map((asset) => ({ sig: asset.sig, label: asset.label, kind: asset.kind })),
                 rejected: session.rejected.map((item) => item.error),
+                ...(truncated > 0 ? {
+                  truncated,
+                  next: `entries[] is capped at 500 per call; ${truncated} entries were NOT imported — call load_local_assets again with the remaining entries.`,
+                } : {}),
               },
             };
           }
