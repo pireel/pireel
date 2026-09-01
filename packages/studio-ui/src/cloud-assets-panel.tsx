@@ -108,7 +108,9 @@ function materialToItem(it: MaterialItem): LibraryItem | null {
     id: `up:${it.id}`,
     kind: it.kind,
     origin: 'upload',
-    insertUrl: it.kind === 'audio' ? it.url : imageThumb(it.url, 'original'),
+    // Rows store BARE keys by convention; every kind resolves through imageThumb ('original'
+    // = cdn prefix, no transform) — audio once bypassed it and 404'd as a relative path.
+    insertUrl: imageThumb(it.url, 'original'),
     thumbSrc: it.thumb_url ?? (it.kind === 'image' ? it.url : null),
     label: it.label ?? (it.kind === 'video' ? t('panels.untitledVideo') : t('panels.untitledImage')),
     createdAt: it.created_at ?? 0,
