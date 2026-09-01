@@ -137,6 +137,7 @@ describe("静态提示词完整性", () => {
     expect(mcpInstructions("test-version")).not.toContain("cut the footage by its spoken transcript.");
     expect(mcpInstructions("test-version")).toContain("FOOTAGE WITHOUT SPEECH is a normal input");
     expect(mcpInstructions("test-version")).toContain("SOUND AND TRANSITIONS have craft rules, not a ban");
+    expect(mcpInstructions("test-version")).toContain("generate_sfx for off-screen/editorial sounds");
     expect(mcpInstructions("test-version")).toContain("it needs no Director Plan");
     expect(mcpInstructions("test-version")).toContain(
       "Uniform slices or filename-order assembly",

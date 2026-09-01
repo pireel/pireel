@@ -156,7 +156,7 @@ import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
-const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
+const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_sfx', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
 
 export type StudioReviewFailurePhase = 'capture' | 'request' | 'response';
 
@@ -2404,6 +2404,39 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 data: {
                   asset: body.asset,
                   next: 'To use it, call register_media with this id/url/durationSec and bpm when present, then add_clips with role=music. Set volume and fades separately; do not use set_bgm for newly generated Agent media.',
+                },
+              };
+            } finally {
+              clearToolProgress(toolId);
+            }
+          }
+          case 'generate_sfx': {
+            const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+            if (!prompt) return { ok: false, error: 'prompt required' };
+            report('Generating sound effect…');
+            try {
+              const spaceId = await getStudioSpaceId(projectId);
+              const res = await fetch('/api/studio/sfx', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  prompt,
+                  ...(Number.isFinite(Number(input.durationSec)) ? { duration_sec: Number(input.durationSec) } : {}),
+                  ...(Number.isFinite(Number(input.promptInfluence)) ? { prompt_influence: Number(input.promptInfluence) } : {}),
+                  loop: input.loop === true,
+                  space_id: spaceId,
+                }),
+                ...(signal ? { signal } : {}),
+              });
+              const body = (await res.json().catch(() => ({}))) as {
+                asset?: { id: string; kind: 'audio'; role: 'sfx'; key: string; url: string; mime: string; prompt: string; durationSec: number; loop: boolean; model: string };
+                error?: string; detail?: string;
+              };
+              if (!res.ok || !body.asset) return { ok: false, error: body.detail || body.error || 'sound effect generation failed' };
+              return {
+                ok: true, summary: 'Sound effect generated',
+                data: {
+                  asset: body.asset,
+                  next: 'To use it, call register_media with this id/url/durationSec, then add_clips with role=sfx at the editorial moment (omit trackId so overlapping hits land on parallel SFX lanes). Set level/fades with set_clip_properties.',
                 },
               };
             } finally {

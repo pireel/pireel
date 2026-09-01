@@ -33,6 +33,7 @@ function deps(overrides: Partial<McpDeps> = {}): McpDeps {
     generateImage: vi.fn(async () => ({ ok: true, summary: 'image started', data: { id: 'ci1', status: 'pending' } })),
     generateVideo: vi.fn(async () => ({ ok: true, summary: 'video started', data: { id: 'cv1', status: 'pending' } })),
     generateMusic: vi.fn(async () => ({ ok: true, summary: 'music generated', data: { asset: { id: 'cm1', url: 'https://cdn.example/m.wav' } } })),
+    generateSfx: vi.fn(async () => ({ ok: true, summary: 'sfx generated', data: { asset: { id: 'cs1', url: 'https://cdn.example/s.mp3' } } })),
     getGenerationJobs: vi.fn(async () => ({ ok: true, summary: '2 generation jobs', data: { jobs: [] } })),
     listVoices: vi.fn(async () => ({ ok: true, summary: '2 voices', data: { voices: [] } })),
     cloneVoice: vi.fn(async () => ({ ok: true, summary: 'voice created', data: { voice: { id: 'voice_1' } } })),
@@ -150,7 +151,7 @@ describe('MCP 协议处理', () => {
     expect(d.listSkills).toHaveBeenCalledWith({ query: '大女主' });
     expect(d.readSkill).toHaveBeenCalledWith('usk_1');
     // 服务端直答集合与 dispatch 的特判保持同步
-    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_skills', 'list_voices', 'read_editing_guide', 'read_frame', 'read_skill', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
+    expect([...MCP_SERVER_TOOL_IDS].sort()).toEqual(['clone_voice', 'create_browser_handoff', 'create_project', 'delete_voice', 'design_voice', 'generate_image', 'generate_music', 'generate_sfx', 'generate_speech', 'generate_video', 'get_generation_jobs', 'get_icons', 'import_media', 'import_stock', 'lip_sync', 'list_assets', 'list_frames', 'list_models', 'list_projects', 'list_skills', 'list_voices', 'read_editing_guide', 'read_frame', 'read_skill', 'rename_project', 'search_assets', 'search_stock', 'switch_project']);
     // import_media 服务端直答(登记进项目行,不过桥)
     const d2 = deps();
     await handleMcpRequest({ id: 100, method: 'tools/call', params: { name: 'import_media', arguments: { sig: 'a.mp4:1:2' } } }, d2);
@@ -189,11 +190,13 @@ describe('MCP 协议处理', () => {
     await handleMcpRequest({ id: 109, method: 'tools/call', params: { name: 'generate_image', arguments: { prompt: 'ocean' } } }, d6);
     await handleMcpRequest({ id: 110, method: 'tools/call', params: { name: 'generate_video', arguments: { prompt: 'waves' } } }, d6);
     await handleMcpRequest({ id: 111, method: 'tools/call', params: { name: 'generate_music', arguments: { prompt: 'calm piano' } } }, d6);
+    await handleMcpRequest({ id: 1111, method: 'tools/call', params: { name: 'generate_sfx', arguments: { prompt: 'short whoosh', durationSec: 1.5 } } }, d6);
     await handleMcpRequest({ id: 112, method: 'tools/call', params: { name: 'get_generation_jobs', arguments: { ids: ['ci1'] } } }, d6);
     expect(d6.listModels).toHaveBeenCalledWith({ kind: 'image' });
     expect(d6.generateImage).toHaveBeenCalledWith({ prompt: 'ocean' });
     expect(d6.generateVideo).toHaveBeenCalledWith({ prompt: 'waves' });
     expect(d6.generateMusic).toHaveBeenCalledWith({ prompt: 'calm piano' });
+    expect(d6.generateSfx).toHaveBeenCalledWith({ prompt: 'short whoosh', durationSec: 1.5 });
     expect(d6.getGenerationJobs).toHaveBeenCalledWith({ ids: ['ci1'] });
     expect(d6.callBridge).not.toHaveBeenCalled();
   });

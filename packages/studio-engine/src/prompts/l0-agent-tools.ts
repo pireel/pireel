@@ -899,6 +899,22 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     }, ['prompt']),
   },
   {
+    id: 'generate_sfx',
+    skillContract: { version: 1, stability: 'stable' },
+    kind: 'card',
+    busyText: 'tools.generate_sfx.busy',
+    icon: '🔔',
+    label: 'tools.generate_sfx.label',
+    description:
+      "Generate ONE short sound effect from a text description (CHARGES the user's Pireel account; 0.5–22 s). This is the OFF-SCREEN / editorial sound path — whooshes, UI pings, stingers, risers, ambience beds, impacts — where no picture drives the sound. Before generating, search_assets kind=audio for an existing timing-compatible sound and reuse it. For sound that must follow a visible physical action in the footage, use generate_foley instead (Studio Chat). Describe the sound, not the scene: source, material, motion, intensity, perspective, duration feel; no speech, no music. Media primitive only — it does NOT place anything: register_media with the returned id/url/durationSec, then add_clips with role=sfx at the editorial moment (omit trackId so overlapping hits land on parallel SFX lanes) and set_clip_properties for level/fades.",
+    inputSchema: obj({
+      prompt: { type: 'string', description: 'The sound itself, e.g. "short airy whoosh, fast, passing left to right" or "soft glass notification ping, single hit".' },
+      durationSec: { type: 'number', description: 'Target length in seconds, 0.5–22 (default 5). Keep hits and whooshes at 0.5–2 s; ambience beds longer.' },
+      promptInfluence: { type: 'number', description: '0–1 (default 0.3). Higher follows the text more literally; lower lets the model interpret.' },
+      loop: { type: 'boolean', description: 'true for a seamless loop (ambience beds); false for one-shot hits (default).' },
+    }, ['prompt']),
+  },
+  {
     id: 'generate_foley',
     kind: 'card',
     busyText: 'tools.generate_foley.busy',
