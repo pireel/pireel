@@ -615,8 +615,10 @@ export function MyAssetsPanel({
 
   /** Folder import goes through webkitdirectory on every browser. Some embedded Chromium shells
    *  expose showDirectoryPicker but never complete its native dialog, while their ordinary file-
-   *  chooser bridge works. The cloud index still records one logical folder plus relative paths. */
-  const FOLDER_CAP = 50;
+   *  chooser bridge works. The cloud index still records one logical folder plus relative paths.
+   *  The cap is a runaway-folder backstop, NOT a product limit — customers cut from 100+ clips
+   *  (a 50 cap forced them into multiple passes, reported 2026-09-01). */
+  const FOLDER_CAP = 500;
   const pickFolder = () => triggerFolderInput(folderInputRef.current);
 
   /** Skill/service handoff entry point. The manifest capability rides in the URL fragment (never
