@@ -2089,7 +2089,7 @@ function StudioTimelineImpl({
                                 setSlipView(null);
                                 setSlipPanel((current) => (current === shot.id ? null : shot.id));
                               }}
-                              className={`absolute bottom-0.5 right-3 z-30 h-4 w-4 items-center justify-center rounded bg-black/60 text-white/90 hover:bg-black/85 ${slipPanel === shot.id ? 'flex' : 'hidden group-hover/shot:flex'}`}
+                              className={`absolute right-3 top-0.5 z-30 h-4 w-4 items-center justify-center rounded bg-black/60 text-white/90 hover:bg-black/85 ${slipPanel === shot.id ? 'flex' : 'hidden group-hover/shot:flex'}`}
                             >
                               <GalleryHorizontal size={10} />
                             </span>
@@ -2247,6 +2247,13 @@ function StudioTimelineImpl({
                     const viewLen = dur / zoom;
                     const viewEnd = viewStart + viewLen;
                     slipPanelGeomRef.current = { dur, W, zoom, viewStart, viewLen };
+                    // Fixed positioning floats the panel ABOVE the track (over the stage edge):
+                    // inside the scroll container it would be clipped at the ruler. Content-px →
+                    // viewport-px goes through the lane rect; scroll re-renders (visibleRange)
+                    // keep it glued to the card.
+                    const laneRect = laneRef.current?.getBoundingClientRect();
+                    if (!laneRect) return null;
+                    const SLIP_PANEL_H = 100;
                     const panelPps = W / viewLen;
                     const tileW = 40;
                     const tiles = stripTiles(strip, viewStart, viewEnd, Math.max(0.05, tileW / panelPps), panelPps);
@@ -2309,8 +2316,12 @@ function StudioTimelineImpl({
                     return (
                       <div
                         ref={slipPanelRef}
-                        className="absolute z-[70] rounded-lg border border-white/10 bg-black/85 p-2 shadow-xl backdrop-blur"
-                        style={{ left, top: H0 + 4, width: W + 16 }}
+                        className="fixed z-[70] rounded-lg border border-white/10 bg-black/85 p-2 shadow-xl backdrop-blur"
+                        style={{
+                          left: laneRect.left + left,
+                          top: Math.max(8, laneRect.top - SLIP_PANEL_H - 6),
+                          width: W + 16,
+                        }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
                         <div className="mb-1 flex items-center gap-2 text-[10px] text-white/70">
