@@ -352,8 +352,10 @@ export function GenChatPanel({ projectId, type, seedPrompt, comp, onInsertMedia,
   }, [projectId, type]);
 
   // poll pending jobs (server-side)
+  // Audio settles in-place through one awaited call (its aud_ placeholder is never a server
+  // job), and elements are client-side — neither has anything to poll at /api/create/:id.
   const pendingKey = entries
-    .filter((e) => e.status === 'pending' && e.type !== 'element')
+    .filter((e) => e.status === 'pending' && e.type !== 'element' && e.type !== 'audio')
     .map((e) => e.id)
     .sort()
     .join(',');

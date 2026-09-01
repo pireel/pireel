@@ -156,7 +156,7 @@ export const PANELS_EN: Record<string, string> = {
   "panels.loopElementSTime":
     "Loop this element's time range (handy for tuning animation)",
   "panels.musicDurationHint":
-    "A target, not a contract — under 30s buys the cheaper short-clip tier",
+    "A target, not a contract — the model produces at least ~30s (trim on the timeline for shorter); under 30s buys the cheaper short-clip tier",
   "panels.hideTrack": "Hide this track",
   "panels.muteTrack": "Mute this track",
   "panels.nShotsSelected": "{n} shots selected",

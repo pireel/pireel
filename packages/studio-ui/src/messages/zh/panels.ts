@@ -149,7 +149,7 @@ export const PANELS_ZH: Record<string, string> = {
   "panels.loadingCatalog": "目录加载中…",
   "panels.loopElementSTime": "循环播放这个动态图形的时间段,方便调动画",
   "panels.musicDurationHint":
-    "参考值:模型不保证严格照做;30 秒以下走短片段档,更便宜",
+    "参考值:模型每次至少产出约 30 秒(需要更短就落轨后裁剪);30 秒以下按短片段档计价,更便宜",
   "panels.hideTrack": "隐藏该轨",
   "panels.muteTrack": "静音该轨",
   "panels.nShotsSelected": "已选 {n} 个分镜",
