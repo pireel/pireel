@@ -113,7 +113,7 @@ export async function probeVideoFile(file: File): Promise<ProbedFile> {
 }
 
 /** Extract audio (upload audio only) → ASR → sentence-level shots. Cached by fileSig (same clip transcribed once). */
-export async function transcribeFile(file: File): Promise<AsrSegment[]> {
+export async function transcribeFile(file: File, opts?: { projectId?: string }): Promise<AsrSegment[]> {
   const sig = fileSig(file);
   const cached = await getCachedAsr(sig);
   if (cached) return cached;
@@ -131,7 +131,7 @@ export async function transcribeFile(file: File): Promise<AsrSegment[]> {
   const r = await fetch('/api/auto-edit/asr', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ audio_url: url, duration_sec: durationSec }),
+    body: JSON.stringify({ audio_url: url, duration_sec: durationSec, ...(opts?.projectId ? { projectId: opts.projectId } : {}) }),
   });
   // Server failures must throw a clear error, not silently become an empty array — callers need to tell "ASR failed" apart from "the video truly has no speech"
   // 402 = credits exhausted: say so instead of an opaque HTTP code

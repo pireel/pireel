@@ -895,7 +895,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     },
                   };
                 }
-                const segs = await race(studioProviders().transcriber.transcribe(file)).catch((error) => {
+                const segs = await race(studioProviders().transcriber.transcribe(file, { projectId })).catch((error) => {
                   if (isNoSpeechAsrResult(error)) return [];
                   throw error;
                 });
@@ -982,7 +982,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   }
                 }
                 const probe = await probeVideoFile(file).catch(() => null);
-                const segs = await race(studioProviders().transcriber.transcribe(file));
+                const segs = await race(studioProviders().transcriber.transcribe(file, { projectId }));
                 const current = documentRef.current;
                 const primaryClipsForAsset = current.timeline.tracks
                   .filter((track) => track.role === 'primaryNarrative')
@@ -1349,6 +1349,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (openingEvidence.length) {
                 try {
                   openingComparison = await race(compareEditorialOpenings(openingEvidence, reviewBrief, {
+                    projectId,
                     ...(signal ? { signal } : {}),
                   }));
                 } catch (error) {
@@ -1472,6 +1473,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 const reviewed = editorialReview && vis
                   ? await race(reviewEditorialCandidates(file, vis.qualityWindows ?? [], reviewBrief, {
                       maxCandidates: maxReviewCandidates,
+                      projectId,
                       ...(signal ? { signal } : {}),
                     }))
                   : null;
@@ -1626,6 +1628,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const reviewed = editorialReview && vis && sourceFile && sourceDurationSec > 0
                 ? await race(reviewEditorialCandidates(sourceFile, vis.qualityWindows ?? [], reviewBrief, {
                     maxCandidates: maxReviewCandidates,
+                    projectId,
                     ...(signal ? { signal } : {}),
                   }))
                 : null;
@@ -1983,7 +1986,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               };
               report(t('workbench.reviewJudgingN', { n: frames.length }));
               reviewPhase = 'request';
-              const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames }), ...(signal ? { signal } : {}) });
+              const rr = await fetch('/api/studio/review', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frames, projectId }), ...(signal ? { signal } : {}) });
               reviewPhase = 'response';
               // scene = per-frame one-line description from the vision pass: issues alone can't answer
               // "what does this moment look like", which this tool also serves
@@ -2285,7 +2288,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const response = await race(fetch('/api/studio/review', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ mode: 'assets', frames }),
+                body: JSON.stringify({ mode: 'assets', frames, projectId }),
                 ...(signal ? { signal } : {}),
               }));
               const body = (await race(response.json().catch(() => ({})))) as {
@@ -2700,7 +2703,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               const res = await fetch('/api/studio/speech', {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(speechInput),
+                body: JSON.stringify({ ...speechInput, projectId }),
                 ...(signal ? { signal } : {}),
               });
               const body = (await res.json().catch(() => ({}))) as {

@@ -117,6 +117,8 @@ export interface StudioChatHandle {
 }
 
 export interface StudioChatProps {
+  /** Billing attribution: which project this chat edits (rides every charged request). */
+  projectId?: string;
   /** Client-side tool executor: mutates Composition state / calls compose to generate blocks, returns a summary. */
   runTool: (
     toolId: string,
@@ -155,6 +157,7 @@ export interface StudioChatProps {
 export const StudioChat = memo(
   forwardRef<StudioChatHandle, StudioChatProps>(function StudioChat(
     {
+      projectId,
       runTool,
       getBody,
       elements,
@@ -402,6 +405,7 @@ export const StudioChat = memo(
 
         <ChatThread
           key={activeId}
+          projectId={projectId}
           threadId={activeId}
           initialMessages={restoredMessages}
           initialFrame={active?.frame ?? null}

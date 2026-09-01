@@ -4312,6 +4312,7 @@ export function HyperframesWorkbench({
       // Capabilities go through the provider (open-source split phase 2): the hosted shell = server LLM + billing; the OSS shell can swap the implementation or use BYO
       return studioProviders().composer.composeStream(
         {
+          projectId,
           block: {
             id: seed.id,
             kind: seed.kind,
@@ -6417,7 +6418,7 @@ export function HyperframesWorkbench({
             clipAsrFailRef.current.add(src);
             return;
           }
-          const segs = await studioProviders().transcriber.transcribe(got.file);
+          const segs = await studioProviders().transcriber.transcribe(got.file, { projectId });
           setClipAsr((m) => ({ ...m, [src]: segs }));
           clipAsrRef.current = { ...clipAsrRef.current, [src]: segs }; // mirror immediately: the re-lay below needs to read it
           // The native caption derivation effect observes clipAsr and relays this source atomically.
@@ -8152,6 +8153,7 @@ export function HyperframesWorkbench({
               <StudioChat
                 key={chatEpoch}
                 ref={chatRef}
+                projectId={projectId}
                 runTool={chatCbs.runTool}
                 getBody={getChatBody}
                 getComp={getChatComp}

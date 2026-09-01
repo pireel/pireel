@@ -787,7 +787,7 @@ describe('Agent composition transaction boundary', () => {
         transcript: expect.stringContaining('先用结果抓住观众'),
       },
     });
-    expect(providerMocks.transcribe).toHaveBeenCalledWith(video);
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(video, expect.anything());
     expect(localMediaMocks.saveLocalVideo).toHaveBeenCalledWith(video, sig, undefined, {
       pinned: false,
       binding: { projectId: 'test', assetId },
@@ -1406,7 +1406,7 @@ describe('Agent composition transaction boundary', () => {
       ok: true,
       data: { assetId: 'tts-audio', durationSec: 12.4, transcript: expect.stringContaining('实际发音') },
     });
-    expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }));
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'audio/mpeg' }), expect.anything());
     expect(h.documentRef.current.assets['tts-audio']?.metadata).toMatchObject({ durationSec: 12.4, hasAudio: true });
     expect(h.documentRef.current.semantics.transcripts['tts-audio']).toEqual([
       { start: 0.2, end: 1.4, text: '实际发音', words: [{ start: 0.2, end: 0.8, text: '实际' }] },
@@ -1458,7 +1458,7 @@ describe('Agent composition transaction boundary', () => {
       ok: true,
       data: { assetId: 'speaker-video', durationSec: 18, transcript: expect.stringContaining('这是视频里的口播') },
     });
-    expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/mp4' }));
+    expect(providerMocks.transcribe).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/mp4' }), expect.anything());
     expect(h.documentRef.current.semantics.transcripts['speaker-video']).toEqual([
       { start: 0.4, end: 2.1, text: '这是视频里的口播' },
     ]);

@@ -18,7 +18,7 @@ function dataUrlPayload(dataUrl: string): { mime: string; base64: string } | nul
 /** Turn exact timeline pixels into stable text evidence before the text-only chat model sees them. */
 export async function inspectTimelineFrameEvidence(
   frames: readonly AttachedTimelineFrame[],
-  options: { signal?: AbortSignal; fetch?: typeof fetch } = {},
+  options: { signal?: AbortSignal; fetch?: typeof fetch; projectId?: string } = {},
 ): Promise<TimelineFrameEvidence[]> {
   if (!frames.length) return [];
   const encoded = frames.map((frame) => ({ frame, payload: dataUrlPayload(frame.dataUrl) }));
@@ -29,6 +29,7 @@ export async function inspectTimelineFrameEvidence(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       mode: 'assets',
+      ...(options.projectId ? { projectId: options.projectId } : {}),
       frames: encoded.map(({ frame, payload }) => ({
         atSec: frame.atSec,
         mime: payload!.mime,

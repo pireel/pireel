@@ -101,6 +101,7 @@ import type {
 } from "./studio-chat";
 
 export function ChatThread({
+  projectId,
   threadId,
   initialMessages,
   initialFrame,
@@ -122,6 +123,7 @@ export function ChatThread({
   onSnapshot,
   handleRef,
 }: {
+  projectId?: string;
   threadId: string;
   initialMessages: UIMessage[];
   initialFrame: AttachedFrame | null;
@@ -189,6 +191,7 @@ export function ChatThread({
         api: studioProviders().chatEndpoint ?? "/api/studio/chat",
         body: () => ({
           locale: studioLocale().toLowerCase().startsWith("zh") ? "zh" : "en",
+          ...(projectId ? { projectId } : {}),
           ...(frameRef.current ? { frameId: frameRef.current.id } : {}),
           ...(frameRef.current?.customVisualStyle
             ? { customVisualStyle: frameRef.current.customVisualStyle }
@@ -475,7 +478,7 @@ export function ChatThread({
           const response = await fetch("/api/studio/order-shots", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ shots: preparedPlacement.shots }),
+            body: JSON.stringify({ shots: preparedPlacement.shots, ...(projectId ? { projectId } : {}) }),
             signal: orderCtrl.signal,
           });
           clearTimeout(orderTimer);
@@ -807,7 +810,7 @@ export function ChatThread({
         timelineFrameInspectionRef.current = ctrl;
         setTimelineFrameInspectionError(false);
         try {
-          timelineFrames = await inspectTimelineFrameEvidence(attachedTimelineFrames, { signal: ctrl.signal });
+          timelineFrames = await inspectTimelineFrameEvidence(attachedTimelineFrames, { signal: ctrl.signal, ...(projectId ? { projectId } : {}) });
         } catch (error) {
           if (!(error instanceof DOMException && error.name === "AbortError")) {
             setTimelineFrameInspectionError(true);

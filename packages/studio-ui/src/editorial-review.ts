@@ -130,7 +130,7 @@ export function editorialOpeningEvidence(
 export async function compareEditorialOpenings(
   evidence: readonly EditorialOpeningEvidence[],
   brief: string,
-  options: { signal?: AbortSignal; maxContenders?: number } = {},
+  options: { signal?: AbortSignal; maxContenders?: number; projectId?: string } = {},
 ): Promise<EditorialOpeningComparison> {
   const contenders = [...evidence]
     .sort((left, right) => (
@@ -211,6 +211,7 @@ export async function compareEditorialOpenings(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       mode: 'source-openings',
+      ...(options.projectId ? { projectId: options.projectId } : {}),
       brief: `${brief}\n\nCross-source opening comparison: every candidate below comes from a different source. Compare them together for the opening role. Rank one clear winner; keep other clean candidates usable for later positions.`,
       candidates: specs,
       frames,
@@ -270,7 +271,7 @@ export async function reviewEditorialCandidates(
   file: File,
   qualityWindows: readonly VisualQualityWindow[],
   brief: string,
-  options: { maxCandidates?: number; signal?: AbortSignal } = {},
+  options: { maxCandidates?: number; signal?: AbortSignal; projectId?: string } = {},
 ): Promise<EditorialCandidateReviewResult> {
   const normalizedBrief = brief.trim().slice(0, 2_000);
   if (!normalizedBrief) throw new Error('editorial review brief is required');
@@ -320,7 +321,7 @@ export async function reviewEditorialCandidates(
       const response = await fetch('/api/studio/review', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mode: 'source-candidates', brief: normalizedBrief, candidates: specs, ...payload }),
+        body: JSON.stringify({ mode: 'source-candidates', brief: normalizedBrief, candidates: specs, ...(options.projectId ? { projectId: options.projectId } : {}), ...payload }),
         ...(options.signal ? { signal: options.signal } : {}),
       });
       const body = (await response.json().catch(() => ({}))) as {

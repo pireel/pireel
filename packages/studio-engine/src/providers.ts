@@ -19,6 +19,8 @@ import type { CustomVisualStyle } from './visual-style';
 
 /** One block-generation request (the same shape the BYO brief is assembled from). */
 export interface ComposeRequest {
+  /** Billing attribution only — which project this generation belongs to. */
+  projectId?: string;
   block: BlockEdit;
   instruction: string;
   theme?: string;
@@ -42,7 +44,8 @@ export interface BlockComposer {
 
 /** Speech → timed sentences (source-clock seconds). */
 export interface Transcriber {
-  transcribe(file: File): Promise<AsrSegment[]>;
+  /** opts.projectId is billing attribution only. */
+  transcribe(file: File, opts?: { projectId?: string }): Promise<AsrSegment[]>;
 }
 
 /** Source-video byte vault (content-addressed by signature). Null results = degrade to local-only. */
