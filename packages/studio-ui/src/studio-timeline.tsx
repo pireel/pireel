@@ -468,6 +468,11 @@ function StudioTimelineImpl({
    *  selection box — the discoverable way to relocate a shot inside its source. */
   const [slipPanel, setSlipPanel] = useState<string | null>(null);
   const slipPanelRef = useRef<HTMLDivElement | null>(null);
+  /** Panel zoom view: null = fit the whole source; otherwise a zoomed sub-range. The ref mirror
+   *  lets in-flight drags read the CURRENT view after followView shifts it mid-gesture. */
+  const [slipView, setSlipView] = useState<{ zoom: number; startSec: number } | null>(null);
+  const slipViewRef = useRef(slipView);
+  slipViewRef.current = slipView;
   // Click-outside / Esc closes the panel. Presses on a slip trigger button are exempt — the
   // button's own toggle owns that interaction (close-then-toggle would reopen it).
   useEffect(() => {
@@ -625,9 +630,17 @@ function StudioTimelineImpl({
         });
       }
       // The slip panel shows the WHOLE source; demand it once (bucket grid caps tile count).
+      // A zoomed view also demands its sub-range — the shorter range yields a finer bucket step.
       if (slipPanel === span.shot.id && span.shot.src) {
         const dur = shotSourceDurations?.get(span.shot.id);
-        if (dur) (demand[span.shot.src] ??= []).push({ startSec: 0, endSec: dur });
+        if (dur) {
+          (demand[span.shot.src] ??= []).push({ startSec: 0, endSec: dur });
+          if (slipView) {
+            const viewLen = dur / Math.min(16, Math.max(1, slipView.zoom));
+            const viewStart = Math.min(Math.max(slipView.startSec, 0), Math.max(0, dur - viewLen));
+            (demand[span.shot.src] ??= []).push({ startSec: viewStart, endSec: viewStart + viewLen });
+          }
+        }
       }
     }
     for (const track of trackStates ?? []) {
@@ -640,7 +653,7 @@ function StudioTimelineImpl({
     if (key === filmstripDemandKeyRef.current) return;
     filmstripDemandKeyRef.current = key;
     onFilmstripDemandChange(demand);
-  }, [onFilmstripDemandChange, sceneSpans, shotSlip, slipPanel, shotSourceDurations, trackStates, visibleRange]);
+  }, [onFilmstripDemandChange, sceneSpans, shotSlip, slipPanel, slipView, shotSourceDurations, trackStates, visibleRange]);
   // Static snap points include every visible clip edge. The playhead changes every frame, so it is
   // appended dynamically at snap time rather than invalidating this memo during playback.
   const snapPoints = useMemo(() => {
@@ -1966,6 +1979,7 @@ function StudioTimelineImpl({
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onSelectShot(shot.id, false);
+                                setSlipView(null);
                                 setSlipPanel((current) => (current === shot.id ? null : shot.id));
                               }}
                               className={`absolute bottom-0.5 right-3 z-30 h-4 w-4 items-center justify-center rounded bg-black/60 text-white/90 hover:bg-black/85 ${slipPanel === shot.id ? 'flex' : 'hidden group-hover/shot:flex'}`}
@@ -2074,27 +2088,98 @@ function StudioTimelineImpl({
                       </div>
                     );
                   })}
-                  {/* Slip panel: the WHOLE source as one strip, current window = draggable selection
-                      box. Dragging drives the same shotSlip ghost as alt-drag (the card filmstrip
-                      re-windows live); release commits once. Click anywhere = center the window. */}
+                  {/* Slip panel: the source as one strip, current window = draggable selection box.
+                      Body drag = slip (same shotSlip ghost as alt-drag; card filmstrip re-windows
+                      live; commit once on release). Edge handles = TRIM (drives the same shotResize
+                      ghost as the card edges, commits through onResizeShot with its ripple rules).
+                      −/+/1x zooms the strip around the window; the view follows the window while
+                      dragging at zoom. Click anywhere = center the window there. */}
                   {slipPanel ? (() => {
                     const span = sceneSpans.find((candidate) => candidate.shot.id === slipPanel);
                     const dur = span ? shotSourceDurations?.get(span.shot.id) : undefined;
                     if (!span || !dur || !onSlipShot) return null;
                     const strip = (span.shot.src ? clipStrips?.[span.shot.src] : filmstrip) ?? [];
+                    const rate = (span.shot.srcEnd - span.shot.srcStart) / Math.max(0.001, span.end - span.start);
+                    const minSpanSrc = Math.max(0.05, 0.2 * rate);
                     const live = shotSlip?.shotId === span.shot.id ? shotSlip.deltaSec : 0;
-                    const winLen = span.shot.srcEnd - span.shot.srcStart;
-                    const winStart = Math.min(Math.max(0, span.shot.srcStart + live), Math.max(0, dur - winLen));
-                    const W = Math.max(240, Math.min(640, x(visibleRange.endSec - visibleRange.startSec) - 24));
+                    const liveTrim = shotResize?.shotId === span.shot.id ? shotResize : null;
+                    const winLen0 = span.shot.srcEnd - span.shot.srcStart;
+                    let winStart = span.shot.srcStart + live;
+                    let winEnd = span.shot.srcEnd + live;
+                    if (liveTrim?.edge === 'left') {
+                      winStart = Math.min(Math.max(0, span.shot.srcStart + (liveTrim.atSec - span.start) * rate), winEnd - minSpanSrc);
+                    } else if (liveTrim?.edge === 'right') {
+                      winEnd = Math.max(Math.min(dur, span.shot.srcEnd + (liveTrim.atSec - span.end) * rate), winStart + minSpanSrc);
+                    }
+                    winStart = Math.max(0, winStart);
+                    winEnd = Math.min(dur, Math.max(winEnd, winStart + minSpanSrc));
+                    const W = Math.max(240, Math.min(960, x(visibleRange.endSec - visibleRange.startSec) - 24));
                     const leftMin = x(visibleRange.startSec) + 8;
                     const left = Math.min(Math.max(x(span.start), leftMin), Math.max(leftMin, x(visibleRange.endSec) - W - 24));
-                    const panelPps = W / dur;
+                    const zoom = slipView?.zoom ?? 1;
+                    const viewLen = dur / zoom;
+                    const viewStart = Math.min(Math.max(slipView?.startSec ?? 0, 0), Math.max(0, dur - viewLen));
+                    const viewEnd = viewStart + viewLen;
+                    const panelPps = W / viewLen;
                     const tileW = 40;
-                    const tiles = stripTiles(strip, 0, dur, Math.max(0.2, tileW / panelPps), panelPps);
+                    const tiles = stripTiles(strip, viewStart, viewEnd, Math.max(0.05, tileW / panelPps), panelPps);
+                    // In-flight drags must read the LATEST view (followView shifts it mid-gesture),
+                    // so pointer→seconds mapping goes through the ref, not the render closure.
+                    const viewNow = () => {
+                      const v = slipViewRef.current;
+                      const z = Math.min(16, Math.max(1, v?.zoom ?? 1));
+                      const len = dur / z;
+                      const start = Math.min(Math.max(v?.startSec ?? 0, 0), Math.max(0, dur - len));
+                      return { start, len, z };
+                    };
+                    const secAtPanel = (clientX: number, box: DOMRect) => {
+                      const v = viewNow();
+                      return v.start + ((clientX - box.left) / W) * v.len;
+                    };
+                    const pxOf = (sec: number) => ((sec - viewStart) / viewLen) * W;
                     const clampDelta = (deltaSec: number) => Math.min(
                       Math.max(deltaSec, -span.shot.srcStart),
                       Math.max(0, dur - span.shot.srcEnd),
                     );
+                    const applyZoom = (nextZoom: number) => {
+                      const z = Math.min(16, Math.max(1, nextZoom));
+                      const nextLen = dur / z;
+                      const center = (winStart + winEnd) / 2;
+                      setSlipView(z <= 1 ? null : {
+                        zoom: z,
+                        startSec: Math.min(Math.max(center - nextLen / 2, 0), Math.max(0, dur - nextLen)),
+                      });
+                    };
+                    const followView = (nextStart: number, nextEnd: number) => {
+                      const v = viewNow();
+                      if (v.z <= 1) return;
+                      if (nextStart < v.start) setSlipView({ zoom: v.z, startSec: Math.max(0, nextStart) });
+                      else if (nextEnd > v.start + v.len) {
+                        setSlipView({ zoom: v.z, startSec: Math.min(Math.max(0, dur - v.len), nextEnd - v.len) });
+                      }
+                    };
+                    const startTrimDrag = (e: React.PointerEvent, edge: 'left' | 'right') => {
+                      if (!onResizeShot || e.button !== 0) return;
+                      e.stopPropagation();
+                      const box = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
+                      let latest = edge === 'left' ? span.start : span.end;
+                      drag(e, (clientX) => {
+                        const sec = secAtPanel(clientX, box);
+                        if (edge === 'left') {
+                          const nextSrcStart = Math.min(Math.max(0, sec), span.shot.srcEnd - minSpanSrc);
+                          latest = span.start + (nextSrcStart - span.shot.srcStart) / rate;
+                          followView(nextSrcStart, span.shot.srcEnd);
+                        } else {
+                          const nextSrcEnd = Math.max(Math.min(dur, sec), span.shot.srcStart + minSpanSrc);
+                          latest = span.end + (nextSrcEnd - span.shot.srcEnd) / rate;
+                          followView(span.shot.srcStart, nextSrcEnd);
+                        }
+                        setShotResize({ shotId: span.shot.id, edge, atSec: latest });
+                      }, (moved) => {
+                        setShotResize(null);
+                        if (moved) onResizeShot(span.shot.id, edge, latest);
+                      });
+                    };
                     return (
                       <div
                         ref={slipPanelRef}
@@ -2105,7 +2190,12 @@ function StudioTimelineImpl({
                         <div className="mb-1 flex items-center gap-2 text-[10px] text-white/70">
                           <span className="shrink-0">{t('panels.slipWindow')}</span>
                           <span className="min-w-0 flex-1 truncate text-right tabular-nums">
-                            {`${winStart.toFixed(1)}s – ${(winStart + winLen).toFixed(1)}s / ${dur.toFixed(1)}s`}
+                            {`${winStart.toFixed(1)}s – ${winEnd.toFixed(1)}s (${(winEnd - winStart).toFixed(1)}s) / ${dur.toFixed(1)}s`}
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1">
+                            <button type="button" aria-label="−" className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20" onClick={() => applyZoom(zoom / 2)}>−</button>
+                            <button type="button" aria-label="1x" className="h-4 rounded bg-white/10 px-1 leading-none hover:bg-white/20" onClick={() => applyZoom(1)}>{`${zoom}x`}</button>
+                            <button type="button" aria-label="+" className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20" onClick={() => applyZoom(zoom * 2)}>+</button>
                           </span>
                           <button
                             type="button"
@@ -2117,16 +2207,17 @@ function StudioTimelineImpl({
                           </button>
                         </div>
                         <div
-                          className="relative h-12 cursor-ew-resize overflow-hidden rounded bg-white/5"
+                          className="relative h-14 cursor-ew-resize overflow-hidden rounded bg-white/5"
                           style={{ width: W }}
                           onPointerDown={(e) => {
                             const box = e.currentTarget.getBoundingClientRect();
                             const apply = (clientX: number) => {
-                              const centerSec = ((clientX - box.left) / W) * dur;
-                              const deltaSec = clampDelta(centerSec - winLen / 2 - span.shot.srcStart);
+                              const centerSec = secAtPanel(clientX, box);
+                              const deltaSec = clampDelta(centerSec - winLen0 / 2 - span.shot.srcStart);
                               const next = { shotId: span.shot.id, deltaSec };
                               shotSlipRef.current = next;
                               setShotSlip(next);
+                              followView(span.shot.srcStart + deltaSec, span.shot.srcEnd + deltaSec);
                             };
                             apply(e.clientX);
                             drag(e, (clientX) => apply(clientX), () => {
@@ -2141,9 +2232,25 @@ function StudioTimelineImpl({
                           {tiles.length ? tiles.map((tile, k) => (
                             <img key={k} src={tile.url} alt="" draggable={false} className="absolute top-0 h-full object-cover" style={{ left: tile.left, width: tileW + 1 }} />
                           )) : <div className="absolute inset-0 bg-gradient-to-r from-sky-500/25 to-sky-500/10" />}
-                          <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style={{ width: Math.max(0, (winStart / dur) * W) }} />
-                          <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/50" style={{ width: Math.max(0, W - ((winStart + winLen) / dur) * W) }} />
-                          <div className="ring-accent pointer-events-none absolute inset-y-0 rounded ring-2" style={{ left: (winStart / dur) * W, width: Math.max(6, (winLen / dur) * W) }} />
+                          <div className="pointer-events-none absolute inset-y-0 left-0 bg-black/50" style={{ width: Math.min(W, Math.max(0, pxOf(winStart))) }} />
+                          <div className="pointer-events-none absolute inset-y-0 right-0 bg-black/50" style={{ width: Math.min(W, Math.max(0, W - pxOf(winEnd))) }} />
+                          <div className="ring-accent pointer-events-none absolute inset-y-0 rounded ring-2" style={{ left: pxOf(winStart), width: Math.max(6, pxOf(winEnd) - pxOf(winStart)) }} />
+                          {onResizeShot ? (
+                            <>
+                              <div
+                                role="none"
+                                onPointerDown={(e) => startTrimDrag(e, 'left')}
+                                className="bg-accent absolute inset-y-0 z-10 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
+                                style={{ left: pxOf(winStart) - 3 }}
+                              />
+                              <div
+                                role="none"
+                                onPointerDown={(e) => startTrimDrag(e, 'right')}
+                                className="bg-accent absolute inset-y-0 z-10 w-1.5 cursor-ew-resize rounded-full opacity-80 hover:opacity-100"
+                                style={{ left: pxOf(winEnd) - 3 }}
+                              />
+                            </>
+                          ) : null}
                         </div>
                       </div>
                     );
