@@ -2307,6 +2307,14 @@ function StudioTimelineImpl({
                             {`${winStart.toFixed(1)}s – ${winEnd.toFixed(1)}s (${(winEnd - winStart).toFixed(1)}s) / ${dur.toFixed(1)}s`}
                           </span>
                           <span className="flex shrink-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              aria-label="−"
+                              className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20"
+                              onClick={() => applyZoom(zoom / 2)}
+                            >
+                              −
+                            </button>
                             <input
                               type="range"
                               min={1}
@@ -2319,11 +2327,11 @@ function StudioTimelineImpl({
                             />
                             <button
                               type="button"
-                              title={t('panels.slipWindow')}
-                              className="w-8 rounded bg-white/10 px-1 leading-4 tabular-nums hover:bg-white/20"
-                              onClick={() => setSlipView(null)}
+                              aria-label="+"
+                              className="h-4 w-4 rounded bg-white/10 leading-none hover:bg-white/20"
+                              onClick={() => applyZoom(zoom * 2)}
                             >
-                              {`${Math.round(zoom * 10) / 10}x`}
+                              +
                             </button>
                           </span>
                           <button
