@@ -373,7 +373,7 @@ export function buildMcpTools(): McpToolDef[] {
     {
       name: 'review_sequence',
       description:
-        'SEE the designed edit as a TEMPORAL SEQUENCE, not one lucky thumbnail. Requires an approved Director Plan. The tab samples each selected Semantic Scene at the meaningful entrance, development, payoff and exit states, returns the rendered frames with their exact sceneIds in time order, and reports deterministic structure problems such as missing Scene design, missing evidence, repeated geometry or inaudible planned speech. Read scene-designs.md when present. LOOK at every attached image in index order; judge the complete layered hierarchy, legibility, protected subjects, buildup, hold, clear, motivated motion and adjacent-Scene handoffs. Repair only the affected Scene designs and implementation, then re-run this tool. Use capture_frame instead for one small local change.',
+        'SEE the edit as a TEMPORAL SEQUENCE, not one lucky thumbnail. Works with or without a Director Plan. With a saved plan, the tab samples each selected Semantic Scene at its entrance, development, payoff and exit states, returns the rendered frames with their exact sceneIds in time order, and reports deterministic structure problems such as missing Scene design, missing evidence, repeated geometry or inaudible planned speech. Without a plan (the normal case for a directly executed edit), it samples the midpoint of every visible clip across the whole timeline in time order (sceneId "timeline"). LOOK at every attached image in index order; judge the complete layered hierarchy, legibility, protected subjects, buildup, hold, clear, motivated motion and handoffs between neighbouring moments. Repair only what is wrong, then re-run this tool. Use capture_frame instead for one small local change.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -381,7 +381,7 @@ export function buildMcpTools(): McpToolDef[] {
           sceneIds: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional exact Director Scene ids to review. Omit for the whole approved edit.',
+            description: 'Optional exact Director Scene ids to review when a plan exists. Omit to review the whole active output (planned Scenes, or every visible clip when there is no plan).',
           },
           maxMoments: {
             type: 'number',

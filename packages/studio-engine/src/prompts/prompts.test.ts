@@ -131,6 +131,13 @@ describe("静态提示词完整性", () => {
       "Skill-specific planning, approval and visual-design methods come only from the selected Skill",
     );
     expect(mcpInstructions("test-version")).not.toContain("whole-film proposal");
+    // The MCP opener describes a general multi-track editor: a transcript is one surface, never the gate.
+    expect(mcpInstructions("test-version")).toContain("multi-source, multi-track video editor");
+    expect(mcpInstructions("test-version")).toContain("never a prerequisite");
+    expect(mcpInstructions("test-version")).not.toContain("cut the footage by its spoken transcript.");
+    expect(mcpInstructions("test-version")).toContain("FOOTAGE WITHOUT SPEECH is a normal input");
+    expect(mcpInstructions("test-version")).toContain("SOUND AND TRANSITIONS have craft rules, not a ban");
+    expect(mcpInstructions("test-version")).toContain("it needs no Director Plan");
     expect(mcpInstructions("test-version")).toContain(
       "Uniform slices or filename-order assembly",
     );

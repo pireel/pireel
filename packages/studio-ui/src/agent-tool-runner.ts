@@ -4304,11 +4304,26 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           ...(sceneIds.length ? { sceneIds } : {}),
           maxMoments,
         });
-        if (!planned.length) {
-          return { ok: false, error: 'review_sequence requires an approved Director Plan with matching Semantic Scenes; use capture_frame for a small unplanned edit' };
+        if (!planned.length && sceneIds.length) {
+          return { ok: false, error: 'review_sequence: none of the requested sceneIds match a saved Director Plan Scene; omit sceneIds to review the whole timeline' };
+        }
+        // Direct-execution edits have no Director Plan. Fall back to one deterministic whole-timeline
+        // pass over every visible clip midpoint so an unplanned complete edit can still be reviewed
+        // as a sequence instead of one thumbnail at a time.
+        const reviewMoments = planned.length
+          ? planned
+          : unplannedReviewAtSecs(documentRef.current, maxMoments).map((atSec) => ({
+            atSec,
+            sceneId: 'timeline',
+            sceneLabel: 'Unplanned timeline',
+            phase: 'scene' as const,
+            expected: 'No Director Plan: judge the composed frame on its own terms — source dominance, legibility, protected subjects, layer coherence and continuity with the neighbouring moments.',
+          }));
+        if (!reviewMoments.length) {
+          return { ok: false, error: 'review_sequence found no visible clips to review on the active output' };
         }
         const renderTimeline = canonicalRenderTimeline(c2, documentRef.current, ctx.resolveAssetUrl);
-        const moments = planned.map((moment) => ({
+        const moments = reviewMoments.map((moment) => ({
           ...moment,
           atSec: Math.min(Math.max(0, moment.atSec), renderTimeline.durationSec),
         }));
