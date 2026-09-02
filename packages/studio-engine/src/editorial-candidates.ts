@@ -150,6 +150,9 @@ export interface EditorialAssemblyClip {
   startSec: number;
   sourceInSec: number;
   sourceOutSec: number;
+  /** Planner output only: `batch` = an authored row (its explicit span honored, snapped to legal
+   * action territory at most); `pool` = deterministic completion from unclaimed reviewed capacity. */
+  origin?: 'batch' | 'pool';
 }
 
 export interface EditorialAssemblySource {
@@ -163,6 +166,12 @@ export interface EditorialAssemblyPlan {
   actualDurationSec: number;
   changed: boolean;
   droppedClipCount: number;
+  /** Authored rows placed with their own span (possibly snapped to legal action territory). */
+  explicitClipCount?: number;
+  /** Of those, rows whose span had to be trimmed to the chain's legal boundaries. */
+  snappedClipCount?: number;
+  /** Clips the planner added from unclaimed reviewed capacity to complete coverage. */
+  fillerClipCount?: number;
 }
 
 const round3 = (value: number) => Math.round(value * 1000) / 1000;
@@ -573,7 +582,33 @@ export function planEditorialAssembly(input: {
     originalIndex: number;
     choices: Array<{ clip: EditorialAssemblyClip; score: number }>;
     entry?: ChainEntry;
+    /** The row's authored span is its one take (the model's decision, not the planner's). */
+    explicit?: boolean;
+    /** That span crossed static/excluded territory and was cut back to the chain's legal edge. */
+    snapped?: boolean;
   };
+  // Duration-weighted brick score of an arbitrary span inside a chain (explicit takes carry no
+  // rhythm shaping: their length is the author's editorial decision).
+  const chainSpanScore = (chain: EditorialShotChain, startSec: number, endSec: number) => {
+    let weighted = 0;
+    let covered = 0;
+    for (const unit of chain) {
+      const overlap = overlapDuration(startSec, endSec, unit.startSec, unit.endSec);
+      if (!overlap) continue;
+      weighted += overlap * unit.score;
+      covered += overlap;
+    }
+    return covered ? weighted / covered : 0;
+  };
+  // The bricks of a chain that lie inside [startSec, endSec] — the capacity an explicit take
+  // leaves unclaimed on either side of itself, which returns to the pool as its own chain.
+  const chainWithin = (chain: EditorialShotChain, startSec: number, endSec: number): EditorialShotChain => (
+    chain.flatMap((unit) => {
+      const clippedStart = Math.max(unit.startSec, startSec);
+      const clippedEnd = Math.min(unit.endSec, endSec);
+      return clippedEnd - clippedStart >= 0.25 ? [{ ...unit, startSec: round3(clippedStart), endSec: round3(clippedEnd) }] : [];
+    })
+  );
   // The full brick-chain pool: every accepted candidate of every reviewed source, exploded into
   // chains of contiguous action units. This IS the assembly's whole choice space — the batch only
   // decides which chains lead (opening/ordering) by claiming them below.
@@ -608,6 +643,30 @@ export function planEditorialAssembly(input: {
     ));
     if (!entry) return [];
     entry.used = true;
+    // The authored span is the take. The platform only enforces legality — the chain already
+    // excludes static holds and broken action, so the span is cut back to the chain's edges —
+    // and the shot floor. Everything else about its length is the author's call: a "two seconds
+    // per shot" instruction from the user has to land somewhere, and this is where.
+    const legalStart = round3(Math.max(clip.sourceInSec, entry.startSec));
+    const legalEnd = round3(Math.min(clip.sourceOutSec, entry.endSec));
+    if (legalEnd - legalStart >= MIN_ASSEMBLY_SHOT_SEC) {
+      const snapped = Math.abs(legalStart - clip.sourceInSec) > 0.05 || Math.abs(legalEnd - clip.sourceOutSec) > 0.05;
+      // Capacity the take leaves on either side goes back to the pool as separate chains, so an
+      // explicit 5s take out of a 19s chain does not silently retire the other 14s.
+      for (const residual of [chainWithin(entry.chain, entry.startSec, legalStart), chainWithin(entry.chain, legalEnd, entry.endSec)]) {
+        if (!residual.length) continue;
+        chainPool.push({
+          ...entry, chain: residual, startSec: residual[0]!.startSec, endSec: residual[residual.length - 1]!.endSec, used: false,
+        });
+      }
+      const take: EditorialAssemblyClip = { ...clip, sourceInSec: legalStart, sourceOutSec: legalEnd };
+      return [{
+        clip, originalIndex, entry, explicit: true, snapped,
+        choices: [{ clip: take, score: Math.round(chainSpanScore(entry.chain, legalStart, legalEnd) * 10) / 10 }],
+      }];
+    }
+    // A span with no legal remainder above the floor (a sub-second sliver, or entirely static)
+    // cannot be honored; the chain's own natural takes stand in for it.
     const choices = chainAssemblyChoices(entry.chain, clip, entry.cutOptions);
     if (!choices.length) return [];
     return [{ clip, originalIndex, choices, entry }];
@@ -667,43 +726,63 @@ export function planEditorialAssembly(input: {
       }
     };
     for (const [tick, state] of states) {
-      const mayDrop = rowIndex > 0;
+      // An authored (explicit) row is never traded away for a better-scoring filler: it is dropped
+      // only when nothing of it fits the remaining time (no portion produces a state).
+      const mayDrop = rowIndex > 0 && !row.explicit;
       if (mayDrop) keepBetter(tick, state);
       for (const choice of row.choices) {
         const durationSec = choice.clip.sourceOutSec - choice.clip.sourceInSec;
         const remainingSec = round3(targetDurationSec - state.durationSec);
         if (remainingSec <= 0) continue;
-        let selectedClip = choice.clip;
-        let selectedDurationSec = durationSec;
+        const portions: Array<{ clip: EditorialAssemblyClip; durationSec: number; score: number }> = [];
         if (durationSec > remainingSec + 0.001) {
           // Whole natural choices are preferred. When the next reviewed choice would cross the
           // narration boundary, use a meaningful peak-centred portion of that already-approved
           // interval instead of dropping the whole shot and leaving a visible tail gap.
           const minimumReadableSec = Math.min(1.2, Math.max(0.8, durationSec * 0.35));
           if (remainingSec < minimumReadableSec) continue;
+          // Fitting an over-long take is the planner's job, and it offers the DP two ways to do
+          // it: the reviewer's own cut option that lies inside the take and fills the remaining
+          // time (a real aesthetic take, scored as such), and a blind peak-centred window. Both
+          // become states; coverage-first dominance then decides — a short high-scoring option
+          // never wins over a portion that actually closes the gap.
+          const reviewedFit = (row.entry?.cutOptions ?? [])
+            .filter((option) => (
+              option.startSec >= choice.clip.sourceInSec - 0.001
+              && option.endSec <= choice.clip.sourceOutSec + 0.001
+              && option.endSec - option.startSec <= remainingSec + 0.001
+              && option.endSec - option.startSec >= Math.max(minimumReadableSec, remainingSec - 0.3)
+            ))
+            .sort((left, right) => right.score - left.score || (right.endSec - right.startSec) - (left.endSec - left.startSec))[0];
+          if (reviewedFit) {
+            const startSec = round3(reviewedFit.startSec);
+            const endSec = round3(reviewedFit.endSec);
+            portions.push({ clip: { ...choice.clip, sourceInSec: startSec, sourceOutSec: endSec }, durationSec: endSec - startSec, score: reviewedFit.score });
+          }
           const sourceCenterSec = (choice.clip.sourceInSec + choice.clip.sourceOutSec) / 2;
-          const trimmed = centeredRange(
-            choice.clip.sourceInSec,
-            choice.clip.sourceOutSec,
-            sourceCenterSec,
-            remainingSec,
-          );
-          selectedClip = { ...choice.clip, sourceInSec: trimmed.startSec, sourceOutSec: trimmed.endSec };
-          selectedDurationSec = trimmed.endSec - trimmed.startSec;
+          const trimmed = centeredRange(choice.clip.sourceInSec, choice.clip.sourceOutSec, sourceCenterSec, remainingSec);
+          portions.push({
+            clip: { ...choice.clip, sourceInSec: trimmed.startSec, sourceOutSec: trimmed.endSec },
+            durationSec: trimmed.endSec - trimmed.startSec,
+            score: choice.score,
+          });
+        } else {
+          portions.push({ clip: choice.clip, durationSec, score: choice.score });
         }
-        const nextDurationSec = round3(state.durationSec + selectedDurationSec);
-        const nextTick = Math.min(targetTick, Math.max(1, Math.round(nextDurationSec * 10)));
-        const nextState: State = {
-          // Score is weighted by the seconds it fills: the objective is average QUALITY over the
-          // covered narration. An unweighted per-choice sum rewarded shot COUNT instead — with
-          // coverage fixed, the optimum was "every chain in the film at its shortest take", which
-          // dragged 25–35-score garnish (a slippers detail shot) into a montage that had 84s of
-          // high-scoring person footage for a 53s narration.
-          score: state.score + choice.score * selectedDurationSec,
-          durationSec: nextDurationSec,
-          selected: [...state.selected, { rowIndex, clip: selectedClip }],
-        };
-        keepBetter(nextTick, nextState);
+        for (const portion of portions) {
+          const nextDurationSec = round3(state.durationSec + portion.durationSec);
+          const nextTick = Math.min(targetTick, Math.max(1, Math.round(nextDurationSec * 10)));
+          keepBetter(nextTick, {
+            // Score is weighted by the seconds it fills: the objective is average QUALITY over the
+            // covered narration. An unweighted per-choice sum rewarded shot COUNT instead — with
+            // coverage fixed, the optimum was "every chain in the film at its shortest take", which
+            // dragged 25–35-score garnish (a slippers detail shot) into a montage that had 84s of
+            // high-scoring person footage for a 53s narration.
+            score: state.score + portion.score * portion.durationSec,
+            durationSec: nextDurationSec,
+            selected: [...state.selected, { rowIndex, clip: portion.clip }],
+          });
+        }
       }
     }
     states = next.size ? next : states;
@@ -715,14 +794,18 @@ export function planEditorialAssembly(input: {
     || right.selected.length - left.selected.length
   ))[0];
   const selected = bestEntry?.[1].selected ?? [];
-  // Deterministic ordering pass: coverage and score chose WHAT plays; review evidence now
-  // chooses WHERE. The opening pins to the highest-ranked SURVIVING opening contender (a
-  // contender whose chain fell below the shot floor simply yields to the next rank), the
-  // strongest ending-fit chain closes, and adjacent same-source shots are spaced apart when an
-  // alternative order exists.
-  const orderedSelected = [...selected];
+  // Ordering: the authored batch keeps its authored order and leads — sequence is the author's
+  // decision as much as the takes are. Review evidence orders only what the planner ADDED: the
+  // opening pins to the highest-ranked surviving contender (only when no authored row leads),
+  // the strongest ending-fit chain closes, and adjacent same-source shots are spaced apart.
+  // Batch rows that were dropped leave gaps in `rows`, so classify by the row's ORIGINAL index
+  // (filler rows are numbered past the batch), never by its position in `rows`.
+  const batchCount = input.clips.length;
+  const isAuthored = (item: { rowIndex: number }) => (rows[item.rowIndex]?.originalIndex ?? batchCount) < batchCount;
+  const authored = selected.filter(isAuthored);
+  const orderedSelected = selected.filter((item) => !isAuthored(item));
   const entryOf = (item: { rowIndex: number }) => rows[item.rowIndex]?.entry ?? null;
-  for (const contender of input.opening ?? []) {
+  for (const contender of authored.length ? [] : input.opening ?? []) {
     const index = orderedSelected.findIndex((item) => {
       const entry = entryOf(item);
       return !!entry && entry.assetId === contender.assetId && entry.candidateId === contender.candidateId;
@@ -759,8 +842,9 @@ export function planEditorialAssembly(input: {
     }
   }
   let atSec = round3(Math.min(...input.clips.map((clip) => clip.startSec)));
-  const clips = orderedSelected.map(({ clip }) => {
-    const placed = { ...clip, startSec: atSec };
+  const clips = [...authored, ...orderedSelected].map((item) => {
+    const { clip } = item;
+    const placed: EditorialAssemblyClip = { ...clip, startSec: atSec, origin: isAuthored(item) ? 'batch' : 'pool' };
     atSec = round3(atSec + clip.sourceOutSec - clip.sourceInSec);
     return placed;
   });
@@ -785,12 +869,16 @@ export function planEditorialAssembly(input: {
       || Math.abs(clip.sourceInSec - original.sourceInSec) > 0.01
       || Math.abs(clip.sourceOutSec - original.sourceOutSec) > 0.01;
   });
+  const explicitRows = authored.filter((item) => rows[item.rowIndex]?.explicit);
   return {
     clips,
     targetDurationSec,
     actualDurationSec,
     changed,
-    droppedClipCount: Math.max(0, input.clips.length - clips.length),
+    droppedClipCount: Math.max(0, batchCount - authored.length),
+    explicitClipCount: explicitRows.length,
+    snappedClipCount: explicitRows.filter((item) => rows[item.rowIndex]?.snapped).length,
+    fillerClipCount: orderedSelected.length,
   };
 }
 

@@ -432,7 +432,7 @@ describe('editorial placement receipts', () => {
     expect(unrepaired!.passthroughCount).toBe(1);
   });
 
-  it('applies a model shot order only when it is a legal opening-pinned permutation', () => {
+  it('applies a model shot order only to pool completion, behind the authored lead', () => {
     const prepared = prepareEditorialPlacement([review], 'add_clips', {
       clips: [
         { assetId: 'narration-asset', role: 'narration', startSec: 0, durationSec: 1.8 },
@@ -441,21 +441,27 @@ describe('editorial placement receipts', () => {
     }, 1.8)!;
     expect(prepared.passthroughCount).toBe(1);
     expect(prepared.shots.length).toBeGreaterThan(0);
-    const ids = prepared.shots.map((shot) => shot.id);
-    // Identity permutation applies cleanly and keeps sequential starts.
-    const applied = applyEditorialShotOrder(prepared, ids);
+    // The authored row is placed as written and reported as the author's.
+    expect(prepared.shots[0]).toMatchObject({ origin: 'batch' });
+    expect(prepared.explicitClipCount).toBe(1);
+    const authoredIds = prepared.shots.filter((shot) => shot.origin === 'batch').map((shot) => shot.id);
+    const poolIds = prepared.shots.filter((shot) => shot.origin === 'pool').map((shot) => shot.id);
+    // A permutation of the pool ids applies cleanly, keeps the authored lead first and sequential starts.
+    const applied = applyEditorialShotOrder(prepared, [...poolIds].reverse());
     expect(applied).not.toBeNull();
     const clips = (applied!.clips as Array<Record<string, unknown>>).slice(prepared.passthroughCount);
+    expect(clips[0]).toMatchObject({ assetId: 'asset-beach', sourceInSec: 0.3, sourceOutSec: 2.1 });
     for (let index = 1; index < clips.length; index += 1) {
       const previous = clips[index - 1]!;
       const previousEnd = Number(previous.startSec)
         + (Number(previous.sourceOutSec) - Number(previous.sourceInSec));
       expect(Number(clips[index]!.startSec)).toBeCloseTo(previousEnd, 2);
     }
-    // Losing a shot, inventing one, or demoting the opening all fall back to deterministic order.
-    expect(applyEditorialShotOrder(prepared, ids.slice(1))).toBeNull();
-    expect(applyEditorialShotOrder(prepared, [...ids.slice(0, -1), 'shot-fake'])).toBeNull();
-    if (ids.length > 1) expect(applyEditorialShotOrder(prepared, [...ids.slice(1), ids[0]!])).toBeNull();
+    // Touching the authored lead, losing a pool shot, or inventing one all fall back to the
+    // deterministic order.
+    expect(applyEditorialShotOrder(prepared, [...authoredIds, ...poolIds])).toBeNull();
+    if (poolIds.length) expect(applyEditorialShotOrder(prepared, poolIds.slice(1))).toBeNull();
+    expect(applyEditorialShotOrder(prepared, [...poolIds.slice(0, -1), 'shot-fake'])).toBeNull();
   });
 
   it('engages deterministic assembly for a mixed batch whose picture rows omit startSec', () => {

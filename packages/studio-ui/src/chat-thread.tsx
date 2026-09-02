@@ -312,18 +312,26 @@ export function ChatThread({
       const placedNarrationEndSec = comp?.audioTracks
         ?.filter((clip) => clip.role === "narration" && !clip.muted)
         .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
-      // Placed narration is authoritative; when it is absent (not yet placed, or rolled back) the
-      // measured duration of the narration audio produced this session keeps deterministic
-      // assembly engaged instead of silently degrading to freehand placement at target=0.
+      // The picture spine, in order of authority: placed narration; narration audio produced this
+      // session but not (yet) on the timeline; an explicit targetDurationSec on the call (a
+      // silent product montage cut to a user spec); the music bed's end. Without any spine the
+      // deterministic assembly cannot engage and placement is freehand — the case to avoid.
+      const explicitTargetSec = Number((requestedInput as { targetDurationSec?: unknown }).targetDurationSec);
+      const musicEndSec = comp?.audioTracks
+        ?.filter((clip) => clip.role === "music" && !clip.muted)
+        .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
       const narrationEndSec = placedNarrationEndSec > 0
         ? placedNarrationEndSec
-        : narrationDurationFromMessages(effectiveMessages);
+        : narrationDurationFromMessages(effectiveMessages)
+          || (Number.isFinite(explicitTargetSec) && explicitTargetSec > 0 ? explicitTargetSec : 0)
+          || musicEndSec;
       const preparedPlacement = prepareEditorialPlacement(
         effectiveMessages,
         id,
         requestedInput,
         narrationEndSec,
       );
+      if (preparedPlacement) ledger.pictureTargetSec = preparedPlacement.targetDurationSec;
       // Repair arming (a detected coverage gap) stands the assembly gate down so the one legal
       // fix — an add_clips batch from the same review evidence — is not blocked by its own lock.
       const editorialPictureLocked = !ledger.pictureRepairArmed
@@ -366,7 +374,7 @@ export function ChatThread({
           data: {
             skipped: true,
             reason: "editorial-picture-locked",
-            instruction: "Preserve the current picture edit. Continue only with unfinished captions, typography, sound, deterministic delivery checks, and a concise final summary.",
+            instruction: "The picture already covers the target; a second full batch would only rebuild it. To change specific shots, lengths or order, edit those clips directly (remove, trim, move) — coverage is re-measured after each edit and a gap opens the gate for one repair batch. Otherwise continue with unfinished captions, typography, sound, deterministic delivery checks, and a concise final summary.",
           },
         });
         return;
@@ -464,13 +472,19 @@ export function ChatThread({
         }
         visualReviewCountRef.current += 1;
       }
-      // Narrative ordering is delegated taste: selection and durations are locked by the
-      // deterministic assembly, and a lightweight model pass may only permute the shots
-      // (opening stays pinned). Any failure — timeout, bad output, non-permutation — falls
-      // back silently to the deterministic order; correctness never depends on this call.
+      // Narrative ordering of what the planner ADDED is delegated taste: the authored batch keeps
+      // its authored order and leads, and a lightweight model pass may permute only the pool
+      // completion that follows it — anchored on the last authored shot so the tail continues
+      // from it. With no authored shot the whole montage is orderable (opening stays pinned).
+      // Any failure — timeout, bad output, non-permutation — falls back silently to the
+      // deterministic order; correctness never depends on this call.
       let orderedInput = executionInput;
       let orderingSource: "model" | "deterministic" | undefined;
-      if (preparedPlacement && preparedPlacement.shots.length >= 4) {
+      const authoredShots = preparedPlacement?.shots.filter((shot) => shot.origin === "batch") ?? [];
+      const poolShots = preparedPlacement?.shots.filter((shot) => shot.origin === "pool") ?? [];
+      const anchorShot = authoredShots.length ? authoredShots[authoredShots.length - 1] : null;
+      const orderableShots = anchorShot ? [anchorShot, ...poolShots] : preparedPlacement?.shots ?? [];
+      if (preparedPlacement && poolShots.length >= 3 && orderableShots.length >= 4) {
         orderingSource = "deterministic";
         try {
           const orderCtrl = new AbortController();
@@ -478,13 +492,15 @@ export function ChatThread({
           const response = await fetch("/api/studio/order-shots", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ shots: preparedPlacement.shots, ...(projectId ? { projectId } : {}) }),
+            body: JSON.stringify({ shots: orderableShots, ...(projectId ? { projectId } : {}) }),
             signal: orderCtrl.signal,
           });
           clearTimeout(orderTimer);
           if (response.ok) {
             const bodyJson = (await response.json()) as { order?: unknown };
-            const order = Array.isArray(bodyJson.order) ? bodyJson.order.map(String) : [];
+            const returned = Array.isArray(bodyJson.order) ? bodyJson.order.map(String) : [];
+            // The anchor is context for the model, not part of the permutation it owns.
+            const order = anchorShot ? returned.filter((shotId) => shotId !== anchorShot.id) : returned;
             const applied = applyEditorialShotOrder(preparedPlacement, order);
             if (applied) {
               orderedInput = applied;
@@ -529,10 +545,13 @@ export function ChatThread({
           const narrationEnd = compAfter?.audioTracks
             ?.filter((clip) => clip.role === "narration" && !clip.muted)
             .reduce((latest, clip) => Math.max(latest, audioClipWindow(clip, 0).end), 0) ?? 0;
+          // Same spine the assembly was fitted to: narration when present, else the target the
+          // planner recorded (explicit spec or music bed) — a silent montage is measured too.
+          const spineEnd = narrationEnd > 0 ? narrationEnd : ledger.pictureTargetSec;
           const pictureSec = (compAfter?.shots ?? [])
             .reduce((sum, shot) => sum + Math.max(0, shot.srcEnd - shot.srcStart), 0);
-          const gap = narrationEnd - pictureSec;
-          if (narrationEnd > 0 && gap > Math.max(1, narrationEnd * 0.03)) {
+          const gap = spineEnd - pictureSec;
+          if (spineEnd > 0 && gap > Math.max(1, spineEnd * 0.03)) {
             pictureCoverageGapSec = Math.round(gap * 10) / 10;
             ledger.pictureRepairArmed = true;
           }
@@ -544,11 +563,14 @@ export function ChatThread({
                 ...(out.data && typeof out.data === "object" ? out.data : {}),
                 pictureCoverageGap: {
                   gapSec: pictureCoverageGapSec,
-                  instruction: `This edit left the picture ${pictureCoverageGapSec}s SHORT of the narration. Close the gap now in ONE add_clips batch using unplaced accepted or reserve:true ranges from the existing review receipt; never stretch, slow down, or repeat already-placed shots. The assembly gate is open for exactly this repair.`,
+                  instruction: `This edit left the picture ${pictureCoverageGapSec}s SHORT of the target length. If that is not what the user asked for, close the gap in ONE add_clips batch using unplaced accepted or reserve:true ranges from the existing review receipt (your spans are placed as written; the planner completes only what you leave open); never stretch, slow down, or repeat already-placed shots. The assembly gate is open for exactly this repair.`,
                 },
               },
             }
           : out;
+        const composition = preparedPlacement
+          ? `${preparedPlacement.explicitClipCount} shot(s) are your explicit spans${preparedPlacement.snappedClipCount ? ` (${preparedPlacement.snappedClipCount} snapped to legal action boundaries — static or broken-action territory is never placed)` : ""}${preparedPlacement.droppedClipCount ? `, ${preparedPlacement.droppedClipCount} requested row(s) could not be placed (no legal remainder, or no time left)` : ""}${preparedPlacement.fillerClipCount ? `, ${preparedPlacement.fillerClipCount} completed from the reviewed pool in the time you left open` : ""}.`
+          : "";
         const reportedOut = out.ok && preparedPlacement
           ? {
               ...out,
@@ -558,17 +580,19 @@ export function ChatThread({
                   targetDurationSec: preparedPlacement.targetDurationSec,
                   actualDurationSec: preparedPlacement.actualDurationSec,
                   droppedClipCount: preparedPlacement.droppedClipCount,
+                  explicitClipCount: preparedPlacement.explicitClipCount,
+                  snappedClipCount: preparedPlacement.snappedClipCount,
+                  fillerClipCount: preparedPlacement.fillerClipCount,
                   naturalSpeed: true,
                   ...(orderingSource ? { ordering: orderingSource } : {}),
                   // An under-target assembly is NOT a finished picture: say so in the receipt and
-                  // name the one legal fix, instead of letting a lock message call it complete.
-                  // A covered assembly is equally explicit the other way: without the FINAL
-                  // declaration a model re-planned "its own" cut and stripped the montage apart.
+                  // name the one legal fix. A covered assembly says what is the author's and what
+                  // is completion, and stays editable — coverage is re-measured after every edit.
                   ...(assemblyCovered ? {
-                    instruction: `The montage is COMPLETE: deterministic assembly placed ${preparedPlacement.actualDurationSec}s of reviewed picture covering the full ${preparedPlacement.targetDurationSec}s narration at natural speed. This IS the final picture for this turn — do not remove, reorder, re-add, or re-plan picture clips. Selection criteria live in the review brief and were already applied during review; do not re-litigate selection (topic fit, ordering, taste) after assembly. Continue with captions, typography, sound, and the final summary.`,
+                    instruction: `The picture covers the full ${preparedPlacement.targetDurationSec}s target at natural speed (${preparedPlacement.actualDurationSec}s placed). ${composition} Your authored order was kept. Selection criteria were applied during review and are settled; if the user's instructions call for different shots, lengths or order, edit the specific clips (remove, trim, move, or one add_clips batch of explicit spans) — coverage is re-measured after each edit and any gap is reported. Otherwise continue with captions, typography, sound, and the final summary.`,
                   } : {
                     shortfallSec: Math.round(assemblyShortfallSec * 10) / 10,
-                    instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s narration, and deterministic assembly already drew on the ENTIRE reviewed pool — retrying placement cannot add coverage. Never stretch, slow down, or repeat shots. Use ask_user to offer the user a choice: add more footage for review, or shorten the narration script and regenerate speech.`,
+                    instruction: `The picture covers ${preparedPlacement.actualDurationSec}s of the ${preparedPlacement.targetDurationSec}s target. ${composition} Completion already drew on the ENTIRE reviewed pool — retrying placement cannot add coverage. Never stretch, slow down, or repeat shots. If the shortfall follows from the user's own constraints (e.g. a fixed length per shot), say so; otherwise use ask_user to offer a choice: add more footage for review, or shorten the narration script and regenerate speech.`,
                   }),
                 },
               },

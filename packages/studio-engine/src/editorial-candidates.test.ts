@@ -485,23 +485,92 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(planned.clips[0]!.sourceOutSec).toBeCloseTo(6.5, 2);
   });
 
-  it('orders the montage from evidence: opening contender first, ending fit last, sources spaced', () => {
-    const performer = (assetId: string, candidateId: string, startSec: number, endSec: number, patch: Record<string, unknown> = {}) => ({
-      assetId,
-      candidates: [reviewedCandidate({
-        candidateId, startSec, endSec, score: 88,
-        actionPhases: [{ phase: 'performance', startSec, endSec, note: 'complete action' }],
-        cutOptions: [{ durationSec: endSec - startSec, startSec, endSec, score: 88, reason: 'complete' }],
-        ...patch,
-      })],
-    });
+  const performer = (assetId: string, candidateId: string, startSec: number, endSec: number, patch: Record<string, unknown> = {}) => ({
+    assetId,
+    candidates: [reviewedCandidate({
+      candidateId, startSec, endSec, score: 88,
+      actionPhases: [{ phase: 'performance', startSec, endSec, note: 'complete action' }],
+      cutOptions: [{ durationSec: endSec - startSec, startSec, endSec, score: 88, reason: 'complete' }],
+      ...patch,
+    })],
+  });
+
+  it('keeps the authored batch in authored order with its explicit takes; evidence orders only filler', () => {
+    // The author chose walker → opener → closer and explicit 2s takes. Sequence and length are
+    // the author's decisions: the opening contender does not displace the authored first shot,
+    // and the takes are placed as written (they lie inside legal action territory).
     const planned = planEditorialAssembly({
       clips: [
-        { assetId: 'walker', startSec: 0, sourceInSec: 0, sourceOutSec: 6 },
-        { assetId: 'opener', startSec: 6, sourceInSec: 0, sourceOutSec: 5 },
-        { assetId: 'closer', startSec: 11, sourceInSec: 0, sourceOutSec: 5 },
+        { assetId: 'walker', startSec: 0, sourceInSec: 1, sourceOutSec: 3 },
+        { assetId: 'opener', startSec: 2, sourceInSec: 0, sourceOutSec: 2 },
+        { assetId: 'closer', startSec: 4, sourceInSec: 2, sourceOutSec: 4 },
       ],
       sources: [
+        performer('walker', 'cand-w', 0, 6),
+        performer('opener', 'cand-o', 0, 5),
+        performer('closer', 'cand-c', 0, 5, { roleFit: [{ role: 'ending', score: 90 }] }),
+      ],
+      targetDurationSec: 6,
+      opening: [{ assetId: 'opener', candidateId: 'cand-o' }],
+    });
+    expect(planned.clips.map((clip) => clip.assetId)).toEqual(['walker', 'opener', 'closer']);
+    expect(planned.clips.map((clip) => [clip.sourceInSec, clip.sourceOutSec])).toEqual([[1, 3], [0, 2], [2, 4]]);
+    expect(planned.clips.every((clip) => clip.origin === 'batch')).toBe(true);
+    expect(planned).toMatchObject({ explicitClipCount: 3, snappedClipCount: 0, fillerClipCount: 0, droppedClipCount: 0 });
+  });
+
+  it('returns the capacity an explicit take leaves unclaimed to the pool and orders filler from evidence', () => {
+    // A 2s take out of a 6s chain: the other 4s stay available for completion. With the batch
+    // under-sampling, filler follows the authored lead and the ending-fit chain closes.
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'walker', startSec: 0, sourceInSec: 2, sourceOutSec: 4 }],
+      sources: [
+        performer('walker', 'cand-w', 0, 6),
+        performer('opener', 'cand-o', 0, 5),
+        performer('closer', 'cand-c', 0, 5, { roleFit: [{ role: 'ending', score: 90 }] }),
+      ],
+      targetDurationSec: 14,
+      opening: [{ assetId: 'opener', candidateId: 'cand-o' }],
+    });
+    expect(planned.clips[0]).toMatchObject({ assetId: 'walker', sourceInSec: 2, sourceOutSec: 4, origin: 'batch' });
+    expect(planned.clips[planned.clips.length - 1]?.assetId).toBe('closer');
+    expect(planned.clips.slice(1).every((clip) => clip.origin === 'pool')).toBe(true);
+    const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
+    expect(total).toBeGreaterThanOrEqual(13);
+    // Residual walker capacity (0–2 / 4–6) was reachable for completion.
+    expect(planned.clips.filter((clip) => clip.assetId === 'walker').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('snaps an explicit take to legal action territory instead of overriding its length', () => {
+    // The author asked for 0–3 of a source whose first 2s are a static setup: the chain starts
+    // at 2, so the take becomes 2–3 (reported as snapped), not a planner-chosen alternative.
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'src', startSec: 0, sourceInSec: 0, sourceOutSec: 3.5 }],
+      sources: [{ assetId: 'src', candidates: [reviewedCandidate({
+        candidateId: 'cand-src', startSec: 0, endSec: 8, score: 90,
+        actionPhases: [
+          { phase: 'setup', startSec: 0, endSec: 2, note: 'static pose, waiting' },
+          { phase: 'performance', startSec: 2, endSec: 8, note: 'walks toward camera' },
+        ],
+        cutOptions: [{ durationSec: 6, startSec: 2, endSec: 8, score: 90, reason: 'walk' }],
+      })] }],
+      targetDurationSec: 1.5,
+    });
+    expect(planned.clips[0]).toMatchObject({ sourceInSec: 2, sourceOutSec: 3.5, origin: 'batch' });
+    expect(planned).toMatchObject({ explicitClipCount: 1, snappedClipCount: 1 });
+  });
+
+  it('orders a pure pool completion from evidence: opening contender first, ending fit last', () => {
+    // The only authored row is a sub-floor sliver, so every placed shot is pool completion —
+    // the one case where review evidence (not the author) decides the sequence.
+    const planned = planEditorialAssembly({
+      clips: [{ assetId: 'sliver', startSec: 0, sourceInSec: 10.4, sourceOutSec: 11.15 }],
+      sources: [
+        { assetId: 'sliver', candidates: [reviewedCandidate({
+          candidateId: 'cand-sliver', startSec: 10.4, endSec: 11.15, score: 94,
+          actionPhases: [{ phase: 'performance', startSec: 10.4, endSec: 11.15, note: 'brief gaze' }],
+          cutOptions: [{ durationSec: 0.75, startSec: 10.4, endSec: 11.15, score: 94, reason: 'gaze' }],
+        })] },
         performer('walker', 'cand-w', 0, 6),
         performer('opener', 'cand-o', 0, 5),
         performer('closer', 'cand-c', 0, 5, { roleFit: [{ role: 'ending', score: 90 }] }),
@@ -511,6 +580,7 @@ describe('editorial temporal reconciliation and assembly', () => {
     });
     expect(planned.clips[0]?.assetId).toBe('opener');
     expect(planned.clips[planned.clips.length - 1]?.assetId).toBe('closer');
+    expect(planned.clips.every((clip) => clip.origin === 'pool')).toBe(true);
   });
 
   it('assembles from the pool even when every batch row is unusable', () => {
@@ -563,7 +633,10 @@ describe('editorial temporal reconciliation and assembly', () => {
     expect(planned.clips[0]?.assetId).toBe('picked');
   });
 
-  it('prefers spreading coverage across reservoirs over one monolithic hold when capacity allows', () => {
+  it('honors an explicitly requested long hold and drops the rows it leaves no room for', () => {
+    // The author asked for the whole 20s hold first, then two 7s alternates, for a 20s target.
+    // The hold is the author's take and is placed as written; the alternates cannot fit and are
+    // dropped (reported), never re-cut into a planner-preferred spread.
     const planned = planEditorialAssembly({
       clips: [
         { assetId: 'hold', startSec: 0, sourceInSec: 0, sourceOutSec: 20 },
@@ -592,12 +665,9 @@ describe('editorial temporal reconciliation and assembly', () => {
       ],
       targetDurationSec: 20,
     });
-    const total = planned.clips.reduce((sum, clip) => sum + (clip.sourceOutSec - clip.sourceInSec), 0);
-    expect(total).toBeGreaterThanOrEqual(19);
-    // Coverage is reachable without the 20s monolith: the long phase contributes a peak-centred
-    // fraction and the alternates carry the rest.
-    expect(planned.clips.every((clip) => clip.sourceOutSec - clip.sourceInSec < 16)).toBe(true);
-    expect(planned.clips.length).toBeGreaterThanOrEqual(3);
+    expect(planned.clips).toHaveLength(1);
+    expect(planned.clips[0]).toMatchObject({ assetId: 'hold', sourceInSec: 0, sourceOutSec: 20, origin: 'batch' });
+    expect(planned).toMatchObject({ actualDurationSec: 20, droppedClipCount: 2, explicitClipCount: 1 });
   });
 
   it('uses a readable portion of the final reviewed interval to close a discrete duration gap', () => {

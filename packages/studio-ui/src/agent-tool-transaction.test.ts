@@ -426,7 +426,7 @@ describe('Agent composition transaction boundary', () => {
     const result = await runStudioTool(h.ctx, 'read_script', {});
     expect(result).toMatchObject({ ok: false, error: '提取口播稿失败,稍后再试' });
 
-    const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
+    const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
     expect(execute).toContain('After Approve, run `remove_silence` first');
     expect(execute).toContain('do not retry it in the same user request');
@@ -647,7 +647,7 @@ describe('Agent composition transaction boundary', () => {
   });
 
   it('keeps speech edits visually directed without an implicit Smart Select frame', () => {
-    const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
+    const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     expect(skill).not.toContain('Smart Select');
     expect(skill).not.toContain('attach `editorial-pulse`');
     expect(skill).toContain('meaningful new visual anchor roughly every 5–10 seconds');
