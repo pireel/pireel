@@ -76,6 +76,7 @@ import { createGlMixer, glDirection } from '@pireel/studio-engine/transition-gl'
 import { injectPreviewRuntime } from './sample-composition';
 import { materializeRemoteMedia } from './remote-media';
 import { buildInlineFontCss } from './export-fonts';
+import { webFontIdOf } from '@pireel/studio-engine/font-library';
 import { t } from './i18n';
 import {
   browserVisualLayerPlan,
@@ -99,10 +100,24 @@ function assertExportableComposition(comp: Composition): void {
   if (issues.length) throw new Error(`Invalid composition: ${issues.slice(0, 3).map((issue) => `${issue.path} ${issue.message}`).join('; ')}`);
 }
 
+/** Every font id a composition renders with: display-text blocks AND the caption layer (main + translation line). */
+function compositionFontIds(comp: Composition): unknown[] {
+  return [
+    ...comp.blocks.map((block) => block.slots.fontFamily),
+    comp.captionStyle?.font,
+    comp.captionStyle?.sub?.font,
+  ];
+}
+
 function compositionLocalFontFamilies(comp: Composition): string[] {
-  return [...new Set(comp.blocks
-    .map((block) => displayTextLocalFontFamily(block.slots.fontFamily))
+  return [...new Set(compositionFontIds(comp)
+    .map((value) => displayTextLocalFontFamily(value))
     .filter((family): family is string => family !== null))];
+}
+
+function compositionWebFontIds(comp: Composition): string[] {
+  return [...new Set(compositionFontIds(comp)
+    .filter((value): value is string => typeof value === 'string' && webFontIdOf(value) !== null))];
 }
 
 /* ============================ Sources and segments ============================ */
@@ -479,6 +494,7 @@ export async function captureCompositionFrame(opts: {
       overlay.root.textContent ?? '',
       undefined,
       compositionLocalFontFamilies(comp),
+      compositionWebFontIds(comp),
     );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
     overlay.win.__hfPreview!.seekTimelines(t);
@@ -700,6 +716,7 @@ export async function clientExportVideo(opts: ClientExportOpts): Promise<Blob> {
       overlay.root.textContent ?? '',
       undefined,
       compositionLocalFontFamilies(comp),
+      compositionWebFontIds(comp),
     );
     const css = `${fontCss}\n${overlay.headCss}\n#root{background:transparent !important;}`;
     // Layout coordinate system is always comp's W×H (font-size calibration unchanged); device size =
