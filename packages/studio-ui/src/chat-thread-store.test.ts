@@ -568,6 +568,27 @@ describe('synchronous studio turn ledger', () => {
     expect(ledger.pictureRepairArmed).toBe(false);
   });
 
+  it('forces the final response after one tool keeps failing with reworded inputs', () => {
+    const ledger = createStudioTurnLedger();
+    const failAsk = (id: string, question: string) => recordStudioTurnToolResult(ledger, {
+      toolId: 'ask_user', toolCallId: id, input: { question, options: ['a', 'b'] },
+      errorText: 'ask_user needs a question and at least 2 options', canMutate: false,
+    });
+    expect(failAsk('a1', 'which one?').sameToolFailureCount).toBe(1);
+    expect(failAsk('a2', 'which asset?').sameToolFailureCount).toBe(2);
+    // A different tool in between restarts the streak; the identical-call counter never trips here.
+    recordStudioTurnToolResult(ledger, {
+      toolId: 'get_state', toolCallId: 'r1', input: {}, output: { ok: true, data: {} }, canMutate: false,
+    });
+    expect(failAsk('a3', 'which clip?').sameToolFailureCount).toBe(1);
+    expect(failAsk('a4', 'which source?').sameToolFailureCount).toBe(2);
+    expect(failAsk('a5', 'which footage?').repeatedFailureCount).toBe(1);
+    expect(ledger.forceFinalResponse).toBe(false);
+    failAsk('a6', 'which video?');
+    expect(ledger.sameToolFailureCount).toBe(4);
+    expect(ledger.forceFinalResponse).toBe(true);
+  });
+
   it('forces the final response after a failed call is retried verbatim', () => {
     const ledger = createStudioTurnLedger();
     const failRemove = (id: string) => recordStudioTurnToolResult(ledger, {

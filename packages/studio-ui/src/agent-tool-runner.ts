@@ -121,6 +121,9 @@ import {
 } from '@pireel/studio-engine/scene-visual-qa';
 import { translateV3Call, type V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/adapter';
 import { documentDelta, renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
+
+/** v3 wording for the library receipts (the legacy hint names legacy tools). */
+const V3_LIBRARY_USAGE_HINT = 'Each id is a complete reference: pass it as assetId to add_clips / insert_clips, or to inspect_media directly — placing is not required to inspect or transcribe. Byte access is resolved on demand; when it is unavailable, ask the user to restore the file in Materials. Never substitute cloud or official media for project-library media unless the user asks.';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
@@ -3217,7 +3220,8 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const question = typeof input.question === 'string' ? input.question.slice(0, 500) : '';
             const options = (Array.isArray(input.options) ? (input.options as unknown[]) : [])
               .map((o) => {
-                const oo = o as { label?: unknown; description?: unknown; value?: unknown; previewUrl?: unknown };
+                // The v3 surface passes plain strings; the legacy surface passes {label, …} objects.
+                const oo = (typeof o === 'string' ? { label: o } : o) as { label?: unknown; description?: unknown; value?: unknown; previewUrl?: unknown };
                 const previewUrl = typeof oo?.previewUrl === 'string' ? oo.previewUrl.trim().slice(0, 2_000) : '';
                 return {
                   label: String(oo?.label ?? '').slice(0, 80),
@@ -4469,6 +4473,14 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         if (name === 'get_state') {
           const window = args.window && typeof args.window === 'object' ? (args.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
           const state = renderV3State(before, window ? { window } : {});
+          // The project library lives in the device index until a save merges it into the document;
+          // the agent must see unplaced footage here or it goes hunting through cloud scopes.
+          const knownSigs = new Set(Object.values(before.assets).map((asset) => asset.locator.localSig).filter(Boolean));
+          for (const entry of ctx.localAssetIndexRef?.current ?? []) {
+            const id = entry.assetId || entry.sig;
+            if (!id || before.assets[id] || knownSigs.has(entry.contentSig || entry.sig)) continue;
+            state.assets.push({ id, kind: entry.kind ?? 'video', ...(entry.label ? { label: entry.label } : {}), library: true });
+          }
           return { ok: true, summary: `${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`, data: { ...state, playhead: Math.round((ctx.tRef?.current ?? 0) * before.canvas.fps) } };
         }
         const kinds = new Map<string, V3ClipKind>();
@@ -4492,6 +4504,10 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
           steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined && translation.calls.length === 1 ? { data: result.data } : {}) });
           if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
           previous = result;
+        }
+        // Legacy library receipts explain themselves in legacy tool names; restate the hint in v3 vocabulary.
+        if (name === 'search_assets' && previous?.data && typeof previous.data === 'object' && 'usageHint' in (previous.data as object)) {
+          previous = { ...previous, data: { ...(previous.data as Record<string, unknown>), usageHint: V3_LIBRARY_USAGE_HINT } };
         }
         // One v3 call = one undo step: keep only the snapshot taken before the first legacy step.
         if (ctx.undoStackRef.current.length > undoDepth + 1) ctx.undoStackRef.current = ctx.undoStackRef.current.slice(0, undoDepth + 1);

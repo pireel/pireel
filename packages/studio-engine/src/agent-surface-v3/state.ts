@@ -62,7 +62,8 @@ export interface V3StateView {
   durationFrames: number;
   frame?: { id: string };
   tracks: V3TrackView[];
-  assets: Array<{ id: string; kind: string; label?: string; durationSec?: number; hasAudio?: boolean }>;
+  /** `library: true` marks project-library media not yet placed on any track — the footage to start from. */
+  assets: Array<{ id: string; kind: string; label?: string; durationSec?: number; hasAudio?: boolean; library?: true }>;
   semantics: { primaryTrackId: string; sceneIds: string[] };
 }
 
@@ -255,6 +256,8 @@ export function renderV3State(
     if (window && clips.length !== track.clips.length) view.totalClips = track.clips.length;
     tracks.push(view);
   }
+  const placedAssetIds = new Set<string>();
+  for (const track of document.timeline.tracks) for (const clip of track.clips) if ('assetId' in clip && clip.assetId) placedAssetIds.add(clip.assetId);
   return {
     canvas: { width: document.canvas.width, height: document.canvas.height, fps: document.canvas.fps },
     durationFrames: documentDurationFrames(document),
@@ -266,6 +269,7 @@ export function renderV3State(
       ...(asset.label ? { label: asset.label } : {}),
       ...(asset.metadata.durationSec !== undefined ? { durationSec: round3(asset.metadata.durationSec) } : {}),
       ...(asset.metadata.hasAudio !== undefined ? { hasAudio: asset.metadata.hasAudio } : {}),
+      ...(!placedAssetIds.has(asset.id) ? { library: true as const } : {}),
     })),
     semantics: { primaryTrackId: document.semantics.primaryNarrativeTrackId, sceneIds: document.semantics.scenes.map((scene) => scene.id) },
   };

@@ -28,6 +28,8 @@ describe('agent surface v3 instructions', () => {
       'Call undo only when they explicitly ask',
       'Do what was asked, then stop',
       'Speech is one editing surface, not the entrance',
+      'One matching library asset is the answer, not a question',
+      'An empty timeline is not a blocker',
       'read_skill it once and apply it',
       'wait for confirmation',
       'A successful call is not proof',

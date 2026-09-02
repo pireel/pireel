@@ -62,6 +62,14 @@ describe('renderV3State', () => {
     expect(state.assets[0]).toEqual({ id: 'a1', kind: 'video', label: 'talk.mp4', durationSec: 118.4, hasAudio: true });
   });
 
+  it('flags library media that is not placed on any track', () => {
+    const document = doc([track('t1', 'visual', [narrative('c1', 0, 300)], { role: 'primaryNarrative' })]);
+    document.assets.lib1 = { id: 'lib1', kind: 'video', label: 'raw.mov', locator: {} as never, metadata: {}, library: { createdAt: 1 } } as never;
+    const state = renderV3State(document);
+    expect(state.assets.find((asset) => asset.id === 'a1')).not.toHaveProperty('library');
+    expect(state.assets.find((asset) => asset.id === 'lib1')).toMatchObject({ kind: 'video', label: 'raw.mov', library: true });
+  });
+
   it('windows tracks and frames and reports totalClips when truncated', () => {
     const document = doc([
       track('t1', 'visual', [narrative('c1', 0, 300), narrative('c2', 300, 300), narrative('c3', 600, 300)], { role: 'primaryNarrative' }),

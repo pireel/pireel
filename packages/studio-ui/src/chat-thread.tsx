@@ -296,6 +296,11 @@ export function ChatThread({
           errorText += studioLocale().toLowerCase().startsWith("zh")
             ? `（完全相同的调用已连续失败 ${recorded.repeatedFailureCount} 次，重试不会成功：改用回执里的真实 id 与参数，或放弃该操作直接收尾。）`
             : ` (This identical call has now failed ${recorded.repeatedFailureCount} times in a row; retrying cannot succeed. Use the real ids and parameters from receipts, or drop this operation and finish.)`;
+        } else if (recorded.sameToolFailureCount >= 2) {
+          // Reworded retries of one tool are the same loop with different text on it.
+          errorText += studioLocale().toLowerCase().startsWith("zh")
+            ? `（${id} 已连续失败 ${recorded.sameToolFailureCount} 次，换措辞重试无效：按错误提示改参数形状；改不了就别再调用它，直接用文字回复用户。）`
+            : ` (${id} has now failed ${recorded.sameToolFailureCount} times in a row; rewording it does not help. Fix the input shape the error describes, or stop calling this tool and answer the user in plain text.)`;
         }
         addToolOutput({
           tool: id,
