@@ -274,17 +274,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     return { ok: true, newClipId: edit.newClipId };
   };
 
-  /** Solo (monitoring only): while set, ONLY that clip is audible in preview — every other clip and the
-   *  footage's own sound go quiet. Deliberately not part of the composition: it answers "what does this one
-   *  sound like", not "what should the video be", so it never persists and never reaches export. Muting a
-   *  clip, which IS a decision about the video, lives on the clip (AudioClip.muted). */
-  const [soloId, setSoloId] = useState<string | null>(null);
-  const soloRef = useRef<string | null>(null);
-  soloRef.current = soloId;
-  useEffect(() => {
-    if (soloId && !(comp.audioTracks ?? []).some((c) => c.id === soloId)) setSoloId(null); // clip gone → drop it
-  }, [comp.audioTracks, soloId]);
-
   /** Engine specs from current state (panel edits land in comp immediately, so there is no separate
    *  preview override to thread through — the effect below respecs from whatever comp says). */
   const engineSpecs = (): EngineAudioClip[] => {
@@ -296,21 +285,20 @@ export function useAudioTracks(deps: AudioTracksDeps) {
         id: clip.id,
         url: clip.src,
         speed: Math.max(0.5, Math.min(2, clip.speed ?? 1)),
-        gainAt: (tt: number) => (soloRef.current && soloRef.current !== clip.id ? 0 : audioClipGainAt(clip, tt, total)),
+        gainAt: (tt: number) => audioClipGainAt(clip, tt, total),
         srcTimeAt: (tt: number) => audioClipSrcTimeAt(clip, tt),
       }));
     return [
       ...laneSpecs,
-      ...supplementalVisualAudioSpecs(visualMediaClips ?? [], () => !!soloRef.current),
+      ...supplementalVisualAudioSpecs(visualMediaClips ?? []),
     ];
   };
 
   // Engine sync: respec on any clip/timeline/bytes change (same-url respec swaps only closures — no reload).
   useEffect(() => {
     videoEngineRef.current?.setAudioClips(engineSpecs());
-    videoEngineRef.current?.setMonitorMuteVideo(!!soloId); // solo silences the footage too, or it isn't solo
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, visualMediaClips, timelineDurationSec, audioFileRev, soloId]);
+  }, [comp.audioTracks, comp.shots, videoFile, renderAudioTracks, visualMediaClips, timelineDurationSec, audioFileRev]);
 
   // Draft restore: dead blob src + sig → OPFS, then cloud vault; remap to a fresh blob URL.
   useEffect(() => {
@@ -424,7 +412,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     narrDbRef.current = null;
     setAudioPeaks(new Map());
     setSourcePeaks(new Map());
-    setSoloId(null);
     setAudioFileRev((value) => value + 1);
   }, []);
 
@@ -432,8 +419,6 @@ export function useAudioTracks(deps: AudioTracksDeps) {
     audioFilesRef,
     audioPeaks,
     clipPeaks,
-    soloId,
-    setSoloId,
     sourcePeaks,
     clipUsable,
     uploadAudio,

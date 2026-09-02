@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Audio panel: settings for whatever is selected — an audio clip (level, solo, fades,
+ * Audio panel: settings for whatever is selected — an audio clip (level, fades,
  * speed) or the selected shots' own sound (level, fades). Nothing selected = nothing to
  * adjust, so the section says so instead of silently addressing every shot. Muting isn't
  * here at all: it's per TRACK and lives on the timeline's track header, where an editor
@@ -26,8 +26,6 @@ export function MusicPanel({
   selectedId,
   usable,
   onPatch,
-  soloId,
-  onSolo,
   peakOf,
   shots,
   onSetShotAudio,
@@ -39,9 +37,6 @@ export function MusicPanel({
   /** Per-clip byte availability (dead blob after reload = false → row shows the missing hint). */
   usable: (c: AudioClip) => boolean;
   onPatch: (id: string, patch: Partial<Pick<AudioClip, 'startSec' | 'volumeDb' | 'fadeInSec' | 'fadeOutSec' | 'speed' | 'inSec' | 'outSec' | 'muted'>>) => void;
-  /** Solo = monitoring only (hear this clip alone, footage included): never stored, never exported. */
-  soloId: string | null;
-  onSolo: (id: string | null) => void;
   /** The clip's true peak (linear, 0..1) once its bytes are decoded — drives the clipping warning. */
   peakOf: (c: AudioClip) => number | null;
   /** SELECTED shots (video track). Empty = nothing selected, so the footage section has no target.
@@ -120,17 +115,6 @@ export function MusicPanel({
             <AudioLevel db={dbValue} disabled={!!sel.muted} onChange={(db) => onPatch(sel.id, { volumeDb: db })} />
             {sel.muted && <div className="text-ink-4 text-[10.5px]">{t('panels.trackMutedHint')}</div>}
             {clipping && !sel.muted && <div className="text-accent text-[10.5px]">{t('panels.audioClippingHint', { db: String(clipsAt) })}</div>}
-            {/* Solo is the one listening control that IS per clip: it answers "what does this one sound like",
-                which is a question about a clip, not about a track. Mute is per track, up on the timeline. */}
-            <div className="flex items-center justify-between">
-              <span className="text-ink-3">{t('panels.soloListen')}</span>
-              <Switch
-                checked={soloId === sel.id}
-                aria-label={t('panels.soloListen')}
-                onCheckedChange={(checked) => onSolo(checked ? sel.id : null)}
-              />
-            </div>
-            {soloId === sel.id && <div className="text-ink-4 text-[10.5px]">{t('panels.soloListenHint')}</div>}
             {/* Effective values (fades are clamped so the two never overlap) — showing the raw stored number
                 would promise a fade the clip is too short to hold. */}
             {slider(t('panels.fadeIn'), selD!.fadeInSec, 0, AUDIO_FADE_MAX_SEC, 0.1, (v) => `${v.toFixed(1)}s`, (v) => onPatch(sel.id, { fadeInSec: v }))}

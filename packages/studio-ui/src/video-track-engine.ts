@@ -153,9 +153,6 @@ export class VideoTrackEngine {
   // source, its decode element is force-muted and the dub carries the sound in SOURCE seconds — lip-sync
   // matters here, so drift correction is tight (0.08s) against the video element's own clock.
   private dubs = new Map<string, { el: HTMLAudioElement; url: string }>();
-  // Solo monitoring: while an audio clip is soloed the footage's own sound is silenced in preview only
-  // (see setMonitorMuteVideo) — this never enters the composition and never reaches the export mixer.
-  private monitorMuteVideo = false;
   // Per-element gain nodes for the VIDEO/dub side, created only when a level above source is asked for
   // (see setElGain). Keyed by element so a recreated element simply gets a fresh chain.
   private elGains = new WeakMap<HTMLMediaElement, { el: HTMLMediaElement; gain?: GainNode }>();
@@ -324,26 +321,10 @@ export class VideoTrackEngine {
   private segGain(i: number, tEdited?: number): number {
     const seg = this.segs[i];
     if (!seg) return 1;
-    if (this.monitorMuteVideo) return 0;
     const base = seg.gain == null ? 1 : Math.max(0, seg.gain); // >1 is a real boost — setElGain routes it
     if (!seg.fadeAt || base <= 0) return base;
     const local = (tEdited ?? this.tEdited) - (this.starts[i] ?? 0);
     return Math.max(0, base * seg.fadeAt(local));
-  }
-
-  /** Monitoring-only footage mute (an audio clip is soloed): silences the video track's own sound in
-   *  PREVIEW without touching the composition — nothing here reaches the export mixer. Applied inside
-   *  segGain, so every writer (activation, roll-through, per-tick fades, dub) picks it up. */
-  setMonitorMuteVideo(on: boolean): void {
-    if (this.monitorMuteVideo === on) return;
-    this.monitorMuteVideo = on;
-    const seg = this.segs[this.curIdx];
-    if (!seg) return;
-    const g = this.segGain(this.curIdx);
-    const el = this.els.get(seg.key);
-    if (el) this.setElGain(el, g); // paused too: no tick would come to apply it
-    const dub = this.dubs.get(seg.key);
-    if (dub) this.setElGain(dub.el, g);
   }
 
   /** Cut transition table (film seconds): inside the window, pushFrame carries the "other side" ghost frame (frame2). */

@@ -9878,8 +9878,6 @@ export function HyperframesWorkbench({
                     selectedId={selectedAudioId}
                     usable={audioOps.clipUsable}
                     onPatch={audioOps.patchClip}
-                    soloId={audioOps.soloId}
-                    onSolo={audioOps.setSoloId}
                     peakOf={(c) =>
                       c.sig ? (audioOps.clipPeaks.get(c.sig) ?? null) : null
                     }

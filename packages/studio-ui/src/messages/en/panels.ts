@@ -248,9 +248,6 @@ export const PANELS_EN: Record<string, string> = {
   "panels.removeMusic": "Remove track",
   "panels.selectShotOrAudioFirst":
     "Select a shot or an audio clip on the timeline first",
-  "panels.soloListen": "Solo",
-  "panels.soloListenHint":
-    "Monitoring this clip alone — footage and other audio are quiet for now; export is unaffected",
   "panels.trackMutedHint":
     "This track is muted — unmute it from the icon in front of the track",
   "panels.unmuteTrack": "Unmute",

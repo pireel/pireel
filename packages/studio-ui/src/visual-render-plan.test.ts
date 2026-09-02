@@ -111,13 +111,12 @@ describe('supplemental visual render plan', () => {
   });
 
   it('routes ordinary video-lane sound through the parent engine with trim and mute semantics', () => {
-    let monitorMuted = false;
     const visual: SupplementalVisualMediaClip = {
       clipId: 'detached', trackId: 'visual-track', stackOrder: 2, kind: 'video', source: 'blob:video',
       startSec: 4, endSec: 6, sourceInSec: 1, sourceOutSec: 5, fit: 'contain', muted: false,
       volumeDb: -6, audioFadeInSec: 1, audioFadeOutSec: 0.5,
     };
-    const [spec] = supplementalVisualAudioSpecs([visual], () => monitorMuted);
+    const [spec] = supplementalVisualAudioSpecs([visual]);
     expect(spec).toMatchObject({ id: 'visual-audio:detached', url: 'blob:video', speed: 2 });
     expect(spec!.srcTimeAt(3.99)).toBeNull();
     expect(spec!.srcTimeAt(4.5)).toBe(2);
@@ -133,8 +132,6 @@ describe('supplemental visual render plan', () => {
     });
     expect(exportSegment!.fadeAt?.(0.5)).toBeCloseTo(0.5, 4);
     expect(exportSegment!.fadeAt?.(1.75)).toBeCloseTo(0.5, 4);
-    monitorMuted = true;
-    expect(spec!.gainAt(4.5)).toBe(0);
     expect(supplementalVisualAudioSpecs([{ ...visual, muted: true }])[0]!.gainAt(4.5)).toBe(0);
     expect(supplementalVisualAudioSpecs([{ ...visual, kind: 'image' }])).toEqual([]);
   });
