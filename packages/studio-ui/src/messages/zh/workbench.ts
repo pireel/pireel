@@ -175,6 +175,7 @@ export const WORKBENCH_ZH: Record<string, string> = {
   "workbench.captionsGlobal": "字幕 · 全局",
   "workbench.captionsOffTheyShow": "(字幕未开启,set_captions 后显示)",
   "workbench.captionsSetName": "已设字幕:{name}",
+  "workbench.visualQuestionAnswered": "已就 {n} 个区间回答画面问题",
   "workbench.scriptCaptionsSet": "已按文案铺设 {n} 行字幕",
   "workbench.scriptCaptionsNoPicture": "时间线上没有可承载字幕的画面片段,先把画面拼好",
   "workbench.scriptEmpty": "文案是空的,给出要上屏的句子",

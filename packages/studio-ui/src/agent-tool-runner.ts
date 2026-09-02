@@ -136,6 +136,7 @@ import {
   editorialOpeningEvidence,
   reviewEditorialCandidates,
   type EditorialOpeningEvidence,
+  askEditorialQuestion,
 } from './editorial-review';
 import { type ExportRenderOpts, captureCompositionFrame } from './client-export';
 import { compositionRenderView } from './composition-render-view';
@@ -1234,6 +1235,34 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
           case 'analyze_visual': {
             const geometryOnly = input.mode === 'geometry';
             const editorialReview = input.mode === 'editorial';
+            const questionMode = input.mode === 'question';
+            const questionText = typeof input.question === 'string' ? input.question.trim() : '';
+            if (questionMode && !questionText) return { ok: false, error: 'analyze_visual mode="question" requires question: one concrete, visually checkable question' };
+            const questionRanges = (list: unknown) => (Array.isArray(list) ? list : [])
+              .map((row) => ({ startSec: Number((row as { startSec?: unknown })?.startSec), endSec: Number((row as { endSec?: unknown })?.endSec) }))
+              .filter((range) => Number.isFinite(range.startSec) && Number.isFinite(range.endSec) && range.endSec > range.startSec);
+            // Targeted question over a source: five stills per range, cached by question. The receipt's
+            // answers are the reusable evidence — selection filters on them, no re-review needed.
+            const answerVisualQuestion = async (file: File, assetId: string, label?: string): Promise<StudioToolResult> => {
+              const explicitRanges = questionRanges(input.ranges);
+              const wholeSourceSec = explicitRanges.length ? 0 : ((await probeVideoFile(file).catch(() => null))?.durationSec ?? 0);
+              const ranges = explicitRanges.length ? explicitRanges : [{ startSec: 0, endSec: wholeSourceSec }];
+              if (!(ranges[0]!.endSec > 0)) return { ok: false, error: `video duration unavailable: ${assetId}` };
+              const asked = await race(askEditorialQuestion(file, ranges, questionText, { projectId, ...(signal ? { signal } : {}) }));
+              return {
+                ok: true,
+                summary: t('workbench.visualQuestionAnswered', { n: asked.answers.length }),
+                data: {
+                  analysisMode: 'question',
+                  assetId,
+                  ...(label ? { label } : {}),
+                  question: asked.question,
+                  answers: asked.answers,
+                  ...(asked.reused ? { visualQuestionReused: true } : {}),
+                  instruction: 'These answers are evidence for THIS question: filter or narrow your selection with them (yes/partial ranges are the usable parts, on the source clock). Do not re-run the review to ask the same thing.',
+                },
+              };
+            };
             const modelBrief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 2_000) : '';
             // Selection criteria are the active Skill's data, applied verbatim; the model-authored
             // brief is bounded and carries the USER's explicit requirements, which win on conflict.
@@ -1251,7 +1280,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               ? input.items.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value))
               : [];
             if (batchItems.length) {
-              if (!editorialReview) return { ok: false, error: 'analyze_visual items[] is available only with mode="editorial"' };
+              if (!editorialReview && !questionMode) return { ok: false, error: 'analyze_visual items[] is available only with mode="editorial" or mode="question"' };
               if (batchItems.length > EDITORIAL_BATCH_MAX_SOURCES) {
                 return { ok: false, error: `analyze_visual items[] accepts at most ${EDITORIAL_BATCH_MAX_SOURCES} sources per call` };
               }
@@ -1265,12 +1294,14 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 if (seen.has(selectors[0]!)) return { ok: false, error: `duplicate analyze_visual batch source: ${selectors[0]}` };
                 seen.add(selectors[0]!);
               }
-              const baseInput = {
-                mode: 'editorial',
-                brief: reviewBrief,
-                maxCandidates: maxReviewCandidates,
-                assessAudio: input.assessAudio === true,
-              };
+              const baseInput = questionMode
+                ? { mode: 'question', question: questionText }
+                : {
+                  mode: 'editorial',
+                  brief: reviewBrief,
+                  maxCandidates: maxReviewCandidates,
+                  assessAudio: input.assessAudio === true,
+                };
               const progressByItem = batchItems.map(() => 0);
               const sourceLabel = (item: Record<string, unknown>, index: number) => {
                 const explicitLocalReference = typeof item.localAssetId === 'string'
@@ -1350,6 +1381,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               } catch (error) {
                 clearToolProgress(toolId);
                 throw error;
+              }
+              if (questionMode) {
+                clearToolProgress(toolId);
+                const answered = results.filter((result) => result.ok).length;
+                const reusedAnswers = results.filter((result) => (result as Record<string, unknown>).visualQuestionReused === true).length;
+                return {
+                  ok: true,
+                  summary: `answered for ${answered}/${batchItems.length} video sources${reusedAnswers ? ` (${reusedAnswers} reused from cache, no charge)` : ''}`,
+                  data: { analysisMode: 'question-batch', question: questionText, items: results },
+                };
               }
               const openingEvidence = results.flatMap((result): EditorialOpeningEvidence[] => {
                 const receipt = result as Record<string, unknown>;
@@ -1465,6 +1506,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               if (!entry) return { ok: false, error: `project-library video not found or ambiguous: ${requestedLocalReference}. Refresh list_assets and retry with its exact id; do not register or place the asset as a workaround` };
               const file = await loadLocalAssetFile(projectId, entry);
               if (!file) return { ok: false, error: 'local video access is unavailable — ask the user to restore access in Materials, then retry. Do not place the asset on the timeline; placement cannot restore file access' };
+              if (questionMode) return await answerVisualQuestion(file, entry.assetId, entry.label);
               try {
                 const probe = await probeVideoFile(file).catch(() => null);
                 const durationSec = probe?.durationSec;
@@ -1568,6 +1610,26 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const targetAsset = documentRef.current.assets[targetAssetId];
             if (!targetAsset) return { ok: false, error: `asset not found: ${targetAssetId}` };
             if (targetAsset.kind !== 'video') return { ok: false, error: `analyze_visual requires a video asset: ${targetAssetId}` };
+            if (questionMode) {
+              const useMounted = targetAssetId === primaryAssetId && !!videoFileRef.current;
+              const source = resolveAssetUrl(targetAsset);
+              let file: File | null = useMounted ? videoFileRef.current : (source ? clipFilesRef.current.get(source) ?? null : null);
+              if (!file) file = await loadProjectAssetFile(targetAsset);
+              if (!file && source) {
+                try {
+                  file = (await race(materializeRemoteMedia(source, {
+                    name: `${targetAsset.label || targetAssetId}.mp4`,
+                    type: 'video/mp4',
+                    sig: targetAsset.locator.localSig,
+                    signal,
+                  }))).file;
+                } catch (error) {
+                  return { ok: false, error: `video fetch failed: ${error instanceof Error ? error.message : String(error)}` };
+                }
+              }
+              if (!file) return { ok: false, error: `video bytes unavailable: ${targetAssetId}` };
+              return await answerVisualQuestion(file, targetAssetId, targetAsset.label);
+            }
             try {
               const useMountedPrimary = targetAssetId === primaryAssetId && !!videoFileRef.current && !!currentVideo();
               let vis: VisualTimeline | null;

@@ -13,6 +13,7 @@ import {
   type EditorialAssemblySource,
   type EditorialCandidateReview,
 } from '@pireel/studio-engine/editorial-candidates';
+import { MAX_VISUAL_QUESTION_RANGES } from '@pireel/studio-engine/visual-question';
 
 export interface StoredThread {
   id: string;
@@ -415,6 +416,16 @@ function compactVisualAnalysisData(data: Record<string, unknown>): Record<string
   } else if (data.analysisMode === 'editorial-candidates') {
     const editorialCandidates = takeArray(data.editorialCandidates, 8);
     if (editorialCandidates) compactData.editorialCandidates = editorialCandidates;
+  } else if (data.analysisMode === 'question' || data.analysisMode === 'question-batch') {
+    // Answers ARE the reusable evidence: a later selection filters on them without re-asking.
+    if (data.question !== undefined) compactData.question = data.question;
+    const answers = takeArray(data.answers, MAX_VISUAL_QUESTION_RANGES);
+    if (answers) compactData.answers = answers;
+    if (data.visualQuestionReused !== undefined) compactData.visualQuestionReused = data.visualQuestionReused;
+    const items = takeArray(data.items, 24);
+    if (items) compactData.items = items.map((item) => item && typeof item === 'object' && !Array.isArray(item)
+      ? compactVisualAnalysisData(item as Record<string, unknown>)
+      : item);
   } else if (data.analysisMode === 'semantic') {
     const segments = takeArray(data.segments, 20);
     if (segments) compactData.segments = segments;

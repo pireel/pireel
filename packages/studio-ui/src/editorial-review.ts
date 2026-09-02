@@ -23,6 +23,9 @@ import {
   editorialSpecsSig,
   getCachedEditorialReview,
   setCachedEditorialReview,
+  getCachedVisualQuestion,
+  setCachedVisualQuestion,
+  visualQuestionCacheKey,
 } from './editorial-review-cache';
 import { fileSig } from './media';
 import {
@@ -31,6 +34,7 @@ import {
   renderEditorialReviewProxy,
   uploadEditorialReviewProxy,
 } from './editorial-review-proxy';
+import { MAX_VISUAL_QUESTION_CHARS, normalizeVisualQuestionAnswers, visualQuestionSpecs, type VisualQuestionAnswer, type VisualQuestionRange } from '@pireel/studio-engine/visual-question';
 
 async function blobToBase64(blob: Blob): Promise<{ base64: string; mime: string }> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -474,4 +478,57 @@ export function candidateSpecsForReview(
   maxCandidates?: number,
 ): EditorialCandidateSpec[] {
   return buildEditorialCandidateSpecs(qualityWindows, maxCandidates);
+}
+
+/** Ask ONE concrete visual question over explicit source ranges of a file (five stills per range).
+ * Cached by file + question + ranges; a hit costs nothing. See visual-question.ts for the contract. */
+export async function askEditorialQuestion(
+  file: File,
+  ranges: readonly VisualQuestionRange[],
+  question: string,
+  options: { signal?: AbortSignal; projectId?: string } = {},
+): Promise<{ question: string; answers: VisualQuestionAnswer[]; reused: boolean }> {
+  const normalizedQuestion = question.trim().slice(0, MAX_VISUAL_QUESTION_CHARS);
+  if (!normalizedQuestion) throw new Error('a visual question is required');
+  const specs = visualQuestionSpecs(ranges);
+  if (!specs.length) return { question: normalizedQuestion, answers: [], reused: false };
+  const cacheKey = visualQuestionCacheKey(fileSig(file), normalizedQuestion, editorialSpecsSig(specs));
+  const cached = await getCachedVisualQuestion(cacheKey);
+  if (cached) return { question: normalizedQuestion, answers: cached, reused: true };
+
+  const requestedFrames = specs
+    .flatMap((candidate) => candidate.frames.map((frame) => ({ candidateId: candidate.id, ...frame })))
+    .sort((left, right) => left.atSec - right.atSec || left.candidateId.localeCompare(right.candidateId));
+  const thumbnails = await extractThumbnails(file, requestedFrames.map((frame) => frame.atSec), { width: 480, quality: 0.8 });
+  const remaining = [...thumbnails];
+  const frames: Array<{ candidateId: string; phase: string; atSec: number; image_base64: string; mime: string }> = [];
+  for (const requested of requestedFrames) {
+    if (!remaining.length) break;
+    let nearestIndex = 0;
+    for (let index = 1; index < remaining.length; index += 1) {
+      if (Math.abs(remaining[index]!.timestamp - requested.atSec) < Math.abs(remaining[nearestIndex]!.timestamp - requested.atSec)) nearestIndex = index;
+    }
+    const [thumbnail] = remaining.splice(nearestIndex, 1);
+    if (!thumbnail || Math.abs(thumbnail.timestamp - requested.atSec) > 0.35) continue;
+    const encoded = await blobToBase64(thumbnail.blob);
+    frames.push({ candidateId: requested.candidateId, phase: requested.phase, atSec: Math.round(thumbnail.timestamp * 1_000) / 1_000, image_base64: encoded.base64, mime: encoded.mime });
+  }
+  if (!frames.length) throw new Error('question frames extraction returned no readable frames');
+  const response = await fetch('/api/studio/review', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'source-question',
+      question: normalizedQuestion,
+      candidates: specs.map((spec) => ({ id: spec.id, startSec: spec.startSec, endSec: spec.endSec })),
+      frames,
+      ...(options.projectId ? { projectId: options.projectId } : {}),
+    }),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  const body = (await response.json().catch(() => ({}))) as { answers?: VisualQuestionAnswer[]; error?: string; detail?: string };
+  if (!response.ok || !Array.isArray(body.answers)) throw new Error(body.detail || body.error || `visual question failed: HTTP ${response.status}`);
+  const answers = normalizeVisualQuestionAnswers(specs, body.answers);
+  await setCachedVisualQuestion(cacheKey, { question: normalizedQuestion, specsSig: editorialSpecsSig(specs), savedAt: Date.now(), answers });
+  return { question: normalizedQuestion, answers, reused: false };
 }

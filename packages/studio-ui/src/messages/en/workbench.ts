@@ -188,6 +188,7 @@ export const WORKBENCH_EN: Record<string, string> = {
   "workbench.captionsOffTheyShow":
     " (captions are off — they will show after set_captions)",
   "workbench.captionsSetName": "Captions set: {name}",
+  "workbench.visualQuestionAnswered": "Visual question answered over {n} range(s)",
   "workbench.scriptCaptionsSet": "Captions laid from the script: {n} lines",
   "workbench.scriptCaptionsNoPicture": "No picture clips on the timeline can carry captions — assemble the picture first",
   "workbench.scriptEmpty": "The script is empty — provide the lines to show",

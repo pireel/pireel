@@ -18,6 +18,7 @@
 import type { EditorialCandidateReview } from '@pireel/studio-engine/editorial-candidates';
 import { kvDelete, kvGet, kvSet } from './idb-kv';
 import { remoteDerivedGet, remoteDerivedPut } from './derived-cache-remote';
+import type { VisualQuestionAnswer } from '@pireel/studio-engine/visual-question';
 
 const PREFIX = 'review:';
 const INDEX_KEY = 'review-index';
@@ -133,4 +134,38 @@ export async function setCachedEditorialReview(key: string, entry: CachedEditori
     if (evicted) await kvDelete(PREFIX + evicted.k);
   }
   await kvSet(INDEX_KEY, index);
+}
+
+/* ---------- targeted visual questions (same store, own key space) ---------- */
+
+export interface CachedVisualQuestionEntry {
+  question: string;
+  specsSig: string;
+  savedAt: number;
+  answers: VisualQuestionAnswer[];
+}
+
+/** Key = file identity + question hash + the asked ranges: re-asking the same thing over the same
+ * ranges is free; a new question or new ranges is a new (cheap) call. */
+export function visualQuestionCacheKey(fileSigValue: string, question: string, specsSig: string): string {
+  return `q_${fnv(fileSigValue)}_${fnv(question.trim().toLowerCase())}_${specsSig}`;
+}
+
+export async function getCachedVisualQuestion(key: string): Promise<VisualQuestionAnswer[] | null> {
+  if (!key) return null;
+  let entry = await kvGet(PREFIX + key) as CachedVisualQuestionEntry | undefined;
+  if (!entry?.answers) {
+    const remote = await remoteDerivedGet('visual-review', key) as CachedVisualQuestionEntry | null;
+    if (remote?.answers && Array.isArray(remote.answers)) {
+      entry = remote;
+      void kvSet(PREFIX + key, remote);
+    }
+  }
+  return entry?.answers && Array.isArray(entry.answers) ? entry.answers : null;
+}
+
+export async function setCachedVisualQuestion(key: string, entry: CachedVisualQuestionEntry): Promise<void> {
+  if (!key) return;
+  remoteDerivedPut('visual-review', key, entry);
+  await kvSet(PREFIX + key, entry);
 }
