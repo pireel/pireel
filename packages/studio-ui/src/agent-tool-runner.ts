@@ -119,6 +119,8 @@ import {
   sceneVisualRepairScope,
   type SceneVisualReviewPhase,
 } from '@pireel/studio-engine/scene-visual-qa';
+import { translateV3Call, type V3ClipKind } from '@pireel/studio-engine/agent-surface-v3/adapter';
+import { documentDelta, renderV3State } from '@pireel/studio-engine/agent-surface-v3/state';
 import { imageThumb, imgSourceBase } from '@pireel/ui/image-url';
 import { t } from './i18n';
 import { type ComposeMode, type ComposedBlock, composedBlockFields, GeneratedBlockValidationError, kitChoiceOf, newBlockComposeMode } from './compose-result';
@@ -4020,8 +4022,12 @@ export async function runAtomicCompositionTool(ctx: AgentToolCtx, execute: () =>
     restore();
     return { ok: false, error: 'mutation rejected: editor invariants failed', data: { issues, documentIssues } };
   }
+  // A result that already carries its own delta (the v3 surface reports a document-level delta) keeps it;
+  // legacy tools get the composition diff attached here.
+  const existing = result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? (result.data as Record<string, unknown>) : undefined;
+  if (existing?.delta !== undefined) return result;
   const delta = compReceiptDelta(before, next) ?? { compositionUpdated: ['other'] };
-  return { ...result, data: { ...((result.data as Record<string, unknown> | undefined) ?? {}), delta } };
+  return { ...result, data: { ...(existing ?? {}), delta } };
 }
 
 /** A rejected parked approval is a turn boundary, not an ordinary successful tool receipt. */
@@ -4448,6 +4454,56 @@ async function runExternalToolInner(ctx: AgentToolCtx, tool: string, input: Reco
         } catch (e) {
           return { ok: false, error: t('workbench.frameCaptureFailedMessage', { message: e instanceof Error ? e.message : String(e) }) };
         }
+      }
+      case 'run_v3': {
+        // The v3 surface over the live bridge: translate against the TAB's document (exact fps and clip
+        // kinds), apply every legacy step here, and answer with the v3 receipt — one delta, one undo step
+        // (the caller wraps this whole case in runAtomicCompositionTool).
+        const name = typeof input.name === 'string' ? input.name : '';
+        const args = input.args && typeof input.args === 'object' && !Array.isArray(input.args) ? (input.args as Record<string, unknown>) : {};
+        const before = documentRef.current;
+        if (name === 'get_state') {
+          const window = args.window && typeof args.window === 'object' ? (args.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
+          const state = renderV3State(before, window ? { window } : {});
+          return { ok: true, summary: `${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`, data: { ...state, playhead: Math.round((ctx.tRef?.current ?? 0) * before.canvas.fps) } };
+        }
+        const kinds = new Map<string, V3ClipKind>();
+        for (const track of before.timeline.tracks) for (const clip of track.clips) kinds.set(clip.id, clip.kind);
+        const translation = translateV3Call(name, args, { fps: before.canvas.fps, kindOf: (id) => kinds.get(id) });
+        if (translation.status === 'error') { const { status: _s, ...rest } = translation; return { ok: false, ...rest }; }
+        if (translation.status === 'pending') return { ok: false, error: 'not_available_yet', data: { detail: translation.reason } };
+        const steps: Array<{ tool: string; ok: boolean; summary?: string; error?: string; data?: unknown }> = [];
+        let previous: StudioToolResult | null = null;
+        const undoDepth = ctx.undoStackRef.current.length;
+        for (const call of translation.calls) {
+          const stepInput: Record<string, unknown> = { ...call.input };
+          if (call.usePrevious) {
+            const carried = call.usePrevious.resultPath.split('.').reduce<unknown>((cursor, key) => (cursor && typeof cursor === 'object' ? (cursor as Record<string, unknown>)[key] : undefined), previous);
+            if (carried === undefined) return { ok: false, error: 'chain_broken', data: { detail: `${call.tool} needed ${call.usePrevious.resultPath}`, steps } };
+            stepInput[call.usePrevious.inputKey] = call.usePrevious.asArray ? [carried] : carried;
+          }
+          const result = await runExternalToolInner(ctx, call.tool, stepInput);
+          steps.push({ tool: call.tool, ok: result.ok, ...(result.summary ? { summary: result.summary } : {}), ...(result.error ? { error: result.error } : {}), ...(result.data !== undefined && translation.calls.length === 1 ? { data: result.data } : {}) });
+          if (!result.ok) return { ok: false, error: result.error ?? 'step_failed', data: { detail: `${call.tool} failed after ${steps.length - 1} completed step(s)`, steps } };
+          previous = result;
+        }
+        // One v3 call = one undo step: keep only the snapshot taken before the first legacy step.
+        if (ctx.undoStackRef.current.length > undoDepth + 1) ctx.undoStackRef.current = ctx.undoStackRef.current.slice(0, undoDepth + 1);
+        const delta = documentDelta(before, documentRef.current);
+        const single = translation.calls.length === 1 ? previous : null;
+        const passthrough = single && !delta ? single : null;
+        if (passthrough) {
+          if (!translation.note) return passthrough;
+          const base = passthrough.data && typeof passthrough.data === 'object' && !Array.isArray(passthrough.data) ? (passthrough.data as Record<string, unknown>) : {};
+          return { ...passthrough, data: { ...base, note: translation.note } };
+        }
+        return {
+          ok: true,
+          summary: steps.map((step) => step.summary).filter(Boolean).join('; ') || `${name} applied`,
+          ...(single?.image ? { image: single.image } : {}),
+          ...(single?.images ? { images: single.images } : {}),
+          data: { ...(single && single.data !== undefined ? { result: single.data } : {}), steps, ...(delta ? { delta } : {}), ...(translation.note ? { note: translation.note } : {}) },
+        };
       }
       default:
         return runStudioTool(ctx, tool, input);

@@ -426,7 +426,7 @@ describe('Agent composition transaction boundary', () => {
     const result = await runStudioTool(h.ctx, 'read_script', {});
     expect(result).toMatchObject({ ok: false, error: '提取口播稿失败,稍后再试' });
 
-    const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
+    const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     const execute = skill.slice(skill.indexOf('## Step 10: Execute with tool discipline'));
     expect(execute).toContain('After Approve, run `remove_silence` first');
     expect(execute).toContain('do not retry it in the same user request');
@@ -571,6 +571,45 @@ describe('Agent composition transaction boundary', () => {
     expect(unplannedReviewAtSecs(withText.document!)).toEqual([2, 6]);
   });
 
+  it('run_v3 answers get_state in the v3 shape and applies a mutation as one delta-bearing step', async () => {
+    const h = harness();
+    h.ctx.setDocument(emptyEditorDocumentV2({ width: 1080, height: 1920, fps: 30 }));
+    const first = new File(['first'], 'first.mov', { type: 'video/quicktime', lastModified: 1 });
+    mediaMocks.probeVideoFile.mockResolvedValueOnce({ durationSec: 4, width: 1080, height: 1920, hasAudio: true });
+    Object.assign(h.ctx, {
+      localAssetIndexRef: { current: [localEntry('first-video', 'first:sig', '第一段', 'video')] },
+      prepareLocalAssetRuntime: vi.fn(async () => ({ ok: true, prepared: true, file: first })),
+      pickVideoFile: vi.fn().mockResolvedValue(undefined),
+      genIdsRef: { current: new Set<string>() },
+      pushUndoSnapshot: () => { h.ctx.undoStackRef.current = [...h.ctx.undoStackRef.current, h.ctx.documentRef.current]; },
+    });
+    const { runExternalTool } = await import('./agent-tool-runner');
+    const placed = await runExternalTool(h.ctx, 'add_clips', { clips: [{ assetId: 'local:first-video', role: 'primary', startSec: 0 }] });
+    expect(placed.ok, JSON.stringify(placed)).toBe(true);
+
+    const state = await runExternalTool(h.ctx, 'run_v3', { name: 'get_state', args: {} });
+    expect(state.ok).toBe(true);
+    const view = state.data as { canvas: { fps: number }; tracks: Array<{ clips?: Array<{ id: string; frames: [number, number] }> }>; playhead: number };
+    expect(view.canvas.fps).toBe(30);
+    expect(view.tracks.some((track) => track.clips?.some((clip) => Array.isArray(clip.frames)))).toBe(true);
+    expect(JSON.stringify(view)).not.toMatch(/"shots"|"blocks"|startSec/);
+
+    const added = await runExternalTool(h.ctx, 'run_v3', { name: 'set_texts', args: { items: [{ text: 'Hook', startFrame: 6, durationFrames: 90, preset: 'headline' }] } });
+    expect(added.ok, JSON.stringify(added)).toBe(true);
+    const data = added.data as { delta?: { clips?: Array<{ kind: string; frames: [number, number] }> }; steps: unknown[] };
+    expect(data.steps).toHaveLength(1);
+    expect(data.delta?.clips?.some((clip) => clip.frames[0] === 6), JSON.stringify(added).slice(0, 600)).toBe(true);
+    expect(JSON.stringify(data.delta)).not.toContain('blocksAdded');
+
+    // Two legacy steps (set_shot_audio + set_video_speed) collapse into ONE undo step and one delta.
+    const primaryId = view.tracks.flatMap((track) => track.clips ?? []).find((clip) => (clip as { kind?: string }).kind === 'narrative')!.id;
+    const undoBefore = h.ctx.undoStackRef.current.length;
+    const patched = await runExternalTool(h.ctx, 'run_v3', { name: 'set_clip_properties', args: { items: [{ clipId: primaryId, volumeDb: -6, speed: 0.5 }] } });
+    expect(patched.ok, JSON.stringify(patched).slice(0, 600)).toBe(true);
+    expect((patched.data as { steps: unknown[] }).steps).toHaveLength(2);
+    expect(h.ctx.undoStackRef.current.length).toBe(undoBefore + 1);
+  });
+
   it('lists project-local assets without exposing device storage locators', async () => {
     const h = harness();
     const assetId = 'shared-product-video';
@@ -647,7 +686,7 @@ describe('Agent composition transaction boundary', () => {
   });
 
   it('keeps speech edits visually directed without an implicit Smart Select frame', () => {
-    const skill = readFileSync(new URL('../../../../src/lib/studio/scenario-skills/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
+    const skill = readFileSync(new URL('../../studio-engine/src/scenario-skills/content/talking-head-edit/SKILL.md', import.meta.url), 'utf8');
     expect(skill).not.toContain('Smart Select');
     expect(skill).not.toContain('attach `editorial-pulse`');
     expect(skill).toContain('meaningful new visual anchor roughly every 5–10 seconds');

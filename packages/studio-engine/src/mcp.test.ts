@@ -11,7 +11,7 @@ import {
 function deps(overrides: Partial<McpDeps> = {}): McpDeps {
   return {
     skillVersion: '2099-01-01.1',
-    callBridge: vi.fn(async () => ({ ok: true, summary: 'done' })),
+    callBridge: vi.fn(async (tool: string) => (tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : { ok: true, summary: 'done' })),
     listFrames: vi.fn(() => [{ id: 'f1', title: 'F1', summary: 's' }]),
     listSkills: vi.fn(async () => ({ ok: true, summary: '1 skill', data: { skills: [{ id: 'usk_1', title: '大女主' }] } })),
     readSkill: vi.fn(async (id: string) => ({ ok: true, summary: id, data: { skill: { id, playbook: 'PB' } } })),
@@ -60,11 +60,20 @@ describe('MCP v3 surface', () => {
     expect(v3Names.length).toBe(47); // 50 minus the three chat-only tools
   });
 
+  it('sends v3 calls to the live tab as one run_v3 bridge call when a tab is open', async () => {
+    const callBridge = vi.fn(async () => ({ ok: true, summary: 'moved', data: { steps: [], delta: { shifted: [] } } }));
+    const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
+    await handleMcpRequest({ id: 30, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }] } } }, d);
+    expect(callBridge).toHaveBeenCalledTimes(1);
+    expect(callBridge).toHaveBeenCalledWith('run_v3', { name: 'move_clips', args: { items: [{ clipId: 'n1', startFrame: 90 }] } }, expect.any(Number));
+  });
+
   it('translates frame-based v3 calls onto legacy seconds and routes by clip kind', async () => {
     const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx });
     const response = await handleMcpRequest({ id: 3, method: 'tools/call', params: { name: 'move_clips', arguments: { items: [{ clipId: 'n1', startFrame: 90 }, { clipId: 'g1', startFrame: 120 }] } } }, d);
-    expect(d.callBridge).toHaveBeenNthCalledWith(1, 'move_clips', { items: [{ clipId: 'n1', startSec: 3 }] }, expect.any(Number));
-    expect(d.callBridge).toHaveBeenNthCalledWith(2, 'move_block', { blockId: 'g1', startSec: 4 }, expect.any(Number));
+    expect(d.callBridge).toHaveBeenNthCalledWith(1, 'run_v3', expect.anything(), expect.any(Number));
+    expect(d.callBridge).toHaveBeenNthCalledWith(2, 'move_clips', { items: [{ clipId: 'n1', startSec: 3 }] }, expect.any(Number));
+    expect(d.callBridge).toHaveBeenNthCalledWith(3, 'move_block', { blockId: 'g1', startSec: 4 }, expect.any(Number));
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean; data: { steps: unknown[] } };
     expect(body.ok).toBe(true);
     expect(body.data.steps).toHaveLength(2);
@@ -83,12 +92,12 @@ describe('MCP v3 surface', () => {
     const response = await handleMcpRequest({ id: 5, method: 'tools/call', params: { name: 'ripple_delete_ranges', arguments: { ranges: [[30, 60]] } } }, d);
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as Record<string, unknown>;
     expect(body).toMatchObject({ ok: false, error: 'fps_unavailable' });
-    expect(d.callBridge).not.toHaveBeenCalled();
+    expect((d.callBridge as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[0])).toEqual(['run_v3']);
     expect((response!.result as { isError: boolean }).isError).toBe(true);
   });
 
   it('stops a multi-step call at the first failure and reports what was applied', async () => {
-    const callBridge = vi.fn(async (tool: string) => (tool === 'delete_blocks' ? { ok: true, summary: 'blocks gone' } : { ok: false, error: 'locked track' }));
+    const callBridge = vi.fn(async (tool: string) => (tool === 'run_v3' ? { ok: false, error: 'studio_not_open' } : tool === 'delete_blocks' ? { ok: true, summary: 'blocks gone' } : { ok: false, error: 'locked track' }));
     const d = deps({ agentSurface: 'v3', resolveV3Context: v3ctx, callBridge });
     const response = await handleMcpRequest({ id: 6, method: 'tools/call', params: { name: 'remove_clips', arguments: { clipIds: ['g1', 'n1'] } } }, d);
     const body = JSON.parse((response!.result as { content: { text: string }[] }).content[0]!.text) as { ok: boolean; error: string; detail: string; data: { steps: { tool: string; ok: boolean }[] } };

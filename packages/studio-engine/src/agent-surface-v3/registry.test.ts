@@ -9,7 +9,7 @@ import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOL_LIMIT, V3_TOOLS, v3Replacemen
 const legacyIds = () => new Set<string>([
   ...(STUDIO_TOOLS as Array<{ id: string }>).map((tool) => tool.id),
   ...MCP_SERVER_TOOL_IDS,
-  ...MCP_BRIDGE_EXTRA_TOOL_IDS,
+  ...[...MCP_BRIDGE_EXTRA_TOOL_IDS].filter((id) => id !== 'run_v3'), // run_v3 is the v3 transport itself, not an agent tool
   ...Object.keys(MCP_BRIEF_TOOLS),
 ]);
 

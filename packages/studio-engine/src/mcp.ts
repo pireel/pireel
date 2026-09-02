@@ -134,7 +134,7 @@ export const MCP_SERVER_TOOL_IDS = new Set(['read_editing_guide', 'read_frame', 
  *  capture_frame=one-moment visual verification; review_sequence=whole-Scene temporal verification
  *  (both return captured frames as image content so the agent can "see" its own edits).
  *  compose_block_brief is a "bridge-fetch context + server-assemble" composite tool, dispatched separately. */
-export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'review_sequence', 'visual_brief', 'submit_visual']);
+export const MCP_BRIDGE_EXTRA_TOOL_IDS = new Set(['get_state', 'apply_block', 'capture_frame', 'review_sequence', 'visual_brief', 'submit_visual', 'run_v3']);
 
 /** Brief composite tools → bridge context-operation names (implemented browser-side in runExternalTool). */
 export const MCP_BRIEF_TOOLS: Record<string, string> = {
@@ -598,6 +598,17 @@ export function buildMcpToolsV3(): McpToolDef[] {
     });
 }
 
+/** v3 tools whose live execution can take minutes inherit a slow legacy tool's bridge timeout. */
+const V3_BRIDGE_TIMEOUT_TOOL: Record<string, string> = {
+  get_transcript: 'read_script',
+  inspect_media: 'analyze_visual',
+  inspect_timeline: 'review_sequence',
+  apply_component: 'apply_block',
+  remove_silence: 'remove_silence',
+  export: 'export_video',
+  denoise_audio: 'denoise_audio',
+};
+
 function readPath(value: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((cursor, key) => (cursor && typeof cursor === 'object' ? (cursor as Record<string, unknown>)[key] : undefined), value);
 }
@@ -605,6 +616,11 @@ function readPath(value: unknown, path: string): unknown {
 /** Run one v3 call: translate to legacy calls, apply them in order (chaining results where the adapter
  *  asks), and fold the receipts into one result. Delta shaping lands with the receipt contract. */
 export async function runV3Tool(name: string, args: Record<string, unknown>, deps: McpDeps): Promise<McpBridgeResult> {
+  // Live tab first: the tab translates against its own document (exact fps, current clip kinds), applies
+  // every step inside one undo group and answers with the v3 receipt. studio_not_open falls through to
+  // the server-side per-step path below (offline receipts carry the same delta vocabulary).
+  const live = await deps.callBridge('run_v3', { name, args }, bridgeTimeoutMs(V3_BRIDGE_TIMEOUT_TOOL[name] ?? name));
+  if (!(live.ok === false && live.error === 'studio_not_open')) return live;
   const ctx: V3AdapterContext = deps.resolveV3Context
     ? await deps.resolveV3Context()
     : { fps: Number.NaN, kindOf: () => undefined };
