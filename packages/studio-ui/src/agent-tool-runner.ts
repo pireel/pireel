@@ -744,8 +744,28 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setDocument(cleared.document);
             }
           }
-          const outcome = runAgentTimelineTool(documentRef.current, toolId, timelineInput);
+          let outcome = runAgentTimelineTool(documentRef.current, toolId, timelineInput);
           if (outcome.ok && outcome.document && outcome.document !== documentRef.current) setDocument(outcome.document);
+          // Project-library media is not in the document until placed; answer its metadata from the
+          // device index instead of reporting the user's own footage as missing.
+          if (toolId === 'inspect_media' && outcome.ok && Array.isArray((outcome.data as { assets?: unknown } | undefined)?.assets)) {
+            const rows = (outcome.data as { assets: Array<Record<string, unknown>> }).assets.map((row) => {
+              if (row.missing !== true || typeof row.assetId !== 'string') return row;
+              const entry = resolveLocalAssetReference(row.assetId, ctx.localAssetIndexRef?.current ?? []);
+              if (!entry) return row;
+              return {
+                assetId: row.assetId,
+                kind: entry.kind ?? 'video',
+                label: entry.label,
+                ...(entry.w && entry.h ? { width: entry.w, height: entry.h } : {}),
+                library: true,
+                availability: 'metadata-only',
+                occurrences: [],
+                hint: 'Project-library media: place it by this id with add_clips / insert_clips, or read speech with get_transcript {assetId}. Duration and pixels resolve on demand.',
+              };
+            });
+            outcome = { ...outcome, data: { ...(outcome.data as Record<string, unknown>), assets: rows } };
+          }
           const summary = outcome.summary
             ? (surface === 'chat' ? t(`tools.${toolId}.label`) : outcome.summary)
             : undefined;

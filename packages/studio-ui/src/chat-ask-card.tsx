@@ -29,7 +29,8 @@ export function AskUserCard({ part }: { part: ToolPartLike }) {
   const options: AskOption[] = Array.isArray(input?.options)
     ? (input!.options as unknown[])
         .map((o) => {
-          const oo = o as { label?: unknown; description?: unknown; value?: unknown; previewUrl?: unknown };
+          // The v3 surface passes plain strings; the legacy surface passes {label, …} objects.
+          const oo = (typeof o === 'string' ? { label: o } : o) as { label?: unknown; description?: unknown; value?: unknown; previewUrl?: unknown };
           const previewUrl = typeof oo?.previewUrl === 'string' ? oo.previewUrl.trim().slice(0, 2_000) : '';
           return {
             label: String(oo?.label ?? ''),

@@ -4,7 +4,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2 } from 'lucide-react';
-import { STUDIO_TOOL_MAP, type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
+import { type StudioToolDef, type StudioToolResult } from '@pireel/studio-engine/prompts';
+import { studioToolDefFor } from './v3-tool-defs';
 import type { Composition } from '@pireel/studio-engine/composition';
 import { useToolProgress } from './tool-progress';
 import { CutListCard, cutRowsOf } from './chat-cut-list';
@@ -232,9 +233,11 @@ function ToolCard({ def, part, children }: { def: StudioToolDef; part: ToolPartL
 
 export function renderToolPart(part: ToolPartLike, key: string, opts?: { onLocate?: (sec: number) => void; getComp?: () => Composition }): React.ReactNode {
   const id = toolIdOf(part);
-  const def = STUDIO_TOOL_MAP[id];
+  const def = studioToolDefFor(id);
   if (!def) return null;
-  // ask_user: a structured question with clickable option chips (its own card, not the generic one)
+  // ask_user: a structured question with clickable option chips (its own card, not the generic one).
+  // On the v3 surface kind=approval is the approval boundary and parks on the approval channel.
+  if (id === 'ask_user' && (part.input as { kind?: unknown } | undefined)?.kind === 'approval') return <div key={key}><ApprovalCard part={part} /></div>;
   if (id === 'ask_user') return <div key={key}><AskUserCard part={part} /></div>;
   // request_approval: model-authored proposal, host-owned generic Reject / Approve boundary
   if (id === 'request_approval') return <div key={key}><ApprovalCard part={part} /></div>;
