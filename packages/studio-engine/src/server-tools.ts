@@ -17,6 +17,7 @@
  * route's job; this just takes data and returns data, directly pinnable by vitest.
  */
 
+import { documentDelta, renderV3State } from './agent-surface-v3/state';
 import { interpretApplyRaw } from './briefs';
 import { placementPercentToBox } from './overlay-placement';
 import { formatDirectorSceneContext, resolveDirectorSceneContext } from './semantic-scenes';
@@ -137,6 +138,9 @@ export interface ServerToolProject {
   /** Credits guardrail for the snapshot: hosted generation affordable? Boolean by design (never the balance
    *  number); route fills it for get_state from the billing store. Absent = line omitted. */
   canGenerate?: boolean;
+  /** Receipt vocabulary. `v3` returns get_state in the v3 shape and mutation receipts with a document-level
+   *  delta (frames, clips, shifted rules, notes); default keeps the legacy composition receipt. */
+  receipt?: 'legacy' | 'v3';
 }
 
 /** Execution result: result goes back to MCP; comp/context present = a change happened, route persists it (version+1). */
@@ -380,6 +384,17 @@ function offlineTranscript(p: ServerToolProject): string {
 
 /** Execute one offline tool. Filter through SERVER_EXECUTABLE_TOOLS before calling. */
 export function runServerTool(tool: string, input: Record<string, unknown>, p: ServerToolProject): ServerToolOutcome {
+  if (p.receipt === 'v3' && tool === 'get_state') {
+    const window = input.window && typeof input.window === 'object' ? (input.window as { tracks?: string[]; fromFrame?: number; toFrame?: number }) : undefined;
+    const state = renderV3State(p.document, window ? { window } : {});
+    return {
+      result: {
+        ok: true,
+        summary: `OFFLINE MODE · project "${p.title}" · ${state.tracks.length} tracks · ${state.durationFrames} frames @ ${state.canvas.fps}fps`,
+        data: { ...state, project: { id: p.id, title: p.title }, offline: true, ...(p.canGenerate != null ? { canGenerate: p.canGenerate } : {}) },
+      },
+    };
+  }
   const out = runServerToolInner(tool, input, p);
   // Insertion-time look freeze remains a native document operation. Composition below is only the
   // read receipt returned to older tool clients.
@@ -425,7 +440,9 @@ export function runServerTool(tool: string, input: Record<string, unknown>, p: S
       };
     }
     // Every successful composition mutation reports its actual compact diff, not just cutting tools.
-    const delta = compReceiptDelta(projectDocumentToComposition(p.document), next);
+    const delta = p.receipt === 'v3'
+      ? documentDelta(p.document, out.document)
+      : compReceiptDelta(projectDocumentToComposition(p.document), next);
     if (delta) out.result.data = { ...((out.result.data as Record<string, unknown> | undefined) ?? {}), delta };
   }
   return out;

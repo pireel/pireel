@@ -1030,3 +1030,26 @@ describe('apply_block:kit 契约答案(离线执行器)', () => {
     expect(String((r3.result as { error?: string }).error)).toContain('sparkline');
   });
 });
+
+describe('v3 receipts (receipt: "v3")', () => {
+  it('get_state returns the v3 shape and mutations carry a document delta in frames', () => {
+    const p = proj({ receipt: 'v3' });
+    const state = runServerTool('get_state', {}, p);
+    expect(state.result.ok).toBe(true);
+    const data = state.result.data as { canvas: { fps: number }; durationFrames: number; tracks: Array<{ id: string; clips?: Array<{ frames: [number, number] }> }>; offline: boolean };
+    expect(data.canvas.fps).toBeGreaterThan(0);
+    expect(data.offline).toBe(true);
+    expect(data.durationFrames).toBeGreaterThan(0);
+    expect(data.tracks.some((track) => track.clips?.some((clip) => Array.isArray(clip.frames) && clip.frames.length === 2))).toBe(true);
+    expect(JSON.stringify(data)).not.toMatch(/"shots"|"blocks"|startSec/);
+
+    const cut = runServerTool('cut_range', { fromSec: 0, toSec: 2 }, p);
+    expect(cut.result.ok).toBe(true);
+    const delta = (cut.result.data as { delta: { durationFrames?: [number, number]; clips?: unknown[]; shifted?: unknown[]; notes?: string[] } }).delta;
+    expect(delta.durationFrames).toBeDefined();
+    expect(delta.durationFrames![1]).toBeLessThan(delta.durationFrames![0]);
+    expect((delta.clips?.length ?? 0) + (delta.shifted?.length ?? 0)).toBeGreaterThan(0);
+    expect(JSON.stringify(delta)).not.toMatch(/shotsUpdated|blocksShifted|fromSec/);
+  });
+});
+
