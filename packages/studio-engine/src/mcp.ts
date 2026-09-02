@@ -19,7 +19,7 @@
  */
 
 import { translateV3Call, type V3AdapterContext, type LegacyCall } from './agent-surface-v3/adapter';
-import { V3_TOOL_IDS, V3_TOOLS } from './agent-surface-v3/registry';
+import { V3_RETIRED_TOOL_IDS, V3_TOOL_IDS, V3_TOOLS, v3ReplacementIndex } from './agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from './agent-surface-v3/schemas';
 import { v3Instructions } from './agent-surface-v3/instructions';
 import { MCP_DESCRIPTION_OVERRIDES, STUDIO_TOOLS, STUDIO_TOOL_MAP, mcpInstructions } from './prompts';
@@ -687,9 +687,17 @@ export async function handleMcpRequest(raw: JsonRpcRequest, deps: McpDeps): Prom
       const args = ((raw.params as { arguments?: unknown } | undefined)?.arguments ?? {}) as Record<string, unknown>;
       if (typeof name !== 'string') return rpcError(raw.id, -32602, 'tools/call: name required');
       if (deps.agentSurface === 'v3' && V3_TOOL_IDS.has(name)) return toolResponse(raw.id, await runV3Tool(name, args, deps));
+      if (deps.agentSurface === 'v3' && V3_RETIRED_TOOL_IDS.includes(name)) {
+        return toolResponse(raw.id, { ok: false, error: 'tool_retired', detail: `${name} no longer exists: keep the plan in your working context and build the edit directly with the clip tools; inspect_timeline reviews the whole output without a plan.` });
+      }
       const result = await callLegacyTool(name, args, deps);
       if (result === null) return rpcError(raw.id, -32602, `unknown tool: ${name}`);
-      return toolResponse(raw.id, result);
+      // Transition alias: legacy names still execute for scripts written against the old surface, but every
+      // receipt names the v3 tool so the caller can move over. tools/list has not advertised them since the cut.
+      const renamed = deps.agentSurface === 'v3' ? v3ReplacementIndex().get(name) : undefined;
+      if (!renamed) return toolResponse(raw.id, result);
+      const data = result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? (result.data as Record<string, unknown>) : {};
+      return toolResponse(raw.id, { ...result, data: { ...data, deprecated: `${name} is a legacy alias kept for a transition period; call ${renamed} (see tools/list) — timeline positions there are frames, not seconds.` } });
     }
     default:
       return rpcError(raw.id, -32601, `method not found: ${method}`);
