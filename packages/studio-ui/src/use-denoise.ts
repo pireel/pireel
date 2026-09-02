@@ -50,18 +50,30 @@ export function useDenoise(deps: DenoiseDeps) {
     blendedRef.current = null;
   }, []);
 
-  const srcSig = (): string | null => {
+  /** The main narration source = the primary track's first video source. videoFileRef only holds a
+   *  file picked in THIS session; after a refresh the source comes back from the local library into
+   *  clipFilesRef under its src url, so the composition — not the legacy ref — is the authority. */
+  const mainSource = (): { file: File; sig: string; urls: string[] } | null => {
+    const shots = compRef.current.shots ?? [];
+    // Prefer a shot whose own sound is in the mix (the recording being cleaned); muted montage
+    // picture is only a last resort so a legacy single-source project still resolves.
+    const mounted = shots.filter((shot) => shot.src && clipFilesRef.current.has(shot.src));
+    const lead = mounted.find((shot) => !shot.audioMuted) ?? mounted[0];
+    if (lead?.src) {
+      const file = clipFilesRef.current.get(lead.src)!;
+      const urls = [...clipFilesRef.current.entries()].filter(([, candidate]) => candidate === file).map(([url]) => url);
+      return { file, sig: lead.srcSig ?? fileSig(file), urls };
+    }
     const f = videoFileRef.current;
-    return f ? (videoSigRef.current ?? fileSig(f)) : null;
+    if (!f) return null;
+    const urls = [...clipFilesRef.current.entries()].filter(([, candidate]) => candidate === f).map(([url]) => url);
+    return { file: f, sig: videoSigRef.current ?? fileSig(f), urls };
   };
+  const srcSig = (): string | null => mainSource()?.sig ?? null;
   /** Playback keys the main file is mounted under. Segments are keyed by their source url in the
    *  multi-source model ('main' only for legacy single-source shots), so the dub must be registered
    *  under every url that resolves to this file — a dub under 'main' alone never plays. */
-  const playbackKeys = (): string[] => {
-    const f = videoFileRef.current;
-    const urls = f ? [...clipFilesRef.current.entries()].filter(([, file]) => file === f).map(([url]) => url) : [];
-    return ['main', ...urls];
-  };
+  const playbackKeys = (): string[] => ['main', ...(mainSource()?.urls ?? [])];
   /** Export rigs are keyed 'main' for src-less shots and clip_<shotId> per src-bearing shot. */
   const exportKeys = (): string[] => {
     const urls = new Set(playbackKeys());
@@ -78,9 +90,14 @@ export function useDenoise(deps: DenoiseDeps) {
   };
 
   const bake = async (strength: number, runId: number) => {
-    const f = videoFileRef.current;
-    const sig = srcSig();
-    if (!f || !sig) return;
+    const source = mainSource();
+    if (!source) {
+      setStatus('failed');
+      toast.error(t('workbench.denoiseNeedsMainSource'));
+      return;
+    }
+    const f = source.file;
+    const sig = source.sig;
     const cached = blendedRef.current;
     if (cached && cached.sig === sig && cached.strength === strength) {
       setStatus('ready');
@@ -125,6 +142,8 @@ export function useDenoise(deps: DenoiseDeps) {
 
   // Watch the comp knob: on → ensure a bake for (sig, strength); off → drop the dub, sound returns to the element.
   const strength = comp.audioDenoise?.strength ?? null;
+  // Re-bake when the lead source changes (restore mounted it after the knob was already on).
+  const leadSrc = (comp.shots ?? []).find((shot) => shot.src)?.src ?? null;
   useEffect(() => {
     const runId = ++runIdRef.current;
     if (strength == null) {
@@ -134,7 +153,7 @@ export function useDenoise(deps: DenoiseDeps) {
     }
     void bake(strength, runId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strength, videoFile]);
+  }, [strength, videoFile, leadSrc]);
 
   // Feed the engine once a blend is ready (status flips drive this; failure keeps the original audio — honest degrade).
   useEffect(() => {

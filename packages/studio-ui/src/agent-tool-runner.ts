@@ -3686,7 +3686,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
               setDenoise(null);
               return { ok: true, summary: t('workbench.denoiseTurnedOff') };
             }
-            if (!videoFileRef.current) {
+            const mainMounted = !!videoFileRef.current || (c.shots ?? []).some((shot) => shot.src && clipFilesRef.current.has(shot.src));
+            const pictureSoundInMix = (c.shots ?? []).some((shot) => !shot.audioMuted);
+            if (!mainMounted || !pictureSoundInMix) {
               // Denoise bakes the MAIN video's own recording. Say what is actually true instead of
               // "local video lost": generated/audio-lane narration is outside its scope, and a
               // montage without a mounted main source has no recording to clean.
