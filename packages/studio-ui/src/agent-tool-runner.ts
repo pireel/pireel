@@ -804,7 +804,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                   ? input.localSig.trim()
                   : '';
               const requestedClipId = typeof input.clipId === 'string' ? input.clipId.trim() : '';
-              const requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
+              let requestedAssetId = typeof input.assetId === 'string' ? input.assetId.trim() : '';
               const measuredTiming = input.measuredTiming === true;
               const rd = (value: number) => Math.round(value * 10) / 10;
               const formatDirectTranscript = (header: string, segments: readonly AsrSegment[]) => wrapAgentTranscript([
@@ -838,6 +838,9 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                     data: { transcript: transcriptForAgent() },
                   };
                 }
+                // Footage placed from the project library has no legacy "main video" file behind it:
+                // transcribe the primary asset itself instead of asking the user to add a video.
+                if (primaryAssetId && !primaryKnown && !asrRef.current?.length && !videoFileRef.current) requestedAssetId = primaryAssetId;
               }
               if (requestedLocalReference) {
                 const resolved = resolveLocalAssetReference(requestedLocalReference, ctx.localAssetIndexRef.current);
@@ -1097,7 +1100,7 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const storedPrimary = primaryAssetId
               ? documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined
               : undefined;
-            const mainTranscript = asrRef.current?.length ? asrRef.current : storedPrimary;
+            let mainTranscript = asrRef.current?.length ? asrRef.current : storedPrimary;
             if (!mainTranscript?.length && typeof input.shotId !== 'string') {
               // Word-exact cutting addresses speech on the primary VIDEO lane. In a narrated
               // montage the narration is a generated audio track — telling the model to call
@@ -1109,7 +1112,16 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
                 ))
               ));
               if (narrationHasTranscript) return { ok: false, error: t('workbench.wordCutNeedsPrimarySpeech') };
-              return { ok: false, error: t('workbench.noTranscriptYetRun') };
+              // Primary footage that has simply not been transcribed yet: transcribe it here rather
+              // than bouncing the model to a second call it cannot name on the v3 surface.
+              if (primaryAssetId) {
+                const primed = await runStudioToolInner(ctx, 'read_script', {}, opts);
+                if (!primed.ok) return primed;
+                mainTranscript = asrRef.current?.length
+                  ? asrRef.current
+                  : (documentRef.current.semantics.transcripts[primaryAssetId] as AsrSegment[] | undefined);
+              }
+              if (!mainTranscript?.length) return { ok: false, error: t('workbench.noTranscriptYetRun') };
             }
             if (!asrRef.current?.length && storedPrimary?.length) {
               asrRef.current = storedPrimary;
