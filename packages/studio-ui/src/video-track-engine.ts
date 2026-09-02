@@ -394,8 +394,20 @@ export class VideoTrackEngine {
         releaseMediaElement(cur.el);
         this.dubs.delete(key);
       }
-      // hand the sound back to the decode element on the next activate/seek
-      if (!this.playing) this.seek(this.tEdited);
+      // hand the sound back to the decode element: stopped → the next activate/seek does it;
+      // playing → un-mute the active element NOW, or the source stays silent until the next
+      // segment change (turning denoise off mid-playback used to cut the sound entirely).
+      if (!this.playing) {
+        this.seek(this.tEdited);
+        return;
+      }
+      const active = this.segs[this.curIdx];
+      const el = active && active.key === key ? this.els.get(key) : undefined;
+      if (el) {
+        el.muted = false;
+        this.setElGain(el, this.segGain(this.curIdx));
+        if (el.paused) el.play().catch(() => {});
+      }
       return;
     }
     if (cur?.url === url) return;
