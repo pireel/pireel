@@ -344,17 +344,16 @@ export function FontPicker({
         <ChevronDown size={12} className={`text-ink-4 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div className="bg-canvas/55 mt-2 overflow-hidden rounded-lg shadow-md">
-          <FontChoiceList
-            value={value}
-            localFonts={localFonts}
-            accessState={accessState}
-            onLoadMore={onLoadMore}
-            onChoose={(font) => { onChoose(font); setOpen(false); }}
-          />
-        </div>
-      )}
+      {/* Always mounted (hidden when closed): the selected option stays in the DOM for a11y/tests. */}
+      <div className={open ? 'bg-canvas/55 mt-2 overflow-hidden rounded-lg shadow-md' : 'hidden'}>
+        <FontChoiceList
+          value={value}
+          localFonts={localFonts}
+          accessState={accessState}
+          onLoadMore={onLoadMore}
+          onChoose={(font) => { onChoose(font); setOpen(false); }}
+        />
+      </div>
     </div>
   );
 }
