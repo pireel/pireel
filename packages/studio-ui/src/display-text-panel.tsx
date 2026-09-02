@@ -190,6 +190,7 @@ export function FontChoiceList({
   onChoose,
   onLoadMore,
   autoFocus,
+  loadingFont,
 }: {
   value: DisplayTextFontId;
   localFonts: LocalFontFamilyOption[];
@@ -197,6 +198,9 @@ export function FontChoiceList({
   onChoose: (font: DisplayTextFontId) => void;
   onLoadMore: () => void;
   autoFocus?: boolean;
+  /** Library id whose glyphs are still downloading after being applied: its row shows a spinner
+   *  where the check mark goes, so the user can keep switching fonts and watch each one land. */
+  loadingFont?: string | null;
 }) {
   const [query, setQuery] = useState('');
   // Library faces show a baked SVG outline of their name (scripts/build-font-previews.py) instead
@@ -230,6 +234,7 @@ export function FontChoiceList({
 
   const fontRow = (id: DisplayTextFontId, label: string, family?: string, preview?: FontPreview) => {
     const selected = id === value;
+    const loading = selected && loadingFont != null && webFontIdOf(id) === loadingFont;
     return (
       <button
         key={id}
@@ -258,7 +263,9 @@ export function FontChoiceList({
             {label}
           </span>
         )}
-        {selected && <Check size={12} className="text-accent shrink-0" />}
+        {loading
+          ? <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
+          : selected && <Check size={12} className="text-accent shrink-0" />}
       </button>
     );
   };
@@ -359,9 +366,10 @@ export function FontPicker({
   // Library id whose glyphs are still downloading after being applied (spinner on the trigger).
   const [loadingFont, setLoadingFont] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // Picking keeps the list open: switching between several faces to compare them is the normal
+  // flow, so the dropdown only closes on outside click / Escape / the trigger.
   const choose = (font: DisplayTextFontId) => {
     onChoose(font);
-    setOpen(false);
     const webId = webFontIdOf(font);
     if (!webId) return;
     setLoadingFont(webId);
@@ -399,11 +407,7 @@ export function FontPicker({
         onClick={() => setOpen((current) => !current)}
         className="bg-canvas/70 text-ink hover:bg-panel-2 flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[12px]"
       >
-        {loadingFont ? (
-          <Loader2 size={12} className="text-ink-4 shrink-0 animate-spin" aria-label={t('displayText.fontLoading')} />
-        ) : (
-          <span className="text-ink-4 text-[10px]">Aa</span>
-        )}
+        <span className="text-ink-4 text-[10px]">Aa</span>
         <span className="min-w-0 flex-1 truncate" style={selectedFamily ? { fontFamily: `"${selectedFamily}", sans-serif` } : undefined}>
           {fontChoiceLabel(value)}
         </span>
@@ -417,6 +421,7 @@ export function FontPicker({
           accessState={accessState}
           onLoadMore={onLoadMore}
           onChoose={choose}
+          loadingFont={loadingFont}
         />
       </div>
     </div>
