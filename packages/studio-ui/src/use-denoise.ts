@@ -92,8 +92,10 @@ export function useDenoise(deps: DenoiseDeps) {
   const bake = async (strength: number, runId: number) => {
     const source = mainSource();
     if (!source) {
-      setStatus('failed');
-      toast.error(t('workbench.denoiseNeedsMainSource'));
+      // Not an error yet: on restore the knob is already on before the primary source is
+      // mounted; the effect re-runs (leadSrc) once it lands. A source that never mounts leaves
+      // the toggle on with no bake — the tool entry reports that case explicitly.
+      setStatus(null);
       return;
     }
     const f = source.file;
