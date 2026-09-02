@@ -14,7 +14,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { applyEditorCommand, type Composition, type EditorDocumentV2 } from '@pireel/studio-engine/composition';
 import { toast } from '@pireel/ui/toast';
 import type { VideoTrackEngine } from './video-track-engine';
-import { DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono } from './denoise';
+import { DENOISE_DEFAULT_MODE, DENOISE_RATE, blendPcm, decodeMono48k, denoiseWetPcm, encodeWavMono, type DenoiseMode } from './denoise';
 import { decodeVideoAudio, toMono } from './audio-decode';
 import { fileSig } from './media';
 import { loadLocalVideo, saveLocalVideo } from './local-media';
@@ -40,7 +40,7 @@ export function useDenoise(deps: DenoiseDeps) {
   const [status, setStatus] = useState<'baking' | 'ready' | 'failed' | null>(null);
   const [progress, setProgress] = useState(0);
   /** Blended output of the last successful bake: what preview plays and export substitutes. */
-  const blendedRef = useRef<{ sig: string; strength: number; file: File; url: string } | null>(null);
+  const blendedRef = useRef<{ sig: string; strength: number; mode: DenoiseMode; file: File; url: string } | null>(null);
   const runIdRef = useRef(0);
 
   useEffect(() => () => {
@@ -89,7 +89,7 @@ export function useDenoise(deps: DenoiseDeps) {
     dubKeysRef.current = url ? keys : [];
   };
 
-  const bake = async (strength: number, runId: number) => {
+  const bake = async (strength: number, mode: DenoiseMode, runId: number) => {
     const source = mainSource();
     if (!source) {
       setStatus('failed');
@@ -99,7 +99,7 @@ export function useDenoise(deps: DenoiseDeps) {
     const f = source.file;
     const sig = source.sig;
     const cached = blendedRef.current;
-    if (cached && cached.sig === sig && cached.strength === strength) {
+    if (cached && cached.sig === sig && cached.strength === strength && cached.mode === mode) {
       setStatus('ready');
       return;
     }
@@ -111,15 +111,15 @@ export function useDenoise(deps: DenoiseDeps) {
       if (!dryBuf) throw new Error('source has no audio track');
       const dry = await toMono(dryBuf, DENOISE_RATE);
       if (runId !== runIdRef.current) return;
-      // wet: OPFS cache by source sig — inference runs once per source ever
-      const wetKey = `dnwet:${sig}`;
+      // wet: OPFS cache by source sig (+ mode) — inference runs once per source ever
+      const wetKey = mode === 'strong' ? `dnwet:${sig}` : `dnwet:${mode}:${sig}`;
       let wet: Float32Array | null = null;
       const wetCached = await loadLocalVideo(wetKey);
       if (wetCached) wet = await decodeMono48k(wetCached);
       if (!wet) {
         wet = await denoiseWetPcm(dry, (p) => {
           if (runId === runIdRef.current) setProgress(p);
-        });
+        }, mode);
         if (runId !== runIdRef.current) return;
         void saveLocalVideo(new File([encodeWavMono(wet)], 'wet.wav', { type: 'audio/wav' }), wetKey);
       }
@@ -127,7 +127,7 @@ export function useDenoise(deps: DenoiseDeps) {
       const blendedFile = new File([encodeWavMono(blendPcm(dry, wet, strength))], 'denoised.wav', { type: 'audio/wav' });
       const prev = blendedRef.current;
       if (prev) URL.revokeObjectURL(prev.url);
-      blendedRef.current = { sig, strength, file: blendedFile, url: URL.createObjectURL(blendedFile) };
+      blendedRef.current = { sig, strength, mode, file: blendedFile, url: URL.createObjectURL(blendedFile) };
       setStatus('ready');
     } catch (e) {
       if (runId !== runIdRef.current) return;
@@ -142,6 +142,7 @@ export function useDenoise(deps: DenoiseDeps) {
 
   // Watch the comp knob: on → ensure a bake for (sig, strength); off → drop the dub, sound returns to the element.
   const strength = comp.audioDenoise?.strength ?? null;
+  const mode: DenoiseMode = comp.audioDenoise?.mode ?? DENOISE_DEFAULT_MODE;
   // Re-bake when the lead source changes (restore mounted it after the knob was already on).
   const leadSrc = (comp.shots ?? []).find((shot) => shot.src)?.src ?? null;
   useEffect(() => {
@@ -151,9 +152,9 @@ export function useDenoise(deps: DenoiseDeps) {
       setDub(null);
       return;
     }
-    void bake(strength, runId);
+    void bake(strength, mode, runId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strength, videoFile, leadSrc]);
+  }, [strength, mode, videoFile, leadSrc]);
 
   // Feed the engine once a blend is ready (status flips drive this; failure keeps the original audio — honest degrade).
   useEffect(() => {
@@ -170,15 +171,20 @@ export function useDenoise(deps: DenoiseDeps) {
   const denoiseForExport = (): Map<string, File> | null => {
     const b = blendedRef.current;
     const on = compRef.current.audioDenoise?.strength != null;
-    if (!on || !b || b.sig !== srcSig() || b.strength !== compRef.current.audioDenoise!.strength) return null;
+    if (!on || !b || b.sig !== srcSig() || b.strength !== compRef.current.audioDenoise!.strength || b.mode !== (compRef.current.audioDenoise!.mode ?? DENOISE_DEFAULT_MODE)) return null;
     return new Map(exportKeys().map((key) => [key, b.file] as const));
   };
 
-  /** Panel/agent entry: strength = turn on / retune (0 < s ≤ 1), null = off. */
-  const setDenoise = (s: number | null) => {
+  /** Panel/agent entry: strength = turn on / retune (0 < s ≤ 1), null = off; mode defaults to the
+   *  current one (or light) so a strength retune never silently switches engines. */
+  const setDenoise = (s: number | null, nextMode?: DenoiseMode) => {
     const command = applyEditorCommand(documentRef.current, {
       type: 'processing.patch',
-      patch: { audioDenoise: s == null ? undefined : { strength: Math.round(Math.max(0.05, Math.min(1, s)) * 100) / 100 } },
+      patch: {
+        audioDenoise: s == null
+          ? undefined
+          : { strength: Math.round(Math.max(0.05, Math.min(1, s)) * 100) / 100, mode: nextMode ?? documentRef.current.processing?.audioDenoise?.mode ?? DENOISE_DEFAULT_MODE },
+      },
     });
     if (!command.ok) {
       toast.error(editorErrorMessage(command.error));

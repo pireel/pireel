@@ -9910,6 +9910,7 @@ export function HyperframesWorkbench({
                     }}
                     denoise={{
                       strength: comp.audioDenoise?.strength ?? null,
+                      mode: comp.audioDenoise?.mode ?? "light",
                       status: denoiseOps.status,
                       progress: denoiseOps.progress,
                     }}

@@ -49,8 +49,8 @@ export function MusicPanel({
   shots: VideoShot[];
   onSetShotAudio: (patch: { volumeDb?: number; fadeInSec?: number; fadeOutSec?: number }) => void;
   /** Narration denoise (main source): strength null = off; status/progress mirror the bake. */
-  denoise: { strength: number | null; status: 'baking' | 'ready' | 'failed' | null; progress: number };
-  onSetDenoise: (strength: number | null) => void;
+  denoise: { strength: number | null; mode: 'light' | 'strong'; status: 'baking' | 'ready' | 'failed' | null; progress: number };
+  onSetDenoise: (strength: number | null, mode?: 'light' | 'strong') => void;
 }) {
   const sel = clips.find((c) => c.id === selectedId) ?? null;
   const selD = sel ? audioClipDefaults(sel) : null;
@@ -155,6 +155,22 @@ export function MusicPanel({
           </div>
           {denoise.strength != null && (
             <>
+              {/* light = steady floor only (keeps the room's own tone); strong = neural rebuild */}
+              <div className="flex items-center gap-1" role="radiogroup" aria-label={t('panels.denoiseMode')}>
+                {(['light', 'strong'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={denoise.mode === mode}
+                    title={t(mode === 'light' ? 'panels.denoiseModeLightHint' : 'panels.denoiseModeStrongHint')}
+                    onClick={() => onSetDenoise(denoise.strength, mode)}
+                    className={`h-6 rounded-md border px-2 text-[11px] ${denoise.mode === mode ? 'border-accent text-ink bg-panel-2/60' : 'border-line text-ink-3 hover:border-accent'}`}
+                  >
+                    {t(mode === 'light' ? 'panels.denoiseModeLight' : 'panels.denoiseModeStrong')}
+                  </button>
+                ))}
+              </div>
               <div className="flex items-center gap-2">
                 <span className="text-ink-3 w-7 shrink-0">{t('panels.denoiseStrength')}</span>
                 <input

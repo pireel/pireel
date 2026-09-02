@@ -223,7 +223,7 @@ export interface EditorDocumentV2 {
   timeline: { tracks: EditorTrack[] };
   semantics: EditorSemanticState;
   processing?: {
-    audioDenoise?: { strength: number };
+    audioDenoise?: { strength: number; mode?: 'light' | 'strong' };
   };
 }
 

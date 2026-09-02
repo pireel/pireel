@@ -1355,10 +1355,11 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
     icon: '🎙️',
     label: 'tools.denoise_audio.label',
     description:
-      'Remove background noise from the MAIN VIDEO\'s own recording (on-device speech-denoise model, bakes in the background — takes a moment on long videos). Scope: the main source\'s audio only — generated speech and audio-lane narration are already clean and are not processed; a montage without a mounted main recording has nothing to denoise, and the tool says so. strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
+      'Remove background noise from the MAIN VIDEO\'s own recording (on-device, bakes in the background). mode light (default) removes only the steady noise floor — hiss, hum, fan — and keeps the room\'s own tone, like a mainstream editor\'s one-click denoise; mode strong is a neural enhancer for genuinely noisy recordings and may change the ambience. Scope: the main source\'s audio only — generated speech and audio-lane narration are already clean and are not processed; a montage without a mounted main recording has nothing to denoise, and the tool says so. strength 0..1 = dry/wet blend (default 0.6; lower it if the voice sounds thin). off:true restores the original audio. Preview and export both play the denoised result once baking finishes.',
     inputSchema: obj(
       {
         strength: { type: 'number', description: 'Blend 0..1 (default 0.6). Re-tuning is fast — inference is cached per source.' },
+        mode: { type: 'string', enum: ['light', 'strong'], description: 'light (default): steady floor only, ambience kept. strong: neural enhancement for very noisy audio.' },
         off: { type: 'boolean', description: 'true = turn denoise off.' },
       },
       [],

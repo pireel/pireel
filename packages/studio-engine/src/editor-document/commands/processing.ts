@@ -12,6 +12,10 @@ export function patchEditorProcessing(document: EditorDocumentV2, patch: Process
     if (!Number.isFinite(strength) || strength <= 0 || strength > 1) {
       return commandFailure(document, 'invalid-command', 'Denoise strength must be within (0, 1].', { path: 'patch.audioDenoise.strength' });
     }
+    const mode = patch.audioDenoise.mode;
+    if (mode != null && mode !== 'light' && mode !== 'strong') {
+      return commandFailure(document, 'invalid-command', 'Denoise mode must be light or strong.', { path: 'patch.audioDenoise.mode' });
+    }
   }
   const processing = { ...(document.processing ?? {}), ...patch };
   for (const key of Object.keys(patch) as (keyof ProcessingPatch)[]) if (patch[key] === undefined) delete processing[key];
