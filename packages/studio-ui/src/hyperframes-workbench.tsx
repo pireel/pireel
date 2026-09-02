@@ -8582,7 +8582,7 @@ export function HyperframesWorkbench({
                                   csSel.wPct ?? 56,
                                   csSel.scale,
                                   comp.width,
-                                  { bold: csSel.bold },
+                                  { bold: csSel.bold, font: csSel.font },
                                 ).length,
                               )
                             : 1;
@@ -8608,7 +8608,7 @@ export function HyperframesWorkbench({
                               base.wPct ?? 56,
                               base.scale,
                               comp.width,
-                              { bold: base.bold },
+                              { bold: base.bold, font: base.font },
                             ).length,
                           );
                           if (n0 <= 1) return base;
@@ -8648,7 +8648,7 @@ export function HyperframesWorkbench({
                                 subStyleSel.wPct ?? 56,
                                 subStyleSel.scale,
                                 comp.width,
-                                { bold: subStyleSel.bold },
+                                { bold: subStyleSel.bold, font: subStyleSel.font },
                               ).length,
                             )
                           : 1;
