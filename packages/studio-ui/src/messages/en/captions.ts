@@ -45,5 +45,6 @@ export const CAPTIONS_EN: Record<string, string> = {
   'captions.off': 'Off',
   'captions.fontSize': 'Font size',
   'captions.bold': 'Bold',
+  'captions.fontFamily': 'Font',
   'captions.enableCaptions': 'Turn on captions',
 };

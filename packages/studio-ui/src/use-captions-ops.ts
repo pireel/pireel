@@ -249,8 +249,8 @@ export function useCaptionsOps(deps: CaptionsOpsDeps) {
       main: resolveCaptionStyle(comp),
       sub: resolveSubCaptionStyle(comp),
       bilingualOn: !!resolveCaptionStyle(comp).sub?.lang,
-      onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => setCaptionStyle(patch),
-      onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; lang?: string | undefined }) =>
+      onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => setCaptionStyle(patch),
+      onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) =>
         setCaptionStyle({ sub: { ...(compRef.current.captionStyle?.sub ?? {}), ...patch } }),
     },
     rows: captionLineRows,

@@ -156,6 +156,7 @@ import {
 import { withEditableBlockGeometry } from './editable-block-geometry';
 import { placementPercentToBox } from '@pireel/studio-engine/overlay-placement';
 import { getStudioSpaceId, listStudioGens, pollCreation, startGeneration } from './gen-api';
+import { isDisplayTextFontId } from '@pireel/studio-engine/display-text-presets';
 
 const PROJECT_MUTATION_TOOLS = new Set(['create_output', 'duplicate_output', 'switch_output', 'rename_output', 'delete_output']);
 const NO_UNDO_TOOLS = new Set(['get_block', 'get_timeline', 'read_director_plan', 'read_scene_designs', 'inspect_media', 'inspect_images', 'get_transcript', 'get_beat_grid', 'list_assets', 'search_assets', 'prepare_local_image', 'search_media', 'list_outputs', ...PROJECT_MUTATION_TOOLS, 'list_models', 'generate_image', 'generate_video', 'generate_music', 'generate_foley', 'get_generation_jobs', 'list_voices', 'clone_voice', 'design_voice', 'delete_voice', 'generate_speech', 'lip_sync', 'review_visuals', 'focus_element', 'seek', 'play', 'pause', 'undo', 'extract_asr', 'read_script', 'list_words', 'analyze_visual', 'export_video', 'track_export', 'ask_user', 'request_approval']);
@@ -2935,6 +2936,11 @@ async function runStudioToolInner(ctx: AgentToolCtx, toolId: string, input: Reco
             const patch: Parameters<typeof setCaptionStyle>[0] = {};
             if (yPct != null) patch.yPct = yPct;
             if (Number.isFinite(scale)) patch.scale = scale;
+            if (typeof input.font === 'string') {
+              if (input.font === 'preset') patch.font = undefined;
+              else if (isDisplayTextFontId(input.font)) patch.font = input.font;
+              else return { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | local:<family> | preset)` };
+            }
             const script = typeof input.script === 'string' ? input.script.trim() : '';
             if (script) {
               // Silent montage: the copy becomes transcript truth of the placed picture clips

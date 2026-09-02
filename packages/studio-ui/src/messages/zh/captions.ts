@@ -45,5 +45,6 @@ export const CAPTIONS_ZH: Record<string, string> = {
   'captions.off': '关闭',
   'captions.fontSize': '字号',
   'captions.bold': '加粗',
+  'captions.fontFamily': '字体',
   'captions.enableCaptions': '开启字幕',
 };

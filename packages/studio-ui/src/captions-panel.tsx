@@ -16,7 +16,9 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Bold, Check, ChevronDown, Languages, Loader2, RefreshCw } from 'lucide-react';
+import { Bold, Check, ChevronDown, Languages, Loader2, RefreshCw, Type } from 'lucide-react';
+import { FontPicker } from './display-text-panel';
+import { cachedLocalFontFamilies, loadLocalFontFamilies, supportsLocalFontAccess, type LocalFontFamilyOption } from './local-font-access';
 import { Switch } from '@pireel/ui/switch';
 import { t } from './i18n';
 import {
@@ -27,7 +29,9 @@ import {
   CAPTION_PRESETS,
   getCaptionPreset,
   isCaptionsOn,
+  isDisplayTextFontId,
   resolveCaptionStyle,
+  type DisplayTextFontId,
 } from '@pireel/studio-engine/composition';
 
 /** One editable caption line = one DISPLAY CUE (derived by displayCues in edited-timeline order across
@@ -87,8 +91,8 @@ export interface CaptionStyleCtl {
   sub: CaptionStyle;
   /** A translation target language is active — only then does the translation-line row show (per user). */
   bilingualOn: boolean;
-  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => void;
-  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; lang?: string | undefined }) => void;
+  onMainPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
+  onSubPatch: (patch: { preset?: string | undefined; scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined; lang?: string | undefined }) => void;
 }
 
 export function CaptionsPanel({
@@ -418,9 +422,26 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
   styleHidden?: boolean;
   /** Preset picked (null = follow main; only offered on the translation row). */
   onPreset: (id: string | null) => void;
-  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined }) => void;
+  onPatch: (patch: { scale?: number; color?: string | undefined; bg?: string | null | undefined; bold?: boolean | undefined; font?: string | undefined }) => void;
 }) {
-  const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg'>(null);
+  const [pop, setPop] = useState<null | 'preset' | 'size' | 'color' | 'bg' | 'font'>(null);
+  // Font picker shares the display-text picker (built-ins + common + system fonts via Local Font Access).
+  const [localFonts, setLocalFonts] = useState<LocalFontFamilyOption[]>(cachedLocalFontFamilies);
+  const [fontAccess, setFontAccess] = useState<'idle' | 'loading' | 'loaded' | 'denied' | 'unsupported'>('idle');
+  const requestLocalFonts = async () => {
+    if (!supportsLocalFontAccess()) {
+      setFontAccess('unsupported');
+      return;
+    }
+    setFontAccess('loading');
+    try {
+      setLocalFonts(await loadLocalFontFamilies());
+      setFontAccess('loaded');
+    } catch {
+      setFontAccess('denied');
+    }
+  };
+  const fontId: DisplayTextFontId = isDisplayTextFontId(style.font) ? style.font : 'preset';
   const rootRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!pop) return;
@@ -498,6 +519,15 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
       </button>
       <button
         type="button"
+        title={t('captions.fontFamily')}
+        aria-pressed={fontId !== 'preset'}
+        onClick={() => setPop(pop === 'font' ? null : 'font')}
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${pop === 'font' || fontId !== 'preset' ? 'border-accent text-ink bg-panel-2/60' : 'border-line text-ink-3 hover:border-accent hover:text-ink'}`}
+      >
+        <Type size={12} />
+      </button>
+      <button
+        type="button"
         title={t('captions.textColor')}
         onClick={() => setPop(pop === 'color' ? null : 'color')}
         className={`hover:border-accent h-7 w-7 shrink-0 rounded-md border p-1 ${pop === 'color' ? 'border-accent' : 'border-line'}`}
@@ -533,6 +563,17 @@ function StyleRow({ label, style, active, isSub, leading, trailing, styleHidden,
           onNone={() => { setPop(null); onPatch({ bg: null }); }}
           onPick={(c) => { setPop(null); onPatch({ bg: c }); }}
         />
+      )}
+      {pop === 'font' && (
+        <div className="border-line bg-panel absolute left-0 top-full z-30 mt-1 w-full min-w-[220px] rounded-lg border p-2 shadow-xl">
+          <FontPicker
+            value={fontId}
+            localFonts={localFonts}
+            accessState={fontAccess}
+            onLoadMore={() => void requestLocalFonts()}
+            onChoose={(font) => { setPop(null); onPatch({ font: font === 'preset' ? undefined : font }); }}
+          />
+        </div>
       )}
       </>
       )}

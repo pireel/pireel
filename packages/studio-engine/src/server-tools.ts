@@ -119,6 +119,7 @@ import { mediaSearchTranscriptsFromDocument, searchProjectMedia } from './media-
 import { normalizeProjectOutputs, projectOutputPositionMap } from './project-outputs';
 import { AGENT_TIMELINE_TOOL_IDS, runAgentTimelineTool } from './agent-timeline';
 import { planScriptCaptionSegments, splitScriptLines } from './script-captions';
+import { isDisplayTextFontId } from './display-text-presets';
 
 // Ensure the template registry is ready at module load. The MCP worker path
 // doesn't go through UI mounting; this un-tree-shakeable call pulls templates.ts
@@ -1172,9 +1173,14 @@ function runServerToolInner(tool: string, input: Record<string, unknown>, p: Ser
       if (preset && !CAPTION_PRESETS.some((x) => x.id === preset)) return { result: { ok: false, error: `no such caption preset: ${preset}` } };
       const yPct = captionYPctForCanvas(p.document.canvas, input.yPct);
       const scale = Number(input.scale);
-      const patch: Record<string, number> = {};
+      const patch: Record<string, number | string | undefined> = {};
       if (yPct != null) patch.yPct = yPct;
       if (Number.isFinite(scale)) patch.scale = scale;
+      if (typeof input.font === 'string') {
+        if (input.font === 'preset') patch.font = undefined;
+        else if (isDisplayTextFontId(input.font)) patch.font = input.font;
+        else return { result: { ok: false, error: `unknown caption font: ${input.font} (use sans | serif | mono | local:<family> | preset)` } };
+      }
       const script = typeof input.script === 'string' ? input.script.trim() : '';
       if (script) {
         // Silent montage: the copy becomes transcript truth of the placed picture clips (see

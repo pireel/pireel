@@ -209,12 +209,14 @@ function renderCaption(slots: Slots, id: string): Rendered {
     ...(typeof slots.color === 'string' ? { color: slots.color as string } : {}),
     ...(slots.bg === null || typeof slots.bg === 'string' ? { bg: slots.bg as string | null } : {}),
     ...(typeof slots.bold === 'boolean' ? { bold: slots.bold as boolean } : {}),
+    ...(typeof slots.font === 'string' ? { font: slots.font as string } : {}),
   };
   const subOv = {
     ...(typeof slots.subPreset === 'string' ? { preset: slots.subPreset as string } : {}),
     ...(typeof slots.subColor === 'string' ? { color: slots.subColor as string } : {}),
     ...(slots.subBg === null || typeof slots.subBg === 'string' ? { bg: slots.subBg as string | null } : {}),
     ...(typeof slots.subBold === 'boolean' ? { bold: slots.subBold as boolean } : {}),
+    ...(typeof slots.subFont === 'string' ? { font: slots.subFont as string } : {}),
   };
   return renderPresetCaption(words, getCaptionPreset(str(slots.preset) || undefined), yPct, xPct, wPct, scale, id, hPct, str(slots.sub) || undefined, subStyle, canvasW, ov, subOv, slots.cue === true);
 }
@@ -242,7 +244,7 @@ function renderCaption(slots: Slots, id: string): Rendered {
  *     env has no canvas → deterministic glyph-class estimate table fallback.
  */
 
-function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean } = {}, cue = false): Rendered {
+function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xPct: number, wPct: number, scale: number, id: string, hPct = 0, sub?: string, subStyle?: { yPct?: number; xPct?: number; wPct?: number; scale?: number; hPct?: number }, canvasW = 1080, ov: { color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, subOv: { preset?: string; color?: string; bg?: string | null; bold?: boolean; font?: string } = {}, cue = false): Rendered {
   // Effective preset = preset + user overrides (text color / plate). Reassigning p keeps every existing
   // use (segmentation budget, pill, css, karaoke revert color) consistent with the overridden look.
   if (ov.color != null || ov.bg !== undefined) p = { ...p, ...(ov.color != null ? { text: ov.color } : {}), ...(ov.bg !== undefined ? { bg: ov.bg ?? undefined } : {}) };
@@ -257,7 +259,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   // difference is presentation: derived cue blocks STACK their lines (all visible, one plate per
   // line — standard subtitle look; at scale 1 a cue fits one line so the stack is a single line);
   // legacy sentence blocks keep the old one-line-at-a-time rotation.
-  const segs = captionLineSegments(words, p, wPct, scale, canvasW, { bold: ov.bold });
+  const segs = captionLineSegments(words, p, wPct, scale, canvasW, { bold: ov.bold, font: ov.font });
   let wIdx = 0;
   const segHtml = segs
     .map((g, si) => {
@@ -286,7 +288,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
   const subScale = subStyle?.scale ?? scale * 0.7;
   const subFs = Math.max(9, Math.round(BASE_CAPTION_FONT_PX * subScale));
   const subW = subStyle?.wPct ?? wPct;
-  const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), subP, subW, subScale, canvasW) : [];
+  const subSegs = sub ? captionLineSegments(wordsFromText(sub, 0, 1), subP, subW, subScale, canvasW, { font: subOv.font }) : [];
   const subPill = subP.bg ? `background:${subP.bg}; padding:${Math.round(subFs * 0.18)}px ${Math.round(subFs * 0.5)}px; border-radius:${Math.round(subFs * 0.28)}px;` : '';
   const subHtml = sub
     ? `<div class="cap-sub" id="${id}-sub">${subSegs.map((g) => `<div class="cap-sub-line">${g.map((w, k) => `<span${k < g.length - 1 && latinJoin(w.text, g[k + 1]!.text) ? ' class="sp"' : ''}>${escapeHtml(w.text)}</span>`).join('')}</div>`).join('')}</div>`
@@ -301,7 +303,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
     : '';
   const subCss = sub
     ? `\n#${id} .cap-sub { position:absolute; pointer-events:auto; left:${n(subStyle?.xPct ?? xPct)}%; ${subAnchor} transform:translateX(-50%); width:auto; max-width:${n(subW)}%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:${Math.round(subFs * 0.15)}px; ${subStyle?.hPct ? `min-height:${n(subStyle.hPct)}%; ` : ''}${subPill} }
-#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.3)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP)}; font-size:${subFs}px; font-weight:${subOv.bold ? 700 : CAPTION_WEIGHT_REGULAR}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
+#${id} .cap-sub-line span.sp { margin-right:${Math.round(subFs * 0.3)}px; }\n#${id} .cap-sub-line span { position:relative; top:-0.04em; flex:none; white-space:nowrap; }\n#${id} .cap-sub-line { display:flex; flex-wrap:nowrap; justify-content:center; align-items:center; max-width:100%; text-align:center; color:${subP.text}; font-family:${presetFontCss(subP, subOv.font)}; font-size:${subFs}px; font-weight:${subOv.bold ? 700 : CAPTION_WEIGHT_REGULAR}; line-height:1.35; ${subP.italic ? 'font-style:italic; ' : ''}${!subP.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8); ' : ''} }`
     : '';
   const decoCss =
     p.deco === 'highlight'
@@ -317,7 +319,7 @@ function renderPresetCaption(words: FxWord[], p: CaptionPreset, yPct: number, xP
 #${id} .cap-root { position:absolute; inset:0; }
 ${stackCss}
 #${id} .cap-line { ${cue ? 'position:relative; max-width:100%;' : `position:absolute; left:${n(xPct)}%; bottom:${n(100 - yPct)}%; transform:translateX(-50%); transform-origin:center bottom; width:${n(wPct)}%; ${hPct > 0 ? `min-height:${n(hPct)}%; ` : ''}`}display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; pointer-events:auto; ${cue ? '' : pill} }
-#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p)}; font-size:${fs}px; font-weight:${mainWeight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${!p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
+#${id} .w { position:relative; top:-0.04em; flex:none; white-space:nowrap; color:${p.text}; font-family:${presetFontCss(p, ov.font)}; font-size:${fs}px; font-weight:${mainWeight}; ${p.italic ? 'font-style:italic;' : ''} line-height:1.2; ${!p.bg ? 'text-shadow:0 2px 12px rgba(0,0,0,0.85),0 0 3px rgba(0,0,0,0.8);' : ''} }
 ${decoCss}
 #${id} .w .t { position:relative; z-index:1; }\n#${id} .w.sp { margin-right:${Math.round(fs * 0.3)}px; }${subCss}`.trim();
 

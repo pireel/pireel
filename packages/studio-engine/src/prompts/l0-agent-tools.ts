@@ -1146,6 +1146,7 @@ export const STUDIO_TOOLS: StudioToolDef[] = [
         preset: { type: 'string', enum: CAPTION_PRESETS.map((p) => p.id), description: 'Caption style id from <caption_catalog>. Omit to only reposition/resize the current captions.' },
         yPct: { type: 'number', description: "Caption baseline's % from the top (smaller = higher). Omit to keep." },
         scale: { type: 'number', description: 'Size multiplier, 1 = preset default. Omit to keep.' },
+        font: { type: 'string', description: "Font override for the caption layer: 'sans' | 'serif' | 'mono' | 'local:<encoded family>' (same ids as display text), or 'preset' to return to the preset's own font. Omit to keep." },
         source: { type: 'string', enum: ['auto', 'track', 'clip'], description: 'Caption source selector. Omit to preserve the current selection, or auto-select on first use.' },
         trackId: { type: 'string', description: 'Required with source=track.' },
         clipId: { type: 'string', description: 'Required with source=clip.' },

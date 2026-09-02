@@ -165,7 +165,7 @@ function ColorSwatches({
   );
 }
 
-function FontPicker({
+export function FontPicker({
   value,
   localFonts,
   accessState,
